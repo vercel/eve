@@ -1,8 +1,7 @@
-import { callSlackApi } from "eve/channels/slack";
 import { defineDynamicSchedules } from "eve/experimental/schedules";
 import { z } from "zod";
 import slack from "../channels/slack.ts";
-import { isHomeTeam, slackCredentials, slackTeamId } from "../lib/slack.ts";
+import { callSlack, isHomeTeam, slackTeamId } from "../lib/slack.ts";
 
 interface TaskPayload {
   readonly task: string;
@@ -20,12 +19,11 @@ function attribute(attributes: Readonly<Record<string, unknown>>, key: string) {
 
 // A deactivated or external account stops its schedules from running.
 async function isActiveMember(payload: TaskPayload): Promise<boolean> {
-  const response = (await callSlackApi({
-    botToken: slackCredentials.botToken,
-    context: { teamId: payload.teamId },
-    operation: "users.info",
-    body: { user: payload.userId },
-  })) as { ok: boolean; error?: string; user?: { deleted?: boolean; team_id?: string } };
+  const response = await callSlack<{ user: { deleted?: boolean; team_id?: string } }>(
+    payload.teamId,
+    "users.info",
+    { user: payload.userId },
+  );
   if (!response.ok) {
     if (response.error === "user_not_found") return false;
     // Anything else may be transient; throwing lets the provider retry.

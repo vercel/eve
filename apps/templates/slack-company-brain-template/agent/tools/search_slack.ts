@@ -1,7 +1,6 @@
-import { callSlackApi } from "eve/channels/slack";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { slackCredentials, slackTeamId } from "../lib/slack.ts";
+import { callSlack, slackTeamId } from "../lib/slack.ts";
 
 interface SearchContextMessage {
   readonly author_name?: string;
@@ -16,9 +15,9 @@ interface SearchContextMessage {
 
 const UNAVAILABLE = {
   no_token:
-    "Slack search needs a fresh Slack message: it works only in a turn started by a mention or DM. Report Slack as unavailable for this turn; never describe it as 'nothing found'.",
+    "Slack search needs a fresh Slack message: it works only in a turn started by a mention or DM. Use read_slack_conversation for channels you already know, and report searches as unavailable, never as 'nothing found'.",
   expired:
-    "The Slack search authorization from this message has expired. Don't retry search_slack this turn. Answer from what you already found and say which searches couldn't run.",
+    "The Slack search authorization from this message has expired. Don't retry search_slack this turn. Keep going with read_slack_conversation and what you already found, and say which searches couldn't run.",
   missing_scope:
     "The Slack app is missing the `search:read.public` scope. Tell the person that an admin needs to add it to the Slack app and reinstall it.",
 } as const;
@@ -32,7 +31,7 @@ export default defineTool({
   description:
     "Search messages in public Slack channels across the workspace, best match first. The agent doesn't need to be in a channel to search it. Never searches private channels or DMs. " +
     "Works only in turns started by a Slack mention or DM, and the authorization expires a few minutes after the message, so run the searches you need early. " +
-    "Each result has the channel, author, text, timestamp, and a permalink to cite inline.",
+    "Each result has the channel, author, text, timestamp, and a permalink to cite inline. Read a match's full thread with read_slack_conversation.",
   inputSchema: z.object({
     query: z
       .string()
@@ -51,22 +50,17 @@ export default defineTool({
       return { unavailable: true, message: UNAVAILABLE.no_token };
     }
 
-    const response = (await callSlackApi({
-      botToken: slackCredentials.botToken,
-      context: { teamId },
-      operation: "assistant.search.context",
-      body: {
+    const response = await callSlack<{ results: { messages?: SearchContextMessage[] } }>(
+      teamId,
+      "assistant.search.context",
+      {
         query,
         action_token: actionToken,
         // Keep the public-only boundary in code even if the app gains broader search scopes.
         channel_types: "public_channel",
         limit: limit ?? 10,
       },
-    })) as {
-      ok: boolean;
-      error?: string;
-      results?: { messages?: readonly SearchContextMessage[] };
-    };
+    );
 
     if (!response.ok) {
       if (response.error === "invalid_action_token") {

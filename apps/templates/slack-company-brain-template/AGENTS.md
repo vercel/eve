@@ -22,6 +22,8 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 - `agent/tools/search_slack.ts`: Slack's Real-time Search API, public channels
   only. It reads the `action_token` auth attribute that `agent/channels/slack.ts`
   sets (a marked workaround until eve's `defaultSlackAuth` does it).
+  `agent/tools/read_slack_conversation.ts` reads a public channel or thread the
+  bot is in. Both use `callSlack` from `agent/lib/slack.ts`.
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.
