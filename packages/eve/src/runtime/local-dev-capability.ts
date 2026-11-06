@@ -10,7 +10,7 @@ import {
   isTrustedDevelopmentClientAddress,
   readTrustedDevelopmentClientAddress,
 } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 
 /**

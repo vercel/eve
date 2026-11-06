@@ -53,3 +53,11 @@ export function logicalSessionInboxToken(token: string): string | undefined {
     ? token.slice(SESSION_INBOX_HOOK_TOKEN_PREFIX.length)
     : undefined;
 }
+
+/** Logical token behind an address: the address itself, or the session's stable command token. */
+export function logicalSessionToken(address: string | SessionInboxAddress): string {
+  if (typeof address === "string") return address;
+  if (!isSessionInboxAddress(address))
+    throw new Error("Session inbox target has an invalid address.");
+  return sessionCommandHookToken(address.sessionId);
+}

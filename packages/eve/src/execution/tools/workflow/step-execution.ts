@@ -22,6 +22,7 @@ import {
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { completeWorkflowStepAuthorization } from "#execution/tools/workflow/authorization-completion.js";
 import {
@@ -83,6 +84,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         requireAuth: auth.requireAuth,
         channel: input.channel,
         to: createToolChannelTo({
+          createRuntime: createWorkflowRuntime,
           delegated: input.delegated,
           loadBundle: loadAgent,
         }),

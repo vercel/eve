@@ -25,10 +25,12 @@ import {
 } from "#internal/workflow/development-world-codec.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 import {
-  DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
-  DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
+} from "#protocol/routes.js";
+import { DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER } from "#internal/application/dev-transport.js";
+import {
+  DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
   DEVELOPMENT_WORLD_OPERATIONS,
   type DevelopmentGenerationAdmission,
   type DevelopmentWorldRequest,

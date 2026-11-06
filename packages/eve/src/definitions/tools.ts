@@ -23,7 +23,7 @@ import {
   readWorkflowToolEntryPoints,
 } from "#tools/workflow-definition.js";
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { createWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import { assertNoOwnTaskIdInput } from "#internal/authored-definition/schema-backed.js";
 import { namedEntries, type EntryKind } from "./named.js";

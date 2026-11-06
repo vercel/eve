@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
+} from "../../src/compiler/artifact-contract.js";
+import {
   createCompileMetadata,
   resolveCompilerArtifactPaths,
   writeCompilerArtifacts,

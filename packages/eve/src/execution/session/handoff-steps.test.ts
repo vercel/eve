@@ -4,7 +4,10 @@ import { trace } from "#compiled/@opentelemetry/api/index.js";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { IncompatibleStateLayoutError } from "#context/serialize.js";
-import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
 import {
   prepareSuccessorStep,
   signalSessionOwnerActivationStep,

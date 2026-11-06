@@ -8,7 +8,8 @@ import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbo
 import type { ModelMessage } from "ai";
 import type { Transition } from "#harness/session-machine/commit.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import type { CallsBack } from "./sign-ins.js";
+import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
+import { SIGN_IN_DECLINED, sameRelayedSignIn, type CallsBack } from "./sign-ins.js";
 
 // Which sign-in callbacks this session can call. Not for workflow bodies: it reads the step's
 // context and the connection runtime.
@@ -153,4 +154,40 @@ export async function settleSignIns(
       }),
     ),
   );
+}
+
+/** A sign-in the person answered, and how. */
+export interface SignInAnswer {
+  readonly interactionId: string;
+  readonly signIn: SignInChallenge;
+  readonly outcome: "accepted" | "declined";
+}
+
+/**
+ * The other open sign-ins an acceptance or a decline in `answer` settles: for the same Connect
+ * grant and principal (`sameRelayedSignIn`), asked on this deployment by this session or one of
+ * its children (`localSignInCallback`). A failure is its asker's to retry, so it settles only its
+ * own row, and a responder's sign-in settles only through its own approval. Any other row keeps its
+ * own card.
+ */
+export function signInsAnswered(
+  tables: SessionView,
+  answer: SignInAnswer,
+  own: OwnCallbacks,
+): readonly AnsweredSignIn[] {
+  // The provider's answer, as its redirect carries it: a decline is RFC 6749 `access_denied`.
+  const params: AnsweredSignIn["params"] =
+    answer.outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
+  return Object.values(tables.interactions).flatMap((row) => {
+    if (
+      row.interactionId === answer.interactionId ||
+      row.status !== "open" ||
+      "responseId" in row.subject ||
+      row.request.signIn === undefined ||
+      !sameRelayedSignIn(row.request.signIn, answer.signIn)
+    )
+      return [];
+    const callback = localSignInCallback(row, own);
+    return callback === undefined ? [] : [{ callback, params }];
+  });
 }

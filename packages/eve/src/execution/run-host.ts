@@ -5,6 +5,7 @@ import type {
   OpenedAgentSession,
   StartedAgentSession,
 } from "#execution/agent-sessions/start.js";
+import type { ToolStubHost } from "#execution/tool-stub-host.js";
 
 // What a workflow tool run needs from the host it runs on: its own id, the hooks it listens on,
 // a clock, a way to resume the hooks others listen on, and the sessions its `ctx.agent` opens.
@@ -50,4 +51,6 @@ export interface RunHost {
     options?: { readonly ifPresent?: boolean },
   ): Promise<void>;
   readonly agentSessions: RunAgentSessions;
+  /** Answers a stubbed eval's calls from the run; see {@link ToolStubHost}. */
+  readonly toolStubs?: ToolStubHost;
 }

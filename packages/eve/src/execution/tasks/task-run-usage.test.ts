@@ -1,5 +1,6 @@
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -9,8 +10,8 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
-import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { turnStep } from "#execution/session/turn-step.js";
+import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
+import { turnStep } from "#execution/workflow-host/turn-step.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import {
   cancelTask,
@@ -57,6 +58,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   return {
     followInterruptedAttempt: (_writable: unknown, state: DurableSessionState) => state,
     readOrphanedLines: async () => [],
+    enterSessionStep: (input: object) => ({ ...input, rerun: false }),
     commitSessionStep: async (
       target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
       decide: (view: SessionView) => readonly { readonly events: readonly SessionEvent[] }[],
@@ -80,6 +82,9 @@ vi.mock("#execution/publish-session-events.js", async () => {
     },
   };
 });
+
+// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
+installWorkflowHost();
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
