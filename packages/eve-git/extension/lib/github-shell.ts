@@ -132,6 +132,8 @@ interface GitHubShellDependencies {
    * a new handle. Sessions that share a sandbox are serialized by a lock inside the sandbox.
    */
   readonly sessionId: string;
+  /** Stops waiting for another command's credential lease when the tool call is cancelled. */
+  readonly abortSignal?: AbortSignal;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
@@ -233,7 +235,7 @@ export async function executeGitHubShell(
   try {
     result = await withGitHubCredentialLease(
       sandbox,
-      dependencies.sessionId,
+      dependencies,
       { authorization, placeholder, placeholderAuthorization, token },
       () => {
         const env: Record<string, string> = {
@@ -292,7 +294,7 @@ interface LeaseCredential {
 
 async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
-  sessionId: string,
+  { sessionId, abortSignal }: Pick<GitHubShellDependencies, "sessionId" | "abortSignal">,
   credential: LeaseCredential,
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
@@ -306,8 +308,11 @@ async function withGitHubCredentialLease<T>(
   leaseQueues.set(sessionId, current);
   await previous;
   try {
-    return await withSandboxLeaseLock(sandbox, credential.placeholder, () =>
-      leaseCredential(sandbox, credential, run, broker),
+    return await withSandboxLeaseLock(
+      sandbox,
+      credential.placeholder,
+      () => leaseCredential(sandbox, credential, run, broker),
+      abortSignal,
     );
   } finally {
     release();

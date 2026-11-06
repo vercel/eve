@@ -744,22 +744,7 @@ test("serializes credential leases across sessions that share one sandbox", asyn
       active = policy;
     },
     async run(input: Parameters<SandboxSession["run"]>[0]) {
-      if (input.command.includes(LEASE_LOCK_PATH)) {
-        try {
-          const { stdout, stderr } = await promisify(execFile)("sh", [
-            "-c",
-            input.command.replaceAll(LEASE_LOCK_PATH, lockPath),
-          ]);
-          return { exitCode: 0, stdout, stderr };
-        } catch (error) {
-          const failed = error as { code?: number; stdout?: string; stderr?: string };
-          return {
-            exitCode: failed.code ?? 1,
-            stdout: failed.stdout ?? "",
-            stderr: failed.stderr ?? "",
-          };
-        }
-      }
+      if (input.command.includes(LEASE_LOCK_PATH)) return runLockCommand(input.command, lockPath);
       const name = input.command.includes("'1'") ? "first" : "second";
       const placeholder = input.env?.GH_TOKEN ?? "";
       // The command's own credential must be leased for as long as it runs.
@@ -809,27 +794,103 @@ test("serializes credential leases across sessions that share one sandbox", asyn
 test("a lease does not release a lock another command holds", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
-  const exec = promisify(execFile);
   try {
     // A holder whose lock was broken as stale must not release its successor's lock.
     execFileSync("mkdir", [lockPath]);
     execFileSync("sh", ["-c", `printf successor > '${lockPath}/owner'`]);
+    let calls = 0;
     const sandboxFake: Pick<SandboxSession, "run"> = {
       async run(input: Parameters<SandboxSession["run"]>[0]) {
-        const command = input.command.replaceAll(LEASE_LOCK_PATH, lockPath);
+        calls += 1;
         // Skip acquisition: simulate the stale holder releasing after its lock was broken.
-        if (command.includes("mkdir")) return { exitCode: 0, stdout: "", stderr: "" };
-        const { stdout, stderr } = await exec("sh", ["-c", command]);
-        return { exitCode: 0, stdout, stderr };
+        if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
+        return runLockCommand(input.command, lockPath);
       },
     };
-    const sandbox = sandboxFake as SandboxSession;
-    await withSandboxLeaseLock(sandbox, "stale-holder", async () => undefined);
+    await withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "stale-holder",
+      async () => undefined,
+    );
     assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "successor");
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock\n");
   } finally {
     rmSync(lockRoot, { recursive: true, force: true });
   }
 });
+
+test("a lease breaks a lock whose holder stopped", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf stopped > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run: (input) => runLockCommand(input.command, lockPath),
+    };
+    let owner = "";
+    await withSandboxLeaseLock(sandboxFake as SandboxSession, "next", async () => {
+      owner = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+    });
+    assert.equal(owner, "next");
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a lease waits on the host and stops when its call is cancelled", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    let attempts = 0;
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run(input) {
+        attempts += 1;
+        return runLockCommand(input.command, lockPath);
+      },
+    };
+    const controller = new AbortController();
+    let ran = false;
+    const waiting = withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "waiter",
+      async () => {
+        ran = true;
+      },
+      controller.signal,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Each attempt returns at once instead of waiting inside the sandbox.
+    assert.ok(attempts > 1);
+    controller.abort(new Error("cancelled"));
+    await assert.rejects(waiting, /cancelled/u);
+    assert.equal(ran, false);
+    assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+/** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */
+async function runLockCommand(
+  command: string,
+  lockPath: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await promisify(execFile)("sh", [
+      "-c",
+      command.replaceAll(LEASE_LOCK_PATH, lockPath),
+    ]);
+    return { exitCode: 0, stdout, stderr };
+  } catch (error) {
+    const failed = error as { code?: number; stdout?: string; stderr?: string };
+    return { exitCode: failed.code ?? 1, stdout: failed.stdout ?? "", stderr: failed.stderr ?? "" };
+  }
+}
 
 function fakeSandbox(
   runs: Parameters<SandboxSession["run"]>[0][],
