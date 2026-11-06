@@ -3,7 +3,6 @@ import { normalizeAgentApproval } from "#internal/authored-definition/approval.j
 import type {
   AgentDefinition,
   AgentBuildDefinition,
-  AgentSchedulesDefinition,
   AgentWorkflowDefinition,
 } from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
@@ -262,36 +261,13 @@ function normalizeAgentWorkflowWorldDefinition(
   return packageName;
 }
 
-const AGENT_VERCEL_SCHEDULES_MODES = ["private", "public", false] as const;
-
-function normalizeAgentSchedulesDefinition(
-  value: unknown,
-  message: string,
-): AgentSchedulesDefinition {
-  const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["vercel"], message);
-  if (record.vercel === undefined) return {};
-
-  const mode = AGENT_VERCEL_SCHEDULES_MODES.find((accepted) => accepted === record.vercel);
-  if (mode === undefined) {
-    throw new Error(
-      `${message} "experimental.schedules.vercel" must be "private", "public", or false.`,
-    );
-  }
-  return { vercel: mode };
-}
-
 function normalizeAgentExperimentalDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["schedules", "workflow"], message);
+  expectOnlyKnownKeys(record, ["workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
-
-  if (record.schedules !== undefined) {
-    normalizedDefinition.schedules = normalizeAgentSchedulesDefinition(record.schedules, message);
-  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

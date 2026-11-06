@@ -295,12 +295,6 @@ export const compiledAgentWorkflowDefinitionSchema = z
   })
   .strict();
 
-export const compiledAgentSchedulesDefinitionSchema = z
-  .object({
-    vercel: z.union([z.enum(["private", "public"]), z.literal(false)]).optional(),
-  })
-  .strict();
-
 export const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> =
   z
     .object({
@@ -326,7 +320,6 @@ export const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
-      schedules: compiledAgentSchedulesDefinitionSchema.optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()

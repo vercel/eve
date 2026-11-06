@@ -91,7 +91,7 @@ Tool-wide helpers and types such as `defineTool`, `defineWorkflowTool`, `defineD
 
 The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` and `disableRoute` come from `eve/channels`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`.
 
-`eve` exports `AgentReasoningDefinition` for `defineAgent({ reasoning })`, `AgentLimitsDefinition` for `defineAgent({ limits })`, `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` for `defineAgent({ experimental: { workflow } })`, and `AgentSchedulesDefinition` and `AgentVercelSchedulesMode` for `defineAgent({ experimental: { schedules } })`. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
+`eve` exports `AgentReasoningDefinition` for `defineAgent({ reasoning })`, `AgentLimitsDefinition` for `defineAgent({ limits })`, and `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` for `defineAgent({ experimental: { workflow } })`. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
 
 `webSearch({ provider })` selects `"exa"`, `"parallel"`, `"browserbase"`, `"tako"`, or `"native"` for AI Gateway search with the Gateway model's credentials. `"native"` uses the model vendor's own search for OpenAI, Anthropic, and Gemini 3 and later models. Other Gateway models get no search unless you set `fallback` to `"exa"`, `"parallel"`, `"browserbase"`, or `"tako"`. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
 

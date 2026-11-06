@@ -1,7 +1,7 @@
 ---
-"eve": minor
+"eve": patch
 ---
 
-Agents deployed to Vercel can now deliver schedules with Vercel Schedules instead of Cron Jobs by setting `experimental.schedules.vercel` to `"private"` or `"public"` in the root `agent.ts`.
+Agents deployed to Vercel now run schedules with Vercel Schedules through a private function instead of Vercel Cron Jobs.
 
-Vercel Schedules is in beta and must be enabled for your Vercel team. The option is not supported yet for agents built as Vercel services, such as with `withEve`.
+Vercel Schedules is in beta and must be enabled for your Vercel team. Agents added to an app with `withEve` keep using Cron Jobs, because Vercel doesn't accept schedules from a service's build output yet.
