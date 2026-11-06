@@ -239,10 +239,37 @@ export type SessionUsageLimit = (usage: {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * How hosted builds deliver authored schedules.
+   */
+  readonly schedules?: AgentSchedulesDefinition;
+  /**
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
 }
+
+/**
+ * Experimental schedule delivery options.
+ */
+export interface AgentSchedulesDefinition {
+  /**
+   * Delivers schedules on Vercel with Vercel Schedules (beta) instead of
+   * Vercel Cron Jobs. Each schedule becomes its own Vercel schedule and runs
+   * in its own invocation. The Vercel team must have Vercel Schedules enabled.
+   *
+   * - `"private"`: schedules invoke a private function with no public route.
+   * - `"public"`: schedules call eve's cron route, as Cron Jobs do.
+   *
+   * Not supported yet for agents built as Vercel services, such as agents
+   * added to a Next.js app with `withEve`.
+   *
+   * @default false
+   */
+  readonly vercel?: AgentVercelSchedulesMode;
+}
+
+/** How Vercel Schedules reach an agent's schedules. */
+export type AgentVercelSchedulesMode = "private" | "public" | false;
 
 /**
  * Advanced hosted-build controls authored in `agent.ts`.

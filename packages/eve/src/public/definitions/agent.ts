@@ -22,6 +22,8 @@ export type {
   AgentLimitsDefinition,
   SessionUsageLimit,
   PublicAgentModelSelectionDefinition as AgentModelSelectionDefinition,
+  AgentSchedulesDefinition,
+  AgentVercelSchedulesMode,
   AgentWorkflowDefinition,
   AgentWorkflowRetentionDefinition,
   AgentWorkflowWorldDefinition,
