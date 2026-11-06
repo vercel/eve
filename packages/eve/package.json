@@ -375,6 +375,12 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/slack-reactions": {
+      "eve-source": "./dist/src/extensions/slack-reactions/extension/extension.js",
+      "types": "./dist/src/extensions/slack-reactions/extension/extension.d.ts",
+      "import": "./dist/src/extensions/slack-reactions/extension/extension.js",
+      "default": "./dist/src/extensions/slack-reactions/extension/extension.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -750,6 +756,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/slack-reactions": {
+        "dist": "./dist/src/extensions/slack-reactions/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
