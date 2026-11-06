@@ -285,7 +285,7 @@ async function installTemplate(): Promise<string> {
   return appRoot;
 }
 
-async function bundleTemplate(): Promise<string> {
+export async function bundleTemplate(): Promise<string> {
   // Loaded on demand so the other channels' conformance files skip the bundler.
   const { build, defaultClientConditions } = await import("vite");
   const appRoot = await installTemplate();
@@ -341,7 +341,7 @@ async function bundleTemplate(): Promise<string> {
  * global `fetch`, which the harness routes to the eve channel. Response bodies
  * stream through, so the browser sees the session stream as it's written.
  */
-async function servePage(host: string, assets: string) {
+export async function servePage(host: string, assets: string) {
   const server = createServer((request, response) => {
     void handle(request, response).catch((error: unknown) => {
       if (!response.headersSent) response.writeHead(500);

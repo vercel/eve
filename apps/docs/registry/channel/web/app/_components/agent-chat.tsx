@@ -49,14 +49,11 @@ export function AgentChat({
   const hasSubmittedMessage = useRef(false);
   const replaceSessionRoute = (nextSessionId: string) => {
     if (sessionId !== undefined) return;
+    const pathname = `/s/${encodeURIComponent(nextSessionId)}`;
+    if (window.location.pathname === pathname) return;
     // Framework routers (Next.js, TanStack Router) patch window.history; navigating
     // through them would remount this route and detach the active stream.
-    History.prototype.replaceState.call(
-      window.history,
-      window.history.state,
-      "",
-      `/s/${encodeURIComponent(nextSessionId)}`,
-    );
+    History.prototype.replaceState.call(window.history, window.history.state, "", pathname);
   };
   const agent = useEveAgent({
     agent: WEB_CHAT_AGENT,
