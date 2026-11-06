@@ -105,10 +105,7 @@ describe("one sign-in answer for parallel children", () => {
   });
 
   it("ends every child's sign-in when the person declines one, with no other card", async () => {
-    const app = await createApp("sign-in-fan-in-declined", {
-      grant: "oauth/weather",
-      stored: false,
-    });
+    const app = await createApp("sign-in-fan-in-declined", { grant: "oauth/weather" });
 
     await app.runtime.run(async () => {
       const run = await startParent(app.name);
@@ -121,13 +118,77 @@ describe("one sign-in answer for parallel children", () => {
 
         const events = [...before, ...after];
         expect(events.filter(isSignInOpened), "sign-in cards in the parent").toHaveLength(CHILDREN);
-        expect(app.completes(), "sign-ins the children tried to complete").toBe(CHILDREN);
-        expect(app.executions(), "calls that ran").toEqual([]);
         expect(signInOutcomes(events), "how each card closed").toEqual([
-          "failed",
-          "failed",
+          "declined",
+          "declined",
+          "declined",
+        ]);
+        expect(app.completes(), "sign-ins completed at the provider").toBe(0);
+        expect(app.executions(), "calls that ran").toEqual([]);
+        expect(filterEventsByType(events, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("leaves the other children's sign-ins open when one fails, and the next sign-in completes them", async () => {
+    const app = await createApp("sign-in-fan-in-failed", { grant: "oauth/weather" });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const events = [...(await signInCards(stream, CHILDREN))];
+        const [failing, card, other] = events.filter(isSignInOpened);
+        await completeSignIn(failing!, { error: "server_error" });
+        events.push(...(await stream.nextUntil("failed card", isSettled(failing!))));
+        expect(signInOutcomes(events), "how each card closed").toEqual(["failed"]);
+
+        await completeSignIn(card!, { code: "oauth-code" });
+        events.push(...(await stream.nextUntil("parent turn", isTurnSettled)));
+
+        expect(events.filter(isSignInOpened), "sign-in cards in the parent").toHaveLength(CHILDREN);
+        expect(signInOutcomes(events).toSorted(), "how each card closed").toEqual([
+          "accepted",
+          "accepted",
           "failed",
         ]);
+        expect(signInOutcome(events, other!), "the card nobody answered").toBe("accepted");
+        expect(app.executions().toSorted()).toHaveLength(CHILDREN - 1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("shows a new card when the grant is gone after an earlier sign-in, and finishes from it", async () => {
+    const app = await createApp("sign-in-fan-in-revoked", {
+      again: true,
+      children: 1,
+      grant: "oauth/weather",
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const events = [...(await signInCards(stream, 1))];
+        await completeSignIn(events.find(isSignInOpened)!, { code: "oauth-code" });
+        // The child's next call finds the grant revoked, so it asks again.
+        events.push(...(await signInCards(stream, 1)));
+        const cards = events.filter(isSignInOpened);
+        expect(cards, "sign-in cards in the parent").toHaveLength(2);
+
+        await completeSignIn(cards[1]!, { code: "oauth-code" });
+        events.push(...(await stream.nextUntil("parent turn", isTurnSettled)));
+
+        expect(app.executions()).toEqual(["Lisbon 0", "Porto 0"]);
+        expect(signInOutcomes(events), "how each card closed").toEqual(["accepted", "accepted"]);
         expect(filterEventsByType(events, "turn.settled").map((e) => e.data.outcome)).toEqual([
           "completed",
         ]);
@@ -208,6 +269,13 @@ async function signInCards(
   return events;
 }
 
+/** How one sign-in card closed. */
+function signInOutcome(events: readonly SessionStreamEvent[], card: SessionStreamEvent) {
+  return filterEventsByType(events, "interaction.settled").find(
+    (event) => event.data.interactionId === signInId(card),
+  )?.data.outcome;
+}
+
 /** How the parent's sign-in cards closed, in the order they closed. */
 function signInOutcomes(events: readonly SessionStreamEvent[]): string[] {
   const cards = new Set(events.filter(isSignInOpened).map(signInId));
@@ -219,10 +287,11 @@ function signInOutcomes(events: readonly SessionStreamEvent[]): string[] {
 type Prompt = LanguageModelV4CallOptions["prompt"];
 
 /**
- * The parent starts three children in one step and waits for their reports. A child, whose
- * conversation starts with the parent's message, checks the weather and reports.
+ * The parent starts `children` children in one step and waits for their reports. A child, whose
+ * conversation starts with the parent's message, checks the weather and reports; with `again`,
+ * child 0 then checks Porto's under another scope of the same grant.
  */
-function scriptedModel() {
+function scriptedModel(children: number, again: boolean) {
   let waits = 0;
   return markMockModel(
     new MockLanguageModelV4({
@@ -232,6 +301,14 @@ function scriptedModel() {
         const first = JSON.stringify(prompt.find((message) => message.role === "user")?.content);
         const child = /CHILD (\d)/u.exec(first)?.[1];
         if (child !== undefined) {
+          if (again && child === "0" && called("get_weather") && !raw.includes("Porto"))
+            return toolCallsStreamResult([
+              {
+                input: JSON.stringify({ city: "Porto 0" }),
+                toolCallId: "call_weather_porto",
+                toolName: "get_weather",
+              },
+            ]);
           return called("get_weather")
             ? textStreamResult(`Weather report ${child} ready.`)
             : toolCallsStreamResult([
@@ -244,14 +321,14 @@ function scriptedModel() {
         }
         if (!called("agent"))
           return toolCallsStreamResult(
-            Array.from({ length: CHILDREN }, (_, index) => ({
+            Array.from({ length: children }, (_, index) => ({
               input: JSON.stringify({ message: `CHILD ${index}: check the weather in Lisbon.` }),
               toolCallId: `call_agent_${index}`,
               toolName: "agent",
             })),
           );
         const reports = raw.match(/Weather report \d ready/gu)?.length ?? 0;
-        if (reports < CHILDREN) {
+        if (reports < children) {
           if (waits > 20) throw new Error("The parent kept waiting for its children.");
           return toolCallsStreamResult([
             { input: "{}", toolCallId: `call_wait_${waits++}`, toolName: "eve__task_wait" },
@@ -265,11 +342,16 @@ function scriptedModel() {
   );
 }
 
-/** `stored: false` is a sign-in the person didn't finish, so Connect holds no grant after it. */
+/**
+ * Connect is faked at its edge: a callback with a `code` stores the grant, and a token is read
+ * from the stored grant. With `again`, the grant is revoked when child 0 asks for Porto's weather.
+ */
 async function createApp(
   name: string,
-  options: { readonly grant?: string; readonly stored?: boolean },
+  options: { readonly again?: boolean; readonly children?: number; readonly grant?: string },
 ) {
+  let granted = false;
+  let revoked = false;
   let starts = 0;
   let completes = 0;
   const executions: string[] = [];
@@ -277,6 +359,7 @@ async function createApp(
     principalType: "user",
     ...(options.grant !== undefined && { vercelConnect: { connector: options.grant } }),
     async getToken(): Promise<TokenResult> {
+      if (granted) return { token: "weather-token" };
       throw new ConnectionAuthorizationRequiredError("weather");
     },
     async startAuthorization({ callbackUrl }) {
@@ -290,9 +373,10 @@ async function createApp(
         resume: { nonce: "weather-nonce" },
       };
     },
-    async completeAuthorization(): Promise<TokenResult> {
+    async completeAuthorization({ callback }): Promise<TokenResult> {
       completes += 1;
-      if (options.stored === false)
+      if (callback.params.code !== undefined) granted = true;
+      if (!granted)
         throw new ConnectionAuthorizationFailedError("weather", {
           message: "The sign-in didn't finish, so you do not have access yet.",
         });
@@ -302,7 +386,10 @@ async function createApp(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        model: defineDynamic(() => ({ model: scriptedModel(), modelContextWindowTokens: 200_000 })),
+        model: defineDynamic(() => ({
+          model: scriptedModel(options.children ?? CHILDREN, options.again === true),
+          modelContextWindowTokens: 200_000,
+        })),
       }),
       name,
     },
@@ -312,8 +399,13 @@ async function createApp(
           default: defineTool({
             description: "Get the weather for a city.",
             async execute(input, ctx) {
+              const porto = input.city.startsWith("Porto");
+              if (porto && !revoked) {
+                revoked = true;
+                granted = false;
+              }
               const token = await ctx.getToken(weatherAuth, {
-                authKey: "weather",
+                authKey: porto ? "weather-porto" : "weather",
                 displayName: "Weather",
               });
               executions.push(input.city);
@@ -379,6 +471,11 @@ async function completeSignIn(
 
 function isSignInOpened(event: SessionStreamEvent): boolean {
   return event.type === "interaction.opened" && event.data.request.kind === "sign-in";
+}
+
+function isSettled(card: SessionStreamEvent) {
+  return (event: SessionStreamEvent) =>
+    event.type === "interaction.settled" && event.data.interactionId === signInId(card);
 }
 
 function isTurnSettled(event: SessionStreamEvent): boolean {

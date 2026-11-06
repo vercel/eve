@@ -7,6 +7,9 @@ import type { InteractionRow } from "#protocol/session-projection/tables.js";
 // Which sign-in attempts replace which. Pure: the session state that holds them is
 // `requests.ts`'s.
 
+/** The failure `reason` of a sign-in the person declined at the provider (RFC 6749 `access_denied`). */
+export const SIGN_IN_DECLINED = "access_denied";
+
 /** What makes two sign-in attempts the same one. */
 interface SignInIdentity extends Pick<AuthorizationChallenge, "candidateId" | "grant" | "name"> {
   readonly principal?: SignInChallenge["principal"];

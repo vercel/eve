@@ -9,13 +9,14 @@ import {
 import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
+import { SIGN_IN_DECLINED, sameRelayedSignIn } from "#harness/hitl/sign-ins.js";
 import { relay } from "#harness/session-machine/transitions.js";
-import { sessionView } from "#harness/session-machine/commit.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
@@ -50,14 +51,9 @@ export async function emitProxiedSubagentEvent(
 ): Promise<PublishedSessionEvents> {
   const { hookPayload, runId, workflowAsk } = input;
   // The other children hear a sign-in's answer before the relay commits: a delivery that fails
-  // fails this step, and its retry plans and delivers them again from the same state.
-  const { state } = input.durableSession;
-  const { signInWakes } = relay(sessionView(storedProjection(state), state), {
-    payload: hookPayload,
-    runId,
-    workflowAsk,
-  });
-  await Promise.all(signInWakes.map(completeChildSignIn));
+  // fails this step, and its retry delivers them again from the same state.
+  const tables = storedProjection(input.durableSession.state).view;
+  await Promise.all(answeredSignIns(tables, hookPayload).map(settleChildSignIn));
   return await commitSessionStep(
     input,
     (view) => [relay(view, { payload: hookPayload, runId, workflowAsk })],
@@ -74,12 +70,58 @@ export async function emitProxiedSubagentEvent(
   );
 }
 
+/** A child's open sign-in to settle with the answer another child's sign-in got. */
+interface AnsweredSignIn {
+  readonly callbackUrl: string;
+  readonly params: Readonly<Record<string, string>>;
+}
+
+/**
+ * The other children's open sign-ins the person's answer in `payload` settles: an acceptance or a
+ * decline of a sign-in this session mirrors, for the same Connect grant and principal
+ * (`sameRelayedSignIn`). A failure is its asker's to retry, so it settles only its own row.
+ */
+function answeredSignIns(
+  tables: SessionView,
+  payload: SubagentInteractionHookPayload,
+): readonly AnsweredSignIn[] {
+  return payload.events.flatMap((event) => {
+    if (event.type !== "interaction.settled") return [];
+    const { interactionId, outcome } = event.data;
+    if (outcome !== "accepted" && outcome !== "declined") return [];
+    const answered = tables.interactions[interactionId];
+    const signIn = answered?.request.signIn;
+    if (
+      answered?.status !== "open" ||
+      answered.origin === undefined ||
+      !("callId" in answered.subject) ||
+      answered.subject.callId !== payload.callId ||
+      signIn === undefined
+    )
+      return [];
+    // The provider's answer, as its redirect carries it: a decline is RFC 6749 `access_denied`.
+    const params: AnsweredSignIn["params"] =
+      outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
+    return Object.values(tables.interactions).flatMap((row) => {
+      const callbackUrl = row.request.signIn?.callbackUrl;
+      return row.interactionId !== interactionId &&
+        row.status === "open" &&
+        row.origin !== undefined &&
+        row.request.signIn !== undefined &&
+        callbackUrl !== undefined &&
+        sameRelayedSignIn(row.request.signIn, signIn)
+        ? [{ callbackUrl, params }]
+        : [];
+    });
+  });
+}
+
 /**
  * Calls a child's sign-in callback, as Connect calls the answered one's: the child matches the
- * attempt in its own turn and reads what Connect holds for its own principal, a grant or none.
- * The URL carries no provider params, which a Connect grant's completion never reads.
+ * attempt in its own turn and settles it under its own principal, reading what Connect holds for
+ * it after an acceptance. The params carry only the answer, never a code or a credential.
  */
-async function completeChildSignIn(callbackUrl: string): Promise<void> {
+async function settleChildSignIn({ callbackUrl, params }: AnsweredSignIn): Promise<void> {
   const callback = parseEveConnectionCallbackRoutePath(new URL(callbackUrl).pathname);
   if (callback === undefined)
     throw new Error(`A child's sign-in callback URL names no attempt: ${callbackUrl}`);
@@ -89,7 +131,7 @@ async function completeChildSignIn(callbackUrl: string): Promise<void> {
       {
         authorizationCallback: {
           attemptId: callback.attemptId,
-          callback: { method: "GET", params: {} },
+          callback: { method: "GET", params },
           connectionName: callback.name,
         },
       },

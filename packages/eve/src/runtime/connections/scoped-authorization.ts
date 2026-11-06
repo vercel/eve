@@ -37,7 +37,7 @@ import {
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
 import { liveProjection } from "#harness/session-machine/current.js";
-import { terminalSignInFailure } from "#harness/hitl/sign-ins.js";
+import { SIGN_IN_DECLINED, terminalSignInFailure } from "#harness/hitl/sign-ins.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import {
@@ -359,6 +359,13 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   const result = consumeAuthorizationResult(scope, input.instanceId);
   if (result === undefined) return false;
 
+  // RFC 6749 section 4.1.2.1: the person refused consent, so there is nothing to complete.
+  if (result.callback.params.error === SIGN_IN_DECLINED)
+    throw new ConnectionAuthorizationFailedError(scope, {
+      message: `Sign-in to "${scope}" was declined.`,
+      reason: SIGN_IN_DECLINED,
+      retryable: false,
+    });
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
   const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
