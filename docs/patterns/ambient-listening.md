@@ -24,6 +24,19 @@ There are two gates, because there are two kinds of unmentioned message:
 
 A message that passes a gate starts a turn with `status: "deferred"`, so the thread shows nothing until the agent calls a tool. When the agent decides to stay quiet and calls `no_reply`, nothing appears in Slack.
 
+### The gate saves cost; the agent decides whether to reply
+
+A gate only decides whether a message is worth a full agent turn. It doesn't decide whether the agent replies. A message that passes the gate reaches the agent's model with its `guidance`, and the agent still works out whether a response is warranted. When it isn't, the agent calls `no_reply` and posts nothing.
+
+Because the agent makes the final call, the follow gate is built to fail open on uncertainty:
+
+- Its question says "when in doubt, answer true", and its threshold is low, so it drops only replies that are clearly not for the agent.
+- A timeout or error lets the reply through.
+
+A borderline reply that gets through costs one turn that may end in `no_reply`. A reply the gate wrongly drops is a person the agent ignores. Failing open means the gate can save turns but never silence a reply the agent would have answered without it.
+
+The join gate is the exception. A message there is a conversation nobody brought the agent into, so it fails closed. See [Tokens versus recall](#tokens-versus-recall).
+
 ## Write the goals
 
 Goals are the main way to steer an ambient agent. Each goal says when the agent should join a conversation and how it should answer. The join gate reads `wakeWhen`; the agent reads `engagement` once it joins. Changing what the agent responds to means editing this file:
