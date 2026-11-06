@@ -153,6 +153,13 @@ async function clearlyNotForAgent(
   const log = { event: "ambient.filter", channelId: message.channelId, ts: message.ts };
   try {
     const earlier = await loadThreadContextMessages(ctx.thread, message);
+    // eve reads the first 50 messages of a thread and swallows read errors. If the
+    // current reply isn't among them, the context is stale or missing: let it through.
+    const inThread = message.threadTs !== message.ts;
+    if (inThread && !ctx.thread.recentMessages.some((entry) => entry.ts === message.ts)) {
+      console.info(JSON.stringify({ ...log, reason: "incomplete-context", skip: false }));
+      return false;
+    }
     const transcript = earlier
       .slice(-10)
       .map((entry) => `${entry.isMe ? "agent" : `<@${entry.user}>`}: ${entry.text.slice(0, 500)}`);
@@ -172,16 +179,19 @@ async function clearlyNotForAgent(
       providerOptions: { gateway: { tags: ["ambient-filter"] } },
     });
     const skip = answers.forAgent.probability < SKIP_BELOW;
-    console.info(JSON.stringify({ ...log, probability: answers.forAgent.probability, skip }));
+    const { probability } = answers.forAgent;
+    console.info(JSON.stringify({ ...log, reason: "decided", probability, skip }));
     return skip;
   } catch {
-    console.warn(JSON.stringify({ ...log, error: true, skip: false }));
+    console.warn(JSON.stringify({ ...log, reason: "error", skip: false }));
     return false; // Fail open: the agent decides.
   }
 }
 ```
 
 The state is the message plus up to ten earlier replies in its thread. That's enough to tell a reply to the agent from a reply to a colleague, and small enough to send on every message. The log line records the decision and its probability, not the message text.
+
+`loadThreadContextMessages` reads the first 50 messages of a thread, and a failed read leaves the list empty or stale. In either case the current reply isn't among the loaded messages, so the filter lets it through instead of judging it without the replies that came right before it.
 
 ## Wire the Slack channel
 
@@ -262,7 +272,7 @@ Every message the filter skips saves a full agent turn. Every message it skips w
 
 ## Monitor the filter
 
-- **Count skips.** Chart `skip` and `error` from the `ambient.filter` log lines by channel. A rising error count means every message reaches the agent: safe, but more expensive.
+- **Count skips.** Chart `skip` by `reason` from the `ambient.filter` log lines, per channel. A rising `error` or `incomplete-context` count means more messages reach the agent unfiltered: safe, but more expensive.
 - **Review what was skipped.** Read a sample of skipped messages in Slack, especially those just under the threshold. Any message the agent should have seen means the threshold or question needs to change.
 - **Watch cost by tag.** The `ambient-filter` Gateway tag separates filter spend from agent turns in Vercel AI Gateway.
 - **Keep a labeled set.** Save reviewed messages with the outcome you wanted, and replay them before changing the threshold, a question, or the decision model. Use [evals](../evals) to check that the agent calls `no_reply` for messages it should stay out of.
