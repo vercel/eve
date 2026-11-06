@@ -21,6 +21,7 @@ import {
   slackUserIdFromAuthContext,
 } from "#public/channels/slack/auth.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import type { SlackHitlRoute } from "#public/channels/slack/hitl.js";
 import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
@@ -88,6 +89,36 @@ interface CardPart {
   readonly message: SlackCardMessage;
 }
 
+/**
+ * Where a code channel's card answers back: the channel's one session, and the owner eve takes
+ * the answer from. A channel whose owner eve never recorded routes without one, so its cards
+ * stay answerable rather than answerable by nobody.
+ */
+function codeChannelRoute(
+  slack: SlackEventContext["slack"],
+  state: SlackChannelState,
+): SlackHitlRoute {
+  const target = slackSessionTargetOf(slack);
+  const ownerId = state.codeChannelOwnerId;
+  return ownerId ? { ...target, ownerId } : target;
+}
+
+/**
+ * The route one request's card answers back on. A question or budget prompt in a code channel is
+ * the owner's to settle, since nothing else says who may: every member sees its buttons, and any
+ * of them could otherwise decide what the agent does next in someone else's channel. An approval
+ * keeps its own rule — its requester, or whoever the tool's response policy allows — so the
+ * channel never narrows a decision the app already said who may make.
+ */
+function routeOf(
+  interaction: Interaction,
+  route: SlackHitlRoute | undefined,
+): SlackHitlRoute | undefined {
+  if (route?.ownerId === undefined || interaction.request.kind !== "approval") return route;
+  const { ownerId: _ownerId, ...rest } = route;
+  return rest;
+}
+
 async function postThreadCards(
   requests: readonly Interaction[],
   ctx: RequestCardContext,
@@ -103,11 +134,14 @@ async function postThreadCards(
     });
     return;
   }
-  // A card in a code channel sits outside any thread, so its clicks carry the session's address.
-  const route = channel.slack.codeChannel ? slackSessionTargetOf(channel.slack) : undefined;
+  // A card in a code channel sits outside any thread, so its clicks carry the session's address,
+  // and, for the requests `routeOf` holds to one person, the channel's owner.
+  const route = channel.slack.codeChannel
+    ? codeChannelRoute(channel.slack, channel.state)
+    : undefined;
   const entries = requests.map((request): CardEntry => ({
     interactionId: request.interactionId,
-    ...renderRequestCard(chain, cardOf(request, "thread", ctx), route),
+    ...renderRequestCard(chain, cardOf(request, "thread", ctx), routeOf(request, route)),
   }));
   const post = async (message: SlackCardMessage) =>
     (await channel.thread.post({ blocks: [...message.blocks], text: message.text })).id;
@@ -329,7 +363,7 @@ async function writeRequests(
     const card = renderRequestCard(
       chain,
       cardOf(interaction, record.destination, ctx),
-      record.route,
+      routeOf(interaction, record.route),
     );
     const fallback = card.fallback.controls;
     return [

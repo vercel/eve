@@ -45,6 +45,8 @@ function harness(
     readonly approvalChannel?: SlackApprovalChannelResolver;
     /** Binds the session to a code channel instead of a thread. */
     readonly codeChannel?: boolean;
+    /** The code channel's owner; `null` for one eve recorded no owner for. */
+    readonly codeChannelOwnerId?: string | null;
     readonly renderers?: readonly SlackRenderer[];
     /** Slack's error code for a call it fails, or `NETWORK` for one that never gets an answer. */
     readonly fails?: (sent: Sent) => string | undefined;
@@ -71,7 +73,11 @@ function harness(
     triggeringUserId: "U_ALICE",
   };
   // A code channel is the session itself, with no thread root, as production state records it.
-  if (options.codeChannel === true) state.codeChannel = true;
+  if (options.codeChannel === true) {
+    state.codeChannel = true;
+    state.codeChannelOwnerId =
+      options.codeChannelOwnerId === undefined ? "U_ALICE" : options.codeChannelOwnerId;
+  }
   const channel = {
     slack: {
       channelId: "C1",
@@ -978,6 +984,34 @@ describe("Slack input request cards", () => {
       }
     },
   );
+
+  // Nothing else says who may settle a question or a budget prompt, so the code channel's owner
+  // does. An approval keeps the responder its own approval policy decides.
+  it("routes a code channel's questions and budget prompts to its owner, not its approvals", async () => {
+    const { ask, sent } = harness({ codeChannel: true });
+    await ask(dayQuestion(), freeformQuestion, budgetPrompt, approval("a_deploy", "deploy"));
+
+    const ids = sent.flatMap((call) => eveActionIds(call.body));
+    expect(ids.filter((id) => id.includes("tool-approval:"))).toEqual([
+      "eve_input:code:C1:tool-approval:a_deploy:button:0",
+      "eve_input:code:C1:tool-approval:a_deploy:button:1",
+    ]);
+    expect(ids.filter((id) => !id.includes("tool-approval:"))).toEqual([
+      "eve_input:codeowner:C1:U_ALICE:q_day",
+      "eve_input_freeform:codeowner:C1:U_ALICE:q_scope",
+      "eve_input:codeowner:C1:U_ALICE:b_0:button:0",
+      "eve_input:codeowner:C1:U_ALICE:b_0:button:1",
+    ]);
+  });
+
+  // eve can't hold a card to an owner it never recorded, so that card stays open to the channel.
+  it("leaves a code channel's card ungated when eve recorded no owner", async () => {
+    const { ask, sent } = harness({ codeChannel: true, codeChannelOwnerId: null });
+    await ask(dayQuestion());
+
+    const ids = sent.flatMap((call) => eveActionIds(call.body));
+    expect(ids).toEqual(["eve_input:code:C1:q_day"]);
+  });
 });
 
 function controls(
