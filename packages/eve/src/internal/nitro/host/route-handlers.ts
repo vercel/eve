@@ -157,14 +157,17 @@ export function renderHostHandler(input: {
  * `defineTask` from `"nitro/task"` would fail on Vercel, where `nitro` is a
  * build-only dependency outside the function trace.
  */
-export function renderScheduleTaskModule(input: { readonly description: string }): string {
+export function renderScheduleTaskModule(input: {
+  readonly description: string;
+  readonly taskName: string;
+}): string {
   return [
     `import { dispatchScheduleTask } from ${importSourceModule("src/internal/nitro/routes/schedule-task.ts")};`,
     importRouteConfig,
     `export default {`,
     `  meta: { description: ${JSON.stringify(input.description)} },`,
     `  async run(event) {`,
-    `    return { result: await dispatchScheduleTask(event.name, config) };`,
+    `    return { result: await dispatchScheduleTask(${JSON.stringify(input.taskName)}, config) };`,
     `  },`,
     `};`,
   ].join("\n");

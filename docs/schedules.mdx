@@ -131,9 +131,11 @@ Hosted Vercel builds run every schedule with [Vercel Schedules](https://vercel.c
 
 Vercel Schedules is in beta and must be enabled for your Vercel team.
 
-When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, each agent builds as a Vercel service. Vercel doesn't accept schedules from a service's build output yet, so these agents use Vercel Cron Jobs instead. Vercel adds each agent's schedules to the project's cron entries. Named agents use their `/eve/<name>` route prefix. When you run `vercel build` locally, use Vercel CLI 56.4.0 or later so the project output includes these cron entries.
+Each Vercel schedule is named after the agent and the schedule, so the agents in one project never share a name. When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, each agent builds as a Vercel service, and Vercel attaches each schedule to the service that built it.
 
-Find run history and per-run logs under **Observability → Logs**. For `withEve` agents, confirm that Vercel found the schedules under **Settings → Cron Jobs**.
+When you run `vercel build` locally, use a Vercel CLI release that accepts schedules from a service's build output. Older releases fail the build for `withEve` projects, and releases before 62.7.0 drop schedules from the output without an error.
+
+Find run history and per-run logs under **Observability → Logs**.
 
 ## Self-deployed hosts
 

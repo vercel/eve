@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildApplication } from "#internal/nitro/host.js";
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
+const DIGEST_TASK_NAME = `eve.schedule.${Buffer.from("schedules/digest.md").toString("base64url")}`;
 
 interface VercelOutputConfig {
   readonly crons?: readonly { readonly path: string; readonly schedule: string }[];
@@ -48,33 +48,31 @@ describe("Vercel schedule delivery", () => {
     ) as { readonly experimentalTriggers?: readonly unknown[] };
 
     expect(config.crons ?? []).toEqual([]);
-    expect(Object.values(config.schedules ?? {})).toEqual([
-      { schedule: "0 9 * * *", function: "_vercel/tasks" },
-    ]);
+    expect(config.schedules).toEqual({
+      [`schedules-agent.${DIGEST_TASK_NAME}`]: { schedule: "0 9 * * *", function: "_vercel/tasks" },
+    });
     expect(functionConfig.experimentalTriggers).toEqual([{ type: "schedule/v1beta" }]);
     expect(config.routes).not.toContainEqual(expect.objectContaining({ dest: "/_vercel/tasks" }));
   });
 
-  // Vercel rejects `schedules` in a service's Build Output.
-  it("keeps Vercel Cron Jobs for Vercel service builds", async () => {
-    const config = await readOutputConfig(
-      await buildForVercel({
-        ...AGENT_FILES,
-        "vercel.json": JSON.stringify({
-          experimentalServices: {
-            eve: { entrypoint: ".", framework: "eve", routePrefix: "/_eve_internal/eve" },
-            web: { entrypoint: ".", framework: "nuxtjs", routePrefix: "/" },
-          },
-        }),
+  it("keeps the private Vercel Schedules function in Vercel service builds", async () => {
+    const outputDir = await buildForVercel({
+      ...AGENT_FILES,
+      "vercel.json": JSON.stringify({
+        experimentalServices: {
+          eve: { entrypoint: ".", framework: "eve", routePrefix: "/_eve_internal/eve" },
+          web: { entrypoint: ".", framework: "nuxtjs", routePrefix: "/" },
+        },
       }),
-    );
+    });
+    const config = await readOutputConfig(outputDir);
 
-    expect(config.schedules).toBeUndefined();
-    expect(config.crons).toEqual([
-      {
-        path: expect.stringMatching(new RegExp(`^${EVE_ROUTE_PREFIX}/cron/`)),
-        schedule: "0 9 * * *",
-      },
-    ]);
+    expect(config.crons ?? []).toEqual([]);
+    expect(config.schedules).toEqual({
+      [`schedules-agent.${DIGEST_TASK_NAME}`]: { schedule: "0 9 * * *", function: "_vercel/tasks" },
+    });
+    await expect(
+      readFile(join(outputDir, "functions", "_vercel", "tasks.func", ".vc-config.json"), "utf8"),
+    ).resolves.toContain("schedule/v1beta");
   });
 });

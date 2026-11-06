@@ -5,6 +5,7 @@ import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
   createEveVercelOptions,
   EVE_WORKFLOW_FLOW_ROUTE_PATH,
+  VERCEL_SCHEDULES_FUNCTION_ROUTE,
 } from "#internal/nitro/host/vercel-build-output-config.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
@@ -22,7 +23,16 @@ const CONSUMER_ROUTE = {
   path: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
   vercelFunction: "schedule-queue",
 } as const;
-const routeTable = { routes: [FLOW_ROUTE] };
+const DAILY_TASK = {
+  cron: "0 0 * * *",
+  description: "Run daily.",
+  logicalPath: "schedules/daily.md",
+  nitroTaskName: "test-agent.eve.schedule.daily",
+  scheduleId: "daily",
+  sourceId: "app:daily",
+  taskName: "eve.schedule.daily",
+};
+const routeTable = { routes: [FLOW_ROUTE], scheduleTasks: [] };
 
 describe("createEveVercelOptions", () => {
   it("returns undefined when the Vercel build output is disabled", () => {
@@ -74,7 +84,7 @@ describe("createEveVercelOptions", () => {
     const withCollections = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
-      routeTable: { routes: [CONSUMER_ROUTE, FLOW_ROUTE] },
+      routeTable: { routes: [CONSUMER_ROUTE, FLOW_ROUTE], scheduleTasks: [] },
     });
 
     expect(withoutCollections?.functionRules).not.toHaveProperty(
@@ -97,21 +107,6 @@ describe("createEveVercelOptions", () => {
       EVE_WORKFLOW_FLOW_ROUTE_PATH,
       EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
     ]);
-  });
-
-  it("sets the cron path only when the table has one", () => {
-    const cronHandlerRoute = "/eve/v1/cron/token";
-
-    expect(
-      createEveVercelOptions({
-        agentName: "test-agent",
-        enabled: true,
-        routeTable: { cronHandlerRoute, routes: [FLOW_ROUTE] },
-      })?.cronHandlerRoute,
-    ).toBe(cronHandlerRoute);
-    expect(
-      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable }),
-    ).not.toHaveProperty("cronHandlerRoute");
   });
 
   it("omits the public route prefix from the flow environment when none is set", () => {
@@ -167,17 +162,26 @@ describe("createEveVercelOptions", () => {
     );
   });
 
-  it("runs schedules through private Vercel Schedules only when asked", () => {
-    expect(
-      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable })?.schedules,
-    ).toBe(false);
-    expect(
-      createEveVercelOptions({
-        agentName: "test-agent",
-        enabled: true,
-        routeTable,
-        vercelSchedules: true,
-      })?.schedules,
-    ).toBe("private");
+  it("runs schedules through Nitro's private Vercel Schedules function", () => {
+    const withoutTasks = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      routeTable,
+    });
+    const withTasks = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      publicRoutePrefix: "/eve/billing",
+      routeTable: { ...routeTable, scheduleTasks: [DAILY_TASK] },
+    });
+
+    expect(withoutTasks?.schedules).toBe("private");
+    expect(withoutTasks?.functionRules).not.toHaveProperty(VERCEL_SCHEDULES_FUNCTION_ROUTE);
+    expect(withTasks?.functionRules[VERCEL_SCHEDULES_FUNCTION_ROUTE]).toEqual({
+      environment: {
+        EVE_PUBLIC_ROUTE_PREFIX: "/eve/billing",
+        WORKFLOW_PRECONDITION_GUARD: "1",
+      },
+    });
   });
 });

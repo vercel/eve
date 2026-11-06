@@ -26,11 +26,6 @@ export type HostMode =
        * so callback URLs resolve behind a per-agent mount.
        */
       readonly publicRoutePrefix?: string;
-      /**
-       * Built as one service of a multi-service Vercel project. Vercel rejects
-       * `schedules` in a service's Build Output, so these keep Cron Jobs.
-       */
-      readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
     };
 
@@ -101,15 +96,12 @@ export function createHostSpec(
   const development = mode.kind === "development";
   const preset = mode.kind === "production" ? mode.preset : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
-  const vercelSchedules =
-    preset === "vercel" && mode.kind === "production" && mode.vercelService !== true;
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   const routes = createHostRouteTable({
     manifest,
     mode: mode.kind,
     scheduleRegistrations: preparedHost.scheduleRegistrations,
     vercel: preset === "vercel",
-    vercelSchedules,
   });
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
@@ -151,7 +143,6 @@ export function createHostSpec(
       enabled: preset === "vercel",
       publicRoutePrefix: mode.kind === "production" ? mode.publicRoutePrefix : undefined,
       routeTable: routes,
-      vercelSchedules,
       workspaceMember: mode.kind === "production" ? mode.workspaceMember : undefined,
     }),
     websocket: development || routes.routes.some((route) => route.method === "WEBSOCKET"),
