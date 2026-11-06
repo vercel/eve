@@ -290,7 +290,10 @@ describe("connection tool errors", () => {
   };
 
   /** Alice's tracker call that fails in the transport, with the connection's `toolCall.onError`. */
-  function failingCall(onError?: NonNullable<ResolvedConnectionDefinition["toolCall"]>["onError"]) {
+  function failingCall(
+    onError?: NonNullable<ResolvedConnectionDefinition["toolCall"]>["onError"],
+    abortSignal?: AbortSignal,
+  ) {
     const failure = new Error("Modern MCP result is missing resultType");
     const connection = {
       connectionName: "tracker",
@@ -326,7 +329,7 @@ describe("connection tool errors", () => {
     const run = contextStorage.run(ctx, async () =>
       connectionEntry(registry, connection, "list_issues").execute!(
         {},
-        { messages: [], toolCallId: "call-1" },
+        { abortSignal, messages: [], toolCallId: "call-1" },
       ),
     );
     return { failure, run };
@@ -349,6 +352,13 @@ describe("connection tool errors", () => {
         toolName: "list_issues",
       }),
     );
+  });
+
+  it("leaves a cancelled turn's error to the turn, without calling the handler", async () => {
+    const onError = vi.fn(() => "The tracker is unavailable.");
+    const { failure, run } = failingCall(onError, AbortSignal.abort());
+    await expect(run).rejects.toBe(failure);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it.each([

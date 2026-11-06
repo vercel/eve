@@ -203,6 +203,8 @@ async function runConnectionTool(
           options,
         );
       } catch (error) {
+        // A cancelled turn is not a connection failure, and the model never reads it.
+        if (options.abortSignal?.aborted === true) throw error;
         throw await connectionToolError(connection, error, {
           callId: options.toolCallId,
           toolName: tool.name,

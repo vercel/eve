@@ -42,7 +42,8 @@ export interface ConnectionToolCallDefinition {
   /**
    * Chooses what the model reads when a call to the connection fails: a transport or protocol
    * error, or a timeout. A tool result the server marks as an error is not a failure here; the
-   * model reads it as the server wrote it. Logs and telemetry keep the original error.
+   * model reads it as the server wrote it. Neither is a cancelled turn. Logs and telemetry keep
+   * the original error.
    *
    * Return `undefined` to keep eve's default. If the handler throws, eve logs it and keeps the
    * default.

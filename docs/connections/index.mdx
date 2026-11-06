@@ -392,7 +392,7 @@ export default defineMcpClientConnection({
 - **Your logs keep the original.** Logs, telemetry, and the result your channels and clients receive keep the original error. Only the model's text changes.
 - **The handler gets the call's context.** It receives the error and the call's context: the session, `callId`, the server's bare `toolName`, and the approver while an approved call runs.
 - **`undefined` keeps the default.** Return `undefined` to keep eve's default for an error you don't handle. If the handler throws, eve logs that and keeps the default.
-- **Some results aren't failures.** A tool result that the server marks as an error isn't a failure here; the model reads it as the server wrote it. Sign-in requests aren't either, since eve handles them itself.
+- **Some results aren't failures.** A tool result that the server marks as an error isn't a failure here; the model reads it as the server wrote it. Sign-in requests aren't either, since eve handles them itself, and neither is a cancelled turn.
 
 ## Dynamic connections
 

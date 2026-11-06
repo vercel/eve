@@ -178,6 +178,7 @@ export async function executeToolCall(
     let failed = false;
     let failure = "";
     let thrown: Error | undefined;
+    let modelText: string | undefined;
     const telemetry = toolTelemetry(input.telemetry, {
       // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,
@@ -227,23 +228,26 @@ export async function executeToolCall(
               output = await raceAbort(Promise.resolve(executed), abandon);
             }
           });
+        } catch (error) {
+          // An app-chosen text replaces only what the model reads: every wrapper sees the cause.
+          if (!(error instanceof ModelFacingError)) throw error;
+          modelText = error.message;
+          throw error.cause;
         } finally {
           executionMs = performance.now() - startedAt;
         }
       });
     } catch (error) {
-      // An app-chosen model-facing text replaces only what the model reads.
-      const cause = error instanceof ModelFacingError ? error.cause : error;
       await telemetry.ended(
-        { error: cause, input: args, toolCallId: callId, toolName, type: "tool-error" },
+        { error, input: args, toolCallId: callId, toolName, type: "tool-error" },
         executionMs,
       );
       throwIfTurnAborted(input.abortSignal);
-      logError(log, "tool execution failed", cause, { toolName, toolCallId: callId });
+      logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;
-      thrown = toError(cause);
+      thrown = toError(error);
       output = thrown.message;
-      failure = modelFacingError(error);
+      failure = modelText ?? modelFacingError(error);
     }
     if (!failed) {
       await telemetry.ended(
@@ -357,12 +361,10 @@ async function* untilAborted<T>(
 }
 
 /**
- * What the model reads for a call whose tool threw: the text an app chose for it, or else the error
- * as the AI SDK rendered it, with its name, which tells the model what kind of failure it was (a
- * `TimeoutError` may be worth retrying).
+ * What the model reads for a call whose tool threw: the error as the AI SDK rendered it, with its
+ * name, which tells the model what kind of failure it was (a `TimeoutError` may be worth retrying).
  */
 function modelFacingError(error: unknown): string {
-  if (error instanceof ModelFacingError) return error.message;
   if (error === null || error === undefined) return "unknown error";
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.toString();

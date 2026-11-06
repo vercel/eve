@@ -23,8 +23,9 @@ toolCall: {
 - **Scope.** It runs for errors thrown while calling the connection, such as transport and protocol errors and eve's call deadline.
   - A result the server marks as an error is a tool result, not a failure. The model reads it as the server wrote it.
   - Sign-in requests (`ConnectionAuthorizationRequiredError`) bypass the handler, since eve answers them itself.
+  - So does a cancelled turn: the model never reads that result.
 - **Only the model's text changes.** Logs, telemetry (`tool-error`), `beforeResult` hooks, and the published call result keep the original error.
-  - eve carries the text on an internal `ModelFacingError` whose `cause` is the original. The harness reports the cause everywhere and gives the model the message.
+  - eve carries the text on an internal `ModelFacingError` whose `cause` is the original. The harness unwraps it inside the innermost execution callback, so telemetry `executeTool` wrappers see only the cause, and gives the model the message.
 - **Context.** `ctx` matches `providedArguments`' context: the connection callback context (session, approver during an approved call), `callId`, and the server's bare `toolName`. It runs inside the call's approval scope.
 - **Defaults.** `undefined` keeps eve's default text. A handler that throws is logged, and the default is kept: a bug in the handler never hides the original failure.
 

@@ -294,8 +294,27 @@ it("gives the model an app-chosen error text and keeps the original error everyw
   const original = new Error("Modern MCP result is missing resultType");
   const text = "The tracker answered in a format eve could not read. The call may have run.";
   const events: import("#protocol/session-event.js").SessionEvent[] = [];
+  const wrapped: unknown[] = [];
+  const ended: unknown[] = [];
   const result = await executeInlineCalls({
     abortSignal: undefined,
+    telemetry: {
+      integrations: [
+        {
+          executeTool: async ({ execute }) => {
+            try {
+              return await execute();
+            } catch (error) {
+              wrapped.push(error);
+              throw error;
+            }
+          },
+          onToolExecutionEnd: ({ toolOutput }) => {
+            ended.push(toolOutput);
+          },
+        },
+      ],
+    },
     approvalMemory: { pending: [], remembered: {} },
     beforeExecute: () => {},
     excludedCallIds: new Set(),
@@ -319,6 +338,8 @@ it("gives the model an app-chosen error text and keeps the original error everyw
     ]),
   });
   expect(result.parts[0]?.output).toEqual({ type: "error-text", value: text });
+  expect(wrapped).toEqual([original]);
+  expect(ended).toEqual([expect.objectContaining({ error: original, type: "tool-error" })]);
   const settled = JSON.stringify(events.find((event) => event.type === "call.settled"));
   expect(settled).toContain(original.message);
   expect(settled).not.toContain(text);
