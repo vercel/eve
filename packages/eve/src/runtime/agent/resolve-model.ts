@@ -103,7 +103,7 @@ async function loadSourceBackedRuntimeModelReference(
     definition: reference.source,
     kindLabel: `runtime model "${reference.id}"`,
     moduleMap: scope.moduleMap,
-    nodeId: scope.nodeId,
+    nodeId: reference.sourceNodeId ?? scope.nodeId,
   });
   if (reference.sourceModelOption !== undefined) {
     return agentToolOptionModel(definition, reference.sourceModelOption, reference.source);

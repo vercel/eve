@@ -2,7 +2,9 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { isDefinedAgent } from "#public/definitions/agent.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { currentModel } from "#definitions/model.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
@@ -76,15 +78,18 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     tool?: AgentToolExposure;
   } = {
     description: definition.description,
-    model: await normalizeDurableModelSelection({
-      modelMetadata: input.modelMetadata,
-      selection: {
-        model: definition.model,
-        modelContextWindowTokens:
-          definition.modelContextWindowTokens ?? parentContextWindow(input.state, definition.model),
-        modelOptions: definition.modelOptions,
-      },
-    }),
+    model:
+      parentProviderModel(input.state, definition) ??
+      (await normalizeDurableModelSelection({
+        modelMetadata: input.modelMetadata,
+        selection: {
+          model: definition.model,
+          modelContextWindowTokens:
+            definition.modelContextWindowTokens ??
+            parentContextWindow(input.state, definition.model),
+          modelOptions: definition.modelOptions,
+        },
+      })),
   };
 
   if (definition.compaction !== undefined) {
@@ -133,9 +138,31 @@ async function normalizeDurableModelSelection(input: {
 }
 
 /**
- * The parent's context window, for a child that runs the parent's own model: a subagent that
- * passes `view.model.id` along gets the metadata the parent's model already has, which a custom
- * model's id alone doesn't carry.
+ * The parent's provider model, for a child that runs it: a subagent that passes `ctx.model.id`
+ * along, with no window or options of its own, gets the parent's source-backed reference, so it
+ * calls the parent's provider instead of AI Gateway. The `source` lives in the parent's compiled
+ * node, which `sourceNodeId` records for the child.
+ */
+function parentProviderModel(
+  state: ContextAccessor,
+  definition: ReturnType<typeof normalizeAgentDefinition>,
+): DynamicSubagentModelReference | undefined {
+  if (definition.modelContextWindowTokens !== undefined || definition.modelOptions !== undefined) {
+    return undefined;
+  }
+  const parent = currentModel(state);
+  if (parent?.source === undefined || parent.id !== definition.model) return undefined;
+  const { reasoning: _reasoning, ...reference } = parent;
+  return {
+    ...reference,
+    sourceNodeId:
+      reference.sourceNodeId ?? state.get(BundleKey)?.nodeId ?? ROOT_COMPILED_AGENT_NODE_ID,
+  };
+}
+
+/**
+ * The parent's context window, for a child that runs the parent's own Gateway model: a custom
+ * model's id alone doesn't carry the metadata the parent's model already has.
  */
 function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {
   if (typeof model !== "string") return undefined;

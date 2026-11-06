@@ -1,4 +1,6 @@
-import type { SessionAuthContext } from "#context/keys.js";
+import { AuthKey, type SessionAuthContext } from "#context/keys.js";
+import { readDynamicSubagentSelections } from "#definitions/subagents.js";
+import { beforeModelCall, definitionSession } from "#internal/testing/definition-session.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { afterEach, describe, expect, it } from "vitest";
@@ -148,6 +150,32 @@ describe("self-modification local agent", () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: false } } });
 
       await expect(Promise.resolve(dynamicEvaluate(agent)(context))).resolves.toBeNull();
+    });
+  });
+});
+
+describe("self-modification local agent on a parent's provider model", () => {
+  it.each([
+    { label: "chatgpt()", contextWindowTokens: 200_000, id: "codex/gpt-5.5" },
+    { label: "mockModel", contextWindowTokens: 1_000_000, id: "eve-mock/model" },
+  ])("runs on the $label parent's own provider", async ({ contextWindowTokens, id }) => {
+    await withDevHost(async () => {
+      const parent = {
+        contextWindowTokens,
+        id,
+        source: { logicalPath: "agent.ts", sourceId: "agent.ts", sourceKind: "module" as const },
+      };
+      const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
+      const { ctx } = definitionSession({
+        model: parent,
+        subagents: [{ evaluate: dynamicEvaluate(agent), name: "self-modification" }],
+      });
+      ctx.set(AuthKey, localDeveloper);
+      await beforeModelCall(ctx);
+
+      expect(readDynamicSubagentSelections(ctx)["subagents/self-modification"]).toMatchObject({
+        agentConfig: { model: { ...parent, sourceNodeId: "root" } },
+      });
     });
   });
 });
