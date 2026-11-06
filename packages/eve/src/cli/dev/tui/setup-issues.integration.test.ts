@@ -7,9 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, type AgentInfoResult } from "#client/index.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
-import { EveTUIRunner, type AgentTUIRenderer } from "./runner.js";
+import { interruptedError } from "./errors.js";
+import { EveTUIRunner } from "./runner.js";
 import { detectSetupIssues } from "./setup-issues.js";
-import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
+import { TerminalRenderer } from "./terminal-renderer.js";
+import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -86,14 +88,15 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       order.push(command.name);
       return { message: `/${command.name} dismissed.` };
     });
-    const readInput = vi.fn(async () => {
-      order.push("prompt");
-      return undefined;
+    const renderer = new TerminalRenderer({
+      input: new MockUserInput(),
+      output: new MockScreen({ columns: 100, rows: 30 }),
+      captureForeignOutput: false,
     });
-    const renderer: AgentTUIRenderer = {
-      readInput,
-      setupFlow: createFakeSetupFlowRenderer(),
-    };
+    const nextInput = vi.spyOn(renderer, "nextInput").mockImplementation(async () => {
+      order.push("prompt");
+      throw interruptedError();
+    });
     const runner = new EveTUIRunner({
       appRoot,
       client,
@@ -109,9 +112,13 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
     expect(handle).toHaveBeenCalledExactlyOnceWith(
       { type: "extension", name: "login", argument: "" },
-      expect.objectContaining({ renderer, title: "eve", initialModelStep: "provider" }),
+      expect.objectContaining({
+        setupFlow: renderer.setupFlow,
+        title: "eve",
+        initialModelStep: "provider",
+      }),
     );
-    expect(readInput).toHaveBeenCalledOnce();
+    expect(nextInput).toHaveBeenCalledOnce();
     expect(order).toEqual(["login", "prompt"]);
   });
 });

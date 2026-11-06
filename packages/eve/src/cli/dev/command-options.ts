@@ -1,15 +1,7 @@
 import type { DevelopmentRequestHeaders } from "#cli/dev/url-target.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  SubagentDisplayMode,
-  TerminalPartDisplayMode,
-} from "#cli/dev/tui/types.js";
+import type { LogDisplayMode } from "#cli/dev/tui/types.js";
 
 export interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  showConnectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
   defaultExtensions?: boolean;
   header?: DevelopmentRequestHeaders;
   host?: string;
@@ -19,12 +11,10 @@ export interface DevelopmentCliOptions {
   logs?: LogDisplayMode;
   name?: string;
   port?: number;
-  showReasoning?: TerminalPartDisplayMode;
   resume?: boolean;
-  showSubagents?: SubagentDisplayMode;
-  showTools?: TerminalPartDisplayMode;
   ui?: boolean;
   url?: string;
+  verbose?: boolean;
 }
 
 export interface ProductionCliOptions {

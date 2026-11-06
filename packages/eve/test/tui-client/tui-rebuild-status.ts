@@ -12,13 +12,14 @@ import {
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof that the dev server's rebuild log lines cycle through a
- * single in-place status row instead of stacking. Lines come from the
- * watcher's real formatter, so this exercises the producer/parser contract:
+ * End-to-end proof that the dev server's rebuild log lines drive the status
+ * line instead of the transcript. Lines come from the watcher's real
+ * formatter, so this exercises the producer/parser contract:
  *
  *   - repeated change→updated cycles show only the latest state
  *   - changed paths shrink to their last two components
  *   - the raw `[eve:dev] change detected …` lines never reach the transcript
+ *   - a failed rebuild commits as an error
  *
  * Needs no agent server and no model credentials.
  */
@@ -65,8 +66,8 @@ void (async () => {
     process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
 
     const snapshot = screen.snapshot();
-    if (!snapshot.includes("tui/setup-panel.ts changed · rebuilt")) {
-      throw new Error(`the latest rebuild should show condensed and in place:\n${snapshot}`);
+    if (!snapshot.includes("tui/setup-panel.ts updated")) {
+      throw new Error(`the latest rebuild should show condensed in the status line:\n${snapshot}`);
     }
     if (snapshot.includes("agent/agent.ts")) {
       throw new Error(`the earlier rebuild cycle should be replaced, not stacked:\n${snapshot}`);
@@ -75,12 +76,15 @@ void (async () => {
       throw new Error(`raw rebuild lines and full paths should not render:\n${snapshot}`);
     }
 
+    process.stderr.write("[eve:dev] rebuild failed: Unexpected token in agent.ts\n");
+    await screen.waitForText("rebuild failed: Unexpected token in agent.ts", 2_000);
+
     input.type("/exit");
     input.enter();
     await runPromise;
 
     process.stdout.write(
-      `${theme.muted("[tui-rebuild-status] in-place rebuild status with shortened paths verified")}\n`,
+      `${theme.muted("[tui-rebuild-status] rebuild status line and failure verified")}\n`,
     );
   } catch (error) {
     process.stdout.write(

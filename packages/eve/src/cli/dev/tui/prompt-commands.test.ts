@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatPromptCommandHelp,
   isPromptControlCommand,
   parsePromptCommand,
   promptCommandsFor,
@@ -154,9 +153,10 @@ describe("promptCommandsFor", () => {
       name: "model",
       argument: "",
     });
-    expect(formatPromptCommandHelp(remote)).not.toContain("/vc:login");
-    expect(formatPromptCommandHelp(remote)).not.toContain("/vc:auth");
-    expect(formatPromptCommandHelp(remote)).not.toContain("/model");
+    const names = remote.flatMap((spec) => [spec.name, ...spec.aliases]);
+    expect(names).not.toContain("vc:login");
+    expect(names).not.toContain("vc:auth");
+    expect(names).not.toContain("model");
   });
 });
 
@@ -199,18 +199,5 @@ describe("PROMPT_COMMANDS registry", () => {
 
   it("leads with /model so a bare slash opens model selection", () => {
     expect(PROMPT_COMMANDS[0]?.name).toBe("model");
-  });
-});
-
-describe("formatPromptCommandHelp", () => {
-  it("lists every command with its hint and aliases", () => {
-    const help = formatPromptCommandHelp();
-    for (const spec of PROMPT_COMMANDS) {
-      expect(help).toContain(`/${spec.name}`);
-      expect(help).toContain(spec.description);
-      if (spec.argumentHint !== undefined) expect(help).toContain(spec.argumentHint);
-      for (const alias of spec.aliases) expect(help).toContain(`(/${alias})`);
-    }
-    expect(help.split("\n")).toHaveLength(PROMPT_COMMANDS.length);
   });
 });

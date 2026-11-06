@@ -265,22 +265,17 @@ eve dev [options]
 
 Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect --url <url>`.
 
-| Flag                                | Type   | Default            | Description                                                     |
-| ----------------------------------- | ------ | ------------------ | --------------------------------------------------------------- |
-| `--host <host>`                     | string | `127.0.0.1`        | Host interface to bind                                          |
-| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                               |
-| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                      |
-| `--resume`                          | flag   | off                | Attempt recovery of retained runs from previous dev invocations |
-| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                     |
-| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                  |
-| `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
-| `--show-tools <mode>`               | enum   | `auto-collapsed`   | Tool-call rendering                                             |
-| `--show-reasoning <mode>`           | enum   | `auto-collapsed`   | Reasoning rendering                                             |
-| `--show-subagents <mode>`           | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
-| `--show-connection-auth <mode>`     | enum   | `full`             | Connection-authorization rendering                              |
-| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
-| `--context-size <tokens>`           | number | none               | Model context window size                                       |
-| `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
+| Flag                      | Type   | Default            | Description                                                     |
+| ------------------------- | ------ | ------------------ | --------------------------------------------------------------- |
+| `--host <host>`           | string | `127.0.0.1`        | Host interface to bind                                          |
+| `--port <port>`           | number | `$PORT`, then 2000 | Port to listen on                                               |
+| `--no-ui`                 | flag   | UI on              | Start the server without an interactive UI                      |
+| `--resume`                | flag   | off                | Attempt recovery of retained runs from previous dev invocations |
+| `--no-default-extensions` | flag   | extensions on      | Do not mount bundled development extensions                     |
+| `--name <name>`           | string | app folder name    | Title shown in the terminal UI                                  |
+| `--input <text>`          | string | none               | Pre-fill the prompt input                                       |
+| `--verbose`               | flag   | off                | Show tool output, reasoning, and subagent activity in full      |
+| `--logs <mode>`           | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
 
 `localDev()` refuses callers connecting from another machine. When `--host` binds another interface, such as `0.0.0.0`, those callers need another authenticator in the channel's `auth` list. A same-machine tunnel or reverse proxy, such as ngrok, cloudflared, or a local nginx, connects locally. eve authenticates every caller it forwards as `local-dev`, so put an authenticator in front of any dev server you expose that way.
 
@@ -339,7 +334,7 @@ eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 
 Without `--print`, `connect` opens the interactive UI and requires a terminal. With `--print <prompt>`, it sends one message, writes only the final assistant text to stdout, and exits. It exits nonzero with an error on stderr if the turn fails, is cancelled, or needs input or authorization. It also fails if the stream ends before the turn finishes. The error includes the session ID once the server accepted the message. Each `--print` starts a new conversation and can't answer pending requests; use the `eve/client` API for that or for multi-turn scripts. `--input` pre-fills the interactive UI and can't be combined with `--print`.
 
-Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `--show-tools`, `--show-reasoning`, `--show-subagents`, `--show-connection-auth`, `--assistant-response-stats`, `--context-size`, and `--logs`. The `--show-*` flags control rendering, not model reasoning effort. Set effort with `eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
+Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `--verbose` and `--logs`. `--verbose` controls rendering, not model reasoning effort. Set effort with `eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
 
 Use `-H, --header <header>` for a bearer token or another request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL; eve sends them as a Basic `Authorization` header and removes them from the target URL.
 

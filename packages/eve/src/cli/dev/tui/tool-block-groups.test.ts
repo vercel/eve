@@ -77,51 +77,25 @@ describe("groupToolBlocksForDisplay", () => {
     ]);
   });
 
-  it("partitions interleaved successes and failures into one group each", () => {
+  it("keeps a settled run with failures as one group that itemizes every call", () => {
     const failedFirst = fetchBlock("f1", "https://a.example", "error", "status 403");
-    const doneOne = fetchBlock("d1", "https://b.example", "done");
-    const doneTwo = fetchBlock("d2", "https://c.example", "done");
-    const failedSecond = fetchBlock("f2", "https://d.example", "error", "status 429");
-    const doneThree = fetchBlock("d3", "https://e.example", "done");
+    const done = fetchBlock("d1", "https://b.example", "done");
+    const failedSecond = fetchBlock("f2", "https://c.example", "error", "status 429");
 
-    const groups = groupToolBlocksForDisplay([
-      failedFirst,
-      doneOne,
-      doneTwo,
-      failedSecond,
-      doneThree,
-    ]);
+    const groups = groupToolBlocksForDisplay([failedFirst, done, failedSecond]);
 
-    expect(groups).toHaveLength(2);
-    expect(groups[0]?.members).toEqual([failedFirst, failedSecond]);
-    // Failures keep their itemized rail, newest call first.
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.members).toEqual([failedFirst, done, failedSecond]);
+    // Failures keep their summaries on the rail, newest call first.
     expect(groups[0]?.display).toMatchObject({
-      title: "Fetch 2 URLs",
+      title: "Fetch 3 URLs",
       status: "error",
       toolGroupItems: [
-        { text: "https://d.example", result: "status 429" },
+        { text: "https://c.example", result: "status 429" },
+        { text: "https://b.example" },
         { text: "https://a.example", result: "status 403" },
       ],
     });
-    expect(groups[1]?.members).toEqual([doneOne, doneTwo, doneThree]);
-    expect(groups[1]?.display).toMatchObject({
-      title: "Fetch 3 URLs",
-      doneTitle: "Fetched 3 URLs",
-      status: "done",
-    });
-    expect(groups[1]?.display.toolGroupItems).toBeUndefined();
-  });
-
-  it("keeps a lone failure as its own block with the original result line", () => {
-    const done = fetchBlock("d1", "https://a.example", "done");
-    const failed = fetchBlock("f1", "https://b.example", "error", "status 404");
-
-    const groups = groupToolBlocksForDisplay([done, failed]);
-
-    expect(groups).toHaveLength(2);
-    expect(groups[0]?.display).toBe(done);
-    expect(groups[1]?.display).toBe(failed);
-    expect(groups[1]?.display.result).toBe("status 404");
   });
 
   it("keeps two agents' settled rows apart even when their calls match", () => {
@@ -134,108 +108,6 @@ describe("groupToolBlocksForDisplay", () => {
     });
     const groups = groupToolBlocksForDisplay([read("c1"), read("c2")]);
     expect(groups.map((group) => group.members.length)).toEqual([1, 1]);
-  });
-
-  it("coalesces a contiguous run of same-source log writes into one section", () => {
-    const write = (title: string, body: string, live = false): Block => ({
-      kind: "log",
-      title,
-      body,
-      live,
-    });
-
-    const groups = groupToolBlocksForDisplay([
-      write("stderr", "warning one\ndetail one"),
-      write("stderr", "warning two", true),
-    ]);
-
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.members).toHaveLength(2);
-    // The merged section shows only the newest write — every stored
-    // diagnostic points at the log file, so on-screen history is redundant
-    // — and stays live while any write still is.
-    expect(groups[0]?.display).toMatchObject({
-      kind: "log",
-      title: "stderr",
-      body: "warning two",
-      live: true,
-      elided: 1,
-    });
-  });
-
-  it("buckets a log run by source and visibility without merging across them", () => {
-    const concise: Block = {
-      kind: "log",
-      title: "stderr",
-      body: "concise one",
-      logVisibility: "summary",
-      live: false,
-    };
-    const raw: Block = {
-      kind: "log",
-      title: "stderr",
-      body: "raw one",
-      logVisibility: "all-only",
-      live: false,
-    };
-    const conciseTwo: Block = { ...concise, body: "concise two" };
-    const rawTwo: Block = { ...raw, body: "raw two" };
-
-    const groups = groupToolBlocksForDisplay([concise, raw, conciseTwo, rawTwo]);
-
-    // The concise/raw diagnostic twins each merge with their own kind — a
-    // mixed section would double the content under one log filter.
-    expect(groups).toHaveLength(2);
-    expect(groups[0]?.display).toMatchObject({
-      body: "concise two",
-      elided: 1,
-      logVisibility: "summary",
-    });
-    expect(groups[1]?.display).toMatchObject({
-      body: "raw two",
-      elided: 1,
-      logVisibility: "all-only",
-    });
-  });
-
-  it("keeps a lone write and in-place log status blocks out of coalescing", () => {
-    const lone: Block = {
-      kind: "log",
-      title: "stderr",
-      body: Array.from({ length: 15 }, (_, i) => `line ${i}`).join("\n"),
-      live: false,
-    };
-    const status: Block = {
-      kind: "log",
-      id: "dev-rebuild:1",
-      title: "stdout",
-      body: "3 files changed · rebuilding…",
-      live: true,
-    };
-    const write: Block = { kind: "log", title: "stdout", body: "ordinary", live: false };
-
-    const groups = groupToolBlocksForDisplay([lone, status, write]);
-
-    // A lone write is never windowed, and the rebuild status row must not
-    // absorb (or be absorbed by) neighboring writes. Single-member buckets
-    // sit at their own positions.
-    expect(groups.map((group) => group.display)).toEqual([lone, status, write]);
-  });
-
-  it("merges a source's writes across interleaved blocks in window mode only", () => {
-    const write = (body: string): Block => ({ kind: "log", title: "stderr", body, live: false });
-    const notice: Block = { kind: "notice", body: "boundary", live: false };
-    const blocks = [write("early failure"), notice, write("late failure")];
-
-    // Window mode: one stream section anchored at the newest write, so
-    // everything that happened after the last error displays after it.
-    const windowed = groupToolBlocksForDisplay(blocks);
-    expect(windowed.map((group) => group.display.kind)).toEqual(["notice", "log"]);
-    expect(windowed[1]?.display).toMatchObject({ body: "late failure", elided: 1 });
-
-    // Runs mode (transcript rebuilds): committed positions stay put.
-    const runs = groupToolBlocksForDisplay(blocks, { logCoalescing: "runs" });
-    expect(runs.map((group) => group.display.kind)).toEqual(["log", "notice", "log"]);
   });
 
   it("does not group a settled call with a still-running one", () => {

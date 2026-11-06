@@ -48,7 +48,7 @@ export interface ConversationItem {
 }
 
 /** Dispatch lineage available on a subagent activation or its caller. */
-export interface ConversationSubagent {
+interface ConversationSubagent {
   /** Subagent name, when the turn arrived through the subagent adapter. */
   readonly name?: string;
   /** Turn id of the dispatching parent turn. */

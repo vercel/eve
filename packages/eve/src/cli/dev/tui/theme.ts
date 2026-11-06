@@ -35,7 +35,7 @@ function ansi256(code: number, enabled: boolean): Style {
  * Named color + emphasis formatters. Each wraps text in the matching SGR
  * sequence (or returns it untouched when color is disabled).
  */
-export interface ThemeColors {
+interface ThemeColors {
   reset: Style;
   bold: Style;
   dim: Style;
@@ -58,7 +58,7 @@ export interface ThemeColors {
  * Resolved glyphs for the current terminal (Unicode by default, ASCII when
  * the terminal can't be trusted with wide/box-drawing characters).
  */
-export interface ThemeGlyphs {
+interface ThemeGlyphs {
   /** `▲` — the Vercel/eve brand mark; prefixes the agent's own output. */
   brand: string;
   /** `│` — left gutter bar marking a user message. */

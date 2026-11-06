@@ -588,7 +588,6 @@ describe("eve dev --input", () => {
       });
       const startup = {
         renderer: {},
-        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
         shutdown: vi.fn(async () => {}),
       };
       const startDevelopmentTuiStartup = vi.fn(async () => startup);
@@ -628,7 +627,7 @@ describe("eve dev --input", () => {
   );
 
   it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
-    "passes --show-* display flags through %s",
+    "passes --verbose and --logs through %s",
     async (...command) => {
       const startHost = vi.fn(() => ({
         start: async () => ({
@@ -639,35 +638,11 @@ describe("eve dev --input", () => {
         close: async () => {},
       }));
       const runDevelopmentTui = await runInteractiveDev(
-        [
-          ...command,
-          "--show-tools",
-          "hidden",
-          "--show-reasoning",
-          "collapsed",
-          "--show-subagents",
-          "full",
-          "--show-connection-auth",
-          "hidden",
-          "--assistant-response-stats",
-          "tokens",
-          "--context-size",
-          "200000",
-          "--logs",
-          "warn",
-        ],
+        [...command, "--verbose", "--logs", "warn"],
         { startHost },
       );
       expect(runDevelopmentTui).toHaveBeenCalledWith(
-        expect.objectContaining({
-          tools: "hidden",
-          reasoning: "collapsed",
-          subagents: "full",
-          connectionAuth: "hidden",
-          assistantResponseStats: "tokens",
-          contextSize: 200000,
-          logs: "warn",
-        }),
+        expect.objectContaining({ verbose: true, logs: "warn" }),
       );
     },
   );
@@ -1404,20 +1379,7 @@ describe("resolveDevUiMode", () => {
 });
 
 describe("resolveTuiDisplayOptions", () => {
-  it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
-    expect(resolveTuiDisplayOptions({})).toEqual({
-      logs: "error",
-      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
-      // restores the streaming transcript trace.
-      reasoning: "auto-collapsed",
-      tools: "auto-collapsed",
-    });
-  });
-
-  it("omits optional display dimensions that were not provided", () => {
-    const resolved = resolveTuiDisplayOptions({ showTools: "full" });
-    expect(resolved).not.toHaveProperty("subagents");
-    expect(resolved).not.toHaveProperty("contextSize");
-    expect(resolved.logs).toBe("error");
+  it("defaults to collapsed output with error logs visible", () => {
+    expect(resolveTuiDisplayOptions({})).toEqual({ logs: "error", verbose: false });
   });
 });

@@ -49,7 +49,7 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly lifecycle?: CommandLifecycle;
-  /** Prepared editing-only startup UI reused by the initialized local runner. */
+  /** The renderer opened while the server booted, reused by the runner. */
   startup?: DevelopmentTuiStartup;
 }
 
@@ -111,7 +111,6 @@ function inlineArgumentSuggestions(appRoot: string) {
 export interface DevelopmentTuiStartup {
   readonly diagnostics: DevDiagnostics | undefined;
   readonly renderer: TerminalRenderer;
-  finish(): { draft: string; queuedPrompt: string | undefined };
   shutdown(): Promise<void>;
 }
 
@@ -129,14 +128,12 @@ export async function startDevelopmentTuiStartup(
     argumentSuggestions: inlineArgumentSuggestions(input.appRoot),
     onExitRequest: input.onExitRequest,
   });
-  renderer.beginStartupDraft({
-    initialDraft: input.initialInput,
-    title: input.name ?? "eve",
-  });
+  // The composer opens while the server boots; Enter waits until the agent is ready.
+  renderer.start({ title: input.name ?? "eve", initialDraft: input.initialInput });
+  renderer.setStartupPhase("starting");
   return {
     diagnostics,
     renderer,
-    finish: () => renderer.finishStartupDraft(),
     async shutdown() {
       renderer.shutdown();
       await diagnostics?.close();
@@ -247,10 +244,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.remote = prepared.remote;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
-  if (startup !== undefined) {
-    options.renderer = startup.renderer;
-    options.startup = startup;
-  }
+  if (startup !== undefined) options.renderer = startup.renderer;
   if (onboard !== undefined) options.onboard = onboard;
   if (onOnboardingStep !== undefined) options.onOnboardingStep = onOnboardingStep;
   if (onOnboardingTerminal !== undefined) options.onOnboardingTerminal = onOnboardingTerminal;

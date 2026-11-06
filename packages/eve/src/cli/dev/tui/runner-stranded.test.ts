@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/index.js";
 
-import { EveTUIRunner, type AgentTUIRenderer, type AgentTUISessionOptions } from "./runner.js";
+import { interruptedError } from "./errors.js";
+import { EveTUIRunner } from "./runner.js";
 import type { AgentTUIConversationView } from "./conversation-view.js";
 import type { DevDiagnostics } from "../diagnostics.js";
+import { TerminalRenderer } from "./terminal-renderer.js";
 import { FakeEveServer, reply } from "./test/fake-eve-server.js";
+import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
 beforeEach(() => {
   // A developer shell exporting gateway credentials must not leak into boot state.
@@ -16,32 +19,40 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 /**
- * A composer that submits each text once the previous turn settles, then
- * leaves. It closes when the runner needs the keyboard for something else.
+ * A person who sends each text once the previous turn settles, then leaves.
+ * They wait whenever the runner needs to do something else first.
  */
-function turnTaking(texts: Array<string | undefined>, overrides: Partial<AgentTUIRenderer> = {}) {
+function turnTaking(texts: Array<string | undefined>) {
+  const renderer = new TerminalRenderer({
+    input: new MockUserInput(),
+    output: new MockScreen({ columns: 120, rows: 40 }),
+    captureForeignOutput: false,
+  });
   const views: AgentTUIConversationView[] = [];
-  const renderer: AgentTUIRenderer = {
-    renderConversation: (view) => views.push(view),
-    readInput: vi.fn(async (options?: AgentTUISessionOptions) => {
-      const closed = new Promise<"closed">((resolve) =>
-        options?.signal?.addEventListener("abort", () => resolve("closed"), { once: true }),
-      );
-      const idle = vi
-        .waitFor(() => {
-          if (views.at(-1)?.working === true) throw new Error("A turn is still running.");
-        })
-        .then(() => "idle" as const);
-      if ((await Promise.race([closed, idle])) === "closed") return undefined;
-      const text = texts.shift();
-      return text === undefined ? undefined : ({ type: "submit", text } as const);
-    }),
-    ...overrides,
-  };
-  return { renderer, views };
+  const render = renderer.renderConversation.bind(renderer);
+  vi.spyOn(renderer, "renderConversation").mockImplementation((view) => {
+    views.push(view);
+    render(view);
+  });
+  vi.spyOn(renderer, "nextInput").mockImplementation(async (signal?: AbortSignal) => {
+    const closed = new Promise<"closed">((resolve) =>
+      signal?.addEventListener("abort", () => resolve("closed"), { once: true }),
+    );
+    const idle = vi
+      .waitFor(() => {
+        if (views.at(-1)?.working === true) throw new Error("A turn is still running.");
+      })
+      .then(() => "idle" as const);
+    if ((await Promise.race([closed, idle])) === "closed") return undefined;
+    const text = texts.shift();
+    if (text === undefined) throw interruptedError();
+    return { type: "submit", text } as const;
+  });
+  return renderer;
 }
 
 describe("EveTUIRunner with a stranded session", () => {
@@ -64,20 +75,18 @@ describe("EveTUIRunner with a stranded session", () => {
       }
       return await server.fetch(input, init);
     });
-    const outcomes: unknown[] = [];
-    const renderError = vi.fn();
+    const renderer = turnTaking(["Hello.", "Still there?", "/clear", "/new", "Fresh start."]);
+    const finishCommand = vi.spyOn(renderer, "finishCommand");
+    const renderError = vi.spyOn(renderer, "renderError");
     await new EveTUIRunner({
       client: new Client({ baseUrl: "http://localhost:3000" }),
-      renderer: turnTaking(
-        ["Hello.", "Still there?", "/clear", "/new", "Fresh start.", undefined],
-        { finishCommand: (outcome) => outcomes.push(outcome), renderError },
-      ).renderer,
+      renderer,
     }).run();
 
     const notice =
       "Session session_1 is stranded (built by eve 0.0.1): the deployment that ran it is no longer available. The session cannot continue. Run /new to end it and start a fresh session.";
     expect(renderError).toHaveBeenCalledWith("Session stranded", notice);
-    expect(outcomes).toEqual([
+    expect(finishCommand.mock.calls.map(([outcome]) => outcome)).toEqual([
       { kind: "result", message: notice, summary: "Couldn't clear the session" },
       { kind: "dismiss" },
     ]);
@@ -135,7 +144,7 @@ describe("EveTUIRunner diagnostics", () => {
     await new EveTUIRunner({
       client: new Client({ baseUrl: "http://localhost:3000" }),
       diagnostics,
-      renderer: turnTaking(["Look up the ledger.", undefined]).renderer,
+      renderer: turnTaking(["Look up the ledger."]),
     }).run();
 
     expect(append).toHaveBeenCalledWith({

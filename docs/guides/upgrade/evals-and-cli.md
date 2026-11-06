@@ -30,15 +30,15 @@ See [Evals](/docs/evals).
 | Before              | After                                 |
 | ------------------- | ------------------------------------- |
 | `eve remote invoke` | `eve remote connect --print <prompt>` |
-| `--tools`           | `--show-tools`                        |
-| `--reasoning`       | `--show-reasoning`                    |
-| `--subagents`       | `--show-subagents`                    |
-| `--connection-auth` | `--show-connection-auth`              |
+| `--tools`           | `--verbose`                           |
+| `--reasoning`       | `--verbose`                           |
+| `--subagents`       | `--verbose`                           |
+| `--connection-auth` | Removed; sign-ins always show         |
 
 `eve remote connect --print <prompt>` sends one prompt, prints the final reply, and exits. For scripted multi-turn sessions and answers, use `eve/client`.
 
-The display flags apply to `eve dev` and `eve remote connect`. They take the same values as before, and the old names aren't aliases. `--reasoning` on `eve init` and `eve set model` still sets the model's reasoning effort. See the [CLI reference](/docs/reference/cli).
+The per-part display flags are replaced by one `--verbose` flag on `eve dev` and `eve remote connect`, which shows tool output, reasoning, and subagent activity in full. The old names aren't aliases. `--reasoning` on `eve init` and `eve set model` still sets the model's reasoning effort. See the [CLI reference](/docs/reference/cli).
 
 ```bash
-eve dev --show-reasoning full --show-tools auto-collapsed
+eve dev --verbose
 ```
