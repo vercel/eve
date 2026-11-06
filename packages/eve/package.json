@@ -113,6 +113,11 @@
       "import": "./dist/src/public/tanstack/index.js",
       "default": "./dist/src/public/tanstack/index.js"
     },
+    "./vite": {
+      "types": "./dist/src/public/vite/index.d.ts",
+      "import": "./dist/src/public/vite/index.js",
+      "default": "./dist/src/public/vite/index.js"
+    },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
       "import": "./dist/src/public/tools/approval/index.js",

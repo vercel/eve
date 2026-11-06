@@ -12,7 +12,7 @@ Deploy eve to Vercel or run it as a Node service on your own infrastructure. Bot
 | [Vercel](/docs/guides/deployment/vercel)             | `.vercel/output`       | You want Vercel to operate the runtime services                 |
 | [Self-hosting](/docs/guides/deployment/self-hosting) | `.output/` Node server | You run Node services on your own servers or container platform |
 
-You can also deploy eve beside a Next.js, Nuxt, SvelteKit, or TanStack Start application that routes browser requests to the agent. See [Frontend integrations](/docs/guides/frontend).
+You can also deploy eve beside a Next.js, Nuxt, SvelteKit, TanStack Start, or other Vite application that routes browser requests to the agent. See [Frontend integrations](/docs/guides/frontend).
 
 ## Backends
 
@@ -69,4 +69,4 @@ Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses 
 
 - [Deploy to Vercel](/docs/guides/deployment/vercel): use Vercel Build Output, Workflow, Sandbox, Cron, and observability
 - [Self-host eve](/docs/guides/deployment/self-hosting): run the eve server on Node with backends you choose
-- [Frontend integrations](/docs/guides/frontend): mount eve alongside Next.js, Nuxt, SvelteKit, or TanStack Start
+- [Frontend integrations](/docs/guides/frontend): mount eve alongside Next.js, Nuxt, SvelteKit, TanStack Start, or another Vite app
