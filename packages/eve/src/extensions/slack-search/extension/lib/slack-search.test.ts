@@ -41,7 +41,11 @@ function slackDirectory(input: {
           });
         }
         const user = input.users[body.get("user")!];
-        return Response.json(user ? { ok: true, user } : { ok: false, error: "user_not_found" });
+        return Response.json(
+          user
+            ? { ok: true, user: { is_restricted: false, ...user } }
+            : { ok: false, error: "user_not_found" },
+        );
       },
     },
   };
@@ -150,6 +154,7 @@ describe("default access policy", () => {
       U0HOST: { team_id: "T0HOME" },
       U0GUEST: { team_id: "T0HOME", is_restricted: true },
       U0PARTNER: { team_id: "T0PARTNER" },
+      U0UNPLACED: {},
     },
   });
   const decide = (
@@ -194,11 +199,18 @@ describe("default access policy", () => {
       { tool: "search", channelId: "C0ELSEWHERE" },
       false,
     ],
+    [
+      "a member Slack names no workspace for",
+      "U0UNPLACED",
+      "C0INTERNAL",
+      { tool: "search", channelId: "C0ELSEWHERE" },
+      false,
+    ],
   ] as const)("decides for %s: %j", async (_who, userId, channelId, request, allowed) => {
     await expect(decide(userId, channelId, request)).resolves.toBe(allowed);
   });
 
-  it("limits a Slack caller to their own conversation when Slack can't say who they are", async () => {
+  it("returns nothing to a Slack caller it can't place, and says which scope is missing", async () => {
     const turn = slackTurn(
       buildSlackAuthContext({
         channelId: "C0UNKNOWN",
@@ -211,8 +223,9 @@ describe("default access policy", () => {
       },
     );
 
-    await expect(turn.authorize({ tool: "search", channelId: "C0UNKNOWN" })).resolves.toBe(true);
-    await expect(turn.authorize({ tool: "search", channelId: "C0ELSEWHERE" })).resolves.toBe(false);
+    await expect(turn.authorize({ tool: "search", channelId: "C0UNKNOWN" })).rejects.toThrow(
+      /couldn't check who is asking.*needs (users:read|channels:read)/,
+    );
   });
 });
 

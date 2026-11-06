@@ -57,9 +57,9 @@ async function slackAudienceOf(
   if (!caller) return undefined;
   const channelId = attribute(caller, "channel_id");
   const userId = attribute(caller, "user_id");
-  // A Slack caller without a conversation or user can't be placed, so it is treated as external.
+  // A Slack caller without a conversation or user can't be placed, so it sees nothing.
   if (!channelId || !userId) {
-    return { channelId: channelId ?? "", sharedChannel: true, external: true, guest: false };
+    return { channelId: channelId ?? "", sharedChannel: true, external: true, guest: true };
   }
   return slackAudience(request, { channelId, userId, teamId });
 }

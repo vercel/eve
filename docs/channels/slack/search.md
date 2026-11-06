@@ -55,9 +55,9 @@ Without `authorize`, the tools follow the limits Slack's own search puts on peop
 - Everyone else in Slack sees every public channel the bot can read.
 - Callers outside Slack, such as web sessions, see every public channel the bot can read. Set a policy if they shouldn't.
 
-The extension reads who is asking with `users.info` and whether the conversation is shared with `conversations.info`, and caches both for a few minutes. If Slack can't answer, it treats the caller as external.
+The extension reads who is asking with `users.info` and whether the conversation is shared with `conversations.info`, and caches both for a minute. If Slack can't answer, for example because the app lacks a scope, the tool fails with an error that names the missing scope and returns nothing.
 
-Set `authorize` to decide for yourself. It replaces the default and receives the same facts as `slack`. This policy keeps the default and also limits the agent to two channels:
+Set `authorize` to decide for yourself. It replaces the default and receives the same facts as `slack`. This policy keeps the default and also limits every caller to two channels, refusing everyone outside Slack:
 
 ```ts title="agent/extensions/slack.ts"
 import slackSearch from "eve/extensions/slack-search";
@@ -65,12 +65,11 @@ import slackSearch from "eve/extensions/slack-search";
 const allowedChannels = new Set(["C0123ENG", "C0456LAUNCH"]);
 
 export default slackSearch({
-  authorize: ({ tool, channelId, slack }) => {
+  authorize: ({ channelId, slack }) => {
     if (!slack || slack.guest) return false;
-    if (slack.sharedChannel || slack.external) {
-      return tool !== "read_user" && channelId === slack.channelId;
-    }
-    return channelId === undefined || allowedChannels.has(channelId);
+    if (channelId === undefined) return !slack.sharedChannel && !slack.external;
+    if (!allowedChannels.has(channelId)) return false;
+    return !(slack.sharedChannel || slack.external) || channelId === slack.channelId;
   },
 });
 ```
