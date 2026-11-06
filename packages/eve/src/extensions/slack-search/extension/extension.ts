@@ -9,6 +9,18 @@ import { defineExtension } from "eve/extension";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { z } from "#compiled/zod/index.js";
 
+/** Where a Slack caller asked, and who they are. */
+export interface SlackSearchAudience {
+  /** The Slack conversation the caller asked in. Answers are posted there. */
+  readonly channelId: string;
+  /** The conversation is shared with another organization through Slack Connect. */
+  readonly sharedChannel: boolean;
+  /** The caller's home workspace isn't the one the app is installed in. */
+  readonly external: boolean;
+  /** The caller is a single-channel or multi-channel guest. */
+  readonly guest: boolean;
+}
+
 /** What a Slack search tool is about to show the caller. */
 export interface SlackSearchAccessRequest {
   readonly tool: "search" | "read_conversation" | "read_user";
@@ -16,6 +28,8 @@ export interface SlackSearchAccessRequest {
   readonly auth: SessionAuthContext | null;
   /** The channel whose messages would be returned. Absent for `read_user`. */
   readonly channelId?: string;
+  /** Set when the caller asked in Slack. Absent for other callers, such as web sessions. */
+  readonly slack?: SlackSearchAudience;
 }
 
 /** Returns `false` to withhold a channel's messages or a user lookup from the caller. */
@@ -35,7 +49,9 @@ export interface SlackSearchExtensionConfig {
   readonly api?: SlackTransportOptions;
   /**
    * Decides which channels and user lookups each caller may see. Called for every channel a
-   * tool would return messages from. Allows every public channel when omitted.
+   * tool would return messages from. When omitted, guests see nothing, and callers in a Slack
+   * Connect conversation or from another workspace see only the conversation they asked in;
+   * everyone else sees every public channel.
    */
   readonly authorize?: SlackSearchAuthorize;
 }

@@ -48,7 +48,16 @@ So that:
 
 ## Restrict what each caller sees
 
-Without `authorize`, anyone who reaches the tools can read every public channel the bot can see. That suits an internal agent. An agent that also serves Slack Connect guests, customers, or non-Slack channels should set a policy:
+Without `authorize`, the tools follow the limits Slack's own search puts on people outside your workspace:
+
+- Guests see nothing.
+- In a Slack Connect conversation, or for a caller whose home workspace isn't the one the app is installed in, the tools return messages only from the conversation they asked in, and `read_user` is refused. The answer is posted where people from the other organization can read it.
+- Everyone else in Slack sees every public channel the bot can read.
+- Callers outside Slack, such as web sessions, see every public channel the bot can read. Set a policy if they shouldn't.
+
+The extension reads who is asking with `users.info` and whether the conversation is shared with `conversations.info`, and caches both for a few minutes. If Slack can't answer, it treats the caller as external.
+
+Set `authorize` to decide for yourself. It replaces the default and receives the same facts as `slack`. This policy keeps the default and also limits the agent to two channels:
 
 ```ts title="agent/extensions/slack.ts"
 import slackSearch from "eve/extensions/slack-search";
@@ -56,21 +65,27 @@ import slackSearch from "eve/extensions/slack-search";
 const allowedChannels = new Set(["C0123ENG", "C0456LAUNCH"]);
 
 export default slackSearch({
-  authorize: ({ auth, channelId }) =>
-    auth?.authenticator === "slack-webhook" &&
-    (channelId === undefined || allowedChannels.has(channelId)),
+  authorize: ({ tool, channelId, slack }) => {
+    if (!slack || slack.guest) return false;
+    if (slack.sharedChannel || slack.external) {
+      return tool !== "read_user" && channelId === slack.channelId;
+    }
+    return channelId === undefined || allowedChannels.has(channelId);
+  },
 });
 ```
+
+`slack` is set when the caller asked in Slack: `channelId` is the conversation they asked in, `sharedChannel` says it's a Slack Connect conversation, `external` says the caller's home workspace is another one, and `guest` says they're a guest.
 
 `authorize` runs once for each channel in a search result, before each channel read, and once for each `read_user` call, where `channelId` is absent. Return `false` to withhold it: search drops the match and reports how many it withheld, and reads and lookups return `reason: "not_authorized"`.
 
 ## Options
 
-| Option        | Default                    | Effect                                                                                                                                                                           |
-| ------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `credentials` | `SLACK_BOT_TOKEN`          | The Slack channel's credentials, the same object `slackChannel` takes. Only `botToken` is used. A function `botToken` receives `{ teamId }` for the workspace the turn came from |
-| `api`         | Slack's API                | Slack API transport overrides, the same as `slackChannel({ api })`                                                                                                               |
-| `authorize`   | Allows all public channels | `({ tool, auth, channelId? }) => boolean`, called with the turn's caller                                                                                                         |
+| Option        | Default                                                                              | Effect                                                                                                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `credentials` | `SLACK_BOT_TOKEN`                                                                    | The Slack channel's credentials, the same object `slackChannel` takes. Only `botToken` is used. A function `botToken` receives `{ teamId }` for the workspace the turn came from |
+| `api`         | Slack's API                                                                          | Slack API transport overrides, the same as `slackChannel({ api })`                                                                                                               |
+| `authorize`   | [Slack's limits for guests and other organizations](#restrict-what-each-caller-sees) | `({ tool, auth, channelId?, slack? }) => boolean`, called with the turn's caller                                                                                                 |
 
 ## Slack app scopes
 
@@ -78,7 +93,8 @@ Add these bot token scopes to your Slack app, then reinstall it:
 
 - `search:read.public` for `search`
 - `channels:read` and `channels:history` for `read_conversation`
-- `users:read` for `read_user`
+- `users:read` for `read_user`, and to tell guests and people from other organizations apart
+- `groups:read`, `im:read`, and `mpim:read` to check whether a private channel or DM the caller asked in is shared. eve's generated Slack app manifest already includes these
 
 ## Override a tool
 

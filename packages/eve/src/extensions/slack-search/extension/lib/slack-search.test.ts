@@ -22,6 +22,31 @@ function fakeSlack(responses: Record<string, Record<string, unknown>>): {
   };
 }
 
+/** A Slack API with fixed channel sharing and user records, for audience lookups. */
+function slackDirectory(input: {
+  readonly sharedChannels: readonly string[];
+  readonly users: Record<string, Record<string, unknown>>;
+}) {
+  return {
+    credentials: { botToken: "xoxb-test" },
+    api: {
+      fetch: async (url: string | URL | Request, init?: RequestInit) => {
+        const method = new URL(String(url)).pathname.split("/").pop();
+        const body = new URLSearchParams(String(init?.body));
+        if (method === "conversations.info") {
+          const channel = body.get("channel")!;
+          return Response.json({
+            ok: true,
+            channel: { id: channel, is_ext_shared: input.sharedChannels.includes(channel) },
+          });
+        }
+        const user = input.users[body.get("user")!];
+        return Response.json(user ? { ok: true, user } : { ok: false, error: "user_not_found" });
+      },
+    },
+  };
+}
+
 function turnWith(request: SlackRequest, overrides: Partial<SlackTurn> = {}): SlackTurn {
   return {
     auth: null,
@@ -75,16 +100,32 @@ describe("slackTurn", () => {
     });
   });
 
-  it("applies the access policy to the turn's caller", async () => {
-    const auth = buildSlackAuthContext({ channelId: "C0CHANNEL1", userId: "U0ALICE" });
+  it("passes the caller and where they asked to the access policy", async () => {
+    const auth = buildSlackAuthContext({
+      channelId: "C0SHARED1",
+      installationTeamId: "T0HOST",
+      userId: "U0ALICE",
+    });
+    const seen: unknown[] = [];
     const turn = slackTurn(auth, {
-      authorize: ({ auth: caller, channelId }) =>
-        caller?.principalId === "slack:U0ALICE" && channelId === "C0OPEN000",
+      ...slackDirectory({
+        sharedChannels: ["C0SHARED1"],
+        users: { U0ALICE: { team_id: "T0HOST" } },
+      }),
+      authorize: ({ auth: caller, channelId, slack }) => {
+        seen.push(slack);
+        return caller?.principalId === "slack:T0HOST:U0ALICE" && channelId === "C0OPEN000";
+      },
     });
 
-    expect(turn.actionToken).toBeUndefined();
     await expect(turn.authorize({ tool: "search", channelId: "C0OPEN000" })).resolves.toBe(true);
     await expect(turn.authorize({ tool: "search", channelId: "C0CLOSED0" })).resolves.toBe(false);
+    expect(seen[0]).toEqual({
+      channelId: "C0SHARED1",
+      sharedChannel: true,
+      external: false,
+      guest: false,
+    });
   });
 
   it("tells the model to wait when Slack rate limits a call", async () => {
@@ -99,6 +140,79 @@ describe("slackTurn", () => {
     await expect(executeSearch({ query: "q" }, turn)).rejects.toThrow(
       "Slack rate limited assistant.search.context. Wait before calling it again.",
     );
+  });
+});
+
+describe("default access policy", () => {
+  const directory = slackDirectory({
+    sharedChannels: ["C0SHARED2"],
+    users: {
+      U0HOST: { team_id: "T0HOME" },
+      U0GUEST: { team_id: "T0HOME", is_restricted: true },
+      U0PARTNER: { team_id: "T0PARTNER" },
+    },
+  });
+  const decide = (
+    userId: string,
+    channelId: string,
+    request: { tool: "search" | "read_user"; channelId?: string },
+  ) =>
+    slackTurn(
+      buildSlackAuthContext({ channelId, installationTeamId: "T0HOME", userId }),
+      directory,
+    ).authorize(request);
+
+  it.each([
+    [
+      "a member in an internal channel",
+      "U0HOST",
+      "C0INTERNAL",
+      { tool: "search", channelId: "C0ELSEWHERE" },
+      true,
+    ],
+    ["a member in an internal channel", "U0HOST", "C0INTERNAL", { tool: "read_user" }, true],
+    ["a guest", "U0GUEST", "C0INTERNAL", { tool: "search", channelId: "C0INTERNAL" }, false],
+    [
+      "a member in a Slack Connect channel",
+      "U0HOST",
+      "C0SHARED2",
+      { tool: "search", channelId: "C0SHARED2" },
+      true,
+    ],
+    [
+      "a member in a Slack Connect channel",
+      "U0HOST",
+      "C0SHARED2",
+      { tool: "search", channelId: "C0ELSEWHERE" },
+      false,
+    ],
+    ["a member in a Slack Connect channel", "U0HOST", "C0SHARED2", { tool: "read_user" }, false],
+    [
+      "an external user in a DM",
+      "U0PARTNER",
+      "D0PARTNER",
+      { tool: "search", channelId: "C0ELSEWHERE" },
+      false,
+    ],
+  ] as const)("decides for %s: %j", async (_who, userId, channelId, request, allowed) => {
+    await expect(decide(userId, channelId, request)).resolves.toBe(allowed);
+  });
+
+  it("limits a Slack caller to their own conversation when Slack can't say who they are", async () => {
+    const turn = slackTurn(
+      buildSlackAuthContext({
+        channelId: "C0UNKNOWN",
+        installationTeamId: "T0HOME",
+        userId: "U0NOSCOPE",
+      }),
+      {
+        credentials: { botToken: "xoxb-test" },
+        api: { fetch: async () => Response.json({ ok: false, error: "missing_scope" }) },
+      },
+    );
+
+    await expect(turn.authorize({ tool: "search", channelId: "C0UNKNOWN" })).resolves.toBe(true);
+    await expect(turn.authorize({ tool: "search", channelId: "C0ELSEWHERE" })).resolves.toBe(false);
   });
 });
 

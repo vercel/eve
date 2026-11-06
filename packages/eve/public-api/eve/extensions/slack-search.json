@@ -1,1 +1,7 @@
-["SlackSearchAccessRequest", "SlackSearchAuthorize", "SlackSearchExtensionConfig", "default"]
+[
+  "SlackSearchAccessRequest",
+  "SlackSearchAudience",
+  "SlackSearchAuthorize",
+  "SlackSearchExtensionConfig",
+  "default"
+]
