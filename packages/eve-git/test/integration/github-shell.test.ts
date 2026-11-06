@@ -735,7 +735,8 @@ test("serializes credential leases across sessions that share one sandbox", asyn
   const firstStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  const sandbox = {
+  const sandboxFake: Pick<SandboxSession, "resolvePath" | "run" | "removePath"> &
+    Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
     resolvePath: (path: string) => (path === "." ? "/workspace" : path),
     async removePath() {},
     async setNetworkPolicy(policy: NetworkPolicy) {
@@ -772,7 +773,8 @@ test("serializes credential leases across sessions that share one sandbox", asyn
       events.push(`${name} end`);
       return { exitCode: 0, stdout: "", stderr: "" };
     },
-  } as unknown as SandboxSession;
+  };
+  const sandbox = sandboxFake as NetworkPolicySandboxSession;
   const run = (pr: string, sessionId: string) =>
     executeGitHubShell(
       { ...READ, command: `gh pr view ${pr} --repo vercel/internal-agents` },
@@ -812,7 +814,7 @@ test("a lease does not release a lock another command holds", async () => {
     // A holder whose lock was broken as stale must not release its successor's lock.
     execFileSync("mkdir", [lockPath]);
     execFileSync("sh", ["-c", `printf successor > '${lockPath}/owner'`]);
-    const sandbox = {
+    const sandboxFake: Pick<SandboxSession, "run"> = {
       async run(input: Parameters<SandboxSession["run"]>[0]) {
         const command = input.command.replaceAll(LEASE_LOCK_PATH, lockPath);
         // Skip acquisition: simulate the stale holder releasing after its lock was broken.
@@ -820,7 +822,8 @@ test("a lease does not release a lock another command holds", async () => {
         const { stdout, stderr } = await exec("sh", ["-c", command]);
         return { exitCode: 0, stdout, stderr };
       },
-    } as unknown as SandboxSession;
+    };
+    const sandbox = sandboxFake as SandboxSession;
     await withSandboxLeaseLock(sandbox, "stale-holder", async () => undefined);
     assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "successor");
   } finally {
