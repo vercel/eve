@@ -58,6 +58,11 @@ interface GitHubConfigBase {
 export interface GitHubAppConfig extends GitHubConfigBase {
   /** The only access control: commands run only when it returns `true`. */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
+  /**
+   * Installation permissions each minted token carries, such as `"contents:write"`.
+   * Omit it for every permission the App holds.
+   */
+  readonly permissions?: readonly string[];
   readonly principalType: "app";
 }
 
@@ -118,6 +123,7 @@ interface GitHubShellDependencies {
         type: "github_app_installation";
         org: string;
         repositories?: string[];
+        permissions?: string[];
       }[];
       subject: { type: "app" };
     },
@@ -187,9 +193,14 @@ export async function executeGitHubShell(
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
-    const installation: { type: "github_app_installation"; org: string; repositories?: string[] } =
-      { type: "github_app_installation", org: owner! };
+    const installation: {
+      type: "github_app_installation";
+      org: string;
+      repositories?: string[];
+      permissions?: string[];
+    } = { type: "github_app_installation", org: owner! };
     if (name) installation.repositories = [name];
+    if (config.permissions) installation.permissions = [...config.permissions];
     token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
       authorizationDetails: [installation],
       subject: { type: "app" },
