@@ -330,10 +330,21 @@ export async function renderHostRoutes(
         );
         break;
       case "workflow":
-        handlers.push({
-          handler: await writeWorkflowFileHandler(route, input),
-          route: route.path,
-        });
+        // On a World host, the queue's function runs the host's activations, not Workflow's.
+        if (input.artifactsConfig.kind === "production" && input.artifactsConfig.host === "world")
+          addVirtualHandler(
+            `#eve/route${route.path}`,
+            renderHostHandler({
+              handlerExport: "handleWorldHostQueue",
+              modulePath: "src/internal/nitro/routes/world-host.ts",
+            }),
+            { route: route.path },
+          );
+        else
+          handlers.push({
+            handler: await writeWorkflowFileHandler(route, input),
+            route: route.path,
+          });
         break;
     }
   }

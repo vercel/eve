@@ -1,3 +1,4 @@
+import { EVE_WORLD_HOST_ENV } from "#internal/nitro/routes/world-host.js";
 import { createHash } from "node:crypto";
 
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
@@ -57,5 +58,7 @@ export function createProductionNitroArtifactsConfig(
   return {
     kind: "production",
     sandboxScope: createHash("sha256").update(appRoot).digest("hex").slice(0, 16),
+    // Experimental: the agent's sessions run on a World host (`routes/world-host.ts`).
+    ...(process.env[EVE_WORLD_HOST_ENV] === "1" && { host: "world" as const }),
   };
 }

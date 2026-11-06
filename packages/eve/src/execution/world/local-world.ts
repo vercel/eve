@@ -32,7 +32,11 @@ export function localWorld(options: LocalWorldOptions): QueueWorld {
       list: async (params) => await (await world()).events.list(params),
     },
     hooks: { getByToken: async (token) => await (await world()).hooks.getByToken(token) },
-    runs: { list: async (params) => await (await world()).runs.list(params) },
+    runs: {
+      list: async (params) => await (await world()).runs.list(params),
+      // Workflow's Worlds have it, so the fitted one does.
+      get: async (runId, params) => await (await world()).runs.get!(runId, params),
+    },
     streams: {
       close: async (runId, name) => await (await world()).streams.close(runId, name),
       getChunks: async (runId, name, chunks) =>

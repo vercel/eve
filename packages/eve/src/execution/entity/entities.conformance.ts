@@ -159,6 +159,45 @@ export function describeEntities(name: string, make: () => Promise<EntitiesUnder
       );
 
       it(
+        "frees an entity's aliases once it ends, and deletes what it kept when asked to",
+        withEntities(async (under) => {
+          if (!under.mailbox) return;
+          const { entities } = under;
+          const kept = entities.newKey();
+          await entities.create(kept, { aliases: ["conformance-ends"], meta: { n: 1 } });
+          const handle = await entities.open(kept);
+          await handle.append([{ kind: "test.state", value: "kept" }], { snapshot: true });
+          await handle.end();
+          expect(await entities.lookup("conformance-ends")).toBeUndefined();
+          expect(await entities.send({ alias: "conformance-ends" }, {})).toBeUndefined();
+          // Another entity may take the alias now.
+          const next = entities.newKey();
+          await entities.create(next, { aliases: ["conformance-ends"], meta: {} });
+          expect(await entities.lookup("conformance-ends")).toBe(next);
+          // An entity that ended keeps what it had, unless it was created to purge it.
+          expect((await entities.load(kept))?.snapshot?.value).toBe("kept");
+          const purged = entities.newKey();
+          await entities.create(purged, { meta: {}, purgeOnEnd: true });
+          const writer = await entities.open(purged);
+          await writer.append([{ kind: "test.state", value: "secret" }], { snapshot: true });
+          await writer.stream.append(0, [text("secret")]);
+          await writer.end();
+          const after = await entities.load(purged).then(
+            (journal) => journal?.snapshot?.value,
+            () => undefined,
+          );
+          expect(after).toBeUndefined();
+          expect(await entities.purged(purged)).toBe(true);
+          expect(await entities.purged(kept)).toBe(false);
+          const lines = await entities.chunks(purged).then(
+            (chunks) => chunks.length,
+            () => 0,
+          );
+          expect(lines).toBe(0);
+        }),
+      );
+
+      it(
         "hands each message over until a write consumes it, in the order it was sent",
         withEntities(async (under) => {
           if (!under.mailbox) return;
@@ -233,11 +272,8 @@ export function describeEntities(name: string, make: () => Promise<EntitiesUnder
             { budgetMs: 5_000 },
           );
           await consumer.serve();
-          await Promise.all([
-            entities.send({ key }, "a"),
-            entities.send({ key }, "b"),
-            entities.send({ key }, "c"),
-          ]);
+          // One after another: the order they're sent in is the order they're handed over.
+          for (const message of ["a", "b", "c"]) await entities.send({ key }, message);
           // Continued once it had a message: activated again after that.
           await untilOf(() => seen.length === 3 && continued && activations >= 2 && running === 0);
           expect(seen).toEqual(["a", "b", "c"]);

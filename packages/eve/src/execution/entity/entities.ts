@@ -92,7 +92,12 @@ export interface Entities {
    */
   create(
     key: string,
-    options: { readonly meta: unknown; readonly aliases?: readonly string[] },
+    options: {
+      readonly meta: unknown;
+      readonly aliases?: readonly string[];
+      /** Its journal, stream and mailbox are deleted once it ends (`EntityHandle.end`). */
+      readonly purgeOnEnd?: boolean;
+    },
   ): Promise<void>;
   /** What `key` was created with, or `undefined` when no such entity exists. */
   meta(key: string): Promise<unknown>;
@@ -118,6 +123,11 @@ export interface Entities {
   chunks(key: string): Promise<readonly Uint8Array[]>;
   /** Reads `key`'s stream from `from` (negative: before its end), following it live. */
   read(key: string, from?: number): ReadableStream<Uint8Array>;
+  /**
+   * Whether `key` ended created with `purgeOnEnd`, so what it kept is deleted: none of it may be
+   * read any more, whatever a World left behind.
+   */
+  purged(key: string): Promise<boolean>;
   /** Every entity of this kind, newest first. */
   list(): Promise<readonly { readonly key: string; readonly createdAt: Date }[]>;
   /** Whether this caller is the one that runs `name` for `occurrence`, across every process. */
@@ -143,6 +153,11 @@ export interface EntityHandle {
   ): Promise<void>;
   /** The mailbox's messages not yet consumed, oldest first. */
   inbox(): Promise<readonly EntityMessage[]>;
+  /**
+   * Ends the entity: nothing reaches it by its aliases any more, which another entity may take,
+   * and nothing activates it. Created with `purgeOnEnd`, what it kept is deleted.
+   */
+  end(): Promise<void>;
   /** The stream, written only by this handle. */
   readonly stream: {
     length(): Promise<number>;
