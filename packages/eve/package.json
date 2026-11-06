@@ -380,6 +380,12 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/custom-skills": {
+      "eve-source": "./dist/src/extensions/custom-skills/extension/extension.js",
+      "types": "./dist/src/extensions/custom-skills/extension/extension.d.ts",
+      "import": "./dist/src/extensions/custom-skills/extension/extension.js",
+      "default": "./dist/src/extensions/custom-skills/extension/extension.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -755,6 +761,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/custom-skills": {
+        "dist": "./dist/src/extensions/custom-skills/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"

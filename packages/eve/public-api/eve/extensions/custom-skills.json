@@ -1,0 +1,16 @@
+[
+  "AppendVersionRequest",
+  "AppendVersionResult",
+  "RemoveSkillsResult",
+  "SkillApplicationMode",
+  "SkillAuth",
+  "SkillChangeEvent",
+  "SkillHead",
+  "SkillHeadPatch",
+  "SkillRepository",
+  "SkillScope",
+  "SkillScopeResolver",
+  "SkillVersionRecord",
+  "StoredSkill",
+  "default"
+]
