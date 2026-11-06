@@ -76,7 +76,6 @@ function createMockDetachedCommand(
 
 function createMockSandbox(input: {
   name: string;
-  networkPolicy?: VercelSandboxRuntimeOptions["networkPolicy"];
   snapshotId?: string;
   sourceSnapshotId?: string;
   status?: string;
@@ -84,7 +83,6 @@ function createMockSandbox(input: {
 }) {
   const files = new Map<string, Buffer>();
   let tags = input.tags;
-  let networkPolicy = input.networkPolicy;
   const sandbox = {
     currentSnapshotId: input.snapshotId ?? "",
     delete: vi.fn().mockResolvedValue(undefined),
@@ -93,9 +91,6 @@ function createMockSandbox(input: {
       unlink: vi.fn().mockResolvedValue(undefined),
     },
     name: input.name,
-    get networkPolicy() {
-      return networkPolicy;
-    },
     sourceSnapshotId: input.sourceSnapshotId,
     readFile: vi.fn(async (file: { path: string }): Promise<object | null> => {
       const content = files.get(file.path);
@@ -127,17 +122,11 @@ function createMockSandbox(input: {
     get tags() {
       return tags;
     },
-    update: vi
-      .fn()
-      .mockImplementation(
-        async (params: {
-          networkPolicy?: VercelSandboxRuntimeOptions["networkPolicy"];
-          tags?: Record<string, string>;
-        }) => {
-          if (params.tags !== undefined) tags = params.tags;
-          if (params.networkPolicy !== undefined) networkPolicy = params.networkPolicy;
-        },
-      ),
+    update: vi.fn().mockImplementation(async (params: { tags?: Record<string, string> }) => {
+      if (params.tags !== undefined) {
+        tags = params.tags;
+      }
+    }),
     writeFiles: vi.fn(
       async (nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>) => {
         for (const file of nextFiles) {
@@ -164,7 +153,6 @@ function createSandboxesInOrder(...sandboxes: ReadonlyArray<ReturnType<typeof cr
 
 interface MockCreateOptions {
   name: string;
-  networkPolicy?: VercelSandboxRuntimeOptions["networkPolicy"];
   source?: { snapshotId?: string; type: string };
   tags?: Record<string, string>;
 }
@@ -173,7 +161,6 @@ interface MockCreateOptions {
 function mockFromCreateOptions(options: MockCreateOptions) {
   return {
     name: options.name,
-    networkPolicy: options.networkPolicy,
     sourceSnapshotId: options.source?.type === "snapshot" ? options.source.snapshotId : undefined,
     tags: options.tags,
   };
@@ -781,13 +768,13 @@ describe("createVercelSandbox", () => {
 
   /*
    * Literal values recorded by earlier releases. Session state, sandbox names,
-   * and prepared snapshot IDs outlive deployments. Recorded state and template
-   * keys stay compatible; fresh starts use the restricted-creation namespace.
+   * and prepared snapshot IDs outlive deployments, and template keys name the
+   * pointers that later builds reuse, so these must never change.
    */
   describe("identity recorded by earlier releases", () => {
     const appRoot = "/tmp/test-app-root";
 
-    it("names fresh sandboxes in the current namespace without changing the state protocol", async () => {
+    it("names session sandboxes and records their state as before", async () => {
       const fake = createFakeVercelProvider();
       const provider = createTestVercelSandbox({
         loadSandboxModule: async () => fake.sandboxModule as never,
@@ -804,8 +791,8 @@ describe("createVercelSandbox", () => {
       }
 
       expect(states).toEqual([
-        { sandboxName: "eve-sbx-vercel-a0533185beb3ef897552fd2cbcf345f1", version: 3 },
-        { sandboxName: "eve-sbx-vercel-9a2afbaf18ce428065518f44d184fcff", version: 3 },
+        { sandboxName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317", version: 3 },
+        { sandboxName: "eve-sbx-vercel-05f9b7e93088c2627297d73f2e7e04cb", version: 3 },
       ]);
       expect(getSandboxEnvironmentRuntime(VercelSandbox.environment())).toMatchObject({
         providerName: "vercel",
@@ -813,7 +800,7 @@ describe("createVercelSandbox", () => {
       });
     });
 
-    it("records DefaultSandbox's unchanged Vercel artifact and state with current sandbox names", async () => {
+    it("records DefaultSandbox's Vercel artifact and state as before", async () => {
       vi.stubEnv("VERCEL", "1");
       vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
       vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
@@ -831,12 +818,12 @@ describe("createVercelSandbox", () => {
       expect([session.state, toolSession.state]).toEqual([
         {
           provider: "vercel",
-          state: { sandboxName: "eve-sbx-vercel-a0533185beb3ef897552fd2cbcf345f1", version: 3 },
+          state: { sandboxName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317", version: 3 },
           stateProtocolVersion: 1,
         },
         {
           provider: "vercel",
-          state: { sandboxName: "eve-sbx-vercel-9a2afbaf18ce428065518f44d184fcff", version: 3 },
+          state: { sandboxName: "eve-sbx-vercel-05f9b7e93088c2627297d73f2e7e04cb", version: 3 },
           stateProtocolVersion: 1,
         },
       ]);
@@ -845,106 +832,27 @@ describe("createVercelSandbox", () => {
       );
     });
 
-    it.each([{}, { snapshotId: "snap_previous_release" }])(
-      "resumes recorded legacy state without resetting its live policy (artifact %j)",
-      async (prepared) => {
-        const sandboxName = "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317";
-        const fake = createFakeVercelProvider();
-        fake.seedTemplate(
-          sandboxName,
-          createMockSandbox({
-            name: sandboxName,
-            networkPolicy: { allow: ["github.com"] },
-            status: "stopped",
-          }),
-        );
-        const provider = createTestVercelSandbox({
-          loadSandboxModule: async () => fake.sandboxModule as never,
-        });
-        const legacy = fake.sandboxes.get(sandboxName)!;
-        legacy.update.mockClear();
+    it("resumes state and a prepared snapshot recorded by an earlier release", async () => {
+      const sandboxName = "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317";
+      const fake = createFakeVercelProvider();
+      fake.seedTemplate(sandboxName, createMockSandbox({ name: sandboxName, status: "stopped" }));
+      const provider = createTestVercelSandbox({
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      });
+      const prepared = { snapshotId: "snap_previous_release" };
 
-        const resumed = await provider.openSession({
-          appRoot,
-          existing: { sandboxName, version: 3 },
-          prepared,
-          sandboxName: "session_golden",
-        });
-        expect(resumed.sandbox.name).toBe(sandboxName);
-        expect(legacy.update).not.toHaveBeenCalled();
-        expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
-      },
-    );
+      const resumed = await provider.openSession({
+        appRoot,
+        existing: { sandboxName, version: 3 },
+        prepared,
+        sandboxName: "session_golden",
+      });
+      const started = await provider.start({ appRoot, prepared, sandboxName: "session_golden" });
 
-    it.each(["allow-all", undefined] as const)(
-      "refuses recorded legacy state with an unverified policy (%s) without running setup or deleting files",
-      async (networkPolicy) => {
-        const sandboxName = "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317";
-        const legacy = createMockSandbox({ name: sandboxName, networkPolicy });
-        const fake = createFakeVercelProvider();
-        fake.seedTemplate(sandboxName, legacy);
-        const provider = createTestVercelSandbox({
-          loadSandboxModule: async () => fake.sandboxModule as never,
-        });
-
-        await expect(
-          provider.openSession({
-            appRoot,
-            existing: { sandboxName, version: 3 },
-            prepared: {},
-            sandboxName: "session_golden",
-          }),
-        ).rejects.toThrow("network policy initialization cannot be verified");
-
-        expect(legacy.runCommand).not.toHaveBeenCalled();
-        expect(legacy.update).not.toHaveBeenCalled();
-        expect(legacy.delete).not.toHaveBeenCalled();
-        expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
-      },
-    );
-
-    it.each([
-      {
-        legacyName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317",
-        prepared: {},
-        sessionId: "session_golden",
-      },
-      {
-        legacyName: "eve-sbx-vercel-05f9b7e93088c2627297d73f2e7e04cb",
-        prepared: {},
-        sessionId: "tool_session_golden",
-      },
-      {
-        legacyName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317",
-        prepared: { snapshotId: "new-deployment-template" },
-        sessionId: "session_golden",
-      },
-    ])(
-      "does not attach $sessionId to an interrupted legacy sandbox (artifact $prepared)",
-      async ({ legacyName, prepared, sessionId }) => {
-        const legacy = createMockSandbox({ name: legacyName, networkPolicy: "allow-all" });
-        const fake = createFakeVercelProvider();
-        fake.seedTemplate(legacyName, legacy);
-        const provider = vercelHarness(
-          {
-            createSandbox: async ({ createOptions, sandboxModule }) =>
-              await sandboxModule.Sandbox.create(createOptions),
-            loadSandboxModule: async () => fake.sandboxModule as never,
-          },
-          { networkPolicy: "deny-all" },
-        );
-
-        const started = await provider.start({ appRoot, prepared, sandboxName: sessionId });
-
-        expect(started.sandbox.name).not.toBe(legacyName);
-        expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledWith(
-          expect.objectContaining({ name: started.sandbox.name, networkPolicy: "deny-all" }),
-        );
-        expect(legacy.update).not.toHaveBeenCalled();
-        expect(legacy.delete).not.toHaveBeenCalled();
-        expect(fake.sandboxes.get(legacyName)).toBe(legacy);
-      },
-    );
+      expect(resumed.sandbox.name).toBe(sandboxName);
+      expect(started.state).toEqual({ sandboxName, version: 3 });
+      expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+    });
 
     it("derives template keys from create options, image, resources, and source revision", async () => {
       const managedFiles = {
@@ -1034,12 +942,9 @@ describe("createVercelSandbox", () => {
       expect(later.state).toEqual(first.state);
     });
 
-    it("deletes both namespace generations by key when no state was recorded, and succeeds once gone", async () => {
+    it("deletes the session's sandbox by key when no state was recorded, and succeeds once it is gone", async () => {
       const { end, fake, start } = session();
-      const legacyName = "eve-sbx-vercel-d013031c951b12a6e378b8afc795475e";
-      fake.seedTemplate(legacyName, createMockSandbox({ name: legacyName }));
       await start();
-      expect(fake.sandboxes.size).toBe(2);
 
       await end(null);
       expect(fake.sandboxes.size).toBe(0);
@@ -1786,7 +1691,6 @@ describe("createVercelSandbox", () => {
     ]);
 
     expect(reopened.map(({ state }) => state)).toEqual([first.state, first.state, first.state]);
-    expect(sessionSandbox.networkPolicy).toEqual({ allow: ["github.com"] });
     expect(sessionSandbox.update).not.toHaveBeenCalled();
 
     await first.sandbox.setNetworkPolicy("allow-all");
@@ -1798,7 +1702,6 @@ describe("createVercelSandbox", () => {
     });
 
     expect(resumed.sandbox.name).toBe(first.sandbox.name);
-    expect(sessionSandbox.networkPolicy).toBe("allow-all");
     expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
     expect(sessionSandbox.update).not.toHaveBeenCalled();
     expect(sessionSandbox.delete).not.toHaveBeenCalled();
