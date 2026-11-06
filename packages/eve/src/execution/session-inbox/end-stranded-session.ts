@@ -12,12 +12,13 @@ import {
   findSessionHookHolder,
   type StrandedSessionOwnerError,
 } from "#execution/session-inbox/owner.js";
-import { logicalSessionToken, requireSessionId } from "#execution/session-inbox/resume.js";
+import { logicalSessionToken } from "#execution/session-inbox/address.js";
+import { requireSessionId } from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import { createLineCommitter } from "#harness/session-machine/lines.js";
-import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunInactive } from "#shared/run-errors.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { endSession } from "#harness/session-machine/deliveries.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
@@ -214,7 +215,7 @@ async function cancelRuns(
     try {
       await cancelRun(world, runId, { cancelReason });
     } catch (error) {
-      if (!isInactiveWorkflowRunError(error)) throw error;
+      if (!isRunInactive(error)) throw error;
     }
   }
 }

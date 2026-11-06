@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { agent } from "#public/tools/agent.js";
@@ -158,7 +158,7 @@ describe("openAgentSessionStep", () => {
         model: "anthropic/claude-opus-5.5",
         name: "reviewer",
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
@@ -169,7 +169,7 @@ describe("openAgentSessionStep", () => {
         model: "",
         name: "reviewer",
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 });
@@ -269,7 +269,7 @@ describe("openAgentSessionStep with an agent({ models }) option", () => {
   });
 
   it("rejects a model the tool doesn't list, even a Gateway ID, without retrying", async () => {
-    await expect(open("openai/gpt-6-sol")).rejects.toBeInstanceOf(FatalError);
+    await expect(open("openai/gpt-6-sol")).rejects.toBeInstanceOf(NonRetryableError);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 

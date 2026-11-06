@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import type { Runtime } from "#channel/types.js";
 import type {
   DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
@@ -16,6 +16,8 @@ type ScheduleDispatchBundle = Pick<CompiledRuntimeAgentBundle, "compiledArtifact
 /** Dispatches an at-least-once callback and reports the sessions it started, if any. */
 export async function dispatchScheduledOccurrence(input: {
   readonly bundle: ScheduleDispatchBundle;
+  /** The runtime the occurrence's sessions start in: the host's. */
+  readonly runtime: Runtime;
   readonly collection: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly occurrence: ScheduleOccurrenceIdentity;
@@ -37,15 +39,14 @@ export async function dispatchScheduledOccurrence(input: {
       application: input.payload.eve.application,
       bundle: () => input.bundle,
       collection: input.collection,
+      runtime: () => input.runtime,
       definition: input.definition,
       namespace: input.namespace,
       operationId: randomUUID(),
       scope: input.payload.envelope.scope,
     });
   const result = await new ScheduleDispatcher({
-    runtime: createWorkflowRuntime({
-      compiledArtifactsSource: input.bundle.compiledArtifactsSource,
-    }),
+    runtime: input.runtime,
     channels: input.bundle.graph.root.channels,
   }).triggerCollection({
     collectionId: input.collection,
@@ -82,6 +83,8 @@ export function createScheduleProviderContext(input: {
   readonly bundle: () => ScheduleDispatchBundle;
   readonly collection: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
+  /** The runtime the occurrences it delivers start their sessions in: the host's. */
+  readonly runtime: () => Runtime;
   /** Overrides the namespace derived from `scope`, for a schedule whose namespace is already known. */
   readonly namespace?: string;
   readonly operationId: string;
@@ -99,6 +102,7 @@ export function createScheduleProviderContext(input: {
         await dispatchScheduledOccurrence({
           bundle: input.bundle(),
           collection: input.collection,
+          runtime: input.runtime(),
           definition: input.definition,
           occurrence: { ...occurrence, collection: input.collection },
           payload: payload as ScheduleCollectionPayload<unknown>,

@@ -77,6 +77,11 @@ export interface SessionInboxTransport<Hook extends InboxHook = InboxHook> {
   dispose(hook: Hook): Promise<void>;
   /** Whether a reader's failure means another owner took the address over. */
   isTakenOver(error: unknown): boolean;
+  /**
+   * The owner these addresses deliver to: Workflow's owner run, or the host's own id. Signals
+   * an owner armed for itself (its timeout, a prewarm) count only on that owner.
+   */
+  ownerRunId(): string;
 }
 
 interface Source<Hook extends InboxHook> {
@@ -125,6 +130,8 @@ export interface SessionInboxReader {
   onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
   /** Requeues payloads a successor handed back, ahead of everything pumped since. */
   restore(payloads: readonly SessionInboxPayload[]): void;
+  /** The owner this inbox reads for (see {@link SessionInboxTransport.ownerRunId}). */
+  ownerRunId(): string;
 }
 
 export interface SessionHookClaimOptions {
@@ -409,6 +416,7 @@ export function createSessionInbox<Hook extends InboxHook>(
   };
 
   return {
+    ownerRunId: () => transport.ownerRunId(),
     get handoverObservation() {
       return handoverObservation;
     },

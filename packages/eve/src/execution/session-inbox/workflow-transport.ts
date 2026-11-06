@@ -1,4 +1,4 @@
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   sessionInboxHookToken,
@@ -11,7 +11,8 @@ import {
 } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunMessageBatch } from "#execution/tools/workflow/messages.js";
 
-type SessionHook = Hook<SessionInboxPayload | WorkflowToolRunMessageBatch>;
+/** A session address on Workflow: one hook. */
+export type SessionHook = Hook<SessionInboxPayload | WorkflowToolRunMessageBatch>;
 
 /**
  * The Workflow transport: each address is a hook on the owner's run, tagged with the session it
@@ -32,5 +33,6 @@ export function workflowInboxTransport(sessionId: string): SessionInboxTransport
     confirm: (hook) => claimHookOwnership(hook),
     dispose: (hook) => disposeHook(hook),
     isTakenOver: (error) => isHookForceClaimedError(error),
+    ownerRunId: () => getWorkflowMetadata().workflowRunId,
   };
 }

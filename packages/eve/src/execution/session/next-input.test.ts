@@ -45,6 +45,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
     awaitingHandover: false,
     async whenHandoverSettled() {},
     claimedTokens: [],
+    ownerRunId: () => "owner-1",
     takeLeading: () => [],
     async claimSessionHook() {},
     async claimSessionHooks() {},

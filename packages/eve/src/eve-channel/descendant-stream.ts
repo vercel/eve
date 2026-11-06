@@ -17,7 +17,7 @@ import { findRemoteAgentBinding, type RemoteAgentBinding } from "#eve-channel/su
 import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 import { isObject } from "#shared/guards.js";
-import { isExpiredWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunExpired } from "#shared/run-errors.js";
 
 /** Every hop resolves recorded authority on its owning deployment, never an event-supplied URL. */
 export async function descendantStreamResponse(input: {
@@ -121,7 +121,7 @@ export async function descendantStreamResponse(input: {
       return response;
     }
   } catch (error) {
-    if (isExpiredWorkflowRunError(error)) return unavailable("session_expired", 410);
+    if (isRunExpired(error)) return unavailable("session_expired", 410);
     return unavailable();
   } finally {
     clearTimeout(timeout);

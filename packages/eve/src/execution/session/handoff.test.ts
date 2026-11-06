@@ -2,11 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import {
-  SESSION_CHECKPOINT_VERSION,
-  SessionHandoff,
-  type SessionOwnerActivation,
-} from "#execution/session/handoff.js";
+import { SessionHandoff, type SessionOwnerActivation } from "#execution/session/handoff.js";
+import { SESSION_CHECKPOINT_VERSION } from "#execution/session/checkpoint.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
@@ -536,6 +533,7 @@ function createInbox(
     claimSessionHook: vi.fn(async () => {}),
     claimSessionHooks: vi.fn(async () => {}),
     claimedTokens: TOKENS,
+    ownerRunId: () => "owner-1",
     takeLeading: () => [],
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => input.unread ?? []),

@@ -1,6 +1,8 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
 import type {
+  Entered,
   PublishedSessionEvents,
+  SessionStepInput,
   SessionStepState,
 } from "#execution/publish-session-events.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
@@ -8,7 +10,7 @@ import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { resumeRoutedHook } from "#execution/hook-routes.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Relay } from "#harness/hitl/relays.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
@@ -27,14 +29,14 @@ export async function withdrawWorkflowToolRunQuestionStep(
   return await withSessionStateDelta(input, withdrawWorkflowToolRunQuestion);
 }
 
-type WithdrawQuestionInput = SessionStepState & {
+type WithdrawQuestionInput = SessionStepInput & {
   readonly control: string;
   readonly requestId: string;
   readonly runId: string;
 };
 
 async function withdrawWorkflowToolRunQuestion(
-  input: WithdrawQuestionInput,
+  input: Entered<WithdrawQuestionInput>,
 ): Promise<PublishedSessionEvents> {
   const decision: WorkflowToolRunControlMessage = {
     kind: "withdrawn",
@@ -55,7 +57,7 @@ async function withdrawWorkflowToolRunQuestion(
  * of the sessions it opened, which ended with it. Nobody can answer them now.
  */
 export async function withdrawFinishedRunQuestionsStep(
-  input: SessionStepState & { readonly runId: string },
+  input: SessionStepInput & { readonly runId: string },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, (target) =>
