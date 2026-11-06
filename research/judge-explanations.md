@@ -21,15 +21,16 @@ export default defineEvalConfig({
 });
 ```
 
-`explain` resolves like `model` and `modelOptions`: per call, then per eval,
-then the project default. `explain: false` turns it off for one call. With no
-`explain`, judges make no extra request.
+`explain` is part of the judge configuration and follows its rules. Per-call
+fields override the eval's or project's judge, and a per-eval `judge` replaces
+the project's as a whole, so an eval that sets `judge: { model }` has no
+`explain` unless it sets one. `explain: false` turns it off for one call. With
+no `explain`, judges make no extra request.
 
 ## Problem
 
-A judge score has no reason attached. When `reply-meets-reference-criteria`
-scores a v case 0, the reader rereads the reply and guesses which part of the
-criteria it missed.
+A judge score has no reason attached. When a judge scores a reply 0 against
+several criteria, the reader rereads the reply and guesses which one it missed.
 
 eve has no reason to pass on. [Decision answers](https://ai-sdk.dev/docs/ai-sdk-core/decisions)
 carry `choice`, `score`, and `probabilities`, and nothing else; the
@@ -46,14 +47,18 @@ state, the question, and the raw answer. That is a debugging dump, not a reason.
 - **Never changes the outcome.** Score, threshold, and verdict come from the
   decision alone.
 - **A failed explanation is not a failed assertion.** The assertion keeps its
-  score, `explanation` is absent, and eve logs a warning. An errored judge
-  gets no explanation.
+  score, `explanation` is absent, and eve logs a warning. An explanation fails
+  when its request fails, or when the text for a key is missing, empty, or
+  longer than 500 characters. A batch reply is checked per key, and keys that
+  name no question are ignored with a warning. An errored judge gets no
+  explanation.
 - **`expected` stays private.** A choice question's expected option is never
   sent, as for the decision. The explanation model sees the chosen option.
 - **One request per decision request.** A batch gets one explanation request
   that returns one explanation per question key.
-- **Bounded.** At most 500 characters per explanation. Its token usage is
-  recorded in assertion metadata, apart from the decision's.
+- **Bounded.** 1–500 characters per explanation, never truncated. Its token
+  usage is recorded in assertion metadata, apart from the decision's, and a
+  batch's explanation usage is marked shared, as decision usage is.
 
 ## Result shape
 
@@ -77,17 +82,8 @@ where their APIs accept text.
   gives up the typed answers, probabilities, and validation the judge is built
   on.
 
-## Consumer: v's evaluation store
+## Consumers
 
-v publishes eve scores through its
-[evaluation contract](https://github.com/vercel/api/blob/d1b542882e6ee573d907cba0a0cf148fa844f17a/agents/v/lib/evaluations/contract.ts#L85-L89).
-A score is `{ evaluatorKey, status, value }`, and the evals pages' Comment
-column reads `v_evaluation_scores.comment`, which nothing writes today. The
-contract gains one optional score field:
-
-| field     | type                | rule                                                                                                     |
-| --------- | ------------------- | -------------------------------------------------------------------------------------------------------- |
-| `comment` | string, 1–500 chars | Offline snapshots only. Online snapshots reject it, because production text stays behind session access. |
-
-The publisher copies `explanation` into `comment`. The comment is not part of
-the evaluator definition, so adding it needs no version bump.
+A store that keeps judge scores can persist `explanation` next to each score.
+The text describes the graded value, so a store that keeps production
+conversations behind access checks applies the same checks to it.
