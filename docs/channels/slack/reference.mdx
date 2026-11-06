@@ -368,6 +368,8 @@ export default defineTool({
 
 Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded principal can't search with it.
 
+To search without writing this tool, mount [`eve/extensions/slack-search`](/docs/channels/slack/search). It reads the same attribute.
+
 #### Continue conversations without repeated mentions
 
 Use `onMessage` to answer mentions, code channel messages, and DMs, and to follow threads that already have an eve session:

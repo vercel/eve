@@ -396,6 +396,16 @@ export default slackChannel({
 
 Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) adds per-conversation allowlists.
 
+## Search Slack history
+
+To let your agent search public channels and read threads, mount [`eve/extensions/slack-search`](/docs/channels/slack/search):
+
+```ts title="agent/extensions/slack.ts"
+import slackSearch from "eve/extensions/slack-search";
+
+export default slackSearch({});
+```
+
 ## Reference
 
 The [Slack reference](/docs/channels/slack/reference) covers:

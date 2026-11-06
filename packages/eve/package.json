@@ -375,6 +375,18 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/slack-search": {
+      "eve-source": "./dist/src/extensions/slack-search/extension/extension.js",
+      "types": "./dist/src/extensions/slack-search/extension/extension.d.ts",
+      "import": "./dist/src/extensions/slack-search/extension/extension.js",
+      "default": "./dist/src/extensions/slack-search/extension/extension.js"
+    },
+    "./extensions/slack-search/tools": {
+      "eve-source": "./dist/src/extensions/slack-search/tools.js",
+      "types": "./dist/src/extensions/slack-search/tools.d.ts",
+      "import": "./dist/src/extensions/slack-search/tools.js",
+      "default": "./dist/src/extensions/slack-search/tools.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -750,6 +762,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/slack-search": {
+        "dist": "./dist/src/extensions/slack-search/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
