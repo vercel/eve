@@ -14,7 +14,7 @@ Important naming note:
 
 | To do this                                               | Read this                                                                        |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                         |
+| Create a project, or understand the file layout          | [Getting Started](./getting-started/index.mdx)                                   |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                      |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                               |
 | Give the agent a typed capability it can call            | [Tools](./tools/index.mdx)                                                       |
@@ -53,7 +53,7 @@ Unless you configure stricter controls, eve agents may operate with permissive s
 
 For a full picture rather than a single task, read in this order:
 
-1. [Getting Started](./getting-started.mdx)
+1. [Getting Started](./getting-started/index.mdx)
 2. [Agents](./agent-config.md)
 3. [TypeScript API Reference](./reference/typescript-api.md)
 4. [Context Control](./concepts/context-control.md)
