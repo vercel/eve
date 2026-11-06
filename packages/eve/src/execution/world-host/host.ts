@@ -30,8 +30,8 @@ import type { DefinedAgent } from "#public/definitions/agent.js";
 import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { holdSessionAgent, type CodeAgent } from "#runtime/sessions/session-agent.js";
-import type { Delivery } from "#shared/delivery.js";
-import type { Answer } from "#shared/input.js";
+import { parseAnswers } from "#shared/input.js";
+import type { SessionHandle } from "#shared/session.js";
 import { handleCallback } from "#compiled/@vercel/queue/index.js";
 import { createScheduleOccurrenceConsumer } from "#internal/schedules/occurrence-consumer.js";
 import { worldHostChannels } from "./channels.js";
@@ -107,21 +107,12 @@ export interface WorldHostOptions {
   }) => void;
 }
 
-/** A conversation with a World host's agent, which runs wherever its wakes are delivered. */
-export interface WorldSession {
-  /** The session's id, once its first message started it. */
-  readonly id: string | undefined;
-  /** Sends a message; it's kept on the World, and the session woken, before this resolves. */
-  send(message: string): Promise<Delivery>;
-  /** Answers the session's open requests, such as approvals. */
-  respond(answers: readonly Answer[]): Promise<Delivery>;
-  /** Cancels the running turn. */
-  cancel(): Promise<void>;
-  /** The session's events from line `from` (its start, by default), followed on the World. */
-  events(options?: {
-    readonly from?: number;
-    readonly signal?: AbortSignal;
-  }): Promise<ReadableStream<SessionStreamEvent>>;
+/**
+ * A conversation with a World host's agent, which runs wherever its wakes are delivered: a
+ * `SessionHandle`, as a client's or an embedded session is, so code written against one runs
+ * against any. Nothing here holds the session in this process.
+ */
+export interface WorldHostSession extends SessionHandle {
   /** What the session waits on a person for, as its stream records so far. */
   pending(): Promise<readonly Interaction[]>;
 }
@@ -130,11 +121,15 @@ export interface WorldHost {
   readonly world: QueueWorld;
   /** The runtime sessions of `agent` are reached through: it runs nothing itself. */
   runtime(agent: string): Runtime;
-  /** A conversation with `agent`: a new one, or the session `resume` names. */
-  session(
+  /**
+   * A conversation with `agent`, every call made as `identity`: a new one, created on the World
+   * before this resolves (so its `id` is set, and nothing runs until its first message), or the
+   * session `resume` names.
+   */
+  createSession(
     agent: string,
     options: { readonly identity: SessionAuthContext | null; readonly resume?: string },
-  ): WorldSession;
+  ): Promise<WorldHostSession>;
   /** The sessions, as the entities they are on the World. */
   readonly entities: Entities;
   /**
@@ -321,7 +316,8 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
     deliver: consumer.deliver,
     tick,
     queueHandler: () => consumer.route(),
-    session: (agent, sessionOptions) => worldSession(runtime(agent), entities, sessionOptions),
+    createSession: async (agent, sessionOptions) =>
+      await worldHostSession(runtime(agent), entities, sessionOptions),
     scheduleConsumer(agent) {
       const hosted = agents.get(agent);
       if (hosted === undefined || !("compiled" in hosted))
@@ -408,65 +404,49 @@ function entityLineStore(entities: Entities, fallback?: SessionLineStore): Sessi
   };
 }
 
-function worldSession(
+async function worldHostSession(
   runtime: Runtime,
   entities: Entities,
   options: { readonly identity: SessionAuthContext | null; readonly resume?: string },
-): WorldSession {
+): Promise<WorldHostSession> {
   const auth = options.identity;
-  let sessionId = options.resume;
-  const ready = (async () => {
-    // A resumed session's address is the one it started with.
-    const recorded =
-      options.resume === undefined
-        ? undefined
-        : ((await entities.meta(options.resume)) as SessionStart | undefined)?.input
-            .continuationToken;
-    if (options.resume !== undefined && recorded === undefined)
-      throw new Error(`The World holds no session "${options.resume}" to resume.`);
-    return createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: CHANNEL_NAME,
-      continuationToken:
-        recorded?.startsWith(`${CHANNEL_NAME}:`) === true
-          ? recorded.slice(CHANNEL_NAME.length + 1)
-          : `embedded-${randomUUID()}`,
-      runtime,
-    });
-  })();
-  ready.catch(() => {});
-  const started = async (): Promise<string> => {
-    await ready;
-    if (sessionId === undefined) throw new Error("The session starts with its first message.");
-    return sessionId;
-  };
+  // A resumed session's address is the one it started with.
+  const recorded =
+    options.resume === undefined
+      ? undefined
+      : ((await entities.meta(options.resume)) as SessionStart | undefined)?.input
+          .continuationToken;
+  if (options.resume !== undefined && recorded === undefined)
+    throw new Error(`The World holds no session "${options.resume}" to resume.`);
+  const address = createChannelAddress({
+    adapter: { kind: "http" },
+    channelName: CHANNEL_NAME,
+    continuationToken:
+      recorded?.startsWith(`${CHANNEL_NAME}:`) === true
+        ? recorded.slice(CHANNEL_NAME.length + 1)
+        : `embedded-${randomUUID()}`,
+    runtime,
+  });
+  const session =
+    options.resume === undefined
+      ? (await address.create({ auth })).session
+      : await address.resolveSession();
+  if (session === undefined)
+    throw new Error(`The World's session "${options.resume}" holds no address.`);
+  const { id } = session;
   return {
-    get id() {
-      return sessionId;
-    },
-    async send(message) {
-      const delivery = await (await ready).send(message, { auth });
-      sessionId = delivery.sessionId;
-      return delivery;
-    },
-    async respond(answers) {
-      return await (await ready).deliver({ answers }, { auth });
-    },
-    async cancel() {
-      await runtime.dispatchSession({
-        command: { deliveryId: `cancel-${randomUUID()}`, kind: "cancel" },
-        sessionId: await started(),
-      });
-    },
-    async events(eventOptions = {}) {
-      return await runtime.getEventStream(await started(), {
-        startIndex: eventOptions.from ?? 0,
-        ...(eventOptions.signal !== undefined && { signal: eventOptions.signal }),
-      });
-    },
+    id,
+    send: async (message, sendOptions = {}) =>
+      await session.send(message, { ...sendOptions, auth }),
+    respond: async (answers, respondOptions = {}) =>
+      await session.respond(parseAnswers(answers), { ...respondOptions, auth }),
+    cancel: async () => await session.cancel({ auth }),
+    clear: async () => await session.clear({ auth }),
+    compact: async () => await session.compact({ auth }),
+    end: async () => await session.end({ auth }),
+    stream: (streamOptions) => session.stream(streamOptions),
     async pending() {
-      if (sessionId === undefined) return [];
-      const reader = (await runtime.getEventStream(sessionId, { follow: false })).getReader();
+      const reader = (await runtime.getEventStream(id, { follow: false })).getReader();
       const events: SessionStreamEvent[] = [];
       for (let next = await reader.read(); !next.done; next = await reader.read())
         events.push(next.value);

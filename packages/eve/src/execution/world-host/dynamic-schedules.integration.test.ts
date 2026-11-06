@@ -134,7 +134,7 @@ describe("dynamic schedules on a World host", () => {
       });
       await host.serve();
       const planned = await (
-        await host.session("planner", { identity: alice }).send("Plan our digests.")
+        await (await host.createSession("planner", { identity: alice })).send("Plan our digests.")
       ).result();
       expect(planned.reply).toBe("Scheduled.");
 
@@ -233,7 +233,7 @@ describe("dynamic schedules on a World host", () => {
       });
       await host.serve();
       const planned = await (
-        await host.session("planner", { identity: alice }).send("Plan the reminder.")
+        await (await host.createSession("planner", { identity: alice })).send("Plan the reminder.")
       ).result();
       expect(planned.reply).toBe("Scheduled.");
       const state = async () =>
