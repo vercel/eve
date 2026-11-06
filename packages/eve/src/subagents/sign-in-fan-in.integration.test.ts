@@ -24,7 +24,7 @@ import { defineTool } from "#tools/definition.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 
 // A parent runs three children at once, and each child's tool needs a Weather sign-in for the
-// same person. Each sign-in relays to the parent as its own card, and the person's answer on one
+// same person, and with `parentAsks` the parent's own tool needs it too. Each sign-in relays to the parent as its own card, and the person's answer on one
 // reaches every child waiting on the same grant. The authorization provider is faked at its edge.
 
 vi.setConfig({ testTimeout: 90_000 });
@@ -225,6 +225,96 @@ describe("one sign-in answer for parallel children", () => {
       }
     });
   });
+  it("completes every child's sign-in when the person answers the parent's own", async () => {
+    const app = await createApp("sign-in-fan-in-parent-answers", {
+      grant: "oauth/weather",
+      parentAsks: true,
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, CHILDREN + 1);
+        const parents = before.filter(isSignInOpened).filter(isOwnSignIn);
+        expect(parents, "the parent's own sign-in cards").toHaveLength(1);
+        await completeSignIn(parents[0]!, { code: "oauth-code" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        const events = [...before, ...after];
+        expect(signInOutcomes(events), "how each card closed").toEqual(
+          Array.from({ length: CHILDREN + 1 }, () => "accepted"),
+        );
+        expect(app.executions().toSorted()).toEqual([
+          "Lisbon 0",
+          "Lisbon 1",
+          "Lisbon 2",
+          "Lisbon parent",
+        ]);
+        expect(filterEventsByType(events, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes the parent's own sign-in when the person answers a child's", async () => {
+    const app = await createApp("sign-in-fan-in-child-answers-parent", {
+      grant: "oauth/weather",
+      parentAsks: true,
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, CHILDREN + 1);
+        const child = before.filter(isSignInOpened).find((card) => !isOwnSignIn(card));
+        await completeSignIn(child!, { code: "oauth-code" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        const events = [...before, ...after];
+        expect(signInOutcomes(events), "how each card closed").toEqual(
+          Array.from({ length: CHILDREN + 1 }, () => "accepted"),
+        );
+        expect(app.executions()).toContain("Lisbon parent");
+        expect(app.executions()).toHaveLength(CHILDREN + 1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("ends the children's sign-ins when the person declines the parent's own", async () => {
+    const app = await createApp("sign-in-fan-in-parent-declines", {
+      grant: "oauth/weather",
+      parentAsks: true,
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, CHILDREN + 1);
+        const parent = before.filter(isSignInOpened).find(isOwnSignIn);
+        await completeSignIn(parent!, { error: "access_denied" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        expect(signInOutcomes([...before, ...after]), "how each card closed").toEqual(
+          Array.from({ length: CHILDREN + 1 }, () => "declined"),
+        );
+        expect(app.completes(), "sign-ins completed at the provider").toBe(0);
+        expect(app.executions(), "calls that ran").toEqual([]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
 });
 
 let restoreWorld = async () => {};
@@ -289,9 +379,10 @@ type Prompt = LanguageModelV4CallOptions["prompt"];
 /**
  * The parent starts `children` children in one step and waits for their reports. A child, whose
  * conversation starts with the parent's message, checks the weather and reports; with `again`,
- * child 0 then checks Porto's under another scope of the same grant.
+ * child 0 then checks Porto's under another scope of the same grant. With `parentAsks`, the
+ * parent checks Lisbon's weather itself while the children run.
  */
-function scriptedModel(children: number, again: boolean) {
+function scriptedModel(children: number, again: boolean, parentAsks: boolean) {
   let waits = 0;
   return markMockModel(
     new MockLanguageModelV4({
@@ -327,6 +418,14 @@ function scriptedModel(children: number, again: boolean) {
               toolName: "agent",
             })),
           );
+        if (parentAsks && !called("get_weather"))
+          return toolCallsStreamResult([
+            {
+              input: JSON.stringify({ city: "Lisbon parent" }),
+              toolCallId: "call_weather_parent",
+              toolName: "get_weather",
+            },
+          ]);
         const reports = raw.match(/Weather report \d ready/gu)?.length ?? 0;
         if (reports < children) {
           if (waits > 20) throw new Error("The parent kept waiting for its children.");
@@ -348,7 +447,12 @@ function scriptedModel(children: number, again: boolean) {
  */
 async function createApp(
   name: string,
-  options: { readonly again?: boolean; readonly children?: number; readonly grant?: string },
+  options: {
+    readonly again?: boolean;
+    readonly children?: number;
+    readonly grant?: string;
+    readonly parentAsks?: boolean;
+  },
 ) {
   let granted = false;
   let revoked = false;
@@ -387,7 +491,11 @@ async function createApp(
     agent: {
       definition: defineAgent({
         model: defineDynamic(() => ({
-          model: scriptedModel(options.children ?? CHILDREN, options.again === true),
+          model: scriptedModel(
+            options.children ?? CHILDREN,
+            options.again === true,
+            options.parentAsks === true,
+          ),
           modelContextWindowTokens: 200_000,
         })),
       }),
@@ -471,6 +579,11 @@ async function completeSignIn(
 
 function isSignInOpened(event: SessionStreamEvent): boolean {
   return event.type === "interaction.opened" && event.data.request.kind === "sign-in";
+}
+
+/** A sign-in the parent asked itself, rather than one it relays for a child. */
+function isOwnSignIn(card: SessionStreamEvent): boolean {
+  return card.type === "interaction.opened" && card.data.origin === undefined;
 }
 
 function isSettled(card: SessionStreamEvent) {

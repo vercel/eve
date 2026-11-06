@@ -10,6 +10,7 @@ import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { SIGN_IN_DECLINED, sameRelayedSignIn } from "#harness/hitl/sign-ins.js";
+import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -52,11 +53,16 @@ export async function emitProxiedSubagentEvent(
   },
 ): Promise<PublishedSessionEvents> {
   const { hookPayload, runId, workflowAsk } = input;
-  // The other children hear a sign-in's answer before the relay commits: a delivery that fails
+  // The other askers hear a sign-in's answer before the relay commits: a delivery that fails
   // fails this step, and its retry delivers them again from the same state.
-  const tables = storedProjection(input.durableSession.state).view;
-  const answered = answeredSignIns(tables, hookPayload, await ownCallbackOrigin());
-  await Promise.all(answered.map(settleChildSignIn));
+  const baseUrl = await workflowCallbackBaseUrl();
+  if (baseUrl !== undefined) {
+    const own = ownCallbacks(input.durableSession.sessionId, baseUrl);
+    const tables = storedProjection(input.durableSession.state).view;
+    await settleSignIns(
+      relayedAnswers(tables, hookPayload).flatMap((answer) => signInsAnswered(tables, answer, own)),
+    );
+  }
   return await commitSessionStep(
     input,
     (view) => [relay(view, { payload: hookPayload, runId, workflowAsk })],
@@ -73,49 +79,61 @@ export async function emitProxiedSubagentEvent(
   );
 }
 
-/** A child's open sign-in to settle with the answer another child's sign-in got. */
+/** An open sign-in to settle with the answer another sign-in for the same grant got. */
 interface AnsweredSignIn {
   readonly callback: { readonly name: string; readonly attemptId: string; readonly token: string };
   readonly params: Readonly<Record<string, string>>;
 }
 
-/** The origin this deployment's own sign-in callback URLs use, or `undefined` outside a workflow. */
-async function ownCallbackOrigin(): Promise<string | undefined> {
+/** A sign-in the person answered, and how. */
+export interface SignInAnswer {
+  readonly interactionId: string;
+  readonly signIn: SignInChallenge;
+  readonly outcome: "accepted" | "declined";
+}
+
+/** Where this session's own sign-in callbacks point: its deployment's origin and its own session. */
+export interface OwnCallbacks {
+  readonly origin: string;
+  readonly sessionId: string;
+}
+
+/** This session's own callbacks, at its workflow's callback base URL. */
+export function ownCallbacks(sessionId: string, callbackBaseUrl: string): OwnCallbacks {
+  return { origin: new URL(callbackBaseUrl).origin, sessionId };
+}
+
+/** This workflow's callback base URL, or `undefined` outside a workflow. */
+async function workflowCallbackBaseUrl(): Promise<string | undefined> {
   const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
   const url = getWorkflowMetadata().url;
-  return typeof url === "string" ? new URL(resolveWorkflowCallbackBaseUrl(url)).origin : undefined;
+  return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
 }
 
 /**
- * The callback of a sign-in this deployment's own child session asked: its URL is on this
- * deployment's origin and names that session's inbox. A remote child's callback belongs to its own
- * deployment's world, and the parent never resumes a hook a child's URL merely names.
+ * The callback of a sign-in asked on this deployment, by this session or a child session it
+ * runs: its URL is on this deployment's origin and names the asker's inbox. A remote child's
+ * callback belongs to its own deployment's world, and the parent never resumes a hook a child's
+ * URL merely names.
  */
-export function localChildCallback(
+export function localSignInCallback(
   row: Pick<InteractionRow, "origin" | "request">,
-  ownOrigin: string,
+  own: OwnCallbacks,
 ): AnsweredSignIn["callback"] | undefined {
   const callbackUrl = row.request.signIn?.callbackUrl;
-  if (callbackUrl === undefined || row.origin === undefined || !URL.canParse(callbackUrl))
-    return undefined;
+  if (callbackUrl === undefined || !URL.canParse(callbackUrl)) return undefined;
   const url = new URL(callbackUrl);
-  if (url.origin !== ownOrigin) return undefined;
+  if (url.origin !== own.origin) return undefined;
   const callback = parseEveConnectionCallbackRoutePath(url.pathname);
-  return callback?.token === authHookToken(row.origin.sessionId) ? callback : undefined;
+  const asker = row.origin?.sessionId ?? own.sessionId;
+  return callback?.token === authHookToken(asker) ? callback : undefined;
 }
 
-/**
- * The other children's open sign-ins the person's answer in `payload` settles: an acceptance or a
- * decline of a sign-in this session mirrors, for the same Connect grant and principal
- * (`sameRelayedSignIn`), asked by a child on this deployment (`localChildCallback`). A failure is
- * its asker's to retry, so it settles only its own row. Any other row keeps its own card.
- */
-function answeredSignIns(
+/** The answers in a child's relayed events to sign-ins this session mirrors for that child. */
+function relayedAnswers(
   tables: SessionView,
   payload: SubagentInteractionHookPayload,
-  ownOrigin: string | undefined,
-): readonly AnsweredSignIn[] {
-  if (ownOrigin === undefined) return [];
+): readonly SignInAnswer[] {
   return payload.events.flatMap((event) => {
     if (event.type !== "interaction.settled") return [];
     const { interactionId, outcome } = event.data;
@@ -130,29 +148,49 @@ function answeredSignIns(
       signIn === undefined
     )
       return [];
-    // The provider's answer, as its redirect carries it: a decline is RFC 6749 `access_denied`.
-    const params: AnsweredSignIn["params"] =
-      outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
-    return Object.values(tables.interactions).flatMap((row) => {
-      if (
-        row.interactionId === interactionId ||
-        row.status !== "open" ||
-        row.request.signIn === undefined ||
-        !sameRelayedSignIn(row.request.signIn, signIn)
-      )
-        return [];
-      const callback = localChildCallback(row, ownOrigin);
-      return callback === undefined ? [] : [{ callback, params }];
-    });
+    return [{ interactionId, outcome, signIn }];
   });
 }
 
 /**
- * Calls a child's sign-in callback, as Connect calls the answered one's: the child matches the
+ * The other open sign-ins an acceptance or a decline in `answer` settles: for the same Connect
+ * grant and principal (`sameRelayedSignIn`), asked on this deployment by this session or one of
+ * its children (`localSignInCallback`). A failure is its asker's to retry, so it settles only its
+ * own row, and a responder's sign-in settles only through its own approval. Any other row keeps its
+ * own card.
+ */
+export function signInsAnswered(
+  tables: SessionView,
+  answer: SignInAnswer,
+  own: OwnCallbacks,
+): readonly AnsweredSignIn[] {
+  // The provider's answer, as its redirect carries it: a decline is RFC 6749 `access_denied`.
+  const params: AnsweredSignIn["params"] =
+    answer.outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
+  return Object.values(tables.interactions).flatMap((row) => {
+    if (
+      row.interactionId === answer.interactionId ||
+      row.status !== "open" ||
+      "responseId" in row.subject ||
+      row.request.signIn === undefined ||
+      !sameRelayedSignIn(row.request.signIn, answer.signIn)
+    )
+      return [];
+    const callback = localSignInCallback(row, own);
+    return callback === undefined ? [] : [{ callback, params }];
+  });
+}
+
+/**
+ * Calls each sign-in's callback, as Connect calls the answered one's: its asker matches the
  * attempt in its own turn and settles it under its own principal, reading what Connect holds for
  * it after an acceptance. The params carry only the answer, never a code or a credential.
  */
-async function settleChildSignIn({ callback, params }: AnsweredSignIn): Promise<void> {
+export async function settleSignIns(answered: readonly AnsweredSignIn[]): Promise<void> {
+  await Promise.all(answered.map(settleSignIn));
+}
+
+async function settleSignIn({ callback, params }: AnsweredSignIn): Promise<void> {
   const payload: AuthorizationCallbackPayload = {
     kind: "authorization-callback",
     payloads: [
