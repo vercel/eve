@@ -229,6 +229,8 @@ const runtimeToolResultActionResultSchema = z
     callId: z.string(),
     /** The `name` of the error the tool threw, such as `"QuotaError"`. */
     errorName: z.string().optional(),
+    /** The bounded reason a framework error carries, such as `"token_rejected_after_authorization"`. */
+    errorCode: z.string().optional(),
     isError: z.boolean().optional(),
     kind: z.literal("tool-result"),
     output: jsonValueSchema,

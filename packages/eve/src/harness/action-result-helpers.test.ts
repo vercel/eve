@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   createRuntimeToolResultFromToolError,
   createRuntimeToolResultFromValue,
@@ -48,6 +49,29 @@ describe("createRuntimeToolResultFromValue", () => {
       kind: "tool-result",
       output: "tool failed",
       toolName: "broken",
+    });
+  });
+
+  it("keeps the reason of a failed authorization as the error code", () => {
+    expect(
+      createRuntimeToolResultFromValue({
+        callId: "call_gh",
+        isError: true,
+        output: new ConnectionAuthorizationFailedError("github", {
+          message: "rejected",
+          reason: "token_rejected_after_authorization",
+          retryable: false,
+        }),
+        toolName: "gh",
+      }),
+    ).toEqual({
+      callId: "call_gh",
+      errorCode: "token_rejected_after_authorization",
+      errorName: "ConnectionAuthorizationFailedError",
+      isError: true,
+      kind: "tool-result",
+      output: "rejected",
+      toolName: "gh",
     });
   });
 });

@@ -9,10 +9,12 @@ export function callOutcomeOf(result: RuntimeActionResult): {
   readonly error?: ErrorInfo;
 } {
   if (result.isError === true) {
-    const error = readOutputError(result.output) ?? {
-      code: "ACTION_RESULT_FAILED",
-      message: formatOutput(result.output),
-    };
+    const errorCode = "errorCode" in result ? result.errorCode : undefined;
+    const message = formatOutput(result.output);
+    const error =
+      errorCode === undefined
+        ? (readOutputError(result.output) ?? { code: "ACTION_RESULT_FAILED", message })
+        : { code: errorCode, message };
     return {
       error:
         "errorName" in result && result.errorName !== undefined

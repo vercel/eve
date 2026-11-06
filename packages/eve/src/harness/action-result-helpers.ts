@@ -1,6 +1,7 @@
 import type { ModelMessage, ToolSet, TypedToolError, TypedToolResult } from "ai";
 
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import { toError } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
@@ -67,10 +68,15 @@ export function createRuntimeToolResultFromValue(input: {
   };
 
   if (input.isError !== true) return result;
-  // The output keeps only a thrown error's message; its name lets instrumentation classify the failure.
-  return thrown === undefined
-    ? { ...result, isError: true }
-    : { ...result, errorName: thrown.name, isError: true };
+  // The output keeps only a thrown error's message; its name and reason let instrumentation classify the failure.
+  if (thrown === undefined) return { ...result, isError: true };
+  const errorCode = isConnectionAuthorizationFailedError(thrown) ? thrown.reason : undefined;
+  return {
+    ...result,
+    errorName: thrown.name,
+    ...(errorCode !== undefined && { errorCode }),
+    isError: true,
+  };
 }
 
 /**
