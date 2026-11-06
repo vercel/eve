@@ -419,9 +419,11 @@ describe("a session's spans, from its committed lines", () => {
   );
 
   it.each([
-    ["a reason code", "access_denied", "access_denied"],
-    ["an error's message", "Calendar said: token abc123 is invalid", undefined],
-  ])("records a failed sign-in's reason when it is %s", async (_, reason, recorded) => {
+    ["a failure's reason code", "failed", "access_denied", "access_denied"],
+    ["a failure's error message", "failed", "Calendar said: token abc123 is invalid", undefined],
+    // Alice sent a new message, so the sign-in ended without anyone refusing it.
+    ["a withdrawal's reason", "withdrawn", "superseded-by-message", undefined],
+  ])("records an authorization reason for %s", async (_, outcome, reason, recorded) => {
     const { commit, spans } = session();
     await commit(...opening.slice(0, 2));
     await commit({
@@ -434,14 +436,16 @@ describe("a session's spans, from its committed lines", () => {
       type: "interaction.opened",
     } as SessionEvent);
     await commit({
-      data: { interactionId: "i_held", outcome: "failed", reason },
+      data: { interactionId: "i_held", outcome, reason },
       scope: turn,
       type: "interaction.settled",
     } as SessionEvent);
     await commit(turnSettled({ outcome: "completed" }));
 
     const span = (await spans()).find((each) => each.name === "agent.approval");
-    expect(span?.attributes["agent.approval.outcome"]).toBe("failed");
+    expect(span?.attributes["agent.approval.outcome"]).toBe(
+      outcome === "failed" ? "failed" : "ignored",
+    );
     expect(span?.attributes["agent.connection.authorization.reason"]).toBe(recorded);
     expect(JSON.stringify(span?.attributes)).not.toContain("abc123");
   });
