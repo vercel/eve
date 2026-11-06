@@ -213,35 +213,6 @@ export function createVercelSandbox(
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
-      /*
-       * Template-less sessions run base setup with open egress, so the policy
-       * from open() or else the environment applies only once it finishes.
-       * An existing sandbox gets it too: the open that created it may have
-       * stopped before applying it, or may still be running base setup.
-       */
-      const networkPolicy = sessionCreateOptions.networkPolicy;
-      if (artifact.snapshotId === undefined && networkPolicy !== undefined) {
-        try {
-          await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
-        } catch (error) {
-          // An existing sandbox may hold session work; failing the open keeps it unused.
-          if (!session.created) throw error;
-          try {
-            await deleteNamedVercelSandbox({
-              createOptions: sessionCreateOptions,
-              sandboxModule,
-              sandboxName: session.sandbox.name,
-            });
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              `Failed to apply network policy and discard Vercel sandbox session "${context.session.id}".`,
-              { cause: error },
-            );
-          }
-          throw error;
-        }
-      }
       return session.sandbox;
     } catch (error) {
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
@@ -262,8 +233,7 @@ export function createVercelSandbox(
 /**
  * The session's sandbox name. Sandbox names are unique within a Vercel
  * project, so the session id alone keeps it stable across deployments and
- * open options; those apply only when the sandbox is created, except a
- * template-less session's network policy, which applies after base setup.
+ * open options; those apply only when the sandbox is created.
  */
 function vercelSessionName(sessionId: string): string {
   return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;
@@ -538,11 +508,12 @@ function createSessionCreateParams(
   const createOptions: VercelCreateOptions = { ...input.createOptions };
   if (input.mounts !== undefined) createOptions.mounts = input.mounts;
   if (input.snapshotId === undefined) {
-    return withBaseSetupNetworkPolicy({
+    // Base setup only checks local runtime paths; it needs no open egress.
+    return {
       ...createOptions,
       name: sandboxName,
       persistent: true,
-    });
+    };
   }
 
   /*
