@@ -54,7 +54,7 @@ import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
-import { SIGN_IN_DECLINED, signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { SIGN_IN_DECLINED, signInAttemptKey, waitingSignIn } from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
@@ -557,12 +557,13 @@ export function relay(
       case "interaction.opened": {
         if (mirror !== undefined) break;
         events.push({
-          data: {
+          // A sign-in the person already has a card for waits on that card's answer.
+          data: waitingSignIn(tables, {
             ...event.data,
             // Every relayed request names its asker; one relayed from further down names its own.
             origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
             subject: { callId: payload.callId },
-          },
+          }),
           type: "interaction.opened",
         });
         // A person answers it here, and the answer goes back the way it came.

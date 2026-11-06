@@ -363,7 +363,9 @@ export function defaultInteractionEvents(
         return;
       }
       const signIn = signInOf(view, data.interactionId);
-      if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
+      // One waiting on a card already shown completes with that card's answer.
+      if (signIn !== undefined && signIn.waitsOn === undefined)
+        await showSlackSignIn(signIn, ctx.channel);
     },
 
     async "response.admitted"({ data }, ctx) {

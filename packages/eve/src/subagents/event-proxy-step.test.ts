@@ -4,7 +4,12 @@ import { authHookToken } from "#harness/authorization.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { localSignInCallback, ownCallbacks, signInsAnswered } from "./event-proxy-step.js";
+import {
+  localSignInCallback,
+  ownCallbacks,
+  signInsAnswered,
+  signInsEnded,
+} from "./event-proxy-step.js";
 
 const OWN = "https://v.example";
 const PARENT = { origin: OWN, sessionId: "parent" };
@@ -161,6 +166,35 @@ describe("signInsAnswered", () => {
     const view = tables([parent, bobs]);
     expect(signInsAnswered(view, answer(parent), PARENT)).toEqual([]);
     expect(signInsAnswered(view, answer(bobs), PARENT)).toEqual([]);
+  });
+
+  it("fails only the sign-ins that waited on a card that ended without an answer", () => {
+    const shown = signInRow("child-a-sign-in", "child-a", ALICE);
+    const waiting = (interactionId: string, asker: string | undefined): InteractionRow => {
+      const r = signInRow(interactionId, asker, ALICE);
+      return {
+        ...r,
+        request: { ...r.request, signIn: { ...r.request.signIn!, waitsOn: shown.interactionId } },
+      };
+    };
+    const view = tables([
+      shown,
+      waiting("child-b-sign-in", "child-b"),
+      waiting("parent-sign-in", undefined),
+      // Its own card is shown, so its own answer settles it.
+      signInRow("child-c-sign-in", "child-c", ALICE),
+    ]);
+    const ending = { interactionId: shown.interactionId, reason: "server_error" };
+    expect(signInsEnded(view, ending, PARENT)).toEqual([
+      {
+        callback: { attemptId: "attempt-a", name: "github", token: authHookToken("child-b") },
+        params: { error: "server_error" },
+      },
+      {
+        callback: { attemptId: "attempt-a", name: "github", token: authHookToken("parent") },
+        params: { error: "server_error" },
+      },
+    ]);
   });
 
   it("never settles a responder's sign-in, which settles through its own approval", () => {

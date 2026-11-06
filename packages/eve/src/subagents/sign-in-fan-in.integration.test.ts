@@ -53,7 +53,12 @@ describe("one sign-in answer for parallel children", () => {
         const after = await stream.nextUntil("parent turn", isTurnSettled);
 
         const events = [...before, ...after];
-        expect(events.filter(isSignInOpened), "sign-in cards in the parent").toHaveLength(CHILDREN);
+        const opened = events.filter(isSignInOpened);
+        expect(opened, "sign-ins the parent records").toHaveLength(CHILDREN);
+        expect(opened.filter(isShownCard), "cards the person sees").toEqual([card]);
+        expect(opened.slice(1).map(waitsOnOf), "the card the others wait on").toEqual(
+          Array.from({ length: CHILDREN - 1 }, () => signInId(card!)),
+        );
         expect(app.starts(), "sign-ins the children started").toBe(CHILDREN);
         expect(app.completes(), "sign-ins the children completed").toBe(CHILDREN);
         expect(app.executions().toSorted()).toEqual(["Lisbon 0", "Lisbon 1", "Lisbon 2"]);
@@ -135,7 +140,7 @@ describe("one sign-in answer for parallel children", () => {
     });
   });
 
-  it("leaves the other children's sign-ins open when one fails, and the next sign-in completes them", async () => {
+  it("fails the sign-ins that wait on a card that fails, so none waits without a card", async () => {
     const app = await createApp("sign-in-fan-in-failed", { grant: "oauth/weather" });
 
     await app.runtime.run(async () => {
@@ -143,22 +148,17 @@ describe("one sign-in answer for parallel children", () => {
       const stream = captureEvents(run);
       try {
         const events = [...(await signInCards(stream, CHILDREN))];
-        const [failing, card, other] = events.filter(isSignInOpened);
-        await completeSignIn(failing!, { error: "server_error" });
-        events.push(...(await stream.nextUntil("failed card", isSettled(failing!))));
-        expect(signInOutcomes(events), "how each card closed").toEqual(["failed"]);
-
-        await completeSignIn(card!, { code: "oauth-code" });
+        const [card, ...waiting] = events.filter(isSignInOpened);
+        expect(waiting.map(waitsOnOf), "the card the others wait on").toEqual(
+          waiting.map(() => signInId(card!)),
+        );
+        await completeSignIn(card!, { error: "server_error" });
         events.push(...(await stream.nextUntil("parent turn", isTurnSettled)));
 
-        expect(events.filter(isSignInOpened), "sign-in cards in the parent").toHaveLength(CHILDREN);
-        expect(signInOutcomes(events).toSorted(), "how each card closed").toEqual([
-          "accepted",
-          "accepted",
-          "failed",
-        ]);
-        expect(signInOutcome(events, other!), "the card nobody answered").toBe("accepted");
-        expect(app.executions().toSorted()).toHaveLength(CHILDREN - 1);
+        expect(signInOutcomes(events), "how each sign-in closed").toEqual(
+          Array.from({ length: CHILDREN }, () => "failed"),
+        );
+        expect(app.executions(), "calls that ran").toEqual([]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -216,7 +216,7 @@ describe("one sign-in answer for parallel children", () => {
         for (const card of cards.slice(1)) await completeSignIn(card, { code: "oauth-code" });
         events.push(...(await stream.nextUntil("parent turn", isTurnSettled)));
 
-        expect(events.filter(isSignInOpened)).toHaveLength(CHILDREN);
+        expect(events.filter(isSignInOpened).filter(isShownCard), "cards").toHaveLength(CHILDREN);
         expect(app.completes()).toBe(CHILDREN);
         expect(app.executions().toSorted()).toEqual(["Lisbon 0", "Lisbon 1", "Lisbon 2"]);
       } finally {
@@ -242,6 +242,7 @@ describe("one sign-in answer for parallel children", () => {
         const after = await stream.nextUntil("parent turn", isTurnSettled);
 
         const events = [...before, ...after];
+        expect(events.filter(isSignInOpened).filter(isShownCard), "cards").toHaveLength(1);
         expect(signInOutcomes(events), "how each card closed").toEqual(
           Array.from({ length: CHILDREN + 1 }, () => "accepted"),
         );
@@ -273,6 +274,7 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const before = await signInCards(stream, CHILDREN + 1);
         const child = before.filter(isSignInOpened).find((card) => !isOwnSignIn(card));
+        expect(before.filter(isSignInOpened).filter(isShownCard), "cards").toHaveLength(1);
         await completeSignIn(child!, { code: "oauth-code" });
         const after = await stream.nextUntil("parent turn", isTurnSettled);
 
@@ -357,13 +359,6 @@ async function signInCards(
   while (events.filter(isSignInOpened).length < count)
     events.push(...(await stream.nextUntil("sign-in card", isSignInOpened)));
   return events;
-}
-
-/** How one sign-in card closed. */
-function signInOutcome(events: readonly SessionStreamEvent[], card: SessionStreamEvent) {
-  return filterEventsByType(events, "interaction.settled").find(
-    (event) => event.data.interactionId === signInId(card),
-  )?.data.outcome;
 }
 
 /** How the parent's sign-in cards closed, in the order they closed. */
@@ -581,14 +576,19 @@ function isSignInOpened(event: SessionStreamEvent): boolean {
   return event.type === "interaction.opened" && event.data.request.kind === "sign-in";
 }
 
+/** A sign-in a channel shows a card for: one that waits on no card already shown. */
+function isShownCard(card: SessionStreamEvent): boolean {
+  return waitsOnOf(card) === undefined;
+}
+
+function waitsOnOf(card: SessionStreamEvent): string | undefined {
+  if (card.type !== "interaction.opened") throw new Error("Expected a sign-in card.");
+  return card.data.request.signIn?.waitsOn;
+}
+
 /** A sign-in the parent asked itself, rather than one it relays for a child. */
 function isOwnSignIn(card: SessionStreamEvent): boolean {
   return card.type === "interaction.opened" && card.data.origin === undefined;
-}
-
-function isSettled(card: SessionStreamEvent) {
-  return (event: SessionStreamEvent) =>
-    event.type === "interaction.settled" && event.data.interactionId === signInId(card);
 }
 
 function isTurnSettled(event: SessionStreamEvent): boolean {

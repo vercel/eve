@@ -11,7 +11,7 @@ import { pendingApprovals } from "./approval-prompt.js";
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
-import { signInAttemptKey, supersededChallenges, withSignIns } from "./sign-ins.js";
+import { signInAttemptKey, supersededChallenges, waitingSignIn, withSignIns } from "./sign-ins.js";
 import {
   failedCall,
   resolveApprovalOutcome,
@@ -522,28 +522,30 @@ export function requireSignIn(
   );
   // A call a sign-in stopped stays open in its step and runs once the sign-in completes, so its
   // settlement reports how the sign-in came out (`callSignInsSettled`).
+  // A newer attempt replaces the one it supersedes.
+  const superseded = new Set(
+    supersededChallenges(view.signIns, input.challenges)
+      .map(signInInteractionId)
+      .filter((interactionId) => tables.interactions[interactionId]?.status === "open"),
+  );
   const events: SessionEvent[] = [
-    // A newer attempt replaces the one it supersedes.
-    ...supersededChallenges(view.signIns, input.challenges).flatMap((superseded) => {
-      const interactionId = signInInteractionId(superseded);
-      return tables.interactions[interactionId]?.status === "open"
-        ? [
-            interactionSettled(interactionId, "abandoned", {
-              reason: "Superseded by a newer authorization attempt.",
-            }),
-          ]
-        : [];
-    }),
-    ...opening.map((challenge) =>
-      signInOpened(challenge, {
+    ...[...superseded].map((interactionId) =>
+      interactionSettled(interactionId, "abandoned", {
+        reason: "Superseded by a newer authorization attempt.",
+      }),
+    ),
+    ...opening.map((challenge) => {
+      const opened = signInOpened(challenge, {
         // A responder's sign-in is about their answer; any other holds the turn.
         subject:
           challenge.candidateId !== undefined &&
           tables.responses[challenge.candidateId] !== undefined
             ? { responseId: challenge.candidateId }
             : { turnId },
-      }),
-    ),
+      });
+      // One a child already has a card for waits on that card's answer.
+      return { ...opened, data: waitingSignIn(tables, opened.data, superseded) };
+    }),
   ];
   const turn = withQueued(view.turn, input.queued);
   const signIns = withSignIns(view.signIns, input.challenges);

@@ -60,9 +60,12 @@ export async function emitProxiedSubagentEvent(
   if (baseUrl !== undefined) {
     const own = ownCallbacks(input.durableSession.sessionId, baseUrl);
     const tables = storedProjection(input.durableSession.state).view;
-    await settleSignIns(
-      relayedAnswers(tables, hookPayload).flatMap((answer) => signInsAnswered(tables, answer, own)),
-    );
+    await settleSignIns([
+      ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
+        signInsAnswered(tables, answer, own),
+      ),
+      ...relayedEndings(tables, hookPayload).flatMap((ending) => signInsEnded(tables, ending, own)),
+    ]);
   }
   return await commitSessionStep(
     input,
@@ -153,6 +156,49 @@ function relayedAnswers(
     )
       return [];
     return [{ interactionId, outcome, signIn }];
+  });
+}
+
+/** A sign-in whose card ended without an answer, and how it ended. */
+export interface SignInEnding {
+  readonly interactionId: string;
+  readonly reason: string;
+}
+
+/** The relayed sign-ins this session mirrors for the child that ended without an answer. */
+function relayedEndings(
+  tables: SessionView,
+  payload: SubagentInteractionHookPayload,
+): readonly SignInEnding[] {
+  return payload.events.flatMap((event) => {
+    if (event.type !== "interaction.settled") return [];
+    const { interactionId, outcome } = event.data;
+    if (outcome === "accepted" || outcome === "declined") return [];
+    const ended = tables.interactions[interactionId];
+    if (
+      ended?.status !== "open" ||
+      ended.request.signIn === undefined ||
+      !("callId" in ended.subject) ||
+      ended.subject.callId !== payload.callId
+    )
+      return [];
+    return [{ interactionId, reason: event.data.reason ?? outcome }];
+  });
+}
+
+/**
+ * The open sign-ins that waited on `ending`'s card (`waitsOn`): no card was shown for them, so
+ * they fail with it, as their own card's failure would, and their askers may ask again.
+ */
+export function signInsEnded(
+  tables: SessionView,
+  ending: SignInEnding,
+  own: OwnCallbacks,
+): readonly AnsweredSignIn[] {
+  return Object.values(tables.interactions).flatMap((row) => {
+    if (row.status !== "open" || row.request.signIn?.waitsOn !== ending.interactionId) return [];
+    const callback = localSignInCallback(row, own);
+    return callback === undefined ? [] : [{ callback, params: { error: ending.reason } }];
   });
 }
 

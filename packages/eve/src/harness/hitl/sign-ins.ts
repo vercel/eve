@@ -1,8 +1,11 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
+import type {
+  InteractionOpenedData,
+  SignInChallenge,
+} from "#protocol/session-events/families/interaction.js";
 import { activeTurnIdOf, type SessionProjection } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
-import type { InteractionRow } from "#protocol/session-projection/tables.js";
+import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 
 // Which sign-in attempts replace which. Pure: the session state that holds them is
 // `requests.ts`'s.
@@ -131,6 +134,37 @@ export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge)
     callbackOrigin(left.callbackUrl) !== undefined &&
     callbackOrigin(left.callbackUrl) === callbackOrigin(right.callbackUrl)
   );
+}
+
+/**
+ * A sign-in opening with the attempt it waits on: the open one for the same grant and principal
+ * the person already has a card for (`sameRelayedSignIn`), other than the ones in `closing`. Its
+ * record and callback stay, and the answer to that card completes it too. A responder's sign-in
+ * is about its own answer, so it always has its own card.
+ */
+export function waitingSignIn(
+  view: SessionView,
+  data: InteractionOpenedData,
+  closing: ReadonlySet<string> = new Set(),
+): InteractionOpenedData {
+  const signIn = data.request.signIn;
+  if (signIn === undefined || signIn.waitsOn !== undefined || "responseId" in data.subject)
+    return data;
+  const shown = Object.values(view.interactions).find(
+    (row) =>
+      row.status === "open" &&
+      !closing.has(row.interactionId) &&
+      !("responseId" in row.subject) &&
+      row.request.signIn !== undefined &&
+      row.request.signIn.waitsOn === undefined &&
+      sameRelayedSignIn(row.request.signIn, signIn),
+  );
+  return shown === undefined
+    ? data
+    : {
+        ...data,
+        request: { ...data.request, signIn: { ...signIn, waitsOn: shown.interactionId } },
+      };
 }
 
 function callbackOrigin(url: string | undefined): string | undefined {

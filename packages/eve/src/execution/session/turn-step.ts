@@ -6,6 +6,7 @@ import {
   ownCallbacks,
   settleSignIns,
   signInsAnswered,
+  signInsEnded,
   type SignInAnswer,
 } from "#subagents/event-proxy-step.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
@@ -215,7 +216,15 @@ async function runSessionStepBody(
         await settleSignIns(
           matches.flatMap(({ challenge, result }) => {
             const answer = ownSignInAnswer(tables, challenge, result.callback);
-            return answer === undefined ? [] : signInsAnswered(tables, answer, own);
+            if (answer !== undefined) return signInsAnswered(tables, answer, own);
+            const error = result.callback.params["error"];
+            return error === undefined
+              ? []
+              : signInsEnded(
+                  tables,
+                  { interactionId: signInInteractionId(challenge), reason: error },
+                  own,
+                );
           }),
         );
       }
