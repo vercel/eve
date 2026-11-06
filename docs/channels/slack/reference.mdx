@@ -348,6 +348,19 @@ While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a 
 
 Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` in a sensitive tool before it changes anything.
 
+#### Read Slack's action token
+
+Slack sends a short-lived `action_token` with some messages. Its data access APIs, such as `assistant.search.context`, take it to act for the person who wrote the message. eve reads it from the event, including the copy Slack nests under `assistant_thread`, into `message.actionToken`:
+
+```ts title="agent/channels/slack.ts"
+onAppMention(ctx, message) {
+  const token = message.actionToken; // undefined when Slack sent none
+  // ...
+}
+```
+
+eve keeps the token out of `defaultSlackAuth` and channel state. Auth attributes are saved with the session and forwarded with the principal to remote agents and MCP connections that set `forwardPrincipal`, so copy the token only to where the call that needs it can read it.
+
 #### Continue conversations without repeated mentions
 
 Use `onMessage` to answer mentions, code channel messages, and DMs, and to follow threads that already have an eve session:
