@@ -4,6 +4,7 @@ import { IconChevronRightSmall } from "@vercel/geistdocs/assets/icons";
 import { Badge } from "@vercel/geistdocs/components/badge";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
+import { PrefetchLink } from "./section";
 
 /** What a dynamic file gives each plan, or null where the plan doesn't get it. */
 export interface PlanResults {
@@ -114,15 +115,18 @@ const FEATURES = [
   {
     title: "Static",
     text: "Plain files that stay the same for every session. Most of an agent never needs more.",
+    doc: { label: "Project Structure", href: "/docs/concepts/project-structure" },
   },
   {
     title: "Dynamic",
     // Every kind of file can be dynamic, not only the ones this example makes dynamic.
     text: "Instructions, skills, tools, subagents, connections, and models can all resolve per session.",
+    doc: { label: "Dynamic Capabilities", href: "/docs/guides/dynamic-capabilities" },
   },
   {
     title: "Multi-tenant",
     text: "One agent serves every customer, each with the plan, data, and access that fits them.",
+    doc: { label: "Multi-Tenant Auth", href: "/docs/patterns/multi-tenant-auth" },
   },
 ];
 
@@ -286,7 +290,16 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         {FEATURES.map((feature) => (
           <li className="flex flex-col gap-1" key={feature.title}>
             <span className="font-[450] text-copy-16 text-gray-1000">{feature.title}</span>
-            <span className="text-pretty text-copy-16 text-gray-900">{feature.text}</span>
+            <span className="text-pretty text-copy-16 text-gray-900">
+              {feature.text} See{" "}
+              <PrefetchLink
+                className="whitespace-nowrap text-gray-1000 underline decoration-gray-alpha-400 underline-offset-4 hover:decoration-gray-1000"
+                href={feature.doc.href}
+              >
+                {feature.doc.label}
+              </PrefetchLink>
+              .
+            </span>
           </li>
         ))}
       </ul>
