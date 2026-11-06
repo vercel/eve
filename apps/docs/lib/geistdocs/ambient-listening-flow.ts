@@ -1,52 +1,70 @@
-export type AmbientBranch = {
-  /** The check or condition at this step. */
-  readonly label: string;
-  /** Where this check lives in code, such as a hook or option. */
-  readonly where?: string;
-  /** What happens when this branch is taken. A step with children has none. */
-  readonly result?: string;
-  /** Renders the result as code, such as a tool name. */
+type AmbientOutcome = {
+  readonly when: string;
+  readonly result: string;
+  readonly detail: string;
   readonly code?: boolean;
-  readonly children?: readonly AmbientBranch[];
 };
 
-export const ambientListeningRoot = "Slack message without a mention";
+type AmbientCheck = {
+  readonly label: string;
+  readonly where: string;
+  readonly question: string;
+  readonly stop: AmbientOutcome;
+  readonly proceed: string;
+};
 
-export const ambientListeningFlow: readonly AmbientBranch[] = [
-  {
-    label: "Not in a followed thread or watched channel",
-    where: "onMessage",
-    result: "ignored",
-  },
-  {
-    label: "Decision model: clearly not for the agent?",
-    where: "decide",
-    result: "skipped, no turn",
-  },
-  {
-    label: "Agent's model, with guidance and goals",
+export const ambientListeningFlow: {
+  readonly root: string;
+  readonly checks: readonly AmbientCheck[];
+  readonly agent: {
+    readonly label: string;
+    readonly where: string;
+    readonly context: string;
+    readonly outcomes: readonly AmbientOutcome[];
+  };
+} = {
+  root: "Slack message without a mention",
+  checks: [
+    {
+      label: "Route the message",
+      where: "onMessage",
+      question: "Followed thread or watched channel?",
+      stop: { when: "No", result: "Ignore", detail: "No model call" },
+      proceed: "Yes",
+    },
+    {
+      label: "Screen for relevance",
+      where: "decide",
+      question: "Clearly not for the agent?",
+      stop: { when: "Yes", result: "Skip", detail: "No agent turn" },
+      proceed: "No, unsure, or filter error",
+    },
+  ],
+  agent: {
+    label: "Let the agent decide",
     where: 'status: "deferred"',
-    children: [
-      { label: "A reply is warranted", result: "answers in the thread" },
-      { label: "It isn't", result: "no_reply", code: true },
+    context: "Uses instructions, guidance, and channel goals.",
+    outcomes: [
+      { when: "Reply warranted", result: "Answer in the thread", detail: "Visible reply" },
+      { when: "Otherwise", result: "no_reply", detail: "Silent end to the turn", code: true },
     ],
   },
-];
-
-function renderBranch(branch: AmbientBranch, depth: number): string[] {
-  const indent = "  ".repeat(depth);
-  const where = branch.where ? ` (\`${branch.where}\`)` : "";
-  const result = branch.result ? `: ${branch.code ? `\`${branch.result}\`` : branch.result}` : "";
-  return [
-    `${indent}- ${branch.label}${where}${result}`,
-    ...(branch.children ?? []).flatMap((child) => renderBranch(child, depth + 1)),
-  ];
-}
+};
 
 export function renderAmbientListeningFlowMarkdown(): string {
+  const { root, checks, agent } = ambientListeningFlow;
   return [
-    `${ambientListeningRoot}:`,
+    `${root}:`,
     "",
-    ...ambientListeningFlow.flatMap((branch) => renderBranch(branch, 0)),
+    ...checks.flatMap((check, index) => [
+      `${index + 1}. **${check.label}** (\`${check.where}\`): ${check.question}`,
+      `   - ${check.stop.when}: ${check.stop.result}. ${check.stop.detail}.`,
+      `   - ${check.proceed}: continue.`,
+    ]),
+    `${checks.length + 1}. **${agent.label}** (\`${agent.where}\`): ${agent.context}`,
+    ...agent.outcomes.map(
+      (outcome) =>
+        `   - ${outcome.when}: ${outcome.code ? `\`${outcome.result}\`` : outcome.result}. ${outcome.detail}.`,
+    ),
   ].join("\n");
 }

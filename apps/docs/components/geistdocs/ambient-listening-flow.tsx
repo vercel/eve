@@ -1,64 +1,89 @@
+import { IconArrowDown } from "@vercel/geistdocs/assets/icons";
 import type { JSX } from "react";
-import {
-  type AmbientBranch,
-  ambientListeningFlow,
-  ambientListeningRoot,
-} from "@/lib/geistdocs/ambient-listening-flow";
+import { ambientListeningFlow } from "@/lib/geistdocs/ambient-listening-flow";
 
-function Branches({ branches }: { branches: readonly AmbientBranch[] }): JSX.Element {
+function StageHeader({
+  number,
+  label,
+  where,
+}: {
+  number: number;
+  label: string;
+  where: string;
+}): JSX.Element {
   return (
-    <ul className="m-0! ml-2! list-none p-0!">
-      {branches.map((branch, index) => {
-        const last = index === branches.length - 1;
-        return (
-          <li key={branch.label} className={`relative m-0! pt-3 pl-7 ${last ? "" : "pb-0"}`}>
-            <span
-              aria-hidden
-              className={`absolute top-0 left-0 w-px bg-gray-alpha-500 ${last ? "h-[23px]" : "h-full"}`}
-            />
-            <span aria-hidden className="absolute top-[22px] left-0 h-px w-5 bg-gray-alpha-500" />
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-copy-14 text-gray-1000">{branch.label}</span>
-              {branch.where ? (
-                <code className="bg-transparent! p-0! text-copy-13! text-gray-900!">
-                  {branch.where}
-                </code>
-              ) : null}
-              {branch.result ? (
-                <span className="flex items-baseline gap-2">
-                  <span aria-hidden className="text-copy-14 text-gray-700">
-                    →
-                  </span>
-                  {branch.code ? (
-                    <code className="bg-transparent! p-0! font-medium text-copy-13! text-gray-1000!">
-                      {branch.result}
-                    </code>
-                  ) : (
-                    <span className="font-medium text-copy-14 text-gray-1000">{branch.result}</span>
-                  )}
-                </span>
-              ) : null}
-            </div>
-            {branch.children ? <Branches branches={branch.children} /> : null}
-          </li>
-        );
-      })}
-    </ul>
+    <div className="flex items-start gap-2.5">
+      <span
+        aria-hidden
+        className="flex size-5 shrink-0 items-center justify-center rounded-full border border-gray-alpha-500 font-mono text-copy-13 text-gray-900"
+      >
+        {number}
+      </span>
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="font-medium text-copy-14 text-gray-1000">{label}</span>
+        <code className="font-mono text-copy-13 text-gray-900">{where}</code>
+      </div>
+    </div>
   );
 }
 
-/**
- * Shows how an unmentioned message moves through free checks, the decision
- * model, and the agent's own judgment, as a tree of outcomes.
- */
 export function AmbientListeningFlow(): JSX.Element {
+  const { root, checks, agent } = ambientListeningFlow;
   return (
     <figure
       aria-label="How an ambient agent decides whether to reply"
-      className="my-8 w-full min-w-0 rounded-xl border border-gray-alpha-400 bg-background-100 p-5 sm:p-6"
+      className="not-prose my-8 w-full min-w-0 rounded-xl border border-gray-alpha-400 bg-background-200 p-4 sm:p-6"
     >
-      <span className="font-medium text-copy-14 text-gray-1000">{ambientListeningRoot}</span>
-      <Branches branches={ambientListeningFlow} />
+      <figcaption className="mb-5 text-center font-medium text-copy-14 text-gray-1000">
+        {root}
+      </figcaption>
+      <ol className="m-0 list-none p-0">
+        {checks.map((check, index) => (
+          <li key={check.where}>
+            <div className="grid grid-cols-[minmax(0,1fr)_24px_minmax(0,0.65fr)] items-center gap-1 sm:gap-2">
+              <div className="min-w-0 rounded-lg border border-gray-alpha-500 bg-background-100 p-3 sm:p-4">
+                <StageHeader number={index + 1} label={check.label} where={check.where} />
+                <div className="mt-3 text-copy-13 text-gray-900">{check.question}</div>
+              </div>
+              <span aria-hidden className="flex justify-center text-gray-700">
+                <IconArrowDown size={16} className="-rotate-90" />
+              </span>
+              <div className="min-w-0 rounded-lg border border-dashed border-gray-alpha-500 p-3 sm:p-4">
+                <div className="text-copy-13 text-gray-900">{check.stop.when}</div>
+                <div className="mt-1 font-medium text-copy-14 text-gray-1000">
+                  {check.stop.result}
+                </div>
+                <div className="mt-1 text-copy-13 text-gray-900">{check.stop.detail}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_24px_minmax(0,0.65fr)] gap-1 sm:gap-2">
+              <div className="flex flex-col items-center gap-1 py-2.5 text-center text-copy-13 text-gray-900">
+                <span>{check.proceed}</span>
+                <IconArrowDown aria-hidden size={16} className="text-gray-700" />
+              </div>
+            </div>
+          </li>
+        ))}
+        <li className="rounded-lg border border-gray-alpha-500 bg-background-100 p-3 sm:p-4">
+          <StageHeader number={checks.length + 1} label={agent.label} where={agent.where} />
+          <div className="mt-3 text-copy-13 text-gray-900">{agent.context}</div>
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-gray-alpha-400 pt-4">
+            {agent.outcomes.map((outcome) => (
+              <div key={outcome.result} className="min-w-0">
+                <div className="text-copy-13 text-gray-900">{outcome.when}</div>
+                <div className="mt-1 font-medium text-copy-14 text-gray-1000">
+                  {outcome.code ? (
+                    <code className="font-mono text-copy-13">{outcome.result}</code>
+                  ) : (
+                    outcome.result
+                  )}
+                </div>
+                <div className="mt-1 text-copy-13 text-gray-900">{outcome.detail}</div>
+              </div>
+            ))}
+          </div>
+        </li>
+      </ol>
     </figure>
   );
 }
