@@ -2019,6 +2019,66 @@ The extension also supports inline screenshots, session naming, proxies, and pro
       },
     ],
   },
+  "agent-desktop": {
+    logo: "agent-desktop",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop",
+    keywords: [
+      "desktop",
+      "desktop automation",
+      "computer use",
+      "accessibility",
+      "at-spi",
+      "linux",
+      "xvfb",
+      "gui",
+      "screenshots",
+    ],
+    install: `Install the agent-desktop extension for eve:
+
+\`\`\`bash
+eve add extension/agent-desktop
+\`\`\`
+
+The extension does not install anything at tool time. Install agent-desktop, a headless Linux desktop, and the apps the agent should operate in your sandbox environment's \`prepare\` callback. Include \`AGENT_DESKTOP_REVALIDATION_KEY\` in the environment options so the prepared template rebuilds when the package's agent-desktop version or desktop packages change:
+
+\`\`\`ts title="agent/sandbox.ts"
+import { AGENT_DESKTOP_REVALIDATION_KEY, installAgentDesktop } from "@eve/agent-desktop/sandbox";
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  env: { AGENT_DESKTOP_REVALIDATION_KEY },
+  prepare: async (sandbox) => {
+    await installAgentDesktop(sandbox, { extraPackages: ["gnome-calculator"] });
+  },
+});
+
+export default defineSandbox(() => environment.open());
+\`\`\`
+
+It requires an apt-based Linux sandbox (Ubuntu 24.04 or later) with root or passwordless sudo.`,
+    quickStart: `Mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/desktop.ts"
+import desktop from "@eve/agent-desktop";
+
+export default desktop({});
+\`\`\`
+
+The filename supplies the \`desktop\` namespace. The extension adds tools such as \`desktop__launch\`, \`desktop__snapshot\`, \`desktop__find\`, \`desktop__click\`, \`desktop__type\`, and \`desktop__screenshot\`, plus instructions for the observe, act, and verify loop. The tools read native accessibility trees, act on element refs, and start a headless desktop on display \`:100\` when a session needs one, so the extension can be mounted beside \`eve/extensions/computer-use\`.`,
+    configure: `Actions are headless by default and use accessibility APIs without moving the pointer. Turn on physical input only when the agent may use it:
+
+\`\`\`ts title="agent/extensions/desktop.ts"
+import desktop from "@eve/agent-desktop";
+
+export default desktop({
+  headed: true,
+  inlineScreenshots: true,
+});
+\`\`\`
+
+Pointer tools, such as \`desktop__hover\`, \`desktop__drag\`, and \`desktop__scroll\`, refuse without \`headed: true\`. Errors keep agent-desktop's retry guidance, so the model only retries when the CLI says retrying is safe. Use the extension's per-tool overrides to require approval for actions such as closing apps. See the [agent-desktop eve extension documentation](https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop) for sandbox preparation, configuration, and tool overrides.`,
+  },
   link: {
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",

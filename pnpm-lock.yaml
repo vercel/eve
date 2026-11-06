@@ -437,6 +437,9 @@ importers:
       '@eve/agent-browser':
         specifier: workspace:*
         version: link:../../packages/eve-agent-browser
+      '@eve/agent-desktop':
+        specifier: workspace:*
+        version: link:../../packages/eve-agent-desktop
       '@getdial/chat-sdk-adapter':
         specifier: 0.2.0
         version: 0.2.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
