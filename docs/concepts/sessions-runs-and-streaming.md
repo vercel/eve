@@ -222,56 +222,9 @@ OpenAI's `cyber_policy` and `bio_policy` refusals also fail only their turn, wit
 
 ## Query session state
 
-`SessionView` from `eve/events` is an opaque, immutable snapshot derived from the stream. Read it with queries:
+Whenever you have a `SessionView`, use selectors from `eve/events` to inspect session state instead of reconstructing it from events. The same selectors work in evals, hooks, channel handlers, dynamic capabilities, and clients.
 
-```ts
-import { activeTurn, call, calls, openInteractions, usage } from "eve/events";
-
-const currentTurn = activeTurn(agent.view);
-const tools = calls(agent.view, { kind: "tool", turnId: currentTurn?.turnId });
-const pending = openInteractions(agent.view);
-const totals = usage(agent.view);
-const observed = call(agent.view, callId);
-if (observed?.state === "failed") console.error(observed.error.message);
-```
-
-`callOutputSource(view, callId)` returns the call that produced a call's output. `call(view, callId)?.output` already follows `outputOf`, so use `callOutputSource` when you need the producing call itself, such as its `callId` or label.
-
-Calls include their resolved `turnId`, `runId`, and `taskId` when known, so you don't join calls to runs to find their turn. `turns`, `deliveries`, `tasks`, `runs`, `parts`, and `children` return curated observations, and `turn`, `delivery`, `task`, and `interaction` look one up by ID. `waiting`, `activity`, and `reply` answer the status questions that built-in clients and channels use. Queries are synchronous and perform no I/O; referenced payloads stay references until explicitly read.
-
-| `waiting(view, turnId)` returns       | When                                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `{ on: "session" }`                   | The session can make progress.                                                              |
-| `{ on: "interaction", interactions }` | Answers are needed.                                                                         |
-| `{ on: "work", calls, tasks }`        | Calls or tasks hold the turn.                                                               |
-| `undefined`                           | The turn is absent or ended, or the session has ended, even if a degraded end left it open. |
-
-`openInteractions(view, { about })` filters by what holds the work:
-
-| `about`          | Includes                                                                                                     |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `{ callId }`     | The call's approval, questions relayed through it, and requests from its task.                               |
-| `{ taskId }`     | That task's requests.                                                                                        |
-| `{ turnId }`     | The turn's requests, including those of its inline calls and responses, but not ones from independent tasks. |
-| `{ responseId }` | That response.                                                                                               |
-
-Read `interaction.subject` to match the subject itself. An answered request that a response policy still weighs stays in `openInteractions` until it ends. `callState(view, callId)` distinguishes `approval` and `blocked` from running work. Both selectors return immutable observations.
-
-Query results can't change the view, and a snapshot you retain doesn't change when later events arrive. Request observations omit private sign-in callback URLs, including in `waiting`, `activity`, and `openInteractions` results. Use `callPreview(view, callId)` and `contentPreviews(view)` for transient progress held by a client or a custom fold; recorded values stay separate. Hook and channel snapshots always describe a whole recorded line.
-
-A custom reader uses the same fold:
-
-```ts
-import { emptySessionView, foldEvents, calls } from "eve/events";
-
-let view = emptySessionView();
-for await (const event of session.stream()) {
-  view = foldEvents(view, [event]);
-  render(calls(view, { kind: "tool" }));
-}
-```
-
-`foldEvents` returns a new snapshot without changing its input. It holds incomplete lines until their final event arrives and absorbs overlapping replay. The view isn't a serialization format; persist events and session cursors to reconstruct it.
+See [Session views & selectors](./session-views-and-selectors) for where to get a view, which selector answers each question, snapshot scope and completeness, and how to fold a stream yourself.
 
 ## Positions
 

@@ -59,7 +59,7 @@ interface HookBaseContext extends SessionContext {
 - `ctx.turn` is the latest turn, including one that ended, or `null` before the first turn.
 - `ctx.now` is the time eve recorded the event.
 - `ctx.memo(key, fn)` follows the [dynamic-value memo rules](./dynamic-capabilities#memo-rules).
-- `ctx.view` is a read-only snapshot of the session, taken with the event. Read what changed from the event and where things stand from the view. On `call.settled`, `call(ctx.view, event.data.callId)` from `eve/events` returns the call's name, kind, input, output, and state.
+- `ctx.view` is a read-only snapshot of the session, taken with the event. Read what changed from the event; for session state, use selectors from `eve/events` on `ctx.view` instead of reconstructing it yourself. On `call.settled`, `call(ctx.view, event.data.callId)` returns the call's name, kind, input, output, and state. See [Session views and selectors](/docs/concepts/session-views-and-selectors).
 - Hooks don't receive the assembled conversation history.
 
 For `task.started`, `task.ended`, and `child.opened`, `ctx.session.id` is the session that started the task or opened the child session, even when the event arrives between turns. These hooks can call `ctx.getSandbox()` on that session, and their state and sandbox changes carry into its next turn.
