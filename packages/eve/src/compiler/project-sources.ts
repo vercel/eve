@@ -431,6 +431,7 @@ const EXTENSION_CONTRIBUTION_ROOTS = new Set([
   "connections",
   "hooks",
   "instructions",
+  "memory",
   "schedules",
   "skills",
   "subagents",
@@ -446,6 +447,10 @@ export function qualifyExtensionContributionLogicalPath(
     const slot = stripLogicalPathExtension(logicalPath);
     if (slot === "instructions" || slot === "system") {
       return `instructions/${namespace}${logicalPath.slice(logicalPath.lastIndexOf("."))}`;
+    }
+    // A flat memory slot takes the mount's name, as a flat instructions file does.
+    if (slot === "memory") {
+      return `memory/${namespace}${logicalPath.slice(logicalPath.lastIndexOf("."))}`;
     }
     throw new Error(`Extension source slot "${logicalPath}" cannot be namespace-scoped.`);
   }

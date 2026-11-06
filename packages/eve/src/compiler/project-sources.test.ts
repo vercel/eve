@@ -17,6 +17,8 @@ describe("qualifyExtensionContributionLogicalPath", () => {
     ["hooks/audit.ts", "hooks/crm__audit.ts"],
     ["instructions.md", "instructions/crm.md"],
     ["instructions/policy.md", "instructions/crm__policy.md"],
+    ["memory.ts", "memory/crm.ts"],
+    ["memory/notes.ts", "memory/crm__notes.ts"],
     ["schedules/sync.ts", "schedules/crm__sync.ts"],
     ["skills/triage/SKILL.md", "skills/crm__triage/SKILL.md"],
     ["subagents/reviewer/agent.ts", "subagents/crm__reviewer/agent.ts"],
@@ -25,7 +27,7 @@ describe("qualifyExtensionContributionLogicalPath", () => {
     expect(qualifyExtensionContributionLogicalPath(logicalPath, "crm")).toBe(expected);
   });
 
-  it.each(["agent.ts", "instrumentation/otel.ts", "memory.ts", "sandbox.ts", "lib/http.ts"])(
+  it.each(["agent.ts", "instrumentation/otel.ts", "sandbox.ts", "lib/http.ts"])(
     "rejects unscopable slot %s",
     (logicalPath) => {
       expect(() => qualifyExtensionContributionLogicalPath(logicalPath, "crm")).toThrow(

@@ -11,7 +11,6 @@ import {
   DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
   DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
   DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
-  DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
@@ -1017,7 +1016,7 @@ describe("discoverAgent (memory)", () => {
     );
   });
 
-  it("rejects memory declared by a mounted extension", async () => {
+  it("discovers memory declared by a mounted extension", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -1025,7 +1024,7 @@ describe("discoverAgent (memory)", () => {
           eve: { extension: { source: "source", dist: "extension" } },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
-        "node_modules/@acme/crm/extension/memory.ts": "export default {};",
+        "node_modules/@acme/crm/extension/memory/notes.ts": "export default {};",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -1039,10 +1038,12 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
-    );
-    expect(sourcesOf(result.manifest.resolvedExtensions[0]!.manifest, "memory")).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      sourcesOf(result.manifest.resolvedExtensions[0]!.manifest, "memory").map(
+        ({ logicalPath, slot }) => ({ logicalPath, slot }),
+      ),
+    ).toEqual([{ logicalPath: "memory/notes.ts", slot: "notes" }]);
   });
 
   it("reports an unresolved mount when the extension package is missing", async () => {

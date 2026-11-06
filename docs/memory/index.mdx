@@ -83,8 +83,11 @@ Slots are independent. Two slots can use the same provider, and their recalled
 context and tools stay separate. The default namespace includes the slot name,
 so `profile` and `workspace` don't share memory even with the same scope value.
 
-A subagent declares its own slots under its own directory. Extensions can't add
-slots, because the agent that uses the extension decides who shares memory.
+A subagent declares its own slots under its own directory. A mounted
+[extension](/docs/extensions#add-a-memory-slot) can add slots too; the mount
+name prefixes them, so an extension's `memory/notes.ts` mounted as `crm` is the
+`crm__notes` slot. The agent can replace or turn off an extension's slot from
+its directory mount.
 
 ## Scope
 
@@ -310,7 +313,6 @@ them: a slot named `web_search` offers its tools beside the built-in `web_search
 | `Memory must use either the flat "memory.ts" form or the named "memory/" directory form, not both.` | Keep `agent/memory.ts` or `agent/memory/`, not both.                                                                         |
 | `Memory slot "<name>" must start with an ASCII letter ...`                                          | Rename the file. A slot name starts with a letter and has only letters, digits, `_`, or `-`, up to 64 characters.            |
 | `Expected the memory export "default" from "<path>" to be created with defineMemory().`             | Wrap the default export in `defineMemory()`.                                                                                 |
-| `An extension may not declare memory ...`                                                           | Remove `memory/` from the extension, and declare the slot in the agent that uses the extension.                              |
 | `Memory slot is disabled for this operation` in `eve dev` logs                                      | The slot's `scope` or `namespace` returned `null`; `resolver` in the log says which. The log never includes the scope value. |
 
 ## Memory and session state

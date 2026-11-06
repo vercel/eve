@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-09-01"
+last_updated: "2026-11-06"
 ---
 
 # First-class memory
@@ -1114,7 +1114,13 @@ nothing in `capture`, or return `null` from `tools`.
 A provider package exports a `MemoryProvider` or provider factory. It may own
 credentials, remote APIs, migrations, retrieval, capture, and model tools. The
 consuming agent owns the slot path, namespace, scope, tool suppression, and
-recall visibility. Mounted extensions cannot contribute memory slots.
+recall visibility. A mounted extension may also declare memory slots under its
+own `memory/`; the mount namespace qualifies each slot like any other
+contribution (`memory/notes.ts` mounted as `crm` is slot `crm__notes`, and a
+flat `memory.ts` is slot `crm`), so its provider tools, default namespace, and
+item identity stay distinct per mount. The consuming agent keeps control
+through ordinary composition: a directory-mount override replaces the slot, and
+a `null` scope or namespace disables it.
 
 ## Design invariants
 

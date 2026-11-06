@@ -12,7 +12,6 @@ import {
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
-  DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
   locateExtensionMount,
@@ -113,12 +112,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
  * one fails discovery, and the declaration is dropped.
  */
 const CONSUMER_OWNED = [
-  {
-    code: DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
-    kind: "memory",
-    message:
-      "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
-  },
   {
     code: DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
     kind: "sandbox",

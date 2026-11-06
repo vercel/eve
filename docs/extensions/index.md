@@ -3,7 +3,7 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-An extension is a package of eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
+An extension is a package of eve tools, channels, connections, skills, schedules, subagents, memory slots, instruction fragments, and hooks. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
 
 To add a ready-made extension with `eve add`, see [Add Integrations](/docs/install-integrations).
 
@@ -30,6 +30,7 @@ The command creates the package with `extension/extension.ts`, TypeScript config
     skills/triage/SKILL.md
     schedules/sync.ts
     subagents/reviewer/agent.ts
+    memory/notes.ts
     instructions.md
     hooks/audit.ts
     lib/http.ts
@@ -39,11 +40,32 @@ Each directory accepts the same static and dynamic forms as in an agent. For exa
 
 Names come from paths, so call the tool `search`, not `crm_search`. The agent's mount adds a prefix such as `crm__`; see [Mount it](#mount-it).
 
-The extension root can't declare agent configuration, instrumentation,
-[memory](/docs/memory), a sandbox, or nested extensions, because the agent that
-mounts the extension decides those. A subagent under `extension/subagents/` has
-its own agent configuration, memory, and sandbox like any other
+The extension root can't declare agent configuration, instrumentation, a
+sandbox, or nested extensions, because the agent that mounts the extension
+decides those. A subagent under `extension/subagents/` has its own agent
+configuration, memory, and sandbox like any other
 [declared subagent](/docs/subagents).
+
+### Add a memory slot
+
+Declare [memory](/docs/memory) under `extension/memory/` or as a flat `extension/memory.ts`, as in an agent. Each file default-exports `defineMemory(...)` with a provider and a scope:
+
+```ts title="extension/memory/notes.ts"
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+import { notesMemory } from "../lib/notes-memory";
+
+export default defineMemory({
+  description: "CRM notes the caller has asked the agent to remember.",
+  provider: notesMemory(),
+  scope: byPrincipal,
+});
+```
+
+The mount prefixes the slot like any other contribution: mounting the extension as `crm` makes `memory/notes.ts` the `crm__notes` slot, and a flat `memory.ts` the `crm` slot. The provider's tools follow the slot name, such as `crm__notes__forget`. The default namespace includes the slot name, so two mounts of the same package keep separate memory. To export a provider without declaring a slot, export its factory from the package and let agents bind it themselves; see [Build a Memory Provider](/docs/memory/custom-provider).
+
+The agent that mounts the extension still decides who shares memory. It can replace the slot with its own `memory/notes.ts` in a [directory mount](#override-a-contribution), or return `null` from that slot's `scope` or `namespace` to turn it off.
 
 ### Add configuration and contributions
 
@@ -193,7 +215,7 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 
 Set `CRM_API_KEY` in the agent's environment, such as `.env.local` for local development.
 
-The mount adds `crm__` to each name: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their route paths, and schedules keep their cron expressions.
+The mount adds `crm__` to each name: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, `memory/notes.ts` becomes the `crm__notes` slot, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their route paths, and schedules keep their cron expressions.
 
 Don't name a mount after one of the agent's connections. A [connection reserves](/docs/connections) every name that starts with `<name>__`, so the compiler rejects the mounted tools and subagents. The name `eve` is reserved for [built-in tools](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill).
 
@@ -301,7 +323,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A channel, tool, connection, skill, schedule, or subagent in your mount directory with the same name replaces the extension's. To adjust an extension tool, import it from the package's `./tools` export and define it again:
+A channel, tool, connection, skill, schedule, memory slot, or subagent in your mount directory with the same name replaces the extension's. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";

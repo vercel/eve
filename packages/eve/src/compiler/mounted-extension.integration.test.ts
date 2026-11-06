@@ -507,6 +507,81 @@ describe("mounted extension via authored-source loader", () => {
 });
 
 /**
+ * An extension's memory slots mount like its tools: the mount name prefixes each slot, so the
+ * provider's tools and default namespace stay distinct per mount, and a directory mount can replace
+ * a slot.
+ */
+describe("mounted extension memory", () => {
+  it("prefixes extension memory slots with the mount name and lets a directory mount replace one", async () => {
+    const memoryModule = (description: string) =>
+      [
+        'import { defineMemory } from "eve/memory";',
+        'import { defineTool } from "eve/tools";',
+        "export default defineMemory({",
+        `  description: ${JSON.stringify(description)},`,
+        "  provider: {",
+        '    recall: { "turn.started": async () => null },',
+        "    tools: async () => ({",
+        "      forget: defineTool({",
+        '        description: "Forget a note.",',
+        "        inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
+        "        execute: async () => ({ forgotten: true }),",
+        "      }),",
+        "    }),",
+        "  },",
+        '  scope: "workspace",',
+        "});",
+        "",
+      ].join("\n");
+    const app = await createAppRoot("eve-mounted-extension-memory-", {
+      files: {
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "You are a precise assistant.",
+        "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";',
+        "agent/extensions/sales/extension.mjs": 'export { default } from "@acme/crm";',
+        "agent/extensions/sales/memory/notes.mjs": memoryModule("Sales notes."),
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
+        "node_modules/@acme/crm/extension/extension.mjs":
+          'import { defineExtension } from "eve/extension";\nexport default defineExtension();',
+        "node_modules/@acme/crm/extension/memory/notes.mjs": memoryModule("CRM notes."),
+      },
+    });
+
+    const { graph, manifest } = await compileRuntimeGraph(app.appRoot);
+
+    expect(
+      compiledOf(manifest, "memory").map(({ description, logicalPath, slug }) => ({
+        description,
+        logicalPath,
+        slug,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        { description: "CRM notes.", logicalPath: "memory/crm__notes.mjs", slug: "crm__notes" },
+        {
+          description: "Sales notes.",
+          logicalPath: "memory/sales__notes.mjs",
+          slug: "sales__notes",
+        },
+      ]),
+    );
+    expect(compiledOf(manifest, "memory")).toHaveLength(2);
+    expect(
+      declared(graph.root.agent, "memory")
+        .map(({ slot }) => slot)
+        .sort(),
+    ).toEqual(["crm__notes", "sales__notes"]);
+  });
+});
+
+/**
  * A no-config extension (`defineExtension()`, no schema) mounted with a bare
  * re-export — no factory call. Proves config is optional end to end through the
  * dev/eval loader.
