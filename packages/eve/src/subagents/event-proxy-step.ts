@@ -16,7 +16,9 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
+import { authHookToken } from "#harness/authorization.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
@@ -53,7 +55,8 @@ export async function emitProxiedSubagentEvent(
   // The other children hear a sign-in's answer before the relay commits: a delivery that fails
   // fails this step, and its retry delivers them again from the same state.
   const tables = storedProjection(input.durableSession.state).view;
-  await Promise.all(answeredSignIns(tables, hookPayload).map(settleChildSignIn));
+  const answered = answeredSignIns(tables, hookPayload, await ownCallbackOrigin());
+  await Promise.all(answered.map(settleChildSignIn));
   return await commitSessionStep(
     input,
     (view) => [relay(view, { payload: hookPayload, runId, workflowAsk })],
@@ -72,19 +75,47 @@ export async function emitProxiedSubagentEvent(
 
 /** A child's open sign-in to settle with the answer another child's sign-in got. */
 interface AnsweredSignIn {
-  readonly callbackUrl: string;
+  readonly callback: { readonly name: string; readonly attemptId: string; readonly token: string };
   readonly params: Readonly<Record<string, string>>;
+}
+
+/** The origin this deployment's own sign-in callback URLs use, or `undefined` outside a workflow. */
+async function ownCallbackOrigin(): Promise<string | undefined> {
+  const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
+  const url = getWorkflowMetadata().url;
+  return typeof url === "string" ? new URL(resolveWorkflowCallbackBaseUrl(url)).origin : undefined;
+}
+
+/**
+ * The callback of a sign-in this deployment's own child session asked: its URL is on this
+ * deployment's origin and names that session's inbox. A remote child's callback belongs to its own
+ * deployment's world, and the parent never resumes a hook a child's URL merely names.
+ */
+export function localChildCallback(
+  row: Pick<InteractionRow, "origin" | "request">,
+  ownOrigin: string,
+): AnsweredSignIn["callback"] | undefined {
+  const callbackUrl = row.request.signIn?.callbackUrl;
+  if (callbackUrl === undefined || row.origin === undefined || !URL.canParse(callbackUrl))
+    return undefined;
+  const url = new URL(callbackUrl);
+  if (url.origin !== ownOrigin) return undefined;
+  const callback = parseEveConnectionCallbackRoutePath(url.pathname);
+  return callback?.token === authHookToken(row.origin.sessionId) ? callback : undefined;
 }
 
 /**
  * The other children's open sign-ins the person's answer in `payload` settles: an acceptance or a
  * decline of a sign-in this session mirrors, for the same Connect grant and principal
- * (`sameRelayedSignIn`). A failure is its asker's to retry, so it settles only its own row.
+ * (`sameRelayedSignIn`), asked by a child on this deployment (`localChildCallback`). A failure is
+ * its asker's to retry, so it settles only its own row. Any other row keeps its own card.
  */
 function answeredSignIns(
   tables: SessionView,
   payload: SubagentInteractionHookPayload,
+  ownOrigin: string | undefined,
 ): readonly AnsweredSignIn[] {
+  if (ownOrigin === undefined) return [];
   return payload.events.flatMap((event) => {
     if (event.type !== "interaction.settled") return [];
     const { interactionId, outcome } = event.data;
@@ -103,15 +134,15 @@ function answeredSignIns(
     const params: AnsweredSignIn["params"] =
       outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
     return Object.values(tables.interactions).flatMap((row) => {
-      const callbackUrl = row.request.signIn?.callbackUrl;
-      return row.interactionId !== interactionId &&
-        row.status === "open" &&
-        row.origin !== undefined &&
-        row.request.signIn !== undefined &&
-        callbackUrl !== undefined &&
-        sameRelayedSignIn(row.request.signIn, signIn)
-        ? [{ callbackUrl, params }]
-        : [];
+      if (
+        row.interactionId === interactionId ||
+        row.status !== "open" ||
+        row.request.signIn === undefined ||
+        !sameRelayedSignIn(row.request.signIn, signIn)
+      )
+        return [];
+      const callback = localChildCallback(row, ownOrigin);
+      return callback === undefined ? [] : [{ callback, params }];
     });
   });
 }
@@ -121,10 +152,7 @@ function answeredSignIns(
  * attempt in its own turn and settles it under its own principal, reading what Connect holds for
  * it after an acceptance. The params carry only the answer, never a code or a credential.
  */
-async function settleChildSignIn({ callbackUrl, params }: AnsweredSignIn): Promise<void> {
-  const callback = parseEveConnectionCallbackRoutePath(new URL(callbackUrl).pathname);
-  if (callback === undefined)
-    throw new Error(`A child's sign-in callback URL names no attempt: ${callbackUrl}`);
+async function settleChildSignIn({ callback, params }: AnsweredSignIn): Promise<void> {
   const payload: AuthorizationCallbackPayload = {
     kind: "authorization-callback",
     payloads: [
