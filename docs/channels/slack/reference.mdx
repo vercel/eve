@@ -143,6 +143,8 @@ message_ts: 1700000000.000004
 | `"immediate"` (default) | The `received` acknowledgement when the message arrives, then the thread status through the turn  |
 | `"deferred"`            | Nothing until the turn's first tool call finishes; a turn that ends with `no_reply` shows nothing |
 
+A call to a tool with [`label: false`](/docs/tools#label-tool-activity) shows no status and doesn't count as that first call, so a deferred turn that only adds a reaction and ends with `no_reply` stays silent.
+
 - Mentions and DMs outside code channels get the `received` acknowledgement, `Thinking...` by default, before their hook runs. `"deferred"` keeps the rest of their turn quiet but can't take the acknowledgement back.
 - When several messages start one turn, the turn is quiet only if all of them are deferred. A message that isn't deferred and joins a quiet turn shows the status from then on.
 - [Edits](#message-edits) are always deferred. `status` on an `onMessageEdited` result has no effect.

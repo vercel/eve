@@ -14,6 +14,7 @@ import {
   isFrameworkTool,
   isInteractionOnly,
 } from "#tools/provided/framework-tool.js";
+import { labelCallbacks } from "#tools/definition.js";
 
 const definition: CompiledToolDefinition = {
   description: "Deploy a project.",
@@ -88,13 +89,36 @@ describe("resolveToolDefinition", () => {
       { kind: "application" },
     );
 
-    expect(resolved.label?.start?.({ environment: "production" })).toBe("Deploy to production");
-    expect(
-      resolved.label?.complete?.({ environment: "production" }, { url: "https://example.com" }),
-    ).toBe("Deployed to https://example.com");
-    expect(resolved.label?.delta?.({ environment: "production" }, { phase: "Uploading" })).toBe(
-      "Uploading",
+    expect(labelCallbacks(resolved.label)?.start?.({ environment: "production" })).toBe(
+      "Deploy to production",
     );
+    expect(
+      labelCallbacks(resolved.label)?.complete?.(
+        { environment: "production" },
+        { url: "https://example.com" },
+      ),
+    ).toBe("Deployed to https://example.com");
+    expect(
+      labelCallbacks(resolved.label)?.delta?.(
+        { environment: "production" },
+        { phase: "Uploading" },
+      ),
+    ).toBe("Uploading");
+  });
+  it("keeps label: false, which hides the tool's calls from activity", async () => {
+    const resolved = await resolveToolDefinition(
+      definition,
+      moduleMap({
+        label: false,
+        description: definition.description,
+        execute: () => null,
+        inputSchema: { type: "object" },
+      }),
+      undefined,
+      { kind: "application" },
+    );
+
+    expect(resolved.label).toBe(false);
   });
 });
 

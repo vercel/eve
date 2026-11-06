@@ -59,6 +59,11 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
 }
 
+/** A tool's label callbacks, or `undefined` when it defines none or sets `label: false`. */
+export function labelCallbacks<T extends object>(label: T | false | undefined): T | undefined {
+  return label === false ? undefined : label;
+}
+
 /**
  * Internal/compiled tool definition shape. Carries `name` because the
  * compiler stamps a path-derived identifier onto every tool entry.
@@ -74,7 +79,7 @@ export interface InternalToolLabelDefinition {
 
 export interface InternalToolDefinition extends ToolDefinitionBase {
   readonly endsTurn?: ToolDefinition["endsTurn"];
-  label?: InternalToolLabelDefinition;
+  label?: InternalToolLabelDefinition | false;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
@@ -97,7 +102,11 @@ export interface PublicToolDefinition<
   TInput = unknown,
   TOutput = unknown,
 > extends ToolDefinitionBase {
-  label?: ToolLabelDefinition<TInput, TOutput>;
+  /**
+   * Activity text for each call. `false` keeps the tool's calls out of activity: channels show no
+   * status for them, and a call doesn't end a quiet turn's silence.
+   */
+  label?: ToolLabelDefinition<TInput, TOutput> | false;
   inputSchema: PublicToolInputSchema<TInput>;
   /**
    * Optional schema describing the value returned by the tool executor.
@@ -436,7 +445,7 @@ export function stampToolDefinition<
     readonly inputSchema?: unknown;
     readonly outputSchema?: unknown;
     readonly execute?: (...args: never[]) => unknown;
-    readonly label?: ToolLabelDefinition;
+    readonly label?: ToolLabelDefinition | false;
     readonly approval?: Approval<never>;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },

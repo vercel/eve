@@ -203,7 +203,14 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(requestCall({ action, owner: { runId }, label: projection.presentationLabel }));
+    await emitFn(
+      requestCall({
+        action,
+        owner: { runId },
+        label: projection.presentationLabel,
+        hidden: projection.hidden,
+      }),
+    );
   };
 
   const collectProviderToolCall = async (toolCall: {

@@ -11,6 +11,7 @@ import {
   AGENT_TOOL_NAME,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
+import { labelCallbacks } from "#tools/definition.js";
 
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
@@ -123,7 +124,7 @@ async function createNodeWithSourceOwnedTools(input: {
 describe("createNodeHarnessTools", () => {
   it("adds the framework label start callback to provider-managed web search", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
-    const label = createNodeHarnessTools({ node }).get("web_search")?.label?.start;
+    const label = labelCallbacks(createNodeHarnessTools({ node }).get("web_search")?.label)?.start;
 
     expect(label?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
   });
@@ -134,7 +135,9 @@ describe("createNodeHarnessTools", () => {
       owner: { kind: "application" },
     });
 
-    expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
+    expect(
+      labelCallbacks(createNodeHarnessTools({ node }).get("web_search")?.label)?.start,
+    ).toBeUndefined();
   });
 
   it("lowers the compiled framework agent tool as a workflow tool", async () => {

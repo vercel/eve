@@ -13,6 +13,7 @@ import {
   type FakeConnection,
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { labelCallbacks } from "#tools/definition.js";
 
 interface SearchOutput {
   readonly remaining: number;
@@ -88,7 +89,7 @@ describe("search", () => {
   it("labels a search with its query, then with how much it found", async () => {
     const { catalog, run } = await catalogContext({ skills, tools });
     const search = catalog.advertised.get(SEARCH_TOOL_NAME)!;
-    const label = search.label!;
+    const label = labelCallbacks(search.label)!;
     const found = await run(() => search.execute!({ query: "refund" }, OPTIONS));
 
     expect(label.start!({ query: "refund" })).toBe("Search tools for “refund”");

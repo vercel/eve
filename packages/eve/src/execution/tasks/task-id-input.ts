@@ -44,7 +44,10 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
     ),
     inputSchema: withTaskIdSchema(schema),
   };
-  if (!agent || definition.label?.start !== undefined) return described;
+  // `label: false` keeps the call out of activity, so it gets no label either.
+  if (!agent || definition.label === false || definition.label?.start !== undefined) {
+    return described;
+  }
   return {
     ...described,
     label: { ...definition.label, start: (input) => agentCallLabel(definition.name, input) },

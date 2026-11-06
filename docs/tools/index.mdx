@@ -197,6 +197,21 @@ export default defineTool({
 
 The label changes only what users see, not the tool name, input, or behavior. eve records it on the call's public action event, so channels show `Deploy storefront to production` and stream consumers can read it. If the callback throws or returns an empty label, activity shows the tool name in readable form, such as `Sync accounts` for `sync_accounts`.
 
+Set `label: false` for housekeeping calls that aren't worth showing, such as adding an emoji reaction:
+
+```ts title="agent/tools/react.ts"
+export default defineTool({
+  description: "React to the message with an emoji.",
+  inputSchema: z.object({ emoji: z.string() }),
+  label: false,
+  async execute({ emoji }) {
+    return react(emoji);
+  },
+});
+```
+
+The call's `capability` carries `hidden: true` and no label. Channels show no status for it, the same way they treat `eve__task_wait` and `eve__task_cancel`, and the call doesn't end a quiet turn's silence, such as a Slack message delivered with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. The call stays in the session's events and history.
+
 The provided `bash`, `edit_file`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
 
 - An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5`.

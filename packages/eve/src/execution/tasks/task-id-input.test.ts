@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { withTaskIdInput } from "#execution/tasks/task-id-input.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { labelCallbacks } from "#tools/definition.js";
 
 function agentTool(name: string): HarnessToolDefinition {
   return {
@@ -57,6 +58,8 @@ describe("agent call label", () => {
     ],
     ["falls back to the agent's name for an empty brief", "agent", "  \n", "Agent"],
   ])("%s", (_name, tool, message, expected) => {
-    expect(withTaskIdInput(agentTool(tool)).label?.start?.({ message })).toBe(expected);
+    expect(labelCallbacks(withTaskIdInput(agentTool(tool)).label)?.start?.({ message })).toBe(
+      expected,
+    );
   });
 });
