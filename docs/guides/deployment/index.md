@@ -36,10 +36,23 @@ Every production deployment needs these steps:
 2. Provide a model credential and any secrets required by tools, connections, and route authentication.
 3. Replace `placeholderAuth()` with a production route policy before accepting browser traffic.
 4. Verify the health route and complete a real agent turn.
+5. Check that the bundle stays small. See [Keep the bundle small](#keep-the-bundle-small).
 
 `eve build` always writes compiler artifacts under `.eve/`. A Vercel build also writes `.vercel/output`. A build for another host writes the eve server under `.output/`.
 
 Files in a `public/` directory at the app root are copied into the build output, and eve's host serves them as static files.
+
+## Keep the bundle small
+
+Each file under `agent/`, and everything it imports, ships in the deployed function. That code also runs when an instance starts, even when the invocation does not use it.
+
+- **Import heavy SDKs where you use them.** Load database, auth, cache, and cloud SDK clients with `await import()` in the tool, hook, or helper that calls them, not at the top of the file.
+- **Keep shared modules light.** A module that many tools, hooks, or instrumentation files import adds its imports to all of them.
+- **Use one version of each dependency.** Two versions of the same package ship and load twice. Align versions across your app's packages, and check with `pnpm why <package>`.
+- **Keep instrumentation lean.** eve loads instrumentation files first and bundles each one separately, so keep their imports small. Enable only the OpenTelemetry instrumentations you use, and import exporters that only development or evals use with `await import()`.
+- **Do no work at module scope.** Create clients, formatters, and other objects on first use, not when the module loads.
+
+Loading on first use moves the cost to the first call that needs it. It helps most for code that only some invocations reach.
 
 ## Configure credentials
 

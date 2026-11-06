@@ -41,6 +41,7 @@ export default defineTool({
 - Tool outputs must be JSON-serializable. Convert `Date`, `Map`, `Set`, `NaN`, and cyclic values before you return them.
 - Add an `outputSchema` for structured output. With Zod or Standard Schema, it also types the `execute` return.
 - Schemas can come from helper modules and be composed with Zod.
+- Import SDK clients inside `execute`, not at the top of the file. See [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 
 ### The `ctx` parameter
 

@@ -105,6 +105,8 @@ For Agent Runs sampling defaults and existing-deployment setup, see
 ## Instrument Node.js dependencies
 
 Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.
+Enable only the instrumentations you use, because each one loads when an instance starts. See
+[Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 For example, install the PostgreSQL instrumentation alongside `pg`:
 
 ```bash
