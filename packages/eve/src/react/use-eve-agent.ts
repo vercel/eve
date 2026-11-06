@@ -14,6 +14,7 @@ import {
 } from "#client/session-store.js";
 import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
+import type { ChannelCommandInfo, ChannelCommandResult } from "#client/commands.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type {
   ClientAuth,
@@ -68,6 +69,16 @@ export interface UseEveAgentReturn extends UseEveAgentSnapshot {
   readonly end: () => Promise<Delivery>;
   readonly clear: () => Promise<Delivery>;
   readonly compact: () => Promise<Delivery>;
+  /** Lists the eve channel's slash commands. Match typed text with `parseSlashCommand`. */
+  readonly commands: () => Promise<readonly ChannelCommandInfo[]>;
+  /**
+   * Runs an eve channel slash command in the current session. A command that ended the session
+   * starts a new one, and its follow-up message arrives on the stream. Show the returned `message`.
+   */
+  readonly runCommand: (
+    name: string,
+    options?: { readonly argument?: string; readonly signal?: AbortSignal },
+  ) => Promise<ChannelCommandResult>;
   /** Resolves on acceptance. Use `turnPolicy` to steer or queue during a running turn. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
@@ -247,6 +258,21 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   const end = useCallback(() => store.end(), [store]);
   const clear = useCallback(() => store.clear(), [store]);
   const compact = useCallback(() => store.compact(), [store]);
+  const commands = useCallback(() => store.commands(), [store]);
+  const runCommand = useCallback(
+    async (
+      name: string,
+      commandOptions?: { readonly argument?: string; readonly signal?: AbortSignal },
+    ) => {
+      const result = await store.runCommand(name, commandOptions);
+      // The store started a new session; prewarm it the way this hook's newSession() does.
+      if (result.ended === true) {
+        setPrewarmResetGeneration((generation) => generation + 1);
+      }
+      return result;
+    },
+    [store],
+  );
   const newSession = useCallback(() => {
     store.newSession();
     setPrewarmResetGeneration((generation) => generation + 1);
@@ -280,6 +306,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       ...visibleSnapshot,
       cancel,
       clear,
+      commands,
       compact,
       newSession,
       prewarm,
@@ -287,11 +314,13 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       respond,
       resume,
       follow,
+      runCommand,
       send,
     }),
     [
       cancel,
       clear,
+      commands,
       compact,
       follow,
       newSession,

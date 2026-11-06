@@ -15,6 +15,7 @@ import {
 } from "#client/session-store.js";
 import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
+import type { ChannelCommandInfo, ChannelCommandResult } from "#client/commands.js";
 import type {
   ClientAuth,
   HeadersValue,
@@ -78,6 +79,16 @@ export interface UseEveAgentReturn {
   readonly end: () => Promise<Delivery>;
   readonly clear: () => Promise<Delivery>;
   readonly compact: () => Promise<Delivery>;
+  /** Lists the eve channel's slash commands. Match typed text with `parseSlashCommand`. */
+  readonly commands: () => Promise<readonly ChannelCommandInfo[]>;
+  /**
+   * Runs an eve channel slash command in the current session. A command that ended the session
+   * starts a new one, and its follow-up message arrives on the stream. Show the returned `message`.
+   */
+  readonly runCommand: (
+    name: string,
+    options?: { readonly argument?: string; readonly signal?: AbortSignal },
+  ) => Promise<ChannelCommandResult>;
   /** Submits a message and resolves on acceptance, not execution. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
@@ -224,6 +235,8 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     newSession: () => store.newSession(),
     clear: () => store.clear(),
     compact: () => store.compact(),
+    commands: () => store.commands(),
+    runCommand: (name, commandOptions) => store.runCommand(name, commandOptions),
     respond: <TOutput = unknown>(
       answers: Parameters<ClientSession["respond"]>[0],
       options?: RespondTurnOptions<TOutput>,

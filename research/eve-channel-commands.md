@@ -21,6 +21,8 @@ The work lands as a stack:
 2. `/new`, `/clear`, and `/compact` move onto the API as `sessionCommands`, the eve channel's
    default commands. This shows the API can express what the built-ins did. `/cancel` stays with
    each client, which knows the turn it's showing.
+3. The browser gets the same commands: `useEveAgent` lists and runs them, and the Web Chat
+   template offers them from its composer.
 
 Slack is deliberately out of scope for now; see [Later](#later).
 
@@ -133,6 +135,19 @@ export default eveChannel({
 - **Running:** the TUI runs a channel command in its current session when it has one. A
   `session: "required"` command answers locally before the first message.
 - **Cancelling:** Esc and Ctrl+C still cancel a turn directly, whatever commands the agent offers.
+
+## Browser
+
+- `useEveAgent` (React, Vue, Svelte) adds `commands()` and `runCommand(name, { argument })`, backed
+  by `SessionStore`. `runCommand` waits for a session still being created, runs the command in it,
+  follows the `delivery` eve sent for it, and calls `newSession()` when the result has `ended`.
+  A result that lands after another `newSession()` isn't applied.
+- `parseSlashCommand(text, commands)` from `eve/client` reads typed text as a listed command, by
+  name or alias. UIs own presentation: the result's `message` isn't added to `messages`.
+- The Web Chat template offers commands only when the page opts in with `<AgentChat commands />`, so
+  an agent's defaults never appear in a deployed chat unannounced. When on, it loads commands on mount, suggests matches while `/name` is typed (Tab
+  completes the first), runs matches instead of sending them, shows `message` in the conversation,
+  and moves the URL to `/s` in place when a command ended the session.
 
 ## Extensions
 

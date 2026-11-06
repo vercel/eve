@@ -27,7 +27,7 @@ export function tuiDriver(): ClientDriver {
   return {
     name: "tui",
     // A local terminal shows only the person at it.
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["buttons", "slash-commands", "text-replies"],
     surface: "private",
     async open(host, wait) {
       // Wide enough that no reply wraps, so each one stays on one screen row.
