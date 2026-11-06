@@ -114,7 +114,7 @@ function Tag({
 const FEATURES = [
   {
     title: "Static",
-    text: "Plain files that stay the same for every session. Most of an agent never needs more.",
+    text: "Build agents from files in a directory, and each file's path determines how eve loads it.",
     href: "/docs/concepts/project-structure",
   },
   {
