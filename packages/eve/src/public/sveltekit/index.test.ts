@@ -2,10 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfigEnv, Plugin, UserConfig } from "vite";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { resolveFrameworkAgents } from "#shared/framework-agents.js";
 import { ensureEveVercelServicesConfig } from "#shared/vercel-services.js";
 
 import { eveSvelteKit } from "./index.js";
 import { resolveSharedEveDevServer } from "./dev-server.js";
+
+vi.mock("#shared/framework-agents.js", () => ({
+  resolveFrameworkAgents: vi.fn(async (appRoot: string) => [
+    {
+      appRoot,
+      publicRoutePrefix: "",
+      transportRoutePrefix: "/eve/v1",
+    },
+  ]),
+}));
 
 vi.mock("./dev-server.js", () => ({
   EVE_BASE_URL_ENV: "EVE_BASE_URL",
@@ -18,6 +29,7 @@ vi.mock("#shared/vercel-services.js", () => ({
 }));
 
 const resolveSharedEveDevServerMock = vi.mocked(resolveSharedEveDevServer);
+const resolveFrameworkAgentsMock = vi.mocked(resolveFrameworkAgents);
 const ensureEveVercelServicesConfigMock = vi.mocked(ensureEveVercelServicesConfig);
 
 type ConfigHook = (config: UserConfig, env: ConfigEnv) => unknown;
@@ -61,6 +73,53 @@ describe("eveSvelteKit", () => {
       },
     });
   });
+
+  it.each([undefined, "https://agents.example.com"])(
+    "proxies workspace routes with EVE_BASE_URL=%s",
+    async (baseUrl) => {
+      vi.stubEnv("EVE_BASE_URL", baseUrl);
+      resolveFrameworkAgentsMock.mockResolvedValueOnce([
+        {
+          appRoot: "/repo/agents/billing",
+          name: "billing",
+          publicRoutePrefix: "/eve/billing",
+          transportRoutePrefix: "/eve/billing/v1",
+        },
+        {
+          appRoot: "/repo/agents/support",
+          name: "support",
+          publicRoutePrefix: "/eve/support",
+          transportRoutePrefix: "/eve/support/v1",
+        },
+      ]);
+      if (baseUrl === undefined) {
+        resolveSharedEveDevServerMock
+          .mockResolvedValueOnce({ origin: "http://127.0.0.1:49152" })
+          .mockResolvedValueOnce({ origin: "http://127.0.0.1:49153" });
+      }
+
+      const result = (await getConfigHook(eveSvelteKit())(
+        {},
+        { command: "serve", mode: "development" },
+      )) as UserConfig;
+
+      const billingProxy = result.server?.proxy?.["/eve/billing/v1"];
+      const supportProxy = result.server?.proxy?.["/eve/support/v1"];
+      if (baseUrl === undefined) {
+        expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith("/repo/agents/billing");
+        expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith("/repo/agents/support");
+        expect(billingProxy).toMatchObject({ target: "http://127.0.0.1:49152" });
+        expect(supportProxy).toMatchObject({ target: "http://127.0.0.1:49153" });
+        expect(
+          typeof billingProxy === "object" && billingProxy.rewrite?.("/eve/billing/v1/chat"),
+        ).toBe("/eve/v1/chat");
+      } else {
+        expect(resolveSharedEveDevServerMock).not.toHaveBeenCalled();
+        expect(billingProxy).toEqual({ changeOrigin: true, target: baseUrl });
+        expect(supportProxy).toEqual({ changeOrigin: true, target: baseUrl });
+      }
+    },
+  );
 
   it("configures Vite preview proxy and starts eve for local production preview", async () => {
     const plugin = eveSvelteKit();
@@ -112,8 +171,15 @@ describe("eveSvelteKit", () => {
 
     await getConfigHook(plugin)({}, { command: "build", mode: "production" });
 
+    const agentRoot = expect.stringMatching(/agent$/);
     expect(ensureEveVercelServicesConfigMock).toHaveBeenCalledWith({
-      appRoot: expect.stringMatching(/agent$/),
+      agents: [
+        {
+          appRoot: agentRoot,
+          publicRoutePrefix: "",
+          transportRoutePrefix: EVE_ROUTE_PREFIX,
+        },
+      ],
       eveBuildCommand: "pnpm build:eve",
       frameworkName: "SvelteKit",
       hostRoot: process.cwd(),

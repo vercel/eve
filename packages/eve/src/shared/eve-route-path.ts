@@ -3,6 +3,11 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 const EVE_NAMED_AGENT_MOUNT_PATTERN = /^\/eve\/[a-z0-9][a-z0-9_-]*$/;
 const EVE_NAMED_AGENT_PROTOCOL_PATTERN = /^\/eve\/[a-z0-9][a-z0-9_-]*\/v1$/;
 
+/** The public mount shared by framework integrations for a named agent. */
+export function createNamedAgentRoutePrefix(name: string): string {
+  return `/eve/${name}`;
+}
+
 /** Joins an internal eve route to a public target, including compact named-agent mounts. */
 export function joinEveRoutePath(basePath: string, routePath: string): string {
   const base = trimTrailingSlash(basePath);

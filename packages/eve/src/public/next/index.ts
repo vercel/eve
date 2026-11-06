@@ -6,7 +6,7 @@ import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectContext } from "#internal/project-context.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-import { joinEveRoutePath } from "#shared/eve-route-path.js";
+import { createNamedAgentRoutePrefix, joinEveRoutePath } from "#shared/eve-route-path.js";
 import { resolveDevServerTimeout } from "#shared/framework-eve-server.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import {
@@ -27,7 +27,6 @@ const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
 const DEFAULT_EVE_NEXT_PRODUCTION_PORT = 4274;
-const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve";
 
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
@@ -182,10 +181,6 @@ function normalizeRoutePrefix(prefix: string): string {
 
 function joinRoutePrefix(prefix: string, path: string): string {
   return `${prefix.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
-}
-
-function createNamedAgentRoutePrefix(name: string): string {
-  return joinRoutePrefix(EVE_NAMED_AGENT_ROUTE_PREFIX, name);
 }
 
 function createNamedAgentServicePrefix(basePrefix: string, name: string): string {

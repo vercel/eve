@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { Plugin, ResolvedConfig, UserConfig } from "vite";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { resolveFrameworkAgents, type ResolvedFrameworkAgent } from "#shared/framework-agents.js";
 import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
@@ -19,8 +20,9 @@ import { normalizeOrigin } from "./routing.js";
  */
 export interface EveSvelteKitPluginOptions {
   /**
-   * Path to the eve application root, relative to the SvelteKit project root
-   * unless absolute. Defaults to the SvelteKit project root.
+   * Path to a standalone eve app or workspace, relative to the SvelteKit project
+   * root unless absolute. Defaults to the SvelteKit project root. Workspace
+   * members mount at `/eve/<name>/v1/*` and build as separate Vercel services.
    */
   readonly eveRoot?: string;
   /**
@@ -40,24 +42,52 @@ function resolveApplicationRoot(svelteKitRoot: string, appPath: string | undefin
 
 function mergeProxyConfig(
   existingProxy: NonNullable<UserConfig["server"]>["proxy"],
-  eveTarget: string,
+  proxies: readonly {
+    readonly agent: ResolvedFrameworkAgent;
+    readonly rewriteNamedRoute: boolean;
+    readonly target: string;
+  }[],
 ): NonNullable<UserConfig["server"]>["proxy"] {
   return {
     ...existingProxy,
-    [EVE_ROUTE_PREFIX]: {
-      changeOrigin: true,
-      target: eveTarget,
-    },
+    ...Object.fromEntries(
+      proxies.map(({ agent, rewriteNamedRoute, target }) => [
+        agent.transportRoutePrefix,
+        {
+          changeOrigin: true,
+          target,
+          ...(rewriteNamedRoute
+            ? {
+                rewrite: (path: string) =>
+                  `${EVE_ROUTE_PREFIX}${path.slice(agent.transportRoutePrefix.length)}`,
+              }
+            : {}),
+        },
+      ]),
+    ),
   };
 }
 
-async function resolveEveDevProxyTarget(appRoot: string): Promise<string> {
+async function resolveEveDevProxyTargets(agents: readonly ResolvedFrameworkAgent[]): Promise<
+  readonly {
+    readonly agent: ResolvedFrameworkAgent;
+    readonly rewriteNamedRoute: boolean;
+    readonly target: string;
+  }[]
+> {
   const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
   if (configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
-    return normalizeOrigin(configuredEveBaseUrl);
+    const target = normalizeOrigin(configuredEveBaseUrl);
+    return agents.map((agent) => ({ agent, rewriteNamedRoute: false, target }));
   }
 
-  return (await resolveSharedEveDevServer(appRoot)).origin;
+  return await Promise.all(
+    agents.map(async (agent) => ({
+      agent,
+      rewriteNamedRoute: agent.name !== undefined,
+      target: (await resolveSharedEveDevServer(agent.appRoot)).origin,
+    })),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -119,8 +149,9 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
       appRoot = resolveApplicationRoot(svelteKitRoot, options.eveRoot);
 
       if (env.command === "build" && process.env.VERCEL) {
+        const agents = await resolveFrameworkAgents(appRoot);
         const configured = await ensureEveVercelServicesConfig({
-          appRoot,
+          agents,
           eveBuildCommand: options.eveBuildCommand,
           frameworkName: "SvelteKit",
           hostRoot: svelteKitRoot,
@@ -133,19 +164,20 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
         return {};
       }
 
-      const proxyTarget = await resolveEveDevProxyTarget(appRoot);
+      const agents = await resolveFrameworkAgents(appRoot);
+      const proxyTargets = await resolveEveDevProxyTargets(agents);
 
       if (env.isPreview) {
         return {
           preview: {
-            proxy: mergeProxyConfig(config.preview?.proxy, proxyTarget),
+            proxy: mergeProxyConfig(config.preview?.proxy, proxyTargets),
           },
         };
       }
 
       return {
         server: {
-          proxy: mergeProxyConfig(config.server?.proxy, proxyTarget),
+          proxy: mergeProxyConfig(config.server?.proxy, proxyTargets),
         },
       };
     },

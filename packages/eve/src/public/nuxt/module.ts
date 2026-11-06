@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { resolveFrameworkAgents, type ResolvedFrameworkAgent } from "#shared/framework-agents.js";
 import {
   resolveDevServerTimeout,
   resolveSharedEveDevServer,
@@ -31,10 +32,9 @@ export interface EveNuxtModuleOptions {
    */
   devServerTimeoutMs?: number;
   /**
-   * Path to the eve application root, resolved relative to the Nuxt project
-   * root unless absolute. Defaults to the Nuxt project root. The dev server is
-   * spawned here, and on Vercel it is the root the generated eve service
-   * builds from.
+   * Path to a standalone eve app or workspace, relative to the Nuxt project
+   * root unless absolute. Defaults to the Nuxt project root. Workspace members
+   * mount at `/eve/<name>/v1/*` and build as separate Vercel services.
    */
   eveRoot?: string;
   /**
@@ -79,22 +79,26 @@ interface NitroVercelConfigHost {
  * with the child handle so the caller can wire lifecycle-scoped cleanup.
  */
 async function resolveEveProxyTarget(input: {
-  readonly appRoot: string;
+  readonly agent: ResolvedFrameworkAgent;
   readonly dev: boolean;
+  readonly localProductionPortOffset: number;
   readonly devServerTimeoutMs?: number;
   readonly onDevServerSpawned?: (child: ChildProcess) => void;
 }): Promise<string> {
   if (!input.dev) {
-    return resolveProductionTarget();
+    return resolveProductionTarget({
+      localPortOffset: input.localProductionPortOffset,
+      routePrefix: input.agent.transportRoutePrefix,
+    });
   }
 
   const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
   if (configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
-    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), EVE_ROUTE_PREFIX);
+    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), input.agent.transportRoutePrefix);
   }
 
   const handle = await resolveSharedEveDevServer({
-    appRoot: input.appRoot,
+    appRoot: input.agent.appRoot,
     host: EVE_NUXT_HOST,
     timeoutMs: input.devServerTimeoutMs,
   });
@@ -126,6 +130,7 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   async setup(options, nuxt) {
     const nuxtRoot = nuxt.options.rootDir;
     const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
+    const agents = await resolveFrameworkAgents(appRoot);
     const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NUXT_HOST);
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
@@ -147,7 +152,7 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
     // integration.
     if (!nuxt.options.dev && process.env.VERCEL) {
       const configured = await ensureEveVercelServicesConfig({
-        appRoot,
+        agents,
         eveBuildCommand: options.eveBuildCommand,
         frameworkName: "Nuxt",
         hostRoot: nuxtRoot,
@@ -168,26 +173,29 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
       // the proxy route rule is registered in time while other modules' setup
       // isn't blocked behind the spawn.
       nuxt.hook("modules:done", async () => {
-        const proxyTarget = await resolveEveProxyTarget({
-          appRoot,
-          dev: nuxt.options.dev,
-          devServerTimeoutMs,
-          onDevServerSpawned: (child) => {
-            // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
-            // down on graceful shutdown and dev restarts. The process-exit
-            // guard in framework-eve-server.ts remains as a fallback for non-graceful
-            // exits.
-            nuxt.hook("close", () => {
-              if (!child.killed) {
-                child.kill();
-              }
+        await Promise.all(
+          agents.map(async (agent, index) => {
+            const proxyTarget = await resolveEveProxyTarget({
+              agent,
+              dev: nuxt.options.dev,
+              localProductionPortOffset: index,
+              devServerTimeoutMs,
+              onDevServerSpawned: (child) => {
+                // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
+                // down on graceful shutdown and dev restarts. The process-exit
+                // guard in framework-eve-server.ts remains as a fallback for non-graceful
+                // exits.
+                nuxt.hook("close", () => {
+                  if (!child.killed) child.kill();
+                });
+              },
             });
-          },
-        });
 
-        extendRouteRules(`${EVE_ROUTE_PREFIX}/**`, {
-          proxy: `${proxyTarget}/**`,
-        });
+            extendRouteRules(`${agent.transportRoutePrefix}/**`, {
+              proxy: `${proxyTarget}/**`,
+            });
+          }),
+        );
       });
     }
   },

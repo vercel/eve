@@ -3,7 +3,7 @@ title: "Nuxt"
 description: "Run an eve agent and a Nuxt app as one project with the eve/nuxt module."
 ---
 
-The `eve/nuxt` module runs a Nuxt frontend and an eve agent as one project, with one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so you configure no CORS or URL env vars.
+The `eve/nuxt` module runs a Nuxt frontend and an eve agent as one project, with one browser origin and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so you configure no CORS or URL env vars.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ export default defineNuxtConfig({
 });
 ```
 
-The module looks for an `agent/` folder in the Nuxt project root. Pass `eveRoot` when the agent lives elsewhere:
+The module looks for an `agent/` folder or an `agents/` workspace in the Nuxt project root. Pass `eveRoot` when the eve project lives elsewhere:
 
 ```ts
 export default defineNuxtConfig({
@@ -50,6 +50,23 @@ export default defineNuxtConfig({
   },
 });
 ```
+
+## Mount a workspace
+
+Point `eveRoot` at an [eve workspace](../../concepts/project-structure#several-root-agents), or omit it when Nuxt runs from the workspace root:
+
+```text
+project/
+├── package.json
+├── nuxt.config.ts
+└── agents/
+    ├── billing/agent/
+    └── support/agent/
+```
+
+The module discovers members without their own `package.json`. Each member gets a public transport route, such as `/eve/support/v1/*`. Select it with `useEveAgent({ agent: "support" })`. An empty workspace fails with an error asking you to add an agent. Pointing `eveRoot` at one member instead mounts it as a standalone agent at `/eve/v1/*`.
+
+In development, each member runs in its own shared eve server. If you set `EVE_BASE_URL`, that server must expose all named member routes. Vercel builds generate one service per member.
 
 ## Call the composable
 
@@ -84,8 +101,8 @@ The browser still needs a production authentication policy. See [Authenticate br
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Concurrent Nuxt processes for the same eve root share one eve dev server. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
-- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds, the module adds an eve [service](https://vercel.com/docs/services) and routes `/eve/v1/**` to it before filesystem routing. The Nuxt app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the agent root, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Concurrent Nuxt processes share each agent's eve dev server. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
+- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds, the module adds an eve [service](https://vercel.com/docs/services) per agent before filesystem routing. Standalone agents use `/eve/v1/**`; workspace members use `/eve/<name>/v1/**`. The Nuxt app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the agent root, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineNuxtConfig({
@@ -102,11 +119,13 @@ The browser still needs a production authentication policy. See [Authenticate br
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   ```
 
+  For a workspace, the local ports increase from `EVE_NUXT_PRODUCTION_PORT` (default `4274`) in agent-name order. Run each member separately on its assigned port. If you set `EVE_NUXT_PRODUCTION_ORIGIN`, that origin must expose all named routes instead.
+
   `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, the two outputs overwrite each other. Build and serve eve from a separate directory instead, and set `eveRoot` to it. See [Self-host eve](../deployment/self-hosting) for running the eve service.
 
 ## Managing vercel.json yourself
 
-When `vercel.json` declares [`services`](https://vercel.com/docs/services), the module generates nothing, and your configuration controls routing. It must include the eve service (`framework: "eve"`) and a rewrite that sends `/eve/v1/*` requests to it, or the module fails the build:
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the module generates nothing, and your configuration controls routing. A missing eve service (`framework: "eve"`) fails the build. Add a rewrite that sends `/eve/v1/*` requests to it:
 
 ```json title="vercel.json"
 {
@@ -117,6 +136,10 @@ When `vercel.json` declares [`services`](https://vercel.com/docs/services), the 
   "rewrites": [{ "source": "/eve/v1/(.*)", "destination": { "service": "eve" } }]
 }
 ```
+
+For a workspace, prefer generated services. To author the full service graph instead, use [`withEve` from `eve/vercel`](../deployment/vercel#compose-agents-with-other-vercel-services) in a root `vercel.ts`. That composition configures named routes, service-scoped path transforms, and public callback prefixes together. Changing only the service names and rewrites in the single-agent example is not sufficient.
+
+A standalone service can use any key when its framework is `"eve"`.
 
 ### Remove `experimentalServices`
 
