@@ -28,15 +28,23 @@ export async function executeSearch(input: SearchInput, turn: SlackTurn) {
   const outcome = await searchSlack(turn.request, { ...input, actionToken: turn.actionToken });
   if ("tokenExpired" in outcome) return TOKEN_EXPIRED;
 
-  const allowed = await Promise.all(
-    outcome.matches.map((match) =>
-      // A match without a channel cannot be checked against the policy, so it is withheld.
-      match.channelId
-        ? turn.authorize({ tool: "search", channelId: match.channelId })
-        : Promise.resolve(false),
-    ),
+  // One policy call per channel, not per match; a match without a channel can't be checked, so
+  // it is withheld.
+  const channelIds = [
+    ...new Set(outcome.matches.flatMap((match) => (match.channelId ? [match.channelId] : []))),
+  ];
+  const allowedIds = new Set(
+    (
+      await Promise.all(
+        channelIds.map(async (channelId) =>
+          (await turn.authorize({ tool: "search", channelId })) ? [channelId] : [],
+        ),
+      )
+    ).flat(),
   );
-  const matches: SlackSearchMatch[] = outcome.matches.filter((_, index) => allowed[index]);
+  const matches: SlackSearchMatch[] = outcome.matches.filter(
+    (match) => match.channelId !== undefined && allowedIds.has(match.channelId),
+  );
   const withheld = outcome.matches.length - matches.length;
   const page = { query: outcome.query, matches, nextCursor: outcome.nextCursor };
   if (withheld === 0) return page;

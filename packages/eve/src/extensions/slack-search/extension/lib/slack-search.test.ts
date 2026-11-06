@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 
@@ -86,6 +86,20 @@ describe("slackTurn", () => {
     await expect(turn.authorize({ tool: "search", channelId: "C0OPEN000" })).resolves.toBe(true);
     await expect(turn.authorize({ tool: "search", channelId: "C0CLOSED0" })).resolves.toBe(false);
   });
+
+  it("tells the model to wait when Slack rate limits a call", async () => {
+    const auth = buildSlackAuthContext({ actionToken: "a", channelId: "C0", userId: "U0ALICE" });
+    const turn = slackTurn(auth, {
+      credentials: { botToken: "xoxb" },
+      api: {
+        fetch: async () => Response.json({ ok: false, error: "ratelimited" }, { status: 429 }),
+      },
+    });
+
+    await expect(executeSearch({ query: "q" }, turn)).rejects.toThrow(
+      "Slack rate limited assistant.search.context. Wait before calling it again.",
+    );
+  });
 });
 
 describe("executeSearch", () => {
@@ -97,22 +111,28 @@ describe("executeSearch", () => {
           messages: [
             { channel_id: "C0OPEN000", content: "ship it", permalink: "https://x/p1" },
             { channel_id: "C0CLOSED0", content: "secret", permalink: "https://x/p2" },
+            { channel_id: "C0CLOSED0", content: "secret 2", permalink: "https://x/p3" },
           ],
         },
       },
     });
+    const checked: (string | undefined)[] = [];
     const result = await executeSearch(
       { query: "launch on:2026-01-01 plan", onDate: "2026-11-05" },
       turnWith(slack.request, {
-        authorize: async ({ channelId }) => channelId === "C0OPEN000",
+        authorize: async ({ channelId }) => {
+          checked.push(channelId);
+          return channelId === "C0OPEN000";
+        },
       }),
     );
 
     expect(slack.calls[0]!.body.query).toBe("launch plan on:2026-11-05");
     expect(result).toMatchObject({
       matches: [{ channelId: "C0OPEN000", text: "ship it", permalink: "https://x/p1" }],
-      withheld: 1,
+      withheld: 2,
     });
+    expect(checked).toEqual(["C0OPEN000", "C0CLOSED0"]);
   });
 
   it("reports an expired action token as the end of search for the turn", async () => {
@@ -137,6 +157,10 @@ describe("executeSearch", () => {
 });
 
 describe("readSlackConversation", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const options = { workspace: "T0READ", authorize: async () => true };
 
   it.each([
@@ -202,6 +226,33 @@ describe("readSlackConversation", () => {
       nextCursor: "page-2",
       messages: [{ userId: "U0ALICE", text: "forwarded decision" }],
     });
+  });
+
+  it("lists the workspace's channels again after a few minutes, so a renamed channel drops out", async () => {
+    vi.useFakeTimers();
+    let channels = [{ id: "C0LAUNCHA", name: "rename-me" }];
+    const slack = fakeSlack({
+      "conversations.info": { ok: true, channel: { is_member: true } },
+      "conversations.history": { ok: true, messages: [] },
+    });
+    const request: SlackRequest = (operation, body) =>
+      operation === "conversations.list"
+        ? Promise.resolve({ ok: true, channels })
+        : slack.request(operation, body);
+    const read = () =>
+      readSlackConversation(
+        request,
+        { channel: "rename-me" },
+        { ...options, workspace: "T0RENAME" },
+      );
+
+    await expect(read()).resolves.toMatchObject({ channel: { id: "C0LAUNCHA" } });
+    channels = [
+      { id: "C0LAUNCHA", name: "renamed" },
+      { id: "C0LAUNCHB", name: "rename-me" },
+    ];
+    vi.advanceTimersByTime(6 * 60_000);
+    await expect(read()).resolves.toMatchObject({ channel: { id: "C0LAUNCHB" } });
   });
 
   it("rejects a time window that ends before it starts", async () => {

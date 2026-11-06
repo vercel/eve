@@ -8,11 +8,13 @@ export type SlackRequest = (
   body: Record<string, unknown>,
 ) => Promise<SlackApiResponse>;
 
+type SlackErrorBody = { readonly error?: string; readonly needed?: string };
+
 /** A Slack response with `ok: false`, carrying Slack's error code. */
 export class SlackCallError extends Error {
   readonly code: string;
 
-  constructor(operation: string, response: SlackApiResponse) {
+  constructor(operation: string, response: SlackErrorBody) {
     const code = response.error ?? "unknown_error";
     super(slackErrorMessage(operation, code, response));
     this.name = "SlackCallError";
@@ -20,7 +22,7 @@ export class SlackCallError extends Error {
   }
 }
 
-function slackErrorMessage(operation: string, code: string, response: SlackApiResponse): string {
+function slackErrorMessage(operation: string, code: string, response: SlackErrorBody): string {
   switch (code) {
     case "missing_scope":
       return `Slack ${operation} needs a bot token scope the app does not have (needed: ${response.needed ?? "unknown"}). Add the scope to the Slack app and reinstall it.`;
@@ -36,7 +38,20 @@ async function call(
   operation: string,
   body: Record<string, unknown>,
 ): Promise<SlackApiResponse & Record<string, unknown>> {
-  const response = await request(operation, body);
+  let response: SlackApiResponse;
+  try {
+    response = await request(operation, body);
+  } catch (error) {
+    // Slack answers a rate limit with HTTP 429, which the transport throws with Slack's JSON body.
+    const slackBody = isRecord(error) ? error.response : undefined;
+    if (isRecord(slackBody) && slackBody.ok === false) {
+      throw new SlackCallError(operation, {
+        error: str(slackBody.error),
+        needed: str(slackBody.needed),
+      });
+    }
+    throw error;
+  }
   if (response.ok !== true) throw new SlackCallError(operation, response);
   return response as SlackApiResponse & Record<string, unknown>;
 }
@@ -222,20 +237,19 @@ const CHANNEL_LIST_DEADLINE_MS = 30_000;
 const CHANNEL_LIST_TTL_MS = 5 * 60_000;
 
 interface ChannelDirectory {
-  readonly idByName: Map<string, string>;
-  listedAt: number;
-  complete: boolean;
+  readonly idByName: ReadonlyMap<string, string>;
+  readonly listedAt: number;
+  /** False when the page cap or deadline cut the listing short. */
+  readonly complete: boolean;
 }
 
 const directories = new Map<string, ChannelDirectory>();
 
-async function listPublicChannels(
-  request: SlackRequest,
-  directory: ChannelDirectory,
-): Promise<void> {
+async function listPublicChannels(request: SlackRequest): Promise<ChannelDirectory> {
   const deadline = Date.now() + CHANNEL_LIST_DEADLINE_MS;
+  const idByName = new Map<string, string>();
   let cursor: string | undefined;
-  directory.complete = false;
+  let complete = false;
   for (let page = 0; page < CHANNEL_LIST_PAGES && Date.now() < deadline; page++) {
     const response = await call(request, "conversations.list", {
       types: "public_channel",
@@ -246,18 +260,21 @@ async function listPublicChannels(
     for (const channel of records(response.channels)) {
       const id = str(channel.id);
       const name = str(channel.name);
-      if (id && name) directory.idByName.set(name.toLowerCase(), id);
+      if (id && name) idByName.set(name.toLowerCase(), id);
     }
     cursor = nextCursor(response);
     if (!cursor) {
-      directory.complete = true;
+      complete = true;
       break;
     }
   }
-  directory.listedAt = Date.now();
+  return { idByName, listedAt: Date.now(), complete };
 }
 
-/** Resolves a public channel name to its ID, listing the workspace's channels at most every few minutes. */
+/**
+ * Resolves a public channel name to its ID. The workspace's channel list is reused for a few
+ * minutes and then listed again from scratch, so renamed and archived channels drop out.
+ */
 async function findPublicChannelId(
   request: SlackRequest,
   rawName: string,
@@ -266,14 +283,9 @@ async function findPublicChannelId(
   const name = rawName.trim().replace(/^#/, "").toLowerCase();
   if (!name) return { complete: true };
   let directory = directories.get(workspace);
-  if (!directory) {
-    directory = { idByName: new Map(), listedAt: 0, complete: false };
+  if (!directory || Date.now() - directory.listedAt > CHANNEL_LIST_TTL_MS) {
+    directory = await listPublicChannels(request);
     directories.set(workspace, directory);
-  }
-  const cached = directory.idByName.get(name);
-  if (cached) return { id: cached, complete: true };
-  if (Date.now() - directory.listedAt > CHANNEL_LIST_TTL_MS) {
-    await listPublicChannels(request, directory);
   }
   return { id: directory.idByName.get(name), complete: directory.complete };
 }
