@@ -3,9 +3,9 @@ title: "Ambient Listening in Slack"
 description: "Let an eve agent hear Slack messages that don't mention it and decide for itself when to speak, with a decision model that filters out clearly unintended messages to save cost."
 ---
 
-An ambient agent hears channel messages that don't mention it and decides for itself whether to speak. It picks up the follow-up meant for it and the question nobody answered, and stays quiet through everything else.
+An ambient agent monitors channel messages and decides for itself whether to speak. It picks up the follow-up meant for it and the question nobody answered, and stays quiet through everything else.
 
-The agent's own model makes that call. It reads the message with the conversation around it, applies your instructions, and either answers or ends the turn silently. eve provides the pieces:
+A decision model screens out messages that clearly aren't for the agent. The agent evaluates the rest in context, then either answers or ends the turn silently. eve provides the pieces:
 
 - **`onMessage`** receives messages that don't mention the agent. `ctx.isSubscribed()` says whether the agent is already in the thread.
 - **`status: "deferred"`** shows nothing in the thread until the agent actually does something.
@@ -17,17 +17,7 @@ This pattern builds on [Reply without a mention](../channels/slack#reply-without
 
 ## How it works
 
-```text
-Slack message without a mention
-  │
-  ├─ Not in a followed thread or watched channel ──→ ignored
-  │
-  ├─ Decision model: clearly not for the agent? ──→ skipped, no turn
-  │
-  └─ Agent's model, with guidance and goals
-       ├─ a reply is warranted ──→ answers in the thread
-       └─ it isn't ──→ no_reply, nothing posted
-```
+<AmbientListeningFlow />
 
 The decision model and the agent answer different questions:
 
@@ -37,7 +27,7 @@ The decision model and the agent answer different questions:
 | Cost        | One small call with a few hundred tokens | A full turn: instructions, tools, and history |
 | When unsure | Lets the message through                 | Calls `no_reply`                              |
 
-The decision model only saves cost. Letting a message through doesn't mean the agent replies: the agent still reasons about whether a reply is warranted, and most ambient turns end in `no_reply`. Nobody in Slack sees them.
+The decision model determines whether a message is worth reviewing further, which saves cost, and the agent reasons about whether a reply is warranted. Most ambient turns end in `no_reply`.
 
 ## Teach the agent when to speak
 
@@ -195,6 +185,8 @@ The state is the message plus up to ten earlier replies in its thread. That's en
 
 ## Wire the Slack channel
 
+This example uses Slack, but the same pattern applies to any [channel](../channels). It matters most in multiplayer channels, where several people talk and most messages aren't for the agent.
+
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
@@ -278,3 +270,13 @@ Every message the filter skips saves a full agent turn. Every message it skips w
 - **Keep a labeled set.** Save reviewed messages with the outcome you wanted, and replay them before changing the threshold, a question, or the decision model. Use [evals](../evals) to check that the agent calls `no_reply` for messages it should stay out of.
 
 Roll out a new goal, instruction change, or threshold to one channel first, and watch it for a few days before you add it everywhere.
+
+## Next steps
+
+Ambient listening works because the agent does the judging. eve delivers each message without a trace, your instructions and goals say when to speak, and `no_reply` keeps silence invisible. The decision model keeps it affordable by skipping what's clearly not for the agent.
+
+Start with one watched channel and the `unanswered-question` goal, then read the `ambient.filter` logs and the agent's replies for a week before you widen it. From there:
+
+- See the [Slack channel reference](../channels/slack/reference) for every message hook option, `guidance`, and `threadContext`.
+- See [Automatic Model Selection](../guides/decide) for how `decide` works and which decision models it supports.
+- Use [evals](../evals) to check that the agent stays quiet when it should and answers when it should.
