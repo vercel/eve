@@ -31,4 +31,13 @@ describe("parseEveConnectionCallbackRoutePath", () => {
     ])
       expect(parseEveConnectionCallbackRoutePath(path)).toBeUndefined();
   });
+
+  it("reads nothing from a path whose name, attempt or token is malformed percent-encoding", () => {
+    for (const path of [
+      "/eve/v1/connections/%ZZ/callback/attempt-a/token",
+      "/eve/v1/connections/github/callback/%E0%A4%A/token",
+      "/eve/v1/connections/github/callback/attempt-a/%",
+    ])
+      expect(parseEveConnectionCallbackRoutePath(path), path).toBeUndefined();
+  });
 });

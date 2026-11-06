@@ -48,5 +48,11 @@ describe("localChildCallback", () => {
   it("never resumes a callback URL it cannot read", () => {
     expect(localChildCallback(row("not a url"), OWN)).toBeUndefined();
     expect(localChildCallback(row(`${OWN}/somewhere/else`), OWN)).toBeUndefined();
+    for (const path of [
+      "/eve/v1/connections/%ZZ/callback/attempt-a/token",
+      "/eve/v1/connections/github/callback/%ZZ/token",
+      `/eve/v1/connections/github/callback/attempt-a/%ZZ${authHookToken("child-a")}`,
+    ])
+      expect(localChildCallback(row(`${OWN}${path}`), OWN), path).toBeUndefined();
   });
 });

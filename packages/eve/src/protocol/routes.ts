@@ -213,11 +213,21 @@ export function parseEveConnectionCallbackRoutePath(
   const [connections, name, callback, attemptId, token] = segments.slice(-5);
   if (connections !== "connections" || callback !== "callback") return undefined;
   if (!name || !attemptId || !token) return undefined;
-  return {
-    attemptId: decodeURIComponent(attemptId),
-    name: decodeURIComponent(name),
-    token: decodeURIComponent(token),
-  };
+  const decoded = [name, attemptId, token].map(decodedSegment);
+  const [decodedName, decodedAttemptId, decodedToken] = decoded;
+  if (decodedName === undefined || decodedAttemptId === undefined || decodedToken === undefined)
+    return undefined;
+  return { attemptId: decodedAttemptId, name: decodedName, token: decodedToken };
+}
+
+/** One path segment, decoded, or `undefined` when its percent-encoding is malformed. */
+function decodedSegment(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch (error) {
+    if (error instanceof URIError) return undefined;
+    throw error;
+  }
 }
 
 /**
