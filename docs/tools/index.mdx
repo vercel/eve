@@ -65,7 +65,7 @@ export default defineTool({
 | `outputSchema`         | none               | Describes and types the return value.                                         |
 | `approval`             | `never()`          | [Asks a person to approve calls](#gate-a-tool-on-human-approval).             |
 | `toModelOutput`        | full return        | [Changes what the model sees](#shape-what-the-model-sees-with-tomodeloutput). |
-| `label`                | readable tool name | [Sets activity text](#label-tool-activity).                                   |
+| `label`                | readable tool name | [Sets activity text](#label-tool-activity), or `false` to hide calls.         |
 | `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).               |
 | `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).    |
 | `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).  |
