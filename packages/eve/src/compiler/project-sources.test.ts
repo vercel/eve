@@ -18,6 +18,7 @@ describe("qualifyExtensionContributionLogicalPath", () => {
     ["instructions.md", "instructions/crm.md"],
     ["instructions/policy.md", "instructions/crm__policy.md"],
     ["memory.ts", "memory/crm.ts"],
+    ["memory.mjs", "memory/crm.mjs"],
     ["memory/notes.ts", "memory/crm__notes.ts"],
     ["schedules/sync.ts", "schedules/crm__sync.ts"],
     ["skills/triage/SKILL.md", "skills/crm__triage/SKILL.md"],
