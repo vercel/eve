@@ -348,18 +348,25 @@ While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a 
 
 Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` in a sensitive tool before it changes anything.
 
-#### Read Slack's action token
+#### Use Slack's action token
 
-Slack sends a short-lived `action_token` with some messages. Its data access APIs, such as `assistant.search.context`, take it to act for the person who wrote the message. eve reads it from the event, including the copy Slack nests under `assistant_thread`, into `message.actionToken`:
+Slack sends an `action_token` with mentions and DMs. The [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api) needs it to search for the person who wrote the message with a bot token. eve reads it into `message.actionToken`, including the copy Slack nests under `assistant_thread`, and `defaultSlackAuth` adds it to the turn's auth as the `action_token` attribute. With the default hooks, or a hook that returns `defaultSlackAuth`, a tool reads it without any channel code:
 
-```ts title="agent/channels/slack.ts"
-onAppMention(ctx, message) {
-  const token = message.actionToken; // undefined when Slack sent none
-  // ...
-}
+```ts title="agent/tools/search_slack.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Search public Slack channels for the person asking.",
+  inputSchema: z.object({ query: z.string() }),
+  async execute({ query }, ctx) {
+    const actionToken = ctx.session.auth.current?.attributes.action_token;
+    // Pass `actionToken` and `query` to `assistant.search.context` with the bot token.
+  },
+});
 ```
 
-eve keeps the token out of `defaultSlackAuth` and channel state. Auth attributes are saved with the session and forwarded with the principal to remote agents and MCP connections that set `forwardPrincipal`, so copy the token only to where the call that needs it can read it.
+Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded principal can't search with it.
 
 #### Continue conversations without repeated mentions
 

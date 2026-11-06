@@ -2,6 +2,6 @@
 "eve": minor
 ---
 
-Add `message.actionToken` to Slack messages, read from Slack's `action_token` at the top level of the event or under `assistant_thread`.
+Add Slack's `action_token` to `defaultSlackAuth` as the `action_token` attribute, so tools can call the Real-time Search API without channel code.
 
-Hooks no longer need to parse `message.raw` for the token that Slack's data access APIs, such as `assistant.search.context`, require. eve doesn't add it to `defaultSlackAuth` or channel state.
+eve also exposes the token as `message.actionToken`, read from the top level of the event or from `assistant_thread`, where Slack sends it in app threads.

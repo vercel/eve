@@ -88,10 +88,10 @@ export interface SlackMessage {
   /** File / image attachments on the inbound message. */
   readonly attachments: readonly SlackAttachment[];
   /**
-   * Slack's `action_token` for this message, when Slack sent one. Data access
-   * APIs such as `assistant.search.context` take it to act for the message's
-   * author. It is short-lived, and eve keeps it out of session auth and
-   * channel state: pass it only to the call that needs it.
+   * Slack's `action_token` for this message, when Slack sent one. The Real-time
+   * Search API (`assistant.search.context`) needs it to search for the
+   * message's author with a bot token. `defaultSlackAuth` copies it to
+   * the `action_token` auth attribute, where tools read it.
    */
   readonly actionToken?: string;
   /** Raw inbound event payload from Slack. */

@@ -167,6 +167,7 @@ export function defaultSlackAuth(
   if (!author) return null;
 
   return buildSlackAuthContext({
+    actionToken: message.actionToken,
     channelId: ctx.slack.channelId,
     email: author.email,
     fullName: author.fullName,
