@@ -12,8 +12,10 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
   (experimental `defineDynamicSchedules`). The destination and creator come
   from the Slack session in `preparePayload`, never from the model.
-- `agent/extensions/code.ts`: eve's code extension, for running code and
-  working with files in the sandbox.
+- `agent/extensions/code.ts` and `agent/extensions/git.ts`: eve's code and git
+  extensions, for running code in the Vercel Sandbox (`agent/sandbox.ts`) and,
+  with `GITHUB_ORG` set, GitHub access through `git__gh`. The `authorize`
+  callback in `git.ts` is the only access check on GitHub commands.
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.

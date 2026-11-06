@@ -16,10 +16,13 @@ agent/
   instructions.md                # grounding, source routing, and Slack style
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
+  extensions/git.ts              # eve's git extension: GitHub access and pull requests
   schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
+  sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
+  lib/github.ts                  # GitHub connector and firewall credential broker
 ```
 
 - **Grounded answers.** The instructions tell the agent to answer
@@ -41,6 +44,10 @@ agent/
 - **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
   lets the agent run scripts, analyze attached files such as CSVs or logs, and
   read or write code in a sandbox.
+- **GitHub.** With `GITHUB_ORG` set, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
+  adds a `git__gh` tool for reading repositories, issues, and pull requests in
+  that organization, and a `pr` skill for opening draft pull requests. See
+  [Connect GitHub](#connect-github).
 - **Built-in eve Slack behavior.** Threads are sessions, the thread status shows
   progress, and approvals and questions appear as buttons.
 
@@ -50,6 +57,7 @@ agent/
 pnpm install
 pnpm exec eve add channel/slack   # creates the Slack app through Vercel Connect
 cp .env.example .env.local        # then set SLACK_TEAM_ID
+vercel env pull                   # Vercel credentials for AI Gateway and the sandbox
 pnpm dev
 ```
 
@@ -70,6 +78,30 @@ Scopes**. Without them, people mention the agent for each follow-up.
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
+
+## Connect GitHub
+
+GitHub is optional. Without `GITHUB_ORG`, the agent still runs code in its
+sandbox but has no GitHub credentials. To enable it, create a Vercel Connect
+GitHub connector:
+
+```bash
+vercel connect create github --name company-brain
+```
+
+Install its GitHub App on the repositories the agent may use, from the Connect
+dashboard. Then set these in `.env.local` and the Vercel project:
+
+- `GITHUB_ORG`: the organization or user whose repositories the agent may access
+- `GITHUB_CONNECTOR`: the connector UID, if it isn't `github/company-brain`
+
+Each `gh` command gets a GitHub App token scoped to one repository. The sandbox
+only sees a placeholder; `lib/github.ts` swaps in the real token at the sandbox
+firewall for that command and removes it afterward. The `authorize` callback in
+`agent/extensions/git.ts` is the only access check: it allows Slack users in
+your workspace, including their scheduled tasks, and only repositories owned by
+`GITHUB_ORG`. Tighten it if not everyone who can reach the agent should open
+pull requests.
 
 ## Scheduled tasks
 
@@ -210,9 +242,8 @@ name. See [Tools](https://eve.dev/docs/tools).
 
 Extensions bundle tools, skills, subagents, and instructions into one package
 you mount under `agent/extensions/`. This template already mounts
-`eve/extensions/code`; delete `agent/extensions/code.ts` if your brain shouldn't
-run code. To let it open pull requests too, mount `eve/extensions/git` next to
-it (see [Publish with the git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)).
+`eve/extensions/code` and `eve/extensions/git`. Delete their files under
+`agent/extensions/` (and `agent/sandbox.ts`) if your brain shouldn't run code.
 Browse more with `pnpm exec eve registry list`. See
 [Extensions](https://eve.dev/docs/extensions).
 
@@ -240,9 +271,11 @@ such as `pnpm exec eve add memory/file`. See [Memory](https://eve.dev/docs/memor
   connections, and use app-scoped auth only for content everyone may see.
 - **Set `SLACK_TEAM_ID`.** Without it, anyone Slack delivers a message from,
   including Slack Connect guests, can start a conversation.
-- **Sandboxed code may reach the network.** Depending on the sandbox, code the
-  agent runs can make outbound requests. Don't put credentials in the sandbox, and set a network policy if
-  you need to restrict egress. See [Sandbox](https://eve.dev/docs/sandbox).
+- **The sandbox has open egress.** Like eve's coding agent template, code the
+  agent runs can reach any host; only GitHub credentials are held back at the
+  firewall. Don't put other credentials in the sandbox, and narrow the network
+  policy in `agent/sandbox.ts` and `lib/github.ts` if you need to restrict
+  egress. See [Sandbox](https://eve.dev/docs/sandbox).
 - **Keep checks in sensitive tools.** The channel gate decides who can start a
   turn. A tool that reads or changes sensitive data should check
   `ctx.session.auth` itself.
