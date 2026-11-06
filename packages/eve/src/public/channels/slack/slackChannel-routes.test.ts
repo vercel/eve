@@ -211,6 +211,31 @@ describe("slackChannel inactive prompt press", () => {
   });
 });
 
+describe("slackChannel action token", () => {
+  it("adds Slack's action token to the default auth without a hook", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ ok: true, ts: "1700000001.000001" }));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    const event = {
+      assistant_thread: { action_token: "action-token" },
+      channel: "C01",
+      text: "hello",
+      ts: "1700000000.000001",
+      type: "app_mention",
+      user: "U01",
+    };
+
+    await firePost(
+      channel,
+      signed(JSON.stringify({ event, event_id: "Ev1", team_id: "T01", type: "event_callback" })),
+      send,
+    );
+
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(input.auth?.attributes).toMatchObject({ action_token: "action-token" });
+  });
+});
+
 describe("slackChannel messageContext.users", () => {
   it("resolves the author before the mention hook and adds names to the turn", async () => {
     fetchMock.mockImplementation(async (request: string | URL | Request) => {

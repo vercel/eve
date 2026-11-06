@@ -348,6 +348,26 @@ While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a 
 
 Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` in a sensitive tool before it changes anything.
 
+#### Use Slack's action token
+
+Slack sends an `action_token` with mentions and DMs. The [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api) needs it to search for the person who wrote the message with a bot token. eve reads it into `message.actionToken`, including the copy Slack nests under `assistant_thread`, and `defaultSlackAuth` adds it to the turn's auth as the `action_token` attribute. With the default hooks, or a hook that returns `defaultSlackAuth`, a tool reads it without any channel code:
+
+```ts title="agent/tools/search_slack.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Search public Slack channels for the person asking.",
+  inputSchema: z.object({ query: z.string() }),
+  async execute({ query }, ctx) {
+    const actionToken = ctx.session.auth.current?.attributes.action_token;
+    // Pass `actionToken` and `query` to `assistant.search.context` with the bot token.
+  },
+});
+```
+
+Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded principal can't search with it.
+
 #### Continue conversations without repeated mentions
 
 Use `onMessage` to answer mentions, code channel messages, and DMs, and to follow threads that already have an eve session:
