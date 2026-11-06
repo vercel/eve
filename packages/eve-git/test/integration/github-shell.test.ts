@@ -807,11 +807,19 @@ test("a lease does not release a lock another command holds", async () => {
         return runLockCommand(input.command, lockPath);
       },
     };
+    let cleaned = false;
     await withSandboxLeaseLock(
       sandboxFake as SandboxSession,
       "stale-holder",
       async () => undefined,
+      {
+        cleanup: async () => {
+          cleaned = true;
+        },
+      },
     );
+    // Nor clear its successor's credential.
+    assert.equal(cleaned, false);
     assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "successor");
     assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock\n");
   } finally {
@@ -830,10 +838,22 @@ test("a lease breaks a lock whose holder stopped", async () => {
       run: (input) => runLockCommand(input.command, lockPath),
     };
     let owner = "";
-    await withSandboxLeaseLock(sandboxFake as SandboxSession, "next", async () => {
-      owner = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
-    });
+    let cleanedWhileHeld = "";
+    await withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "next",
+      async () => {
+        owner = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+      },
+      {
+        cleanup: async () => {
+          cleanedWhileHeld = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+        },
+      },
+    );
     assert.equal(owner, "next");
+    // The holder cleans up before it gives up the lock.
+    assert.equal(cleanedWhileHeld, "next");
     assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
   } finally {
     rmSync(lockRoot, { recursive: true, force: true });
@@ -861,7 +881,7 @@ test("a lease waits on the host and stops when its call is cancelled", async () 
       async () => {
         ran = true;
       },
-      controller.signal,
+      { signal: controller.signal },
     );
     await new Promise((resolve) => setTimeout(resolve, 600));
     // Each attempt returns at once instead of waiting inside the sandbox.

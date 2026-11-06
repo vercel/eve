@@ -312,7 +312,12 @@ async function withGitHubCredentialLease<T>(
       sandbox,
       credential.placeholder,
       () => leaseCredential(sandbox, credential, run, broker),
-      abortSignal,
+      {
+        // Clears the policy only while this command still holds the lock, so a command whose
+        // lock was broken as stale can't clear its successor's credential.
+        cleanup: () => broker(sandbox, null),
+        ...(abortSignal !== undefined && { signal: abortSignal }),
+      },
     );
   } finally {
     release();
@@ -320,49 +325,45 @@ async function withGitHubCredentialLease<T>(
   }
 }
 
-/** Points the sandbox's network policy at `credential` for `run`, then clears it. */
+/** Points the sandbox's network policy at `credential` for `run`; the lock's release clears it. */
 async function leaseCredential<T>(
   sandbox: SandboxSession,
   credential: LeaseCredential,
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
-  try {
-    const api: GitHubLeaseRule[] = [
+  const api: GitHubLeaseRule[] = [
+    {
+      match: {
+        headers: [
+          {
+            key: { exact: "authorization" },
+            value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+          },
+        ],
+      },
+      transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+    },
+  ];
+  await broker(sandbox, {
+    "api.github.com": api,
+    // `gh release upload` and `gh release create` with assets send files here.
+    "uploads.github.com": api,
+    "github.com": [
       {
         match: {
           headers: [
             {
               key: { exact: "authorization" },
-              value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+              value: { exact: credential.placeholderAuthorization },
             },
           ],
         },
-        transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+        transform: [{ headers: { authorization: credential.authorization } }],
       },
-    ];
-    await broker(sandbox, {
-      "api.github.com": api,
-      // `gh release upload` and `gh release create` with assets send files here.
-      "uploads.github.com": api,
-      "github.com": [
-        {
-          match: {
-            headers: [
-              {
-                key: { exact: "authorization" },
-                value: { exact: credential.placeholderAuthorization },
-              },
-            ],
-          },
-          transform: [{ headers: { authorization: credential.authorization } }],
-        },
-      ],
-    });
-    return await run();
-  } finally {
-    await broker(sandbox, null);
-  }
+    ],
+  });
+  return await run();
 }
 
 export function parseCommand(command: string): string[] {

@@ -51,19 +51,32 @@ function acquireCommand(owner: string): string {
 }
 
 /**
- * Removes the lock only while `owner` still holds it. Only breakers take the guard, so when it
- * stays busy for the whole short wait it was left behind, nothing can break the lock, and
- * releasing without it is safe.
+ * Starts a release: takes the guard (briefly retrying) so no waiter can break the lock while the
+ * holder clears its credential, then prints `<guarded> <held>`, where `held` says whether `owner`
+ * still holds the lock. Only breakers and releases take the guard, so when it stays busy for the
+ * whole short wait it was left behind and releasing without it is safe.
  */
-function releaseCommand(owner: string): string {
+function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
   const id = shellQuote(owner);
   return [
     `guarded=0`,
     `for _ in $(seq 20); do if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi; sleep 0.1; done`,
+    `held=0`,
+    `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
+    `printf '%s %s' "$guarded" "$held"`,
+  ].join("\n");
+}
+
+/** Finishes a release: removes the lock only while `owner` still holds it, then the guard. */
+function finishReleaseCommand(owner: string, guarded: boolean): string {
+  const lock = shellQuote(LEASE_LOCK_PATH);
+  const guard = shellQuote(GUARD_PATH);
+  const id = shellQuote(owner);
+  return [
     `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then rm -rf ${lock}; fi`,
-    `if [ "$guarded" = 1 ]; then rmdir ${guard}; fi`,
+    ...(guarded ? [`rmdir ${guard}`] : []),
   ].join("\n");
 }
 
@@ -81,6 +94,18 @@ function waitForRetry(signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
+/** What a holder does with the sandbox lease lock. */
+export interface SandboxLeaseLockOptions {
+  /**
+   * Undoes what the holder set up, such as clearing its network policy. It runs while no waiter
+   * can break the lock, and only while this holder still holds it: a holder whose lock was broken
+   * as stale must not clear its successor's credential.
+   */
+  readonly cleanup?: () => PromiseLike<void>;
+  /** Stops waiting for the lock. */
+  readonly signal?: AbortSignal;
+}
+
 /**
  * Holds the sandbox's credential lease lock while `run` executes. A lease replaces the sandbox's
  * whole network policy, so two `gh` commands sharing one sandbox, such as subagents sharing their
@@ -93,7 +118,7 @@ export async function withSandboxLeaseLock<T>(
   sandbox: SandboxSession,
   owner: string,
   run: () => PromiseLike<T>,
-  signal?: AbortSignal,
+  { cleanup, signal }: SandboxLeaseLockOptions = {},
 ): Promise<T> {
   const deadline = Date.now() + LEASE_WAIT_MS;
   const command = acquireCommand(owner);
@@ -118,7 +143,33 @@ export async function withSandboxLeaseLock<T>(
   try {
     return await run();
   } finally {
+    await release(sandbox, owner, cleanup);
+  }
+}
+
+async function release(
+  sandbox: SandboxSession,
+  owner: string,
+  cleanup: (() => PromiseLike<void>) | undefined,
+): Promise<void> {
+  // When the sandbox can't say who holds the lock, clean up anyway: leaving a credential leased
+  // is worse than clearing a successor's.
+  let guarded = false;
+  let held = true;
+  try {
+    const begun = await sandbox.run({ command: beginReleaseCommand(owner) });
+    const [guard, holder] = begun.stdout.trim().split(" ");
+    if (begun.exitCode === 0 && holder !== undefined) {
+      guarded = guard === "1";
+      held = holder === "1";
+    }
+  } catch {}
+  try {
+    if (held) await cleanup?.();
+  } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
-    await Promise.resolve(sandbox.run({ command: releaseCommand(owner) })).catch(() => undefined);
+    await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(
+      () => undefined,
+    );
   }
 }
