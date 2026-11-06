@@ -321,6 +321,27 @@ export async function parseSessionControlBody(
   return rejectUnknownFields(payload, []) ?? payload;
 }
 
+const MAX_COMMAND_ARGUMENT_LENGTH = 8192;
+
+/** Parses `POST /eve/v1/commands/:name`: an optional `argument` string. */
+export async function parseCommandBody(req: Request): Promise<{ argument: string } | Response> {
+  const payload = await parseOptionalJsonRequest(req);
+  if (payload instanceof Response) return payload;
+  const unknown = rejectUnknownFields(payload, ["argument"]);
+  if (unknown !== undefined) return unknown;
+  const argument = payload.argument ?? "";
+  if (typeof argument !== "string") {
+    return Response.json({ error: "'argument' must be a string.", ok: false }, { status: 400 });
+  }
+  if (argument.length > MAX_COMMAND_ARGUMENT_LENGTH) {
+    return Response.json(
+      { error: `'argument' exceeds ${MAX_COMMAND_ARGUMENT_LENGTH} characters.`, ok: false },
+      { status: 413 },
+    );
+  }
+  return { argument: argument.trim() };
+}
+
 export async function parseOptionalJsonRequest(
   req: Request,
 ): Promise<Record<string, unknown> | Response> {

@@ -35,6 +35,8 @@ The transcript stays in your terminal scrollback after you exit. Before your fir
 
 A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) accepts no new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
 
+The agent can add its own commands through the [eve channel's `commands`](../channels/eve#slash-commands). They appear after the built-in commands, locally and through `eve remote connect`, and refresh when the agent reloads.
+
 ## Set up a new agent
 
 After interactive `eve init`, the TUI opens directly. eve keeps the connection already selected for the project, including a project OIDC connection. Without one, it checks credentials set in the environment, the saved machine default, and then the Vercel CLI's current team. With the Vercel CLI team, eve checks account access but doesn't create or link a Vercel project.
