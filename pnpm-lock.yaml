@@ -331,6 +331,9 @@ importers:
       '@vercel/analytics':
         specifier: 2.0.1
         version: 2.0.1(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(next@16.3.8(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.5.2(d48cf68a49299d5426a5972e1b9387e2))(react@19.2.6)(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vue@3.5.42(typescript@6.0.3))
+      '@vercel/firewall':
+        specifier: 1.2.6
+        version: 1.2.6
       '@vercel/geistdocs':
         specifier: 2.14.2
         version: 2.14.2(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(7eb82b335cccccda73811972c8fed49f)
@@ -7921,6 +7924,10 @@ packages:
   '@vercel/detect-agent@1.2.5':
     resolution: {integrity: sha512-0krENrjuitlW8s6TJu0MlqCevyCU7K7JK63jZAf7xZ6n17tx+vUEwzHT3sTxawtwZxaW21hu+oFUpoOrm49FsQ==}
     engines: {node: '>=14'}
+
+  '@vercel/firewall@1.2.6':
+    resolution: {integrity: sha512-89ybsa2rnVNdw6RI3jGOVvqUJaBj6Umm4IagC1o3PKtr/MXxBKOLek+yyUgF0csA0O5W+dzcpdIhKxVXhgVVtA==}
+    engines: {node: '>= 20'}
 
   '@vercel/functions@1.6.0':
     resolution: {integrity: sha512-R6FKQrYT5MZs5IE1SqeCJWxMuBdHawFcCZboKKw8p7s+6/mcd55Gx6tWmyKnQTyrSEA04NH73Tc9CbqpEle8RA==}
@@ -21574,6 +21581,8 @@ snapshots:
   '@vercel/detect-agent@1.2.3': {}
 
   '@vercel/detect-agent@1.2.5': {}
+
+  '@vercel/firewall@1.2.6': {}
 
   '@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.49)':
     optionalDependencies:
