@@ -24,6 +24,7 @@ import type { SignInChallenge } from "#protocol/session-events/families/interact
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { debug6086 } from "#runtime/connections/scoped-authorization.js";
 
@@ -83,7 +84,7 @@ export async function emitProxiedSubagentEvent(
           local: localSignInCallback(row, own) !== undefined,
         })),
     });
-    await settleSignIns([
+    await settleSignIns(resumeSignInCallback, [
       ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
         signInsAnswered(tables, answer, own),
       ),
