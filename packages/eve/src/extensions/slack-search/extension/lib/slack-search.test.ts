@@ -44,9 +44,11 @@ describe("slackTurn", () => {
     const requests: { url: string; authorization: string | null; body: string }[] = [];
     const tokenTeams: (string | undefined)[] = [];
     const turn = slackTurn(auth, {
-      botToken: ({ teamId }) => {
-        tokenTeams.push(teamId);
-        return "xoxb-install";
+      credentials: {
+        botToken: ({ teamId }) => {
+          tokenTeams.push(teamId);
+          return "xoxb-install";
+        },
       },
       api: {
         fetch: async (input, init) => {

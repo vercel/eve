@@ -23,14 +23,14 @@ import slackSearch from "eve/extensions/slack-search";
 export default slackSearch({});
 ```
 
-`slackSearch({})` uses `SLACK_BOT_TOKEN`, as `slackChannel` does. With Vercel Connect, pass the bot token from the same connector as your channel:
+`slackSearch({})` uses `SLACK_BOT_TOKEN`, as `slackChannel` does. With Vercel Connect, pass the same credentials as your channel:
 
 ```ts title="agent/extensions/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
 import slackSearch from "eve/extensions/slack-search";
 
 export default slackSearch({
-  botToken: connectSlackCredentials("slack/my-agent").botToken,
+  credentials: connectSlackCredentials("slack/my-agent"),
 });
 ```
 
@@ -44,7 +44,7 @@ So that:
 
 - Search works only in a turn started by a Slack message. In other turns, such as schedules or HTTP sessions, it returns `reason: "no_slack_message"`, and the model reads specific channels with `read_conversation` instead.
 - The token expires a few minutes after the message. Once it does, search returns `reason: "search_token_expired"` for the rest of the turn, and the model finishes from what it already found.
-- `read_conversation` and `read_user` use the bot token alone, so they work in any turn. `read_conversation` reads only channels the bot is a member of. For other channels it returns `reason: "not_in_channel"` and tells the model a channel member can invite the bot.
+- `read_conversation` and `read_user` use the bot token alone, so they work in any turn. In a turn that didn't come from Slack, a function `botToken` receives no `teamId`, so an app installed in several workspaces must return a default workspace's token. `read_conversation` reads only channels the bot is a member of. For other channels it returns `reason: "not_in_channel"` and tells the model a channel member can invite the bot.
 
 ## Restrict what each caller sees
 
@@ -66,11 +66,11 @@ export default slackSearch({
 
 ## Options
 
-| Option      | Default                       | Effect                                                                                            |
-| ----------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `botToken`  | `process.env.SLACK_BOT_TOKEN` | Bot token string, or a function that receives `{ teamId }` for the workspace that got the message |
-| `api`       | Slack's API                   | Slack API transport overrides, the same as `slackChannel({ api })`                                |
-| `authorize` | Allows all public channels    | `({ tool, auth, channelId? }) => boolean`, called with the turn's caller                          |
+| Option        | Default                    | Effect                                                                                                                                                                           |
+| ------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `credentials` | `SLACK_BOT_TOKEN`          | The Slack channel's credentials, the same object `slackChannel` takes. Only `botToken` is used. A function `botToken` receives `{ teamId }` for the workspace the turn came from |
+| `api`         | Slack's API                | Slack API transport overrides, the same as `slackChannel({ api })`                                                                                                               |
+| `authorize`   | Allows all public channels | `({ tool, auth, channelId? }) => boolean`, called with the turn's caller                                                                                                         |
 
 ## Slack app scopes
 

@@ -1,4 +1,8 @@
-import type { SlackBotToken, SlackTransportOptions } from "eve/channels/slack";
+import type {
+  SlackBotToken,
+  SlackChannelCredentials,
+  SlackTransportOptions,
+} from "eve/channels/slack";
 import type { SessionAuthContext } from "eve/context";
 import { defineExtension } from "eve/extension";
 
@@ -22,11 +26,11 @@ export type SlackSearchAuthorize = (
 /** Configuration for `eve/extensions/slack-search`. */
 export interface SlackSearchExtensionConfig {
   /**
-   * Bot token for Slack Web API calls, as in `slackChannel({ credentials: { botToken } })`.
-   * Function providers receive the workspace that received the turn's message. Falls back to
-   * `process.env.SLACK_BOT_TOKEN`.
+   * The Slack channel's credentials, the same object `slackChannel` takes. Only `botToken` is
+   * used; a function provider receives the workspace that received the turn's message. Falls
+   * back to `process.env.SLACK_BOT_TOKEN`.
    */
-  readonly botToken?: SlackBotToken;
+  readonly credentials?: Pick<SlackChannelCredentials, "botToken">;
   /** Slack API transport overrides, as in `slackChannel({ api })`. */
   readonly api?: SlackTransportOptions;
   /**
@@ -39,7 +43,11 @@ export interface SlackSearchExtensionConfig {
 const isFunction = (value: unknown) => typeof value === "function";
 
 const schema = z.object({
-  botToken: z.union([z.string().trim().min(1), z.custom<SlackBotToken>(isFunction)]).optional(),
+  credentials: z
+    .object({
+      botToken: z.union([z.string().trim().min(1), z.custom<SlackBotToken>(isFunction)]).optional(),
+    })
+    .optional(),
   api: z
     .custom<SlackTransportOptions>((value) => typeof value === "object" && value !== null)
     .optional(),

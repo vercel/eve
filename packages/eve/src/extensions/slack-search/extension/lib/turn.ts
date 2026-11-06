@@ -47,7 +47,7 @@ export function slackTurn(
     request: (operation, body) =>
       callSlackApi({
         api: config.api,
-        botToken: config.botToken,
+        botToken: config.credentials?.botToken,
         context: teamId ? { teamId } : {},
         operation,
         body,
