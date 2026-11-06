@@ -1,3 +1,4 @@
+import { remoteChildBindingName } from "#execution/child-binding-name.js";
 import type { StartWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import type { Runtime, SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
@@ -121,6 +122,8 @@ export interface InProcessHostOptions {
    * authored one, on a deployment that also runs Workflow. Without one, its run fails.
    */
   readonly startDurableRun?: StartWorkflowToolRun;
+  /** The entity whose activation this host runs in, which its runs' ids name (`InProcessRunsHost.owner`). */
+  readonly runOwner?: string;
 }
 
 /** A session running here: what the host records of it, and its loop. */
@@ -210,6 +213,9 @@ export function createInProcessHost(
   let suspending = false;
   // Once draining, a step that would start waits for `dispose`, which refuses it.
   let draining: Promise<never> | undefined;
+  // Children a restored run is reopening: until each claims its addresses, what arrives for it
+  // finds no one, so the host isn't quiescent.
+  let reopening = 0;
   let refuseDrained: (error: Error) => void = () => {};
   /** How many of each session's waits are on a timer (`SessionHost.sleep`). */
   const sleeping = new Map<string, number>();
@@ -234,20 +240,31 @@ export function createInProcessHost(
   const dispatchSession: Runtime["dispatchSession"] = async ({ command, sessionId }) =>
     await deliverCommand(sessionCommandHookToken(sessionId), command);
 
+  const { callbackBaseUrl } = options;
   const runs = createInProcessRuns({
+    suspending: () => suspending,
+    ...(options.runOwner !== undefined && { owner: options.runOwner }),
     ...(options.startDurableRun !== undefined && { startDurableRun: options.startDurableRun }),
+    // A remote agent's replies come back through eve's callback route, which a host with a
+    // callback origin serves.
+    ...(callbackBaseUrl !== undefined && { remote: { callbackBaseUrl: () => callbackBaseUrl } }),
     dispatchSession,
     inboxes,
     stepBoundary,
     async reopenSession(config, sessionId, { idle }) {
       if (sessions.has(sessionId)) return true;
-      const saved = await store?.load(sessionId);
-      if (saved === undefined) return false;
-      // Between turns, with nothing unread, it has no turn left to reply from.
-      if (!idle && saved.open === undefined && (saved.inputs?.unread.length ?? 0) === 0)
-        return false;
-      await runtimeFor(config).restore(saved);
-      return true;
+      reopening += 1;
+      try {
+        const saved = await store?.load(sessionId);
+        if (saved === undefined) return false;
+        // Between turns, with nothing unread, it has no turn left to reply from.
+        if (!idle && saved.open === undefined && (saved.inputs?.unread.length ?? 0) === 0)
+          return false;
+        await runtimeFor(config).restore(saved);
+        return true;
+      } finally {
+        reopening -= 1;
+      }
     },
     runtimeFor,
     timers,
@@ -270,7 +287,15 @@ export function createInProcessHost(
   });
   const applyRunMessages = applyRunMessagesOn({
     // A remote child can't be opened here, so no run reports one.
-    recordRemoteBinding: async () => unavailable("A remote agent"),
+    // Where a remote child streams from, beside the parent's state on its World.
+    recordRemoteBinding: async (parentSessionId, binding) => {
+      if (options.worldStore === undefined) unavailable("A remote agent");
+      await options.worldStore.keep(
+        parentSessionId,
+        remoteChildBindingName(binding.childSessionId),
+        binding,
+      );
+    },
     stopLate,
   });
   const dispatchRuns = dispatchCoordinationOn(runs.startRun);
@@ -334,7 +359,7 @@ export function createInProcessHost(
     }),
     suspended: () => suspending,
     async quiescent() {
-      if (!inboxes.quiet()) return false;
+      if (reopening > 0 || !inboxes.quiet()) return false;
       for (const [sessionId, live] of sessions) {
         if (!(await settledNow(live.loop.settledStep()))) return false;
         if (!inboxes.waiting(sessionId) && !sleeping.has(sessionId)) return false;

@@ -101,6 +101,16 @@ export interface Entities {
   ): Promise<void>;
   /** What `key` was created with, or `undefined` when no such entity exists. */
   meta(key: string): Promise<unknown>;
+  /** When `key` was created, and when what it kept expires once it ended; `undefined` if none. */
+  info(key: string): Promise<
+    | {
+        readonly createdAt: Date;
+        readonly expiredAt?: Date;
+        /** `"running"` while it lives; `"completed"` (or another end) once it ended. */
+        readonly status: string;
+      }
+    | undefined
+  >;
   /** The entity an alias reaches, if any. */
   lookup(alias: string): Promise<string | undefined>;
   /**
@@ -113,8 +123,8 @@ export interface Entities {
     body: unknown,
     options?: { readonly dedupeKey?: string },
   ): Promise<{ readonly key: string } | undefined>;
-  /** Opens `key` for writing here, creating it (with no meta) if it doesn't exist. */
-  open(key: string): Promise<EntityHandle>;
+  /** Opens `key` for writing here, creating it (with `options.meta`, or none) if it doesn't exist. */
+  open(key: string, options?: { readonly meta?: unknown }): Promise<EntityHandle>;
   /** `key`'s journal, without opening it; `undefined` when no such entity exists. */
   load(key: string): Promise<LoadedJournal | undefined>;
   /** How many chunks `key`'s stream holds. */
@@ -123,6 +133,8 @@ export interface Entities {
   chunks(key: string): Promise<readonly Uint8Array[]>;
   /** Reads `key`'s stream from `from` (negative: before its end), following it live. */
   read(key: string, from?: number): ReadableStream<Uint8Array>;
+  /** What `key` keeps under `name` (`EntityHandle.keep`), the latest; `undefined` if nothing. */
+  value(key: string, name: string): Promise<Uint8Array | undefined>;
   /**
    * Whether `key` ended created with `purgeOnEnd`, so what it kept is deleted: none of it may be
    * read any more, whatever a World left behind.
@@ -158,6 +170,12 @@ export interface EntityHandle {
    * and nothing activates it. Created with `purgeOnEnd`, what it kept is deleted.
    */
   end(): Promise<void>;
+  /**
+   * Keeps `value` under `name`, beside the journal, for readers who ask for it by name
+   * (`Entities.value`): the latest kept is what they read. Few, small values: where a session's
+   * remote child streams from, say.
+   */
+  keep(name: string, value: Uint8Array): Promise<void>;
   /** The stream, written only by this handle. */
   readonly stream: {
     length(): Promise<number>;

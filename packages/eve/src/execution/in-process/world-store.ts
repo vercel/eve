@@ -95,6 +95,11 @@ export interface WorldSessionStoreOptions {
   readonly entities?: Entities;
   /** A handle this process holds already, such as an activation's: written through, not reopened. */
   readonly handles?: (sessionId: string) => EntityHandle | undefined;
+  /**
+   * The session whose activation this store writes for (`handles` holds its entity): the others
+   * it writes are sessions that one runs (subagents'), created naming it (`ChildMeta`).
+   */
+  readonly root?: string;
 }
 
 export interface WorldSessionStore extends SessionStore {
@@ -109,7 +114,22 @@ export interface WorldSessionStore extends SessionStore {
    */
   received(sessionId: string): void;
   /** Consumes what `received` left for a save, now: the session stopped. */
+  /** Keeps `value` under `name` for `sessionId`, beside its state (`EntityHandle.keep`). */
+  keep(sessionId: string, name: string, value: unknown): Promise<void>;
   flush(sessionId: string): Promise<void>;
+}
+
+const valueEncoder = new TextEncoder();
+
+/** What a session's entity is created with when another session's activation runs it. */
+export interface ChildMeta {
+  readonly root: string;
+}
+
+/** The session whose activation runs the one created with `meta`, if another does. */
+export function rootOfChild(meta: unknown): string | undefined {
+  const root = (meta as Partial<ChildMeta> | undefined)?.root;
+  return typeof root === "string" ? root : undefined;
 }
 
 export function createWorldSessionStore(
@@ -134,7 +154,14 @@ export function createWorldSessionStore(
     if (held !== undefined) return held;
     let handle = opened.get(sessionId);
     if (handle === undefined) {
-      handle = entities.open(sessionId);
+      // A session of another one's activation (a subagent's) names it: what arrives for it once
+      // the activation stopped goes there.
+      handle = entities.open(
+        sessionId,
+        options.root === undefined
+          ? undefined
+          : { meta: { root: options.root } satisfies ChildMeta },
+      );
       opened.set(sessionId, handle);
       handle.catch(() => opened.delete(sessionId));
     }
@@ -236,6 +263,9 @@ export function createWorldSessionStore(
       const message = receiving.get(sessionId);
       receiving.delete(sessionId);
       if (message !== undefined) unsaved.set(sessionId, message);
+    },
+    async keep(sessionId, name, value) {
+      await (await handleOf(sessionId)).keep(name, valueEncoder.encode(JSON.stringify(value)));
     },
     async flush(sessionId) {
       await write(sessionId, async () => {
