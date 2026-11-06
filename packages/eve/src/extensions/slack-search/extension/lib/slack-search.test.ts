@@ -564,6 +564,9 @@ describe("executeRead", () => {
           if (method === "conversations.info") {
             return Response.json({ ok: true, channel: { id: "C0OTHER01", is_member: asUser } });
           }
+          if (method === "users.info") {
+            return Response.json({ ok: true, user: { team_id: "T0HOME", is_restricted: false } });
+          }
           if (method === "conversations.replies") {
             return Response.json({ ok: true, messages: [{ ts: "1785412800.000100", text: "hi" }] });
           }
