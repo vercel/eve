@@ -2545,7 +2545,38 @@ vercel env pull
 
 The MCP method registers the OAuth client automatically. Sign in with a Sanity account that has access to the projects and datasets your agent needs, and copy the returned connector UID into \`connect()\`.
 
-The MCP server can edit and publish content; use [tool filters and approval gates](/docs/connections/mcp#tool-filters) to control these actions.`,
+The MCP server can edit and publish content; use [tool filters and approval gates](/docs/connections/mcp#tool-filters) to control these actions.
+
+### Sanity Knowledge Bases
+
+Use the connection above when your agent needs to write, such as creating drafts, patching documents, or publishing. When your agent needs to answer questions, connect it to a Sanity Knowledge Base.
+
+A Knowledge Base pulls in your Sanity datasets, files, and crawled websites, and distills them into one clean, consistent body of knowledge for agents to read. Each MCP endpoint serves only the Knowledge Bases you choose, and agents can't change what they read.
+
+1. Get started with [Sanity Knowledge Bases](https://www.sanity.io/get-started?ref=context&utm_source=vercel&utm_medium=referral&utm_campaign=vercel-knowledge-bases), then create a Knowledge Base and add its sources. Knowledge Bases are in beta; an organization admin enables them from the [Labs page](https://www.sanity.io/manage/org/labs) in Manage.
+2. [Create an MCP endpoint](https://www.sanity.io/docs/ai/sanity-context-configure-mcp) that serves that Knowledge Base. Add only Knowledge Bases as its sources: an endpoint that also has a dataset source serves GROQ tools instead.
+3. Create an organization-level API token (not a project token) with Context Viewer permissions and add it to your Vercel project as \`SANITY_ORGANIZATION_TOKEN\`.
+
+Create \`agent/connections/sanity-knowledge.ts\`:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://api.sanity.io/v1/context/organizations/<orgId>/mcp/<endpointName>",
+  description: "Sanity Knowledge Base: read-only knowledge for answering questions about <your domain>.",
+  headers: { Authorization: \`Bearer \${process.env.SANITY_ORGANIZATION_TOKEN}\` },
+});
+\`\`\`
+
+Replace \`<orgId>\` with your Sanity organization ID and \`<endpointName>\` with the name you gave the endpoint. The token carries organization-level permissions, so keep it server-side.
+
+| Your agent needs to... | Use |
+| --- | --- |
+| Create, edit, or publish content, or inspect schemas | Sanity MCP (above) |
+| Answer questions from approved knowledge | Sanity Knowledge Base |
+
+Many agents use both: the Knowledge Base to know the answer, and the Sanity MCP to act on it.`,
   },
   sentry: {
     logo: "sentry",
