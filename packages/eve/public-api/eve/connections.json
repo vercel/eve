@@ -11,6 +11,8 @@
   "ConnectionCallbackContext",
   "ConnectionPrincipal",
   "ConnectionToolCallDefinition",
+  "ConnectionToolErrorContext",
+  "ConnectionToolErrorHandler",
   "DynamicConnectionDefinition",
   "DynamicConnectionResult",
   "DynamicConnectionSet",

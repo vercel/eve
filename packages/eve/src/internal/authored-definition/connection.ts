@@ -57,7 +57,7 @@ const KNOWN_AUTHORIZATION_KEYS = [
   // canonical producer.
   "vercelConnect",
 ] as const;
-const KNOWN_TOOL_CALL_KEYS = ["providedArguments"] as const;
+const KNOWN_TOOL_CALL_KEYS = ["onError", "providedArguments"] as const;
 
 /**
  * Validates one authored MCP client connection module export at build time
@@ -189,8 +189,13 @@ function normalizeConnectionToolCall(
   );
   expectOnlyKnownKeys(toolCall, KNOWN_TOOL_CALL_KEYS, `${message} The "toolCall" field`);
 
+  if (toolCall.onError !== undefined && typeof toolCall.onError !== "function") {
+    throw new Error(`${message} The "toolCall.onError" field must be a function.`);
+  }
+  const onError = toolCall.onError as ConnectionToolCallDefinition["onError"];
+
   if (toolCall.providedArguments === undefined) {
-    return {};
+    return onError === undefined ? {} : { onError };
   }
 
   const providedArguments = expectObjectRecord(
@@ -218,7 +223,10 @@ function normalizeConnectionToolCall(
     }
   }
 
-  return { providedArguments: providedArguments as ProvidedArgumentsDefinition };
+  return {
+    ...(onError !== undefined && { onError }),
+    providedArguments: providedArguments as ProvidedArgumentsDefinition,
+  };
 }
 
 /**

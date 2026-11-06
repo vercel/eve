@@ -42,6 +42,16 @@ describe("normalizeMcpClientConnectionDefinition", () => {
     ).toThrow('"protocolVersionDiscovery" must be a boolean.');
   });
 
+  it("preserves toolCall.onError and rejects one that is not a function", () => {
+    const onError = () => "The tracker is unavailable.";
+    expect(
+      normalizeMcpClientConnectionDefinition(validInput({ toolCall: { onError } }), MSG).toolCall,
+    ).toEqual({ onError });
+    expect(() =>
+      normalizeMcpClientConnectionDefinition(validInput({ toolCall: { onError: "text" } }), MSG),
+    ).toThrow('"toolCall.onError" field must be a function.');
+  });
+
   describe("happy path", () => {
     it("accepts a valid definition with a getToken function", () => {
       const result = normalizeMcpClientConnectionDefinition(validInput(), MSG);

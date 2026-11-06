@@ -29,6 +29,7 @@ import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { ModelFacingError } from "#shared/model-facing-error.js";
 import { callProgress } from "#harness/call-facts.js";
 import { settleCall, startCall } from "#harness/session-machine/calls.js";
 import { withUsageCall } from "#harness/usage-sink.js";
@@ -231,14 +232,16 @@ export async function executeToolCall(
         }
       });
     } catch (error) {
+      // An app-chosen model-facing text replaces only what the model reads.
+      const cause = error instanceof ModelFacingError ? error.cause : error;
       await telemetry.ended(
-        { error, input: args, toolCallId: callId, toolName, type: "tool-error" },
+        { error: cause, input: args, toolCallId: callId, toolName, type: "tool-error" },
         executionMs,
       );
       throwIfTurnAborted(input.abortSignal);
-      logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
+      logError(log, "tool execution failed", cause, { toolName, toolCallId: callId });
       failed = true;
-      thrown = toError(error);
+      thrown = toError(cause);
       output = thrown.message;
       failure = modelFacingError(error);
     }
@@ -354,10 +357,12 @@ async function* untilAborted<T>(
 }
 
 /**
- * What the model reads for a call whose tool threw: the error as the AI SDK rendered it, with its
- * name, which tells the model what kind of failure it was (a `TimeoutError` may be worth retrying).
+ * What the model reads for a call whose tool threw: the text an app chose for it, or else the error
+ * as the AI SDK rendered it, with its name, which tells the model what kind of failure it was (a
+ * `TimeoutError` may be worth retrying).
  */
 function modelFacingError(error: unknown): string {
+  if (error instanceof ModelFacingError) return error.message;
   if (error === null || error === undefined) return "unknown error";
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.toString();
