@@ -59,6 +59,8 @@ Set `image`, `source`, `tags`, project credentials, and `fetch` on the environme
 
 If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, eve runs the selector again to start a fresh sandbox.
 
+If resume reports `network policy initialization cannot be verified`, start a new eve session. eve refuses that sandbox without deleting its existing filesystem.
+
 ## Snapshot preparation
 
 During build, eve prepares its base runtime in a temporary Vercel Sandbox, writes managed workspace and skill files, and runs the authored `prepare` callback. A `prepare` callback that breaks the base runtime fails the build. eve creates each new session sandbox from the captured snapshot.

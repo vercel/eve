@@ -109,12 +109,16 @@ export function createVercelSandbox(
 
   return {
     async onSessionEnd(context, state, { signal }) {
-      await deleteNamedVercelSandbox({
-        createOptions,
-        sandboxModule: await loadSandboxModule(),
-        sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
-        signal,
-      });
+      const sandboxModule = await loadSandboxModule();
+      const sandboxNames =
+        state === null
+          ? [vercelSessionName(context.session.id), vercelSessionName(context.session.id, 2)]
+          : [state.sandboxName];
+      await Promise.all(
+        sandboxNames.map((sandboxName) =>
+          deleteNamedVercelSandbox({ createOptions, sandboxModule, sandboxName, signal }),
+        ),
+      );
     },
     async prepare(context) {
       // Without build-time inputs, sessions can initialize directly from the image.
@@ -145,7 +149,7 @@ export function createVercelSandbox(
         });
       }
     },
-    async resume(_context, artifact, stateValue) {
+    async resume(context, artifact, stateValue) {
       requirePreparedVercelTemplate(artifact);
       const state = requireVercelSessionState(stateValue);
       const sandboxModule = await loadSandboxModule();
@@ -157,6 +161,15 @@ export function createVercelSandbox(
       if (sandbox === null) {
         throw new SandboxSessionGoneError(
           `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
+        );
+      }
+      if (
+        state.sandboxName !== vercelSessionName(context.session.id) &&
+        (sandbox.networkPolicy === undefined || sandbox.networkPolicy === "allow-all")
+      ) {
+        throw new Error(
+          `Cannot resume legacy Vercel sandbox "${state.sandboxName}": its network policy initialization cannot be verified. ` +
+            "Start a new eve session to create a sandbox with the configured policy. The existing filesystem has not been deleted.",
         );
       }
       await ensureVercelSandboxBaseRuntime(sandbox);
@@ -233,10 +246,12 @@ export function createVercelSandbox(
 /**
  * The session's sandbox name. Sandbox names are unique within a Vercel
  * project, so the session id alone keeps it stable across deployments and
- * open options; those apply only when the sandbox is created.
+ * open options; those apply only when the sandbox is created. Version 3 excludes
+ * legacy sandboxes whose interrupted initialization could leave open egress.
+ * Recorded legacy state resumes its original name only with a verified policy.
  */
-function vercelSessionName(sessionId: string): string {
-  return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;
+function vercelSessionName(sessionId: string, version: 2 | 3 = 3): string {
+  return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version }).slice(0, 32)}`;
 }
 
 function vercelIdentityOptions(options: object | undefined): object | undefined {
