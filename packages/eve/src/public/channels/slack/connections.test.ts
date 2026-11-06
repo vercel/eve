@@ -5,6 +5,7 @@ import {
   buildAuthEphemeralBlocks,
   buildAuthRequiredPublicText,
   formatConnectionDisplayName,
+  SIGN_IN_CONNECT_ACTION_ID,
 } from "#public/channels/slack/connections.js";
 import {
   parseSignInCancelTarget,
@@ -102,6 +103,7 @@ describe("buildAuthEphemeralBlocks", () => {
         elements: [
           {
             type: "button",
+            action_id: SIGN_IN_CONNECT_ACTION_ID,
             text: { type: "plain_text", text: "Connect Linear" },
             url: "https://connect.example.com/authorize/sca_abc",
             style: "primary",
