@@ -173,6 +173,7 @@ describe("workflowEntry sign-in failure", () => {
         );
         expect(refused?.data.outcome).toBe("failed");
         expect(JSON.stringify(refused?.data)).toContain("already failed in this turn");
+        expect(refused?.data.error?.code).toBe("sign_in_failed");
 
         // The refusal lasts the turn: the next one asks for the sign-in again.
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {

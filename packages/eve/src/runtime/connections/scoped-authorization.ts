@@ -217,7 +217,8 @@ export async function handleAuthorizationError(
   if (refused !== undefined) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
       message: `Authorization for "${scoped.scope}" already failed in this turn and can't be retried${refused.reason === undefined ? "." : `: ${refused.reason}`}`,
-      ...(refused.reason !== undefined && { reason: refused.reason }),
+      // The recorded reason can be free text, such as an authored failure's message.
+      reason: "sign_in_failed",
       retryable: false,
     });
   }
