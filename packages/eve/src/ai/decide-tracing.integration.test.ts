@@ -150,6 +150,7 @@ describe("decide tracing", () => {
         return {
           ...answer,
           answers: { ...answer.answers, urgent: { type: "boolean", probability: 0.2 } },
+          providerMetadata: { gateway: { generationId: "gen_alice", cost: "0.0004" } },
         };
       },
     });
@@ -193,6 +194,8 @@ describe("decide tracing", () => {
       "gen_ai.request.model": model.modelId,
       "gen_ai.usage.input_tokens": 42,
       "gen_ai.usage.output_tokens": 3,
+      "gen_ai.generation.id": "gen_alice",
+      "gen_ai.usage.cost": 0.0004,
     });
     const request = exporter.getFinishedSpans().find((span) => span.name === "decision request")!;
     expect(request.parentSpanContext?.spanId).toBe(decision.spanContext().spanId);
