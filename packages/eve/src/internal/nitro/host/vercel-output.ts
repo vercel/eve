@@ -14,6 +14,7 @@ import { dirname, join, relative } from "node:path";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
+import { VERCEL_SCHEDULES_FUNCTION_ROUTE } from "#internal/nitro/host/vercel-build-output-config.js";
 
 // Named post-build shims for Vercel output. Each goes once Nitro covers it.
 
@@ -23,8 +24,7 @@ const SHARED_SERVER_FUNCTION = "eve/__server";
  * The namespaces a service build publishes, as function directories and route
  * destinations without the leading `/`. Its output merges with the host app's,
  * so a root route such as `/` or an authored channel path could shadow the
- * host's own; those stay reachable only through the host's routing. The cron
- * route lives under eve's prefix.
+ * host's own; those stay reachable only through the host's routing.
  */
 const SERVICE_NAMESPACES = [`${EVE_ROUTE_PREFIX.slice(1)}/`, ".well-known/workflow/"];
 
@@ -38,6 +38,8 @@ const SERVICE_NAMESPACES = [`${EVE_ROUTE_PREFIX.slice(1)}/`, ".well-known/workfl
  * function moves to `eve/__server.func`. A route with its own Vercel function,
  * such as a queue consumer, keeps that function, its route, and its trigger;
  * those routes are static, so the function directory is the path itself.
+ * Nitro's private schedules function keeps its own directory too: Vercel
+ * invokes it through the service's schedules, never through a route.
  * Other functions and route destinations in {@link SERVICE_NAMESPACES} are
  * served by the shared function; everything else is pruned.
  */
@@ -45,9 +47,12 @@ export async function normalizeVercelServiceOutput(
   outputDir: string,
   routeTable: Pick<HostRouteTable, "routes">,
 ): Promise<void> {
-  const ownFunctions = new Set(
-    routeTable.routes.flatMap((route) => ("vercelFunction" in route ? [route.path.slice(1)] : [])),
-  );
+  const ownFunctions = new Set([
+    ...routeTable.routes.flatMap((route) =>
+      "vercelFunction" in route ? [route.path.slice(1)] : [],
+    ),
+    VERCEL_SCHEDULES_FUNCTION_ROUTE.slice(1),
+  ]);
   const isShared = (functionPath: string) =>
     SERVICE_NAMESPACES.some((namespace) => functionPath.startsWith(namespace));
 

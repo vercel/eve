@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
@@ -8,7 +8,7 @@ import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import { normalizeRoutePattern } from "#compiler/channel-route-plan.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
-import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import { connectionEventRoute } from "#runtime/connections/events/path.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
@@ -77,11 +77,19 @@ type HostRoute =
       readonly vercelFunction: "workflow-queue";
     };
 
+/** An authored schedule registered as a Nitro task. */
+export interface HostScheduleTask extends ScheduleRegistration {
+  /**
+   * The Nitro task name, which Vercel Schedules also uses as the schedule
+   * name. It leads with the agent name so the agents in one Vercel project
+   * never share a schedule name.
+   */
+  readonly nitroTaskName: string;
+}
+
 export interface HostRouteTable {
   readonly routes: readonly HostRoute[];
-  readonly scheduleTasks: readonly ScheduleRegistration[];
-  /** The Vercel Cron Jobs path; the Vercel preset registers its handler. */
-  readonly cronHandlerRoute?: string;
+  readonly scheduleTasks: readonly HostScheduleTask[];
 }
 
 interface HostRouteTableInput {
@@ -90,8 +98,6 @@ interface HostRouteTableInput {
   readonly mode: "development" | "production";
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
-  /** Vercel Schedules invokes a private function, so no cron route is needed. */
-  readonly vercelSchedules?: boolean;
 }
 
 /** Every route, task, and cron path eve's Nitro host serves, in registration order. */
@@ -149,13 +155,13 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
     }),
   });
 
-  const scheduleTasks = development ? [] : input.scheduleRegistrations;
+  const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
+    ...task,
+    nitroTaskName: `${manifest.config.name}.${task.taskName}`,
+  }));
   return {
     routes: routes.map((route) => withHeadAllow(route, routes)),
     scheduleTasks,
-    ...(scheduleTasks.length > 0 &&
-      input.vercel &&
-      input.vercelSchedules !== true && { cronHandlerRoute: createCronHandlerRoute() }),
   };
 }
 
@@ -199,16 +205,6 @@ function staticVercelFunctionPath(path: string): string {
     throw new Error(`A route with its own Vercel function must be static: ${path}`);
   }
   return path;
-}
-
-/**
- * An unguessable cron path under eve's protocol prefix. Vercel cron requests
- * otherwise hit the public `/_vercel/cron` and rely on a `CRON_SECRET` the
- * user must set; the path itself is the secret here. Vercel reads it from the
- * deployment's `config.crons[]`, and it is never logged or served.
- */
-function createCronHandlerRoute(): string {
-  return `${EVE_ROUTE_PREFIX}/cron/${randomBytes(32).toString("base64url")}`;
 }
 
 export interface HostNitroRoutes {
@@ -358,13 +354,10 @@ export async function renderHostRoutes(
     // The id's basename becomes the chunk filename, and a task name encodes its
     // whole source path, so a digest keeps the filename short.
     const digest = createHash("sha256").update(task.taskName).digest("hex").slice(0, 16);
-    const handler = addVirtualModule(
-      `schedule-task/${digest}`,
-      renderScheduleTaskModule({ description: task.description }),
-    );
-    tasks[task.taskName] = { description: task.description, handler };
+    const handler = addVirtualModule(`schedule-task/${digest}`, renderScheduleTaskModule(task));
+    tasks[task.nitroTaskName] = { description: task.description, handler };
     const cronTasks = (scheduledTasks[task.cron] ??= []);
-    if (!cronTasks.includes(task.taskName)) cronTasks.push(task.taskName);
+    if (!cronTasks.includes(task.nitroTaskName)) cronTasks.push(task.nitroTaskName);
   }
 
   return {

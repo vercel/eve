@@ -177,18 +177,18 @@ describe("framework-next build", () => {
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const config = await readVercelOutputConfig(outputRoot);
-    expect(config.crons).toHaveLength(3);
-    expect(config.crons).toEqual(
+    expect(config.crons).toEqual([{ path: "/api/user-cleanup", schedule: "0 0 * * *" }]);
+    // Vercel CLI lifts each service's schedules into the deployment and sets `service`.
+    expect(Object.entries(config.schedules as Record<string, unknown>)).toEqual(
       expect.arrayContaining([
-        { path: "/api/user-cleanup", schedule: "0 0 * * *" },
-        {
-          path: expect.stringMatching(/^\/eve\/billing\/v1\/cron\/[A-Za-z0-9_-]+$/),
-          schedule: "*/10 * * * *",
-        },
-        {
-          path: expect.stringMatching(/^\/eve\/support\/v1\/cron\/[A-Za-z0-9_-]+$/),
-          schedule: "*/5 * * * *",
-        },
+        [
+          expect.stringMatching(/^billing\.eve\.schedule\./),
+          { function: "_vercel/tasks", schedule: "*/10 * * * *", service: "eve-billing" },
+        ],
+        [
+          expect.stringMatching(/^support\.eve\.schedule\./),
+          { function: "_vercel/tasks", schedule: "*/5 * * * *", service: "eve-support" },
+        ],
       ]),
     );
   }, 240_000);

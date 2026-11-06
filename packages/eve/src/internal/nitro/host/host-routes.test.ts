@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CompiledAgentManifest, CompiledChannelDefinition } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
-import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { createHostRouteTable } from "#internal/nitro/host/host-routes.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
@@ -182,30 +182,20 @@ describe("createHostRouteTable", () => {
   });
 
   it.each([
-    {
-      mode: "development",
-      vercel: false,
-      schedules: false,
-      tasks: 0,
-      cron: false,
-      consumer: false,
-    },
-    { mode: "production", vercel: false, schedules: false, tasks: 1, cron: false, consumer: false },
-    { mode: "production", vercel: true, schedules: false, tasks: 1, cron: true, consumer: true },
-    { mode: "production", vercel: true, schedules: true, tasks: 1, cron: false, consumer: true },
+    { mode: "development", vercel: false, tasks: 0, consumer: false },
+    { mode: "production", vercel: false, tasks: 1, consumer: false },
+    { mode: "production", vercel: true, tasks: 1, consumer: true },
   ] as const)(
-    "registers schedules for $mode (vercel: $vercel, schedules: $schedules)",
-    ({ consumer, cron, mode, schedules, tasks, vercel }) => {
+    "registers schedules for $mode (vercel: $vercel)",
+    ({ consumer, mode, tasks, vercel }) => {
       const result = table({
         manifest: manifest({ vercelScheduleCollection: true }),
         mode,
         scheduleRegistrations: [DAILY],
         vercel,
-        vercelSchedules: schedules,
       });
 
       expect(result.scheduleTasks).toHaveLength(tasks);
-      expect(result.cronHandlerRoute?.startsWith(`${EVE_ROUTE_PREFIX}/cron/`) ?? false).toBe(cron);
       expect(result.routes.find((route) => route.kind === "schedule-consumer")).toEqual(
         consumer
           ? {
@@ -219,14 +209,13 @@ describe("createHostRouteTable", () => {
     },
   );
 
-  it("mints a fresh unguessable cron path per table", () => {
-    const input = { scheduleRegistrations: [DAILY], vercel: true };
+  it("names each schedule's Nitro task after its agent", () => {
+    const [task] = table({ scheduleRegistrations: [DAILY] }).scheduleTasks;
 
-    expect(table(input).cronHandlerRoute).toMatch(
-      new RegExp(`^${EVE_ROUTE_PREFIX}/cron/[A-Za-z0-9_-]{43}$`),
-    );
-    expect(table(input).cronHandlerRoute).not.toBe(table(input).cronHandlerRoute);
-    expect(table({ vercel: true }).cronHandlerRoute).toBeUndefined();
+    expect(task).toMatchObject({
+      nitroTaskName: "probe-agent.eve.schedule.daily",
+      taskName: DAILY.taskName,
+    });
   });
 
   it.each([
