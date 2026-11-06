@@ -46,6 +46,7 @@ export {
 export { openDeferredApprovals, queueInput } from "./approvals.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
+export type { SignInJoiner, SignInJoiners } from "./requests.js";
 
 /**
  * A model step made calls that need a person's approval: the step's response waits on them

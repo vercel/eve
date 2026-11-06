@@ -92,6 +92,7 @@ export function sessionView(
     projection,
     relayedRequestIds: new Set(hitl.relays.keys()),
     responders: hitl.responders,
+    signInJoiners: hitl.signInJoiners,
     // A sign-in whose interaction closed, as when its call settles without it, is no longer one
     // the session waits on.
     signIns: hitl.signIns.filter(

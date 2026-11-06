@@ -136,6 +136,7 @@ it.each([
     const view: SessionView = {
       projection: { ...initialSessionProjection(), view: tables },
       relayedRequestIds: new Set<string>(),
+      signInJoiners: {},
       responders: {},
       signIns: [],
       turn: {

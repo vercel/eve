@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { PendingResponder } from "#harness/hitl/index.js";
+import type { PendingResponder, SignInJoiners } from "#harness/hitl/index.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
@@ -46,6 +46,8 @@ export interface SessionView {
   readonly responders: Readonly<Record<string, PendingResponder>>;
   /** The sign-in attempts the session waits on, with what completing them needs. */
   readonly signIns: readonly AuthorizationChallenge[];
+  /** Relayed sign-ins that wait on one this session shows, by the shown row's interaction id. */
+  readonly signInJoiners: SignInJoiners;
 }
 
 /** Reads the authoritative lifecycle facts saved alongside execution state. */

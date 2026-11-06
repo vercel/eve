@@ -203,6 +203,24 @@ export function createEveConnectionCallbackRoutePath(
 }
 
 /**
+ * Reads the connection, attempt and token a connection callback path names, under any prefix the
+ * deployment serves eve at, or `undefined` for another path.
+ */
+export function parseEveConnectionCallbackRoutePath(
+  pathname: string,
+): { readonly name: string; readonly attemptId: string; readonly token: string } | undefined {
+  const segments = pathname.split("/");
+  const [connections, name, callback, attemptId, token] = segments.slice(-5);
+  if (connections !== "connections" || callback !== "callback") return undefined;
+  if (!name || !attemptId || !token) return undefined;
+  return {
+    attemptId: decodeURIComponent(attemptId),
+    name: decodeURIComponent(name),
+    token: decodeURIComponent(token),
+  };
+}
+
+/**
  * Creates the stable framework-owned terminal callback route path.
  */
 export function createEveCallbackRoutePath(token: string): string {

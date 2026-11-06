@@ -892,6 +892,7 @@ function changesNothing(view: MachineView, transition: Transition): boolean {
     transition.events.length === 0 &&
     transition.signIns === undefined &&
     transition.relays === undefined &&
+    transition.signInJoiners === undefined &&
     transition.history === undefined
   );
 }

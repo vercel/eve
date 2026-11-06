@@ -54,7 +54,8 @@ import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { sameRelayedSignIn, signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import type { SignInJoiner } from "#harness/hitl/index.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
@@ -485,10 +486,25 @@ export function finishRun(
       (ids.has(row.interactionId) ||
         (run.taskId !== undefined && interactionOwner(tables, row).taskId === run.taskId)),
   );
-  return unchanged(
-    view,
-    withdrawn.map((row) => withdrawInteraction(row.interactionId, "asker-ended")),
-  );
+  const events = withdrawn.map((row) => withdrawInteraction(row.interactionId, "asker-ended"));
+  // A sign-in others joined stays up for them, shown for the oldest one still waiting.
+  const ended = (joiner: SignInJoiner) =>
+    run.taskId !== undefined && callTaskIds(tables, joiner.callId).has(run.taskId);
+  const joiners: Record<string, readonly SignInJoiner[]> = {};
+  for (const [interactionId, waiting] of Object.entries(view.signInJoiners)) {
+    const shownEnded = withdrawn.some((row) => row.interactionId === interactionId);
+    const remaining = waiting.filter((joiner) => !ended(joiner));
+    if (!shownEnded && remaining.length === waiting.length) continue;
+    joiners[interactionId] = shownEnded ? [] : remaining;
+    if (shownEnded) {
+      const promoted = promoteJoiner(tables, remaining);
+      events.push(...promoted.events);
+      Object.assign(joiners, promoted.joiners);
+    }
+  }
+  return Object.keys(joiners).length > 0
+    ? { ...unchanged(view, events), signInJoiners: joiners }
+    : unchanged(view, events);
 }
 
 /** An interaction nobody needs anymore; the writer withdraws the answers still open on it. */
@@ -519,7 +535,7 @@ export function relay(
     readonly runId?: string;
     readonly workflowAsk?: WorkflowAskRoute;
   },
-): Transition {
+): RelayTransition {
   const { payload } = input;
   const tables = view.projection.view;
   const route: Relay | undefined =
@@ -532,20 +548,26 @@ export function relay(
         };
   const events: SessionEvent[] = [];
   const upsert: Record<string, Relay> = {};
-  // A serving task can keep using a child after replying to the call that opened it, whether the
-  // task started with that call or took it later, and after later turns pruned the call.
-  const served = tables.calls[payload.callId];
-  const running = (taskId: string | undefined) =>
-    taskId !== undefined && tables.tasks[taskId]?.status === "running";
-  const serving =
-    (served !== undefined && (served.status !== "settled" || running(served.taskId))) ||
-    Object.values(tables.tasks).some(
-      (task) => task.status === "running" && task.startedBy.callId === payload.callId,
-    );
+  const joiners: Record<string, readonly SignInJoiner[]> = {};
+  const waitingOn = (interactionId: string) =>
+    joiners[interactionId] ?? view.signInJoiners[interactionId] ?? [];
+  const signInWakes: string[] = [];
+  const serving = servesCall(tables, payload.callId);
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
     if (event.type === "interaction.opened" && !serving) continue;
+    if (event.type === "interaction.settled" && mirror === undefined) {
+      // A joined sign-in its asker settled on its own no longer waits on the shown one.
+      for (const [shownId, waiting] of Object.entries({ ...view.signInJoiners, ...joiners })) {
+        const remaining = waiting.filter(
+          (joiner) =>
+            joiner.callId !== payload.callId || joiner.opened.interactionId !== interactionId,
+        );
+        if (remaining.length !== waiting.length) joiners[shownId] = remaining;
+      }
+      continue;
+    }
     if (
       event.type !== "interaction.opened" &&
       (mirror?.origin === undefined ||
@@ -556,24 +578,62 @@ export function relay(
     switch (event.type) {
       case "interaction.opened": {
         if (mirror !== undefined) break;
-        events.push({
-          data: {
-            ...event.data,
-            // Every relayed request names its asker; one relayed from further down names its own.
-            origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
-            subject: { callId: payload.callId },
-          },
-          type: "interaction.opened",
-        });
+        const opened = {
+          ...event.data,
+          // Every relayed request names its asker; one relayed from further down names its own.
+          origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
+          subject: { callId: payload.callId },
+        };
+        const signIn = opened.request.kind === "sign-in" ? opened.request.signIn : undefined;
+        if (signIn !== undefined) {
+          // The same grant for the same person is one sign-in: it waits on the card shown.
+          const shown = relayedSignIns(tables).find(
+            (row) => row.status === "open" && sameRelayedSignIn(row.signIn, signIn),
+          );
+          if (shown !== undefined) {
+            joiners[shown.interactionId] = [
+              ...waitingOn(shown.interactionId),
+              { callId: payload.callId, opened },
+            ];
+            break;
+          }
+          // Asked again after the person signed in for it: the stored grant completes it now.
+          const completed = relayedSignIns(tables).some(
+            (row) =>
+              row.outcome === "accepted" &&
+              stillCurrent(view, row.owner) &&
+              sameRelayedSignIn(row.signIn, signIn),
+          );
+          if (completed && signIn.callbackUrl !== undefined) {
+            signInWakes.push(signIn.callbackUrl);
+            break;
+          }
+        }
+        events.push({ data: opened, type: "interaction.opened" });
         // A person answers it here, and the answer goes back the way it came.
         if (route !== undefined && event.data.request.kind !== "sign-in")
           upsert[interactionId] = route;
         break;
       }
-      case "interaction.settled":
+      case "interaction.settled": {
         if (mirror?.status !== "open") break;
         events.push(...mirrorSettled(tables, event.data));
+        const waiting = waitingOn(interactionId);
+        if (waiting.length === 0) break;
+        joiners[interactionId] = [];
+        if (event.data.outcome === "accepted") {
+          // The grant is stored now: each joined asker completes its own sign-in from it.
+          signInWakes.push(
+            ...waiting.flatMap((joiner) => joiner.opened.request.signIn?.callbackUrl ?? []),
+          );
+        } else {
+          // Its asker gave up on it, not the person: the card stays up for the others.
+          const promoted = promoteJoiner(tables, waiting);
+          events.push(...promoted.events);
+          Object.assign(joiners, promoted.joiners);
+        }
         break;
+      }
       case "response.admitted": {
         // The asker admitted an answer this session forwarded: it stands here too, while the
         // rest of its batch waits.
@@ -593,9 +653,93 @@ export function relay(
     }
   }
   // A route retires once its request closes, with the records of every closed row.
-  return Object.keys(upsert).length > 0
-    ? { ...unchanged(view, events), relays: upsert }
-    : unchanged(view, events);
+  return {
+    ...unchanged(view, events),
+    ...(Object.keys(upsert).length > 0 && { relays: upsert }),
+    ...(Object.keys(joiners).length > 0 && { signInJoiners: joiners }),
+    signInWakes,
+  };
+}
+
+/** A relay's transition, with the callback URLs of the joined sign-ins it completes. */
+export interface RelayTransition extends Transition {
+  readonly signInWakes: readonly string[];
+}
+
+/**
+ * Whether this session still serves `callId`: the call is open, or a running task serves it.
+ * A serving task can keep using a child after replying to the call that opened it, whether the
+ * task started with that call or took it later, and after later turns pruned the call.
+ */
+function servesCall(tables: PublicView, callId: string): boolean {
+  const served = tables.calls[callId];
+  const running = (taskId: string | undefined) =>
+    taskId !== undefined && tables.tasks[taskId]?.status === "running";
+  return (
+    (served !== undefined && (served.status !== "settled" || running(served.taskId))) ||
+    Object.values(tables.tasks).some(
+      (task) => task.status === "running" && task.startedBy.callId === callId,
+    )
+  );
+}
+
+/** The tasks that serve `callId`. */
+function callTaskIds(tables: PublicView, callId: string): ReadonlySet<string> {
+  const ids = new Set<string>();
+  const taskId = tables.calls[callId]?.taskId;
+  if (taskId !== undefined) ids.add(taskId);
+  for (const task of Object.values(tables.tasks))
+    if (task.startedBy.callId === callId) ids.add(task.taskId);
+  return ids;
+}
+
+/** The sign-ins this session mirrors from its children. */
+function relayedSignIns(tables: PublicView) {
+  return Object.values(tables.interactions).flatMap((row) => {
+    const signIn = row.request.signIn;
+    return row.origin === undefined || row.request.kind !== "sign-in" || signIn === undefined
+      ? []
+      : [
+          {
+            interactionId: row.interactionId,
+            outcome: row.outcome,
+            owner: interactionOwner(tables, row),
+            signIn,
+            status: row.status,
+          },
+        ];
+  });
+}
+
+/** Whether a mirrored row's owner is still at work: the open turn, or a running task. */
+function stillCurrent(
+  view: SessionView,
+  owner: { readonly turnId?: string; readonly taskId?: string },
+): boolean {
+  const tables = view.projection.view;
+  return (
+    (owner.turnId !== undefined && owner.turnId === activeTurnIdOf(view.projection)) ||
+    (owner.taskId !== undefined && tables.tasks[owner.taskId]?.status === "running")
+  );
+}
+
+/**
+ * The shown sign-in closed while others still wait on it: the oldest joiner whose call this
+ * session still serves opens as the shown one, and the rest wait on it.
+ */
+function promoteJoiner(
+  tables: PublicView,
+  waiting: readonly SignInJoiner[],
+): {
+  readonly events: readonly SessionEvent[];
+  readonly joiners: Readonly<Record<string, readonly SignInJoiner[]>>;
+} {
+  const [next, ...rest] = waiting.filter((joiner) => servesCall(tables, joiner.callId));
+  if (next === undefined) return { events: [], joiners: {} };
+  return {
+    events: [{ data: next.opened, type: "interaction.opened" }],
+    joiners: rest.length > 0 ? { [next.opened.interactionId]: rest } : {},
+  };
 }
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */

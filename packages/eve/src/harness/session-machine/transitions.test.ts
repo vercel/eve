@@ -14,6 +14,7 @@ import {
   controlled,
   discardAttempt,
   fail,
+  finishRun,
   matchSignIns,
   relay,
   routeAnswer,
@@ -23,6 +24,7 @@ import {
 import { sessionEndedFacts } from "#harness/facts.js";
 import type { SuspendedStep } from "#harness/session-machine/state.js";
 import type { SessionView } from "#harness/session-machine/view.js";
+import type { Transition } from "#harness/session-machine/commit.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -955,3 +957,190 @@ function committed(
 ): SessionEvent[] {
   return cascade(view.projection.view, decide(view).events);
 }
+
+describe("joined sign-ins", () => {
+  const RUI = { id: "rui", issuer: "vercel", type: "user" } as const;
+  const tasks = ["a1", "a2", "a3"] as const;
+
+  /** A turn running three helper tasks, one per call. */
+  function threeHelpers(): HarnessSession {
+    return withPublished(
+      withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }),
+      tasks.flatMap((callId) => [
+        {
+          data: { callId, capability: { kind: "agent", name: "helper" }, owner: { runId } },
+          scope: { runId, turnId },
+          type: "call.requested",
+        },
+        {
+          data: {
+            kind: "agent",
+            name: "helper",
+            startedBy: { callId },
+            taskId: `task-${callId}`,
+          },
+          scope: { turnId },
+          type: "task.started",
+        },
+        { data: { callId, taskId: `task-${callId}` }, scope: { turnId }, type: "call.started" },
+      ]) as SessionEvent[],
+    );
+  }
+
+  const callbackUrl = (callId: string, origin = "https://v.example") =>
+    `${origin}/eve/v1/connections/github/callback/attempt-${callId}/${encodeURIComponent(`eve:inbox:v1:eve:session:child-${callId}:inbox`)}`;
+
+  function signInOpened(
+    callId: string,
+    overrides: {
+      readonly principal?: {
+        readonly type: string;
+        readonly id?: string;
+        readonly issuer?: string;
+      };
+      readonly grant?: string | null;
+      readonly origin?: string;
+    } = {},
+  ): SessionEvent {
+    return {
+      data: {
+        interactionId: `attempt-${callId}`,
+        request: {
+          kind: "sign-in",
+          prompt: "Sign in to GitHub",
+          signIn: {
+            callbackUrl: callbackUrl(callId, overrides.origin),
+            ...(overrides.grant !== null && { grant: overrides.grant ?? "github/vercel-v" }),
+            name: `github-${callId}`,
+            principal: overrides.principal ?? RUI,
+            url: "https://connect.example/authorize",
+          },
+        },
+        subject: { turnId: "child-turn" },
+      },
+      type: "interaction.opened",
+    } as SessionEvent;
+  }
+
+  const relayed = (session: HarnessSession, callId: string, events: readonly SessionEvent[]) =>
+    relay(viewOf(session), {
+      payload: {
+        callId,
+        childSessionId: `child-${callId}`,
+        events: events as never,
+        kind: "subagent-interaction",
+        subagentName: "helper",
+      },
+    });
+
+  /** Publishes a transition's facts and saves what it changes, as a commit does. */
+  const applied = (session: HarnessSession, change: Transition) =>
+    saveTransition(withPublished(session, change.events), change);
+
+  function askAll(
+    session: HarnessSession,
+    callIds: readonly string[] = tasks,
+    opened: (callId: string) => SessionEvent = (callId) => signInOpened(callId),
+  ) {
+    return callIds.reduce(
+      (current, callId) => applied(current, relayed(current, callId, [opened(callId)])),
+      session,
+    );
+  }
+
+  const openSignIns = (session: HarnessSession) =>
+    Object.values(viewOf(session).projection.view.interactions)
+      .filter((row) => row.request.kind === "sign-in" && row.status === "open")
+      .map((row) => row.interactionId);
+
+  const settledBySigning = (callId: string, outcome = "accepted") =>
+    [
+      { data: { interactionId: `attempt-${callId}`, outcome }, type: "interaction.settled" },
+    ] as SessionEvent[];
+
+  it("shows one sign-in for three children that need the same grant for the same person", () => {
+    const asked = askAll(threeHelpers());
+
+    expect(openSignIns(asked)).toEqual(["attempt-a1"]);
+    expect(
+      readHitlState(asked.state).signInJoiners["attempt-a1"]?.map((joiner) => joiner.callId),
+    ).toEqual(["a2", "a3"]);
+  });
+
+  it("completes every joined sign-in once the shown one is accepted", () => {
+    const asked = askAll(threeHelpers());
+    const accepted = relayed(asked, "a1", settledBySigning("a1"));
+
+    expect(accepted.events).toMatchObject([
+      { data: { interactionId: "attempt-a1", outcome: "accepted" }, type: "interaction.settled" },
+    ]);
+    expect(accepted.signInWakes).toEqual([callbackUrl("a2"), callbackUrl("a3")]);
+    const after = dropClosedRecords(
+      applied(asked, accepted),
+      storedProjection(applied(asked, accepted).state),
+    );
+    expect(readHitlState(after.state).signInJoiners).toEqual({});
+  });
+
+  it("completes a sign-in asked again after the person signed in, with no card", () => {
+    const signed = applied(
+      askAll(threeHelpers(), ["a1"]),
+      relayed(askAll(threeHelpers(), ["a1"]), "a1", settledBySigning("a1")),
+    );
+    const late = relayed(signed, "a2", [signInOpened("a2")]);
+
+    expect(late.events).toEqual([]);
+    expect(late.signInWakes).toEqual([callbackUrl("a2")]);
+  });
+
+  it("moves the card to the oldest joiner when the shown child's task ends", () => {
+    const asked = askAll(threeHelpers());
+    const ended = applied(asked, finishRun(viewOf(asked), { taskId: "task-a1" }));
+
+    expect(openSignIns(ended)).toEqual(["attempt-a2"]);
+    expect(
+      readHitlState(ended.state).signInJoiners["attempt-a2"]?.map((joiner) => joiner.callId),
+    ).toEqual(["a3"]);
+    const accepted = relayed(ended, "a2", settledBySigning("a2"));
+    expect(accepted.signInWakes).toEqual([callbackUrl("a3")]);
+  });
+
+  it("moves the card to the oldest joiner when the shown child withdraws its sign-in", () => {
+    const asked = askAll(threeHelpers());
+    const withdrawn = applied(asked, relayed(asked, "a1", settledBySigning("a1", "interrupted")));
+
+    expect(openSignIns(withdrawn)).toEqual(["attempt-a2"]);
+  });
+
+  it("drops a joiner whose own task ends, and a joiner its child settled", () => {
+    const asked = askAll(threeHelpers());
+    const ended = applied(asked, finishRun(viewOf(asked), { taskId: "task-a2" }));
+    const settled = applied(ended, relayed(ended, "a3", settledBySigning("a3", "interrupted")));
+
+    expect(openSignIns(settled)).toEqual(["attempt-a1"]);
+    expect(relayed(settled, "a1", settledBySigning("a1")).signInWakes).toEqual([]);
+  });
+
+  it("keeps a card per principal, and one person's sign-in never completes another's", () => {
+    const asked = askAll(threeHelpers(), ["a1", "a2"], (callId) =>
+      signInOpened(callId, {
+        principal: callId === "a1" ? RUI : { id: "ben", issuer: "vercel", type: "user" },
+      }),
+    );
+
+    expect(openSignIns(asked)).toEqual(["attempt-a1", "attempt-a2"]);
+    expect(relayed(asked, "a1", settledBySigning("a1")).signInWakes).toEqual([]);
+  });
+
+  it("keeps a card per sign-in without a grant, or minted by another deployment", () => {
+    const noGrant = askAll(threeHelpers(), ["a1", "a2"], (callId) =>
+      signInOpened(callId, { grant: null }),
+    );
+    const elsewhere = askAll(threeHelpers(), ["a1", "a2"], (callId) =>
+      signInOpened(callId, { origin: callId === "a1" ? "https://v.example" : "https://w.example" }),
+    );
+
+    expect(openSignIns(noGrant)).toEqual(["attempt-a1", "attempt-a2"]);
+    expect(openSignIns(elsewhere)).toEqual(["attempt-a1", "attempt-a2"]);
+  });
+});

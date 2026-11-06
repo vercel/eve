@@ -6,6 +6,7 @@ import { isObject } from "#shared/guards.js";
 import type { PendingResponder } from "./responders.js";
 import { parseRelay, type Relay } from "./relays.js";
 import { resolveActiveAuthorizationChallenges } from "./sign-ins.js";
+import type { InteractionOpenedData } from "#protocol/session-events/families/interaction.js";
 
 const REQUESTS_KEY = "eve.runtime.hitl.requests";
 
@@ -13,12 +14,26 @@ export interface HitlState {
   readonly signIns: readonly AuthorizationChallenge[];
   readonly responders: Readonly<Record<string, PendingResponder>>;
   readonly relays: ReadonlyMap<string, Relay>;
+  readonly signInJoiners: SignInJoiners;
 }
+
+/**
+ * A child's relayed sign-in that one already shown here completes, so it opens no card of its
+ * own: the call it serves, and the request as this session would mirror it.
+ */
+export interface SignInJoiner {
+  readonly callId: string;
+  readonly opened: InteractionOpenedData;
+}
+
+/** Joined sign-ins, oldest first, by the interaction id of the mirrored sign-in they wait on. */
+export type SignInJoiners = Readonly<Record<string, readonly SignInJoiner[]>>;
 
 interface StoredRequests {
   readonly responders?: unknown;
   readonly signIns?: unknown;
   readonly relays?: unknown;
+  readonly signInJoiners?: unknown;
 }
 
 function readRequests(state: SessionStateMap | undefined): StoredRequests {
@@ -36,6 +51,7 @@ export function readHitlState(state: SessionStateMap | undefined): HitlState {
   return {
     signIns: Array.isArray(raw.signIns) ? raw.signIns : [],
     responders: record<PendingResponder>(raw.responders),
+    signInJoiners: record<readonly SignInJoiner[]>(raw.signInJoiners),
     get relays() {
       return (relays ??= new Map(
         Object.entries(record(raw.relays)).flatMap(([id, value]) => {
@@ -52,9 +68,10 @@ export function holdsHitlRequests(state: SessionStateMap | undefined): boolean {
   const requests = state?.[REQUESTS_KEY];
   if (requests === undefined) return false;
   if (!isObject(requests) || Array.isArray(requests)) return true;
-  const { signIns, relays } = requests as StoredRequests;
+  const { signIns, relays, signInJoiners } = requests as StoredRequests;
   return (
     signIns !== undefined ||
+    signInJoiners !== undefined ||
     (relays !== undefined && (!isObject(relays) || Object.keys(relays).length > 0))
   );
 }
@@ -63,6 +80,8 @@ export interface HitlStateChange {
   readonly signIns?: readonly AuthorizationChallenge[];
   readonly relays?: Readonly<Record<string, Relay>>;
   readonly responders?: Readonly<Record<string, PendingResponder>>;
+  /** Joined sign-ins by the row they wait on; an empty list drops that row's entry. */
+  readonly signInJoiners?: SignInJoiners;
 }
 
 /** Changes and retirement share one save; the fold, not another ledger, owns record lifetime. */
@@ -76,6 +95,7 @@ export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
     change.signIns === undefined &&
     change.relays === undefined &&
     change.responders === undefined &&
+    change.signInJoiners === undefined &&
     stored !== undefined &&
     (!isObject(stored) || Array.isArray(stored))
   )
@@ -119,6 +139,21 @@ export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
       kept(
         { ...current.responders, ...change.responders },
         (id) => view === undefined || (view.responses[id]?.status ?? "settled") !== "settled",
+      ),
+    );
+  }
+  if (
+    change.signInJoiners !== undefined ||
+    (view !== undefined && Object.keys(current.signInJoiners).length > 0)
+  ) {
+    const joiners = { ...current.signInJoiners, ...change.signInJoiners };
+    put(
+      "signInJoiners",
+      kept(
+        joiners,
+        (id) =>
+          (joiners[id]?.length ?? 0) > 0 &&
+          (view === undefined || view.interactions[id]?.status === "open"),
       ),
     );
   }
