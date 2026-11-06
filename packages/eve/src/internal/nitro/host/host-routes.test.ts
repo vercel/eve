@@ -209,14 +209,21 @@ describe("createHostRouteTable", () => {
     },
   );
 
-  it("names each schedule's Nitro task after its agent", () => {
-    const [task] = table({ scheduleRegistrations: [DAILY] }).scheduleTasks;
+  it.each([
+    { vercelService: false, nitroTaskName: "eve.schedule.daily" },
+    { vercelService: true, nitroTaskName: "probe-agent.eve.schedule.daily" },
+  ])(
+    "names Nitro tasks after the agent only in Vercel service builds ($vercelService)",
+    ({ nitroTaskName, vercelService }) => {
+      const [task] = table({
+        scheduleRegistrations: [DAILY],
+        vercel: true,
+        vercelService,
+      }).scheduleTasks;
 
-    expect(task).toMatchObject({
-      nitroTaskName: "probe-agent.eve.schedule.daily",
-      taskName: DAILY.taskName,
-    });
-  });
+      expect(task).toMatchObject({ nitroTaskName, taskName: DAILY.taskName });
+    },
+  );
 
   it.each([
     { mode: "development", vercel: false, world: undefined, direct: false },
