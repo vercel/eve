@@ -10,31 +10,39 @@ last_updated: "2026-11-06"
 
 Every assertion result states the scale its score is on, so a reader can tell
 a probability from a rubric position. eve sets the scale for its own
-assertions and judges; `t.score` accepts one.
+assertions and judges. `t.score` and custom assertions declare one.
 
-| scale                                 | the score is                                                                          | set by                                |
-| ------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------- |
-| `{ type: "categorical", categories }` | one category's value, such as fail (0) or pass (1)                                    | gates; `choice` judges, as fail/pass  |
-| `{ type: "probability" }`             | the judge's probability that the answer is yes, 0–1                                   | `boolean` judges and criteria strings |
-| `{ type: "ordinal", levels }`         | a position on `levels`, worst first, over the last index; can fall between two levels | `score` judges                        |
-| `{ type: "continuous" }`              | a number with no further meaning                                                      | `similarity`; `t.score` by default    |
+| scale                                 | the score is                                                                          | set by                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `{ type: "categorical", categories }` | one category's value: fail (0) or pass (1)                                            | scoped methods, `includes`, `equals`, `matches`, `satisfies`; `choice` judges |
+| `{ type: "probability" }`             | the judge's probability that the answer is yes, 0–1                                   | `boolean` judges and criteria strings                                         |
+| `{ type: "ordinal", levels }`         | a position on `levels`, worst first, over the last index; can fall between two levels | `score` judges                                                                |
+| `{ type: "continuous" }`              | a number with no further meaning                                                      | `similarity`                                                                  |
+
+The scale describes the score's shape, so severity doesn't change it: a gated
+`similarity` stays continuous, and a soft `includes` stays pass/fail.
 
 ```ts
 t.score(grade).label("faithfulness").scale({ type: "probability" });
 ```
 
+A custom `Assertion` passed to `t.check` or `t.require` declares its scale with
+an optional `scale` property. `t.score` and custom assertions without one have
+no scale.
+
 ## Problem
 
 A judge score of 0.5 means "Mostly clear" on a three-level rubric and a coin
-flip as a probability. eve knows which it is when it scores: the question type
-and its levels are in hand. It then drops them. Only the display name
-(`judge.score`, `judge.boolean`) keeps a trace.
+flip as a probability. eve records what tells them apart, but not as a
+contract. A judge result's `metadata.question` holds the question's `type` and
+`criteria`, and `metadata.answer` holds the raw answer. Metadata is an untyped
+bag: its keys can change without notice, and only judges fill it. `t.score`
+and custom assertions have no equivalent, so a reporter has no way to read
+their scale.
 
-Consumers guess. v's publisher derives a scale from its own judge files
-([`judgeScale`](https://github.com/vercel/api/blob/d1b542882e6ee573d907cba0a0cf148fa844f17a/agents/v/evals/lib/checks/judge.ts#L97-L99)),
-and its contract has only categorical and continuous scales, so probability
-and rubric judges both publish as `continuous`. The evals pages then label them
-the same way.
+So consumers keep their own copy of each scale. A store that knows only
+categorical and continuous scales publishes probability and rubric judges both
+as continuous, and shows them the same way.
 
 ## Semantics
 
@@ -43,27 +51,18 @@ the same way.
   scales, as it warns for duplicate scores.
 - **Thresholds don't change.** They still apply to the 0–1 score.
 - **No scale reads as continuous**, which is what every consumer assumes today.
-- **Ordinal scores read through their levels.** A reporter can show 0.5 on
-  three levels as "Mostly clear", and 0.65 as between "Mostly clear" and
-  "Clear and concise".
+- **Ordinal levels are labels.** A rubric criterion can be a string, a JSON
+  value, or `null`. A string criterion is its own label. Any other criterion is
+  labelled by its position, `Level 1` worst. The full criterion stays in
+  `metadata.question`. A reporter can then show 0.5 on three levels as its
+  middle label, and 0.65 as between the middle and best labels.
 
 `AssertionResult` gains `scale`, absent when unknown. Artifacts and reporters
 receive it.
 
-## Consumer: v's evaluation contract
+## Consumers
 
-v's
-[`scaleSchema`](https://github.com/vercel/api/blob/d1b542882e6ee573d907cba0a0cf148fa844f17a/agents/v/lib/evaluations/contract.ts#L38-L56)
-gains the two missing types:
-
-| scale         | shape                                                | rule                       | evals pages show                                                             |
-| ------------- | ---------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------- |
-| `probability` | `{ type: "probability" }`                            | completed scores in [0, 1] | `Model judge · <model> · probability`                                        |
-| `ordinal`     | `{ type: "ordinal", levels: string[] }`, 2–20 levels | completed scores in [0, 1] | `Model judge · <model> · 3 levels`, and the nearest level next to each score |
-
-The publisher reads `scale` from the eve result. A scale is part of an
-evaluator version's identity, so a judge that moves from `continuous` to one of
-these needs a version bump and starts a new history. Today none does: all 11 of
-v's offline judges are binary and publish as categorical. The online
-`request-completeness` judge stays `continuous`, because it is a generated 0–1
-grade, neither a probability nor a rubric position.
+A store can read `scale` from the eve result, so it needs no copy of the
+mapping. A store that treats a scale as part of an evaluator's identity starts
+a new history for an evaluator whose scale changes, such as a rubric judge that
+was published as continuous.
