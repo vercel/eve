@@ -329,8 +329,8 @@ export interface SlackChannelState extends UndeliveredReplyState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   /**
-   * Connection name to the sign-in prompt the default sign-in `interaction.opened` handler sent
-   * as a direct message, because the session had no thread to hold a public status. The matching
+   * Sign-in interaction id to the prompt the default sign-in `interaction.opened` handler sent as
+   * a direct message, because the session had no thread to hold a public status. The matching
    * sign-in `interaction.settled` handler edits it in place to surface the resolution outcome.
    * @internal
    */
