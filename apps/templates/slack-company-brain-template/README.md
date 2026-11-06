@@ -17,12 +17,15 @@ agent/
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
+  memory/personal.ts             # private notes per person, in DMs and outside Slack
+  memory/channel.ts              # shared notes per Slack channel
   schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
   lib/github.ts                  # GitHub connector and firewall credential broker
+  lib/conversation.ts            # tells private conversations from shared channels
 ```
 
 - **Grounded answers.** The instructions tell the agent to answer
@@ -37,6 +40,9 @@ agent/
   [Get started](#get-started).
 - **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
   can start a conversation, so guests in Slack Connect channels can't.
+- **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
+  private one per person, and a shared one per Slack channel. See
+  [Memory](#memory).
 - **Scheduled tasks.** People can ask for recurring or one-time work, such as
   "every Monday at 9, summarize last week's open questions here". Results post
   in the conversation where the schedule was created. See
@@ -57,7 +63,8 @@ agent/
 pnpm install
 pnpm exec eve add channel/slack   # creates the Slack app through Vercel Connect
 cp .env.example .env.local        # then set SLACK_TEAM_ID
-vercel env pull                   # Vercel credentials for AI Gateway and the sandbox
+pnpm exec eve integration setup file-memory  # private Blob store for memory
+vercel env pull                   # Vercel credentials for AI Gateway, sandbox, and memory
 pnpm dev
 ```
 
@@ -78,6 +85,35 @@ Scopes**. Without them, people mention the agent for each follow-up.
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
+
+## Memory
+
+The agent keeps two kinds of notes, each a small document it edits with save
+and remove tools:
+
+| Slot       | Shared by                   | Available in                                    |
+| ---------- | --------------------------- | ----------------------------------------------- |
+| `personal` | One person                  | Slack DMs and non-Slack channels, such as `eve` |
+| `channel`  | Everyone in a Slack channel | That channel's threads                          |
+
+Personal memory is off in shared conversations, including group DMs, so notes
+about one person never show up in a thread other people read. Channel memory
+is off in DMs. Scopes come from the trusted Slack session in
+`lib/conversation.ts`, never from the model. Personal memory follows the
+signed-in identity, so someone's Slack DMs and their `eve` sessions keep
+separate notes.
+
+On Vercel, memory is stored in a private Vercel Blob store. Run
+`pnpm exec eve integration setup file-memory` once to create it and connect it to the
+project, then redeploy. Without it, memory on Vercel reports an error that
+points to that command. Under `eve dev`, memory lives in process memory and resets on
+restart.
+
+To change what gets remembered, edit the slot descriptions in `agent/memory/`
+and the Memory section of `agent/instructions.md`. To search many records
+instead of keeping a small document, swap `fileMemory()` for another
+[provider](https://eve.dev/docs/memory#choose-a-provider) without changing the
+scopes.
 
 ## Connect GitHub
 
@@ -261,9 +297,6 @@ carries. The Slack docs cover common next steps:
 - [Customize rendering](https://eve.dev/docs/channels/slack#customize-rendering)
   of replies and approval cards.
 
-To let the agent remember things between conversations, add a memory provider,
-such as `pnpm exec eve add memory/file`. See [Memory](https://eve.dev/docs/memory).
-
 ## Before you roll it out
 
 - **Shared threads are public to their members.** Anything the agent retrieves
@@ -276,6 +309,9 @@ such as `pnpm exec eve add memory/file`. See [Memory](https://eve.dev/docs/memor
   firewall. Don't put other credentials in the sandbox, and narrow the network
   policy in `agent/sandbox.ts` and `lib/github.ts` if you need to restrict
   egress. See [Sandbox](https://eve.dev/docs/sandbox).
+- **Channel memory is shared.** Anyone who can reach the agent in a channel
+  benefits from, and can add to, that channel's notes. Review the channel
+  memory description if your channels hold sensitive discussions.
 - **Keep checks in sensitive tools.** The channel gate decides who can start a
   turn. A tool that reads or changes sensitive data should check
   `ctx.session.auth` itself.
