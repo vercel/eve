@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -27,6 +28,18 @@ const spawnMock = vi.hoisted(() =>
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
+}));
+
+const listeningPorts = vi.hoisted(() => new Set<number>());
+vi.mock("node:net", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:net")>()),
+  createConnection: ({ port }: { port: number }) => {
+    const socket = Object.assign(new EventEmitter(), { setTimeout() {}, destroy() {} });
+    setImmediate(() =>
+      socket.emit(listeningPorts.has(port) ? "connect" : "error", new Error("ECONNREFUSED")),
+    );
+    return socket;
+  },
 }));
 
 import { withEve } from "./index.js";
@@ -58,6 +71,10 @@ describe("withEve Vercel config", () => {
   const originalCwd = process.cwd();
 
   afterEach(() => {
+    for (const result of spawnMock.mock.results) {
+      if (result.type === "return") result.value.emit("exit", 0, null);
+    }
+    listeningPorts.clear();
     spawnMock.mockReset();
     process.chdir(originalCwd);
     vi.unstubAllEnvs();
@@ -143,8 +160,12 @@ describe("withEve Vercel config", () => {
       const child = Object.assign(new EventEmitter(), {
         killed: false,
         kill,
-        stderr: new EventEmitter(),
-        stdout: new EventEmitter(),
+        stderr: new PassThrough(),
+        stdout: new PassThrough(),
+      });
+      kill.mockImplementation(() => {
+        child.emit("exit", 1, null);
+        return true;
       });
       setImmediate(() => {
         child.stderr.emit(
@@ -827,21 +848,20 @@ async function writeBuiltAgent(agentRoot: string): Promise<void> {
   await writeFile(join(agentRoot, ".output", "server", "index.mjs"), "// built agent\n");
 }
 
-/** Each spawned child reports it is listening on the port it was given. */
+/** Model the child binding its configured listener without requiring a log line. */
 function spawnListeningServer(): void {
   spawnMock.mockImplementation((_command, _args, options) => {
     const child = Object.assign(new EventEmitter(), {
       killed: false,
       kill: () => undefined,
       pid: 12345,
-      stderr: new EventEmitter(),
-      stdout: new EventEmitter(),
+      exitCode: null,
+      signalCode: null,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
     });
     setImmediate(() => {
-      child.stdout.emit(
-        "data",
-        Buffer.from(`Listening on: http://127.0.0.1:${options.env.PORT ?? ""}/\n`),
-      );
+      listeningPorts.add(Number(options.env.PORT));
     });
     return child;
   });
