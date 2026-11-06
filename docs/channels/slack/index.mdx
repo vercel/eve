@@ -177,6 +177,8 @@ export default slackChannel({
 
 An ignored message never starts a turn. Once `decide` lets a message through, its thread has a session, so later replies take the followed-thread branch without another decision call. If `decide` throws, eve drops the message; catch the error and return `{ auth }` to answer anyway. See [Classify ambient replies with a decision model](/docs/channels/slack/reference#classify-ambient-replies-with-a-decision-model) for choosing the decision model.
 
+For a fuller setup with per-channel goals, instructions for staying silent, a decision model that filters out clearly unintended messages, and monitoring, see [Ambient Listening in Slack](/docs/patterns/ambient-listening).
+
 ## Handle message edits
 
 When someone edits a DM, a code channel message, or a message that mentions the agent before or after the edit, in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. By default, the edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until its first tool call finishes.
