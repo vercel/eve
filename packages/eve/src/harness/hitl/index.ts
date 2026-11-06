@@ -26,6 +26,7 @@ import {
   requestLimit,
   requireSignIn,
 } from "./approvals.js";
+import { stepCallsBack } from "./sign-in-callbacks.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
 import { isEmptyInput } from "./delivery.js";
 
@@ -85,6 +86,7 @@ export async function stopForToolSignIn(
     requireSignIn(step.view(), {
       calls: interrupt.calls,
       challenges: interrupt.challenges,
+      callsBack: stepCallsBack(step),
     }),
     step.session.history,
   );
@@ -179,4 +181,11 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
 }
 
 export { readHitlState } from "./requests.js";
+export {
+  callsBackFor,
+  localSignInCallback,
+  ownCallbacks,
+  type OwnCallbacks,
+  type SignInCallback,
+} from "./sign-in-callbacks.js";
 export { holdsHitlRequests } from "./view.js";

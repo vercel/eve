@@ -164,7 +164,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       const event = signInOf(sessionTables(ctx.view), data.interactionId);
-      if (event === undefined) return;
+      if (event === undefined || event.waitsOn !== undefined) return;
       const { displayName } = event;
       if (data.outcome === "accepted") {
         await postActivity(

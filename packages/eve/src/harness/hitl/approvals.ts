@@ -11,7 +11,13 @@ import { pendingApprovals } from "./approval-prompt.js";
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
-import { signInAttemptKey, supersededChallenges, waitingSignIn, withSignIns } from "./sign-ins.js";
+import {
+  signInAttemptKey,
+  supersededChallenges,
+  waitingSignIn,
+  withSignIns,
+  type CallsBack,
+} from "./sign-ins.js";
 import {
   failedCall,
   resolveApprovalOutcome,
@@ -512,6 +518,8 @@ export function requireSignIn(
   input: {
     readonly challenges: readonly AuthorizationChallenge[];
     readonly calls?: readonly StoppedCall[];
+    /** The sign-ins this session can call back, when it runs in a workflow. */
+    readonly callsBack?: CallsBack;
     readonly queued?: HarnessStepInput;
   },
 ): Transition {
@@ -544,7 +552,7 @@ export function requireSignIn(
             : { turnId },
       });
       // One a child already has a card for waits on that card's answer.
-      return { ...opened, data: waitingSignIn(tables, opened.data, superseded) };
+      return { ...opened, data: waitingSignIn(tables, opened.data, input.callsBack, superseded) };
     }),
   ];
   const turn = withQueued(view.turn, input.queued);

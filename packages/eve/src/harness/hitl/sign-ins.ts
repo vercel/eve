@@ -139,16 +139,24 @@ export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge)
 /**
  * A sign-in opening with the attempt it waits on: the open one for the same grant and principal
  * the person already has a card for (`sameRelayedSignIn`), other than the ones in `closing`. Its
- * record and callback stay, and the answer to that card completes it too. A responder's sign-in
- * is about its own answer, so it always has its own card.
+ * record and callback stay, and the answer to that card completes it too, so it waits only when
+ * this session can call its callback (`callsBack`); any other keeps its own card. A
+ * responder's sign-in is about its own answer, so it always has its own card.
  */
 export function waitingSignIn(
   view: SessionView,
   data: InteractionOpenedData,
+  callsBack: CallsBack | undefined,
   closing: ReadonlySet<string> = new Set(),
 ): InteractionOpenedData {
   const signIn = data.request.signIn;
-  if (signIn === undefined || signIn.waitsOn !== undefined || "responseId" in data.subject)
+  if (
+    signIn === undefined ||
+    signIn.waitsOn !== undefined ||
+    "responseId" in data.subject ||
+    callsBack === undefined ||
+    !callsBack(data)
+  )
     return data;
   const shown = Object.values(view.interactions).find(
     (row) =>
@@ -166,6 +174,9 @@ export function waitingSignIn(
         request: { ...data.request, signIn: { ...signIn, waitsOn: shown.interactionId } },
       };
 }
+
+/** Whether this session can call a sign-in's callback, and so complete it from another's answer. */
+export type CallsBack = (row: Pick<InteractionRow, "origin" | "request">) => boolean;
 
 function callbackOrigin(url: string | undefined): string | undefined {
   if (url === undefined || !URL.canParse(url)) return undefined;

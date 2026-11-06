@@ -142,7 +142,8 @@ export async function settleSignIn(
   surface: SignInSurface,
 ): Promise<void> {
   const signIn = signInOf(view, data.interactionId);
-  if (signIn === undefined || signIn.responseId !== undefined) return;
+  if (signIn === undefined || signIn.responseId !== undefined || signIn.waitsOn !== undefined)
+    return;
   const posted = surface.posted.get(signIn.name);
   if (posted === undefined) return;
   surface.posted.set(signIn.name, undefined);

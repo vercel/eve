@@ -10,17 +10,21 @@ import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { SIGN_IN_DECLINED, sameRelayedSignIn } from "#harness/hitl/sign-ins.js";
+import {
+  callsBackFor,
+  localSignInCallback,
+  ownCallbacks,
+  type OwnCallbacks,
+  type SignInCallback,
+} from "#harness/hitl/index.js";
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
-import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
-import { vercelConnectCallbackUrl } from "#runtime/connections/scoped-authorization.js";
-import { authHookToken } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
@@ -57,8 +61,9 @@ export async function emitProxiedSubagentEvent(
   // The other askers hear a sign-in's answer before the relay commits: a delivery that fails
   // fails this step, and its retry delivers them again from the same state.
   const baseUrl = await workflowCallbackBaseUrl();
-  if (baseUrl !== undefined) {
-    const own = ownCallbacks(input.durableSession.sessionId, baseUrl);
+  const own =
+    baseUrl === undefined ? undefined : ownCallbacks(input.durableSession.sessionId, baseUrl);
+  if (own !== undefined) {
     const tables = storedProjection(input.durableSession.state).view;
     await settleSignIns([
       ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
@@ -69,7 +74,14 @@ export async function emitProxiedSubagentEvent(
   }
   return await commitSessionStep(
     input,
-    (view) => [relay(view, { payload: hookPayload, runId, workflowAsk })],
+    (view) => [
+      relay(view, {
+        callsBack: own === undefined ? undefined : callsBackFor(own),
+        payload: hookPayload,
+        runId,
+        workflowAsk,
+      }),
+    ],
     {
       origin: "relayed",
       inputSource:
@@ -85,7 +97,7 @@ export async function emitProxiedSubagentEvent(
 
 /** An open sign-in to settle with the answer another sign-in for the same grant got. */
 interface AnsweredSignIn {
-  readonly callback: { readonly name: string; readonly attemptId: string; readonly token: string };
+  readonly callback: SignInCallback;
   readonly params: Readonly<Record<string, string>>;
 }
 
@@ -96,44 +108,11 @@ export interface SignInAnswer {
   readonly outcome: "accepted" | "declined";
 }
 
-/** Where this session's own sign-in callbacks point: its deployment's origin and its own session. */
-export interface OwnCallbacks {
-  readonly origin: string;
-  readonly sessionId: string;
-}
-
-/**
- * This session's own callbacks, at its workflow's callback base URL. Only a Vercel Connect sign-in
- * has a grant to share, and its callback names a loopback host `localhost`, as `eve dev` mints it.
- */
-export function ownCallbacks(sessionId: string, callbackBaseUrl: string): OwnCallbacks {
-  return { origin: new URL(vercelConnectCallbackUrl(callbackBaseUrl)).origin, sessionId };
-}
-
 /** This workflow's callback base URL, or `undefined` outside a workflow. */
 async function workflowCallbackBaseUrl(): Promise<string | undefined> {
   const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
   const url = getWorkflowMetadata().url;
   return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
-}
-
-/**
- * The callback of a sign-in asked on this deployment, by this session or a child session it
- * runs: its URL is on this deployment's origin and names the asker's inbox. A remote child's
- * callback belongs to its own deployment's world, and the parent never resumes a hook a child's
- * URL merely names.
- */
-export function localSignInCallback(
-  row: Pick<InteractionRow, "origin" | "request">,
-  own: OwnCallbacks,
-): AnsweredSignIn["callback"] | undefined {
-  const callbackUrl = row.request.signIn?.callbackUrl;
-  if (callbackUrl === undefined || !URL.canParse(callbackUrl)) return undefined;
-  const url = new URL(callbackUrl);
-  if (url.origin !== own.origin) return undefined;
-  const callback = parseEveConnectionCallbackRoutePath(url.pathname);
-  const asker = row.origin?.sessionId ?? own.sessionId;
-  return callback?.token === authHookToken(asker) ? callback : undefined;
 }
 
 /** The answers in a child's relayed events to sign-ins this session mirrors for that child. */

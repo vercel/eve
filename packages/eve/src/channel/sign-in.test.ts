@@ -132,6 +132,26 @@ describe("a sign-in on a channel", () => {
     }
   });
 
+  it("leaves the shown card alone when a sign-in that waited on it ends", async () => {
+    // Both sign-ins are for GitHub: the shown card's record is keyed by that name.
+    const shown = waitingOnGitHub();
+    const waiting = waitingOnGitHub(undefined, "sign-in-0");
+    for (const ending of [
+      { interactionId: "sign-in-1", outcome: "accepted" as const },
+      { interactionId: "sign-in-1", outcome: "failed" as const, reason: "access_denied" },
+    ]) {
+      const { posts, state, surface: channel } = surface({ edits: true, private: false });
+      await showSignIn(shown, "sign-in-1", channel);
+      await settleSignIn(waiting, ending, channel);
+      expect(channel.edit).not.toHaveBeenCalled();
+      expect(channel.typing).not.toHaveBeenCalled();
+      expect(posts).toEqual([
+        "Authorization required for Github. Continue in a direct message with this agent.",
+      ]);
+      expect(state.pendingSignIns).toEqual({ github: "status-1" });
+    }
+  });
+
   it("leaves an approver's sign-in to its approval's prompt", async () => {
     const { surface: dm } = surface({ private: true });
     await showSignIn(waitingOnGitHub("response-1"), "sign-in-1", dm);

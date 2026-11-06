@@ -20,6 +20,7 @@ import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/t
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
+import { stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
   dispatch,
@@ -98,7 +99,13 @@ export async function admitHumanInput(
     );
   }
   if (weighed.challenges.length > 0) {
-    await step.apply(requireSignIn(step.view(), { challenges: weighed.challenges, queued: input }));
+    await step.apply(
+      requireSignIn(step.view(), {
+        challenges: weighed.challenges,
+        callsBack: stepCallsBack(step),
+        queued: input,
+      }),
+    );
     return { kind: "stop", result: await park(step) };
   }
   const typedAnswers = config.typedAnswers !== false;
@@ -335,6 +342,7 @@ async function runApproved(
         return approval === undefined ? stopped : { ...stopped, approval };
       }),
       challenges: signIn.challenges,
+      callsBack: stepCallsBack(step),
     }),
     step.session.history,
   );

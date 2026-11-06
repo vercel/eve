@@ -54,7 +54,12 @@ import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
-import { SIGN_IN_DECLINED, signInAttemptKey, waitingSignIn } from "#harness/hitl/sign-ins.js";
+import {
+  SIGN_IN_DECLINED,
+  signInAttemptKey,
+  waitingSignIn,
+  type CallsBack,
+} from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
@@ -514,6 +519,8 @@ function withdrawInteraction(
 export function relay(
   view: SessionView,
   input: {
+    /** The sign-ins this session can call back, when it runs in a workflow. */
+    readonly callsBack?: CallsBack;
     readonly payload: SubagentInteractionHookPayload;
     /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
@@ -558,12 +565,16 @@ export function relay(
         if (mirror !== undefined) break;
         events.push({
           // A sign-in the person already has a card for waits on that card's answer.
-          data: waitingSignIn(tables, {
-            ...event.data,
-            // Every relayed request names its asker; one relayed from further down names its own.
-            origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
-            subject: { callId: payload.callId },
-          }),
+          data: waitingSignIn(
+            tables,
+            {
+              ...event.data,
+              // Every relayed request names its asker; one relayed from further down names its own.
+              origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
+              subject: { callId: payload.callId },
+            },
+            input.callsBack,
+          ),
           type: "interaction.opened",
         });
         // A person answers it here, and the answer goes back the way it came.

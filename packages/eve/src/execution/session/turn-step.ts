@@ -3,7 +3,6 @@ import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import {
-  ownCallbacks,
   settleSignIns,
   signInsAnswered,
   signInsEnded,
@@ -94,7 +93,7 @@ import { createTurnEventHandler } from "#execution/session/turn-event-handler.js
 import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
 import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { readHitlState } from "#harness/hitl/index.js";
+import { ownCallbacks, readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createDurableSessionValues,
