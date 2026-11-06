@@ -622,6 +622,12 @@ const firecrawlLogo = (props: LogoProps) => (
   </svg>
 );
 
+const klaviyoLogo = (props: LogoProps) => (
+  <svg viewBox="0 0 118 80" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M0 0h118L94 40l24 40H0z" fill="currentColor" />
+  </svg>
+);
+
 const localFalconLogo = (props: LogoProps) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" {...props}>
     <g transform="translate(196.49, 75) scale(0.85)">
@@ -1157,6 +1163,7 @@ export const logos = {
   embat: embatLogo,
   firecrawl: firecrawlLogo,
   "hugging-face": huggingFaceLogo,
+  klaviyo: klaviyoLogo,
   "local-falcon": localFalconLogo,
   make: makeLogo,
   manufact: manufactLogo,

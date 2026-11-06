@@ -653,6 +653,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "klaviyo",
+    name: "Klaviyo",
+    kind: "connection",
+    tagline: "Manage email and SMS marketing: profiles, segments, campaigns, flows, and reporting.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Klaviyo: manage profiles, lists, segments, campaigns, flows, templates, and catalogs, and report on marketing performance.",
+      mcp: { url: "https://mcp.klaviyo.com/mcp" },
+    },
+  },
+  {
     slug: "local-falcon",
     name: "Local Falcon",
     kind: "connection",

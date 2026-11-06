@@ -165,6 +165,20 @@ describe("Sanity connection setup", () => {
   });
 });
 
+describe("Klaviyo connection setup", () => {
+  it("connects Klaviyo's remote MCP server through a host-keyed Connect connector", () => {
+    const integration = getIntegration("klaviyo")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/klaviyo");
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.klaviyo.com/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("klaviyo")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create mcp.klaviyo.com --name klaviyo",
+    );
+  });
+});
+
 describe("Tavily connection setup", () => {
   it("pins the MCP connection method for Tavily", () => {
     const integration = getIntegration("tavily")!;

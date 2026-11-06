@@ -2422,6 +2422,26 @@ Keep the API key in a server-side environment variable. eve sends it directly to
     keywords: ["mcp", "models", "datasets", "spaces", "gradio", "ai", "oauth", "connect"],
     authModes: ["user"],
   },
+  klaviyo: {
+    logo: "klaviyo",
+    docsHref: "https://developers.klaviyo.com/en/docs/klaviyo_mcp_server",
+    connectors: { user: { service: "mcp.klaviyo.com", name: "klaviyo" } },
+    keywords: [
+      "mcp",
+      "email marketing",
+      "sms",
+      "campaigns",
+      "flows",
+      "segments",
+      "profiles",
+      "ecommerce",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+    configureNote:
+      "Each user signs in to their own Klaviyo account and needs the Owner, Admin, or Manager role. Klaviyo's tools can send campaigns and change customer data, so add an approval gate or append `?read-only=true` to the URL for read-only access. Tools that read profiles, events, and reviews return customer-supplied text; append `&disable-tools-with-user-generated-content=true` to exclude them.",
+  },
   "local-falcon": {
     logo: "local-falcon",
     docsHref: "/docs/connections/mcp",
