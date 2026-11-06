@@ -16,6 +16,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   extensions, for running code in the Vercel Sandbox (`agent/sandbox.ts`) and,
   with `GITHUB_ORG` set, GitHub access through `git__gh`. The `authorize`
   callback in `git.ts` is the only access check on GitHub commands.
+- `agent/memory/`: two file memory slots. `personal` is per person and only
+  on in private conversations; `channel` is per Slack channel. Scopes come from
+  `agent/lib/conversation.ts`, never from model input.
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.
