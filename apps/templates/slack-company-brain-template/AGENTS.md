@@ -12,6 +12,8 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
   (experimental `defineDynamicSchedules`). The destination and creator come
   from the Slack session in `preparePayload`, never from the model.
+- `agent/extensions/code.ts`: eve's code extension, for running code and
+  working with files in the sandbox.
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.
