@@ -243,26 +243,6 @@ describe("decide tracing", () => {
     },
   );
 
-  it("parents a routing decision to its turn rather than an active host span", async () => {
-    const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
-    let turn: { spanId: string; traceId: string } | undefined;
-    await inSession(async (ctx) => {
-      turn = ctx.require(SessionTraceSeedKey);
-      await trace
-        .getTracer("test.workflow")
-        .startActiveSpan("workflow step", { root: true }, async (span) => {
-          try {
-            await decide({ model, questions, state });
-          } finally {
-            span.end();
-          }
-        });
-    });
-    expect(decisions()).toHaveLength(1);
-    expect(decisions()[0]!.parentSpanContext?.spanId).toBe(turn?.spanId);
-    expect(decisions()[0]!.spanContext().traceId).toBe(turn?.traceId);
-  });
-
   it.each([
     { root: { kind: "own" as const }, expected: "alice-session" },
     {

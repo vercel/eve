@@ -1,15 +1,12 @@
-import { DEFAULT_DECISION_MODEL, decideWithMetadata } from "#ai/decision-adapter.js";
+import {
+  DEFAULT_DECISION_MODEL,
+  decideWithMetadata,
+  resolveDecisionModel,
+} from "#ai/decision-adapter.js";
 import type { DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
 import { Experimental_DecisionRefusalError as DecisionRefusalError } from "#compiled/@ai-sdk/provider/index.js";
-import {
-  context,
-  createContextKey,
-  trace,
-  SpanKind,
-  SpanStatusCode,
-} from "#compiled/@opentelemetry/api/index.js";
-import { currentCapture, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
-import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
+import { context } from "#compiled/@opentelemetry/api/index.js";
+import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey, SessionKey } from "#context/keys.js";
 import { getRegisteredTelemetryIntegrations } from "#instrumentation/ai-sdk-telemetry.js";
@@ -22,9 +19,8 @@ import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
 import { gatewayCostAttributes, readGatewayCostData } from "#tracing/eve/gateway.js";
+import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
-
-const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
 
 /** Decision calls can run before a model attempt or outside an eve session. */
 export async function decideWithTracing<
@@ -32,7 +28,8 @@ export async function decideWithTracing<
 >(options: DecisionOptions<Questions>) {
   const runtime = getInstrumentationRuntime();
   const settings = runtime?.otelSettings;
-  if (settings === undefined) return decideWithMetadata(options);
+  const traceDecision = runtime?.decision;
+  if (settings === undefined || traceDecision === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
   const session = readInstrumentationSessionContext(ctx);
   const sessionId = ctx.get(SessionIdKey);
@@ -41,7 +38,6 @@ export async function decideWithTracing<
     sessionId === undefined || turnId === undefined
       ? undefined
       : await runtime?.readTurnTraceContext?.(sessionId, turnId);
-  const preparedContext = turnContext ?? session.traceSeed;
   const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
   const decision = resolveInstrumentationTraceDecision(
     settings,
@@ -60,95 +56,67 @@ export async function decideWithTracing<
           session.conversation.environment,
         );
   const inherited = currentCapture();
+  const record = effective?.action === "record";
   const capture = {
-    emit: effective?.action === "record" && inherited?.emit !== false,
+    emit: record && inherited?.emit !== false,
     recordInputs:
       settings.recordInputs &&
-      effective?.action === "record" &&
+      record &&
       effective.recordInputs &&
       inherited?.recordInputs !== false,
     recordOutputs:
       settings.recordOutputs &&
-      effective?.action === "record" &&
+      record &&
       effective.recordOutputs &&
       inherited?.recordOutputs !== false,
   };
-  // eve owns this operation; the SDK integration would emit a second pair of spans.
-  const telemetry = {
-    integrations: [...getRegisteredTelemetryIntegrations({ excludeEveOtelIntegration: true })],
-    recordInputs: capture.recordInputs,
-    recordOutputs: capture.recordOutputs,
-  };
-  let parent = context.active();
-  const active = trace.getSpan(parent)?.spanContext();
-  // Host spans such as workflow steps can be active during model routing, but they belong to
-  // another trace; only spans inside the turn's trace may parent its decisions.
-  if (
-    preparedContext !== undefined &&
-    (active === undefined || (turnContext !== undefined && active.traceId !== turnContext.traceId))
-  ) {
-    parent = trace.setSpan(parent, trace.wrapSpanContext(preparedContext));
-  }
-  const reference = trace.getSpan(parent)?.spanContext();
-  if (
-    !capture.emit ||
-    parent.getValue(SUPPRESS_TRACING_KEY) === true ||
-    (preparedContext !== undefined && (preparedContext.traceFlags & 1) === 0) ||
-    (reference !== undefined && (reference.traceFlags & 1) === 0)
-  ) {
-    return otelTelemetry().suppressed!(() => decideWithMetadata(options, { telemetry }));
-  }
-  parent = withChannelAudience(parent, session.audience);
+  let host = withChannelAudience(context.active(), session.audience);
   if (sessionId !== undefined)
-    parent = withOperationTraceContext(parent, {
+    host = withOperationTraceContext(host, {
       sessionId,
       rootSessionId: session.parent?.rootSessionId,
       traceSessionId: resolveTraceRootSessionId(ctx, sessionId),
     });
-  const model = options.model ?? DEFAULT_DECISION_MODEL;
-  const modelId = typeof model === "string" ? model : model.modelId;
-  const span = trace.getTracer("eve.ai").startSpan(
-    `decision ${modelId}`,
-    {
-      kind: SpanKind.CLIENT,
-      attributes: {
-        "gen_ai.operation.name": "decision",
-        "gen_ai.request.model": modelId,
-        "gen_ai.agent.name": settings.functionId ?? agentName,
-        "operation.name": "decision",
-      },
-    },
-    parent,
-  );
-  return context.with(withCapture(trace.setSpan(parent, span), capture), async () => {
-    try {
-      const result = await decideWithMetadata(options, {
-        telemetry,
-        onStart: (event) => {
-          span.updateName(`decision ${event.modelId}`);
-          span.setAttributes({
-            "gen_ai.provider.name": event.provider,
-            "gen_ai.request.model": event.modelId,
-          });
-        },
-      });
-      span.setAttributes({
-        "gen_ai.usage.input_tokens": result.usage.inputTokens,
-        "gen_ai.usage.output_tokens": result.usage.outputTokens,
-        "gen_ai.response.id": result.response.id,
-        "gen_ai.response.model": result.response.modelId,
-        ...gatewayCostAttributes(readGatewayCostData(result.providerMetadata) ?? {}),
-      });
-      return result;
-    } catch (error) {
-      // SDK errors can retain inputs and outputs on enumerable error properties.
-      if (!DecisionRefusalError.isInstance(error)) {
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        span.setAttribute("error.type", "decision_error");
-      }
-      throw error;
-    } finally {
-      span.end();
-    }
+  const model = resolveDecisionModel(options.model ?? DEFAULT_DECISION_MODEL);
+  const operation = await traceDecision({
+    modelId: typeof model === "string" ? model : model.modelId,
+    provider: typeof model === "string" ? undefined : model.provider,
+    identity:
+      sessionId === undefined || turnId === undefined
+        ? undefined
+        : eveTurnIdentity({ sessionId, rootSessionId: session.parent?.rootSessionId, turnId }),
+    agentName: settings.functionId ?? agentName,
+    capture,
+    parent: turnContext ?? session.traceSeed,
+    context: host,
   });
+  // eve owns this operation; the SDK integration would emit a second pair of spans.
+  const telemetry = {
+    integrations: [...getRegisteredTelemetryIntegrations({ excludeEveOtelIntegration: true })],
+    recordInputs: operation.capture.recordInputs,
+    recordOutputs: operation.capture.recordOutputs,
+  };
+  try {
+    const result = await operation.run(() =>
+      decideWithMetadata({ ...options, model }, { telemetry }),
+    );
+    operation.attributes({
+      "gen_ai.response.id": result.response.id,
+      "gen_ai.response.model": result.response.modelId,
+      ...gatewayCostAttributes(readGatewayCostData(result.providerMetadata) ?? {}),
+    });
+    await operation.complete({
+      usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
+    });
+    return result;
+  } catch (error) {
+    // A refusal is an answer, not a failed request. SDK errors can retain inputs and outputs on
+    // enumerable properties, so a failure records only its type.
+    await operation.complete(
+      DecisionRefusalError.isInstance(error)
+        ? { outcome: "refused" }
+        : { failed: true, errorCode: "decision_error" },
+    );
+    throw error;
+  }
 }

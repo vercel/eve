@@ -36,6 +36,7 @@ import {
   readGatewayCostData,
 } from "#tracing/eve/gateway.js";
 import type {
+  AgentRun,
   AgentSpanIdGenerator,
   AgentTelemetry,
   AttemptOperation,
@@ -71,6 +72,7 @@ interface AgentOtelInstrumentation {
     sessionId: string,
     turnId: string,
   ) => Promise<InstrumentationTraceContext | undefined>;
+  readonly decision: AgentRun["decision"];
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -263,6 +265,7 @@ export function createAgentOtelInstrumentation(
     prepareSessionTrace,
     prepareTurnTrace,
     readTurnTraceContext: sessionTracing.readTurnTraceContext,
+    decision: tracing.decision,
     async runInContext(operation, execute) {
       if (operation.type === "memory.operation") return memory.runInContext(operation, execute);
       const ceiling = { emit: true, ...(await capturePolicy.forOperation(operation.scope)) };

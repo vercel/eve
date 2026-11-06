@@ -221,6 +221,7 @@ export function validSnapshot(
       tool: ["callId", "name"],
       approval: ["requestId"],
       memory: ["operation", "phase", "slot", "storeId"],
+      decision: ["modelId"],
     };
     if (!fields[record.data.type].every((key) => typeof options[key] === "string")) return false;
     if (

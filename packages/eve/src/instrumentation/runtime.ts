@@ -44,6 +44,7 @@ import {
 } from "#instrumentation/memory.js";
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
 import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
+import type { AgentRun } from "#compiled/@vercel/agent-runs/index.js";
 import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
@@ -136,6 +137,8 @@ export interface InstrumentationRuntime {
     sessionId: string,
     turnId: string,
   ) => Promise<InstrumentationTraceContext | undefined>;
+  /** Traces one decision model call when eve owns agent spans. */
+  readonly decision?: AgentRun["decision"];
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
