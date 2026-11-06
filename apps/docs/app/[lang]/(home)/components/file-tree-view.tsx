@@ -173,7 +173,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   );
 
   const board = (
-    <div className="max-w-5xl overflow-hidden material-large">
+    <div className="max-w-5xl overflow-hidden material-large xl:max-w-none">
       <div className="grid grid-cols-[270px_1fr]">
         {/* Sidebar: the files in this agent; click any to view it. */}
         <div className="border-r">
@@ -287,7 +287,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         <div className="hidden md:block">{board}</div>
       </div>
       {/* Each item links to its docs as a whole, like the feature cards further down the page. */}
-      <ul className="m-0 grid list-none gap-5 p-0 md:grid-cols-3 md:gap-x-6 xl:col-span-3 xl:row-start-2 xl:grid-cols-1 xl:content-start xl:pl-4">
+      <ul className="m-0 grid list-none gap-5 p-0 md:grid-cols-3 md:gap-x-6 xl:col-span-3 xl:row-start-2 xl:grid-cols-1 xl:content-start xl:pl-12">
         {FEATURES.map((feature) => (
           <li key={feature.title}>
             <PrefetchLink className="group flex flex-col gap-1" href={feature.href}>
