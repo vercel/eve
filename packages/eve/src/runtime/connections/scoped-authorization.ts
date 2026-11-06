@@ -38,7 +38,16 @@ import {
 } from "#runtime/connections/principal.js";
 import { liveProjection } from "#harness/session-machine/current.js";
 import { SIGN_IN_DECLINED, terminalSignInFailure } from "#harness/hitl/sign-ins.js";
-import { AuthKey, type SessionAuthContext } from "#context/keys.js";
+import { AuthKey, ParentSessionKey, SessionIdKey, type SessionAuthContext } from "#context/keys.js";
+
+/** TEMPORARY v-preview diagnostics for #6086; never on the PR branch. */
+export function debug6086(tag: string, fields: Record<string, unknown> = {}): void {
+  const store = contextStorage.getStore();
+  console.log(
+    `EVE-DEBUG-6086 ${tag} ${JSON.stringify({ sessionId: store?.get(SessionIdKey), subagent: store?.get(ParentSessionKey) !== undefined, ...fields })}`,
+  );
+}
+
 import { readSessionSchedule } from "#context/session-schedule.js";
 import {
   type AuthorizationDefinition,
@@ -100,8 +109,16 @@ export function createAuthorizationExecution(
     async getToken(scoped: ScopedAuthorization): Promise<TokenResult> {
       await complete(scoped);
       try {
-        return await resolveScopedToken(scoped);
+        const result = await resolveScopedToken(scoped);
+        debug6086("getToken.ok", { scope: scoped.scope, justAuthorized: justAuthorized.has(scoped.instanceId ?? scoped.scope) });
+        return result;
       } catch (error) {
+        debug6086("getToken.error", {
+          scope: scoped.scope,
+          name: error instanceof Error ? error.name : typeof error,
+          code: (error as { code?: unknown; reason?: unknown })?.code ?? (error as { reason?: unknown })?.reason,
+          message: error instanceof Error ? error.message.slice(0, 200) : undefined,
+        });
         if (!isConnectionAuthorizationRequiredError(error)) {
           throw error;
         }
@@ -174,6 +191,12 @@ export async function handleAuthorizationError(
     throw error;
   }
   const { scoped } = error;
+  debug6086("handleAuthorizationError", {
+    scope: scoped.scope,
+    justAuthorized: error.justAuthorized,
+    evictToken: options.evictToken,
+    cause: error.cause instanceof Error ? `${error.cause.name}: ${error.cause.message.slice(0, 200)}` : String(error.cause),
+  });
   if (error.justAuthorized) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
       message: `Authorization for "${scoped.scope}" failed: the service rejected the token immediately after authorization.`,
@@ -357,6 +380,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   if (!supportsInteractiveAuthorization(authorization)) return false;
 
   const result = consumeAuthorizationResult(scope, input.instanceId);
+  if (result !== undefined) debug6086("completeScopedAuthorization", { scope, params: result.callback.params });
   if (result === undefined) return false;
 
   // RFC 6749 section 4.1.2.1: the person refused consent, so there is nothing to complete.
@@ -395,6 +419,7 @@ async function startScopedAuthorization(
   if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
   const attempt = createAuthorizationAttempt(scope);
+  debug6086("startScopedAuthorization", { scope, attemptId: attempt?.attemptId, hookUrl: attempt?.hookUrl });
   if (attempt === undefined) return undefined;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;

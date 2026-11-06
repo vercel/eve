@@ -270,6 +270,10 @@ export async function executeGitHubShell(
     await sandbox.removePath({ path: githubConfig, recursive: true, force: true });
     await sandbox.removePath({ path: bodyFile, force: true });
   }
+  if (userAuth)
+    console.log(
+      `EVE-DEBUG-6086 gh.result ${JSON.stringify({ invocationId, argv0: argv[0], argv1: argv[1], exitCode: result.exitCode, unauthorized: GITHUB_UNAUTHORIZED.test(result.stderr), stderr: sanitizeOutput(result.stderr, token, authorization).value.slice(0, 300) })}`,
+    );
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
     // GitHub rejected the caller's token: evict it and sign the caller in again.
     dependencies.requireAuth!(userAuth);

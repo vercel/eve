@@ -49,6 +49,9 @@ export function connectUserAuthorization(
       const response = await client.getTokenResponse(connector, params(principal));
       return { token: response.token, expiresAt: response.expiresAt };
     } catch (error) {
+      console.log(
+        `EVE-DEBUG-6086 connect.getTokenResponse.error ${JSON.stringify({ connector, phase, principalId: principal.type === "user" ? principal.id : principal.type, name: error instanceof Error ? error.name : typeof error, code: (error as { code?: unknown })?.code, status: (error as { status?: unknown })?.status, message: error instanceof Error ? error.message.slice(0, 200) : undefined })}`,
+      );
       throw translate(error, phase);
     }
   };

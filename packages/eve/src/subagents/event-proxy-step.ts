@@ -19,6 +19,7 @@ import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { authHookToken } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import { debug6086 } from "#runtime/connections/scoped-authorization.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
@@ -55,7 +56,26 @@ export async function emitProxiedSubagentEvent(
   // The other children hear a sign-in's answer before the relay commits: a delivery that fails
   // fails this step, and its retry delivers them again from the same state.
   const tables = storedProjection(input.durableSession.state).view;
-  const answered = answeredSignIns(tables, hookPayload, await ownCallbackOrigin());
+  const ownOrigin = await ownCallbackOrigin();
+  const answered = answeredSignIns(tables, hookPayload, ownOrigin);
+  debug6086("fanIn", {
+    callId: hookPayload.callId,
+    events: hookPayload.events.map((event) =>
+      event.type === "interaction.settled"
+        ? `${event.type}:${event.data.interactionId}:${event.data.outcome}`
+        : event.type,
+    ),
+    ownOrigin,
+    open: Object.values(tables.interactions)
+      .filter((row) => row.status === "open" && row.request.signIn !== undefined)
+      .map((row) => ({
+        id: row.interactionId,
+        childSession: row.origin?.sessionId,
+        callbackUrl: row.request.signIn?.callbackUrl,
+        local: ownOrigin === undefined ? "no-origin" : localChildCallback(row, ownOrigin) !== undefined,
+      })),
+    resumed: answered.map((entry) => entry.callback.attemptId),
+  });
   await Promise.all(answered.map(settleChildSignIn));
   return await commitSessionStep(
     input,
