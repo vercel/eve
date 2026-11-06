@@ -11,6 +11,7 @@ import {
   type GitHubCoAuthor,
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
+import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
 import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
@@ -126,7 +127,10 @@ interface GitHubShellDependencies {
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
-  /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
+  /**
+   * Orders this session's own credential leases in process; every `ctx.getSandbox()` call returns
+   * a new handle. Sessions that share a sandbox are serialized by a lock inside the sandbox.
+   */
   readonly sessionId: string;
 }
 
@@ -278,15 +282,18 @@ export async function executeGitHubShell(
   };
 }
 
+/** The real credential and the placeholder a leased command sends in its place. */
+interface LeaseCredential {
+  readonly authorization: string;
+  readonly placeholder: string;
+  readonly placeholderAuthorization: string;
+  readonly token: string;
+}
+
 async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
   sessionId: string,
-  credential: {
-    readonly authorization: string;
-    readonly placeholder: string;
-    readonly placeholderAuthorization: string;
-    readonly token: string;
-  },
+  credential: LeaseCredential,
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
@@ -298,6 +305,23 @@ async function withGitHubCredentialLease<T>(
   const current = previous.then(() => gate);
   leaseQueues.set(sessionId, current);
   await previous;
+  try {
+    return await withSandboxLeaseLock(sandbox, credential.placeholder, () =>
+      leaseCredential(sandbox, credential, run, broker),
+    );
+  } finally {
+    release();
+    if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
+  }
+}
+
+/** Points the sandbox's network policy at `credential` for `run`, then clears it. */
+async function leaseCredential<T>(
+  sandbox: SandboxSession,
+  credential: LeaseCredential,
+  run: () => PromiseLike<T>,
+  broker: GitHubConfig["broker"],
+): Promise<T> {
   try {
     const api: GitHubLeaseRule[] = [
       {
@@ -332,12 +356,7 @@ async function withGitHubCredentialLease<T>(
     });
     return await run();
   } finally {
-    try {
-      await broker(sandbox, null);
-    } finally {
-      release();
-      if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
-    }
+    await broker(sandbox, null);
   }
 }
 
