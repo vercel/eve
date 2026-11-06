@@ -154,23 +154,29 @@ describe("decide tracing", () => {
       },
     });
     let parentId: string | undefined;
-    await inSession(async () => {
-      await trace.getTracer("test.tool").startActiveSpan("classify request", async (span) => {
-        parentId = span.spanContext().spanId;
-        try {
-          const result = await decide({
-            model,
-            questions: {
-              ...questions,
-              urgent: { type: "boolean", instructions: "Does Alice need an urgent response?" },
-            },
-            state,
-          });
-          expect(result.answers.team.choice).toBe("billing");
-        } finally {
-          span.end();
-        }
-      });
+    await inSession(async (ctx) => {
+      const turn = trace.setSpan(
+        context.active(),
+        trace.wrapSpanContext(ctx.require(SessionTraceSeedKey)),
+      );
+      await trace
+        .getTracer("test.tool")
+        .startActiveSpan("classify request", {}, turn, async (span) => {
+          parentId = span.spanContext().spanId;
+          try {
+            const result = await decide({
+              model,
+              questions: {
+                ...questions,
+                urgent: { type: "boolean", instructions: "Does Alice need an urgent response?" },
+              },
+              state,
+            });
+            expect(result.answers.team.choice).toBe("billing");
+          } finally {
+            span.end();
+          }
+        });
     });
 
     expect(decisions()).toHaveLength(1);
@@ -236,6 +242,26 @@ describe("decide tracing", () => {
       ).toEqual(expectedParents.map(({ spanId, traceId }) => ({ spanId, traceId })));
     },
   );
+
+  it("parents a routing decision to its turn rather than an active host span", async () => {
+    const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
+    let turn: { spanId: string; traceId: string } | undefined;
+    await inSession(async (ctx) => {
+      turn = ctx.require(SessionTraceSeedKey);
+      await trace
+        .getTracer("test.workflow")
+        .startActiveSpan("workflow step", { root: true }, async (span) => {
+          try {
+            await decide({ model, questions, state });
+          } finally {
+            span.end();
+          }
+        });
+    });
+    expect(decisions()).toHaveLength(1);
+    expect(decisions()[0]!.parentSpanContext?.spanId).toBe(turn?.spanId);
+    expect(decisions()[0]!.spanContext().traceId).toBe(turn?.traceId);
+  });
 
   it.each([
     { root: { kind: "own" as const }, expected: "alice-session" },

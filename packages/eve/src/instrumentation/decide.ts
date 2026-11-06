@@ -80,7 +80,13 @@ export async function decideWithTracing<
     recordOutputs: capture.recordOutputs,
   };
   let parent = context.active();
-  if (trace.getSpan(parent) === undefined && preparedContext !== undefined) {
+  const active = trace.getSpan(parent)?.spanContext();
+  // Host spans such as workflow steps can be active during model routing, but they belong to
+  // another trace; only spans inside the turn's trace may parent its decisions.
+  if (
+    preparedContext !== undefined &&
+    (active === undefined || (turnContext !== undefined && active.traceId !== turnContext.traceId))
+  ) {
     parent = trace.setSpan(parent, trace.wrapSpanContext(preparedContext));
   }
   const reference = trace.getSpan(parent)?.spanContext();
