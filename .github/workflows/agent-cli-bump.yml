@@ -1,0 +1,109 @@
+name: Agent CLI bump
+
+# @eve/agent-browser and @eve/agent-desktop each pin the CLI they install in the
+# sandbox, and agent-browser also vendors that release's MCP catalog. When npm
+# has a newer release, this opens one PR per CLI that retargets its package, so
+# the extensions never fall behind the CLIs they install.
+on:
+  schedule:
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      cli:
+        description: CLI to bump (defaults to all)
+        type: choice
+        options: ["", agent-browser, agent-desktop]
+        default: ""
+      version:
+        description: Version to target when a CLI is selected (defaults to npm latest)
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: github.repository == 'vercel/eve' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        cli: [agent-browser, agent-desktop]
+    concurrency:
+      group: agent-cli-bump-${{ matrix.cli }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    # Main only accepts changes through a pull request with passing checks, so
+    # the job commits to a bot branch and opens a PR with GITHUB_TOKEN, like the
+    # Version Packages and eve-code benchmark snapshot PRs.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Skip CLIs the dispatch did not select
+        id: selected
+        env:
+          CLI: ${{ inputs.cli }}
+        run: echo "run=$([[ -z "$CLI" || "$CLI" == "${{ matrix.cli }}" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - if: steps.selected.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.selected.outputs.run == 'true'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - if: steps.selected.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+      - if: steps.selected.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync the pin and vendored files
+        id: sync
+        if: steps.selected.outputs.run == 'true'
+        env:
+          VERSION: ${{ inputs.cli == matrix.cli && inputs.version || '' }}
+        run: node .github/scripts/agent-cli-bump.mjs sync "${{ matrix.cli }}" "$VERSION" > "$RUNNER_TEMP/summary.md"
+
+      # The branch restarts from main on every bump, so the PR holds one commit
+      # and never conflicts. createCommitOnBranch commits are signed by GitHub,
+      # which satisfies the signed-commit rule without a bot signing key.
+      - name: Open bump pull request
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLI: ${{ matrix.cli }}
+          BRANCH: bot/${{ matrix.cli }}-bump
+          VERSION: ${{ steps.sync.outputs.version }}
+          TITLE: "chore(${{ matrix.cli }}): target ${{ matrix.cli }} ${{ steps.sync.outputs.version }}"
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json url -q '.[0].url // empty')
+          if [ -n "$pr" ] && [ "$(gh pr view "$pr" -R "$GITHUB_REPOSITORY" --json title -q .title)" = "$TITLE" ]; then
+            echo "::notice::$pr already targets $CLI $VERSION."
+            exit 0
+          fi
+
+          head=$(git rev-parse HEAD)
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" > /dev/null
+          fi
+          mapfile -t files < <(git ls-files --modified --others --exclude-standard)
+          HEAD_OID="$head" node .github/scripts/agent-cli-bump.mjs commit-payload "${files[@]}" > "$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
+
+          {
+            cat "$RUNNER_TEMP/summary.md"
+            echo
+            echo "GitHub holds workflow runs on pull requests that \`GITHUB_TOKEN\` opens until a maintainer approves them. Select **Approve workflows to run** to run the required checks, as on the Version Packages PR."
+            echo
+            echo "Every bump resets \`$BRANCH\` to \`main\`. Push follow-up fixes here only after the last bump you expect, or the next run discards them."
+          } > "$RUNNER_TEMP/body.md"
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
+          else
+            pr=$(gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md")
+          fi
+          echo "Bump pull request: $pr"
