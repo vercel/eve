@@ -9,6 +9,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   to every turn: grounding, source routing, and Slack style.
 - `agent/channels/slack.ts`: who can reach the agent and what context each
   message carries.
+- `agent/schedules/tasks.ts`: schedules people create by asking in Slack
+  (experimental `defineDynamicSchedules`). The destination and creator come
+  from the Slack session in `preparePayload`, never from the model.
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.

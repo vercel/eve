@@ -14,6 +14,9 @@ importers:
       eve:
         specifier: ^1.0.0-rc.6
         version: 1.0.0-rc.6(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 24.x
