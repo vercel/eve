@@ -1,3 +1,4 @@
+import type { SessionAuthContext } from "eve/context";
 import {
   defaultSlackAuth,
   slackChannel,
@@ -12,10 +13,33 @@ function authorTeamId(message: SlackMessage): string | undefined {
   return typeof team === "string" ? team : undefined;
 }
 
+// WORKAROUND(vercel/eve#6088): copies Slack's per-message `action_token` into
+// the turn's auth as the `action_token` attribute, where `tools/search_slack.ts`
+// reads it. Once that PR ships in an eve release, `defaultSlackAuth` does this
+// itself: bump `eve`, delete this function, and use `defaultSlackAuth(message, ctx)`
+// directly in `admit`. The search tool needs no change.
+function withActionToken(
+  auth: SessionAuthContext | null,
+  message: SlackMessage,
+): SessionAuthContext | null {
+  if (!auth || auth.attributes.action_token) return auth;
+  const { action_token: topLevel, assistant_thread: assistantThread } = message.raw;
+  // Slack nests the token under `assistant_thread` in app threads.
+  const nested =
+    typeof assistantThread === "object" && assistantThread !== null
+      ? (assistantThread as Record<string, unknown>).action_token
+      : undefined;
+  const token = [topLevel, nested].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  if (!token) return auth;
+  return { ...auth, attributes: { ...auth.attributes, action_token: token.trim() } };
+}
+
 function admit(ctx: SlackInboundMessageContext, message: SlackMessage) {
   if (message.author?.isBot !== false) return null;
   if (!isHomeTeam(authorTeamId(message))) return null;
-  return { auth: defaultSlackAuth(message, ctx) };
+  return { auth: withActionToken(defaultSlackAuth(message, ctx), message) };
 }
 
 const FOLLOWED_THREAD_GUIDANCE =

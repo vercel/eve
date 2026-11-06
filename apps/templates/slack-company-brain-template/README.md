@@ -22,6 +22,7 @@ agent/
   schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
+  tools/search_slack.ts          # searches public Slack channels
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
   lib/github.ts                  # GitHub connector and firewall credential broker
@@ -38,6 +39,10 @@ agent/
   it. Otherwise it calls `no_reply` and leaves no trace. Top-level channel
   messages still need a mention. This needs extra Slack events; see
   [Get started](#get-started).
+- **Slack search.** `search_slack` uses Slack's
+  [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api)
+  to find relevant messages in public channels, best match first, with
+  permalinks the agent cites. See [Slack search](#slack-search).
 - **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
   can start a conversation, so guests in Slack Connect channels can't.
 - **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
@@ -83,8 +88,28 @@ To follow threads without a mention, the Slack app also needs the
 connector's **Advanced** settings under **Trigger Event Types** and **Bot
 Scopes**. Without them, people mention the agent for each follow-up.
 
+For Slack search, also add the `search:read.public` bot scope the same way.
+
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
+
+## Slack search
+
+`agent/tools/search_slack.ts` calls Slack's `assistant.search.context` with the
+app's bot token. It searches public channels only, even ones the agent hasn't
+joined, and never private channels or DMs.
+
+Slack only allows this with the short-lived `action_token` from the message
+that started the turn, so search works in turns started by a mention or DM. It
+doesn't work in scheduled tasks, followed-thread replies without a mention, or
+non-Slack channels, and the token expires a few minutes after the message. The
+tool tells the agent when search is unavailable so it reports the gap instead
+of claiming nothing was found.
+
+The Slack channel copies the token into each turn's auth as the `action_token`
+attribute. That copy is a temporary workaround in `agent/channels/slack.ts`,
+marked `WORKAROUND(vercel/eve#6088)`; a later eve release does it in
+`defaultSlackAuth`.
 
 ## Memory
 

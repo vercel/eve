@@ -19,6 +19,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 - `agent/memory/`: two file memory slots. `personal` is per person and only
   on in private conversations; `channel` is per Slack channel. Scopes come from
   `agent/lib/conversation.ts`, never from model input.
+- `agent/tools/search_slack.ts`: Slack's Real-time Search API, public channels
+  only. It reads the `action_token` auth attribute that `agent/channels/slack.ts`
+  sets (a marked workaround until eve's `defaultSlackAuth` does it).
 - `agent/skills/`: procedures and reference material loaded on demand.
 - `agent/connections/`, `agent/tools/`, `agent/subagents/`, `agent/extensions/`:
   added as the brain grows. Names come from file paths.
