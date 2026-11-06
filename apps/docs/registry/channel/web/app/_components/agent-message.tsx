@@ -1,7 +1,7 @@
 "use client";
 
 import type { CallState, SessionView } from "eve/events";
-import { callState, call, part, showsActivity } from "eve/events";
+import { callState, call, part } from "eve/events";
 import type {
   Interaction,
   EveInteractionPart,
@@ -93,12 +93,12 @@ export function AgentMessage({
 /**
  * A message's parts, with each run of steps (reasoning and calls) gathered into one list. A call
  * that asks a question shows as that question instead, and the model waiting on or cancelling
- * its own tasks, or a tool that sets `label: false`, isn't activity to show.
+ * its own tasks isn't activity to show.
  */
 function blocksOf(parts: readonly EveMessagePart[], asks: Asks): (EveMessagePart | Step[])[] {
   const blocks: (EveMessagePart | Step[])[] = [];
   for (const part of parts) {
-    if (part.type === "tool" && !showsActivity(part)) continue;
+    if (part.type === "tool" && part.kind === "control") continue;
     const isStep =
       part.type === "reasoning" ||
       (part.type === "tool" && asks.questionsFor(part.callId).length === 0);
