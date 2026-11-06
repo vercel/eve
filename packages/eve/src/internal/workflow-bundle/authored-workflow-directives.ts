@@ -5,9 +5,13 @@ import {
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
-const ENTRY_POINT_METHODS = new Intl.ListFormat("en", { type: "disjunction" }).format(
-  WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
-);
+// Built when an error needs it: the first `Intl` formatter in a process loads locale data, which
+// would otherwise add to every cold start.
+function formatEntryPointMethods(): string {
+  return new Intl.ListFormat("en", { type: "disjunction" }).format(
+    WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
+  );
+}
 
 // Earlier eve releases exported these helpers from `eve/workflow`; name the replacement instead
 // of surfacing a generic missing-export error.
@@ -112,7 +116,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(directive)} in "${input.filePath}" is a module-level directive. ` +
           `Put it as the first statement of the function it marks: a top-level "async function" declaration` +
-          ` or the ${ENTRY_POINT_METHODS} method of a default-exported defineWorkflowTool().`,
+          ` or the ${formatEntryPointMethods()} method of a default-exported defineWorkflowTool().`,
       );
     }
   }
@@ -144,7 +148,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
           `Workflow directives must mark a top-level "async function" declaration` +
-          ` or the ${ENTRY_POINT_METHODS} method of a default-exported defineWorkflowTool().`,
+          ` or the ${formatEntryPointMethods()} method of a default-exported defineWorkflowTool().`,
       );
     }
     if (entry.fn.async !== true) {
