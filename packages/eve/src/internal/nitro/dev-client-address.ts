@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 import { networkInterfaces } from "node:os";
 
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 export const DEVELOPMENT_CLIENT_ADDRESS_HEADER = "x-eve-dev-client-address";

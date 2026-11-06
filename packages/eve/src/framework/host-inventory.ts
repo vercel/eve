@@ -10,7 +10,7 @@ import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-rou
 import {
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
-} from "#internal/workflow/development-world-protocol.js";
+} from "#protocol/routes.js";
 
 type HostHttpMethod = "ALL" | "GET" | "POST";
 

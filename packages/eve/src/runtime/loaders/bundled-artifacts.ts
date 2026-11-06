@@ -1,4 +1,4 @@
-import type { CompileMetadata } from "#compiler/artifacts.js";
+import type { CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";

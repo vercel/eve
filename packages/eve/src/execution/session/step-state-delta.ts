@@ -1,5 +1,10 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
-import { followInterruptedAttempt, readOrphanedLines } from "#execution/publish-session-events.js";
+import {
+  enterSessionStep,
+  followInterruptedAttempt,
+  readOrphanedLines,
+  type Entered,
+} from "#execution/publish-session-events.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type {
   SessionStateDelta,
@@ -13,6 +18,11 @@ import { diffValue, snapshotValue } from "#shared/value-delta.js";
 // can't import the session's publication.
 
 const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as const;
+
+/** What a session step is given: its session values, and where it writes. */
+type StepValues = Partial<SessionStateValues> & {
+  readonly sessionWritable?: WritableStream<Uint8Array>;
+};
 
 /**
  * Runs a session step's work and returns its result with the session values
@@ -31,25 +41,28 @@ const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as c
 export async function withSessionStateDelta<
   I extends Partial<SessionStateValues>,
   R extends Partial<SessionStateValues>,
->(input: I, work: (input: I) => Promise<R>): Promise<WithSessionStateDelta<R>>;
+>(input: I, work: (step: Entered<I>) => Promise<R>): Promise<WithSessionStateDelta<R>>;
 export async function withSessionStateDelta(
-  input: Partial<SessionStateValues>,
-  work: (input: Partial<SessionStateValues>) => Promise<Partial<SessionStateValues>>,
+  input: StepValues,
+  work: (step: Entered<StepValues>) => Promise<Partial<SessionStateValues>>,
 ): Promise<SessionStateTransition> {
   const base = Object.fromEntries(
     SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
   );
-  const { sessionWritable } = input as { readonly sessionWritable?: WritableStream<Uint8Array> };
+  // The step's entry: whether it runs again is decided here, once, for all it does.
+  const step = enterSessionStep(input);
+  const { sessionWritable } = step;
   if (sessionWritable !== undefined && base.sessionState !== undefined) {
     const checkpoint = base.sessionState as DurableSessionState;
     const session = readDurableSession(checkpoint);
     await readOrphanedLines({
+      rerun: step.rerun,
       sessionId: checkpoint.sessionId,
       position: storedProjection(session.state).view.position,
       sessionWritable,
     });
   }
-  const { serializedContext, sessionState, history, ...result } = await work(input);
+  const { serializedContext, sessionState, history, ...result } = await work(step);
   const candidateState = sessionState ?? base.sessionState;
   const next = {
     serializedContext,

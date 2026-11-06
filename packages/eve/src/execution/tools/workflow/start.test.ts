@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startFailureResult, startWorkflowToolRun } from "./start.js";
+import { startWorkflowToolRun } from "#execution/workflow-host/start-run.js";
+import { startFailureResult } from "./start.js";
 import type { WorkflowToolRunInput } from "./types.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
-import {
-  startWorkflowOnCurrentDeployment,
-  workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
+import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({
   startWorkflowOnCurrentDeployment: vi.fn(),
+}));
+vi.mock("#execution/workflow-references.js", () => ({
   workflowToolRunWorkflowReference: { workflowId: "workflow//eve//workflowToolRunWorkflow" },
 }));
 

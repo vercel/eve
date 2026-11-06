@@ -3,7 +3,7 @@ import {
   readWorkflowToolEntryPoints,
   type WorkflowToolEntryPoint,
 } from "#tools/workflow-definition.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { TASK_ID_INPUT, withTaskIdSchema } from "#execution/tasks/task-id-input.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";

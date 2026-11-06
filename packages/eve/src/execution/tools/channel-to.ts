@@ -4,7 +4,7 @@ import {
   type CrossChannelToFn,
 } from "#channel/cross-channel-receive.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import type { CreateRuntime } from "#execution/node-step.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
 /**
@@ -12,6 +12,8 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
  * reached through their `receive()` hooks as a route's `ctx.to()` reaches them.
  */
 export function createToolChannelTo(input: {
+  /** The runtime a channel's session starts in: the host's. */
+  readonly createRuntime: CreateRuntime;
   /** Whether a parent, local or remote, delegated the session running the tool. */
   readonly delegated: boolean;
   /** The compiled agent that owns the tool. */
@@ -32,7 +34,7 @@ export function createToolChannelTo(input: {
       async send(message, options) {
         const bundle = await input.loadBundle();
         const to = createCrossChannelToFn(
-          createWorkflowRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
+          input.createRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
           toCrossChannelTargets(bundle.graph.root.channels),
         );
         // The session belongs to the channel, so it starts outside the tool's

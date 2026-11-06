@@ -48,6 +48,9 @@ jobs:
       - name: Guard mechanical code invariants
         run: pnpm guard:invariants
 
+      - name: Guard that the Workflow-free session core reaches no Workflow module
+        run: pnpm --filter eve run build:compiled && pnpm --filter eve exec node scripts/browser-reach.mjs --check --workflow-only
+
       - name: Check templates match their copied source files
         run: pnpm check:template-files
 

@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   activateDevelopmentGeneration,
   createDevelopmentGenerationPruner,
 } from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import { getDevelopmentWorkflowGeneration } from "#runtime/development-generation.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   decodeDevelopmentWorldValue,
@@ -25,12 +25,16 @@ import {
 } from "#internal/workflow/development-world-server.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
+  DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
+  DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
+} from "#protocol/routes.js";
+import {
+  DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
+} from "#internal/application/dev-transport.js";
+import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
-  DEVELOPMENT_WORKFLOW_SECRET_ENV,
-  DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
-  DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
-  DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#internal/workflow/development-world-protocol.js";
 
 const createScratchDirectory = useTemporaryDirectories();

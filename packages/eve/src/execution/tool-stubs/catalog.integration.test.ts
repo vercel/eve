@@ -2,7 +2,9 @@ import { mintClearance } from "#harness/clearance.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
-import { toolStubProvider } from "#context/providers/tool-stubs.js";
+import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
+import { toolStubPlayback } from "#execution/tool-stub-host.js";
+import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { invokeTool, isRunnableTool } from "#harness/tools.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -92,8 +94,9 @@ describe("tool stubs through eve__tool", () => {
           sessionId: run.runId,
           turn: { id: "turn-0", sequence: 0 },
         });
-        ctx.set(ToolStubsKey, { rootSessionId: run.runId, rules, token });
-        ctx.setVirtualContext(toolStubProvider.key, toolStubProvider.create(ctx)!.value);
+        const scope = { rootSessionId: run.runId, rules, token };
+        ctx.set(ToolStubsKey, scope);
+        ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(workflowToolStubs, scope));
         // eve runs an eve__tool call as the call to the entry it resolves to.
         const call = (toolCallId: string, input: Record<string, unknown>) =>
           inSession(async () => {

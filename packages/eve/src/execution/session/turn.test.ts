@@ -11,15 +11,15 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
-import { turnStep } from "#execution/session/turn-step.js";
-import { publishSessionEvents } from "#execution/publish-session-events.js";
+import { turnStep } from "#execution/workflow-host/turn-step.js";
+import { publishSessionEvents, type Entered } from "#execution/publish-session-events.js";
 import type {
   DeliverHookPayload,
   SessionAuthContext,
   SessionCapabilities,
   TurnCaller,
 } from "#channel/types.js";
-import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
+import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import {
   type SessionStateValues,
@@ -59,8 +59,10 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getWorkflowMetadata: () => ({ url: "https://parent.example" }),
 }));
-vi.mock("#execution/coordination-dispatch-step.js", () => ({
+vi.mock("#execution/workflow-host/dispatch-step.js", () => ({
   dispatchCoordinationStep: vi.fn(),
+}));
+vi.mock("#execution/coordination-dispatch-step.js", () => ({
   publishDispatchedCallsStep: vi.fn(),
 }));
 
@@ -95,7 +97,7 @@ vi.mock("#execution/publish-session-events.js", async (importOriginal) => {
     ),
   };
 });
-vi.mock("#execution/session/turn-step.js", () => ({
+vi.mock("#execution/workflow-host/turn-step.js", () => ({
   turnStep: vi.fn(),
 }));
 vi.mock("#execution/tasks/steps.js", async (importOriginal) => ({
@@ -136,7 +138,7 @@ afterEach(() => vi.restoreAllMocks());
 
 /** A mocked session step whose work returns whole state, as the real step's work does. */
 function stepWork<I extends Partial<SessionStateValues>, R extends Partial<SessionStateValues>>(
-  work: (input: I) => Promise<R>,
+  work: (step: Entered<I>) => Promise<R>,
 ): (input: I) => Promise<WithSessionStateDelta<R>> {
   return (input) => withSessionStateDelta(input, work);
 }
@@ -150,10 +152,10 @@ const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
 /** These dispatches leave nothing to publish, so their work omits `pending`. */
 function dispatchWork(
   work: (
-    input: Parameters<typeof dispatchCoordinationStep>[0],
+    input: Entered<Parameters<typeof dispatchCoordinationStep>[0]>,
   ) => Promise<Omit<CoordinationDispatchResult, "pending">>,
 ) {
-  return stepWork(async (input: Parameters<typeof dispatchCoordinationStep>[0]) => ({
+  return stepWork(async (input: Entered<Parameters<typeof dispatchCoordinationStep>[0]>) => ({
     ...(await work(input)),
     pending: { executing: [], refused: [], started: [] },
   }));
@@ -264,6 +266,7 @@ describe("SessionExecution checkpoints", () => {
   it("binds the delegated caller on the turn's first step only", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -343,6 +346,7 @@ describe("SessionExecution checkpoints", () => {
       const pending: SessionInboxPayload[] = [];
       const inbox: SessionInbox = {
         claimedTokens: [],
+        ownerRunId: () => "run_owner",
         takeLeading: () => [],
         claimSessionHook: vi.fn(),
         claimSessionHooks: vi.fn(),
@@ -401,6 +405,7 @@ describe("SessionExecution checkpoints", () => {
     let drainingFirst = true;
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -469,6 +474,7 @@ describe("SessionExecution checkpoints", () => {
     const pending: SessionInboxPayload[] = [];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -541,6 +547,7 @@ describe("SessionExecution checkpoints", () => {
     const pending: SessionInboxPayload[] = [];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -602,6 +609,7 @@ describe("SessionExecution checkpoints", () => {
     let notify: (payload: SessionInboxPayload) => void = () => {};
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -664,6 +672,7 @@ describe("SessionExecution checkpoints", () => {
       let notify: (payload: SessionInboxPayload) => void = () => {};
       const inbox: SessionInbox = {
         claimedTokens: [],
+        ownerRunId: () => "run_owner",
         takeLeading: () => [],
         claimSessionHook: vi.fn(),
         claimSessionHooks: vi.fn(),
@@ -698,6 +707,7 @@ describe("SessionExecution checkpoints", () => {
     const sessionState = stateWithBlockingRun();
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -754,6 +764,7 @@ describe("SessionExecution checkpoints", () => {
     let interrupt: ((payload: SessionInboxPayload) => void) | undefined;
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -812,6 +823,7 @@ describe("SessionExecution checkpoints", () => {
     };
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -875,6 +887,7 @@ describe("SessionExecution checkpoints", () => {
     const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -924,6 +937,7 @@ describe("SessionExecution checkpoints", () => {
     async ({ capabilities, holds, serializedContext }) => {
       const inbox: SessionInbox = {
         claimedTokens: [],
+        ownerRunId: () => "run_owner",
         takeLeading: () => [],
         claimSessionHook: vi.fn(),
         claimSessionHooks: vi.fn(),
@@ -983,6 +997,7 @@ describe("SessionExecution checkpoints", () => {
     async (pause) => {
       const inbox: SessionInbox = {
         claimedTokens: [],
+        ownerRunId: () => "run_owner",
         takeLeading: () => [],
         claimSessionHook: vi.fn(),
         claimSessionHooks: vi.fn(),
@@ -1033,6 +1048,7 @@ describe("SessionExecution checkpoints", () => {
     const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1093,6 +1109,7 @@ describe("SessionExecution checkpoints", () => {
     const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1175,6 +1192,7 @@ describe("SessionExecution checkpoints", () => {
     ];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1263,6 +1281,7 @@ describe("SessionExecution checkpoints", () => {
     ];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1350,6 +1369,7 @@ describe("SessionExecution checkpoints", () => {
     ];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1446,6 +1466,7 @@ describe("SessionExecution checkpoints", () => {
     ];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: <T extends SessionInboxPayload>(
         accepts: (payload: SessionInboxPayload) => payload is T,
       ): T[] => {
@@ -1516,6 +1537,7 @@ describe("SessionExecution checkpoints", () => {
     ];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: <T extends SessionInboxPayload>(
         accepts: (payload: SessionInboxPayload) => payload is T,
       ): T[] => {
@@ -1624,6 +1646,7 @@ describe("SessionExecution checkpoints", () => {
     const payloads = [outcome("draft", 300), outcome("draft", 300), outcome("review", 500)];
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1714,7 +1737,7 @@ describe("SessionExecution checkpoints", () => {
     const inbox: SessionInbox = { ...idleInbox(), next: vi.fn(async () => payloads.shift()) };
     // The outcome records the task's result, as the real step does before publishing `task.settled`.
     vi.mocked(applyRunMessagesStep).mockImplementation(
-      stepWork(async (input: Parameters<typeof applyRunMessagesStep>[0]) => ({
+      stepWork(async (input: Entered<Parameters<typeof applyRunMessagesStep>[0]>) => ({
         cancelled: false,
         serializedContext: input.serializedContext,
         sessionState: reportedState,
@@ -1783,7 +1806,7 @@ describe("SessionExecution checkpoints", () => {
       );
     // The real step tells the run to stop and publishes `task.settled`; this test reads the request.
     vi.mocked(cancelTasksStep).mockImplementationOnce(
-      stepWork(async (input: Parameters<typeof cancelTasksStep>[0]) => ({
+      stepWork(async (input: Entered<Parameters<typeof cancelTasksStep>[0]>) => ({
         serializedContext: input.serializedContext,
         sessionState: input.sessionState,
       })),
@@ -1821,6 +1844,7 @@ describe("SessionExecution checkpoints", () => {
     let signalDelivery: (payload: SessionInboxPayload) => void = () => {};
     const inbox: SessionInbox = {
       claimedTokens: [],
+      ownerRunId: () => "run_owner",
       takeLeading: () => [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
@@ -1984,7 +2008,7 @@ function publishIntoContext(): void {
   vi.mocked(applyRunMessagesStep)
     .mockReset()
     .mockImplementation(
-      stepWork(async (input: Parameters<typeof applyRunMessagesStep>[0]) =>
+      stepWork(async (input: Entered<Parameters<typeof applyRunMessagesStep>[0]>) =>
         append(
           input.serializedContext,
           input.messages
@@ -2030,6 +2054,7 @@ function boundaryRunMessages() {
   });
   const inbox: SessionInbox = {
     claimedTokens: [],
+    ownerRunId: () => "run_owner",
     takeLeading: () => [],
     claimSessionHook: vi.fn(),
     claimSessionHooks: vi.fn(),
@@ -2071,6 +2096,7 @@ function createCursor(input: {
 function idleInbox(): SessionInbox {
   return {
     claimedTokens: [],
+    ownerRunId: () => "run_owner",
     takeLeading: () => [],
     claimSessionHook: vi.fn(),
     claimSessionHooks: vi.fn(),

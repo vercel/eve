@@ -6,7 +6,7 @@ import {
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
+import { commitSessionStep, type SessionStepInput } from "#execution/publish-session-events.js";
 import {
   type SessionStateTransition,
   type WithSessionStateDelta,
@@ -15,7 +15,6 @@ import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
   startWorkflowTask,
   startWorkflowToolCallRun,
-  startWorkflowToolRun,
   type StartWorkflowTaskInput,
   type StartWorkflowToolRun,
 } from "#execution/tools/workflow/start.js";
@@ -41,21 +40,9 @@ import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
- * Starts the runs of the pending calls and records them on the session. A
- * retry starts its runs again, since a Workflow start has no idempotency key,
- * so this step publishes nothing and commits as soon as the runs are
- * recorded. See {@link publishDispatchedCallsStep}.
- */
-export async function dispatchCoordinationStep(
-  input: CoordinationDispatchInput,
-): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
-  "use step";
-  return await dispatchCoordinationOn(startWorkflowToolRun)(input);
-}
-
-/**
- * The dispatch {@link dispatchCoordinationStep} runs, starting each run with `startRun`: Workflow
- * starts its runs on the current deployment, and another host starts them its own way.
+ * The dispatch Workflow's `dispatchCoordinationStep` runs (`workflow-host/dispatch-step.ts`),
+ * starting each run with `startRun`: Workflow starts its runs on the current deployment, and
+ * another host starts them its own way.
  */
 export function dispatchCoordinationOn(
   startRun: StartWorkflowToolRun,
@@ -67,12 +54,12 @@ export function dispatchCoordinationOn(
 }
 
 /**
- * Publishes, as one commit, what {@link dispatchCoordinationStep} recorded: the calls the turn
+ * Publishes, as one commit, what the dispatch recorded: the calls the turn
  * waits on started, the tasks it started or reached, and the calls it refused. Run ownership is
  * checkpointed first, so retrying the publication cannot start those runs again.
  */
 export async function publishDispatchedCallsStep(
-  input: SessionStepState & { readonly pending: PendingDispatch },
+  input: SessionStepInput & { readonly pending: PendingDispatch },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, ({ pending, ...target }) =>

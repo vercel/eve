@@ -1,7 +1,11 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
 import type { OpenedAgentSession } from "#execution/agent-sessions/start.js";
 import type { RemoteChildBinding } from "#execution/child-binding.js";
-import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
+import {
+  publishSessionEvents,
+  type SessionStepInput,
+  type SessionStepState,
+} from "#execution/publish-session-events.js";
 import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { applyTaskRunMessage, type TaskRunMessage } from "#execution/tasks/steps.js";
@@ -98,7 +102,7 @@ export interface RunMessageChildren {
   recordRemoteBinding(parentSessionId: string, binding: RemoteChildBinding): Promise<void>;
 }
 
-export type ApplyRunMessagesInput = SessionStepState & {
+export type ApplyRunMessagesInput = SessionStepInput & {
   readonly canCancelTurn?: boolean;
   readonly messages: readonly AppliedRunMessage[];
 };

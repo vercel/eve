@@ -5,7 +5,7 @@ import { getChannelBuildMetadata } from "#channel/compiled-channel.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
 import type { CompiledChannelDefinition } from "#compiler/manifest.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { workflowCallbackErrorMessage } from "#shared/workflow-tool-context.js";
 import {
   loadModuleBackedDefinition,

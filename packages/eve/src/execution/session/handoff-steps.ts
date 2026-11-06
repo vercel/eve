@@ -10,18 +10,15 @@ import { deserializeContext, IncompatibleStateLayoutError } from "#context/seria
 import type { SessionCheckpointMigration } from "#execution/session/checkpoint-migrations.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
+import { type SessionOwnerActivation } from "#execution/session/handoff.js";
 import {
   SESSION_CHECKPOINT_VERSION,
   type SessionCheckpoint,
-  type SessionOwnerActivation,
-} from "#execution/session/handoff.js";
+} from "#execution/session/checkpoint.js";
 import { createLogger } from "#internal/logging.js";
 import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
-import {
-  hasRunEnded,
-  startWorkflowOnDeployment,
-  workflowEntryReference,
-} from "#execution/workflow-runtime.js";
+import { hasRunEnded, startWorkflowOnDeployment } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   SESSION_HANDOFF_VERSION,
   type HandoffWorkflowEntryInput,
