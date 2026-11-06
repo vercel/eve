@@ -15,13 +15,15 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
-import { getWorld } from "#internal/workflow/runtime.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
 // A parent runs three children at once, and each child's tool needs a Weather sign-in for the
 // same person, and with `parentAsks` the parent's own tool needs it too. Each sign-in relays to the parent as its own card, and the person's answer on one
@@ -317,6 +319,75 @@ describe("one sign-in answer for parallel children", () => {
       }
     });
   });
+
+  it("completes the children's sign-ins from the parent's card when it opens first", async () => {
+    const app = await createApp("sign-in-fan-in-parent-first", {
+      grant: "oauth/weather",
+      parentAsks: "first",
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await parentCardFirst(app, stream);
+        const [first] = before.filter(isSignInOpened);
+        expect(before.filter(isSignInOpened).filter(isShownCard), "cards").toEqual([first]);
+        await completeSignIn(first!, { code: "oauth-code" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        expect(signInOutcomes([...before, ...after]), "how each card closed").toEqual(
+          Array.from({ length: CHILDREN + 1 }, () => "accepted"),
+        );
+        expect(app.executions()).toHaveLength(CHILDREN + 1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("ends the children's sign-ins when a message withdraws the parent's card they wait on", async () => {
+    const app = await createApp("sign-in-fan-in-parent-withdrawn", {
+      grant: "oauth/weather",
+      parentAsks: "first",
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await parentCardFirst(app, stream);
+        const inbox = sessionInboxHookToken(`http:${app.name}`);
+        await waitForHook({ runId: run.runId }, { token: inbox });
+        await resumeHook(inbox, {
+          auth: ALICE,
+          kind: "send",
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          payload: { message: "Never mind the parent's weather." },
+        });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        const events = [...before, ...after];
+        const cards = events.filter(isSignInOpened).map(signInId);
+        const settled = new Set(
+          filterEventsByType(events, "interaction.settled").map((e) => e.data.interactionId),
+        );
+        expect(
+          cards.filter((id) => !settled.has(id)),
+          "sign-ins left without a card",
+        ).toEqual([]);
+        expect(signInOutcomes(events).toSorted(), "how each card closed").toEqual([
+          ...Array.from({ length: CHILDREN }, () => "failed"),
+          "withdrawn",
+        ]);
+        expect(app.executions(), "calls that ran").toEqual([]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
 });
 
 let restoreWorld = async () => {};
@@ -361,6 +432,19 @@ async function signInCards(
   return events;
 }
 
+/** The parent's own card, then the children's, which ask only once it is open. */
+async function parentCardFirst(
+  app: { readonly releaseChildren: () => void },
+  stream: ReturnType<typeof captureEvents>,
+): Promise<SessionStreamEvent[]> {
+  const parent = await signInCards(stream, 1);
+  expect(parent.filter(isSignInOpened).map(isOwnSignIn), "the first card is the parent's").toEqual([
+    true,
+  ]);
+  app.releaseChildren();
+  return [...parent, ...(await signInCards(stream, CHILDREN))];
+}
+
 /** How the parent's sign-in cards closed, in the order they closed. */
 function signInOutcomes(events: readonly SessionStreamEvent[]): string[] {
   const cards = new Set(events.filter(isSignInOpened).map(signInId));
@@ -377,7 +461,7 @@ type Prompt = LanguageModelV4CallOptions["prompt"];
  * child 0 then checks Porto's under another scope of the same grant. With `parentAsks`, the
  * parent checks Lisbon's weather itself while the children run.
  */
-function scriptedModel(children: number, again: boolean, parentAsks: boolean) {
+function scriptedModel(children: number, again: boolean, parentAsks: boolean | "first") {
   let waits = 0;
   return markMockModel(
     new MockLanguageModelV4({
@@ -413,7 +497,7 @@ function scriptedModel(children: number, again: boolean, parentAsks: boolean) {
               toolName: "agent",
             })),
           );
-        if (parentAsks && !called("get_weather"))
+        if (parentAsks !== false && !called("get_weather"))
           return toolCallsStreamResult([
             {
               input: JSON.stringify({ city: "Lisbon parent" }),
@@ -446,11 +530,17 @@ async function createApp(
     readonly again?: boolean;
     readonly children?: number;
     readonly grant?: string;
-    readonly parentAsks?: boolean;
+    /** The parent's own tool needs the sign-in too; with `first`, the children ask after it. */
+    readonly parentAsks?: boolean | "first";
   },
 ) {
   let granted = false;
   let revoked = false;
+  // With `parentAsks: "first"`, the children ask once the test has seen the parent's card.
+  let releaseChildren = () => {};
+  const childrenAsk = new Promise<void>((resolve) => {
+    releaseChildren = resolve;
+  });
   let starts = 0;
   let completes = 0;
   const executions: string[] = [];
@@ -489,7 +579,7 @@ async function createApp(
           model: scriptedModel(
             options.children ?? CHILDREN,
             options.again === true,
-            options.parentAsks === true,
+            options.parentAsks ?? false,
           ),
           modelContextWindowTokens: 200_000,
         })),
@@ -502,6 +592,8 @@ async function createApp(
           default: defineTool({
             description: "Get the weather for a city.",
             async execute(input, ctx) {
+              if (options.parentAsks === "first" && input.city !== "Lisbon parent")
+                await childrenAsk;
               const porto = input.city.startsWith("Porto");
               if (porto && !revoked) {
                 revoked = true;
@@ -524,6 +616,7 @@ async function createApp(
   return {
     completes: () => completes,
     executions: () => executions,
+    releaseChildren,
     name,
     runtime,
     starts: () => starts,

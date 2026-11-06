@@ -26,7 +26,7 @@ import {
   requestLimit,
   requireSignIn,
 } from "./approvals.js";
-import { stepCallsBack } from "./sign-in-callbacks.js";
+import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
 import { isEmptyInput } from "./delivery.js";
 
@@ -82,7 +82,8 @@ export async function stopForToolSignIn(
   step: Step,
   interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
 ): Promise<StepResult> {
-  await step.apply(
+  await applyEndingSignIns(
+    step,
     requireSignIn(step.view(), {
       calls: interrupt.calls,
       challenges: interrupt.challenges,
@@ -185,7 +186,11 @@ export {
   callsBackFor,
   localSignInCallback,
   ownCallbacks,
+  settleSignIns,
+  signInsEnded,
+  type AnsweredSignIn,
   type OwnCallbacks,
   type SignInCallback,
+  type SignInEnding,
 } from "./sign-in-callbacks.js";
 export { holdsHitlRequests } from "./view.js";

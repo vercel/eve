@@ -3,6 +3,10 @@ import type { Step } from "#harness/step/context.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import { vercelConnectCallbackUrl } from "#runtime/connections/scoped-authorization.js";
+import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
+import type { ModelMessage } from "ai";
+import type { Transition } from "#harness/session-machine/commit.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { CallsBack } from "./sign-ins.js";
 
 // Which sign-in callbacks this session can call. Not for workflow bodies: it reads the step's
@@ -53,10 +57,91 @@ export function callsBackFor(own: OwnCallbacks): CallsBack {
   return (row) => localSignInCallback(row, own) !== undefined;
 }
 
+/** `step`'s session's own callbacks, when it runs in a workflow. */
+function stepCallbacks(step: Pick<Step, "ctx" | "session">): OwnCallbacks | undefined {
+  const baseUrl = step.ctx.get(CallbackBaseUrlKey);
+  return baseUrl === undefined ? undefined : ownCallbacks(step.session.sessionId, baseUrl);
+}
+
 /** The sign-ins `step`'s session can call back, when it runs in a workflow. */
 export function stepCallsBack(step: Pick<Step, "ctx" | "session">): CallsBack | undefined {
-  const baseUrl = step.ctx.get(CallbackBaseUrlKey);
-  return baseUrl === undefined
-    ? undefined
-    : callsBackFor(ownCallbacks(step.session.sessionId, baseUrl));
+  const own = stepCallbacks(step);
+  return own === undefined ? undefined : callsBackFor(own);
+}
+
+/**
+ * Applies a transition that can end this session's own sign-in cards without an answer, as a
+ * steering message withdraws them or a newer attempt replaces them. The sign-ins that waited on
+ * such a card hear first that it ended (`signInsEnded`), so none waits on a card nobody sees.
+ */
+export async function applyEndingSignIns(
+  step: Pick<Step, "apply" | "ctx" | "session" | "view">,
+  change: Transition,
+  messages?: readonly ModelMessage[],
+): Promise<void> {
+  const own = stepCallbacks(step);
+  if (own !== undefined) {
+    const tables = step.view().projection.view;
+    await settleSignIns(
+      change.events.flatMap((event) => {
+        if (event.type !== "interaction.settled") return [];
+        const { interactionId, outcome, reason } = event.data;
+        if (outcome === "accepted" || outcome === "declined") return [];
+        return signInsEnded(tables, { interactionId, reason: reason ?? outcome }, own);
+      }),
+    );
+  }
+  await step.apply(change, messages);
+}
+
+/** An open sign-in to settle with the answer another sign-in for the same grant got. */
+export interface AnsweredSignIn {
+  readonly callback: SignInCallback;
+  readonly params: Readonly<Record<string, string>>;
+}
+
+/** A sign-in whose card ended without an answer, and how it ended. */
+export interface SignInEnding {
+  readonly interactionId: string;
+  readonly reason: string;
+}
+
+/**
+ * The open sign-ins that waited on `ending`'s card (`waitsOn`): no card was shown for them, so
+ * they fail with it, as their own card's failure would, and their askers may ask again.
+ */
+export function signInsEnded(
+  tables: SessionView,
+  ending: SignInEnding,
+  own: OwnCallbacks,
+): readonly AnsweredSignIn[] {
+  return Object.values(tables.interactions).flatMap((row) => {
+    if (row.status !== "open" || row.request.signIn?.waitsOn !== ending.interactionId) return [];
+    const callback = localSignInCallback(row, own);
+    return callback === undefined ? [] : [{ callback, params: { error: ending.reason } }];
+  });
+}
+
+/**
+ * Calls each sign-in's callback, as Connect calls the answered one's: its asker matches the
+ * attempt in its own turn and settles it under its own principal, reading what Connect holds for
+ * it after an acceptance. The params carry only the answer, never a code or a credential.
+ */
+export async function settleSignIns(answered: readonly AnsweredSignIn[]): Promise<void> {
+  await Promise.all(
+    answered.map(({ callback, params }) =>
+      resumeSignInCallback(callback.token, {
+        kind: "authorization-callback",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: callback.attemptId,
+              callback: { method: "GET", params },
+              connectionName: callback.name,
+            },
+          },
+        ],
+      }),
+    ),
+  );
 }

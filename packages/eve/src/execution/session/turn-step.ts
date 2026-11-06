@@ -2,12 +2,7 @@ import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
-import {
-  settleSignIns,
-  signInsAnswered,
-  signInsEnded,
-  type SignInAnswer,
-} from "#subagents/event-proxy-step.js";
+import { signInsAnswered, type SignInAnswer } from "#subagents/event-proxy-step.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -93,7 +88,7 @@ import { createTurnEventHandler } from "#execution/session/turn-event-handler.js
 import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
 import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { ownCallbacks, readHitlState } from "#harness/hitl/index.js";
+import { ownCallbacks, readHitlState, settleSignIns, signInsEnded } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createDurableSessionValues,

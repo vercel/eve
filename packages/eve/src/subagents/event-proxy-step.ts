@@ -14,15 +14,15 @@ import {
   callsBackFor,
   localSignInCallback,
   ownCallbacks,
+  settleSignIns,
+  signInsEnded,
+  type AnsweredSignIn,
   type OwnCallbacks,
-  type SignInCallback,
+  type SignInEnding,
 } from "#harness/hitl/index.js";
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
-import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
@@ -95,12 +95,6 @@ export async function emitProxiedSubagentEvent(
   );
 }
 
-/** An open sign-in to settle with the answer another sign-in for the same grant got. */
-interface AnsweredSignIn {
-  readonly callback: SignInCallback;
-  readonly params: Readonly<Record<string, string>>;
-}
-
 /** A sign-in the person answered, and how. */
 export interface SignInAnswer {
   readonly interactionId: string;
@@ -138,12 +132,6 @@ function relayedAnswers(
   });
 }
 
-/** A sign-in whose card ended without an answer, and how it ended. */
-export interface SignInEnding {
-  readonly interactionId: string;
-  readonly reason: string;
-}
-
 /** The relayed sign-ins this session mirrors for the child that ended without an answer. */
 function relayedEndings(
   tables: SessionView,
@@ -162,22 +150,6 @@ function relayedEndings(
     )
       return [];
     return [{ interactionId, reason: event.data.reason ?? outcome }];
-  });
-}
-
-/**
- * The open sign-ins that waited on `ending`'s card (`waitsOn`): no card was shown for them, so
- * they fail with it, as their own card's failure would, and their askers may ask again.
- */
-export function signInsEnded(
-  tables: SessionView,
-  ending: SignInEnding,
-  own: OwnCallbacks,
-): readonly AnsweredSignIn[] {
-  return Object.values(tables.interactions).flatMap((row) => {
-    if (row.status !== "open" || row.request.signIn?.waitsOn !== ending.interactionId) return [];
-    const callback = localSignInCallback(row, own);
-    return callback === undefined ? [] : [{ callback, params: { error: ending.reason } }];
   });
 }
 
@@ -208,34 +180,4 @@ export function signInsAnswered(
     const callback = localSignInCallback(row, own);
     return callback === undefined ? [] : [{ callback, params }];
   });
-}
-
-/**
- * Calls each sign-in's callback, as Connect calls the answered one's: its asker matches the
- * attempt in its own turn and settles it under its own principal, reading what Connect holds for
- * it after an acceptance. The params carry only the answer, never a code or a credential.
- */
-export async function settleSignIns(answered: readonly AnsweredSignIn[]): Promise<void> {
-  await Promise.all(answered.map(settleSignIn));
-}
-
-async function settleSignIn({ callback, params }: AnsweredSignIn): Promise<void> {
-  const payload: AuthorizationCallbackPayload = {
-    kind: "authorization-callback",
-    payloads: [
-      {
-        authorizationCallback: {
-          attemptId: callback.attemptId,
-          callback: { method: "GET", params },
-          connectionName: callback.name,
-        },
-      },
-    ],
-  };
-  try {
-    await resumeRunnableHook(callback.token, payload);
-  } catch (error) {
-    // Its asker's session is gone, so nothing waits on the sign-in anymore.
-    if (!HookNotFoundError.is(error)) throw error;
-  }
 }

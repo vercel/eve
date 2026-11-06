@@ -5,7 +5,8 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { localSignInCallback, ownCallbacks } from "#harness/hitl/sign-in-callbacks.js";
-import { signInsAnswered, signInsEnded } from "./event-proxy-step.js";
+import { signInsEnded } from "#harness/hitl/sign-in-callbacks.js";
+import { signInsAnswered } from "./event-proxy-step.js";
 
 const OWN = "https://v.example";
 const PARENT = { origin: OWN, sessionId: "parent" };

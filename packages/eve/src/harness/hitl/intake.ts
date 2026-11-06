@@ -20,7 +20,7 @@ import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/t
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
-import { stepCallsBack } from "./sign-in-callbacks.js";
+import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
   dispatch,
@@ -99,7 +99,8 @@ export async function admitHumanInput(
     );
   }
   if (weighed.challenges.length > 0) {
-    await step.apply(
+    await applyEndingSignIns(
+      step,
       requireSignIn(step.view(), {
         challenges: weighed.challenges,
         callsBack: stepCallsBack(step),
@@ -335,7 +336,8 @@ async function runApproved(
   if (signIn === undefined) return undefined;
   // A stopped call keeps the approval it ran on, so it runs on it again after the sign-in.
   const byCallId = new Map(calls.map((approval) => [approval.call.callId, approval]));
-  await step.apply(
+  await applyEndingSignIns(
+    step,
     requireSignIn(step.view(), {
       calls: signIn.calls.map((stopped) => {
         const approval = byCallId.get(stopped.call.callId);
@@ -394,7 +396,7 @@ async function withdrawSteeredSignIns(
 ): Promise<HarnessStepInput | undefined> {
   const names = [...new Set(step.view().signIns.map((challenge) => challenge.name))];
   if (names.length === 0) return input;
-  await step.apply(withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
+  await applyEndingSignIns(step, withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
   return {
     ...input,
     context: [
