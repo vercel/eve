@@ -1,0 +1,16 @@
+{
+  "name": "eve-step-2-tui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node chat.ts",
+    "coder": "node coder.ts"
+  },
+  "dependencies": {
+    "ai": "7.0.137",
+    "eve": "file:../../.."
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -16,7 +16,7 @@ import { isAbortError } from "#client/session-store-helpers.js";
 import { formatStrandedSessionNotice } from "./stranded-session.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
-import type { SendTurnPayload } from "#client/types.js";
+import type { ClientSessionState, SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import type { AgentInfoResult, Client, SessionStreamEvent } from "#client/index.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
@@ -340,6 +340,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   probeMcpConnection?: McpConnectionProbe;
   /** Configured client for the conversation's sessions and their subagent streams. */
   client: Client;
+  /** A session to continue instead of starting one: the TUI replays its history and goes on. */
+  initialSession?: ClientSessionState;
   renderer?: AgentTUIRenderer;
   screen?: TerminalOutput;
   userInput?: TerminalInput;
@@ -389,8 +391,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
-  /** Test seam for `/info`; defaults to the filesystem application inspector. */
-  inspectApplication?: typeof inspectApplication;
+  /** What `/info` shows; by default the application at `appRoot`, as `eve info` inspects it. */
+  describeApplication?: () => Promise<string>;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
@@ -443,7 +445,9 @@ export class EveTUIRunner {
   readonly #remoteAuthFlow?: RemoteAuthFlow;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
-  readonly #inspectApplication: typeof inspectApplication;
+  readonly #describeApplication?: () => Promise<string>;
+  /** The TUI continues a session it didn't start, which replays before the composer opens. */
+  readonly #continuing: boolean;
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
@@ -502,7 +506,9 @@ export class EveTUIRunner {
     this.#store = new SessionStore({
       client: options.client,
       followAgents: true,
+      initialSession: options.initialSession,
     });
+    this.#continuing = options.initialSession !== undefined;
     this.#store.setCallbacks({
       onEvent: (event) => this.#recordDiagnostics(event),
       onSessionChange: (session) => {
@@ -552,7 +558,12 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
-    this.#inspectApplication = options.inspectApplication ?? inspectApplication;
+    const { appRoot } = options;
+    this.#describeApplication =
+      options.describeApplication ??
+      (appRoot === undefined
+        ? undefined
+        : async () => renderApplicationInfo(await inspectApplication(appRoot)));
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
     if (options.serverUrl !== undefined && options.remote === undefined) {
@@ -718,6 +729,12 @@ export class EveTUIRunner {
       if (startupOutcome?.message !== undefined)
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
+
+    // A continued session's history, and a turn of it still going, as the stream holds them.
+    if (this.#continuing)
+      await this.#store
+        .resume()
+        .catch((error: unknown) => this.#renderSendError("Couldn't continue the session", error));
 
     // One loop for everything that takes the keyboard. The store streams the
     // session throughout, so the composer stays open while work runs.
@@ -1481,8 +1498,8 @@ export class EveTUIRunner {
   }
 
   async #showApplicationInfo(): Promise<void> {
-    const appRoot = this.#appRoot;
-    if (appRoot === undefined) {
+    const describe = this.#describeApplication;
+    if (describe === undefined) {
       this.#finishCommand({
         kind: "result",
         message: "/info is only available in local dev sessions.",
@@ -1490,7 +1507,7 @@ export class EveTUIRunner {
       return;
     }
     try {
-      const info = renderApplicationInfo(await this.#inspectApplication(appRoot));
+      const info = await describe();
       if (this.#renderer.showInfoPanel !== undefined) await this.#renderer.showInfoPanel(info);
       else this.#finishCommand({ kind: "result", message: info });
     } catch (error) {

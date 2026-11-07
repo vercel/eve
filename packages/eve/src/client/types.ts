@@ -100,6 +100,12 @@ export interface ClientOptions {
    * `"follow"` explicitly permits forwarding custom headers on redirects.
    */
   readonly redirect?: ClientRedirectPolicy;
+
+  /**
+   * The `fetch` every request goes through; the global `fetch` by default. An agent served in
+   * the same process passes one that answers its eve channel there, so nothing goes over HTTP.
+   */
+  readonly fetch?: typeof fetch;
 }
 
 /**

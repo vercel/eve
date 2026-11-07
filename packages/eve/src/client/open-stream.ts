@@ -82,6 +82,8 @@ interface FollowStreamInput {
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly baseUrl: string;
+  /** The client's `fetch`, which `Client` defaults to the global one. */
+  readonly fetch: typeof fetch;
   readonly resolveReconnectPolicy?: () => false | ReconnectOptions | undefined;
   readonly reconnect?: false | ReconnectOptions;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
@@ -326,7 +328,7 @@ export async function openStreamBody(
       : connectionController.signal;
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await input.fetch(url, {
         cache: "no-store",
         headers,
         redirect: input.redirect,

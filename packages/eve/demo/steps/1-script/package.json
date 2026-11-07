@@ -1,0 +1,15 @@
+{
+  "name": "eve-step-1-script",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node chat.ts"
+  },
+  "dependencies": {
+    "ai": "7.0.137",
+    "eve": "file:../../.."
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

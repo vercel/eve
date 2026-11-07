@@ -544,6 +544,8 @@ Each value in `tools`, `skills`, `connections`, and `instructions` can also be a
 
 An agent defined in code refuses the fields that configure a directory's build or deployment: `build`, `defaultTools`, `tool`, and `experimental.workflow.world`. Its `compaction.model` must be a model id. The agent-wide `approval` isn't supported in code yet, so set `approval` on each tool.
 
+To run an agent defined in code in your own process, or in the `eve dev` terminal UI, see [Agents in Code](./experimental/embed).
+
 ## Where adjacent settings live
 
 | Concern                       | Lives in                                                                         |
