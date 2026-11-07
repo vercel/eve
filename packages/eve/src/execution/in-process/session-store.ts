@@ -1,4 +1,5 @@
 import type { SessionCommand } from "#channel/types.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { SessionSnapshot } from "./snapshot.js";
 
 // Where an in-process host keeps each session while it runs, so that another process continues
@@ -9,14 +10,16 @@ import type { SessionSnapshot } from "./snapshot.js";
 // the one port a host keeps sessions through: a snapshot taken whole goes in with
 // `saveSnapshot`.
 
-/** One command a session's address accepted, kept until a step the session saved has read it. */
-export interface AcceptedInput {
+/**
+ * One command, or one message from a run, a session's address accepted, kept until a step the
+ * session saved has read it.
+ */
+export type AcceptedInput = {
   /** In the order the session's addresses accepted them, from 0. */
   readonly seq: number;
   /** The address it arrived at. */
   readonly token: string;
-  readonly command: SessionCommand;
-}
+} & ({ readonly command: SessionCommand } | { readonly runMessage: WorkflowToolRunMessage });
 
 /** What a session continues from besides its stream: a snapshot without its lines. */
 export type SessionState = Omit<SessionSnapshot, "lines">;
@@ -74,10 +77,29 @@ export function withAppendedInputs(
   const later = appended.filter((input) => input.seq >= next);
   const last = later.at(-1);
   if (last === undefined) return snapshot;
+  const heard = heardWith(snapshot.inputs?.heard, later);
   return {
     ...snapshot,
-    inputs: { next: last.seq + 1, unread: [...(snapshot.inputs?.unread ?? []), ...later] },
+    inputs: {
+      next: last.seq + 1,
+      unread: [...(snapshot.inputs?.unread ?? []), ...later],
+      ...(heard !== undefined && { heard }),
+    },
   };
+}
+
+/** `heard`, counting the run messages among `inputs` too; `undefined` while no run sent any. */
+export function heardWith(
+  heard: Readonly<Record<string, number>> | undefined,
+  inputs: readonly AcceptedInput[],
+): Readonly<Record<string, number>> | undefined {
+  let counted = heard;
+  for (const input of inputs) {
+    if (!("runMessage" in input)) continue;
+    const { runId } = input.runMessage.from;
+    counted = { ...counted, [runId]: (counted?.[runId] ?? 0) + 1 };
+  }
+  return counted;
 }
 
 /**

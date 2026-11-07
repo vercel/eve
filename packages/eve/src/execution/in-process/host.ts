@@ -1,25 +1,37 @@
 import type { Runtime, SessionCommand, SessionCommandResult } from "#channel/types.js";
+import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import { dispatchCoordinationOn } from "#execution/coordination-dispatch-step.js";
+import { registerHost } from "#execution/hosts.js";
+import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import {
   activeCommandResult,
   identifyCommand,
   inactiveCommandResult,
 } from "#execution/session-commands.js";
+import {
+  logicalSessionInboxToken,
+  sessionCommandHookToken,
+} from "#execution/session-inbox/address.js";
 import type { SessionHost, SessionMoves, StartedSession } from "#execution/session/program.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import { applyRunMessagesOn } from "#execution/tools/workflow/apply-run-messages.js";
+import { createUlid } from "#shared/ulid.js";
 import { createMemoryInboxRegistry, type MemoryInboxRegistry } from "./inbox-transport.js";
 import { createMemoryLineStore } from "./line-store.js";
+import { createInProcessRuns, type InProcessRuns } from "./runs.js";
 import type { HostedSession } from "./session-record.js";
 import { memoryWorld } from "#execution/world/memory-world.js";
 import type { RuntimeWorld } from "#execution/world/runtime-world.js";
+import type { InProcessRuntime } from "./runtime.js";
 import { stoppableStore, type SessionStore } from "./session-store.js";
 import { createWorldSessionStore } from "./world-store.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
-// What an in-process host keeps for the sessions it runs: its stores, addresses and timers, and
-// the sessions running on it.
+// What every runtime of one in-process host shares: its stores, addresses, timers and runs, the
+// sessions running on any of its runtimes, and the route that sends hook tokens it holds here
+// instead of to Workflow. A run's child sessions run on the host's runtime for the child's agent
+// (`runtimeFor`), beside the parent's.
 
 const IN_PROCESS_DEPLOYMENT_ID = "in-process";
 
@@ -39,13 +51,16 @@ const IN_PROCESS_MOVES: SessionMoves = {
 
 function unavailable(what: string): never {
   throw new Error(
-    `${what} needs a durable run, which an in-process session doesn't have. Run the agent with \`eve dev\` or deploy it.`,
+    `${what} needs a deployment, which an in-process session doesn't have. Run the agent with \`eve dev\` or deploy it.`,
   );
 }
 
-/** The runtime a session's durable calls would start in, which refuses each. */
-const NO_DURABLE_RUNS: Runtime = {
-  createSession: async () => unavailable("Starting a subagent or task session"),
+/**
+ * The runtime a turn step's own durable calls start in. A session's runs start through its
+ * host's dispatch instead, so nothing here does.
+ */
+const NO_STEP_RUNTIME: Runtime = {
+  createSession: async () => unavailable("Starting a session from a tool"),
   dispatchContinuation: async () => unavailable("Sending to another session"),
   dispatchSession: async () => unavailable("Sending to another session"),
   getEventStream: async () => unavailable("Reading another session"),
@@ -65,8 +80,13 @@ export interface InProcessHostOptions {
    */
   readonly world?: RuntimeWorld;
   /**
-   * What a step's data crosses: a structured clone by default. Workflow's serializer
-   * (`workflowStepBoundary`) hands steps exactly what a deployment would.
+   * Where the server this host runs in routes eve's callbacks (`/.well-known/eve/...`), which
+   * sign-in links name. Without one, a tool that needs a sign-in can't ask for it.
+   */
+  readonly callbackBaseUrl?: string;
+  /**
+   * What a step's data and a hook's payload cross: a structured clone by default. Workflow's
+   * serializer (`workflowStepBoundary`) hands steps exactly what a deployment would.
    */
   readonly stepBoundary?: StepBoundary;
 }
@@ -82,6 +102,7 @@ export interface InProcessHost {
   readonly lines: ReturnType<typeof createMemoryLineStore>;
   readonly inboxes: MemoryInboxRegistry;
   readonly timers: InProcessTimers;
+  readonly runs: InProcessRuns;
   /** The World the host's sessions are runs on. */
   readonly world: RuntimeWorld;
   /** Its sessions on the World, until `dispose` stops writing to it. */
@@ -112,10 +133,17 @@ export interface InProcessHost {
   dispose(): Promise<void>;
 }
 
-export function createInProcessHost(options: InProcessHostOptions): InProcessHost {
+/**
+ * The host every runtime `runtimeFor` returns shares. It reaches a child's runtime through
+ * `runtimeFor`, which also reopens a child a run opened before a restore.
+ */
+export function createInProcessHost(
+  options: InProcessHostOptions,
+  runtimeFor: (config: SessionRuntimeConfig) => InProcessRuntime,
+): InProcessHost {
   const lines = createMemoryLineStore();
   const stepBoundary = options.stepBoundary ?? structuredCloneBoundary;
-  const inboxes = createMemoryInboxRegistry();
+  const inboxes = createMemoryInboxRegistry(stepBoundary);
   const timers = createInProcessTimers();
   const world = options.world ?? memoryWorld();
   const onWorld = createWorldSessionStore(world, {
@@ -133,27 +161,59 @@ export function createInProcessHost(options: InProcessHostOptions): InProcessHos
 
   const deliverCommand: InProcessHost["deliverCommand"] = async (token, command) => {
     const identified = identifyCommand(command);
-    // Kept before its address accepts it, so a session that goes on after a crash has it.
-    const holder = inboxes.holder(token);
-    if (holder !== undefined) await records.get(holder)?.accept(token, identified);
-    const held = inboxes.deliver(token, identified);
-    return held === undefined
-      ? inactiveCommandResult(identified)
-      : activeCommandResult(identified, held.sessionId);
+    const delivery = await inboxes.deliver(token, identified);
+    return delivery?.kind === "delivered"
+      ? activeCommandResult(identified, delivery.owner)
+      : inactiveCommandResult(identified);
   };
+  const dispatchSession: Runtime["dispatchSession"] = async ({ command, sessionId }) =>
+    await deliverCommand(sessionCommandHookToken(sessionId), command);
 
-  // Without runs, no run sends anything.
-  const applyRunMessages = applyRunMessagesOn({
-    recordRemoteBinding: async () => unavailable("A remote agent"),
-    stopLate: async () => unavailable("A subagent"),
+  const runs = createInProcessRuns({
+    dispatchSession,
+    inboxes,
+    stepBoundary,
+    async reopenSession(config, sessionId, { idle }) {
+      if (sessions.has(sessionId)) return true;
+      const saved = await store?.load(sessionId);
+      if (saved === undefined) return false;
+      // Between turns, with nothing unread, it has no turn left to reply from.
+      if (!idle && saved.open === undefined && (saved.inputs?.unread.length ?? 0) === 0)
+        return false;
+      await runtimeFor(config).restore(saved);
+      return true;
+    },
+    runtimeFor,
+    timers,
   });
-  // Each call that needs a run of its own fails with why, as a run that can't start does.
-  const dispatchRuns = dispatchCoordinationOn(async ({ toolName }) =>
-    unavailable(`The \`${toolName}\` tool`),
-  );
+
+  // A child a run opened after its task ended is stopped, best effort, as on Workflow.
+  const { stopLate } = agentSessionsOver({
+    deliveryId: (kind, sessionId) => `agent-session:late:${createUlid()}:${sessionId}:${kind}`,
+    local: {
+      start: async () => {
+        throw new Error("A session's children are opened by its runs.");
+      },
+      command: async (session, command) =>
+        await dispatchSession({ command, sessionId: session.address.sessionId }),
+      async commandLate(sessionId, command) {
+        await dispatchSession({ command, sessionId });
+      },
+    },
+    remote: undefined,
+  });
+  const applyRunMessages = applyRunMessagesOn({
+    // A remote child can't be opened here, so no run reports one.
+    recordRemoteBinding: async () => unavailable("A remote agent"),
+    stopLate,
+  });
+  const dispatchRuns = dispatchCoordinationOn(runs.startRun);
 
   const stepHost: SessionStepHost = {
-    createRuntime: () => NO_DURABLE_RUNS,
+    ...(options.callbackBaseUrl !== undefined && {
+      callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""),
+    }),
+    createRuntime: () => NO_STEP_RUNTIME,
     // Attributes belong to a Workflow run; an in-process session has none.
     setAttributes: async () => {},
   };
@@ -171,6 +231,18 @@ export function createInProcessHost(options: InProcessHostOptions): InProcessHos
     );
   };
 
+  releases.push(
+    registerHost({
+      async deliver(token, payload) {
+        // A session's addresses are named here by their logical tokens.
+        const delivery = await inboxes.deliver(logicalSessionInboxToken(token) ?? token, payload);
+        return delivery?.kind;
+      },
+      runEnded: (runId) => runs.runEnded(runId),
+      cancelRun: (runId, reason) => runs.cancelRun(runId, reason),
+    }),
+  );
+
   return {
     deliverCommand,
     deploymentId: IN_PROCESS_DEPLOYMENT_ID,
@@ -178,6 +250,7 @@ export function createInProcessHost(options: InProcessHostOptions): InProcessHos
     lines,
     records,
     running,
+    runs,
     sessions,
     keeps: kept !== undefined,
     store,
@@ -198,13 +271,16 @@ export function createInProcessHost(options: InProcessHostOptions): InProcessHos
     async dispose() {
       // Sessions on a World the runtime was given are suspended: the World holds them as they
       // were, and closing their addresses stops their loops without ending them, so restore
-      // continues them with their sandboxes, as after a crash. Otherwise, closing ends them.
+      // continues them with their sandboxes and children, as after a crash. Otherwise, closing
+      // ends them.
       suspending = kept !== undefined;
       // What sessions wrote is kept before the World stops being written to, so a suspended
       // session's stream holds every line it wrote.
       if (kept !== undefined) await lines.flushAll().catch(() => {});
       kept?.stop();
       inboxes.closeAll();
+      // A run whose body waits on a session that ended never settles, so nothing waits for
+      // runs: their sessions end, and their hooks are closed.
       await Promise.all(running.values());
       timers.dispose();
       for (const release of releases.splice(0)) release();

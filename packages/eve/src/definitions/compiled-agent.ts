@@ -1,5 +1,5 @@
-import { compiledDelegates } from "#execution/agent-sessions/metadata.js";
 import { compiledAgentRoster } from "#execution/agent-sessions/roster.js";
+import { compiledDelegates } from "#execution/agent-sessions/metadata.js";
 import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { memoryDefinition, memoryToolsDefinition } from "#memory/definition.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";

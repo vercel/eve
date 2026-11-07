@@ -30,32 +30,32 @@
     "total.workflow": 0
   },
   "src/execution/in-process/runtime.ts": {
-    "static.modules": 790,
-    "static.kib": 4208,
+    "static.modules": 812,
+    "static.kib": 4306,
     "static.builtinFiles": 61,
     "static.workflow": 0,
-    "total.modules": 964,
-    "total.kib": 6674,
+    "total.modules": 984,
+    "total.kib": 6765,
     "total.builtinFiles": 138,
     "total.workflow": 0
   },
   "src/embed/agent.ts": {
-    "static.modules": 542,
-    "static.kib": 1827,
+    "static.modules": 548,
+    "static.kib": 1840,
     "static.builtinFiles": 49,
     "static.workflow": 0,
-    "total.modules": 597,
-    "total.kib": 1827,
+    "total.modules": 599,
+    "total.kib": 1840,
     "total.builtinFiles": 63,
     "total.workflow": 0
   },
   "src/embed/session.ts": {
-    "static.modules": 792,
-    "static.kib": 4214,
+    "static.modules": 814,
+    "static.kib": 4312,
     "static.builtinFiles": 62,
     "static.workflow": 0,
-    "total.modules": 966,
-    "total.kib": 6680,
+    "total.modules": 986,
+    "total.kib": 6771,
     "total.builtinFiles": 139,
     "total.workflow": 0
   }

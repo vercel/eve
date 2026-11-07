@@ -1,3 +1,4 @@
+import type { SessionSubagent } from "#runtime/sessions/session-agent.js";
 import type { ModelMessage } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -62,6 +63,8 @@ export interface DefinitionResources {
    * first definition that names one provides it.
    */
   readonly sandbox?: CodeSandbox;
+  /** A subagent the agent can delegate to, as `subagents/<name>/agent.ts` would declare it. */
+  readonly subagent?: SessionSubagent;
 }
 
 /** What a definition can add, by field. */

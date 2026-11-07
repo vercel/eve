@@ -23,6 +23,7 @@ describe("eve.defaults()", () => {
       "tool::edit_file",
       "tool::web_fetch",
       "tool::web_search",
+      "tool::agent",
     ]);
   });
 
@@ -37,7 +38,10 @@ describe("eve.defaults()", () => {
           without: ["bash", "read_file", "write_file", "edit_file"],
         })
         .map(({ id }) => id),
-    ).toEqual(["tool::web_fetch", "tool::web_search"]);
+    ).toEqual(["tool::web_fetch", "tool::web_search", "tool::agent"]);
+    expect(
+      eve.defaults({ sandbox: sandbox("a"), without: ["agent"] }).map(({ id }) => id),
+    ).not.toContain("tool::agent");
   });
 
   it("is the list the compiler adds to every file agent's node, in its order", () => {
