@@ -1,4 +1,5 @@
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 import { createHash } from "node:crypto";
 
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
@@ -36,6 +37,11 @@ export interface MemoryScopeContext {
     readonly auth: SessionAuth;
   };
   readonly channel: InstrumentationChannel;
+  /**
+   * Where the conversation happens. Its `space`, such as a Slack channel,
+   * scopes memory to everyone in that place.
+   */
+  readonly conversation?: ConversationContext;
 }
 
 export type MemoryScopeDefinition =

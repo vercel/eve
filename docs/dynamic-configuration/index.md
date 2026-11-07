@@ -19,6 +19,7 @@ Every dynamic function receives:
 | `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                               |
 | `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
 | `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
+| `ctx.conversation`        | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                  |
 | `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
 | `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                           |
 | `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                              |

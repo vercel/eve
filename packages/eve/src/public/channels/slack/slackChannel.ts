@@ -138,6 +138,8 @@ import {
 } from "#public/channels/undelivered-reply.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import type { ConversationSpaceType } from "#shared/conversation-context.js";
+import { readSlackSpaceType, slackConversationSpace } from "#public/channels/slack/space.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { markEventHandled } from "./utils.js";
 
@@ -259,6 +261,8 @@ export interface SlackChannelState extends UndeliveredReplyState {
   audience?: ChannelAudience;
   /** Slack channel id seeded by the inbound mention. */
   channelId: string | null;
+  /** The conversation's space type, read from the inbound event's `channel_type`. */
+  spaceType?: ConversationSpaceType;
   /** Slack thread root ts; `null` in a code channel, which is one session across its threads. */
   threadTs: string | null;
   /** Whether this session serves a Slack code channel. */
@@ -1190,6 +1194,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       };
     },
     audience: ({ state }) => state.audience ?? "unknown",
+    space: ({ state }) => slackConversationSpace(state),
 
     context(state, session) {
       return rebuildSlackContext(state, session, api, config.credentials);
@@ -1960,6 +1965,8 @@ async function dispatchSlackMessage(input: {
   const isPrivateConversation = await isDMOrPrivateChannel();
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
+  const spaceType = readSlackSpaceType(input.message.raw);
+  if (spaceType !== undefined) channelState.spaceType = spaceType;
   await deliverSlackMessage({
     botUserId: input.receivingBotUserId,
     credentials: input.credentials,
