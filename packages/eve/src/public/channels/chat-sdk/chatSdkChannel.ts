@@ -106,6 +106,8 @@ export interface ChatSdkChannelState
    * reaches them privately. `null` once more than one person sent as it.
    */
   usersByPrincipal?: Record<string, string | null>;
+  /** @internal The name of the person behind each principal that sent or answered, so an answered card can name them. */
+  namesByPrincipal?: Record<string, string>;
   /** @internal Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
   /** @internal Id of the content part streaming into the anchor. */
@@ -334,7 +336,13 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     }
     const auth = config.resolveInputAuth ? await config.resolveInputAuth(event) : null;
     const answer = await respondOrRetireInactivePrompt(
-      () => bridgeRespond(bot, [response], { auth, thread: thread.toJSON() }),
+      () =>
+        bridgeRespond(
+          bot,
+          [response],
+          { auth, thread: thread.toJSON() },
+          { responderName: chatSdkUserName(event.user) },
+        ),
       {
         retirePrompt: (label) => retireInputCard(thread, event.messageId, label),
       },
@@ -407,6 +415,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: ChannelContext["session"] },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      recordPrincipalName(channel.state, channel.session.auth.current, payload);
       recordLatestMessage(channel.state, payload);
       const answer = resolveInputAnswer(channel.state, payload);
       if (answer !== undefined)
@@ -474,7 +483,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await thread.adapter.editMessage(
           thread.id,
           messageId,
-          renderInteractions(card.requests, inputActionPrefix, resolved),
+          renderInteractions(
+            card.requests,
+            inputActionPrefix,
+            resolved,
+            channel.state.namesByPrincipal,
+          ),
         );
       } catch (error) {
         if (!isNotImplemented(error)) {
@@ -726,6 +740,7 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   answers: readonly Answer[],
   options: ChatSdkRespondOptions,
+  state?: Partial<ChatSdkDeliveryState>,
 ): Promise<Delivery> {
   const from = activeFrom("respond");
   const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
@@ -733,6 +748,7 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   return from(thread.id).respond(parseAnswers(answers), {
     ...respondOptions,
     auth: auth ?? null,
+    ...(state !== undefined && { state }),
   });
 }
 
@@ -771,9 +787,42 @@ function recordLatestMessage(
   state.latestMessageId = message.id;
 }
 
-/** Channel state a delivery carries. `inputAnswer` lives only on the delivery. */
+/** Channel state a delivery carries. `inputAnswer` and `responderName` live only on the delivery. */
 interface ChatSdkDeliveryState extends ChatSdkChannelState {
   inputAnswer?: ChatSdkInputAnswer;
+  /** The name of the person who pressed, for a press's delivery. */
+  responderName?: string;
+}
+
+/** How a Chat SDK user is named on a card everyone in the thread reads. */
+function chatSdkUserName(user: {
+  readonly fullName?: string;
+  readonly userName?: string;
+}): string | undefined {
+  return user.fullName || user.userName || undefined;
+}
+
+/**
+ * Records the name of whoever sent a delivery, the message's author or the
+ * presser, as the person behind its caller, so a card the delivery answers can
+ * name them.
+ */
+function recordPrincipalName(
+  state: ChatSdkChannelState,
+  caller: SessionAuthContext | null,
+  payload: ChannelDelivery<ChatSdkChannelState>,
+): void {
+  if (caller === null) return;
+  const delivered = payload.state as Partial<ChatSdkDeliveryState> | undefined;
+  const author =
+    payload.message === undefined ? undefined : delivered?.thread?.currentMessage?.author;
+  const name =
+    delivered?.responderName ??
+    (author === undefined || author.isBot === true || author.isMe
+      ? undefined
+      : chatSdkUserName(author));
+  if (name === undefined || state.namesByPrincipal?.[caller.principalId] === name) return;
+  state.namesByPrincipal = { ...state.namesByPrincipal, [caller.principalId]: name };
 }
 
 /**

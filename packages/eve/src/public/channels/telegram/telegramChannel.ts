@@ -69,6 +69,7 @@ import {
   stateFromTelegramCallbackQuery,
   stateFromTelegramMessage,
   telegramContinuationTokenFromState,
+  telegramUserName,
 } from "#public/channels/telegram/state.js";
 import { verifyTelegramRequest } from "#public/channels/telegram/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
@@ -104,6 +105,10 @@ export interface TelegramChannelState extends TelegramHitlState {
   messageThreadId: number | null;
   /** Telegram user id that triggered the current session/turn. */
   triggeringUserId?: string | null;
+  /** @internal The name of the Telegram user who sent a delivery's message or press. */
+  triggeringUserName?: string | null;
+  /** @internal The name of the person behind each principal that sent or answered, so an answered prompt can name them. */
+  namesByPrincipal?: Record<string, string>;
   /**
    * Bot message id that the triggering message replied to. The deliver hook
    * reads it from delivery state to answer a pending ForceReply prompt.
@@ -627,6 +632,7 @@ async function dispatchCallbackQuery(input: {
                 .from(telegramContinuationTokenFromState(state))
                 .respond([telegramCallbackAnswer(data)], {
                   auth: defaultTelegramAuth({ ...message, from: input.query.from }),
+                  state: { triggeringUserName: telegramUserName(input.query.from) },
                 }),
             { retirePrompt: (label) => retireInactivePrompt(telegram, message, label) },
             log,
@@ -690,6 +696,7 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   const adapter = channel.adapter;
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
     const state = payload.state as Partial<TelegramChannelState> | undefined;
+    recordTelegramName(ctx.state, ctx.session.auth.current, state?.triggeringUserName);
     const responses = [
       ...(payload.answers ?? []),
       ...telegramReplyAnswers(state?.replyToBotMessageId, payload.message),
@@ -706,6 +713,20 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
     }
     return defaultDeliverResult(payload);
   };
+}
+
+/**
+ * Records the name of the Telegram user who sent a delivery as the one behind its caller, so a
+ * prompt the delivery answers can name them.
+ */
+function recordTelegramName(
+  state: TelegramChannelState,
+  caller: SessionAuthContext | null,
+  name: string | null | undefined,
+): void {
+  if (caller === null || typeof name !== "string" || name === "") return;
+  if (state.namesByPrincipal?.[caller.principalId] === name) return;
+  state.namesByPrincipal = { ...state.namesByPrincipal, [caller.principalId]: name };
 }
 
 function readChatId(value: unknown): string | undefined {

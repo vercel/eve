@@ -111,11 +111,14 @@ export function renderInteractionAttachment(
 
 /** Renders an answered Teams card that replaces a pending HITL prompt. */
 export function renderAnsweredInteractionMessage(input: {
+  /** Who answered, as in `Answered by Alice: Saturday`. */
+  readonly by?: string;
   readonly includeText?: boolean;
   readonly label?: string;
   readonly prompt: string;
 }): TeamsMessageBody {
-  const text = input.label ? `Answered: ${input.label}` : "Answered";
+  const answered = input.by ? `Answered by ${input.by}` : "Answered";
+  const text = input.label ? `${answered}: ${input.label}` : answered;
   const result = renderSettledInputRequestMessage(input.prompt, { color: "good", text });
   if (input.includeText !== false) return { ...result, text, textFormat: "plain" };
   return result;

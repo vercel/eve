@@ -34,44 +34,6 @@ export interface BrokenCell {
   readonly symptom: RegExp;
 }
 
-/** Rules that check how an answered prompt's message changes, by prompt kind and how it was answered. */
-const answeredPromptRules = {
-  approvalPress: {
-    cleared: "pressing Approve clears the approval's buttons",
-    named: "pressing Approve names who approved on the approval",
-  },
-  approvalText: {
-    cleared: "approving by text clears the approval's buttons",
-    named: "approving by text names who approved on the approval",
-  },
-  questionPress: {
-    cleared: "pressing an option clears the question's buttons",
-    named: "pressing an option names who answered on the question",
-  },
-  questionText: {
-    cleared: "answering a question by text clears its buttons",
-    named: "answering a question by text names who answered on the question",
-  },
-} as const satisfies Record<
-  string,
-  { readonly cleared: ContractRuleName; readonly named: ContractRuleName }
->;
-
-type AnsweredPrompt = keyof typeof answeredPromptRules;
-
-/** Answered prompts in `groups` lose their buttons, but the edit doesn't say who answered. */
-function unnamedAnsweredPrompts(
-  reason: string,
-  groups: readonly AnsweredPrompt[],
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    groups.map((group) => [
-      answeredPromptRules[group].named,
-      { reason, symptom: /the answered prompt never names who answered/ },
-    ]),
-  );
-}
-
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
@@ -144,37 +106,14 @@ const SLACK_SIGN_IN_LINGERS = signInLingers(
   "the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can",
 );
 
-/**
- * A channel gets the responder on `RequestSettlement.responder` (the deciding response's delivery
- * principal) but leaves it off the answered prompt.
- */
-const UNNAMED_RESPONDER =
-  "the settlement names who answered, but the channel's answered prompt doesn't show them";
-
 const CHAT_SDK_BROKEN = {
-  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
-    "approvalPress",
-    "approvalText",
-    "questionPress",
-    "questionText",
-  ]),
   "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active":
     {
       reason:
         "a press carries only the card's message id, and the session that knew its prompt is gone, so the retired card shows only how it ended",
       symptom: /the inactive prompt reads .* to contain/u,
     },
-};
-
-const DISCORD_BROKEN = {
-  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-};
-
-/** Gateway messages are plain text, so they reach rules interactions can't. */
-const DISCORD_GATEWAY_BROKEN = {
-  ...DISCORD_BROKEN,
-  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionText"]),
-};
+} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const SIGN_IN_PRESS_RULE = "someone else pressing a sign-in isn't shown its link or code";
 const SIGN_IN_SENT_PRIVATELY = {
@@ -199,19 +138,6 @@ const SLACK_BROKEN = {
     symptom: /were shown in one message, so a typed reply can't say which it answers/,
   },
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
-
-const TEAMS_BROKEN = {
-  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
-} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
-
-const TELEGRAM_BROKEN = {
-  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
-    "approvalPress",
-    "approvalText",
-    "questionPress",
-    "questionText",
-  ]),
-};
 
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
@@ -242,21 +168,21 @@ const channelConformance = {
     },
     { driver: chatSdkTextDriver },
   ],
-  "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
+  "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private") }],
   discord: [
     {
       driver: () => discordDriver(),
-      broken: { ...DISCORD_BROKEN, ...SIGN_IN_LINGERS },
+      broken: SIGN_IN_LINGERS,
       unsupported: { ...DISCORD_UNSUPPORTED, ...DISCORD_SERVER_SIGN_IN },
     },
     {
       driver: () => discordDriver("shared", "gateway"),
-      broken: { ...DISCORD_GATEWAY_BROKEN, ...SIGN_IN_LINGERS },
+      broken: SIGN_IN_LINGERS,
       unsupported: DISCORD_SERVER_SIGN_IN,
     },
     {
       driver: () => discordDriver("shared", "gateway-threads"),
-      broken: { ...DISCORD_GATEWAY_BROKEN, ...SIGN_IN_LINGERS },
+      broken: SIGN_IN_LINGERS,
       unsupported: DISCORD_SERVER_SIGN_IN,
     },
   ],
@@ -264,13 +190,11 @@ const channelConformance = {
     {
       dm: true,
       driver: () => discordDriver("private"),
-      broken: DISCORD_BROKEN,
       unsupported: DISCORD_UNSUPPORTED,
     },
     {
       dm: true,
       driver: () => discordDriver("private", "gateway"),
-      broken: DISCORD_GATEWAY_BROKEN,
     },
   ],
   github: [
@@ -322,18 +246,18 @@ const channelConformance = {
   teams: [
     {
       driver: teamsDriver,
-      broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINGERS },
+      broken: SIGN_IN_LINGERS,
       unsupported: signInKeptPrivate(
         "a group gets a link-free card whose button reveals the challenge to its person alone; the driver does not press it to show the initial challenge",
         ...SIGN_IN_SHOWN_RULES,
       ),
     },
   ],
-  "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
+  "teams-dm": [{ dm: true, driver: () => teamsDriver("private") }],
   telegram: [
     {
       driver: telegramDriver,
-      broken: { ...TELEGRAM_BROKEN, ...SIGN_IN_LINGERS },
+      broken: SIGN_IN_LINGERS,
       unsupported: signInKeptPrivate(
         "a group's status sends the challenge privately once the person presses Authorize, which the driver doesn't press",
         ...SIGN_IN_SHOWN_RULES,
@@ -341,7 +265,7 @@ const channelConformance = {
       ),
     },
   ],
-  "telegram-dm": [{ dm: true, driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
+  "telegram-dm": [{ dm: true, driver: () => telegramDriver("private") }],
   tui: [
     {
       driver: tuiDriver,
