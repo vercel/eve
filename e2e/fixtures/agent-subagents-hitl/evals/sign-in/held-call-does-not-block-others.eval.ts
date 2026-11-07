@@ -6,6 +6,7 @@ import {
   CODE_TOKEN,
   answer,
   turnOutcomes,
+  logReports,
   reportsIn,
   signIns,
   signInSettlements,
@@ -32,6 +33,8 @@ export default defineEval({
     await reader.readUntil(turnSettled);
 
     const { calls, errors } = reportsIn(reader.events);
+
+    logReports(t, reader.events);
     for (const settled of signInSettlements(reader.events))
       t.log(`sign-in ${settled.data.interactionId} ${settled.data.outcome} at ${settled.meta.at}`);
     for (const call of calls)

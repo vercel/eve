@@ -5,6 +5,7 @@ import {
   ACCEPT_CODE,
   CODE_TOKEN,
   answer,
+  logReports,
   reportsIn,
   shownCards,
   signIns,
@@ -40,6 +41,7 @@ export default defineEval({
       equals(["accepted", "accepted", "accepted"]),
     );
     const { calls, errors } = reportsIn(events);
+    logReports(t, events);
     t.check(errors, equals([]));
     t.check(
       calls.map(({ token }) => token),

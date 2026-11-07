@@ -72,6 +72,8 @@ export interface WeatherResult {
   readonly city: string;
   readonly token: string;
   readonly finishedAt: number;
+  /** FIXTURE-TRACE: this call's storage operations, as JSON. */
+  readonly trace?: string;
 }
 
 export const FAN_IN_MARKER = "SIGN-IN-FAN-IN";
@@ -93,5 +95,6 @@ export function planAfter<T>(text: string | null, marker: string): T | undefined
 export function describeCall(output: unknown, isError: boolean): string {
   const result = output as Partial<WeatherResult> | undefined;
   if (isError || result?.token === undefined) return `error=${JSON.stringify(output)}`;
-  return `[${result.city}] token=${result.token} at=${result.finishedAt}`;
+  const trace = result.trace === undefined ? "" : ` FIXTURE-TRACE ${result.trace}`;
+  return `[${result.city}] token=${result.token} at=${result.finishedAt}${trace}`;
 }

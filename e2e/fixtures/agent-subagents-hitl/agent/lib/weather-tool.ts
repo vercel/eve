@@ -13,6 +13,7 @@ import {
   markReturned,
   readGrant,
   storeGrant,
+  traceFor,
 } from "./weather-grants";
 import {
   ACCEPT_CODE,
@@ -69,7 +70,10 @@ const weatherAuth = (grant: WeatherGrant) =>
       // The shown card was accepted, so the provider now holds the grant this sign-in waited on.
       if (code === undefined && error === undefined) {
         const token = await readGrant(person);
-        if (token === undefined) throw new Error("The accepted weather sign-in left no grant.");
+        if (token === undefined)
+          throw new Error(
+            `The accepted weather sign-in left no grant. FIXTURE-TRACE ${JSON.stringify({ person, ...traceFor(person) })}`,
+          );
         return { token };
       }
       throw new ConnectionAuthorizationFailedError("weather", {
@@ -97,8 +101,13 @@ export const weatherTool = defineTool({
     afterParent: z.boolean().optional(),
   }),
   async execute(input, ctx): Promise<WeatherResult> {
+    const started = Date.now();
     const grant = input.grant ?? "weather";
     const person = ctx.session.auth.current?.principalId;
+    const traced = (result: Omit<WeatherResult, "trace">): WeatherResult => ({
+      ...result,
+      trace: JSON.stringify({ principal: person ?? null, ...traceFor(person ?? "", started) }),
+    });
     if (input.afterParent === true) {
       if (person === undefined) throw new Error("A call that waits on the parent needs a person.");
       await awaitParentAsked(person, HOLD_LIMIT_MS);
@@ -108,15 +117,15 @@ export const weatherTool = defineTool({
       displayName: "Fixture Weather",
     });
     if (input.holdFor === undefined)
-      return { city: input.city, finishedAt: Date.now(), token: token.token };
+      return traced({ city: input.city, finishedAt: Date.now(), token: token.token });
     if (person === undefined) throw new Error("A held weather call needs a person.");
     if (token.token === CODE_TOKEN) {
       await awaitReturned(person, input.holdFor, HOLD_LIMIT_MS);
-      return { city: input.city, finishedAt: Date.now(), token: token.token };
+      return traced({ city: input.city, finishedAt: Date.now(), token: token.token });
     }
     // Stamped before it is recorded, so the held call that reads the record finishes after it.
     const finishedAt = Date.now();
     await markReturned(person, input.city);
-    return { city: input.city, finishedAt, token: token.token };
+    return traced({ city: input.city, finishedAt, token: token.token });
   },
 });

@@ -150,6 +150,14 @@ export function reportsIn(events: readonly SessionStreamEvent[]): {
   return { calls, errors };
 }
 
+/** FIXTURE-TRACE: logs each report line of the parent's reply whole. */
+export function logReports(
+  t: { log(message: string): void },
+  events: readonly SessionStreamEvent[],
+) {
+  for (const line of finalReply(events).split("\n")) t.log(`report ${line}`);
+}
+
 /** The text of the parent's reply that reports its children, or `""` before it. */
 function finalReply(events: readonly SessionStreamEvent[]): string {
   const texts = events.flatMap((event) => {
