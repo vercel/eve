@@ -1,10 +1,6 @@
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
-import type {
-  AgentDefinition,
-  AgentBuildDefinition,
-  AgentWorkflowDefinition,
-} from "#public/definitions/agent.js";
+import type { AgentBuildDefinition, AgentWorkflowDefinition } from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import {
@@ -19,10 +15,12 @@ import {
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
 import {
+  AGENT_CODE_ONLY_FIELDS,
   AGENT_WORKFLOW_RETENTION_VALUES,
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
+  type PublicAgentDefinition,
   type PublicAgentStaticModelDefinition,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
@@ -30,7 +28,7 @@ import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definitio
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
+type NormalizedAgentDefinition = Omit<PublicAgentDefinition, "build"> & {
   build?: {
     externalDependencies?: Readonly<AgentBuildDefinition["externalDependencies"]>;
   };
@@ -40,7 +38,8 @@ type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
  * Normalizes one authored agent definition into the canonical internal shape.
  *
  * Authored `name` fields are rejected — agent identity is derived at compile
- * time from `manifest.agentId` (package name or app-root basename).
+ * time from `manifest.agentId` (package name or app-root basename) — as are the
+ * other fields only an agent defined in code sets, with where each goes instead.
  */
 export function normalizeAgentDefinition(
   value: unknown,
@@ -52,6 +51,7 @@ export function normalizeAgentDefinition(
     );
   }
   const record = expectObjectRecord(value, message);
+  rejectCodeOnlyFields(record, message);
   expectOnlyKnownKeys(
     record,
     [
@@ -134,6 +134,19 @@ export function normalizeAgentDefinition(
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;
+}
+
+/**
+ * Throws on the first field only an agent defined in code sets (`tools`, `instructions`, ...),
+ * naming where an agent built from files puts it instead.
+ */
+function rejectCodeOnlyFields(record: Readonly<Record<string, unknown>>, message: string): void {
+  for (const [field, instead] of Object.entries(AGENT_CODE_ONLY_FIELDS)) {
+    if (record[field] === undefined) continue;
+    throw new Error(
+      `${message} "${field}" is a field of an agent defined in code; in an agent/ directory, ${instead}.`,
+    );
+  }
 }
 
 /** A static model passes through; a dynamic one is its `defineDynamic(fn)` value. */

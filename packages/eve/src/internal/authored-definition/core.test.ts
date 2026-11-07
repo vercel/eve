@@ -39,6 +39,31 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.model).toBe(model);
   });
 
+  it.each([
+    ["tools", { deploy: {} }, "put each tool in agent/tools/<name>.ts"],
+    ["instructions", "Be brief.", "write them in agent/instructions.md"],
+    ["skills", { triage: {} }, "put each skill in agent/skills/<name>.md"],
+    ["connections", { github: {} }, "put each connection in agent/connections/<name>.ts"],
+    ["subagents", { reviewer: {} }, "put each subagent in agent/subagents/<name>/agent.ts"],
+    ["definitions", [], "an agent built from files declares its definitions as files under agent/"],
+    [
+      "name",
+      "release",
+      "an agent built from files takes its name from its package name or app folder",
+    ],
+    ["version", "2", "a deployment names the version of an agent built from files"],
+    ["bare", true, "eve's runtime definitions always apply to an agent built from files"],
+  ])(
+    "rejects %s, a field of an agent defined in code, naming where it goes",
+    (field, value, instead) => {
+      expect(() =>
+        normalizeAgentDefinition({ model: "openai/gpt-5.5", [field]: value }, FAILURE_MESSAGE),
+      ).toThrow(
+        `${FAILURE_MESSAGE} "${field}" is a field of an agent defined in code; in an agent/ directory, ${instead}`,
+      );
+    },
+  );
+
   it("rejects a dynamic agent.ts, pointing at the dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
