@@ -22,6 +22,7 @@ docs, prompts, comments, and headings.
 - `apps/fixtures` — shared agent fixtures used by e2e, TUI smoke tests, and local dev
 - `apps/frameworks`, `apps/templates`, `apps/docs` — framework integrations, templates, docs site
 - `docs` — published documentation content
+- `examples` — self-contained example agents built against the workspace `eve`
 - `e2e/` — fixture-owned `eve eval` end-to-end tests
 - `research` — issue-backed implementation plans for proposed changes
 

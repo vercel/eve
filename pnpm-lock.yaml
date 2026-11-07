@@ -1832,6 +1832,34 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  examples/json-render-slack:
+    dependencies:
+      '@json-render/chat':
+        specifier: 0.22.0
+        version: 0.22.0(chat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(zod@4.6.7)
+      '@json-render/core':
+        specifier: 0.22.0
+        version: 0.22.0(zod@4.6.7)
+      ai:
+        specifier: 'catalog:'
+        version: 7.0.137(zod@4.6.7)
+      eve:
+        specifier: workspace:*
+        version: link:../../packages/eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      chat:
+        specifier: 4.42.0
+        version: 4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   packages/eve:
     dependencies:
       '@linqapp/sdk':
@@ -3907,6 +3935,17 @@ packages:
 
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
+
+  '@json-render/chat@0.22.0':
+    resolution: {integrity: sha512-5X88BgOWLyC1B2ko7kHFM3BO2LygsN+79wy6Gin6EIxYvT4v+6wp9gRcUMQZP3hLGhEbuIE4sawk5OsZzPkGTQ==}
+    peerDependencies:
+      chat: ^4.43.0
+      zod: 4.6.7
+
+  '@json-render/core@0.22.0':
+    resolution: {integrity: sha512-BIfJ2V3bLYETetBu2KWoxxRPU5cSAf77dDTBgqaV54kEAfyHta1psPJgNk0fDcB3FCrnCZ5KO/X41VDkrNSYgw==}
+    peerDependencies:
+      zod: 4.6.7
 
   '@kapso/chat-adapter@0.1.1':
     resolution: {integrity: sha512-4QAqB4ADI7k1bbvHdjIB0r3qrBHahtET1IeJHYXc8ND+3uF0OmCK/5hRoNrKYhCzMMPHESK35t6wVkc+zWcJyw==}
@@ -17422,6 +17461,16 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@js-sdsl/ordered-map@4.4.2': {}
+
+  '@json-render/chat@0.22.0(chat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@json-render/core': 0.22.0(zod@4.6.7)
+      chat: 4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
+      zod: 4.6.7
+
+  '@json-render/core@0.22.0(zod@4.6.7)':
+    dependencies:
+      zod: 4.6.7
 
   '@kapso/chat-adapter@0.1.1(ai@7.0.137(zod@4.6.7))(chat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)':
     dependencies:
