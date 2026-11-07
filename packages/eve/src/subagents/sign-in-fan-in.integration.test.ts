@@ -417,6 +417,147 @@ describe("one sign-in answer for parallel children", () => {
       }
     });
   });
+
+  it("shows one card for a single child, which runs its call once after the person signs in", async () => {
+    const app = await createApp("sign-in-fan-in-single", { children: 1, grant: "oauth/weather" });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, 1);
+        const [card] = before.filter(isSignInOpened);
+        await completeSignIn(card!, { code: "oauth-code" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        const events = [...before, ...after];
+        expect(events.filter(isSignInOpened), "sign-ins the parent records").toEqual([card]);
+        expect(waitsOnOf(card!), "the card waits on another").toBeUndefined();
+        expect(app.starts(), "sign-ins the child started").toBe(1);
+        expect(app.completes(), "sign-ins the child completed").toBe(1);
+        expect(app.executions(), "calls that ran").toEqual(["Lisbon 0"]);
+        expect(signInOutcomes(events), "how the card closed").toEqual(["accepted"]);
+        expect(filterEventsByType(events, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("opens no other sign-in for the rest of the turn after the person declines", async () => {
+    const app = await createApp("sign-in-fan-in-declined-no-reask", { grant: "oauth/weather" });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, CHILDREN);
+        const [card] = before.filter(isSignInOpened);
+        await completeSignIn(card!, { error: "access_denied" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        expect(after.filter(isSignInOpened), "sign-ins opened after the decline").toEqual([]);
+        expect(app.starts(), "sign-ins the children started").toBe(CHILDREN);
+        expect(signInOutcomes([...before, ...after]), "how each sign-in closed").toEqual(
+          Array.from({ length: CHILDREN }, () => "declined"),
+        );
+        expect(app.executions(), "calls that ran").toEqual([]);
+        expect(filterEventsByType(after, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("fails every child's sign-in with the error when the answered one's token exchange fails", async () => {
+    const failure = "The token endpoint answered 500.";
+    const app = await createApp("sign-in-fan-in-exchange-error", {
+      exchangeFails: failure,
+      grant: "oauth/weather",
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, CHILDREN);
+        const [card] = before.filter(isSignInOpened);
+        await completeSignIn(card!, { code: "oauth-code" });
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        const events = [...before, ...after];
+        expect(after.filter(isSignInOpened), "sign-ins opened after the failure").toEqual([]);
+        const [shown, ...waiting] = signInSettlements(events);
+        expect(shown, "how the shown card closed").toEqual({ outcome: "failed", reason: failure });
+        expect(
+          waiting.map(({ outcome }) => outcome),
+          "how the waiting sign-ins closed",
+        ).toEqual(Array.from({ length: CHILDREN - 1 }, () => "failed"));
+        // Each waiting child's sign-in hears the shown card's error, not a code.
+        expect(app.callbacks(), "the callbacks each child's exchange read").toEqual([
+          { code: "oauth-code" },
+          ...Array.from({ length: CHILDREN - 1 }, () => ({ error: failure })),
+        ]);
+        expect(app.executions(), "calls that ran").toEqual([]);
+        expect(filterEventsByType(after, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("runs a child that asks after the card settled on the stored grant, with no other card", async () => {
+    const app = await createApp("sign-in-fan-in-late-joiner", {
+      children: 2,
+      grant: "oauth/weather",
+      lateChild: true,
+    });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const events = [...(await signInCards(stream, 1))];
+        const [card] = events.filter(isSignInOpened);
+        await completeSignIn(card!, { code: "oauth-code" });
+        events.push(
+          ...(await stream.nextUntil(
+            "the card settled",
+            (event) =>
+              event.type === "interaction.settled" && event.data.interactionId === signInId(card!),
+          )),
+        );
+        await vi.waitFor(() => expect(app.executions()).toEqual(["Lisbon 0"]), {
+          timeout: 30_000,
+        });
+        // The held child asks for the same grant only now, after the card settled.
+        app.releaseLate();
+        events.push(...(await stream.nextUntil("parent turn", isTurnSettled)));
+
+        expect(events.filter(isSignInOpened), "sign-ins the parent records").toEqual([card]);
+        expect(app.starts(), "sign-ins the children started").toBe(1);
+        expect(app.completes(), "sign-ins the children completed").toBe(1);
+        expect(app.executions(), "calls that ran").toEqual(["Lisbon 0", "Lisbon 1"]);
+        expect(signInOutcomes(events), "how the card closed").toEqual(["accepted"]);
+        expect(filterEventsByType(events, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        app.releaseLate();
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
 });
 
 let restoreWorld = async () => {};
@@ -472,6 +613,14 @@ async function parentCardFirst(
   ]);
   app.releaseChildren();
   return [...parent, ...(await signInCards(stream, CHILDREN))];
+}
+
+/** How the parent's sign-in cards closed and why, in the order they closed. */
+function signInSettlements(events: readonly SessionStreamEvent[]) {
+  const cards = new Set(events.filter(isSignInOpened).map(signInId));
+  return filterEventsByType(events, "interaction.settled")
+    .filter((event) => cards.has(event.data.interactionId))
+    .map(({ data }) => ({ outcome: data.outcome, reason: data.reason }));
 }
 
 /** How the parent's sign-in cards closed, in the order they closed. */
@@ -558,7 +707,11 @@ async function createApp(
   options: {
     readonly again?: boolean;
     readonly children?: number;
+    /** The token exchange for a callback with a code throws this, as a provider outage would. */
+    readonly exchangeFails?: string;
     readonly grant?: string;
+    /** The last child asks for its token only after `releaseLate`. */
+    readonly lateChild?: boolean;
     /** The parent's own tool needs the sign-in too; with `first`, the children ask after it. */
     readonly parentAsks?: boolean | "first";
     /** The first call to get a token holds until `release`, as a long command would. */
@@ -581,8 +734,13 @@ async function createApp(
   const childrenAsk = new Promise<void>((resolve) => {
     releaseChildren = resolve;
   });
+  let releaseLate = () => {};
+  const lateJoins = new Promise<void>((resolve) => {
+    releaseLate = resolve;
+  });
   let starts = 0;
   let completes = 0;
+  const callbacks: Readonly<Record<string, string>>[] = [];
   const executions: string[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
     principalType: "user",
@@ -604,6 +762,9 @@ async function createApp(
     },
     async completeAuthorization({ callback }): Promise<TokenResult> {
       completes += 1;
+      callbacks.push(callback.params);
+      if (options.exchangeFails !== undefined && callback.params.code !== undefined)
+        throw new Error(options.exchangeFails);
       if (callback.params.code !== undefined) granted = true;
       if (!granted)
         throw new ConnectionAuthorizationFailedError("weather", {
@@ -634,6 +795,11 @@ async function createApp(
             async execute(input, ctx) {
               if (options.parentAsks === "first" && input.city !== "Lisbon parent")
                 await childrenAsk;
+              if (
+                options.lateChild === true &&
+                input.city === `Lisbon ${(options.children ?? CHILDREN) - 1}`
+              )
+                await lateJoins;
               const porto = input.city.startsWith("Porto");
               if (porto && !revoked) {
                 revoked = true;
@@ -659,11 +825,13 @@ async function createApp(
     ],
   });
   return {
+    callbacks: () => callbacks,
     completes: () => completes,
     executions: () => executions,
     othersRan: () => others,
     release: () => release(),
     releaseChildren,
+    releaseLate: () => releaseLate(),
     name,
     runtime,
     starts: () => starts,
