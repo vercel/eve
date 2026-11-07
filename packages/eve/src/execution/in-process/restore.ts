@@ -6,7 +6,12 @@ import { deliveriesReadBy } from "#execution/session/open-turn.js";
 import { runRecordOf, type RunSnapshot } from "./runs.js";
 import { deliveryIdOf } from "./session-record.js";
 import type { AcceptedInput } from "./session-store.js";
-import { checkpointPosition, SESSION_SNAPSHOT_FORMAT, type SessionSnapshot } from "./snapshot.js";
+import {
+  checkpointPosition,
+  lineCount,
+  SESSION_SNAPSHOT_FORMAT,
+  type SessionSnapshot,
+} from "./snapshot.js";
 
 // What restoring a snapshot does, decided before anything runs. The runtime applies the plan:
 // it opens the stream, claims the addresses, queues what the plan redelivers, reports each lost
@@ -26,8 +31,8 @@ export interface RestorePlan {
   /** The idle timeout's deadline, kept across the restore. */
   readonly deadline: Date | undefined;
   /**
-   * Subagents' runs that go on: the store kept the sessions they opened. Each skips the messages
-   * the session heard from it.
+   * Replayable runs that go on (subagents', `ask_question`'s): the store kept the sessions they
+   * opened. Each skips the messages the session heard from it.
    */
   readonly resumedRuns: readonly { readonly run: RunSnapshot; readonly heard: number }[];
   /** Runs that don't survive, each reported once as interrupted. */
@@ -35,7 +40,7 @@ export interface RestorePlan {
 }
 
 /**
- * Plans restoring `snapshot`. With a store (`hasStore`), the sessions a subagent's run opened are
+ * Plans restoring `snapshot`. With a store (`hasStore`), the sessions a replayable run opened are
  * kept there, so the run goes on; without one, every run is lost. A snapshot this build can't
  * continue is refused, with why.
  */
@@ -60,10 +65,10 @@ export function planRestore(
   const { open } = snapshot;
   const reading = new Set(deliveriesReadBy(open));
   const runs = snapshot.runs ?? [];
-  const goesOn = (run: RunSnapshot) => options.hasStore && runRecordOf(run).kind === "subagent";
+  const goesOn = (run: RunSnapshot) => options.hasStore && runRecordOf(run).replayable;
   return {
     boot: {
-      rerunFirst: snapshot.lines.length > checkpointPosition(checkpoint),
+      rerunFirst: lineCount(snapshot) > checkpointPosition(checkpoint),
       serializedContext: stampSessionIdentity(checkpoint.serializedContext, snapshot.sessionId),
       ...(open !== undefined && { start: { from: open, kind: "resume" } }),
     },

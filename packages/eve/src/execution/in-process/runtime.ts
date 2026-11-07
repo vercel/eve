@@ -31,7 +31,7 @@ import type { Keep, Arrival } from "./inbox-transport.js";
 import { planRestore } from "./restore.js";
 import { interruptedRunOutcome, type RunSnapshot, type WorkflowFunction } from "./runs.js";
 import { HostedSession } from "./session-record.js";
-import { saveSnapshot, type StoredSession } from "./session-store.js";
+import { type LoadOptions, saveSnapshot, type StoredSession } from "./session-store.js";
 import type { SessionSnapshot } from "./snapshot.js";
 import { createInProcessTimeoutControl } from "./timers.js";
 
@@ -80,13 +80,36 @@ export interface InProcessRuntime extends Runtime {
    * kept the sessions its subagents opened, their runs go on; any other run it had reports as
    * interrupted. A snapshot this build can't read is refused, with why.
    */
-  restore(snapshot: SessionSnapshot): Promise<{ readonly sessionId: string }>;
-  /** The session the runtime's World holds under `sessionId`, as `restore` continues it. */
-  load(sessionId: string): Promise<SessionSnapshot | undefined>;
+  restore(
+    snapshot: SessionSnapshot,
+    options?: {
+      /** The runtime's World holds `snapshot` already (`load` read it): it isn't saved again. */
+      readonly stored?: boolean;
+    },
+  ): Promise<{ readonly sessionId: string }>;
+  /**
+   * The session the runtime's World holds under `sessionId`, as `restore` continues it. With
+   * `{ lines: "count" }`, without its stream's lines, for a runtime that doesn't serve them.
+   */
+  load(sessionId: string, options?: LoadOptions): Promise<SessionSnapshot | undefined>;
   /** The sessions the runtime's World holds, most recently saved first. */
   sessions(): Promise<readonly StoredSession[]>;
   /** Makes an authored workflow tool's body, its `"use workflow"` function's twin, run here. */
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
+  /**
+   * Starts a session under `sessionId`, whose run its World may hold already (one another
+   * process created, with the session's addresses), as `createSession` starts a new one.
+   */
+  startSession(sessionId: string, input: RunInput): Promise<RunHandle>;
+  /**
+   * Whether every session and run of this runtime's host waits on what arrives next or on a
+   * timer: stopped now (`dispose`), each continues from its World as it is.
+   */
+  quiescent(): Promise<boolean>;
+  /** The earliest timer any session or run of this runtime's host waits on, epoch milliseconds. */
+  nextTimer(): number | undefined;
+  /** Lets running steps finish and starts no other, so `dispose` stops at a step boundary. */
+  drain(): Promise<void>;
   /**
    * Ends `sessionId` here deliberately: its turn is cancelled, the sessions its runs opened end
    * with it, its sandbox is released, and its stream records the end, in the store too. Resolves
@@ -152,7 +175,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
    * Opens `sessionId`'s stream: lines are kept on the World in batches, each before a reader sees
    * it, and a call's start is kept before the tool runs (`isBarrierLine`).
    */
-  const openStream = (sessionId: string, recorded: readonly string[] = []) => {
+  const openStream = (sessionId: string, recorded: readonly string[] = [], from = 0) => {
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     const writable = lines.open(
@@ -165,8 +188,9 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
           batch.map((line) => decoder.decode(line)),
         ),
       isBarrierLine,
+      from,
     );
-    host.onDispose(registerSessionLineStore(sessionId, lines));
+    if (host.servesLines) host.onDispose(registerSessionLineStore(sessionId, lines));
     return writable;
   };
 
@@ -182,6 +206,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     const record = new HostedSession({
       boot,
       lines: () => lines.recorded(boot.sessionId).map((line) => decoder.decode(line)),
+      linesFrom: () => lines.heldFrom(boot.sessionId),
       flushLines: () => lines.flush(boot.sessionId),
       runs: (heard) => host.runs.unheard(boot.sessionId, heard),
       suspended: host.suspended,
@@ -216,46 +241,55 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     });
   };
 
+  const startSession = async (sessionId: string, input: RunInput): Promise<RunHandle> => {
+    const prepared = await prepareInitialEntry(config, input);
+    const sessionWritable = openStream(sessionId);
+    const boot = await bootInitialOwner(
+      { ...prepared.entry, ownerDeploymentId: host.deploymentId },
+      sessionId,
+      {
+        inboxTransport: inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
+        sessionWritable,
+        async settleContinuationConflict({ command, continuationToken }) {
+          if (inboxes.holder(continuationToken) === undefined)
+            throw new Error(`No session here holds continuation "${continuationToken}".`);
+          await host.deliverCommand(continuationToken, command);
+        },
+        timeouts: timeoutsFor(sessionId),
+      },
+    );
+    if (boot === undefined) {
+      // Another session holds the continuation token, and the message went to it.
+      const holder = inboxes.holder(input.continuationToken ?? "");
+      if (holder === undefined) throw new Error("The session's address is held elsewhere.");
+      return { events: readSessionEventStream(holder), sessionId: holder };
+    }
+    // Saved before the session accepts its first message: as the step it starts with.
+    const record = hostedSession(boot.session);
+    await record.save();
+    run(record, boot.session, boot.inbox);
+    let events: ReadableStream | undefined;
+    return {
+      get events() {
+        return (events ??= readSessionEventStream(sessionId));
+      },
+      sessionId,
+      ...(prepared.input.delivery !== undefined && {
+        deliveryId: prepared.input.delivery.deliveryId,
+      }),
+    };
+  };
+
   return {
-    async createSession(input: RunInput): Promise<RunHandle> {
-      const prepared = await prepareInitialEntry(config, input);
-      const sessionId = `session_${createUlid()}`;
-      const sessionWritable = openStream(sessionId);
-      const boot = await bootInitialOwner(
-        { ...prepared.entry, ownerDeploymentId: host.deploymentId },
-        sessionId,
-        {
-          inboxTransport: inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
-          sessionWritable,
-          async settleContinuationConflict({ command, continuationToken }) {
-            if (inboxes.holder(continuationToken) === undefined)
-              throw new Error(`No session here holds continuation "${continuationToken}".`);
-            await host.deliverCommand(continuationToken, command);
-          },
-          timeouts: timeoutsFor(sessionId),
-        },
-      );
-      if (boot === undefined) {
-        // Another session holds the continuation token, and the message went to it.
-        const holder = inboxes.holder(input.continuationToken ?? "");
-        if (holder === undefined) throw new Error("The session's address is held elsewhere.");
-        return { events: readSessionEventStream(holder), sessionId: holder };
-      }
-      // Saved before the session accepts its first message: as the step it starts with.
-      const record = hostedSession(boot.session);
-      await record.save();
-      run(record, boot.session, boot.inbox);
-      let events: ReadableStream | undefined;
-      return {
-        get events() {
-          return (events ??= readSessionEventStream(sessionId));
-        },
-        sessionId,
-        ...(prepared.input.delivery !== undefined && {
-          deliveryId: prepared.input.delivery.deliveryId,
-        }),
-      };
-    },
+    createSession: async (input: RunInput) => await startSession(`session_${createUlid()}`, input),
+
+    startSession,
+
+    quiescent: () => host.quiescent(),
+
+    nextTimer: () => timers.next(),
+
+    drain: () => host.drain(),
 
     async dispatchContinuation<TCommand extends SessionCommand>(
       input: DispatchContinuationInput<TCommand>,
@@ -305,12 +339,12 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       return live.record.snapshot();
     },
 
-    async restore(snapshot) {
+    async restore(snapshot, options = {}) {
       const { sessionId } = snapshot;
       const plan = planRestore(snapshot, { hasStore: host.keeps });
       if (sessions.has(sessionId)) throw new Error(`Session "${sessionId}" already runs here.`);
-      await saveSnapshot(store, snapshot);
-      const sessionWritable = openStream(sessionId, snapshot.lines);
+      if (options.stored !== true) await saveSnapshot(store, snapshot);
+      const sessionWritable = openStream(sessionId, snapshot.lines, snapshot.linesFrom);
       const { checkpoint } = plan;
       const timeout = timeoutsFor(sessionId)({
         sessionId,
@@ -325,7 +359,10 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         sessionWritable,
         ...(timeout !== undefined && { sessionTimeoutControl: timeout }),
       });
-      const record = hostedSession(boot, { inputs: snapshot.inputs, lostRuns: plan.lostRuns });
+      const record = hostedSession(boot, {
+        inputs: snapshot.inputs,
+        lostRuns: plan.lostRuns,
+      });
       const inbox = createSessionInbox(
         inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
       );
@@ -350,7 +387,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       return { sessionId };
     },
 
-    load: (sessionId) => store.load(sessionId),
+    load: (sessionId, options) => store.load(sessionId, options),
 
     sessions: () => store.list(),
 

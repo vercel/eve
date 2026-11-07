@@ -48,6 +48,19 @@ describe("run errors", () => {
     expect(isRunTargetGone(new Error("other"))).toBe(false);
   });
 
+  it("read Vercel's answer to a read of a run it doesn't hold as a missing run", () => {
+    // What Vercel's World throws from a run's events or streams, as `runs.get` doesn't.
+    const response = (message: string, code = "not-found") =>
+      Object.assign(new Error(message), { code, name: "WorkflowWorldError", status: 404 });
+    const missing = response("workflow run wrun_01M6RT1NN213X5HXADN0DG7FKZ not found");
+    expect(isRunNotFound(missing)).toBe(true);
+    expect(isRunNotFound(new Error("wrapped", { cause: missing }))).toBe(true);
+    expect(isRunMissing(missing)).toBe(true);
+    // Another 404, or another code: not a missing run.
+    expect(isRunNotFound(response("hook hook_1 not found"))).toBe(false);
+    expect(isRunNotFound(response("workflow run wrun_1 not found", "conflict"))).toBe(false);
+  });
+
   it("read a copy that crossed a serializer by its name", () => {
     expect(isHookNotFound({ name: "HookNotFoundError", message: "Hook not found" })).toBe(true);
     expect(isHookNotFound({ name: "HookNotFoundError" })).toBe(false);
