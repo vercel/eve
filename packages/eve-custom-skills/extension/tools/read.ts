@@ -1,13 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import {
-  nameField,
-  scopeField,
-  skillId,
-  versionField,
-  withSkillScope,
-} from "../lib/tool-support.ts";
+import { nameField, scopeField, versionField, withSkillScope } from "../lib/tool-support.ts";
 
 export default defineTool({
   label: {
@@ -23,16 +17,17 @@ export default defineTool({
   }),
   async execute(input, ctx) {
     return withSkillScope(ctx, input.scope, "Failed to read the skill.", async (skills, scope) => {
-      const skill = await skills.getVersion(scope, skillId(input.name), input.version);
+      const skill = await skills.getVersion(scope, skills.normalizeName(input.name), input.version);
       return {
         name: skill.name,
         version: skill.version,
         status: skill.status,
-        activeVersion: skill.activeVersion,
+        liveVersion: skill.liveVersion,
         applicationMode: skill.applicationMode,
         description: skill.description,
-        instructions: skill.markdown,
+        instructions: skill.instructions,
         validation: skill.validation,
+        savedBy: skill.savedBy.label,
         createdAt: skill.createdAt,
       };
     });
