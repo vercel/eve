@@ -134,7 +134,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 10. <a id="note-10"></a>the platform has no second person who can act or buttons a person can press
 11. <a id="note-11"></a>one person answers at their own terminal; there's nobody else to tell
 12. <a id="note-12"></a>one person answers in their own browser tab; there's nobody else to tell
-13. <a id="note-13"></a>a resolved prompt doesn't say who answered; input.resolved carries no responder
+13. <a id="note-13"></a>the settlement names who answered, but the channel's answered prompt doesn't show them
 14. <a id="note-14"></a>a press carries only the card's message id, and the session that knew its prompt is gone, so the retired card shows only how it ended
 15. <a id="note-15"></a>a server channel gets a link-free status whose button reveals the challenge to its person alone; the driver does not press it to show the initial challenge
 16. <a id="note-16"></a>Linq's openDM needs the person's phone handle, but a message names its sender by an opaque handle id, so the bot can only say to continue in a direct message

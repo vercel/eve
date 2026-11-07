@@ -145,7 +145,7 @@ const SLACK_SIGN_IN_LINGERS = signInLingers(
 );
 
 const UNNAMED_RESPONDER =
-  "a resolved prompt doesn't say who answered; input.resolved carries no responder";
+  "the settlement names who answered, but the channel's answered prompt doesn't show them";
 
 const CHAT_SDK_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
