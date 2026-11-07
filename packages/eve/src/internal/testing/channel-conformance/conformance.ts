@@ -144,6 +144,10 @@ const SLACK_SIGN_IN_LINGERS = signInLingers(
   "the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can",
 );
 
+/**
+ * A channel gets the responder on `RequestSettlement.responder` (the deciding response's delivery
+ * principal) but leaves it off the answered prompt.
+ */
 const UNNAMED_RESPONDER =
   "the settlement names who answered, but the channel's answered prompt doesn't show them";
 
