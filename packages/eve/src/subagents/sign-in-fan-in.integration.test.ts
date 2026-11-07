@@ -447,8 +447,11 @@ describe("one sign-in answer for parallel children", () => {
     });
   });
 
-  it("opens no other sign-in for the rest of the turn after the person declines", async () => {
-    const app = await createApp("sign-in-fan-in-declined-no-reask", { grant: "oauth/weather" });
+  it("refuses a child's second call after the person declines, with no new sign-in", async () => {
+    const app = await createApp("sign-in-fan-in-declined-retry", {
+      grant: "oauth/weather",
+      retryAfterRefusal: true,
+    });
 
     await app.runtime.run(async () => {
       const run = await startParent(app.name);
@@ -456,15 +459,28 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const before = await signInCards(stream, CHILDREN);
         const [card] = before.filter(isSignInOpened);
+        const starts = app.starts();
+        const completes = app.completes();
         await completeSignIn(card!, { error: "access_denied" });
         const after = await stream.nextUntil("parent turn", isTurnSettled);
 
-        expect(after.filter(isSignInOpened), "sign-ins opened after the decline").toEqual([]);
-        expect(app.starts(), "sign-ins the children started").toBe(CHILDREN);
+        // Each child read its first call's refusal and called again.
+        const retries = app.retries();
+        expect(Object.keys(retries).toSorted(), "children that called again").toEqual(
+          Array.from({ length: CHILDREN }, (_, index) => `${index}`),
+        );
         expect(signInOutcomes([...before, ...after]), "how each sign-in closed").toEqual(
           Array.from({ length: CHILDREN }, () => "declined"),
         );
+        expect(starts, "sign-ins the children started before the decline").toBe(CHILDREN);
+        expect(app.starts(), "sign-ins started by the second calls").toBe(starts);
+        expect(after.filter(isSignInOpened), "sign-ins opened after the decline").toEqual([]);
+        expect(app.completes(), "sign-ins completed by the second calls").toBe(completes);
         expect(app.executions(), "calls that ran").toEqual([]);
+        for (const output of Object.values(retries)) {
+          expect(output, "the second call's result").toContain("won't be asked for again");
+          expect(output, "the second call's result").not.toContain("authorized with");
+        }
         expect(filterEventsByType(after, "turn.settled").map((e) => e.data.outcome)).toEqual([
           "completed",
         ]);
@@ -637,9 +653,15 @@ type Prompt = LanguageModelV4CallOptions["prompt"];
  * The parent starts `children` children in one step and waits for their reports. A child, whose
  * conversation starts with the parent's message, checks the weather and reports; with `again`,
  * child 0 then checks Porto's under another scope of the same grant. With `parentAsks`, the
- * parent checks Lisbon's weather itself while the children run.
+ * parent checks Lisbon's weather itself while the children run. With `retry`, a child calls
+ * `get_weather` once more after its first call's result, and `retry` hears that second result.
  */
-function scriptedModel(children: number, again: boolean, parentAsks: boolean | "first") {
+function scriptedModel(
+  children: number,
+  again: boolean,
+  parentAsks: boolean | "first",
+  retry?: (child: string, output: string) => void,
+) {
   let waits = 0;
   return markMockModel(
     new MockLanguageModelV4({
@@ -657,6 +679,21 @@ function scriptedModel(children: number, again: boolean, parentAsks: boolean | "
                 toolName: "get_weather",
               },
             ]);
+          if (retry !== undefined && called("get_weather")) {
+            const retryId = `call_weather_${child}_again`;
+            if (!raw.includes(retryId))
+              return toolCallsStreamResult([
+                {
+                  input: JSON.stringify({ city: `Lisbon ${child} again` }),
+                  toolCallId: retryId,
+                  toolName: "get_weather",
+                },
+              ]);
+            const result = prompt
+              .flatMap((message) => (message.role === "tool" ? message.content : []))
+              .find((part) => part.type === "tool-result" && part.toolCallId === retryId);
+            if (result !== undefined) retry(child, JSON.stringify(result));
+          }
           return called("get_weather")
             ? textStreamResult(`Weather report ${child} ready.`)
             : toolCallsStreamResult([
@@ -716,8 +753,11 @@ async function createApp(
     readonly parentAsks?: boolean | "first";
     /** The first call to get a token holds until `release`, as a long command would. */
     readonly holdFirst?: boolean;
+    /** Each child calls `get_weather` once more after its first call's result. */
+    readonly retryAfterRefusal?: boolean;
   },
 ) {
+  const retries: Record<string, string> = {};
   let holding = false;
   let release = () => {};
   const held = new Promise<void>((resolve) => {
@@ -781,6 +821,11 @@ async function createApp(
             options.children ?? CHILDREN,
             options.again === true,
             options.parentAsks ?? false,
+            options.retryAfterRefusal === true
+              ? (child, output) => {
+                  retries[child] = output;
+                }
+              : undefined,
           ),
           modelContextWindowTokens: 200_000,
         })),
@@ -832,6 +877,7 @@ async function createApp(
     release: () => release(),
     releaseChildren,
     releaseLate: () => releaseLate(),
+    retries: () => retries,
     name,
     runtime,
     starts: () => starts,

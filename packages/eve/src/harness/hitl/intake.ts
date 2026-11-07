@@ -299,10 +299,11 @@ async function runApproved(
   );
   if (calls.length === 0) return undefined;
   // One reporter for every group: a group's call can complete a sign-in another group's call
-  // stopped on, and each attempt settles once.
+  // stopped on, and each attempt settles once. It stays until every group has finished, so a
+  // group that fails doesn't take it from a sibling still running.
   const signIns = signInReports({ publish: step.publish, view: () => step.view() });
   step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
-  const executed = await Promise.all(
+  const groups = await Promise.allSettled(
     local.map(async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };
       const view = step.view().projection.view;
@@ -332,7 +333,12 @@ async function runApproved(
         view: () => step.view(),
       });
     }),
-  ).finally(() => step.ctx.delete(SignInCompletedKey));
+  );
+  step.ctx.delete(SignInCompletedKey);
+  const executed = groups.map((group) => {
+    if (group.status === "rejected") throw group.reason;
+    return group.value;
+  });
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
