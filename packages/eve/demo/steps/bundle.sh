@@ -12,8 +12,8 @@ ai="$(node -p "require('$eve/node_modules/ai/package.json').version")"
 
 rm -rf "$out" && mkdir -p "$out"
 (cd "$eve/.package" && npm pack --silent --pack-destination "$out" >/dev/null)
-for step in 1-script 2-tui; do
-  tar -C "$here" --exclude=node_modules -cf - "$step" | tar -C "$out" -xf -
+for step in 1-script 2-tui 3-webpage; do
+  tar -C "$here" --exclude=node_modules --exclude=dist -cf - "$step" | tar -C "$out" -xf -
   node -e '
     const [file, tarball, ai] = process.argv.slice(1);
     const fs = require("node:fs");
@@ -23,4 +23,4 @@ for step in 1-script 2-tui; do
   ' "$out/$step/package.json" "eve-$version.tgz" "$ai"
 done
 cp "$here/README.md" "$out/README.md"
-echo "$out: eve-$version.tgz, 1-script, 2-tui, README.md (ai $ai)"
+echo "$out: eve-$version.tgz, 1-script, 2-tui, 3-webpage, README.md (ai $ai)"

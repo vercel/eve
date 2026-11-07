@@ -1,0 +1,18 @@
+{
+  "name": "eve-step-3-webpage",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "ai": "7.0.137",
+    "eve": "file:../../.."
+  },
+  "devDependencies": {
+    "vite": "8.3.1"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
