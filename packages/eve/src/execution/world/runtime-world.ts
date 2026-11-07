@@ -38,6 +38,9 @@ export type WorldEventRequest =
         readonly input: Uint8Array;
         /** `queueNamespace` names the queue a World's recovery re-enqueues the run on. */
         readonly executionContext?: Readonly<Record<string, unknown>>;
+        /** The run's attributes; reserved ones (`$retention`) need `allowReservedAttributes`. */
+        readonly attributes?: Readonly<Record<string, string>>;
+        readonly allowReservedAttributes?: true;
       };
       readonly specVersion?: number;
     }
@@ -56,6 +59,12 @@ export type WorldEventRequest =
       readonly specVersion?: number;
     }
   | { readonly eventType: "run_started"; readonly specVersion?: number }
+  | {
+      /** The run ended: the World disposes its hooks, and keeps its data as its retention says. */
+      readonly eventType: "run_completed";
+      readonly eventData: { readonly output?: Uint8Array };
+      readonly specVersion?: number;
+    }
   | {
       readonly eventType: "step_created";
       readonly correlationId: string;
@@ -165,6 +174,15 @@ export interface RuntimeWorld {
       readonly pagination?: WorldPagination;
       readonly resolveData: "none";
     }): Promise<WorldPage<WorldRun>>;
+    /**
+     * One run, with when its data expired (`expiredAt`): a run whose retention is zero expires
+     * once it ends, and what it left behind (a stream's chunks) is no longer to be read. Optional:
+     * a World without it expires nothing. Throws a run-not-found error for a run it never held.
+     */
+    get?(
+      runId: string,
+      params: { readonly resolveData: "none" },
+    ): Promise<WorldRun & { readonly expiredAt?: Date }>;
   };
   readonly streams: {
     /** Appends one chunk; it's stored once this resolves. */

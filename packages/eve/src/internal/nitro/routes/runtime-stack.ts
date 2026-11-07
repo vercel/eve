@@ -1,5 +1,6 @@
 import type { Runtime } from "#channel/types.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { usesWorldHost, worldHostRuntime } from "#internal/nitro/routes/world-host.js";
 import { resolveRemoteAgentStreamHeaders } from "#execution/agent-sessions/remote.js";
 import type { RemoteAgentStreamHeadersResolver } from "#internal/nitro/routes/channel-route-context.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -40,7 +41,9 @@ export async function resolveNitroChannelRuntimeBundle(
   const bundle = await getCompiledRuntimeAgentBundle({
     compiledArtifactsSource,
   });
-  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
+  const runtime = usesWorldHost(config)
+    ? await worldHostRuntime(config)
+    : createWorkflowRuntime({ compiledArtifactsSource });
   return {
     agentName: bundle.resolvedAgent.config?.name ?? "eve",
     channels: bundle.graph.root.channels,

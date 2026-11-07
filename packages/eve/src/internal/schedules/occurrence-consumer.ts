@@ -35,7 +35,9 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
  */
 export function createScheduleOccurrenceConsumer(input: {
   readonly compiledArtifactsSource: () => RuntimeCompiledArtifactsSource;
-  readonly runtime: (compiledArtifactsSource: RuntimeCompiledArtifactsSource) => Runtime;
+  readonly runtime: (
+    compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+  ) => Runtime | Promise<Runtime>;
 }): {
   readonly handler: MessageHandler<unknown>;
   readonly retry: RetryHandler;
@@ -91,7 +93,7 @@ export function createScheduleOccurrenceConsumer(input: {
           definition,
           occurrence,
           payload,
-          runtime: input.runtime(bundle.compiledArtifactsSource),
+          runtime: await input.runtime(bundle.compiledArtifactsSource),
           verifyDelivery: async () =>
             verifyScheduleDelivery(
               queue,
