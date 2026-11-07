@@ -19,6 +19,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
   const fanIn = planAfter<FanInPlan>(message, FAN_IN_MARKER);
   if (fanIn !== undefined) return signInFanIn(request, fanIn);
+  const probe = planAfter<{ key: string; step: string }>(message, "BLOB-PROBE");
+  if (probe !== undefined) {
+    const result = request.toolResults.find((entry) => entry.name === "blob_probe");
+    return result === undefined
+      ? { toolCalls: [{ name: "blob_probe", input: probe }] }
+      : `BLOB-PROBE-RESULT ${JSON.stringify(result.output)}`;
+  }
   if (message.includes("Read the parent input-hook audit")) {
     const audit = request.toolResults.find((result) => result.name === "read_input_hooks");
     return audit === undefined
