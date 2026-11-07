@@ -5,7 +5,7 @@ import {
   type LiveDynamicModelSelection,
 } from "#context/keys.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -149,7 +149,7 @@ export async function chooseModel(
 /** The session's model outside a model call: the one it chose last, else the one it was given. */
 export function currentModel(ctx: Pick<ContextReader, "get">): RuntimeModelReference | undefined {
   return (
-    ctx.get(ChosenModelKey)?.reference ?? givenModel(ctx) ?? ctx.get(BundleKey)?.turnAgent.model
+    ctx.get(ChosenModelKey)?.reference ?? givenModel(ctx) ?? compiledBundleOf(ctx)?.turnAgent.model
   );
 }
 

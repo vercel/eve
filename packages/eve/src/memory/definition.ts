@@ -21,7 +21,8 @@ import {
   type MemoryScope,
   type MemoryTurnContext,
 } from "#public/memory/index.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import {
   createMemoryScope,
@@ -252,7 +253,7 @@ async function captureBeforeCompaction(
           abortSignal: ctx.signal,
           compaction: {
             modelId:
-              container.get(BundleKey)?.turnAgent.compactionModel?.id ??
+              container.get(SessionAgentKey)?.settings.compaction?.model?.id ??
               effectiveModelId(container) ??
               "unknown",
             usageInputTokens: started.data.trigger?.inputTokens ?? null,
@@ -362,10 +363,9 @@ export async function resolveMemoryScope(
         })
       : memory.scope;
   if (scope === null) return disabled(memory.slot, "scope");
-  const bundle = ctx.ctx.get(BundleKey);
   const namespaceContext = {
-    appRoot: bundle?.resolvedAgent.metadata.appRoot ?? "",
-    node: bundle?.nodeId ?? "__root__",
+    appRoot: compiledBundleOf(ctx.ctx)?.resolvedAgent.metadata.appRoot ?? "",
+    node: runtimeNodeId(ctx.ctx.get(SessionAgentKey) ?? {}),
     slot: memory.slot,
   };
   const namespace =

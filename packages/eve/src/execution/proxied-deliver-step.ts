@@ -22,7 +22,7 @@ import {
 import { type WithSessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
@@ -288,7 +288,7 @@ async function routeProxiedDeliver(
       if (remote !== undefined) {
         const ctx = await deserializeContext(serializedContext);
         const headers = await resolveRemoteAgentStreamHeaders({
-          bundle: ctx.require(BundleKey),
+          bundle: requireCompiledBundle(ctx),
           name: remote.name,
           dynamicBinding: remote.dynamicBinding,
           resolverId: remote.resolverId,

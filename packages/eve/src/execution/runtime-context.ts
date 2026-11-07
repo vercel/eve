@@ -25,7 +25,8 @@ import {
   TraceRootKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { readConversationId } from "#shared/conversation-identity.js";
@@ -37,18 +38,18 @@ import { resolveInstrumentationEnvironment } from "#internal/application/dev-env
  * Builds the bootstrap {@link ContextContainer} for one run.
  */
 export function buildRunContext(input: {
+  readonly agent: SessionAgent;
   readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
-  readonly bundle: CompiledBundle;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly run: RunInput;
 }): ContextContainer {
-  const { bundle, run } = input;
+  const { agent, run } = input;
   const ctx = new ContextContainer();
   const auth: SessionAuthContext | null = run.auth;
   const conversationId = readConversationId(run.conversationId);
   if (conversationId !== undefined) ctx.set(ConversationIdKey, conversationId);
 
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, agent);
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
   ctx.set(
     ConversationContextKey,

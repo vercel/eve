@@ -31,7 +31,8 @@ import {
   ToolChannelKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
@@ -99,10 +100,8 @@ import {
   type CreateRuntime,
 } from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
-import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
@@ -223,7 +222,9 @@ async function runSessionStepBody(
     enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
   }
   const adapter = ctx.require(ChannelKey);
-  const bundle = ctx.require(BundleKey);
+  const agent = sessionAgent(ctx);
+  // The compiled node whose `agent/tools/` and module scope the step runs.
+  const bundle = requireCompiledBundle(ctx);
 
   // Populate the callback base URL so getHookUrl() works during tool execution.
   if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
@@ -284,7 +285,7 @@ async function runSessionStepBody(
     history: validateHarnessModelMessages(input.history),
   };
   const instrumentation = bindSessionInstrumentation({
-    agentName: bundle.turnAgent.id,
+    agentName: agent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
@@ -333,7 +334,7 @@ async function runSessionStepBody(
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
     const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
-    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
+    const sessionUsageLimit = agent.settings.limits?.sessionUsage;
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
@@ -549,7 +550,7 @@ async function runSessionStepBody(
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
       // Nothing here starts a turn, so a cancel has nothing to stop.
-      await publishAdmission(buildRuntimeIdentity(effectiveNode)).catch(ignoreTurnCancellation);
+      await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -567,17 +568,12 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
+    const runtimeIdentity = buildRuntimeIdentity(agent);
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-          const revision = deploymentId
-            ? `deployment:${deploymentId}`
-            : await resolveRuntimeCompiledArtifactsVersionedCacheKey(
-                bundle.compiledArtifactsSource,
-              );
+          const revision = await agent.revision();
           await contextStorage.run(ctx, () =>
             restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
@@ -640,8 +636,7 @@ async function runSessionStepBody(
       }
     }
 
-    const modelCallsPerStep =
-      bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
+    const modelCallsPerStep = agent.settings.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
 
     const runHarnessStep = async (
@@ -665,6 +660,7 @@ async function runSessionStepBody(
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
         },
+        agent,
         node: effectiveNode,
         sessionUsageLimit,
         // The title's write finishes first.
@@ -699,7 +695,7 @@ async function runSessionStepBody(
               channel: channelOf(ctx),
               to: createToolChannelTo({
                 delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadBundle: () => ctx.require(BundleKey),
+                loadBundle: () => bundle,
               }),
             });
             const schemaSession =

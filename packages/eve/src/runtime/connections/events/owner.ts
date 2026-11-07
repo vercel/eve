@@ -1,7 +1,8 @@
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
+import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
@@ -24,9 +25,12 @@ import type { ManagedEventSubscription } from "#shared/connection-events.js";
 const SUBSCRIBE_OUTCOME_TIMEOUT_MS = 90_000;
 
 /** The context a watch's runs execute in: its creator's auth and origin session. */
-function bindingContext(binding: EventBinding, bundle: CompiledBundle): Record<string, unknown> {
+async function bindingContext(
+  binding: EventBinding,
+  bundle: CompiledBundle,
+): Promise<Record<string, unknown>> {
   const ctx = new ContextContainer({ localDevRequest: undefined });
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, await compiledSessionAgent(bundle));
   ctx.set(AuthKey, binding.auth);
   if (binding.traceSeed !== undefined) ctx.set(SessionTraceSeedKey, binding.traceSeed);
   // This is origin metadata, not a conversation owner or a state snapshot.
@@ -46,7 +50,7 @@ export async function startConnectionEventOwner(
   signal?: AbortSignal,
 ): Promise<ManagedEventSubscription | undefined> {
   const run = await startWorkflowOnCurrentDeployment(connectionEventWorkflowReference, [
-    { binding, serializedContext: bindingContext(binding, bundle) },
+    { binding, serializedContext: await bindingContext(binding, bundle) },
   ]);
   const outcome = await readSubscribeOutcome(run.runId, signal);
   return outcome && subscriptionFromOutcome(outcome);
@@ -71,7 +75,7 @@ export async function startConnectionEventDelivery(
   const binding = watch.owner;
   await startConnectionEventDeliveryRun({
     binding,
-    serializedContext: bindingContext(binding, bundle),
+    serializedContext: await bindingContext(binding, bundle),
     payload,
   });
   return true;
