@@ -1,4 +1,4 @@
-import { type CompiledModuleMap, compiledModuleMapSchema } from "#compiler/module-map.js";
+import { type CompiledModuleMap, compiledModuleMapSchema } from "#compiler/module-map-schema.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";

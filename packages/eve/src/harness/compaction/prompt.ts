@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import { estimateTokens } from "#harness/token-estimate.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
@@ -122,7 +123,7 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    excessTokens -= (Buffer.byteLength(entry.content) - Buffer.byteLength(degraded)) / 4;
+    excessTokens -= (utf8ByteLength(entry.content) - utf8ByteLength(degraded)) / 4;
     entries[index] = { content: degraded, role: entry.role };
   }
 }

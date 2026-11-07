@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import { resolveDiscoveryProject } from "#discover/project.js";

@@ -1,8 +1,7 @@
-import { setTimeout as delay } from "node:timers/promises";
-
 import { createLogger } from "#internal/logging.js";
 import { classifyModelCallError } from "#harness/model-call/errors.js";
 import { decide, type Policy, type Restriction } from "#shared/restriction.js";
+import { delay } from "#platform/delay.js";
 
 const log = createLogger("harness.tool-loop");
 /**
@@ -88,7 +87,7 @@ export async function runModelCallWithRetries<T>(
         error,
       });
       await diag.onRetry?.(error);
-      await delay(delayMs, undefined, { signal });
+      await delay(delayMs, signal);
     }
   }
 }

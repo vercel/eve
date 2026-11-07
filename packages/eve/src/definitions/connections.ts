@@ -2,7 +2,7 @@ import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
+import { CONNECTION_SLUG_PATTERN } from "#shared/name-grammar.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { resolveDynamicConnectionValue } from "#runtime/resolve-connection.js";

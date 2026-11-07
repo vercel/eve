@@ -4,9 +4,9 @@ import {
   createReadFileStamp,
   normalizeModelPath,
   type ReadFileState,
-  ReadFileStateKey,
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
+import { ReadFileStateKey } from "#context/keys.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 

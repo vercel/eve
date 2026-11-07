@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
-
 import type { ConnectionProtocol } from "#shared/connection-types.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 /** Builds the opaque, reconstruction-stable identity for one resolved connection instance. */
 export function createConnectionInstanceId(input: {
@@ -10,16 +9,14 @@ export function createConnectionInstanceId(input: {
   readonly sourceId: string;
   readonly url: string;
 }): string {
-  const digest = createHash("sha256")
-    .update(
-      JSON.stringify([
-        input.sourceId,
-        input.connectionName,
-        input.protocol,
-        input.url,
-        input.instanceKey ?? "",
-      ]),
-    )
-    .digest("base64url");
+  const digest = sha256Base64Url(
+    JSON.stringify([
+      input.sourceId,
+      input.connectionName,
+      input.protocol,
+      input.url,
+      input.instanceKey ?? "",
+    ]),
+  );
   return `connection:${digest}`;
 }

@@ -4,7 +4,7 @@ import { getKnownByteLength, readFileData } from "#internal/attachments/data.js"
 
 function bytesOf(data: unknown): string | undefined {
   const read = readFileData(data);
-  return read.kind === "bytes" ? read.bytes.toString("utf8") : undefined;
+  return read.kind === "bytes" ? new TextDecoder().decode(read.bytes) : undefined;
 }
 
 describe("readFileData", () => {

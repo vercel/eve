@@ -1,8 +1,6 @@
 import { NonRetryableError } from "#shared/run-errors.js";
 import {
   assertPublicHostname,
-  createPublicDispatcher,
-  fetchWithDispatcher,
   findUnsafeDestinationError,
   readBoundedResponse,
   UnsafeDestinationError,
@@ -10,6 +8,8 @@ import {
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { isObject } from "#shared/guards.js";
+import { readEnv } from "#platform/env.js";
+import { withPublicFetch } from "#platform/public-fetch.js";
 
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
@@ -98,11 +98,9 @@ async function requestCallback(
   }
   const policy = { allowLoopback: isLocalDevelopmentServer() };
   assertPublicHostname(url.hostname, policy);
-  const dispatcher = await createPublicDispatcher(policy);
-  try {
-    const response = await fetchWithDispatcher(urlText, {
+  return await withPublicFetch(policy, async (fetchPublic) => {
+    const response = await fetchPublic(urlText, {
       ...init,
-      dispatcher,
       method: "POST",
       // Do not follow redirects: a validated callback host could otherwise
       // 3xx-bounce the framework to an internal/metadata address after the
@@ -110,9 +108,7 @@ async function requestCallback(
       redirect: "error",
     });
     return await readBoundedResponse(response, MAX_CALLBACK_RESPONSE_BYTES);
-  } finally {
-    await dispatcher.close();
-  }
+  });
 }
 
 function callbackLogFields(input: { readonly body: unknown; readonly url: string }) {
@@ -140,7 +136,7 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
 
 async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<string, string>> {
   const headers: Record<string, string> = { "content-type": "application/json" };
-  if (process.env.VERCEL !== "1") return headers;
+  if (readEnv("VERCEL") !== "1") return headers;
 
   let url: URL;
   try {
@@ -149,7 +145,7 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
     return headers;
   }
   const currentHost = VERCEL_CALLBACK_HOST_ENVS.some((name) => {
-    const host = process.env[name]?.trim();
+    const host = readEnv(name)?.trim();
     return host !== undefined && host !== "" && URL.parse(`https://${host}`)?.origin === url.origin;
   });
   if (url.protocol !== "https:") return headers;
@@ -161,7 +157,7 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
 }
 
 function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
-  const configured = process.env.EVE_CALLBACK_TRUSTED_ORIGINS?.trim();
+  const configured = readEnv("EVE_CALLBACK_TRUSTED_ORIGINS")?.trim();
   if (!configured) return [];
   return configured.split(",").map((entry) => {
     const url = URL.parse(entry.trim());
@@ -218,7 +214,7 @@ function readAmbientVercelOidcToken(): string | undefined {
     }
   )[VERCEL_REQUEST_CONTEXT];
   const token =
-    requestContext?.get?.().headers?.["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN;
+    requestContext?.get?.().headers?.["x-vercel-oidc-token"] ?? readEnv("VERCEL_OIDC_TOKEN");
   const trimmed = token?.trim();
   return trimmed === "" ? undefined : trimmed;
 }

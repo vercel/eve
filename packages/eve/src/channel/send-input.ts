@@ -2,6 +2,7 @@ import type { MessageContent, MessageFilePart } from "#shared/message-content.js
 
 import type { SendPayload } from "#channel/routes.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
+import { toBase64 } from "#shared/bytes.js";
 
 /** Normalizes the shorthand input forms accepted by channel and session sends. */
 export function normalizeSendInput(input: MessageContent | SendPayload): SendPayload {
@@ -32,7 +33,7 @@ export function serializeFilePartsInMessage(
     }
     if (part.data instanceof Uint8Array || part.data instanceof ArrayBuffer) {
       changed = true;
-      const base64 = Buffer.from(new Uint8Array(part.data)).toString("base64");
+      const base64 = toBase64(new Uint8Array(part.data));
       return { ...part, data: `data:${part.mediaType};base64,${base64}` };
     }
     return part;

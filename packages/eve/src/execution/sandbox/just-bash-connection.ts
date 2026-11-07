@@ -6,7 +6,7 @@ import type {
 } from "#public/sandbox/just-bash-sandbox.js";
 import { SANDBOX_AGENT_ENV, type SandboxConnection } from "#public/sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
-import { dirname } from "node:path";
+import { dirname } from "#platform/host-path.js";
 
 // One just-bash interpreter over a filesystem, as a sandbox connection: the disk binding's, over a
 // session root (`just-bash-runtime.ts`), and the memory sandbox's, over an in-memory filesystem.

@@ -10,7 +10,8 @@ import type {
 } from "#compiler/manifest.js";
 import { deriveResourceRootEntries, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
-import { normalizeSkillPackage, writeSkillPackageDirectory } from "#shared/skill-package.js";
+import { normalizeSkillPackage } from "#shared/skill-package.js";
+import { writeSkillPackageDirectory } from "#shared/skill-package-directory.js";
 
 const RESOURCES_DIRECTORY = "workspace-resources";
 const RESOURCE_WORKSPACE_DIRECTORY = "workspace";

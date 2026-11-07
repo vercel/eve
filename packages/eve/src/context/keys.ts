@@ -35,6 +35,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
+import type { ReadFileState } from "#execution/tools/file-state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
@@ -259,3 +260,9 @@ export interface DurableDynamicSkillMetadata {
 export const DynamicSkillSandboxKey = new ContextKey<Readonly<Record<string, string>>>(
   "eve.dynamicSkillSandbox",
 );
+
+/**
+ * Durable context key for read-file stamps (`#execution/tools/file-state.js`). It's here, with the
+ * keys every session loads, so a restored session reads it before its file tools load.
+ */
+export const ReadFileStateKey = new ContextKey<ReadFileState>("eve.readFile");

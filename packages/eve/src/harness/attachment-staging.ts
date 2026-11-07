@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
-import { basename, dirname, extname } from "node:path";
 import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } from "ai";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import type { ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
+import type { ChannelAdapterContext } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { buildChannelContext } from "#channel/session.js";
 import { contextStorage, loadContext } from "#context/container.js";
@@ -13,7 +11,7 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
-import { maxBytesOf } from "#internal/attachments/limited-read.js";
+import { maxBytesOf } from "#internal/attachments/upload-limit.js";
 import { verifyMediaType } from "#internal/attachments/media-metadata.js";
 import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
 import {
@@ -21,7 +19,11 @@ import {
   isMediaTypeAllowed,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
-import { createPublicDownloads, type PublicDownloads } from "#internal/attachments/public-link.js";
+import {
+  createPublicDownloads,
+  type DownloadedFile,
+  type PublicDownloads,
+} from "#internal/attachments/public-link.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   decodeSandboxRef,
@@ -32,6 +34,10 @@ import {
 } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
+import { sha256Hex } from "#shared/digest.js";
+import { toBase64 } from "#shared/bytes.js";
+import { basename, dirname, extname } from "#platform/host-path.js";
+import { hostBytes } from "#platform/host-bytes.js";
 
 /**
  * Directory, relative to the workspace root, where eve stages message
@@ -57,7 +63,15 @@ const DEFAULT_MEDIA_TYPE = "application/octet-stream";
 const CACHED_REF_BYTES_LIMIT = 64 * 1024 * 1024;
 
 // Insertion order doubles as LRU order: a hit moves its entry to the end.
-const cachedRefBytes = new Map<string, Buffer>();
+/**
+ * A file to stage: what a channel's `fetchFile` returned (its `FetchFileResult`), or what eve
+ * downloaded or decoded itself.
+ */
+interface StagedFile extends DownloadedFile {
+  readonly filename?: string;
+}
+
+const cachedRefBytes = new Map<string, Uint8Array>();
 let cachedRefBytesTotal = 0;
 
 // A staged name keeps or gains the extension its media type implies, so a
@@ -257,7 +271,7 @@ function cacheKey(sessionId: string | undefined, ref: SandboxRef): string | unde
   return JSON.stringify([sessionId, ref.path, ref.size, ref.mediaType]);
 }
 
-function readCachedRefBytes(key: string): Buffer | undefined {
+function readCachedRefBytes(key: string): Uint8Array | undefined {
   const bytes = cachedRefBytes.get(key);
   if (bytes !== undefined) {
     cachedRefBytes.delete(key);
@@ -270,7 +284,7 @@ function readCachedRefBytes(key: string): Buffer | undefined {
 function cacheRefBytes(key: string, bytes: Uint8Array): void {
   if (bytes.byteLength > CACHED_REF_BYTES_LIMIT || cachedRefBytes.has(key)) return;
   // A copy, so a caller reusing its buffer can't change what later calls send.
-  cachedRefBytes.set(key, Buffer.from(bytes));
+  cachedRefBytes.set(key, hostBytes(bytes));
   cachedRefBytesTotal += bytes.byteLength;
   for (const [oldestKey, oldest] of cachedRefBytes) {
     if (cachedRefBytesTotal <= CACHED_REF_BYTES_LIMIT) break;
@@ -472,10 +486,7 @@ async function hydrateToolOutput(
       if (!inlinesSandboxRefAsBytes(ref)) return [label];
       const bytes = await read(ref);
       if (bytes === null) return [renderMissingSandboxRef(ref)];
-      return [
-        label,
-        { ...part, data: { data: Buffer.from(bytes).toString("base64"), type: "data" } },
-      ];
+      return [label, { ...part, data: { data: toBase64(bytes), type: "data" } }];
     }),
   );
   return { ...output, value: value.flat() };
@@ -606,7 +617,7 @@ async function stageFilePart(
     return attachmentNote(part, "could not be read.");
   }
 
-  let resolved: FetchFileResult;
+  let resolved: StagedFile;
   try {
     resolved = await resolveLink(data.url, adapterCtx, downloads);
   } catch (error) {
@@ -634,7 +645,7 @@ function attachmentNote(part: FilePart, outcome: string): TextPart {
  */
 async function stageResolvedBytes(
   part: FilePart,
-  resolved: FetchFileResult,
+  resolved: StagedFile,
   sandbox: SandboxSession,
   policy: UploadPolicy | undefined,
 ): Promise<FilePart | TextPart> {
@@ -672,7 +683,7 @@ async function stageResolvedBytes(
  * for the session so the next model calls need not read them back.
  */
 async function writeSandboxRef(
-  bytes: Buffer,
+  bytes: Uint8Array,
   declaredMediaType: string,
   filename: string | undefined,
   sandbox: SandboxSession,
@@ -696,7 +707,7 @@ async function resolveLink(
   url: URL,
   adapterCtx: ChannelAdapterContext,
   downloads: PublicDownloads,
-): Promise<FetchFileResult> {
+): Promise<StagedFile> {
   const adapter = adapterCtx.ctx.get(ChannelKey);
   const adapterKind = adapter === undefined ? "none" : getAdapterKind(adapter);
 
@@ -722,7 +733,7 @@ async function resolveLink(
       });
     }
     if (result !== null) {
-      return Buffer.isBuffer(result) ? { bytes: result } : result;
+      return result instanceof Uint8Array ? { bytes: result } : result;
     }
   }
   return downloads(url, adapterKind);
@@ -749,7 +760,7 @@ function reconstitueFilePartUrls(
 }
 
 function sha256Prefix(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex").slice(0, SHA_PREFIX_LENGTH);
+  return sha256Hex(bytes).slice(0, SHA_PREFIX_LENGTH);
 }
 
 function safeFilename(provided: string | undefined, sha: string, mediaType: string): string {

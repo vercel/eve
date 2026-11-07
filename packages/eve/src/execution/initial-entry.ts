@@ -10,7 +10,7 @@ import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.j
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
+import { loadCompiledSessionAgent } from "#platform/compiled-agents.js";
 import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";

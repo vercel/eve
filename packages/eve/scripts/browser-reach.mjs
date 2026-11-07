@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// What an eve entry reaches: its modules, their size, the files that import Node built-ins, and the
-// Workflow runtime, which a Workflow-free entry must not reach at all.
+// What a browser build of an eve entry reaches: its modules, their size, the files that import Node
+// built-ins or name Node globals, and the Workflow runtime, which a Workflow-free entry must not
+// reach at all. The session core's roots reach no Node built-in and no eve file naming a Node
+// global.
 //
 //   node scripts/browser-reach.mjs [--entry src/execution/session/program.ts] [--json] [--chains]
 //   node scripts/browser-reach.mjs --check    # fail on any Workflow module, or a metric past the baseline
@@ -8,9 +10,9 @@
 //   node scripts/browser-reach.mjs --why <path> [--cut a=>b,...]   # explain a module, or try a cut
 //
 // "Static" follows only static imports from the entry: what loads at startup. "Total" includes
-// lazy `import()` targets too, since a bundler builds those as well. The entries are resolved as
-// Node resolves them, where every host of the session core runs. Node built-ins are left external
-// and counted.
+// lazy `import()` targets too, since a bundler builds those as well. The entries are resolved as a
+// browser bundler resolves them (the `browser` condition, no `node`), so each `#platform/*` module
+// is its `.web.ts` twin. Node built-ins are left external and counted, not shimmed.
 import { readFileSync, writeFileSync } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
@@ -30,12 +32,12 @@ const option = (name, fallback) => {
 };
 
 /**
- * The Workflow-free entries: the session core's host-neutral roots, which every host runs a
- * session through (the session loop, the turn step it runs, and a session's first-owner boot),
- * the in-process host, which runs sessions through them without Workflow, and the internal embed
- * entry's agent builder and sessions.
+ * The entries that promise no Node built-in and no eve file naming a Node global: the session
+ * core's host-neutral roots, which every host runs a session through (the session loop, the turn
+ * step it runs, and a session's first-owner boot), the in-process host, which runs sessions
+ * through them without Workflow, and the internal embed entry's agent builder and sessions.
  */
-const ENTRIES = option("--entry", undefined)?.split(",") ?? [
+const NODE_FREE_ENTRIES = [
   "src/execution/session/program.ts",
   "src/execution/session/turn-step.ts",
   "src/execution/session/owner-boot.ts",
@@ -43,6 +45,9 @@ const ENTRIES = option("--entry", undefined)?.split(",") ?? [
   "src/embed/agent.ts",
   "src/embed/session.ts",
 ];
+
+/** The Workflow-free entries: the session core's roots, the in-process host and the embed entry. */
+const ENTRIES = option("--entry", undefined)?.split(",") ?? [...NODE_FREE_ENTRIES];
 
 /**
  * The Workflow runtime: Workflow's packages, and eve's modules under `internal/workflow/` that wrap
@@ -59,6 +64,45 @@ const isWorkflowOwn = (s) => s.startsWith("internal/workflow/") || s.startsWith(
 const isWorkflow = (s, sharedWithoutWorkflow) =>
   isWorkflowOwn(s) || (s.startsWith("gen:_chunks/workflow") && !sharedWithoutWorkflow.has(s));
 
+// Node globals a module names without importing them. A browser bundler provides none (Vite,
+// webpack 5 and esbuild only define `process.env.NODE_ENV`), so a browser-path module that reads
+// one breaks there. Counted with esbuild's `define`, which replaces only free references: not a
+// member such as `globalThis.process`, nor a local of the same name.
+const NODE_GLOBALS = [
+  "Buffer",
+  "process",
+  "global",
+  "setImmediate",
+  "clearImmediate",
+  "__dirname",
+  "__filename",
+];
+const GLOBAL_SENTINEL = "__eveNodeGlobal_";
+const nodeGlobalsCache = new Map();
+/** The Node globals the module at `path` (relative to the package) names. */
+function nodeGlobalsOf(path) {
+  if (nodeGlobalsCache.has(path)) return nodeGlobalsCache.get(path);
+  let found = [];
+  if (/\.[cm]?[jt]sx?$/.test(path)) {
+    // `process.env.NODE_ENV` is what every bundler defines, so it isn't a use. It becomes an opaque
+    // name, not a string: a constant would fold its branches away, and a development build runs
+    // the other one.
+    const source = readFileSync(join(PACKAGE_ROOT, path), "utf8").replace(
+      /(?<![\w$.])process\.env\.NODE_ENV\b/g,
+      "__eveNodeEnv",
+    );
+    const loader = /\.[cm]?tsx?$/.test(path) ? (path.endsWith("x") ? "tsx" : "ts") : "js";
+    const { code } = esbuild.transformSync(source, {
+      define: Object.fromEntries(NODE_GLOBALS.map((name) => [name, `${GLOBAL_SENTINEL}${name}`])),
+      format: "esm",
+      loader,
+    });
+    found = NODE_GLOBALS.filter((name) => code.includes(`${GLOBAL_SENTINEL}${name}`));
+  }
+  nodeGlobalsCache.set(path, found);
+  return found;
+}
+
 const builtins = new Set(builtinModules);
 const isBuiltin = (path) => path.startsWith("node:") || builtins.has(path);
 
@@ -71,20 +115,10 @@ const short = (p) =>
 
 // `--cut a=>b,c=>d` simulates removing the imports from module `a` to modules starting with `b`
 // (short paths), to see what a seam would save before making it.
-/**
- * Edges no Workflow-free entry follows, each with why. Sandbox prewarm under `eve dev` loads the
- * app's authored modules, and so Workflow, but only in development, from a build on disk.
- */
-const DEVELOPMENT_ONLY = [
-  ["execution/sandbox/ensure.ts", "execution/sandbox/development-lazy-prewarm.ts"],
-];
-const cuts = [
-  ...DEVELOPMENT_ONLY,
-  ...(option("--cut", "") ?? "")
-    .split(",")
-    .filter(Boolean)
-    .map((pair) => pair.split("=>")),
-];
+const cuts = (option("--cut", "") ?? "")
+  .split(",")
+  .filter(Boolean)
+  .map((pair) => pair.split("=>"));
 const isCut = (from, to) => cuts.some(([a, b]) => short(from) === a && short(to).startsWith(b));
 
 async function measure(entry) {
@@ -92,15 +126,13 @@ async function measure(entry) {
     .build({
       absWorkingDir: PACKAGE_ROOT,
       bundle: true,
-      conditions: ["eve-source", "node", "import"],
+      conditions: ["eve-source", "browser", "import"],
       entryPoints: [entry],
-      // just-bash's optional codecs, which it loads only if they're installed.
-      external: ["node-liblzma", "@mongodb-js/zstd"],
       format: "esm",
       logLevel: "silent",
       metafile: true,
       outfile: "browser-reach.js",
-      platform: "node",
+      platform: "browser",
       plugins: [
         {
           name: "node-builtins",
@@ -176,11 +208,18 @@ async function measure(entry) {
       [...reach(followDynamic, isWorkflowOwn).seen].map(short).filter((s) => !isWorkflowOwn(s)),
     );
     const workflow = [...seen].filter((p) => isWorkflow(short(p), sharedWithoutWorkflow));
+    const globalFiles = {};
+    for (const p of seen) {
+      const names = nodeGlobalsOf(p);
+      if (names.length > 0) globalFiles[short(p)] = names;
+    }
     return {
       builtinFiles: [...builtinFiles].map(short).sort(),
       builtinModules: [...builtinModulesReached].sort(),
       bytes,
       eveModules: [...seen].filter((p) => /^(src\/|.*packages\/eve\/src\/)/.test(p)).length,
+      globalFiles,
+      list: [...seen].map(short).sort(),
       modules: seen.size,
       workflow: workflow.length,
       // The first Workflow module, by the chain that reaches it: where the seam is missing.
@@ -196,6 +235,8 @@ async function measure(entry) {
   };
 }
 
+const isVendored = (shortPath) => shortPath.startsWith("gen:") || shortPath.startsWith("dep:");
+
 /** The numbers the baseline holds; each may only shrink. */
 function guardedMetrics(report) {
   const metrics = {};
@@ -204,6 +245,11 @@ function guardedMetrics(report) {
     metrics[`${reach}.modules`] = s.modules;
     metrics[`${reach}.kib`] = Math.round(s.bytes / 1024);
     metrics[`${reach}.builtinFiles`] = s.builtinFiles.length;
+    // eve's own modules and the third-party ones it bundles, apart: what a fix must reach differs.
+    metrics[`${reach}.globalFiles`] = Object.keys(s.globalFiles).filter(
+      (p) => !isVendored(p),
+    ).length;
+    metrics[`${reach}.vendorGlobalFiles`] = Object.keys(s.globalFiles).filter(isVendored).length;
     metrics[`${reach}.workflow`] = s.workflow;
   }
   return metrics;
@@ -229,7 +275,8 @@ if (flag("--json")) {
       console.log(
         `  ${kind.padEnd(6)} ${String(s.modules).padStart(5)} modules (${s.eveModules} eve), ` +
           `${(s.bytes / 1024).toFixed(0).padStart(6)} KiB, ${s.workflow} Workflow, ` +
-          `${s.builtinFiles.length} files importing Node built-ins (${s.builtinModules.join(", ") || "none"})`,
+          `${s.builtinFiles.length} files importing Node built-ins (${s.builtinModules.join(", ") || "none"}), ` +
+          `${Object.keys(s.globalFiles).length} naming Node globals`,
       );
       if (s.workflowChain !== undefined) console.log(`    Workflow via ${s.workflowChain}`);
     }
@@ -237,8 +284,12 @@ if (flag("--json")) {
       console.log(`  why (static): ${r.why.static}\n  why (total): ${r.why.total}`);
     }
     if (flag("--chains")) {
-      console.log("  startup files importing Node built-ins:");
-      for (const f of r.static.builtinFiles) console.log(`    ${f}`);
+      console.log("  files importing Node built-ins (total):");
+      for (const f of r.total.builtinFiles) console.log(`    ${f}`);
+      console.log("  files naming Node globals (total):");
+      for (const [f, names] of Object.entries(r.total.globalFiles)) {
+        console.log(`    ${f}: ${names.join(", ")}`);
+      }
     }
   }
 }
@@ -253,6 +304,21 @@ if (flag("--check") || flag("--update")) {
   if (workflow.length > 0) {
     console.error("\nWorkflow-free entries reach the Workflow runtime:");
     for (const w of workflow) console.error(`  ${w}`);
+    process.exit(1);
+  }
+  // Nor does a Node-free entry reach a Node built-in, or an eve file naming a Node global.
+  // (Vendored code may name one behind a `typeof` check; the baseline holds how many files do.)
+  const node = reports
+    .filter((r) => NODE_FREE_ENTRIES.includes(r.entry))
+    .flatMap((r) => [
+      ...r.total.builtinFiles.map((f) => `${r.entry}: ${f} imports a Node built-in`),
+      ...Object.entries(r.total.globalFiles)
+        .filter(([f]) => !isVendored(f))
+        .map(([f, names]) => `${r.entry}: ${f} names ${names.join(", ")}`),
+    ]);
+  if (node.length > 0) {
+    console.error("\nThe Node-free entries reach Node:");
+    for (const n of node) console.error(`  ${n}`);
     process.exit(1);
   }
   const current = Object.fromEntries(reports.map((r) => [r.entry, guardedMetrics(r)]));

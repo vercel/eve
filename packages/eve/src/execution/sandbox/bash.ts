@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
@@ -8,6 +6,8 @@ import {
   truncateTail,
 } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { randomUUID } from "#platform/uuid.js";
+import { concatBytes, utf8ByteLength } from "#shared/bytes.js";
 
 /** How long a `bash` call waits by default before it leaves the command running in the background. */
 export const BASH_YIELD_SECONDS = 60;
@@ -255,8 +255,8 @@ async function claimRunningJob(
   const pid = Number(match[1]);
   const stdout = raw.stdout.slice(match.index + match[0].length);
   const omitted = {
-    stderr: Math.max(0, Number(match[3]) - Buffer.byteLength(raw.stderr)),
-    stdout: Math.max(0, Number(match[2]) - Buffer.byteLength(stdout)),
+    stderr: Math.max(0, Number(match[3]) - utf8ByteLength(raw.stderr)),
+    stdout: Math.max(0, Number(match[2]) - utf8ByteLength(stdout)),
   };
   return {
     ...formatStreams({ stderr: raw.stderr, stdout }, omitted, directory),
@@ -280,7 +280,7 @@ async function readTail(stream: ReadableStream<Uint8Array>): Promise<StreamTail>
   let bytes = 0;
   let omittedBytes = 0;
   const keepTail = () => {
-    const tail = Buffer.concat(chunks).subarray(-MAX_OUTPUT_BYTES);
+    const tail = concatBytes(chunks).subarray(-MAX_OUTPUT_BYTES);
     omittedBytes += bytes - tail.byteLength;
     chunks = [tail];
     bytes = tail.byteLength;

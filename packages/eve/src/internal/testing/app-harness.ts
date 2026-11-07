@@ -4,7 +4,7 @@ import {
   type CompileFromMemoryInput,
 } from "#internal/testing/compile-from-memory.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
 import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";

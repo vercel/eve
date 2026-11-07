@@ -51,6 +51,14 @@
       "eve-source": "./.generated/compiled/*",
       "default": "./dist/src/compiled/*"
     },
+    "#platform/*.js": {
+      "eve-source": {
+        "node": "./src/platform/*.ts",
+        "default": "./src/platform/*.web.ts"
+      },
+      "node": "./dist/src/platform/*.js",
+      "default": "./dist/src/platform/*.web.js"
+    },
     "#*.js": {
       "eve-source": "./src/*.ts",
       "default": "./dist/src/*.js"
