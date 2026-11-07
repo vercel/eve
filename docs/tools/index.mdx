@@ -53,6 +53,7 @@ export default defineTool({
 - `ctx.messages`: the model input for the step that requested this call, as a [dynamic tool's](/docs/guides/dynamic-capabilities) `ctx.messages()` sees it.
 - `ctx.abortSignal`: aborts when the turn is cancelled. Pass it to work that supports cancellation. Sandbox sessions from `ctx.getSandbox()` already use it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
+- `ctx.conversation`: where the conversation happens: its `audience`, the channel that created it, and its [`space`](/docs/channels#spaces), such as the Slack channel a thread is in.
 - `ctx.channel`: the channel serving the session, as [hooks](/docs/guides/hooks) and [dynamic resolvers](/docs/guides/dynamic-capabilities) see it: `kind`, `continuationToken`, and `metadata`. `metadata` is what the channel's `metadata(state)` hook returns, such as a Slack thread's `channelId` and `threadTs`.
 - `ctx.to(channel, target)`: starts or continues a session on one of the agent's channels. See [Start channel sessions](#start-channel-sessions-ctxto).
 

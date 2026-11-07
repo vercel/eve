@@ -10,6 +10,7 @@ import type {
 } from "#channel/adapter.js";
 export type { CommittedLine } from "#channel/adapter.js";
 import type { ChannelAudienceProjector } from "#channel/audience.js";
+import type { ChannelSpaceProjector } from "#channel/space.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
@@ -64,7 +65,11 @@ export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   AudienceCaller,
   AudienceContext,
+  ConversationContext,
   ConversationEnvironment,
+  ConversationSpace,
+  ConversationSpaceContext,
+  ConversationSpaceType,
 } from "#shared/conversation-context.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
 export type {
@@ -327,6 +332,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
   const audience = definition.audience;
+  const space = definition.space;
   const uploadPolicy =
     definition.uploadPolicy === undefined ? undefined : mergeUploadPolicy(definition.uploadPolicy);
   const hasBehavior =
@@ -379,16 +385,15 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     }
   }
 
+  const projectors: { audience?: ChannelAudienceProjector; space?: ChannelSpaceProjector } = {};
+  if (audience !== undefined) projectors.audience = audience as ChannelAudienceProjector;
+  if (space !== undefined) projectors.space = space as ChannelSpaceProjector;
+  const hasProjectors = audience !== undefined || space !== undefined;
+
   if (!hasBehavior && !hasEventHandlers && !hasFetchFile) {
     return {
       kind: HTTP_ADAPTER_KIND,
-      ...(audience === undefined
-        ? undefined
-        : {
-            instrumentation: {
-              audience: audience as ChannelAudienceProjector,
-            },
-          }),
+      ...(hasProjectors && { instrumentation: projectors }),
     } as ChannelAdapter<any>;
   }
 
@@ -398,24 +403,17 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     fetchFile: definition.fetchFile,
     uploadPolicy,
     instrumentation:
-      metadata === undefined && audience === undefined
+      metadata === undefined && !hasProjectors
         ? undefined
         : {
-            ...(metadata === undefined
-              ? undefined
-              : {
-                  metadata(state): ChannelInstrumentationMetadata {
-                    const projected = metadata(state as NonNullable<TState>) as Record<
-                      string,
-                      unknown
-                    >;
-                    const { audience: _ignoredAudience, ...customMetadata } = projected;
-                    return customMetadata;
-                  },
-                }),
-            ...(audience === undefined
-              ? undefined
-              : { audience: audience as ChannelAudienceProjector }),
+            ...projectors,
+            ...(metadata !== undefined && {
+              metadata(state: unknown): ChannelInstrumentationMetadata {
+                const projected = metadata(state as NonNullable<TState>) as Record<string, unknown>;
+                const { audience: _ignoredAudience, ...customMetadata } = projected;
+                return customMetadata;
+              },
+            }),
           },
 
     createAdapterContext(base): any {
