@@ -1,4 +1,4 @@
-import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import { resolvedPromptLabel, responderName } from "#channel/resolved-prompt.js";
 import { optionStyle, type RequestSettlement } from "#channel/interaction-prompts.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import type { CardChild } from "#compiled/chat/index.js";
@@ -11,18 +11,20 @@ const FREEFORM_HINT = "Reply with your answer.";
 /**
  * Renders pending input requests as a Chat SDK card with one button per option,
  * plus fallback text for adapters without cards (such as Photon iMessage). A
- * request in `resolved` shows its outcome in place of its buttons.
+ * request in `resolved` shows its outcome in place of its buttons, naming who
+ * answered when `names` has their principal.
  */
 export function renderInteractions(
   requests: readonly Interaction[],
   inputActionPrefix: string,
   resolved: Readonly<Record<string, RequestSettlement>> = {},
+  names?: Readonly<Record<string, string>>,
 ) {
   const outcome = (request: Interaction) => {
     const resolution = resolved[request.interactionId];
     return resolution === undefined
       ? undefined
-      : resolvedPromptLabel(resolution, request.request.options);
+      : resolvedPromptLabel(resolution, request.request.options, responderName(names, resolution));
   };
   return {
     card: Card({
