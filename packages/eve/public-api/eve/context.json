@@ -1,4 +1,7 @@
 [
+  "ConversationContext",
+  "ConversationSpace",
+  "ConversationSpaceType",
   "HistoryMessage",
   "SessionAuth",
   "SessionAuthContext",
