@@ -1,4 +1,8 @@
-import type { EntityHandle, JournalRecord } from "#execution/entity/entities.js";
+import {
+  type EntityHandle,
+  type JournalRecord,
+  TakenOverError,
+} from "#execution/entity/entities.js";
 import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import { sessionEntities } from "#execution/world/session-entities.js";
 import { serialPerKey } from "#shared/serial-per-key.js";
@@ -21,7 +25,10 @@ import type { SessionSnapshot } from "./snapshot.js";
 //     `FULL_STATE_EVERY`th save write a whole `eve.state` instead.
 // Loading a session reads its journal from its newest whole state, applies the changes after it,
 // and adds the inputs after those.
-// One writer per session.
+//
+// One process writes a session: this store opens it (creating it, or fencing out whoever wrote it
+// before) at its first write. Once the entity refuses a write, every later write of that session
+// fails here (`TakenOverError`), before it reaches the World.
 
 const STATE_RECORD = "eve.state";
 const INPUT_RECORD = "eve.input";
@@ -73,11 +80,21 @@ function stateOf(journal: {
   return { inputs, state };
 }
 
-export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
+export interface WorldSessionStoreOptions {
+  /** Once, when the World refuses a session's write because another process took it over. */
+  readonly onTakenOver?: (sessionId: string, error: TakenOverError) => void;
+}
+
+export function createWorldSessionStore(
+  world: RuntimeWorld,
+  options: WorldSessionStoreOptions = {},
+): SessionStore {
   const entities = sessionEntities(world);
   const opened = new Map<string, Promise<EntityHandle>>();
   // What this store last saved of each session, which its next save is a change from.
   const saved = new Map<string, Saved>();
+  // Sessions another process took over: this one writes them no more.
+  const lost = new Map<string, TakenOverError>();
   // A session's writes land in the order they were made.
   const writes = serialPerKey();
 
@@ -89,6 +106,22 @@ export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
       handle.catch(() => opened.delete(sessionId));
     }
     return await handle;
+  };
+  /** Runs one of `sessionId`'s writes, in order, unless another process took the session over. */
+  const write = async (sessionId: string, run: () => Promise<void>): Promise<void> => {
+    await writes.run(sessionId, async () => {
+      const taken = lost.get(sessionId);
+      if (taken !== undefined) throw taken;
+      try {
+        await run();
+      } catch (error) {
+        if (error instanceof TakenOverError && !lost.has(sessionId)) {
+          lost.set(sessionId, error);
+          options.onTakenOver?.(sessionId, error);
+        }
+        throw error;
+      }
+    });
   };
 
   /** Saves `state` whole, or as a change from what this store saved of it last. */
@@ -118,7 +151,7 @@ export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
 
   return {
     async appendLines(sessionId, position, lines) {
-      await writes.run(sessionId, async () => {
+      await write(sessionId, async () => {
         const encoder = new TextEncoder();
         await (
           await handleOf(sessionId)
@@ -129,12 +162,12 @@ export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
       });
     },
     async appendInput(sessionId, input) {
-      await writes.run(sessionId, async () => {
+      await write(sessionId, async () => {
         await (await handleOf(sessionId)).append([{ kind: INPUT_RECORD, value: input }]);
       });
     },
     async saveState(state) {
-      await writes.run(state.sessionId, () => saveOf(state));
+      await write(state.sessionId, () => saveOf(state));
     },
     async load(sessionId): Promise<SessionSnapshot | undefined> {
       await writes.settled(sessionId);

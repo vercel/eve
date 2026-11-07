@@ -46,6 +46,7 @@ type RunErrorName =
   | "EntityConflictError"
   | "HookConflictError"
   | "HookNotFoundError"
+  | "InBandSupersededError"
   | "RunExpiredError"
   | "StreamExpiredError"
   | "WorkflowRunNotFoundError";
@@ -105,4 +106,9 @@ export function isRunTargetGone(error: unknown): boolean {
     "RunExpiredError",
     "EntityConflictError",
   ]);
+}
+
+/** Whether a World refused an in-band write because another writer moved the run on. */
+export function isInBandSuperseded(error: unknown): boolean {
+  return anyCause(error, ["InBandSupersededError"]);
 }

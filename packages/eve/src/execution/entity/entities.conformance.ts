@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Entities } from "./entities.js";
+import { type Entities, isTakenOver } from "./entities.js";
 
 // The conformance suite of `entities.ts`: its guarantees as tests, for any implementation on any
 // World. `describeEntities` runs them against what `make` returns. A native implementation that
@@ -59,6 +59,33 @@ export function describeEntities(name: string, make: () => Promise<EntitiesUnder
           { kind: "test.change", value: 5 },
         ]);
         expect(await entities.load(entities.newKey())).toBeUndefined();
+      }),
+    );
+
+    it(
+      "keeps one writer: opening an entity fences out whoever held it, who writes nothing more",
+      withEntities(async ({ entities, elsewhere }) => {
+        const key = entities.newKey();
+        const first = await entities.open(key);
+        await first.append([{ kind: "test.state", value: "first" }], { snapshot: true });
+        await first.stream.append(0, [text("a")]);
+        const second = await elsewhere().open(key);
+        const refused = async (write: () => Promise<unknown>) =>
+          await write().then(
+            () => false,
+            (error: unknown) => isTakenOver(error),
+          );
+        expect(await refused(() => first.append([{ kind: "test.change", value: "late" }]))).toBe(
+          true,
+        );
+        expect(await refused(() => first.stream.append(1, [text("late")]))).toBe(true);
+        await second.append([{ kind: "test.change", value: "second" }]);
+        expect((await entities.load(key))?.after).toEqual([
+          { kind: "test.change", value: "second" },
+        ]);
+        expect(
+          (await entities.chunks(key)).map((chunk) => new TextDecoder().decode(chunk)),
+        ).toEqual(["a"]);
       }),
     );
 

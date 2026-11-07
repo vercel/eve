@@ -1,3 +1,5 @@
+import { createLogger } from "#internal/logging.js";
+import { isTakenOver } from "#execution/entity/entities.js";
 import type {
   DispatchContinuationInput,
   DispatchSessionInput,
@@ -30,6 +32,8 @@ import { HostedSession } from "./session-record.js";
 import { saveSnapshot, type StoredSession } from "./session-store.js";
 import type { SessionSnapshot } from "./snapshot.js";
 import { createInProcessTimeoutControl } from "./timers.js";
+
+const log = createLogger("execution.in-process.runtime");
 
 const BARRIER_FACTS = ['"type":"call.started"'];
 const barrierDecoder = new TextDecoder();
@@ -165,8 +169,14 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     sessions.set(sessionId, { loop, record });
     const session = loop.finished.then(
       () => undefined,
-      // The session's stream records how it ended.
-      () => undefined,
+      (error: unknown) => {
+        // Another process continued the session: nothing of this one's reached the World after.
+        if (isTakenOver(error))
+          log.warn("session continued in another process; this one stopped writing it", {
+            sessionId,
+          });
+        // Otherwise the session's stream records how it ended.
+      },
     );
     running.set(sessionId, session);
     void session.finally(() => {
