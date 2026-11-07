@@ -75,7 +75,7 @@ function HarnessTools() {
     >
       <div
         aria-hidden
-        className="absolute inset-0 select-none font-mono text-[2.75cqw] [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black_88%,transparent),linear-gradient(to_right,black_82%,transparent)]"
+        className="absolute inset-0 select-none font-mono text-[3.12cqw] [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black_88%,transparent),linear-gradient(to_right,black_82%,transparent)]"
       >
         <div className="absolute top-[17%] -right-[1em] left-[5%] min-h-full overflow-hidden rounded-t-[0.85em] border border-gray-alpha-400 bg-background-100">
           {/* The gutter's rule runs the full height of the window, under the lines. */}
