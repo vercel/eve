@@ -4,6 +4,7 @@ import { NonRetryableError } from "#shared/run-errors.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { agent } from "#public/tools/agent.js";
+import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import {
   openAgentSessionStep,
   sendAgentSessionMessageStep,
@@ -330,5 +331,21 @@ describe("commands to a session that opened without waiting", () => {
       'Agent "reviewer" can no longer receive messages; its session ended.',
     );
     expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("agentSessionsOver", () => {
+  it("refuses a remote agent on a host that can't reach one, saying why", async () => {
+    mocks.targetKind = "remote";
+    const local = { command: vi.fn(), commandLate: vi.fn(), start: vi.fn() };
+    const sessions = agentSessionsOver({
+      deliveryId: (kind, sessionId) => `in-process:${sessionId}:${kind}`,
+      local,
+      remote: undefined,
+    });
+    await expect(sessions.open({ ...message, name: "crm" })).rejects.toThrow(
+      'Agent "reviewer" is remote, and this host can\'t reach remote agents yet.',
+    );
+    expect(local.start).not.toHaveBeenCalled();
   });
 });

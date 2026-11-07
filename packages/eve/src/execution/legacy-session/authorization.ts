@@ -1,4 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { deliverToHostedHook } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -15,6 +16,8 @@ export async function resumeAuthorizationCallback(
   token: string,
   payload: AuthorizationCallbackPayload,
 ): Promise<void> {
+  // A session or run a host runs in this process holds its hook here, not in Workflow.
+  if (await deliverToHostedHook(token, payload)) return;
   try {
     await resumeRunnableHook(token, payload);
     return;

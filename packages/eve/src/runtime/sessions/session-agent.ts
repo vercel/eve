@@ -1,3 +1,5 @@
+import type { AgentRoster } from "#execution/agent-sessions/roster.js";
+import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { ContextReader } from "#context/key.js";
 import type { Definition } from "#definitions/definition.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -85,6 +87,8 @@ export interface SessionAgent {
   readonly adapters: RuntimeAdapterRegistry;
   /** The agents a workflow tool's `ctx.agents` lists in the session `ctx` belongs to. */
   delegates(ctx: ContextReader): Readonly<Record<string, WorkflowAgentMetadata>>;
+  /** The agents its sessions delegate to, with the dynamic ones the calling turn selected. */
+  roster(dynamicSelections: DynamicSubagentSelections): AgentRoster;
   /** What opens its sessions' sandbox, when it has one. */
   sandbox(): Promise<AgentSandbox | undefined>;
   /**

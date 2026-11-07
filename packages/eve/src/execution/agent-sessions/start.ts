@@ -4,31 +4,16 @@ import type { RunInput, SessionCommand } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
-import {
-  resolveAgentAction,
-  resolveAgentStartTarget,
-  type SubagentStartTarget,
-} from "#execution/agent-sessions/target.js";
+import { loadAgentRoster, type AgentRoster } from "#execution/agent-sessions/roster.js";
+import type { SubagentStartTarget } from "#execution/agent-sessions/target.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
-import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import {
-  InvalidRuntimeModelSelectionError,
-  resolveRuntimeModelSelection,
-} from "#runtime/agent/resolve-model.js";
-import { toErrorMessage } from "#shared/errors.js";
+import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
-import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
-import { readAgentToolModels } from "#tools/agent-models.js";
-import { selectionModel } from "#models/options.js";
-import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 // How a run's `ctx.agent` resolves and prepares the session it opens, on any host. Workflow opens
 // it in a step (`steps.ts`); the in-process host opens it in its process. Both go through
@@ -152,7 +137,8 @@ export function agentSessionResetCommand(deliveryId: string) {
 
 export interface SessionStart<Target extends SubagentStartTarget> {
   readonly auth: SessionAuth;
-  readonly bundle: CompiledBundle;
+  /** The agents the call's session delegates to, which resolved the target. */
+  readonly roster: AgentRoster;
   readonly context: AgentSessionContext;
   readonly key: string;
   readonly replyTo: string;
@@ -182,7 +168,7 @@ export interface PreparedLocalAgentSession {
 export function prepareLocalAgentSession(
   input: SessionStart<LocalStartTarget>,
 ): PreparedLocalAgentSession {
-  const { auth, bundle, context, target } = input;
+  const { auth, context, roster, target } = input;
   const { action } = target;
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
@@ -191,7 +177,7 @@ export function prepareLocalAgentSession(
     schedule: context.schedule,
     channelMetadata: context.channelMetadata,
     continuationKey: input.key,
-    graph: bundle.graph,
+    graph: roster.graph,
     inheritedConversation: context.conversation,
     initiatorAuth: auth.initiator,
     parent: createParentContext(context, input.replyTo),
@@ -227,12 +213,7 @@ export function prepareLocalAgentSession(
       delivery: { channelKind: "subagent", channelName: "subagent", deliveryId },
       toolStubs: childToolStubs,
     },
-    runtime: {
-      agentSessionRuntimeOverrides: input.runtimeOverrides,
-      compiledArtifactsSource: bundle.compiledArtifactsSource,
-      dynamicSubagentAgentConfig: target.dynamicSubagentAgentConfig,
-      nodeId: action.nodeId,
-    },
+    runtime: roster.childRuntime(target, input.runtimeOverrides),
   };
 }
 
@@ -244,19 +225,16 @@ export async function resolveAgentSessionStart(
   input: AgentSessionOpenInput,
 ): Promise<SessionStart<SubagentStartTarget> & { readonly agentName: string }> {
   const { context } = input;
-  const bundle = await loadAgentSessionBundle(context);
-  const action = resolveAgentAction({
-    bundle,
-    callId: context.parent.callId,
-    dynamicSelections: context.dynamicSelections,
-    input: { message: input.message, outputSchema: input.outputSchema, target: input.name },
+  const roster = await loadAgentRoster(context);
+  const action = roster.resolveAction(context.parent.callId, {
+    message: input.message,
+    outputSchema: input.outputSchema,
+    target: input.name,
   });
-  const target = resolveAgentStartTarget({
+  const target = roster.startTarget(
     action,
-    bundle,
-    dynamicSelections: context.dynamicSelections,
-    isRootSession: context.parent.rootSessionId === context.parent.sessionId,
-  });
+    context.parent.rootSessionId === context.parent.sessionId,
+  );
   if (input.model !== undefined && target.kind === "remote") {
     throw new NonRetryableError(
       `ctx.agent("${input.name}", { model }) cannot override a remote agent's model. Configure the model on the receiving agent.`,
@@ -265,124 +243,16 @@ export async function resolveAgentSessionStart(
   const runtimeOverrides =
     input.model === undefined
       ? undefined
-      : await normalizeRuntimeOverrides({
-          bundle,
-          model: input.model,
-          name: input.name,
-          toolName: input.toolName,
-        });
+      : await roster.runtimeOverrides(input.name, input.model, input.toolName);
   return {
     agentName: action.name,
     auth: input.auth,
-    bundle,
     context,
     key: input.key,
     replyTo: input.replyTo,
+    roster,
     runtimeOverrides,
     target,
-  };
-}
-
-async function normalizeRuntimeOverrides({
-  bundle,
-  model,
-  name,
-  toolName,
-}: {
-  readonly bundle: CompiledBundle;
-  readonly model: AgentSessionModelSelection;
-  readonly name: string;
-  readonly toolName: string | undefined;
-}): Promise<AgentSessionRuntimeOverrides> {
-  const tool = await loadAgentModelsTool(bundle, toolName);
-  if (tool !== undefined) {
-    return { model: await resolveAgentToolModel(bundle, tool, model) };
-  }
-  try {
-    const selection = await resolveRuntimeModelSelection({
-      durability: "durable",
-      modelMetadata: bundle.modelMetadata,
-      selection: model,
-    });
-    return { model: selection.reference };
-  } catch (error) {
-    if (error instanceof InvalidRuntimeModelSelectionError) {
-      throw new NonRetryableError(
-        `ctx.agent("${name}", { model }) could not resolve the model selection: ${toErrorMessage(error)}`,
-      );
-    }
-    throw error;
-  }
-}
-
-interface AgentModelsTool {
-  readonly definition: CompiledBundle["resolvedAgent"]["tools"][number];
-  readonly models: NonNullable<ReturnType<typeof readAgentToolModels>>;
-}
-
-/** The `agent({ models })` tool whose run opens the session, if that is what opens it. */
-async function loadAgentModelsTool(
-  bundle: CompiledBundle,
-  toolName: string | undefined,
-): Promise<AgentModelsTool | undefined> {
-  const definition =
-    toolName === undefined
-      ? undefined
-      : bundle.resolvedAgent.tools.find((candidate) => candidate.name === toolName);
-  // Only a workflow tool's run opens sessions, and only `agent({ models })` carries models.
-  if (definition?.behavior?.handling?.kind !== "workflow-tool") return undefined;
-  const models = readAgentToolModels(
-    await loadResolvedModuleExport({
-      definition,
-      kindLabel: "tool",
-      moduleMap: bundle.moduleMap,
-      nodeId: bundle.nodeId,
-    }),
-  );
-  return models === undefined ? undefined : { definition, models };
-}
-
-/**
- * An `agent({ models })` tool names its model by option key. A live model's reference points
- * back at the tool and key, so the child reads the model again from its own module map, and
- * replay opens the same option.
- */
-async function resolveAgentToolModel(
-  bundle: CompiledBundle,
-  { definition, models }: AgentModelsTool,
-  model: AgentSessionModelSelection,
-): Promise<RuntimeModelReference> {
-  const option = typeof model === "string" ? models.get(model) : undefined;
-  if (option === undefined) {
-    throw new NonRetryableError(
-      `The "${definition.name}" tool has no model ${JSON.stringify(model)}. Use one of its agent({ models }) keys, or omit model to use the current model.`,
-    );
-  }
-  let reference: RuntimeModelReference;
-  try {
-    ({ reference } = await resolveRuntimeModelSelection({
-      durability: "live",
-      modelMetadata: bundle.modelMetadata,
-      selection: option.selection,
-    }));
-  } catch (error) {
-    if (error instanceof InvalidRuntimeModelSelectionError) {
-      throw new NonRetryableError(
-        `The "${definition.name}" tool could not resolve its model "${option.key}": ${toErrorMessage(error)}`,
-      );
-    }
-    throw error;
-  }
-  if (typeof selectionModel(option.selection) === "string") return reference;
-  return {
-    ...reference,
-    source: {
-      exportName: definition.exportName,
-      logicalPath: definition.logicalPath,
-      sourceId: definition.sourceId,
-      sourceKind: "module",
-    },
-    sourceModelOption: option.key,
   };
 }
 
@@ -399,19 +269,4 @@ export function createParentContext(
     traceContext: context.trace.parentTraceContext,
     traceRoot: context.traceRoot,
   };
-}
-
-/** The compiled agent whose subagent registry resolves the names `ctx.agent` opens. */
-export async function loadAgentSessionBundle(
-  context: AgentSessionContext,
-): Promise<CompiledBundle> {
-  if (context.bundle === undefined) {
-    throw new NonRetryableError(
-      `ctx.agent() opens the subagents of an agent compiled from files; "${context.agent.id}" is held by this process, not compiled.`,
-    );
-  }
-  return await getCompiledRuntimeAgentBundle({
-    compiledArtifactsSource: resolveDurableCompiledArtifactsSource(context.bundle.source),
-    nodeId: context.bundle.nodeId,
-  });
 }
