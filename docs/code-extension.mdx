@@ -96,6 +96,8 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 
 `gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
+GitHub chooses the author email of a commit that `gh-signed-commit` creates, so a `Signed-off-by` trailer in the message may not match it, and a DCO check then fails the commit. When the message signs off, `gh-signed-commit` compares each sign-off with the author email GitHub recorded. On a mismatch it still succeeds, and it writes that email, the exact `Signed-off-by` trailer to use, and DCO remediation text for fixing the commit without a force push to stderr. Bot authors, such as GitHub App installations, are not checked.
+
 | Option                 | Required      | Effect                                                                                     |
 | ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
 | `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |

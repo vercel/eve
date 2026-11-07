@@ -1,4 +1,4 @@
-export const GH_SIGNED_COMMIT_VERSION = "4";
+export const GH_SIGNED_COMMIT_VERSION = "5";
 
 export const GH_SIGNED_COMMIT_SOURCE = String.raw`#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
@@ -48,7 +48,7 @@ async function main() {
     head = baseHead;
   }
 
-  const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }";
+  const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url message author { name email } } } }";
   const message = { headline: options.message };
   if (options.body) message.body = options.body;
   const response = await fetch(api + "/graphql", {
@@ -70,11 +70,39 @@ async function main() {
   if (!response.ok || payload.errors?.length) {
     throw new Error("GitHub commit failed: " + (payload.errors?.map((item) => item.message).join("; ") || response.status));
   }
-  const oid = payload.data?.createCommitOnBranch?.commit?.oid;
+  const commit = payload.data?.createCommitOnBranch?.commit;
+  const oid = commit?.oid;
   if (!oid) throw new Error("GitHub commit returned no oid");
   git("fetch", "origin", options.branch);
   git("reset", "--soft", "FETCH_HEAD");
   process.stdout.write(oid + "\n");
+  const notice = signOffNotice(oid, commit.author, commit.message ?? [options.message, options.body].filter(Boolean).join("\n\n"));
+  if (notice) process.stderr.write(notice + "\n");
+}
+
+// GitHub, not the commit message, picks the author email of a commit it
+// creates, and DCO checks require a Signed-off-by that matches it. Compare the
+// message's sign-offs with the author GitHub recorded and explain a mismatch.
+function signOffNotice(oid, author, message) {
+  const signOffs = [...message.matchAll(/^signed-off-by:[ \t]*(.*?)[ \t]*<([^<>\s]+)>[ \t]*$/gimu)].map((match) => match[2]);
+  if (signOffs.length === 0) return null;
+  if (!author || typeof author.email !== "string" || !author.email) {
+    return "gh-signed-commit: could not check " + oid + "'s sign-off: GitHub returned no author email. Read it with gh api repos/" + options.repo + "/commits/" + oid + " --jq .commit.author before reporting DCO status.";
+  }
+  const email = author.email.toLowerCase();
+  // DCO checks exempt bot authors, such as GitHub App installations.
+  if (/\[bot\]@users\.noreply\.github\.com$/u.test(email)) return null;
+  if (signOffs.some((value) => value.toLowerCase() === email)) return null;
+  const identity = (author.name || author.email) + " <" + author.email + ">";
+  const trailer = "Signed-off-by: " + identity;
+  return [
+    "gh-signed-commit: sign-off mismatch: GitHub recorded " + identity + " as the author of " + oid + ", but its sign-off names " + signOffs.map((value) => "<" + value + ">").join(", ") + ". A DCO check fails this commit until a sign-off matches the author email.",
+    "Sign off every later commit on this branch with: " + trailer,
+    "To fix " + oid + " without a force push, where the repository allows DCO remediation commits, end the next commit's body with:",
+    "I, " + identity + ", hereby add my Signed-off-by to this commit: " + oid,
+    "",
+    trailer,
+  ].join("\n");
 }
 
 function ensureNoUnstagedTrackedChanges() {
