@@ -1,0 +1,19 @@
+[
+  "SkillAction",
+  "SkillApplicationMode",
+  "SkillApprovalDecision",
+  "SkillApprovalRequest",
+  "SkillApprovalRule",
+  "SkillApprovalTarget",
+  "SkillAuthor",
+  "SkillChangeEvent",
+  "SkillLimits",
+  "SkillLiveState",
+  "SkillScope",
+  "SkillScopeContext",
+  "SkillScopeResolver",
+  "SkillValidation",
+  "SkillVersionStatus",
+  "StoredSkill",
+  "default"
+]
