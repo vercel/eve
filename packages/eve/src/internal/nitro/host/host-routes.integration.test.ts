@@ -334,7 +334,8 @@ describe("rendered host routes", () => {
     const task = (await host.load(host.routes.tasks.daily!.handler)) as {
       run(event: { name: string }): Promise<unknown>;
     };
-    expect(await task.run({ name: "daily" })).toEqual({ result: "ran daily" });
+    // The task dispatches eve's own task name, whatever Nitro calls it.
+    expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran daily" });
     expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("daily", artifactsConfig);
   });
 });

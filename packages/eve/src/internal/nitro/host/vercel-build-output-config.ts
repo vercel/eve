@@ -12,6 +12,15 @@ import {
 
 export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 
+type FunctionRule = {
+  environment: Record<string, string>;
+  experimentalTriggers?: ReturnType<(typeof QUEUE_TRIGGERS)[HostRouteVercelFunction]>[];
+  maxDuration?: "max";
+};
+
+/** The route of Nitro's private Vercel Schedules function. */
+export const VERCEL_SCHEDULES_FUNCTION_ROUTE = "/_vercel/tasks";
+
 // Nitro emits `config.json` routes in `functionRules` key order; this order keeps it stable.
 const QUEUE_TRIGGERS = {
   "workflow-queue": createEveWorkflowQueueTrigger,
@@ -31,8 +40,7 @@ export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
   publicRoutePrefix?: string;
-  routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">;
-  vercelSchedules?: boolean;
+  routeTable: Pick<HostRouteTable, "routes" | "scheduleTasks">;
   workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
@@ -56,6 +64,25 @@ export function createEveVercelOptions(input: {
     environment[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] = "1";
   }
 
+  const functionRules: Record<string, FunctionRule> = Object.fromEntries([
+    ...Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
+      input.routeTable.routes
+        .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
+        .map((route) => [
+          route.path,
+          {
+            maxDuration: "max" as const,
+            experimentalTriggers: [createTrigger(input.agentName)],
+            environment,
+          },
+        ]),
+    ),
+    // Nitro adds the schedule trigger to its private schedules function.
+    ...(input.routeTable.scheduleTasks.length > 0
+      ? [[VERCEL_SCHEDULES_FUNCTION_ROUTE, { environment }]]
+      : []),
+  ]);
+
   return {
     config: {
       version: 3 as const,
@@ -64,25 +91,9 @@ export function createEveVercelOptions(input: {
         version: resolveInstalledPackageInfo().version,
       },
     },
-    ...(input.routeTable.cronHandlerRoute !== undefined && {
-      cronHandlerRoute: input.routeTable.cronHandlerRoute,
-    }),
     // Schedules run through a private function only Vercel Schedules can invoke.
     // Explicit, so an inherited `NITRO_VERCEL_SCHEDULES` can't change delivery.
-    schedules: input.vercelSchedules === true ? ("private" as const) : (false as const),
-    functionRules: Object.fromEntries(
-      Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
-        input.routeTable.routes
-          .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
-          .map((route) => [
-            route.path,
-            {
-              maxDuration: "max" as const,
-              experimentalTriggers: [createTrigger(input.agentName)],
-              environment,
-            },
-          ]),
-      ),
-    ),
+    schedules: "private" as const,
+    functionRules,
   };
 }
