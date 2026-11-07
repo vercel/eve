@@ -1,4 +1,4 @@
-import { inMemory, type MemoryDocumentBackend } from "eve/memory/file";
+import { inMemory, MemoryDocumentConflictError, type MemoryDocumentBackend } from "eve/memory/file";
 import { vercelBlob } from "eve/memory/file/vercel";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -87,6 +87,29 @@ export async function awaitReturned(person: string, cities: readonly string[], l
       throw new Error(
         `The other weather calls didn't return within ${limitMs} ms: ${waiting.join(", ")}.`,
       );
+    await sleep(200);
+  }
+}
+
+/** Records that `person`'s parent asked for its own sign-in; a second record is the same fact. */
+export async function markParentAsked(person: string) {
+  try {
+    await grants.write({
+      content: "asked",
+      expectedVersion: null,
+      key: `${person}/parent-asked`,
+      signal: deadline(),
+    });
+  } catch (error) {
+    if (!MemoryDocumentConflictError.is(error)) throw error;
+  }
+}
+
+/** Waits until `person`'s parent asked for its own sign-in, or fails after `limitMs`. */
+export async function awaitParentAsked(person: string, limitMs: number) {
+  const until = Date.now() + limitMs;
+  while ((await grants.read({ key: `${person}/parent-asked`, signal: deadline() })) === null) {
+    if (Date.now() > until) throw new Error(`The parent didn't ask within ${limitMs} ms.`);
     await sleep(200);
   }
 }

@@ -41,11 +41,10 @@ export interface FanInPlan {
   readonly again?: boolean;
   /** The last child starts only after the others report. */
   readonly late?: boolean;
-  /**
-   * The parent checks Lisbon itself: `first` in the step that starts the children, `after` once
-   * every child reported.
-   */
-  readonly parent?: "first" | "after";
+  /** The parent checks Lisbon itself once the children started, while their calls are out. */
+  readonly parent?: boolean;
+  /** The children ask for their sign-ins only once the parent asked for its own. */
+  readonly parentFirst?: boolean;
   /** Child 0 calls again after its first call fails. */
   readonly retry?: boolean;
   /** The children from this index on need the other grant. */
@@ -62,6 +61,8 @@ export interface ChildPlan {
   readonly retry?: boolean;
   /** Needs the other connector's grant. */
   readonly other?: boolean;
+  /** Asks for its sign-in only once the parent asked for its own. */
+  readonly afterParent?: boolean;
 }
 
 /** What one weather call returns. */

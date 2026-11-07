@@ -106,8 +106,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 /**
  * The parent runs `children` weather children in one step and waits for every report. With
  * `late`, the last child starts only after the others report. With `parent`, the parent checks
- * Lisbon itself, in that step or once every child reported, and reports that call's result with
- * the children's.
+ * Lisbon itself in the next step, while the children's calls are out, and reports that call's
+ * result with the children's.
  */
 function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelResponse | string {
   const reports = taskResultsOf(request, "weather-child");
@@ -115,16 +115,13 @@ function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelRespo
   const first = plan.late === true ? plan.children - 1 : plan.children;
   if (started === 0)
     return {
-      toolCalls: [
-        ...(plan.parent === "first" ? [parentWeather] : []),
-        ...Array.from({ length: first }, (_, index) => weatherChild(plan, index)),
-      ],
+      toolCalls: Array.from({ length: first }, (_, index) => weatherChild(plan, index)),
     };
+  if (plan.parent === true && !hasReceipt(request, "get_weather"))
+    return { toolCalls: [parentWeather] };
   if (started < plan.children && reports.length === started)
     return { toolCalls: [weatherChild(plan, started)] };
   if (reports.length < plan.children) return waitForTasks();
-  if (plan.parent === "after" && !hasReceipt(request, "get_weather"))
-    return { toolCalls: [parentWeather] };
   const own = request.toolResults
     .filter((result) => result.name === "get_weather")
     .map((call) => `${CHILD_REPORT} ${describeCall(call.output, call.isError)}`);
@@ -133,7 +130,7 @@ function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelRespo
 
 const parentWeather = {
   id: "parent-weather",
-  input: { city: "Lisbon parent" },
+  input: { city: "Lisbon parent", parent: true },
   name: "get_weather",
 };
 
@@ -148,6 +145,7 @@ function weatherChild(plan: FanInPlan, index: number) {
     ...(plan.again === true && index === 0 && { again: true }),
     ...(plan.retry === true && index === 0 && { retry: true }),
     ...(plan.otherFrom !== undefined && index >= plan.otherFrom && { other: true }),
+    ...(plan.parentFirst === true && { afterParent: true }),
   };
   return {
     id: `weather-child-${index}`,

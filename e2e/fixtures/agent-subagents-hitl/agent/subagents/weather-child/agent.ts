@@ -28,6 +28,7 @@ const agent: DefinedAgent = defineAgent({
               city: plan.city,
               holdFor: plan.holdFor,
               ...(plan.other === true && { grant: "other" }),
+              ...(plan.afterParent === true && { afterParent: true }),
             },
             name: "get_weather",
           },

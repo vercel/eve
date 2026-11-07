@@ -7,7 +7,14 @@ import {
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { awaitReturned, markReturned, readGrant, storeGrant } from "./weather-grants";
+import {
+  awaitParentAsked,
+  awaitReturned,
+  markParentAsked,
+  markReturned,
+  readGrant,
+  storeGrant,
+} from "./weather-grants";
 import {
   ACCEPT_CODE,
   CODE_TOKEN,
@@ -76,16 +83,27 @@ export const weatherTool = defineTool({
     holdFor: z.array(z.string()).optional(),
     /** The grant the call needs; `weather` when absent. */
     grant: z.enum(["weather", "other"]).optional(),
+    /** The parent's call: records that the parent asked, for children told to wait for it. */
+    parent: z.boolean().optional(),
+    /** Asks for the sign-in only once the parent asked for its own. */
+    afterParent: z.boolean().optional(),
   }),
   async execute(input, ctx): Promise<WeatherResult> {
     const grant = input.grant ?? "weather";
-    const token = await ctx.getToken(auths[grant], {
-      authKey: grant,
-      displayName: "Fixture Weather",
-    });
+    const person = ctx.session.auth.current?.principalId;
+    if (input.afterParent === true) {
+      if (person === undefined) throw new Error("A call that waits on the parent needs a person.");
+      await awaitParentAsked(person, HOLD_LIMIT_MS);
+    }
+    const token = await ctx
+      .getToken(auths[grant], { authKey: grant, displayName: "Fixture Weather" })
+      .catch(async (error: unknown) => {
+        // The parent's sign-in opens as this error reaches the harness, in this same step.
+        if (input.parent === true && person !== undefined) await markParentAsked(person);
+        throw error;
+      });
     if (input.holdFor === undefined)
       return { city: input.city, finishedAt: Date.now(), token: token.token };
-    const person = ctx.session.auth.current?.principalId;
     if (person === undefined) throw new Error("A held weather call needs a person.");
     if (token.token === CODE_TOKEN) {
       await awaitReturned(person, input.holdFor, HOLD_LIMIT_MS);

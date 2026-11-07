@@ -16,8 +16,7 @@ import {
 
 /**
  * Two people each run two children that need the same grant, at the same time. Each person gets
- * their own card. One person's acceptance runs only their own children: the other person's
- * sign-ins stay open until they answer their own card, and their calls run on their own grant.
+ * their own card, and each person's calls run on the grant their own card stored.
  */
 export default defineEval({
   description: "Two people's sign-ins for one grant never share a card or a grant.",

@@ -28,6 +28,8 @@ export interface FanIn {
   readUntil(done: (events: readonly SessionStreamEvent[]) => boolean): Promise<void>;
   /** Cancels the parent's turn, as the person stopping it would. */
   cancel(): Promise<void>;
+  /** Sends the parent's running turn another message from the same person. */
+  send(message: string): Promise<void>;
 }
 
 /** Starts the parent on `plan` as a fresh person, and reads its stream from the start. */
@@ -49,6 +51,9 @@ export async function startFanIn(t: EveEvalContext, plan: FanInPlan): Promise<Fa
     events,
     async cancel() {
       await session.cancel();
+    },
+    async send(message) {
+      await session.start(message, { ...person, turnPolicy: "steer" });
     },
     async readUntil(done) {
       if (done(events)) return;
