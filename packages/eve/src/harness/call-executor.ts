@@ -29,6 +29,7 @@ import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { ModelFacingError } from "#shared/model-facing-error.js";
 import { callProgress } from "#harness/call-facts.js";
 import { settleCall, startCall } from "#harness/session-machine/calls.js";
 import { withUsageCall } from "#harness/usage-sink.js";
@@ -177,6 +178,7 @@ export async function executeToolCall(
     let failed = false;
     let failure = "";
     let thrown: Error | undefined;
+    let modelText: string | undefined;
     const telemetry = toolTelemetry(input.telemetry, {
       // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,
@@ -226,6 +228,11 @@ export async function executeToolCall(
               output = await raceAbort(Promise.resolve(executed), abandon);
             }
           });
+        } catch (error) {
+          // An app-chosen text replaces only what the model reads: every wrapper sees the cause.
+          if (!(error instanceof ModelFacingError)) throw error;
+          modelText = error.message;
+          throw error.cause;
         } finally {
           executionMs = performance.now() - startedAt;
         }
@@ -240,7 +247,7 @@ export async function executeToolCall(
       failed = true;
       thrown = toError(error);
       output = thrown.message;
-      failure = modelFacingError(error);
+      failure = modelText ?? modelFacingError(error);
     }
     if (!failed) {
       await telemetry.ended(

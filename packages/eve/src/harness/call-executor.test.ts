@@ -7,6 +7,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { ModelFacingError } from "#shared/model-facing-error.js";
 
 it.each([
   [undefined, "run"],
@@ -287,4 +288,59 @@ it("closes a streaming tool when progress publication fails", async () => {
   });
   expect(result.parts[0]?.output).toMatchObject({ type: "error-text" });
   expect(closed).toBe(true);
+});
+
+it("gives the model an app-chosen error text and keeps the original error everywhere else", async () => {
+  const original = new Error("Modern MCP result is missing resultType");
+  const text = "The tracker answered in a format eve could not read. The call may have run.";
+  const events: import("#protocol/session-event.js").SessionEvent[] = [];
+  const wrapped: unknown[] = [];
+  const ended: unknown[] = [];
+  const result = await executeInlineCalls({
+    abortSignal: undefined,
+    telemetry: {
+      integrations: [
+        {
+          executeTool: async ({ execute }) => {
+            try {
+              return await execute();
+            } catch (error) {
+              wrapped.push(error);
+              throw error;
+            }
+          },
+          onToolExecutionEnd: ({ toolOutput }) => {
+            ended.push(toolOutput);
+          },
+        },
+      ],
+    },
+    approvalMemory: { pending: [], remembered: {} },
+    beforeExecute: () => {},
+    excludedCallIds: new Set(),
+    messages: [],
+    publish: async (publication) => {
+      events.push(...eventsOf(publication));
+    },
+    toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "save", type: "tool-call" }],
+    tools: new Map([
+      [
+        "save",
+        {
+          name: "save",
+          description: "Save notes",
+          inputSchema: jsonSchema({ type: "object" }),
+          execute: () => {
+            throw new ModelFacingError(text, { cause: original });
+          },
+        },
+      ],
+    ]),
+  });
+  expect(result.parts[0]?.output).toEqual({ type: "error-text", value: text });
+  expect(wrapped).toEqual([original]);
+  expect(ended).toEqual([expect.objectContaining({ error: original, type: "tool-error" })]);
+  const settled = JSON.stringify(events.find((event) => event.type === "call.settled"));
+  expect(settled).toContain(original.message);
+  expect(settled).not.toContain(text);
 });
