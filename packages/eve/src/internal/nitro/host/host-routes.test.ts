@@ -182,17 +182,26 @@ describe("createHostRouteTable", () => {
   });
 
   it.each([
-    { mode: "development", vercel: false, tasks: 0, cron: false, consumer: false },
-    { mode: "production", vercel: false, tasks: 1, cron: false, consumer: false },
-    { mode: "production", vercel: true, tasks: 1, cron: true, consumer: true },
+    {
+      mode: "development",
+      vercel: false,
+      schedules: false,
+      tasks: 0,
+      cron: false,
+      consumer: false,
+    },
+    { mode: "production", vercel: false, schedules: false, tasks: 1, cron: false, consumer: false },
+    { mode: "production", vercel: true, schedules: false, tasks: 1, cron: true, consumer: true },
+    { mode: "production", vercel: true, schedules: true, tasks: 1, cron: false, consumer: true },
   ] as const)(
-    "registers schedules for $mode (vercel: $vercel)",
-    ({ consumer, cron, mode, tasks, vercel }) => {
+    "registers schedules for $mode (vercel: $vercel, schedules: $schedules)",
+    ({ consumer, cron, mode, schedules, tasks, vercel }) => {
       const result = table({
         manifest: manifest({ vercelScheduleCollection: true }),
         mode,
         scheduleRegistrations: [DAILY],
         vercel,
+        vercelSchedules: schedules,
       });
 
       expect(result.scheduleTasks).toHaveLength(tasks);

@@ -166,4 +166,18 @@ describe("createEveVercelOptions", () => {
       },
     );
   });
+
+  it("runs schedules through private Vercel Schedules only when asked", () => {
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable })?.schedules,
+    ).toBe(false);
+    expect(
+      createEveVercelOptions({
+        agentName: "test-agent",
+        enabled: true,
+        routeTable,
+        vercelSchedules: true,
+      })?.schedules,
+    ).toBe("private");
+  });
 });

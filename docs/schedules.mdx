@@ -127,11 +127,13 @@ The route exists only in development. Production builds never include it. It nee
 
 ## On Vercel
 
-Hosted Vercel builds turn every schedule into a Vercel Cron Job entry in `.vercel/output/config.json`. When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, Vercel adds each agent's schedules to the project's cron entries. Named agents use their `/eve/<name>` route prefix.
+Hosted Vercel builds run every schedule with [Vercel Schedules](https://vercel.com/docs/schedules). Each schedule becomes its own Vercel schedule in `.vercel/output/config.json`. The schedule invokes a private function that has no public route, so no `CRON_SECRET` is needed. Each schedule runs in its own invocation, so one failing schedule doesn't affect the others. Failed invocations aren't retried.
 
-When you run `vercel build` locally, use Vercel CLI 56.4.0 or later so the project output includes these cron entries.
+Vercel Schedules is in beta and must be enabled for your Vercel team.
 
-Confirm that Vercel found the schedules under **Settings → Cron Jobs**. Find run history under **Observability → Cron Jobs**, and per-run logs under **Observability → Logs**.
+When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, each agent builds as a Vercel service. Vercel doesn't accept schedules from a service's build output yet, so these agents use Vercel Cron Jobs instead. Vercel adds each agent's schedules to the project's cron entries. Named agents use their `/eve/<name>` route prefix. When you run `vercel build` locally, use Vercel CLI 56.4.0 or later so the project output includes these cron entries.
+
+Find run history and per-run logs under **Observability → Logs**. For `withEve` agents, confirm that Vercel found the schedules under **Settings → Cron Jobs**.
 
 ## Self-deployed hosts
 

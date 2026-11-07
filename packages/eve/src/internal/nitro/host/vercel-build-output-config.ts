@@ -32,6 +32,7 @@ export function createEveVercelOptions(input: {
   enabled: boolean;
   publicRoutePrefix?: string;
   routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">;
+  vercelSchedules?: boolean;
   workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
@@ -66,6 +67,9 @@ export function createEveVercelOptions(input: {
     ...(input.routeTable.cronHandlerRoute !== undefined && {
       cronHandlerRoute: input.routeTable.cronHandlerRoute,
     }),
+    // Schedules run through a private function only Vercel Schedules can invoke.
+    // Explicit, so an inherited `NITRO_VERCEL_SCHEDULES` can't change delivery.
+    schedules: input.vercelSchedules === true ? ("private" as const) : (false as const),
     functionRules: Object.fromEntries(
       Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
         input.routeTable.routes
