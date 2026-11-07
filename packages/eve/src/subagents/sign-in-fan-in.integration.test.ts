@@ -79,6 +79,35 @@ describe("one sign-in answer for parallel children", () => {
     });
   });
 
+  it("completes the other children's sign-ins while the answered child's call still runs", async () => {
+    const app = await createApp("sign-in-fan-in-held", { grant: "oauth/weather", holdFirst: true });
+
+    await app.runtime.run(async () => {
+      const run = await startParent(app.name);
+      const stream = captureEvents(run);
+      try {
+        const before = await signInCards(stream, CHILDREN);
+        const [card] = before.filter(isSignInOpened);
+        await completeSignIn(card!, { code: "oauth-code" });
+        // The answered child's call holds after its sign-in completes; the others still run.
+        await app.othersRan();
+        expect(app.executions(), "calls that ran while one held").toHaveLength(CHILDREN - 1);
+        app.release();
+        const after = await stream.nextUntil("parent turn", isTurnSettled);
+
+        expect([...before, ...after].filter(isSignInOpened).filter(isShownCard)).toEqual([card]);
+        expect(app.executions()).toHaveLength(CHILDREN);
+        expect(filterEventsByType(after, "turn.settled").map((e) => e.data.outcome)).toEqual([
+          "completed",
+        ]);
+      } finally {
+        app.release();
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("delivers the answer again after a delivery to one child fails, with no other card", async () => {
     const app = await createApp("sign-in-fan-in-retry", { grant: "oauth/weather" });
 
@@ -532,8 +561,19 @@ async function createApp(
     readonly grant?: string;
     /** The parent's own tool needs the sign-in too; with `first`, the children ask after it. */
     readonly parentAsks?: boolean | "first";
+    /** The first call to get a token holds until `release`, as a long command would. */
+    readonly holdFirst?: boolean;
   },
 ) {
+  let holding = false;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let othersRan = () => {};
+  const others = new Promise<void>((resolve) => {
+    othersRan = resolve;
+  });
   let granted = false;
   let revoked = false;
   // With `parentAsks: "first"`, the children ask once the test has seen the parent's card.
@@ -603,7 +643,12 @@ async function createApp(
                 authKey: porto ? "weather-porto" : "weather",
                 displayName: "Weather",
               });
+              if (options.holdFirst === true && !holding) {
+                holding = true;
+                await held;
+              }
               executions.push(input.city);
+              if (holding && executions.length === (options.children ?? CHILDREN) - 1) othersRan();
               return { city: input.city, summary: `authorized with ${token.token}` };
             },
             inputSchema: z.object({ city: z.string() }),
@@ -616,6 +661,8 @@ async function createApp(
   return {
     completes: () => completes,
     executions: () => executions,
+    othersRan: () => others,
+    release: () => release(),
     releaseChildren,
     name,
     runtime,
