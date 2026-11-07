@@ -47,23 +47,23 @@ export default defineChannel({
         region: process.env.VERCEL_REGION ?? null,
       });
     }),
-    // Cross-request steps for one key: `read`, `write`, then `poll`; each reports its instance.
-    GET("/fixture-blob-probe/step", async (request) => {
-      const url = new URL(request.url);
-      const key = url.searchParams.get("key")!;
-      const step = url.searchParams.get("step");
-      const at = Date.now();
-      if (step === "read")
-        return Response.json({ at, instance: INSTANCE, result: await read(key) });
-      if (step === "write") {
-        await write(key);
-        return Response.json({ at, instance: INSTANCE, result: "written" });
-      }
+    // Reads `key` once (missing), then keeps polling on this same instance while a separate
+    // request writes it. Reports this instance so the eval can compare it with the writer's.
+    GET("/fixture-blob-probe/read-then-poll", async (request) => {
+      const key = new URL(request.url).searchParams.get("key")!;
+      const firstReadAt = Date.now();
+      const firstRead = await read(key);
       return Response.json({
-        at,
+        firstRead,
+        firstReadAt,
         instance: INSTANCE,
-        ...(await poll(key, Number(url.searchParams.get("since")), 35_000)),
+        ...(await poll(key, firstReadAt, 35_000)),
       });
+    }),
+    GET("/fixture-blob-probe/write", async (request) => {
+      const key = new URL(request.url).searchParams.get("key")!;
+      await write(key);
+      return Response.json({ instance: INSTANCE, writtenAt: Date.now() });
     }),
   ],
 });

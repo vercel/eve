@@ -1,5 +1,6 @@
 import { defineEval } from "eve/evals";
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 
 /** PROBE, do not merge: see agent/channels/blob-probe.ts. Logs results; asserts nothing. */
 export default defineEval({
@@ -12,16 +13,18 @@ export default defineEval({
       return `${response.status} ${await response.text()}`;
     };
     t.log(`same ${await get("/fixture-blob-probe/same")}`);
-    for (const round of [0, 1, 2]) {
-      const key = `${randomUUID()}/cross`;
-      t.log(`cross ${round} read ${await get(`/fixture-blob-probe/step?step=read&key=${key}`)}`);
-      const results = await Promise.all([
-        get(`/fixture-blob-probe/step?step=write&key=${key}`),
-        ...[0, 1, 2].map(() =>
-          get(`/fixture-blob-probe/step?step=poll&since=${Date.now()}&key=${key}`),
-        ),
-      ]);
-      for (const line of results) t.log(`cross ${round} ${line}`);
-    }
+    // The reader holds its poll on the instance that read the path as missing; the writer is a
+    // separate request, which may land on another instance. Only rounds whose instances differ
+    // test the cross-instance case; both IDs are logged.
+    await Promise.all(
+      [0, 1, 2, 3, 4, 5].map(async (round) => {
+        const key = `${randomUUID()}/cross`;
+        const reader = get(`/fixture-blob-probe/read-then-poll?key=${key}`);
+        await sleep(1_500);
+        const writer = await get(`/fixture-blob-probe/write?key=${key}`);
+        t.log(`cross ${round} writer ${writer}`);
+        t.log(`cross ${round} reader ${await reader}`);
+      }),
+    );
   },
 });
