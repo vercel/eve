@@ -244,7 +244,7 @@ jobs:
         run: pnpm --filter @eve/agent-desktop test:live
 
   test-framework-fixtures:
-    name: test-framework-fixtures (next, nuxt, sveltekit, tanstack)
+    name: test-framework-fixtures (next, nuxt, sveltekit, tanstack, vite)
     runs-on: ubuntu-latest
 
     steps:

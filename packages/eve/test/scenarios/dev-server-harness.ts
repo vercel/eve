@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { request as requestHttp, type Agent } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { existsSync, watch as watchFileSystem } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Readable } from "node:stream";
@@ -337,6 +338,29 @@ export async function waitForPath(path: string, timeoutMs: number = 60_000): Pro
       settle(resolve);
     }
   });
+}
+
+/** Reserve a loopback port and release it, so a server can bind it next. */
+export async function findFreePort(): Promise<number> {
+  const server = createNetServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (address === null || typeof address === "string") {
+    throw new Error("Expected a TCP address for the free-port probe.");
+  }
+  return address.port;
+}
+
+/** Fetch a URL for readiness polling, treating a refused connection as "not yet". */
+export async function fetchStatus(url: string): Promise<number | undefined> {
+  try {
+    const response = await fetch(url);
+    await response.body?.cancel();
+    return response.status;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function fetchText(serverUrl: string, path: string): Promise<string> {
