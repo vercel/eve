@@ -82,7 +82,7 @@ describe("createEveVitePlugin", () => {
     expect(resolveSharedEveDevServerMock).not.toHaveBeenCalled();
   });
 
-  it("starts a dev server without local agent files when EVE_BASE_URL is set", async () => {
+  it("proxies to EVE_BASE_URL without local agent files", async () => {
     vi.stubEnv("EVE_BASE_URL", "https://agent.example.com");
     const root = await createTemporaryDirectory("eve-vite-plugin-");
 
@@ -145,6 +145,26 @@ describe("createEveVitePlugin", () => {
 
     await expect(runConfig(plugin, root, previewEnv)).resolves.toEqual({});
     expect(resolveSharedEveDevServerMock).not.toHaveBeenCalled();
+  });
+
+  it("proxies each workspace member to its own dev server in preview", async () => {
+    const root = await createTemporaryDirectory("eve-vite-plugin-");
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
+    await Promise.all([
+      mkdir(join(root, "agents", "a", "agent"), { recursive: true }),
+      mkdir(join(root, "agents", "b", "agent"), { recursive: true }),
+    ]);
+    resolveSharedEveDevServerMock
+      .mockResolvedValueOnce({ origin: "http://127.0.0.1:1111" })
+      .mockResolvedValueOnce({ origin: "http://127.0.0.1:2222" });
+
+    const result = await runConfig(createEveVitePlugin({ host, options: {} }), root, previewEnv);
+
+    expect(resolveSharedEveDevServerMock).toHaveBeenCalledTimes(2);
+    expect(result.preview?.proxy).toEqual({
+      "/eve/a/v1": expect.objectContaining({ target: "http://127.0.0.1:1111" }),
+      "/eve/b/v1": expect.objectContaining({ target: "http://127.0.0.1:2222" }),
+    });
   });
 
   it("fails fast when a Nitro-only host did not install the Nitro plugin", async () => {

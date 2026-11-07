@@ -191,10 +191,10 @@ export function createEveVitePlugin(input: {
           return {};
         }
 
-        // Every workspace member's dev server serves it at `/eve/v1`, so
-        // preview (which reuses dev servers) needs just one server.
+        // Each workspace member's dev server serves only that member at
+        // `/eve/v1`, so dev and preview both need one server per member.
         const origins = await Promise.all(
-          (isPreview ? agents.slice(0, 1) : agents).map(async (agent) => {
+          agents.map(async (agent) => {
             const handle = await resolveEveAgentDevServer(agent, host, devServerTimeoutMs);
             if (handle.process !== undefined) {
               spawnedDevServers.set(agent.appRoot, handle.process);
@@ -205,7 +205,7 @@ export function createEveVitePlugin(input: {
         const proxy: Record<string, ProxyOptions> = {};
         const routeRules: Record<string, { readonly proxy: string }> = {};
         for (const [index, agent] of agents.entries()) {
-          const origin = origins[isPreview ? 0 : index];
+          const origin = origins[index];
           const publicPrefix = joinEveRoutePath(agent.publicRoutePrefix, EVE_ROUTE_PREFIX);
           proxy[publicPrefix] = {
             changeOrigin: true,

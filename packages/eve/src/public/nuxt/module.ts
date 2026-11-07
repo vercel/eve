@@ -14,7 +14,7 @@ import {
 } from "#shared/framework-eve-integration.js";
 import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 
-import { resolveProductionOrigin } from "./production-origin.js";
+import { resolveProductionTarget } from "./production-origin.js";
 
 const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
 
@@ -138,9 +138,9 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
             }
             target = `${handle.origin}${EVE_ROUTE_PREFIX}`;
           } else {
-            // A built eve workspace runs each member as its own server, which
-            // serves `/eve/v1` and takes the next port from the base.
-            target = `${resolveProductionOrigin(index)}${EVE_ROUTE_PREFIX}`;
+            // An origin override mounts every agent under its public prefix;
+            // otherwise each member runs as its own server on the next port.
+            target = resolveProductionTarget({ portOffset: index, publicPrefix });
           }
           extendRouteRules(`${publicPrefix}/**`, { proxy: `${target}/**` });
         }),

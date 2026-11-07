@@ -96,7 +96,7 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** The module doesn't start eve in production; run the eve service yourself. `nuxt build` writes proxy rules that send the eve routes to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. An `agents/` workspace runs each member as its own server on the next port instead (`4275`, `4276`, ...), because each serves `/eve/v1`. Override the first port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
+- **Non-Vercel hosts.** The module doesn't start eve in production; run the eve service yourself. `nuxt build` writes proxy rules that send the eve routes to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. With `EVE_NUXT_PRODUCTION_ORIGIN`, each `agents/` workspace member keeps its own path on that host (`/eve/<name>/v1`). Without it, each member runs as its own server serving `/eve/v1`, on consecutive ports from `4274` in alphabetical order of member name (`4274`, `4275`, ...). Override the first port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
 
   ```bash
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
