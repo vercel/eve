@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import type { Plugin, ProxyOptions, UserConfig } from "vite";
+import type { Plugin, PluginOption, ProxyOptions, UserConfig, ViteBuilder } from "vite";
 
 import {
   parseVercelServicesConfig,
@@ -12,6 +12,7 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath, normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
 import {
   addEveVercelServices,
+  readEveBaseUrlOrigin,
   resolveEveAgentDevServer,
   resolveEveAgents,
   type EveFrameworkAgent,
@@ -72,6 +73,18 @@ interface EveNitroModule {
   }): Promise<void>;
 }
 
+function flattenPlugins(options: readonly PluginOption[]): Plugin[] {
+  const plugins: Plugin[] = [];
+  for (const option of options) {
+    if (Array.isArray(option)) {
+      plugins.push(...flattenPlugins(option));
+    } else if (option !== null && typeof option === "object" && "name" in option) {
+      plugins.push(option as Plugin);
+    }
+  }
+  return plugins;
+}
+
 /**
  * Create a Vite plugin that runs eve agents alongside a Vite app.
  *
@@ -89,11 +102,15 @@ export function createEveVitePlugin(input: {
   const { host, nitroOnly, options, vercelOutputAfterSsrBundle } = input;
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, host);
   let viteRoot: string;
+  let projectRoot: string;
   let agents: readonly EveFrameworkAgent[];
   let isPreview = false;
   let isSsrBuild = false;
   let isVercelBuild = false;
   let nitroModuleInstalled = false;
+  // Nitro's own preview server answers every request, and its build Vite
+  // instance does not share this module state, so its plugin name is the signal.
+  let nitroServesPreview = false;
 
   async function addEveVercelServicesToOutput(): Promise<void> {
     const outputConfigPath = join(viteRoot, ".vercel", "output", "config.json");
@@ -107,7 +124,12 @@ export function createEveVitePlugin(input: {
         }
         return parseVercelServicesConfig(JSON.parse(source), outputConfigPath);
       },
-      { agents, eveBuildCommand: options.eveBuildCommand, host, projectRoot: viteRoot },
+      {
+        agents,
+        eveBuildCommand: options.eveBuildCommand,
+        host,
+        hostRoot: viteRoot,
+      },
     );
     if (config !== undefined) {
       await writeFile(outputConfigPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -131,7 +153,7 @@ export function createEveVitePlugin(input: {
           agents,
           eveBuildCommand: options.eveBuildCommand,
           host,
-          projectRoot: viteRoot,
+          hostRoot: viteRoot,
         });
         if (config !== undefined) {
           nitro.options.vercel = { ...nitro.options.vercel, config };
@@ -143,32 +165,57 @@ export function createEveVitePlugin(input: {
       order: "pre",
       async handler(config, env): Promise<NitroUserConfig> {
         viteRoot = resolve(config.root ?? "");
-        agents = await resolveEveAgents(resolve(viteRoot, options.eveRoot ?? ""));
+        projectRoot = resolve(viteRoot, options.eveRoot ?? "");
         isPreview = env.isPreview === true;
+        nitroServesPreview =
+          isPreview &&
+          flattenPlugins(config.plugins ?? []).some((plugin) => plugin.name === "nitro:preview");
         isVercelBuild = env.command === "build" && Boolean(process.env.VERCEL);
-        if (env.command !== "serve" || (isPreview && nitroOnly)) {
+        if (env.command !== "serve") {
+          // Vercel needs the agents to generate their services; every other
+          // build needs none, and may have no agent files at all.
+          agents = isVercelBuild ? await resolveEveAgents(projectRoot) : [];
+          return {};
+        }
+        // The proxy only needs the agent names, so a frontend that reaches an
+        // agent elsewhere can build without local agent files.
+        const configuredOrigin = readEveBaseUrlOrigin();
+        agents =
+          configuredOrigin === undefined
+            ? await resolveEveAgents(projectRoot)
+            : [{ appRoot: projectRoot, publicRoutePrefix: "" }];
+        // Nitro answers every preview request itself, so a proxy or a dev
+        // server here would do nothing. A Nitro-only host always reaches
+        // preview through it.
+        if (nitroServesPreview || (isPreview && nitroOnly)) {
           return {};
         }
 
-        const proxy: Record<string, ProxyOptions> = {};
-        const routeRules: Record<string, { readonly proxy: string }> = {};
-        await Promise.all(
-          agents.map(async (agent) => {
+        // Every workspace member's dev server serves it at `/eve/v1`, so
+        // preview (which reuses dev servers) needs just one server.
+        const origins = await Promise.all(
+          (isPreview ? agents.slice(0, 1) : agents).map(async (agent) => {
             const handle = await resolveEveAgentDevServer(agent, host, devServerTimeoutMs);
             if (handle.process !== undefined) {
               spawnedDevServers.set(agent.appRoot, handle.process);
             }
-            const publicPrefix = joinEveRoutePath(agent.publicRoutePrefix, EVE_ROUTE_PREFIX);
-            proxy[publicPrefix] = {
-              changeOrigin: true,
-              rewrite: normalizePublicEveRoutePath,
-              target: handle.origin,
-            };
-            routeRules[`${publicPrefix}/**`] = {
-              proxy: `${handle.origin}${EVE_ROUTE_PREFIX}/**`,
-            };
+            return handle.origin;
           }),
         );
+        const proxy: Record<string, ProxyOptions> = {};
+        const routeRules: Record<string, { readonly proxy: string }> = {};
+        for (const [index, agent] of agents.entries()) {
+          const origin = origins[isPreview ? 0 : index];
+          const publicPrefix = joinEveRoutePath(agent.publicRoutePrefix, EVE_ROUTE_PREFIX);
+          proxy[publicPrefix] = {
+            changeOrigin: true,
+            rewrite: normalizePublicEveRoutePath,
+            target: origin,
+          };
+          routeRules[`${publicPrefix}/**`] = {
+            proxy: `${origin}${EVE_ROUTE_PREFIX}/**`,
+          };
+        }
 
         if (isPreview) {
           return { preview: { proxy } };
@@ -198,10 +245,18 @@ export function createEveVitePlugin(input: {
     },
     buildApp: {
       order: "post",
-      async handler() {
-        if (isVercelBuild && !nitroModuleInstalled && !vercelOutputAfterSsrBundle) {
-          await addEveVercelServicesToOutput();
+      async handler(builder: ViteBuilder) {
+        if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
+          return;
         }
+        // `buildApp` runs before Vite builds the environments that `--app`
+        // selects, so the adapter has not written `.vercel/output` yet.
+        for (const environment of Object.values(builder.environments)) {
+          if (!environment.isBuilt) {
+            await builder.build(environment);
+          }
+        }
+        await addEveVercelServicesToOutput();
       },
     },
     closeBundle: {

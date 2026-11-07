@@ -12,8 +12,8 @@ const createTemporaryDirectory = useTemporaryDirectories();
 const host = { label: "Vite", slug: "vite" };
 const agents = [{ appRoot: "/app", publicRoutePrefix: "" }];
 
-const readNothing = async (): Promise<never> => {
-  throw new Error("read the build output");
+const never = async (): Promise<never> => {
+  throw new Error("generated services for a project that declares them");
 };
 
 async function writeFiles(root: string, files: Record<string, string>): Promise<void> {
@@ -44,11 +44,11 @@ describe("addEveVercelServices", () => {
     });
 
     await expect(
-      addEveVercelServices(readNothing, {
+      addEveVercelServices(never, {
         agents,
         eveBuildCommand: undefined,
         host,
-        projectRoot: root,
+        hostRoot: root,
       }),
     ).resolves.toBeUndefined();
   });
@@ -58,11 +58,11 @@ describe("addEveVercelServices", () => {
     await writeFiles(root, { "vercel.json": vercelServices([["web", "vite"]]) });
 
     await expect(
-      addEveVercelServices(readNothing, {
+      addEveVercelServices(never, {
         agents,
         eveBuildCommand: undefined,
         host,
-        projectRoot: root,
+        hostRoot: root,
       }),
     ).rejects.toThrow(/already defines services/);
   });
@@ -74,11 +74,11 @@ describe("addEveVercelServices", () => {
     });
 
     await expect(
-      addEveVercelServices(readNothing, {
+      addEveVercelServices(never, {
         agents,
         eveBuildCommand: undefined,
         host,
-        projectRoot: root,
+        hostRoot: root,
       }),
     ).resolves.toBeUndefined();
   });
@@ -96,11 +96,11 @@ describe("addEveVercelServices", () => {
     await mkdir(hostRoot, { recursive: true });
 
     await expect(
-      addEveVercelServices(readNothing, {
+      addEveVercelServices(never, {
         agents,
         eveBuildCommand: undefined,
         host,
-        projectRoot: hostRoot,
+        hostRoot,
       }),
     ).resolves.toBeUndefined();
   });
@@ -118,11 +118,11 @@ describe("addEveVercelServices", () => {
     await writeFiles(hostRoot, { "vercel.json": vercelServices([["web", "vite"]]) });
 
     await expect(
-      addEveVercelServices(readNothing, {
+      addEveVercelServices(never, {
         agents,
         eveBuildCommand: undefined,
         host,
-        projectRoot: hostRoot,
+        hostRoot,
       }),
     ).rejects.toThrow(/already defines services/);
   });

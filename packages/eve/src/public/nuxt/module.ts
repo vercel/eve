@@ -8,6 +8,7 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   addEveVercelServices,
+  readEveBaseUrlOrigin,
   resolveEveAgentDevServer,
   resolveEveAgents,
 } from "#shared/framework-eve-integration.js";
@@ -79,7 +80,7 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   async setup(options, nuxt) {
     const nuxtRoot = nuxt.options.rootDir;
     const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NUXT_HOST);
-    const agents = await resolveEveAgents(resolve(nuxtRoot, options.eveRoot ?? ""));
+    const eveProjectRoot = resolve(nuxtRoot, options.eveRoot ?? "");
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
@@ -100,10 +101,10 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
     if (!nuxt.options.dev && process.env.VERCEL) {
       const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroVercelConfigHost }).nitro;
       const config = await addEveVercelServices(async () => nitro.vercel?.config ?? {}, {
-        agents,
+        agents: await resolveEveAgents(eveProjectRoot),
         eveBuildCommand: options.eveBuildCommand,
         host: EVE_NUXT_HOST,
-        projectRoot: nuxtRoot,
+        hostRoot: nuxtRoot,
       });
       if (config !== undefined) {
         nitro.vercel = { ...nitro.vercel, config };
@@ -117,9 +118,15 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
     // the proxy route rule is registered in time while other modules' setup
     // isn't blocked behind the spawn.
     nuxt.hook("modules:done", async () => {
+      // The proxy only needs the agent names, so a frontend that reaches an
+      // agent elsewhere needs no local agent files.
+      const agents =
+        readEveBaseUrlOrigin() === undefined
+          ? await resolveEveAgents(eveProjectRoot)
+          : [{ appRoot: eveProjectRoot, publicRoutePrefix: "" }];
       const children: ChildProcess[] = [];
       await Promise.all(
-        agents.map(async (agent) => {
+        agents.map(async (agent, index) => {
           const publicPrefix = joinEveRoutePath(agent.publicRoutePrefix, EVE_ROUTE_PREFIX);
           let target: string;
           if (nuxt.options.dev) {
@@ -131,8 +138,9 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
             }
             target = `${handle.origin}${EVE_ROUTE_PREFIX}`;
           } else {
-            // A built eve workspace serves each member under its own mount.
-            target = `${resolveProductionOrigin()}${publicPrefix}`;
+            // A built eve workspace runs each member as its own server, which
+            // serves `/eve/v1` and takes the next port from the base.
+            target = `${resolveProductionOrigin(index)}${EVE_ROUTE_PREFIX}`;
           }
           extendRouteRules(`${publicPrefix}/**`, { proxy: `${target}/**` });
         }),

@@ -74,7 +74,7 @@ The browser still needs a production authentication policy. See [Authenticate br
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` starts an eve dev server for each agent and proxies its routes to it. The browser talks only to the SvelteKit origin. `npm run build && npm run preview` works the same way: the preview server proxies the eve routes. A server the plugin starts stops when the Vite server closes.
+- **Local dev.** `npm run dev` starts an eve dev server for each agent and proxies its routes to it. The browser talks only to the SvelteKit origin. `npm run build && npm run preview` works the same way: the preview server proxies the eve routes. A server the plugin starts stops when the Vite server closes. Any tool that loads `vite.config.ts` in serve mode, such as Vitest, starts or reuses a server, so keep `eveSvelteKit()` out of a separate test config.
 - **Vercel.** The SvelteKit app and the eve runtime deploy as a single project. On Vercel builds, the plugin adds an eve [service](https://vercel.com/docs/services) per agent and routes its transport requests to it before filesystem routing. The SvelteKit app serves everything else, and no `vercel.json` is required. By default, each generated service runs the installed eve binary from its agent root, so agent directories don't need their own `package.json`. When the agents need their own build step, set `eveBuildCommand`:
 
   ```ts

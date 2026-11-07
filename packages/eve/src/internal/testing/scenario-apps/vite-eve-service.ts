@@ -3,7 +3,8 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 /**
  * A Vite host with a generated eve Vercel service. The agent lives in the
  * host root, and a stand-in for a framework adapter writes the Vercel Build
- * Output that `eveVite()` adds the eve service to.
+ * Output in `closeBundle`, as real adapters do, so `eveVite()` must run after
+ * the environment builds.
  */
 export function createViteEveServiceDescriptor(): ScenarioAppDescriptor {
   return {
@@ -25,7 +26,7 @@ export default defineConfig({
   plugins: [
     {
       name: "build-output",
-      async buildApp() {
+      async closeBundle() {
         await mkdir(".vercel/output", { recursive: true });
         await writeFile(
           ".vercel/output/config.json",

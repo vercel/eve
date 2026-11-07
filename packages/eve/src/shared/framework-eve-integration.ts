@@ -26,6 +26,21 @@ import { findClosestLinkedVercelDirectory } from "#shared/vercel-output-director
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 
+/** Validate `EVE_BASE_URL` and reduce it to its origin, when set. */
+export function readEveBaseUrlOrigin(): string | undefined {
+  const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
+  if (configuredEveBaseUrl === undefined || configuredEveBaseUrl.length === 0) {
+    return undefined;
+  }
+  const url = URL.parse(configuredEveBaseUrl);
+  if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    throw new Error(
+      `${EVE_BASE_URL_ENV} must be an absolute http(s) URL such as http://127.0.0.1:2000, received "${configuredEveBaseUrl}".`,
+    );
+  }
+  return url.origin;
+}
+
 /**
  * One eve agent mounted by a framework integration. `publicRoutePrefix` is
  * empty for a standalone agent, which mounts at `/eve/v1`.
@@ -64,15 +79,9 @@ export async function resolveEveAgentDevServer(
   host: EveFrameworkHost,
   timeoutMs: number | undefined,
 ): Promise<EveProcessHandle> {
-  const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
-  if (configuredEveBaseUrl) {
-    const url = URL.parse(configuredEveBaseUrl);
-    if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) {
-      throw new Error(
-        `${EVE_BASE_URL_ENV} must be an absolute http(s) URL such as http://127.0.0.1:2000, received "${configuredEveBaseUrl}".`,
-      );
-    }
-    return { origin: url.origin };
+  const configuredOrigin = readEveBaseUrlOrigin();
+  if (configuredOrigin !== undefined) {
+    return { origin: configuredOrigin };
   }
 
   return resolveSharedEveDevServer({
@@ -95,15 +104,15 @@ export async function addEveVercelServices(
     readonly agents: readonly EveFrameworkAgent[];
     readonly eveBuildCommand: string | undefined;
     readonly host: EveFrameworkHost;
-    readonly projectRoot: string;
+    readonly hostRoot: string;
   },
 ): Promise<VercelServicesConfig | undefined> {
-  // A vercel.ts that composes eve with `withEve` declares the eve services,
-  // and the host app's build is one of them. With a Vercel Root Directory it
-  // lives at the linked project root rather than the host root.
-  const vercelDirectory = await findClosestLinkedVercelDirectory(input.projectRoot);
-  const linkedRoot = vercelDirectory === undefined ? input.projectRoot : dirname(vercelDirectory);
-  for (const root of new Set([input.projectRoot, linkedRoot])) {
+  // Config lives at the host root, where the build output is written, not at
+  // the eve project root that `eveRoot` can move elsewhere. With a Vercel Root
+  // Directory the linked project root holds it instead.
+  const vercelDirectory = await findClosestLinkedVercelDirectory(input.hostRoot);
+  const linkedRoot = vercelDirectory === undefined ? input.hostRoot : dirname(vercelDirectory);
+  for (const root of new Set([input.hostRoot, linkedRoot])) {
     if ((await readOptionalFile(join(root, "vercel.ts")))?.includes("eve/vercel")) {
       return undefined;
     }
@@ -111,9 +120,9 @@ export async function addEveVercelServices(
 
   // A vercel.json at the host root wins; otherwise the linked project root's
   // config describes the deploy.
-  const hostConfig = await readVercelJsonFile(join(input.projectRoot, "vercel.json"));
+  const hostConfig = await readVercelJsonFile(join(input.hostRoot, "vercel.json"));
   const rootConfig =
-    linkedRoot === input.projectRoot || hasServices(hostConfig.services)
+    linkedRoot === input.hostRoot || hasServices(hostConfig.services)
       ? hostConfig
       : await readVercelJsonFile(join(linkedRoot, "vercel.json"));
   const rootServices = createServiceConfigRecord(rootConfig.services);
@@ -153,8 +162,8 @@ export async function addEveVercelServices(
           )} build`,
       },
       target: {
-        hostOutputDirectory: join(input.projectRoot, ".vercel", "output"),
-        projectRoot: input.projectRoot,
+        hostOutputDirectory: join(input.hostRoot, ".vercel", "output"),
+        projectRoot: input.hostRoot,
       },
     })),
     routes: config.routes,
