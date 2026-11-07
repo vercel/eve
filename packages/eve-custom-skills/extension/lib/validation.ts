@@ -1,16 +1,41 @@
 import { createHash } from "node:crypto";
 
 import { InvalidSkillNameError } from "./errors.ts";
-import type { SaveSkillInput, SkillValidation } from "./types.ts";
+import type { SkillValidation } from "./types.ts";
 
-/**
- * eve caps a skill name at 64 characters, and an extension's dynamic skills
- * load as `<mount>__<prefix><name>`. 40 leaves room for a 14-character mount
- * name plus the `channel-` prefix.
- */
-export const MAX_SKILL_NAME_LENGTH = 40;
-export const MAX_SKILL_DESCRIPTION_LENGTH = 280;
-export const MAX_SKILL_MARKDOWN_LENGTH = 20_000;
+/** Size limits for custom skills. Every field is per scope or per skill. */
+export interface SkillLimits {
+  /** Skills per scope. */
+  readonly maxSkills: number;
+  /** Always-on skills per scope. */
+  readonly maxAlwaysOn: number;
+  /** Combined always-on instructions per scope, in characters. */
+  readonly maxAlwaysOnCharacters: number;
+  /**
+   * A skill name's length. eve caps a loadable skill name at 64 characters,
+   * and custom skills load as `<mount>__<scope prefix><name>`, so leave room
+   * for both.
+   */
+  readonly maxNameLength: number;
+  readonly maxDescriptionLength: number;
+  readonly maxInstructionsLength: number;
+}
+
+export const DEFAULT_LIMITS: SkillLimits = {
+  maxSkills: 100,
+  maxAlwaysOn: 5,
+  maxAlwaysOnCharacters: 20_000,
+  maxNameLength: 40,
+  maxDescriptionLength: 280,
+  maxInstructionsLength: 20_000,
+};
+
+/** The largest values a tool input accepts; the configured limits apply on top. */
+export const INPUT_CEILINGS = {
+  name: 64,
+  description: 2_000,
+  instructions: 200_000,
+} as const;
 
 const ROUTING_CONDITION = /^use when (?:the )?user (?:asks|requests|wants|needs)\b/i;
 
@@ -21,19 +46,19 @@ export function isRoutingDescription(description: string): boolean {
   return ROUTING_CONDITION.test(description.trim());
 }
 
-export function pathSafe(value: string): string {
-  return value
+export function normalizeSkillName(raw: string, maxLength: number): string {
+  const normalized = raw
+    .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-export function normalizeSkillName(raw: string): string {
-  const normalized = pathSafe(raw.trim()).slice(0, MAX_SKILL_NAME_LENGTH).replace(/-+$/g, "");
   if (!normalized) {
     throw new InvalidSkillNameError(
       "Skill name must contain at least one letter or number (it becomes a lowercase, hyphenated identifier).",
     );
+  }
+  if (normalized.length > maxLength) {
+    throw new InvalidSkillNameError(`Skill name must be ${maxLength} characters or fewer.`);
   }
   return normalized;
 }
@@ -63,29 +88,31 @@ function containsUnsupportedControlCharacters(value: string): boolean {
   return false;
 }
 
-export function normalizeSkillInput(input: SaveSkillInput): SaveSkillInput {
-  const normalized: SaveSkillInput = {
-    name: normalizeSkillName(input.name),
+export interface SkillContent {
+  readonly description: string;
+  readonly markdown: string;
+}
+
+export function normalizeSkillContent(input: SkillContent): SkillContent {
+  return {
     description: input.description.trim().replace(/\s+/g, " "),
     markdown: input.markdown.trim(),
   };
-  if (input.applicationMode) normalized.applicationMode = input.applicationMode;
-  return normalized;
 }
 
-/** Errors block a save; warnings save the version as a draft for review. */
-export function validateSkillContent(input: SaveSkillInput): SkillValidation {
-  const { description, markdown } = normalizeSkillInput(input);
+/** Errors block a save; warnings save a first version as a draft for review. */
+export function validateSkillContent(input: SkillContent, limits: SkillLimits): SkillValidation {
+  const { description, markdown } = input;
   const errors: string[] = [];
   const warnings: string[] = [];
 
   if (!description) errors.push("A skill description is required.");
-  if (description.length > MAX_SKILL_DESCRIPTION_LENGTH) {
-    errors.push(`Skill description must be ${MAX_SKILL_DESCRIPTION_LENGTH} characters or fewer.`);
+  if (description.length > limits.maxDescriptionLength) {
+    errors.push(`Skill description must be ${limits.maxDescriptionLength} characters or fewer.`);
   }
   if (!markdown) errors.push("Skill instructions (markdown) are required.");
-  if (markdown.length > MAX_SKILL_MARKDOWN_LENGTH) {
-    errors.push(`Skill instructions must be ${MAX_SKILL_MARKDOWN_LENGTH} characters or fewer.`);
+  if (markdown.length > limits.maxInstructionsLength) {
+    errors.push(`Skill instructions must be ${limits.maxInstructionsLength} characters or fewer.`);
   }
   if (
     containsUnsupportedControlCharacters(description) ||

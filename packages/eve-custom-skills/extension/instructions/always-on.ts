@@ -6,8 +6,8 @@ import { loadTurnSkills } from "../lib/runtime.ts";
 /** Injects the turn's always-on custom skills into the system prompt. */
 export default defineDynamic(async (ctx: DynamicContext) => {
   const scopes = await loadTurnSkills({
-    auth: ctx.session.auth.current,
-    sessionId: ctx.session.id,
+    session: ctx.session,
+    ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
     turnId: ctx.turn?.id,
   });
   const sections = scopes.flatMap(({ scope, skills }) => {

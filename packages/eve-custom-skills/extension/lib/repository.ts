@@ -1,16 +1,11 @@
-import type { SkillApplicationMode, SkillValidation } from "./types.ts";
+import type { SkillApplicationMode, SkillAuthor, SkillScope, SkillValidation } from "./types.ts";
 
-/**
- * A skill's state without any version body: which version is live, the
- * newest version, and how the live version applies.
- */
+/** A skill's state without any version body. Skills are addressed by name within a scope. */
 export interface SkillHead {
-  /** Stable identifier. Skills the tools create use their name. */
-  readonly id: string;
   readonly name: string;
-  readonly ownerKey: string;
   readonly liveVersion: number | null;
   readonly latestVersion: number;
+  /** How the live version applies. */
   readonly applicationMode: SkillApplicationMode;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -19,14 +14,20 @@ export interface SkillHead {
 /** One immutable saved version. */
 export interface SkillVersionRecord {
   readonly version: number;
-  readonly name: string;
   readonly description: string;
   readonly markdown: string;
-  /** Who saved this version. */
-  readonly ownerLabel: string;
+  /** How the version applies once it is published. */
+  readonly applicationMode: SkillApplicationMode;
   readonly checksum: string;
   readonly validation: SkillValidation;
+  readonly savedBy: SkillAuthor;
   readonly createdAt: string;
+}
+
+/** One version to read in a batch. */
+export interface SkillVersionRef {
+  readonly name: string;
+  readonly version: number;
 }
 
 /** Changes to a head. Omitted fields stay as they are. */
@@ -36,11 +37,7 @@ export interface SkillHeadPatch {
 }
 
 export interface AppendVersionRequest {
-  /**
-   * The skill to add a version to. `null` creates a new skill with an id the
-   * repository assigns; a new skill may also be created under a chosen id.
-   */
-  readonly id: string | null;
+  readonly name: string;
   /**
    * The latest version the caller saw, or `null` when the skill must not exist
    * yet. A mismatch rejects with `SkillConflictError`.
@@ -48,15 +45,9 @@ export interface AppendVersionRequest {
   readonly expectedLatest: number | null;
   /** A repeated append with the same key returns the version it saved. */
   readonly idempotencyKey?: string;
-  readonly version: Pick<
-    SkillVersionRecord,
-    "name" | "description" | "markdown" | "checksum" | "validation"
-  >;
-  /** Whether the new version goes live, and the mode written with it. */
-  readonly head: {
-    readonly activate: boolean;
-    readonly applicationMode: SkillApplicationMode;
-  };
+  readonly version: Omit<SkillVersionRecord, "version" | "createdAt">;
+  /** Whether the new version goes live, which also sets the head's mode to the version's. */
+  readonly activate: boolean;
 }
 
 export interface AppendVersionResult {
@@ -67,23 +58,29 @@ export interface AppendVersionResult {
 }
 
 export interface RemoveSkillsResult {
-  readonly removed: ReadonlyArray<{ readonly id: string; readonly ownerKey: string }>;
+  readonly removed: readonly string[];
   readonly notFound: readonly string[];
 }
 
 /**
  * Where custom skills live. The lifecycle (validation, drafts, publishing,
- * rollback, application modes, always-on limits) runs on top of this
- * interface and never inspects the scope `S`.
+ * rollback, application modes, limits) runs on top of this interface.
+ * Storage failures reject; they never read as empty.
  */
-export interface SkillRepository<S> {
-  /** Every skill in the scope. Storage failures reject; they never read as empty. */
-  listHeads(scope: S): Promise<SkillHead[]>;
-  getHead(scope: S, id: string): Promise<SkillHead | null>;
+export interface SkillRepository {
+  /** Every skill in the scope. */
+  listHeads(scope: SkillScope): Promise<SkillHead[]>;
+  getHead(scope: SkillScope, name: string): Promise<SkillHead | null>;
   /** Every version of a skill, oldest first. */
-  listVersions(scope: S, id: string): Promise<SkillVersionRecord[]>;
-  getVersion(scope: S, id: string, version: number): Promise<SkillVersionRecord | null>;
-  appendVersion(scope: S, request: AppendVersionRequest): Promise<AppendVersionResult>;
-  updateHead(scope: S, id: string, patch: SkillHeadPatch): Promise<SkillHead>;
-  remove(scope: S, ids: readonly string[]): Promise<RemoveSkillsResult>;
+  listVersions(scope: SkillScope, name: string): Promise<SkillVersionRecord[]>;
+  /** The requested versions, in request order, with `null` for any that don't exist. */
+  getVersions(
+    scope: SkillScope,
+    refs: readonly SkillVersionRef[],
+  ): Promise<Array<SkillVersionRecord | null>>;
+  appendVersion(scope: SkillScope, request: AppendVersionRequest): Promise<AppendVersionResult>;
+  /** Rejects with `SkillNotFoundError` when the skill doesn't exist. */
+  updateHead(scope: SkillScope, name: string, patch: SkillHeadPatch): Promise<SkillHead>;
+  /** Deletes skills with every version. */
+  remove(scope: SkillScope, names: readonly string[]): Promise<RemoveSkillsResult>;
 }

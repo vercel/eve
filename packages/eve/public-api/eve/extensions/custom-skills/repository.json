@@ -1,0 +1,15 @@
+[
+  "AppendVersionRequest",
+  "AppendVersionResult",
+  "DocumentRepositoryOptions",
+  "RemoveSkillsResult",
+  "SkillConflictError",
+  "SkillHead",
+  "SkillHeadPatch",
+  "SkillLifecycleError",
+  "SkillNotFoundError",
+  "SkillRepository",
+  "SkillVersionRecord",
+  "SkillVersionRef",
+  "documentRepository"
+]

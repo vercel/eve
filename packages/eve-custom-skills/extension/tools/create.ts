@@ -1,14 +1,104 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
+import type { SavePlan } from "../lib/lifecycle.ts";
+import { skillAuthor } from "../lib/scopes.ts";
 import {
-  NEXT_TURN,
+  loadName,
   modeField,
   nameField,
+  NEXT_TURN,
   scopeField,
-  withSkillScope,
+  skillChange,
 } from "../lib/tool-support.ts";
-import { MAX_SKILL_DESCRIPTION_LENGTH, MAX_SKILL_MARKDOWN_LENGTH } from "../lib/validation.ts";
+import { InvalidSkillNameError } from "../lib/errors.ts";
+import { INPUT_CEILINGS } from "../lib/validation.ts";
+
+const inputSchema = z.object({
+  name: nameField.describe(
+    "Short identifier, e.g. 'deploy-checklist'. Normalized to lowercase letters, numbers, and hyphens.",
+  ),
+  description: z
+    .string()
+    .min(1)
+    .max(INPUT_CEILINGS.description)
+    .describe(
+      "One-line routing condition, e.g. 'Use when the user asks for a production deploy checklist.' On-demand and deferred skills must start with 'Use when the user asks', 'requests', 'wants', or 'needs'. No behavior instructions.",
+    ),
+  instructions: z
+    .string()
+    .min(1)
+    .max(INPUT_CEILINGS.instructions)
+    .describe("The full skill procedure in Markdown."),
+  applicationMode: modeField,
+  scope: scopeField,
+});
+
+const { approval, execute } = skillChange<z.infer<typeof inputSchema>, SavePlan, object>({
+  action: "create",
+  failure: "Failed to save the skill.",
+  fallbackCard: ({ name, scope }) =>
+    `Save skill "${name}"${scope ? ` in the ${scope} scope` : ""}?`,
+  async plan(input, { skills, scope, scopes }) {
+    const plan = await skills.planSave(scope, {
+      name: input.name,
+      description: input.description,
+      markdown: input.instructions,
+      applicationMode: input.applicationMode,
+    });
+    const shadowed = scopes.find(
+      (other) => other !== scope && other.loadPrefix && plan.name.startsWith(other.loadPrefix),
+    );
+    if (shadowed) {
+      throw new InvalidSkillNameError(
+        `Skill names in this scope can't start with "${shadowed.loadPrefix}", which names ${shadowed.name} skills. Pick another name.`,
+      );
+    }
+    return {
+      plan,
+      changesLive: plan.activates,
+      targets: [
+        {
+          name: plan.name,
+          version: plan.version,
+          description: plan.description,
+          instructions: plan.markdown,
+          applicationMode: plan.applicationMode,
+          warnings: plan.validation.warnings,
+          live: plan.live,
+        },
+      ],
+    };
+  },
+  async run(plan, { skills, scope, approved, ctx }) {
+    const { skill, previous, replayed } = await skills.save(scope, plan, {
+      savedBy: skillAuthor(ctx.session.auth.current),
+      idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
+      // A first version that now needs approval nobody gave waits as a draft.
+      draft: !approved,
+    });
+    const live = skill.status === "active";
+    const stays =
+      skill.liveVersion === null
+        ? "No version is live yet."
+        : `Version ${skill.liveVersion} stays live.`;
+    return {
+      output: {
+        name: skill.name,
+        version: skill.version,
+        status: skill.status,
+        liveVersion: skill.liveVersion,
+        applicationMode: skill.applicationMode,
+        loadName: loadName(scope, skill.name),
+        warnings: skill.validation.warnings,
+        message: live
+          ? `Saved and activated "${skill.name}" version ${skill.version} in ${skill.applicationMode} mode. ${NEXT_TURN}`
+          : `Saved "${skill.name}" version ${skill.version} as a draft. ${stays} Publish this exact version if the user asked for it to go live; the approval card is the only confirmation.`,
+      },
+      ...(!replayed && { change: { kind: "saved" as const, skill, previous } }),
+    };
+  },
+});
 
 export default defineTool({
   label: {
@@ -16,55 +106,8 @@ export default defineTool({
     complete: ({ name }) => `Saved skill ${name}`,
   },
   description:
-    "Save a new immutable version of a custom skill. A clean first version goes live immediately; a first version with validation warnings, and every later version of an existing skill, is saved as a draft that the `publish` tool makes live. Always choose the application mode.",
-  inputSchema: z.object({
-    name: nameField.describe(
-      "Short identifier, e.g. 'deploy-checklist'. Normalized to lowercase letters, numbers, and hyphens.",
-    ),
-    description: z
-      .string()
-      .min(1)
-      .max(MAX_SKILL_DESCRIPTION_LENGTH)
-      .describe(
-        "One-line routing condition, e.g. 'Use when the user asks for a production deploy checklist.' On-demand and deferred skills must start with 'Use when the user asks', 'requests', 'wants', or 'needs'. No behavior instructions.",
-      ),
-    instructions: z
-      .string()
-      .min(1)
-      .max(MAX_SKILL_MARKDOWN_LENGTH)
-      .describe("The full skill procedure in Markdown."),
-    applicationMode: modeField,
-    scope: scopeField,
-  }),
-  async execute(input, ctx) {
-    return withSkillScope(ctx, input.scope, "Failed to save the skill.", async (skills, scope) => {
-      const skill = await skills.save(
-        scope,
-        {
-          name: input.name,
-          description: input.description,
-          markdown: input.instructions,
-          applicationMode: input.applicationMode,
-        },
-        { idempotencyKey: ctx.callId },
-      );
-      const live = skill.status === "active";
-      const stays =
-        skill.activeVersion === null
-          ? "No version is live yet."
-          : `Version ${skill.activeVersion} stays live.`;
-      return {
-        name: skill.name,
-        version: skill.version,
-        status: skill.status,
-        activeVersion: skill.activeVersion,
-        applicationMode: skill.applicationMode,
-        loadName: `${scope.loadNamePrefix}${skill.name}`,
-        warnings: skill.validation.warnings,
-        message: live
-          ? `Saved and activated "${skill.name}" version ${skill.version} in ${skill.applicationMode} mode. ${NEXT_TURN}`
-          : `Saved "${skill.name}" version ${skill.version} as a draft. ${stays} Publish this exact version if the user asked for it to go live; the approval card is the only confirmation.`,
-      };
-    });
-  },
+    "Save a new immutable version of a custom skill. A clean first version goes live immediately; a first version with validation warnings, and every later version of an existing skill, is saved as a draft that the `publish` tool makes live. A draft never changes the live version or its mode. Always choose the application mode.",
+  inputSchema,
+  approval,
+  execute,
 });
