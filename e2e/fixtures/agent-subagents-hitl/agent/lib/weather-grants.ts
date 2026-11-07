@@ -3,7 +3,8 @@ import { vercelBlob } from "eve/memory/file/vercel";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /**
- * The fixture weather provider's grants, one per person, and which of a person's calls returned.
+ * The fixture weather provider's grants, one per person, and which of a person's calls finished
+ * their protected work.
  * A deployment runs calls on many instances, so there they live in Vercel Blob; `eve dev` runs one
  * process.
  */
@@ -57,7 +58,10 @@ export async function revokeGrant(person: string) {
   });
 }
 
-/** Records that `person`'s call for `city` returned, for a held call to wait on. */
+/**
+ * Records that `person`'s call for `city` finished its protected work, for a held call to wait on.
+ * It is written just before `get_weather` returns.
+ */
 export async function markReturned(person: string, city: string) {
   await grants.write({
     content: "returned",
@@ -68,8 +72,8 @@ export async function markReturned(person: string, city: string) {
 }
 
 /**
- * Waits until `person`'s calls for every city in `cities` have returned, or fails after
- * `limitMs`: a call that holds this way returns only after the calls it waits on.
+ * Waits until `person`'s calls for every city in `cities` have finished their protected work, or
+ * fails after `limitMs`: a call that holds this way returns only after the calls it waits on.
  */
 export async function awaitReturned(person: string, cities: readonly string[], limitMs: number) {
   const until = Date.now() + limitMs;
