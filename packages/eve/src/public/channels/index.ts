@@ -57,6 +57,15 @@ export {
   type CommittedLine,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
+export {
+  defineCommand,
+  type CommandContext,
+  type CommandSession,
+  type CommandDefinition,
+  type CommandDefinitions,
+  type CommandInput,
+  type CommandResult,
+} from "#public/definitions/command.js";
 export type {
   FetchFileContext,
   FetchFileFunction,

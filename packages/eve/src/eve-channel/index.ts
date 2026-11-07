@@ -27,10 +27,13 @@ import {
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
+  EVE_COMMAND_ROUTE_PATTERN,
+  EVE_COMMANDS_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
+  EVE_SESSION_COMMAND_ROUTE_PATTERN,
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_END_ROUTE_PATTERN,
@@ -63,6 +66,7 @@ import {
   createSessionStreamResponse,
   deriveOperationContinuationToken,
   parseCancelTurnBody,
+  parseCommandBody,
   parseCreateBody,
   parseIncludeTailIndex,
   parseOptionalJsonRequest,
@@ -96,6 +100,8 @@ import type {
   EveChannelConfig,
   EveEventContext,
 } from "#eve-channel/types.js";
+import { listEveCommandsResponse, runEveCommandResponse } from "#eve-channel/commands.js";
+import { assertCommandNames } from "#public/definitions/command.js";
 
 export * from "#eve-channel/types.js";
 export { eveVercelOidc, type EveVercelOidcOptions } from "#eve-channel/auth.js";
@@ -159,6 +165,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
   const localDevConfigured = (Array.isArray(input.auth) ? input.auth : [input.auth]).some(
     isLocalDevAuth,
   );
+  const commands = input.commands;
+  assertCommandNames("eve channel", commands);
 
   return defineChannel<undefined, EveEventContext>({
     cors: input.cors,
@@ -190,6 +198,72 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         }
 
         return await respond();
+      }),
+
+      GET(EVE_COMMANDS_ROUTE_PATH, async (req) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        return listEveCommandsResponse(commands);
+      }),
+
+      POST(EVE_COMMAND_ROUTE_PATTERN, async (req, { params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const body = await parseCommandBody(req);
+        if (body instanceof Response) return body;
+        return await runEveCommandResponse({
+          commands,
+          name: params.name ?? "",
+          argument: body.argument,
+          caller: sessionAuthFromResult(authResult),
+        });
+      }),
+
+      POST(EVE_SESSION_COMMAND_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseCommandBody(req);
+        if (body instanceof Response) return body;
+        // `run` reads `session.id` before any control dispatches, so it must name a real session.
+        if (!(await getRun(sessionId).exists)) {
+          return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+        }
+        const caller = sessionAuthFromResult(authResult);
+        const session = attachSession(sessionId);
+        return await runEveCommandResponse({
+          commands,
+          name: params.name ?? "",
+          argument: body.argument,
+          caller,
+          session: {
+            handle: session,
+            // The same path as a typed follow-up to this session, so `onMessage` decides its auth.
+            async deliver(message) {
+              const resolved = await resolveOnMessage({
+                auth: caller,
+                config: input,
+                message,
+                request: req,
+                sessionId,
+              });
+              if (resolved instanceof Response) return resolved;
+              return await session.send(
+                message,
+                attachClientContext(
+                  {
+                    auth: resolved.auth,
+                    context: resolved.context,
+                    history: resolved.history,
+                    title: resolved.title,
+                  },
+                  resolved.clientContext,
+                ),
+              );
+            },
+          },
+        });
       }),
 
       GET(
