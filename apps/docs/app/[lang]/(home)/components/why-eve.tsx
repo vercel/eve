@@ -5,46 +5,121 @@ import {
   SiSvelte,
   SiVercel,
 } from "@icons-pack/react-simple-icons";
-import {
-  IconCheck,
-  IconCross,
-  IconMessage,
-  IconShieldCheck,
-  IconWrench,
-} from "@vercel/geistdocs/assets/icons";
-import { LogoNextJs } from "@vercel/geistdocs/assets/logos";
+import { IconMessage, IconShieldCheck, IconWrench } from "@vercel/geistdocs/assets/icons";
+import { LogoIconGrokSvg, LogoNextJs } from "@vercel/geistdocs/assets/logos";
 import type { ComponentProps, JSX } from "react";
 import { cn } from "@/lib/utils";
-import { FeatureCard, GrayBadge, RuledList, ruledRow, Visual, pct, view } from "./control-visual";
+import { FeatureCard, Visual, pct, view } from "./control-visual";
 import { HomeSection } from "./section";
 
-const TOOLS = [
-  { name: "bash", state: "Default", Icon: IconCheck },
-  { name: "query_crm", state: "Custom", Icon: IconWrench },
-  { name: "sleep", state: "Disabled", Icon: IconCross },
-  { name: "web_search", state: "Default", Icon: IconCheck },
+// Turning off eve's default tools in agent.ts, from its built-in tools docs, verbatim: the agent
+// starts with none of the built-ins, and files under agent/tools add back only what it needs.
+// Tokens are [text, tone]; keywords and strings recede so the names read first.
+type Token = [string, "name" | "muted"];
+const HARNESS_FILE = "agent/agent.ts";
+const HARNESS_LINES: { n: number; added: boolean; tokens: Token[] }[] = [
+  {
+    n: 1,
+    added: false,
+    tokens: [
+      ["import", "muted"],
+      [" { ", "muted"],
+      ["defineAgent", "name"],
+      [" } ", "muted"],
+      ["from", "muted"],
+      [' "eve"', "muted"],
+      [";", "muted"],
+    ],
+  },
+  { n: 2, added: false, tokens: [] },
+  {
+    n: 3,
+    added: false,
+    tokens: [
+      ["export default", "muted"],
+      [" defineAgent", "name"],
+      ["({", "muted"],
+    ],
+  },
+  {
+    n: 4,
+    added: true,
+    tokens: [
+      ["  defaultTools", "name"],
+      [": ", "muted"],
+      ["false", "muted"],
+      [",", "muted"],
+    ],
+  },
+  {
+    n: 5,
+    added: false,
+    tokens: [
+      ["  model", "name"],
+      [": ", "muted"],
+      ['"openai/gpt-5.4"', "muted"],
+      [",", "muted"],
+    ],
+  },
+  { n: 6, added: false, tokens: [["});", "muted"]] },
 ];
 
+// A close-up of the file in an editor window, placed like the agent UI visual's front window:
+// same inset, running past the frame's right and bottom edges. The added line is marked as a
+// diff, with a rule and a tint fading out to the right, and holds the cursor; the window fades
+// out toward the bottom.
 function HarnessTools() {
   return (
-    <Visual caption="The agent's tools: bash on by default, a custom query_crm tool added, sleep disabled, and web_search on by default.">
-      {/* The fade sits on a frame-sized layer so it ends at the frame, not the list. */}
-      <div className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_68%,transparent)]">
-        <RuledList header={<span className="font-mono">agent/tools</span>}>
-          {TOOLS.map(({ Icon, name, state }) => (
-            <li className={ruledRow} key={name}>
-              <span
+    <Visual
+      caption={`An editor showing ${HARNESS_FILE}, with defaultTools: false being added to defineAgent: the agent starts without eve's default tools.`}
+    >
+      <div
+        aria-hidden
+        className="absolute inset-0 select-none font-mono text-[2.75cqw] [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black_88%,transparent),linear-gradient(to_right,black_82%,transparent)]"
+      >
+        <div className="absolute top-[17%] -right-[1em] left-[5%] min-h-full overflow-hidden rounded-t-[0.85em] border border-gray-alpha-400 bg-background-100">
+          {/* The gutter's rule runs the full height of the window, under the lines. */}
+          <span className="absolute inset-y-0 left-[2.75em] border-gray-alpha-400 border-l" />
+          <ol className="relative m-0 list-none p-0 pt-[1.25em] leading-[1.8]">
+            {HARNESS_LINES.map(({ added, n, tokens }) => (
+              <li
                 className={cn(
-                  "w-[8em] whitespace-nowrap font-mono text-[0.75em] leading-none",
-                  state === "Disabled" ? "text-gray-700" : "text-gray-1000",
+                  "flex whitespace-pre",
+                  // The diff mark spans the whole row from the window's left border: a 2px rule
+                  // drawn as an inset shadow, so the line numbers don't shift, and a tint.
+                  added &&
+                    "-my-[2px] bg-linear-to-r from-gray-alpha-200 from-30% to-transparent to-90% py-[2px] shadow-[inset_2px_0_0_var(--ds-gray-1000)]",
                 )}
+                key={n}
               >
-                {name}
-              </span>
-              <GrayBadge icon={<Icon />}>{state}</GrayBadge>
-            </li>
-          ))}
-        </RuledList>
+                <span
+                  className={cn(
+                    "w-[2.75em] shrink-0 pr-[0.9em] text-right tabular-nums",
+                    added ? "text-gray-1000" : "text-gray-700",
+                  )}
+                >
+                  {n}
+                </span>
+                <code className="flex-1 pl-[0.75em] font-mono">
+                  {tokens.map(([text, tone]) => (
+                    <span
+                      className={tone === "name" ? "text-gray-1000" : "text-gray-900"}
+                      key={text}
+                    >
+                      {text}
+                    </span>
+                  ))}
+                  {added ? (
+                    // A zero-height anchor on the baseline, so the taller cursor doesn't grow the line box.
+                    <span className="relative ml-px inline-block">
+                      <span className="absolute -top-[1.05em] left-0 h-[1.35em] w-[1.5px] bg-gray-1000" />
+                    </span>
+                  ) : null}
+                </code>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
     </Visual>
   );
@@ -150,6 +225,7 @@ const PROVIDERS = [
   { name: "OpenAI", Logo: SiOpenai },
   { name: "Anthropic", Logo: SiAnthropic },
   { name: "Google Gemini", Logo: SiGooglegemini },
+  { name: "Grok", Logo: LogoIconGrokSvg },
 ];
 
 // Your data drifts through the channel from right to left as rounded squares, in focus inside
