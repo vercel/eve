@@ -88,7 +88,7 @@ function HarnessTools() {
                   // The diff mark spans the whole row from the window's left border: a 2px rule
                   // drawn as an inset shadow, so the line numbers don't shift, and a tint.
                   added &&
-                    "-my-[2px] bg-linear-to-r from-gray-alpha-200 from-30% to-transparent to-90% py-[2px] shadow-[inset_2px_0_0_var(--ds-gray-1000)]",
+                    "-my-[1.5px] bg-linear-to-r from-gray-alpha-200 from-30% to-transparent to-90% py-[1.5px] shadow-[inset_2px_0_0_var(--ds-gray-1000)]",
                 )}
                 key={n}
               >
