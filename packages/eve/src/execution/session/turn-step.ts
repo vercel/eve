@@ -2,6 +2,7 @@ import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { signInsAnswered, type SignInAnswer } from "#subagents/event-proxy-step.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -87,7 +88,14 @@ import { createTurnEventHandler } from "#execution/session/turn-event-handler.js
 import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
 import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { readHitlState } from "#harness/hitl/index.js";
+import {
+  ownCallbacks,
+  readHitlState,
+  ResumeSignInKey,
+  settleSignIns,
+  signInsEnded,
+} from "#harness/hitl/index.js";
+import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createDurableSessionValues,
@@ -106,6 +114,10 @@ import {
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { signInInteractionId } from "#harness/interaction-facts.js";
+import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export type { TurnStepInput };
 
@@ -197,6 +209,27 @@ async function runSessionStepBody(
     if (matches.length > 0) {
       const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
+      // The children waiting on the same grant hear this session's answer, as it hears theirs.
+      const baseUrl = ctx.get(CallbackBaseUrlKey);
+      if (baseUrl !== undefined) {
+        const own = ownCallbacks(durableSession.sessionId, baseUrl);
+        const tables = storedProjection(durableSession.state).view;
+        await settleSignIns(
+          resumeSignInCallback,
+          matches.flatMap(({ challenge, result }) => {
+            const answer = ownSignInAnswer(tables, challenge, result.callback);
+            if (answer !== undefined) return signInsAnswered(tables, answer, own);
+            const error = result.callback.params["error"];
+            return error === undefined
+              ? []
+              : signInsEnded(
+                  tables,
+                  { interactionId: signInInteractionId(challenge), reason: error },
+                  own,
+                );
+          }),
+        );
+      }
       ctx.set(PendingAuthorizationResultKey, authResults);
       // The session stops waiting on them; the turn they resume reports their completion.
       const view = sessionView(storedProjection(durableSession.state), durableSession.state);
@@ -656,6 +689,7 @@ async function runSessionStepBody(
               startSessionPrewarmers(ctx, "turn");
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
+            ctx.setVirtualContext(ResumeSignInKey, resumeSignInCallback);
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({
@@ -742,4 +776,20 @@ function stoppedForPerson(result: StepResult): boolean {
 /** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
 function ignoreTurnCancellation(error: unknown): void {
   if (!isTurnCancellation(error)) throw error;
+}
+
+/**
+ * How the person answered this session's own sign-in, read from its callback: a decline is RFC
+ * 6749 `access_denied`, any other error is a failure its asker retries, and none is an acceptance.
+ */
+function ownSignInAnswer(
+  tables: SessionView,
+  challenge: AuthorizationChallenge,
+  callback: AuthorizationCallback,
+): SignInAnswer | undefined {
+  const interactionId = signInInteractionId(challenge);
+  const signIn = tables.interactions[interactionId]?.request.signIn;
+  const error = callback.params["error"];
+  if (signIn === undefined || (error !== undefined && error !== SIGN_IN_DECLINED)) return undefined;
+  return { interactionId, outcome: error === undefined ? "accepted" : "declined", signIn };
 }

@@ -594,17 +594,29 @@ describe("calls a sign-in stopped", () => {
 
     // A call that throws fails its sign-in with why, and says when the failure is terminal.
     const failed = callSignInsSettled(matched, second!, {
-      reason: "access_denied",
+      reason: "invalid_grant",
       retryable: false,
     });
     expect(failed.find((event) => event.type === "interaction.settled")?.data).toEqual({
       cause: { responseId: "response_callback_slack-1" },
       interactionId: "slack-1",
       outcome: "failed",
-      reason: "access_denied",
+      reason: "invalid_grant",
       response: { retryable: false },
     });
     expect(accepted(session, failed)).toEqual([]);
+
+    // One the person refused at the provider is declined, not failed.
+    const declined = callSignInsSettled(matched, second!, {
+      reason: "access_denied",
+      retryable: false,
+    });
+    expect(declined.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
+      interactionId: "slack-1",
+      outcome: "declined",
+      reason: "access_denied",
+    });
+    expect(accepted(session, declined)).toEqual([]);
   });
 
   it("keeps the approval of an approved call that a sign-in stops again", () => {
