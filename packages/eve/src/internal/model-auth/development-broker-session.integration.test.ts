@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 const stored = vi.hoisted(() => new Map<string, string>());
 vi.mock("#compiled/just-secrets/index.js", () => ({
@@ -15,6 +16,10 @@ import { VERCEL_MODEL_CLIENT_ID } from "./vercel.js";
 import { handleDevelopmentModelCredentialRequest } from "./development-broker-server.js";
 import { readDevelopmentModelCredential } from "./development-broker-client.js";
 
+const createTemporaryDirectory = useTemporaryDirectories();
+beforeEach(async () => {
+  vi.stubEnv("HOME", await createTemporaryDirectory("eve-broker-session-home-"));
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();

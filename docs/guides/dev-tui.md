@@ -55,7 +55,7 @@ In a menu, type to filter, use the arrow keys, press `Enter` to select, or press
 
 ### Credentials and deployment
 
-eve saves API keys and its OAuth refresh credentials in the OS secret store, never in project files. The last successful login becomes the machine default. eve records the project's connection and team, which aren't secret, in `.eve/provider.json`. A key selected through `/login` takes precedence over the same provider's key in your shell. A project connected through environment credentials keeps using its environment. The Vercel CLI keeps its own credentials.
+eve saves API keys and its OAuth refresh credentials in the OS secret store, never in project files. For a Vercel account login, eve stores the access token and its expiry in plaintext in `~/.eve/auth/vercel-access.json`, with file mode `0600` in a directory with mode `0700`, so every eve process for your user shares one access token. The refresh token stays only in the OS secret store. The last successful login becomes the machine default. eve records the project's connection and team, which aren't secret, in `.eve/provider.json`. A key selected through `/login` takes precedence over the same provider's key in your shell. A project connected through environment credentials keeps using its environment. The Vercel CLI keeps its own credentials.
 
 Credential discovery runs only in local development. Deployments need `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or project OIDC credentials. ChatGPT subscription models are local-only. `/login` doesn't link a deployment or authenticate a remote server; `/deploy` installs the Vercel CLI and signs you in when needed.
 

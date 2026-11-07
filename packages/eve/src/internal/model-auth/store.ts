@@ -3,7 +3,7 @@ export { isModelConnection, type ModelConnectionSelection } from "#shared/model-
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { secrets } from "#compiled/just-secrets/index.js";
 import { isObject } from "#shared/guards.js";
 
@@ -34,14 +34,54 @@ export async function writeModelSecret(name: string, value: string): Promise<voi
   }
 }
 
-let cachedVercelSession: VercelSession | undefined;
-let cachedVercelSessionClientId: string | undefined;
+function vercelAccessFile(): string {
+  return join(homedir(), ".eve", "auth", "vercel-access.json");
+}
 
+function refreshTokenDigest(refreshToken: string): string {
+  return createHash("sha256").update(refreshToken).digest("hex");
+}
+
+async function readVercelAccess(
+  clientId: string,
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresAt: number }> {
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(vercelAccessFile(), "utf8"));
+  } catch {
+    return { accessToken: "", expiresAt: 0 };
+  }
+  if (
+    !isObject(value) ||
+    value.clientId !== clientId ||
+    value.refreshTokenSha256 !== refreshTokenDigest(refreshToken) ||
+    typeof value.accessToken !== "string" ||
+    typeof value.expiresAt !== "number"
+  )
+    return { accessToken: "", expiresAt: 0 };
+  return { accessToken: value.accessToken, expiresAt: value.expiresAt };
+}
+
+/** Callers serialize writes with the Vercel login lock in `vercel.ts`. */
 export async function writeVercelSession(session: VercelSession, clientId: string): Promise<void> {
-  const { accessToken: _accessToken, expiresAt: _expiresAt, ...stored } = session;
+  const { accessToken, expiresAt, ...stored } = session;
+  const target = vercelAccessFile();
+  await mkdir(join(homedir(), ".eve", "auth"), { recursive: true, mode: 0o700 });
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  // Other eve processes read the access token from this file; the refresh token stays in the OS secret store.
+  await writeFile(
+    temporary,
+    JSON.stringify({
+      clientId,
+      refreshTokenSha256: refreshTokenDigest(session.refreshToken),
+      accessToken,
+      expiresAt,
+    }),
+    { mode: 0o600 },
+  );
+  await rename(temporary, target);
   await writeModelSecret("vercel", JSON.stringify({ clientId, ...stored }));
-  cachedVercelSession = session;
-  cachedVercelSessionClientId = clientId;
 }
 
 export async function readVercelSession(clientId: string): Promise<VercelSession | undefined> {
@@ -62,17 +102,8 @@ export async function readVercelSession(clientId: string): Promise<VercelSession
     throw new Error("Saved Vercel login is invalid. Run /login to sign in again.");
   }
   return {
-    accessToken:
-      cachedVercelSessionClientId === clientId &&
-      cachedVercelSession?.refreshToken === value.refreshToken
-        ? cachedVercelSession.accessToken
-        : "",
+    ...(await readVercelAccess(clientId, value.refreshToken)),
     refreshToken: value.refreshToken,
-    expiresAt:
-      cachedVercelSessionClientId === clientId &&
-      cachedVercelSession?.refreshToken === value.refreshToken
-        ? cachedVercelSession.expiresAt
-        : 0,
     teamId: value.teamId,
     teamName: value.teamName,
   };
