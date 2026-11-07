@@ -78,7 +78,7 @@ function HarnessTools() {
         aria-hidden
         className="absolute inset-0 select-none font-mono text-[3.12cqw] [mask-composite:intersect] [mask-image:linear-gradient(to_bottom,black_88%,transparent),linear-gradient(to_right,black_82%,transparent)]"
       >
-        <div className="absolute top-[17%] -right-[1em] left-[5%] min-h-full overflow-hidden rounded-t-[0.85em] border border-gray-alpha-400 bg-background-100">
+        <div className="absolute top-[17%] -right-[1em] left-[9.5625%] min-h-full overflow-hidden rounded-t-[0.85em] border border-gray-alpha-400 bg-background-100">
           {/* The gutter's rule runs the full height of the window, under the lines. */}
           <span className="absolute inset-y-0 left-[2.75em] border-gray-alpha-400 border-l" />
           <ol className="relative m-0 list-none p-0 pt-[1.25em] leading-[1.8]">
@@ -133,6 +133,9 @@ function HarnessTools() {
 // front one runs past the right edge.
 const windowWidth = 55;
 const sliver = 22;
+// The front window's inset from the left matches its 17% inset from the top: 17% of the
+// 16:9 frame's height is 9.5625% of its width. The harness window uses the same inset.
+const inset = 17 * (9 / 16);
 // The names' 0.5px outline, as text shadows around text filled with the window's color. A stroke
 // with a covering fill doesn't work: Safari ignores paint-order on HTML text, and draws stroked
 // and filled text on slightly different pixel grids, so the two never line up.
@@ -150,9 +153,9 @@ const textOutline = [
   .join(", ");
 
 const APPS = [
-  { name: "SvelteKit", Logo: SiSvelte, left: 5, back: true },
-  { name: "Nuxt", Logo: SiNuxt, left: 5 + sliver, back: true },
-  { name: "Next.js", Logo: LogoNextJs, left: 5 + 2 * sliver, back: false },
+  { name: "SvelteKit", Logo: SiSvelte, left: inset, back: true },
+  { name: "Nuxt", Logo: SiNuxt, left: inset + sliver, back: true },
+  { name: "Next.js", Logo: LogoNextJs, left: inset + 2 * sliver, back: false },
 ];
 
 function AgentUi() {
