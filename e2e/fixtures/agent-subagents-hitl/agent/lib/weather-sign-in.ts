@@ -1,9 +1,10 @@
 /**
  * The weather sign-in the fan-in evals drive: a Vercel Connect grant, faked at its edge.
  *
- * The person answers the shown card by calling its callback with `code`. A child that waited on
- * that card hears the answer as a callback with no `code` and no `error`, and reads the grant the
- * provider then holds. The provider keeps one grant per person (`weather-grants.ts`), and each eval
+ * The person answers the shown card at the provider's consent link
+ * (`channels/weather-provider.ts`) with `code`. As Vercel Connect does, the provider stores the
+ * grant on acceptance before it calls eve back. A child that waited on that card hears the answer
+ * as a callback with no `code` and no `error`, and reads the grant the provider already holds. The provider keeps one grant per person (`weather-grants.ts`), and each eval
  * asks as a new person, so evals that run at once on one deployment never share a grant.
  */
 

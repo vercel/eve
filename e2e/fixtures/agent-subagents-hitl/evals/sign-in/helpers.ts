@@ -112,8 +112,9 @@ export function turnSettled(events: readonly SessionStreamEvent[]): boolean {
 }
 
 /**
- * Answers a sign-in card the way the provider's redirect would: a GET on its callback URL with
- * `params`, such as a `code` or `error=access_denied`.
+ * Answers a sign-in card the way a person at the provider would: opens its consent link with
+ * `params`, such as a `code` or `error=access_denied`, then the eve callback the provider sends
+ * them on to.
  */
 export async function answer(
   t: EveEvalContext,
@@ -121,11 +122,15 @@ export async function answer(
   params: Readonly<Record<string, string>>,
 ): Promise<void> {
   const signInUrl = card.data.request.signIn?.url;
-  if (signInUrl === undefined) throw new Error("Expected the sign-in to carry its callback URL.");
-  const url = new URL(signInUrl);
-  for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
-  const callback = await t.target.fetch(`${url.pathname}${url.search}`);
-  if (!callback.ok) throw new Error(`The sign-in callback failed (${callback.status}).`);
+  if (signInUrl === undefined) throw new Error("Expected the sign-in to carry its consent link.");
+  const consent = new URL(signInUrl);
+  for (const [name, value] of Object.entries(params)) consent.searchParams.set(name, value);
+  const provider = await t.target.fetch(`${consent.pathname}${consent.search}`);
+  if (!provider.ok) throw new Error(`The fixture provider failed (${provider.status}).`);
+  const { callback } = (await provider.json()) as { callback: string };
+  const url = new URL(callback);
+  const response = await t.target.fetch(`${url.pathname}${url.search}`);
+  if (!response.ok) throw new Error(`The sign-in callback failed (${response.status}).`);
 }
 
 /** One weather call a child reported. */

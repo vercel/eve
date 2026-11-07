@@ -7,19 +7,12 @@ import {
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import {
-  awaitParentAsked,
-  awaitReturned,
-  markReturned,
-  readGrant,
-  storeGrant,
-} from "./weather-grants";
+import { awaitParentAsked, awaitReturned, markReturned, readGrant } from "./weather-grants";
 import {
   ACCEPT_CODE,
   CODE_TOKEN,
   EXCHANGE_FAILURE,
   FAILING_CODE,
-  GRANT_TOKEN,
   HOLD_LIMIT_MS,
   OTHER_GRANT,
   WEATHER_GRANT,
@@ -51,9 +44,13 @@ const weatherAuth = (grant: WeatherGrant) =>
       if (token === undefined) throw new ConnectionAuthorizationRequiredError("weather");
       return { token };
     },
-    async startAuthorization({ callbackUrl }) {
+    async startAuthorization({ callbackUrl, principal }) {
+      // The person consents at the provider, which stores the grant and then calls back.
+      const consent = new URL("/fixture-weather/authorize", callbackUrl);
+      consent.searchParams.set("callback", callbackUrl);
+      if (grant !== "none") consent.searchParams.set("grant", grantKey(principal, grant));
       return {
-        challenge: { displayName: "Fixture Weather", url: callbackUrl },
+        challenge: { displayName: "Fixture Weather", url: consent.toString() },
         resume: { marker: "fixture-weather" },
       };
     },
@@ -61,10 +58,7 @@ const weatherAuth = (grant: WeatherGrant) =>
       if (resume?.marker !== "fixture-weather") throw new Error("Fixture weather state mismatch.");
       const person = grantKey(principal, grant);
       const { code, error } = callback.params;
-      if (code === ACCEPT_CODE) {
-        if (grant !== "none") await storeGrant(person, GRANT_TOKEN);
-        return { token: CODE_TOKEN };
-      }
+      if (code === ACCEPT_CODE) return { token: CODE_TOKEN };
       if (code === FAILING_CODE) throw new Error(EXCHANGE_FAILURE);
       // The shown card was accepted, so the provider now holds the grant this sign-in waited on.
       if (code === undefined && error === undefined) {
