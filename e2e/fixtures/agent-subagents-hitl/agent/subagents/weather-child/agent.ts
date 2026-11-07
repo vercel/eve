@@ -4,15 +4,15 @@ import { mockModel } from "eve/evals";
 import {
   CHILD_MARKER,
   CHILD_REPORT,
+  describeCall,
   planAfter,
   type ChildPlan,
-  type WeatherResult,
 } from "../../lib/weather-sign-in";
 
 /**
  * Checks the weather for the city the parent names, which needs the person's weather sign-in,
  * then reports every call's result. With `again`, it then revokes the grant at the provider and
- * checks Porto, which has to sign in again.
+ * checks Porto, which has to sign in again. With `retry`, a first call that fails is made once more.
  */
 const agent: DefinedAgent = defineAgent({
   description: "Check the weather for a city, which needs the person's weather sign-in.",
@@ -24,11 +24,17 @@ const agent: DefinedAgent = defineAgent({
       return {
         toolCalls: [
           {
-            input: { city: plan.city, holdFor: plan.holdFor },
+            input: {
+              city: plan.city,
+              holdFor: plan.holdFor,
+              ...(plan.other === true && { grant: "other" }),
+            },
             name: "get_weather",
           },
         ],
       };
+    if (plan.retry === true && calls.length === 1 && calls[0]!.isError)
+      return { toolCalls: [{ input: { city: plan.city }, name: "get_weather" }] };
     const revoked = toolResults.some((result) => result.name === "revoke_weather_grant");
     if (plan.again === true && calls.length === 1 && !calls[0]!.isError)
       return revoked
@@ -38,16 +44,11 @@ const agent: DefinedAgent = defineAgent({
             ],
           }
         : { toolCalls: [{ input: {}, name: "revoke_weather_grant" }] };
-    return calls.map((call) => `${CHILD_REPORT} ${describe(call.output, call.isError)}`).join("\n");
+    return calls
+      .map((call) => `${CHILD_REPORT} ${describeCall(call.output, call.isError)}`)
+      .join("\n");
   }),
   modelContextWindowTokens: 1_000_000,
 });
 
 export default agent;
-
-/** One call's result as one line: `[city] token=<token> at=<ms>`, or the error it ended with. */
-function describe(output: unknown, isError: boolean): string {
-  const result = output as Partial<WeatherResult> | undefined;
-  if (isError || result?.token === undefined) return `error=${JSON.stringify(output)}`;
-  return `[${result.city}] token=${result.token} at=${result.finishedAt}`;
-}

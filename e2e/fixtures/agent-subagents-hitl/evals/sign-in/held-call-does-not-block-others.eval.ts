@@ -9,6 +9,7 @@ import {
   turnOutcomes,
   reportsIn,
   signIns,
+  signInSettlements,
   startFanIn,
   turnSettled,
 } from "./helpers";
@@ -32,6 +33,10 @@ export default defineEval({
     await reader.readUntil(turnSettled);
 
     const { calls, errors } = reportsIn(reader.events);
+    for (const settled of signInSettlements(reader.events))
+      t.log(`sign-in ${settled.data.interactionId} ${settled.data.outcome} at ${settled.meta.at}`);
+    for (const call of calls)
+      t.log(`call ${call.city} token=${call.token} at ${new Date(call.at).toISOString()}`);
     t.check(errors, equals([]));
     t.check(calls.length, equals(3));
     const held = calls.filter((call) => call.token === CODE_TOKEN);

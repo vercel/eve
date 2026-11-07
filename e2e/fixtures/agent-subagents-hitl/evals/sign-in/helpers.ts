@@ -26,6 +26,8 @@ export interface FanIn {
   readonly events: readonly SessionStreamEvent[];
   /** Reads on until `done` holds for every event read so far. */
   readUntil(done: (events: readonly SessionStreamEvent[]) => boolean): Promise<void>;
+  /** Cancels the parent's turn, as the person stopping it would. */
+  cancel(): Promise<void>;
 }
 
 /** Starts the parent on `plan` as a fresh person, and reads its stream from the start. */
@@ -45,6 +47,9 @@ export async function startFanIn(t: EveEvalContext, plan: FanInPlan): Promise<Fa
   };
   return {
     events,
+    async cancel() {
+      await session.cancel();
+    },
     async readUntil(done) {
       if (done(events)) return;
       await reader
@@ -89,6 +94,11 @@ export function allSettled(events: readonly SessionStreamEvent[]): boolean {
 /** How each of the parent's turns settled. */
 export function turnOutcomes(events: readonly SessionStreamEvent[]): string[] {
   return events.flatMap((event) => (event.type === "turn.settled" ? [event.data.outcome] : []));
+}
+
+/** Whether the parent's turn has paused on a card. */
+export function paused(events: readonly SessionStreamEvent[]): boolean {
+  return events.some((event) => event.type === "turn.paused");
 }
 
 /** Whether the parent's turn has settled. */
@@ -143,6 +153,11 @@ function finalReply(events: readonly SessionStreamEvent[]): string {
     return typeof value === "string" && value.includes(FAN_IN_DONE) ? [value] : [];
   });
   return texts.at(-1) ?? "";
+}
+
+/** Whether `card` is the parent's own sign-in, not one a child relayed. */
+export function isOwn(card: Opened): boolean {
+  return card.data.origin === undefined;
 }
 
 /** The ids of the sign-ins in `cards`. */

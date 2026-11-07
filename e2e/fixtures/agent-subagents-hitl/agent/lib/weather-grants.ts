@@ -77,9 +77,12 @@ export async function awaitReturned(person: string, cities: readonly string[], l
     const returned = await Promise.all(
       cities.map((city) => grants.read({ key: `${person}/returned/${city}`, signal: deadline() })),
     );
-    if (returned.every((document) => document !== null)) return;
+    const waiting = cities.filter((_, index) => returned[index] === null);
+    if (waiting.length === 0) return;
     if (Date.now() > until)
-      throw new Error(`The other weather calls didn't return within ${limitMs} ms.`);
+      throw new Error(
+        `The other weather calls didn't return within ${limitMs} ms: ${waiting.join(", ")}.`,
+      );
     await sleep(200);
   }
 }

@@ -10,6 +10,9 @@
 /** The Connect connector every weather sign-in names, so parallel children share one card. */
 export const WEATHER_GRANT = "oauth/fixture-weather";
 
+/** Another connector, whose sign-ins never share a card with {@link WEATHER_GRANT}'s. */
+export const OTHER_GRANT = "oauth/fixture-weather-other";
+
 /** The `code` a person's accepted sign-in carries. */
 export const ACCEPT_CODE = "fixture-ok";
 
@@ -38,6 +41,15 @@ export interface FanInPlan {
   readonly again?: boolean;
   /** The last child starts only after the others report. */
   readonly late?: boolean;
+  /**
+   * The parent checks Lisbon itself: `first` in the step that starts the children, `after` once
+   * every child reported.
+   */
+  readonly parent?: "first" | "after";
+  /** Child 0 calls again after its first call fails. */
+  readonly retry?: boolean;
+  /** The children from this index on need the other grant. */
+  readonly otherFrom?: number;
 }
 
 /** What the parent tells one weather child. */
@@ -46,6 +58,10 @@ export interface ChildPlan {
   /** The other children's cities: this call holds until theirs return, if it answered the card. */
   readonly holdFor?: readonly string[];
   readonly again?: boolean;
+  /** Call again once after the first call fails. */
+  readonly retry?: boolean;
+  /** Needs the other connector's grant. */
+  readonly other?: boolean;
 }
 
 /** What one weather call returns. */
@@ -68,4 +84,11 @@ export function planAfter<T>(text: string | null, marker: string): T | undefined
   const json = text.slice(start + marker.length + 1);
   const end = json.indexOf("}");
   return end < 0 ? undefined : (JSON.parse(json.slice(0, end + 1)) as T);
+}
+
+/** One call's result as one line: `[city] token=<token> at=<ms>`, or the error it ended with. */
+export function describeCall(output: unknown, isError: boolean): string {
+  const result = output as Partial<WeatherResult> | undefined;
+  if (isError || result?.token === undefined) return `error=${JSON.stringify(output)}`;
+  return `[${result.city}] token=${result.token} at=${result.finishedAt}`;
 }
