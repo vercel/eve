@@ -34,7 +34,8 @@ import {
   withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";
-import { runApprovedCalls } from "./approved-calls.js";
+import { runApprovedCalls, signInReports } from "./approved-calls.js";
+import { SignInCompletedKey } from "#harness/authorization.js";
 import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
@@ -297,6 +298,10 @@ async function runApproved(
     ),
   );
   if (calls.length === 0) return undefined;
+  // One reporter for every group: a group's call can complete a sign-in another group's call
+  // stopped on, and each attempt settles once.
+  const signIns = signInReports({ publish: step.publish, view: () => step.view() });
+  step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
   const executed = await Promise.all(
     local.map(async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };
@@ -322,11 +327,12 @@ async function runApproved(
         publish: step.publish,
         responderOf: (approval) => approval.responder,
         telemetry: attempt?.telemetry,
+        signIns,
         tools,
         view: () => step.view(),
       });
     }),
-  );
+  ).finally(() => step.ctx.delete(SignInCompletedKey));
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
