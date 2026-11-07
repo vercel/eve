@@ -90,7 +90,7 @@ function runSessionCommand(
 
 describe("eve channel commands", () => {
   it("lists command metadata behind route auth", async () => {
-    const commands = { escalate, restart };
+    const commands = () => ({ escalate, restart });
     const list = route("GET", "/eve/v1/commands", { auth: none(), commands });
     const response = await list(new Request("https://eve.test/eve/v1/commands"), args({}));
     expect(await response.json()).toEqual({
@@ -111,6 +111,26 @@ describe("eve channel commands", () => {
     expect((await rejected(new Request("https://eve.test/eve/v1/commands"), args({}))).status).toBe(
       401,
     );
+  });
+
+  it("adds a commands record to the session commands, and lets a function replace them", async () => {
+    const names = async (input: EveChannelConfig) => {
+      const list = route("GET", "/eve/v1/commands", input);
+      const body = (await (
+        await list(new Request("https://eve.test/eve/v1/commands"), args({}))
+      ).json()) as { commands: { name: string }[] };
+      return body.commands.map((command) => command.name);
+    };
+    expect(await names({ auth: none() })).toEqual(["new", "clear", "compact"]);
+    expect(await names({ auth: none(), commands: { escalate } })).toEqual([
+      "new",
+      "clear",
+      "compact",
+      "escalate",
+    ]);
+    expect(
+      await names({ auth: none(), commands: ({ clear }) => ({ clear: clear!, escalate }) }),
+    ).toEqual(["clear", "escalate"]);
   });
 
   it("sends a command's follow-up into the session through onMessage, as the caller", async () => {
