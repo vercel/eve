@@ -81,3 +81,20 @@ test("computer-use bootstrap writes all assets and installs pinned dependencies 
   assert.doesNotMatch(installScript, /\bgh\b/u);
   assert.match(commands.at(-1) ?? "", /sudo -n bash/u);
 });
+
+test.expectFailure(
+  "computer-use install takes the Firefox ESR line Mozilla currently serves",
+  async () => {
+    let installScript = "";
+    await installComputerUse({
+      resolvePath: (path) => `/workspace/${path}`,
+      run: async () => ({ exitCode: 0, stderr: "", stdout: "" }),
+      writeTextFile: async ({ path, content }) => {
+        if (path.endsWith("/install-computer-use.sh")) installScript = content;
+      },
+    });
+    // Mozilla's repository stops serving an ESR line after its end of life, so a
+    // pinned line fails every new install once that happens (#5829).
+    assert.equal(/firefox-esr=\S+/u.exec(installScript)?.[0], undefined);
+  },
+);
