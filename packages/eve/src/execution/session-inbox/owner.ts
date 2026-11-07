@@ -1,5 +1,6 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { readInboxHandle } from "#execution/session-inbox/handle.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -71,6 +72,21 @@ export async function resumeRunnableHook(
   }
   if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
+}
+
+/**
+ * Delivers a sign-in callback to its asker's inbox. An asker whose session is gone has nothing
+ * waiting on the sign-in anymore, so its missing hook is not an error.
+ */
+export async function resumeSignInCallback(
+  token: string,
+  payload: AuthorizationCallbackPayload,
+): Promise<void> {
+  try {
+    await resumeRunnableHook(token, payload);
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+  }
 }
 
 /**

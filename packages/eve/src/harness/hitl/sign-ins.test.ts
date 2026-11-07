@@ -1,13 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
-import { sameRelayedSignIn } from "./sign-ins.js";
+import type {
+  InteractionOpenedData,
+  SignInChallenge,
+} from "#protocol/session-events/families/interaction.js";
+import { emptySessionView } from "#protocol/session-projection/fold.js";
+import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import { authHookToken } from "#harness/authorization.js";
+import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
+import { callsBackFor } from "./sign-in-callbacks.js";
+import { sameRelayedSignIn, waitingSignIn } from "./sign-ins.js";
+
+const PARENT = { origin: "https://v.example", sessionId: "parent" };
+const OWN = callsBackFor(PARENT);
+
+/** A callback on `origin` that names `sessionId`'s inbox. */
+function callbackUrl(origin = PARENT.origin, sessionId = PARENT.sessionId): string {
+  return `${origin}${createEveConnectionCallbackRoutePath("github", "attempt-1", authHookToken(sessionId))}`;
+}
 
 const RUI = { id: "rui", issuer: "vercel", type: "user" } as const;
 
 function signIn(overrides: Partial<SignInChallenge> = {}): SignInChallenge {
   return {
-    callbackUrl: "https://v.example/eve/v1/connections/github/callback/attempt-1/token",
+    callbackUrl: callbackUrl(),
     grant: "github/vercel-v",
     name: "github",
     principal: RUI,
@@ -50,5 +66,89 @@ describe("sameRelayedSignIn", () => {
       false,
     );
     expect(sameRelayedSignIn(signIn(), signIn({ callbackUrl: undefined }))).toBe(false);
+  });
+});
+
+function opened(
+  interactionId: string,
+  overrides: Partial<SignInChallenge> = {},
+  subject: InteractionOpenedData["subject"] = { callId: `call-${interactionId}` },
+): InteractionOpenedData {
+  return {
+    interactionId,
+    request: { kind: "sign-in", prompt: "Sign in", signIn: signIn(overrides) },
+    subject,
+  };
+}
+
+function viewOf(
+  ...rows: readonly (InteractionOpenedData & { readonly status?: InteractionRow["status"] })[]
+): SessionView {
+  const interactions = rows.map((row): InteractionRow => ({
+    introducedAt: 0,
+    startedAt: "1970-01-01T00:00:00.000Z",
+    status: "open",
+    ...row,
+  }));
+  return {
+    ...emptySessionView(),
+    interactions: Object.fromEntries(interactions.map((row) => [row.interactionId, row])),
+  };
+}
+
+describe("waitingSignIn", () => {
+  it("names the open sign-in the person already has a card for", () => {
+    const view = viewOf(opened("shown"), opened("waiting", { waitsOn: "shown" }));
+    expect(waitingSignIn(view, opened("next"), OWN).request.signIn?.waitsOn).toBe("shown");
+  });
+
+  it("leaves another principal's sign-in for the same grant with its own card", () => {
+    const view = viewOf(opened("shown"));
+    const ben = opened("ben", { principal: { ...RUI, id: "ben" } });
+    expect(waitingSignIn(view, ben, OWN)).toBe(ben);
+  });
+
+  it("leaves a sign-in with its own card when the shown one closes or is closing", () => {
+    const next = opened("next");
+    expect(waitingSignIn(viewOf({ ...opened("shown"), status: "settled" }), next, OWN)).toBe(next);
+    expect(waitingSignIn(viewOf(opened("shown")), next, OWN, new Set(["shown"]))).toBe(next);
+  });
+
+  it("never waits on or for a responder's sign-in, which its approval prompts for", () => {
+    const responder = opened("responder", {}, { responseId: "response-1" });
+    expect(waitingSignIn(viewOf(opened("shown")), responder, OWN)).toBe(responder);
+    const next = opened("next");
+    expect(waitingSignIn(viewOf(responder), next, OWN)).toBe(next);
+  });
+
+  it("waits for a local child's sign-in, whose callback this session calls", () => {
+    const view = viewOf(opened("shown"));
+    const child = opened("child", { callbackUrl: callbackUrl(PARENT.origin, "child-b") });
+    const relayed = { ...child, origin: { interactionId: "attempt-b", sessionId: "child-b" } };
+    expect(waitingSignIn(view, relayed, OWN).request.signIn?.waitsOn).toBe("shown");
+  });
+
+  it("leaves a sign-in this session can't call back with its own card", () => {
+    // Two remote children on one deployment: their sign-ins match, but only theirs resumes them.
+    const remote = "https://remote.example";
+    const relayedFrom = (interactionId: string, sessionId: string) => ({
+      ...opened(interactionId, { callbackUrl: callbackUrl(remote, sessionId) }),
+      origin: { interactionId: `attempt-${sessionId}`, sessionId },
+    });
+    const view = viewOf(relayedFrom("first", "child-a"));
+    const second = relayedFrom("second", "child-b");
+    expect(waitingSignIn(view, second, OWN)).toBe(second);
+    // Its inbox's token names another session, or its URL doesn't parse.
+    const local = viewOf(opened("shown"));
+    const wrongInbox = {
+      ...opened("wrong", { callbackUrl: callbackUrl(PARENT.origin, "child-c") }),
+      origin: { interactionId: "attempt-b", sessionId: "child-b" },
+    };
+    expect(waitingSignIn(local, wrongInbox, OWN)).toBe(wrongInbox);
+    const malformed = opened("malformed", { callbackUrl: "not a url" });
+    expect(waitingSignIn(local, malformed, OWN)).toBe(malformed);
+    // Outside a workflow, nothing calls anyone's callback.
+    const next = opened("next");
+    expect(waitingSignIn(local, next, undefined)).toBe(next);
   });
 });
