@@ -9,6 +9,7 @@ packages:
   - apps/fixtures/*
   - apps/frameworks/*
   - e2e/fixtures/*
+  - examples/*
   - packages/*
 
 allowBuilds:
