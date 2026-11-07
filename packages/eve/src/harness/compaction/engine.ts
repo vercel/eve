@@ -168,12 +168,39 @@ function startStage(lastStage: CompactionStage | undefined): CompactionStage {
   return lastStage === "tail" ? "text-tail" : "summary-only";
 }
 
+/** Conversation regions, config and summarizer handed to each compaction heuristic. */
+interface CompactionHeuristicInput {
+  readonly config: CompactionConfig;
+  readonly conversation: readonly ModelMessage[];
+  readonly forceSummary: boolean;
+  readonly previousCheckpoint: string | undefined;
+  readonly resume: boolean;
+  readonly summarize: CompactionSummarizer;
+}
+
 /**
- * Compacts messages by summarizing them with the compaction model, keeping the
- * recent tail verbatim when the result reaches the target, degrading it to text-only, then
- * dropping it, clipping the summary and cutting the request until it fits the threshold. A
- * compaction whose result was already over the trigger on the next call starts at the stage
- * after the one it ended at. Returns the history and the stage it ended at.
+ * A heuristic either produces a complete replacement history and the stage it ended at, or
+ * signals that the next heuristic must run. Anything exceptional throws.
+ */
+type CompactionHeuristicOutcome =
+  | {
+      readonly messages: ModelMessage[];
+      readonly stage: CompactionStage;
+      readonly type: "compacted";
+    }
+  | { readonly type: "insufficient" };
+
+type CompactionHeuristic = (input: CompactionHeuristicInput) => Promise<CompactionHeuristicOutcome>;
+
+/**
+ * Heuristics tried in order. Composing a new strategy (pruning variants, protect-lists) means
+ * adding an entry here.
+ */
+const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [fixedTailHeuristic];
+
+/**
+ * Compacts messages with the first {@link CompactionHeuristic} that produces a history. Returns
+ * the history and the stage it ended at.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -187,6 +214,39 @@ export async function compactMessages(
   resume = true,
 ): Promise<{ readonly messages: ModelMessage[]; readonly stage: CompactionStage }> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  for (const heuristic of COMPACTION_HEURISTICS) {
+    const outcome = await heuristic({
+      config,
+      conversation,
+      forceSummary,
+      previousCheckpoint,
+      resume,
+      summarize,
+    });
+    if (outcome.type === "compacted") {
+      return { messages: outcome.messages, stage: outcome.stage };
+    }
+  }
+  throw new CompactionOverLimitError(
+    `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
+  );
+}
+
+/**
+ * Summarizes the conversation with the compaction model and keeps a fixed recent tail, with
+ * oversized tool results capped. The tail stays verbatim when the result reaches the target,
+ * degrades to text-only, then drops; the summary is clipped and the request cut until it fits
+ * the threshold. A compaction whose result was already over the trigger on the next call starts
+ * at the stage after the one it ended at.
+ */
+async function fixedTailHeuristic({
+  config,
+  conversation,
+  forceSummary,
+  previousCheckpoint,
+  resume,
+  summarize,
+}: CompactionHeuristicInput): Promise<CompactionHeuristicOutcome> {
   const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
     resume ? resumeAfter(kept, replay, threshold) : kept;
   const budget = keptTailBudget(config);
@@ -216,12 +276,12 @@ export async function compactMessages(
   if (!forceSummary && start === "tail" && first.fit === undefined) {
     const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
-      return { messages: keepNonToolResultMessages(recent), stage: "text-tail" };
+      return { messages: keepNonToolResultMessages(recent), stage: "text-tail", type: "compacted" };
     }
   }
 
-  // Tool results in the kept tail are shortened on this path only: one large
-  // file read would otherwise take the whole tail budget.
+  // Oversized tool results are capped: one large file read would otherwise take the whole tail
+  // budget.
   const cappedConversation = capToolResults(conversation);
   const summaryPlan = planTail(cappedConversation);
   const { currentIndex, fit, keep, replay } = summaryPlan;
@@ -280,7 +340,7 @@ export async function compactMessages(
       config.threshold,
     );
     if (reachesTarget(verbatim)) {
-      return { messages: verbatim, stage: "tail" };
+      return { messages: verbatim, stage: "tail", type: "compacted" };
     }
   }
 
@@ -292,13 +352,13 @@ export async function compactMessages(
       config.threshold,
     );
     if (reachesTarget(stripped)) {
-      return { messages: stripped, stage: "text-tail" };
+      return { messages: stripped, stage: "text-tail", type: "compacted" };
     }
   }
 
   const noTail = withResumptionGuard(checkpointHead(summary), replay, config.threshold);
   if (fits(noTail)) {
-    return { messages: noTail, stage: "summary-only" };
+    return { messages: noTail, stage: "summary-only", type: "compacted" };
   }
 
   // Last, the summary is clipped to the largest piece that fits beside the
@@ -332,7 +392,7 @@ export async function compactMessages(
 
   const clipped = withClippedSummary(replay);
   if (clipped !== undefined) {
-    return { messages: clipped, stage: "summary-only" };
+    return { messages: clipped, stage: "summary-only", type: "compacted" };
   }
 
   // The request itself is over: a file it carries gives way to a note first,
@@ -350,7 +410,7 @@ export async function compactMessages(
       `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
     );
   }
-  return { messages: cutRequest, stage: "summary-only" };
+  return { messages: cutRequest, stage: "summary-only", type: "compacted" };
 }
 
 const CAPPED_RESULT_ANNOTATION =
