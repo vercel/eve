@@ -1,5 +1,27 @@
 # eve
 
+## 1.0.0-rc.7
+
+Released 2026-11-07 · [Compare with 1.0.0-rc.6](https://github.com/vercel/eve/compare/eve%401.0.0-rc.6...eve%401.0.0-rc.7)
+
+### Features
+
+- Add the `eveVite()` plugin from `eve/vite` to run eve agents alongside any Vite app in development, `vite preview`, and Vercel deployments.
+  `eveSvelteKit()`, `eveTanStack()`, and the Nuxt module now share its agent discovery and Vercel services, so all of them mount `agents/` workspace members at `/eve/<name>/v1/*`. The SvelteKit plugin no longer sets `EVE_BASE_URL` in the dev server process; set it yourself if your server code reads it to reach the agent. On non-Vercel hosts, the Nuxt module proxies each workspace member to its own local server on consecutive ports from `EVE_NUXT_PRODUCTION_PORT` (default `4274`), or to `/eve/<name>/v1` on `EVE_NUXT_PRODUCTION_ORIGIN` when set. ([#6097](https://github.com/vercel/eve/pull/6097))
+- Add `label: false` to keep a tool's calls out of activity, such as emoji reactions.
+  Channels show no status for these calls, and a call doesn't end a quiet turn's silence, so a deferred Slack turn that only reacts and ends with `no_reply` stays silent. The call's `capability` and its message part from `eve/react`, `eve/vue`, and `eve/svelte` carry `hidden: true`, and `showsActivity(call)` from `eve/events` applies the same rule in custom renderers. ([#6017](https://github.com/vercel/eve/pull/6017))
+- New projects' `AGENTS.md` and the coding-agent setup prompt now point to guidance on keeping the deployed bundle small and cold starts fast. ([#6079](https://github.com/vercel/eve/pull/6079))
+- Hosted agents start faster: the bundled manifest is checked when the agent is built instead of on every cold start, the workflow driver code ships as plain text without an inline source map in production builds, and error-message formatters are created only when an error needs them. ([#6047](https://github.com/vercel/eve/pull/6047))
+- Add `decision <model>` OpenTelemetry spans for `decide`, automatic model selection, and tool approvals, with policy-aware model, usage, cost, and failure metadata that distinguishes refusals from request failures.
+  A decision sits under the operation it runs in, or under the turn when model routing runs before the turn's first step. `@vercel/agent-runs` adds `AgentRun.decision` and an optional `AgentTelemetry.activeSpan`, so a decision nests under a host span inside its operation but not under a host span from another trace, such as a workflow step. ([#5349](https://github.com/vercel/eve/pull/5349))
+
+### Bug Fixes
+
+- Make local world stream reads scale with new chunks: a repeated `getInfo` or cursor `getChunks` on a long stream no longer reopens every earlier chunk file. ([#5910](https://github.com/vercel/eve/pull/5910))
+- The experimental Vercel schedule provider bundles Schedules SDK 0.0.3, the first stable release after alpha.19. ([#6027](https://github.com/vercel/eve/pull/6027))
+- Make connection sign-ins countable in traces: each sign-in span names its agent, a failed sign-in records its reason, and a call a connection refused records which connection and why.
+  `agent.approval` spans now carry `gen_ai.agent.name` and `agent.name`, so a query scoped to one agent no longer drops its sign-in prompts. A sign-in that fails with a reason code such as `access_denied` records it as `agent.connection.authorization.reason`; a sign-in that ends any other way, such as one a new message withdrew, records none. A tool call that fails with `ConnectionAuthorizationFailedError`, including one that never asked anyone to sign in, such as `principal_required` or `sign_in_unavailable` in a turn a schedule started, records `eve.connection.name` and `agent.connection.authorization.reason` on its `execute_tool` span. Only reason codes are recorded: a free-text reason or error message stays off the span whatever the trace policy records. ([#6078](https://github.com/vercel/eve/pull/6078))
+
 ## 1.0.0-rc.6
 
 Released 2026-11-05 · [Compare with 1.0.0-rc.5](https://github.com/vercel/eve/compare/eve%401.0.0-rc.5...eve%401.0.0-rc.6)
