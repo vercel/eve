@@ -2,7 +2,7 @@
   "name": "@eve/custom-skills",
   "version": "0.0.0",
   "private": true,
-  "description": "Source of the eve/extensions/custom-skills extension: versioned skills that the people talking to an agent save for themselves or their Slack channel.",
+  "description": "Source of the eve/extensions/custom-skills extension: versioned skills that the people talking to an agent save for themselves or their channel.",
   "type": "module",
   "exports": {
     "./package.json": "./package.json"

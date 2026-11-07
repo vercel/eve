@@ -1,3 +1,4 @@
+/** Base class for lifecycle errors whose message the model can act on. */
 export class SkillLifecycleError extends Error {
   constructor(message?: string) {
     super(message);
@@ -23,9 +24,10 @@ export class InvalidSkillContentError extends SkillLifecycleError {
   }
 }
 
+/** The skill doesn't exist in the scope. Repositories throw it from `updateHead`. */
 export class SkillNotFoundError extends SkillLifecycleError {
-  constructor(id: string) {
-    super(`No skill named "${id}" was found in this scope.`);
+  constructor(name: string) {
+    super(`No skill named "${name}" was found in this scope.`);
   }
 }
 
@@ -37,8 +39,12 @@ export class SkillVersionNotFoundError extends SkillLifecycleError {
 
 export class InvalidSkillTransitionError extends SkillLifecycleError {}
 
+/** The approval rule refused the change, or the scope is read-only. */
+export class SkillChangeRefusedError extends SkillLifecycleError {}
+
 /**
  * A write lost a race: the skill's latest version is no longer the one the
- * caller expected, or a new skill's id is already taken.
+ * caller expected, or a new skill's name is already taken. Repositories throw
+ * it from `appendVersion`; the lifecycle retries saves that didn't pin a version.
  */
 export class SkillConflictError extends SkillLifecycleError {}

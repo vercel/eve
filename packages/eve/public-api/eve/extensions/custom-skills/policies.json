@@ -1,0 +1,12 @@
+[
+  "SkillApprovalDecision",
+  "SkillApprovalRequest",
+  "SkillApprovalRule",
+  "SkillScope",
+  "SkillScopeContext",
+  "SkillScopeResolver",
+  "defaultScopes",
+  "defaultSkillApproval",
+  "personalScope",
+  "spaceScope"
+]

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { MemoryDocumentConflictError, type MemoryDocumentBackend } from "eve/memory/file";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import type {
   SkillHeadPatch,
   SkillRepository,
   SkillVersionRecord,
+  SkillVersionRef,
 } from "./repository.ts";
 import { SKILL_APPLICATION_MODES, type SkillScope } from "./types.ts";
 
@@ -25,7 +26,6 @@ const versionEntrySchema = z.object({
 });
 
 const skillEntrySchema = z.object({
-  name: z.string(),
   liveVersion: z.number().int().positive().nullable(),
   applicationMode: z.enum(SKILL_APPLICATION_MODES),
   createdAt: z.string(),
@@ -40,16 +40,16 @@ const catalogSchema = z.object({
 
 const versionDocumentSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
-  name: z.string(),
   description: z.string(),
   markdown: z.string(),
-  ownerLabel: z.string(),
+  applicationMode: z.enum(SKILL_APPLICATION_MODES),
   checksum: z.string(),
   validation: z.object({
     valid: z.boolean(),
     errors: z.array(z.string()),
     warnings: z.array(z.string()),
   }),
+  savedBy: z.object({ principalId: z.string().nullable(), label: z.string() }),
   createdAt: z.string(),
 });
 
@@ -60,8 +60,11 @@ type VersionDocument = z.infer<typeof versionDocumentSchema>;
 export interface DocumentRepositoryOptions {
   /** Any versioned document store, such as `vercelBlob()` or `inMemory()` from `eve/memory/file`. */
   readonly backend: MemoryDocumentBackend;
-  /** Key prefix for every document. Defaults to `custom-skills`. */
-  readonly prefix?: string;
+  /**
+   * Key prefix for every document. Give each agent that shares a store its
+   * own namespace, or they share every user's skills. Defaults to `custom-skills`.
+   */
+  readonly namespace?: string;
   readonly now?: () => Date;
 }
 
@@ -72,20 +75,17 @@ export interface DocumentRepositoryOptions {
  *
  * Catalog writes are compare-and-swap, so version numbers, live versions, and
  * modes never race. A version's content is written before the catalog entry
- * that numbers it; deleted skills overwrite their version documents with an
- * empty tombstone because the backend has no delete.
+ * that numbers it. Removing a skill overwrites its version documents with an
+ * empty tombstone, because the backend has no delete; a backend that keeps
+ * object history still holds the old content.
  */
-export function documentRepository(
-  options: DocumentRepositoryOptions,
-): SkillRepository<SkillScope> {
+export function documentRepository(options: DocumentRepositoryOptions): SkillRepository {
   return new DocumentSkillRepository(options);
 }
 
-function toHead(id: string, entry: SkillEntry, ownerKey: string): SkillHead {
+function toHead(name: string, entry: SkillEntry): SkillHead {
   return {
-    id,
-    name: entry.name,
-    ownerKey,
+    name,
     liveVersion: entry.liveVersion,
     latestVersion: entry.versions.at(-1)?.version ?? 0,
     applicationMode: entry.applicationMode,
@@ -95,38 +95,31 @@ function toHead(id: string, entry: SkillEntry, ownerKey: string): SkillHead {
 }
 
 function toRecord(version: number, document: VersionDocument): SkillVersionRecord {
-  return {
-    version,
-    name: document.name,
-    description: document.description,
-    markdown: document.markdown,
-    ownerLabel: document.ownerLabel,
-    checksum: document.checksum,
-    validation: document.validation,
-    createdAt: document.createdAt,
-  };
+  const { schemaVersion: _schemaVersion, ...record } = document;
+  return { version, ...record };
 }
 
-function conflictMessage(id: string, current: number | null, expected: number | null): string {
-  if (current === null) return `Skill "${id}" no longer exists. Read it again before saving.`;
-  if (expected === null) return `A skill named "${id}" already exists.`;
-  return `Skill "${id}" changed: its latest version is ${current}, not ${expected}. Read it again before saving.`;
+function conflictMessage(name: string, current: number | null, expected: number | null): string {
+  if (current === null) return `Skill "${name}" no longer exists. Read it again before saving.`;
+  if (expected === null) return `A skill named "${name}" already exists.`;
+  return `Skill "${name}" changed: its latest version is ${current}, not ${expected}. Read it again before saving.`;
 }
 
-class DocumentSkillRepository implements SkillRepository<SkillScope> {
+class DocumentSkillRepository implements SkillRepository {
   readonly #backend: MemoryDocumentBackend;
-  readonly #prefix: string;
+  readonly #namespace: string;
   readonly #now: () => Date;
   readonly #signal = new AbortController().signal;
 
   constructor(options: DocumentRepositoryOptions) {
     this.#backend = options.backend;
-    this.#prefix = options.prefix ?? "custom-skills";
+    this.#namespace = options.namespace ?? "custom-skills";
     this.#now = options.now ?? (() => new Date());
   }
 
+  /** Hashing the scope key keeps any key path-safe and stops two keys from colliding. */
   #catalogKey(scope: SkillScope): string {
-    return `${this.#prefix}/${scope.ownerKey}`;
+    return `${this.#namespace}/${createHash("sha256").update(scope.key).digest("hex")}`;
   }
 
   async #readCatalog(scope: SkillScope): Promise<{ catalog: Catalog; version: string | null }> {
@@ -184,8 +177,7 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
   }
 
   async #replay(
-    scope: SkillScope,
-    id: string,
+    name: string,
     entry: SkillEntry,
     idempotencyKey: string | undefined,
   ): Promise<AppendVersionResult | null> {
@@ -195,7 +187,7 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
     const document = await this.#readVersion(saved.key);
     if (!document) return null;
     return {
-      head: toHead(id, entry, scope.ownerKey),
+      head: toHead(name, entry),
       version: toRecord(saved.version, document),
       replayed: true,
     };
@@ -203,18 +195,18 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
 
   async listHeads(scope: SkillScope): Promise<SkillHead[]> {
     const { catalog } = await this.#readCatalog(scope);
-    return Object.entries(catalog.skills).map(([id, entry]) => toHead(id, entry, scope.ownerKey));
+    return Object.entries(catalog.skills).map(([name, entry]) => toHead(name, entry));
   }
 
-  async getHead(scope: SkillScope, id: string): Promise<SkillHead | null> {
+  async getHead(scope: SkillScope, name: string): Promise<SkillHead | null> {
     const { catalog } = await this.#readCatalog(scope);
-    const entry = catalog.skills[id];
-    return entry ? toHead(id, entry, scope.ownerKey) : null;
+    const entry = catalog.skills[name];
+    return entry ? toHead(name, entry) : null;
   }
 
-  async listVersions(scope: SkillScope, id: string): Promise<SkillVersionRecord[]> {
+  async listVersions(scope: SkillScope, name: string): Promise<SkillVersionRecord[]> {
     const { catalog } = await this.#readCatalog(scope);
-    const entry = catalog.skills[id];
+    const entry = catalog.skills[name];
     if (!entry) return [];
     const documents = await Promise.all(
       entry.versions.map(async ({ version, key }) => {
@@ -225,42 +217,50 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
     return documents.filter((record): record is SkillVersionRecord => record !== null);
   }
 
-  async getVersion(
+  async getVersions(
     scope: SkillScope,
-    id: string,
-    version: number,
-  ): Promise<SkillVersionRecord | null> {
+    refs: readonly SkillVersionRef[],
+  ): Promise<Array<SkillVersionRecord | null>> {
+    if (refs.length === 0) return [];
     const { catalog } = await this.#readCatalog(scope);
-    const saved = catalog.skills[id]?.versions.find((entry) => entry.version === version);
-    if (!saved) return null;
-    const document = await this.#readVersion(saved.key);
-    return document ? toRecord(version, document) : null;
+    return Promise.all(
+      refs.map(async ({ name, version }) => {
+        const saved = catalog.skills[name]?.versions.find((entry) => entry.version === version);
+        if (!saved) return null;
+        const document = await this.#readVersion(saved.key);
+        return document ? toRecord(version, document) : null;
+      }),
+    );
   }
 
   async appendVersion(
     scope: SkillScope,
     request: AppendVersionRequest,
   ): Promise<AppendVersionResult> {
-    const id = request.id ?? randomUUID();
+    const { name } = request;
     const { catalog } = await this.#readCatalog(scope);
-    const existing = catalog.skills[id];
+    const existing = catalog.skills[name];
     if (existing) {
-      const replay = await this.#replay(scope, id, existing, request.idempotencyKey);
+      const replay = await this.#replay(name, existing, request.idempotencyKey);
       if (replay) return replay;
     }
     const current = existing ? (existing.versions.at(-1)?.version ?? 0) : null;
     if (request.expectedLatest !== current) {
-      throw new SkillConflictError(conflictMessage(id, current, request.expectedLatest));
+      throw new SkillConflictError(conflictMessage(name, current, request.expectedLatest));
     }
 
     const createdAt = this.#now().toISOString();
     const document: VersionDocument = {
       schemaVersion: SCHEMA_VERSION,
       ...request.version,
-      ownerLabel: scope.ownerLabel,
+      validation: {
+        ...request.version.validation,
+        errors: [...request.version.validation.errors],
+        warnings: [...request.version.validation.warnings],
+      },
       createdAt,
     };
-    const key = `${this.#catalogKey(scope)}/${id}/${randomUUID()}`;
+    const key = `${this.#catalogKey(scope)}/${randomUUID()}`;
     await this.#backend.write({
       key,
       content: JSON.stringify(document),
@@ -270,7 +270,7 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
 
     try {
       const outcome = await this.#updateCatalog(scope, (latest) => {
-        const entry = latest.skills[id];
+        const entry = latest.skills[name];
         const replayed = entry?.versions.find(
           (version) =>
             request.idempotencyKey !== undefined &&
@@ -279,30 +279,33 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
         if (entry && replayed) return { entry, version: replayed.version, replayed: true };
         const latestVersion = entry ? (entry.versions.at(-1)?.version ?? 0) : null;
         if (request.expectedLatest !== latestVersion) {
-          throw new SkillConflictError(conflictMessage(id, latestVersion, request.expectedLatest));
+          throw new SkillConflictError(
+            conflictMessage(name, latestVersion, request.expectedLatest),
+          );
         }
         const version = (latestVersion ?? 0) + 1;
         const saved: z.infer<typeof versionEntrySchema> = { version, key };
         if (request.idempotencyKey !== undefined) saved.idempotencyKey = request.idempotencyKey;
         const next: SkillEntry = {
-          name: request.version.name,
-          liveVersion: request.head.activate ? version : (entry?.liveVersion ?? null),
-          applicationMode: request.head.applicationMode,
+          liveVersion: request.activate ? version : (entry?.liveVersion ?? null),
+          applicationMode: request.activate
+            ? request.version.applicationMode
+            : (entry?.applicationMode ?? request.version.applicationMode),
           createdAt: entry?.createdAt ?? createdAt,
           updatedAt: createdAt,
           versions: [...(entry?.versions ?? []), saved],
         };
-        latest.skills[id] = next;
+        latest.skills[name] = next;
         return { entry: next, version, replayed: false };
       });
       if (outcome.replayed) {
         await this.#tombstone(key);
-        const replay = await this.#replay(scope, id, outcome.entry, request.idempotencyKey);
+        const replay = await this.#replay(name, outcome.entry, request.idempotencyKey);
         if (replay) return replay;
-        throw new SkillLifecycleError(`Skill "${id}" lost a replayed version.`);
+        throw new SkillLifecycleError(`Skill "${name}" lost a replayed version.`);
       }
       return {
-        head: toHead(id, outcome.entry, scope.ownerKey),
+        head: toHead(name, outcome.entry),
         version: toRecord(outcome.version, document),
         replayed: false,
       };
@@ -312,35 +315,35 @@ class DocumentSkillRepository implements SkillRepository<SkillScope> {
     }
   }
 
-  async updateHead(scope: SkillScope, id: string, patch: SkillHeadPatch): Promise<SkillHead> {
+  async updateHead(scope: SkillScope, name: string, patch: SkillHeadPatch): Promise<SkillHead> {
     const entry = await this.#updateCatalog(scope, (catalog) => {
-      const current = catalog.skills[id];
-      if (!current) throw new SkillNotFoundError(id);
+      const current = catalog.skills[name];
+      if (!current) throw new SkillNotFoundError(name);
       const next: SkillEntry = { ...current, updatedAt: this.#now().toISOString() };
       if (patch.liveVersion !== undefined) next.liveVersion = patch.liveVersion;
       if (patch.applicationMode !== undefined) next.applicationMode = patch.applicationMode;
-      catalog.skills[id] = next;
+      catalog.skills[name] = next;
       return next;
     });
-    return toHead(id, entry, scope.ownerKey);
+    return toHead(name, entry);
   }
 
-  async remove(scope: SkillScope, ids: readonly string[]): Promise<RemoveSkillsResult> {
+  async remove(scope: SkillScope, names: readonly string[]): Promise<RemoveSkillsResult> {
     const removed = await this.#updateCatalog(scope, (catalog) => {
-      const entries: Array<{ id: string; keys: string[] }> = [];
-      for (const id of new Set(ids)) {
-        const entry = catalog.skills[id];
+      const entries: Array<{ name: string; keys: string[] }> = [];
+      for (const name of new Set(names)) {
+        const entry = catalog.skills[name];
         if (!entry) continue;
-        entries.push({ id, keys: entry.versions.map(({ key }) => key) });
-        delete catalog.skills[id];
+        entries.push({ name, keys: entry.versions.map(({ key }) => key) });
+        delete catalog.skills[name];
       }
       return entries;
     });
     await Promise.all(removed.flatMap(({ keys }) => keys.map((key) => this.#tombstone(key))));
-    const removedIds = new Set(removed.map(({ id }) => id));
+    const removedNames = new Set(removed.map(({ name }) => name));
     return {
-      removed: removed.map(({ id }) => ({ id, ownerKey: scope.ownerKey })),
-      notFound: [...new Set(ids)].filter((id) => !removedIds.has(id)),
+      removed: [...removedNames],
+      notFound: [...new Set(names)].filter((name) => !removedNames.has(name)),
     };
   }
 }
