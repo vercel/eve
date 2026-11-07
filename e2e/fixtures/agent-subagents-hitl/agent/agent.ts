@@ -2,10 +2,21 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
+import {
+  CHILD_MARKER,
+  FAN_IN_DONE,
+  FAN_IN_MARKER,
+  planAfter,
+  type ChildPlan,
+  type FanInPlan,
+} from "./lib/weather-sign-in";
+
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  const fanIn = planAfter<FanInPlan>(message, FAN_IN_MARKER);
+  if (fanIn !== undefined) return signInFanIn(request, fanIn);
   if (message.includes("Read the parent input-hook audit")) {
     const audit = request.toolResults.find((result) => result.name === "read_input_hooks");
     return audit === undefined
@@ -88,6 +99,49 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   throw new Error("Mixed runtime-action step resumed before both tool results were available.");
+}
+
+/**
+ * The parent runs `children` weather children in one step and waits for every report. With
+ * `late`, the last child starts only after the others report, with the grant they ran on.
+ */
+function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelResponse | string {
+  const reports = taskResultsOf(request, "weather-child");
+  const started = request.toolResults.filter((result) => result.name === "weather-child").length;
+  const first = plan.late === true ? plan.children - 1 : plan.children;
+  if (started === 0)
+    return { toolCalls: Array.from({ length: first }, (_, index) => weatherChild(plan, index)) };
+  if (started < plan.children && reports.length === started) {
+    const grant = /token=(\S+)/u.exec(reports.join(" "))?.[1];
+    return { toolCalls: [weatherChild(plan, started, grant)] };
+  }
+  if (reports.length < plan.children) return waitForTasks();
+  return [FAN_IN_DONE, ...reports].join("\n");
+}
+
+function weatherChild(plan: FanInPlan, index: number, grant?: string) {
+  const child: ChildPlan = {
+    city: `Lisbon ${index}`,
+    ...(plan.hold === true && { hold: true }),
+    ...(plan.again === true && index === 0 && { again: true }),
+    ...(grant !== undefined && { grant }),
+  };
+  return {
+    id: `weather-child-${index}`,
+    input: { message: `${CHILD_MARKER} ${JSON.stringify(child)}` },
+    name: "weather-child",
+  };
+}
+
+/** Every `<task_result>` the agent `tool` returned so far, oldest first. */
+function taskResultsOf(request: MockModelRequest, tool: string): string[] {
+  const pattern = new RegExp(
+    `<task_result [^>]*tool="${tool}"[^>]*>([\\s\\S]*?)</task_result>`,
+    "gu",
+  );
+  return request.messages
+    .filter((message) => message.role === "user")
+    .flatMap((message) => [...message.text.matchAll(pattern)].map((match) => match[1]!));
 }
 
 /** An agent call returns a receipt; its result arrives later in a `<task_result>` message. */
