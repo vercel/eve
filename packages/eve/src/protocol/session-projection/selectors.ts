@@ -335,10 +335,12 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   // forwarded to the child that asked it, doesn't wait on an answer. A request relayed from a
   // task this turn's call started belongs to the task, but the turn still waits on its interaction.
   // A question about a call that already ended, such as a cancelled stretch's before its run
-  // withdraws it, holds nothing.
+  // withdraws it, holds nothing. A sign-in that waited on a card already settled has its answer:
+  // its asker heard back with that card and settles it as it resumes.
   const interactionsWaiting = openInteractions(view).filter(
     (entry) =>
       !answered.has(entry.interactionId) &&
+      !heardBack(view, entry) &&
       !("callId" in entry.subject && view.calls[entry.subject.callId]?.status === "settled") &&
       (interactionOwner(view, entry).turnId === turnId || subjectTurn(view, entry) === turnId),
   );
@@ -356,6 +358,12 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     };
   }
   return { on: "session" };
+}
+
+/** Whether `row` is a sign-in that waited on another's card (`waitsOn`), and that card settled. */
+function heardBack(view: SessionView, row: InteractionRow): boolean {
+  const shown = row.request.signIn?.waitsOn;
+  return shown !== undefined && view.interactions[shown]?.status === "settled";
 }
 
 /** The approval this session asked about a call itself, not one relayed from elsewhere. */
