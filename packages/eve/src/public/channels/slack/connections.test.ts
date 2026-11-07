@@ -111,16 +111,14 @@ describe("buildAuthEphemeralBlocks", () => {
     ]);
   });
 
-  it("says the turn is paused and offers Cancel when the sign-in holds a turn", () => {
+  it("offers Cancel under the bare heading when the sign-in holds a turn", () => {
     const target = { channelId: "C01", threadTs: "1700000000.000001", turnId: "turn_0" };
     const blocks = buildAuthEphemeralBlocks({
       cancel: target,
       displayName: "Linear",
       url: "https://connect.example.com/authorize/sca_abc",
     });
-    expect((blocks[0] as { text: { text: string } }).text.text).toBe(
-      "*Connect Linear*\nI've paused until you connect your Linear account or cancel.",
-    );
+    expect((blocks[0] as { text: { text: string } }).text.text).toBe("*Connect Linear*");
     const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[1];
     expect(cancel).toMatchObject({
       action_id: SIGN_IN_CANCEL_ACTION_ID,

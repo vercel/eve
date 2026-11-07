@@ -81,10 +81,11 @@ interface AuthEphemeralPrompt {
 }
 
 /**
- * Block Kit blocks for the private sign-in prompt. It names the service and
- * why it is asking before the button, because the user may not remember which
- * request needed it. A device-code flow's `userCode` is a fallback the
- * provider shows only sometimes, so it is a quiet hint below the button.
+ * Block Kit blocks for the private sign-in prompt. It names the service
+ * before the button. Only a prompt with no held turn says why it is asking;
+ * a held turn's Cancel button and the agent's own reply already say it. A
+ * device-code flow's `userCode` is a fallback the provider shows only
+ * sometimes, so it is a quiet hint below the button.
  */
 export function buildAuthEphemeralBlocks(
   input: AuthEphemeralPrompt & {
@@ -95,7 +96,7 @@ export function buildAuthEphemeralBlocks(
   const intro =
     input.cancel === undefined
       ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.`
-      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel.`;
+      : `*Connect ${input.displayName}*`;
   const blocks: unknown[] = [
     {
       type: "section",
