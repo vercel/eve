@@ -28,7 +28,7 @@ export type WeatherGrant = "weather" | "other" | "none";
 /** Where the provider keeps `principal`'s `grant`: one per person and grant. */
 function grantKey(principal: ConnectionPrincipal, grant: WeatherGrant): string {
   if (principal.type !== "user") throw new Error("The weather sign-in needs a person.");
-  return grant === "weather" ? principal.id : `${principal.id}/${grant}`;
+  return grant === "weather" ? principal.id : `${principal.id}-${grant}`;
 }
 
 /** A weather sign-in, a Vercel Connect grant whose provider is faked at its edge. */

@@ -66,9 +66,16 @@ export async function markReturned(person: string, city: string) {
   await grants.write({
     content: "returned",
     expectedVersion: null,
-    key: `${person}/returned/${city}`,
+    key: returnedKey(person, city),
     signal: deadline(),
   });
+}
+
+// `vercelBlob` percent-encodes the key into the pathname on write but reads the encoded pathname
+// back literally, so a key with `/` or a space is written and never found. base64url keeps the city
+// within `[A-Za-z0-9_-]` without merging two cities into one key.
+function returnedKey(person: string, city: string) {
+  return `${person}-returned-${Buffer.from(city).toString("base64url")}`;
 }
 
 /**
@@ -79,7 +86,7 @@ export async function awaitReturned(person: string, cities: readonly string[], l
   const until = Date.now() + limitMs;
   for (;;) {
     const returned = await Promise.all(
-      cities.map((city) => grants.read({ key: `${person}/returned/${city}`, signal: deadline() })),
+      cities.map((city) => grants.read({ key: returnedKey(person, city), signal: deadline() })),
     );
     const waiting = cities.filter((_, index) => returned[index] === null);
     if (waiting.length === 0) return;
@@ -97,7 +104,7 @@ export async function markParentAsked(person: string) {
     await grants.write({
       content: "asked",
       expectedVersion: null,
-      key: `${person}/parent-asked`,
+      key: `${person}-parent-asked`,
       signal: deadline(),
     });
   } catch (error) {
@@ -108,7 +115,7 @@ export async function markParentAsked(person: string) {
 /** Waits until `person`'s parent asked for its own sign-in, or fails after `limitMs`. */
 export async function awaitParentAsked(person: string, limitMs: number) {
   const until = Date.now() + limitMs;
-  while ((await grants.read({ key: `${person}/parent-asked`, signal: deadline() })) === null) {
+  while ((await grants.read({ key: `${person}-parent-asked`, signal: deadline() })) === null) {
     if (Date.now() > until) throw new Error(`The parent didn't ask within ${limitMs} ms.`);
     await sleep(200);
   }
