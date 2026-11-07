@@ -1,5 +1,13 @@
 # @eve/agent-desktop
 
+## 0.1.0-rc.1
+
+Released 2026-11-07 · [Compare with 0.1.0-rc.0](https://github.com/vercel/eve/compare/%40eve%2Fagent-desktop%400.1.0-rc.0...%40eve%2Fagent-desktop%400.1.0-rc.1)
+
+### Dependencies
+
+- Updated eve to 1.0.0-rc.7.
+
 ## 0.1.0-rc.0
 
 Released 2026-11-03 · [View commits](https://github.com/vercel/eve/commits/%40eve%2Fagent-desktop%400.1.0-rc.0)
