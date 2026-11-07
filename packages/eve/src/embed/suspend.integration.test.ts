@@ -120,15 +120,10 @@ async function until(
   session: EmbeddedSession,
   done: (events: readonly SessionStreamEvent[]) => boolean,
 ): Promise<SessionStreamEvent[]> {
-  const reader = (await session.events()).getReader();
   const events: SessionStreamEvent[] = [];
-  try {
-    for (let next = await reader.read(); !next.done; next = await reader.read()) {
-      events.push(next.value);
-      if (done(events)) break;
-    }
-  } finally {
-    await reader.cancel();
+  for await (const event of session.stream({ startIndex: 0 })) {
+    events.push(event);
+    if (done(events)) break;
   }
   return events;
 }
@@ -157,7 +152,7 @@ describe("suspending and ending an embedded session", () => {
     const reviewer = reviewerGate();
     const lead = leadAgent(reviewer);
     const world = localTestWorld(directory);
-    const first = createSession(lead, { identity: alice, world });
+    const first = await createSession(lead, { identity: alice, world });
     await first.send("Write the plan, and ask the reviewer.");
     await reviewer.started;
     await until(first, (seen) => said(seen, "Waiting on the reviewer."));
@@ -173,7 +168,7 @@ describe("suspending and ending an embedded session", () => {
     expect(await linesOf(world, sessionId)).not.toContain('"session.ended"');
     expect(await linesOf(world, reviewerId!)).not.toContain('"session.ended"');
 
-    const second = createSession(lead, { identity: alice, resume: sessionId, world });
+    const second = await createSession(lead, { identity: alice, resume: sessionId, world });
     try {
       const events = await until(second, (seen) => said(seen, "Read: "));
       // The reviewer's run went on and reached the reviewer the store kept; its cut-off step
@@ -200,7 +195,7 @@ describe("suspending and ending an embedded session", () => {
   it("ends a session on close, and the reviewer it opened with it", async () => {
     const reviewer = reviewerGate();
     const world = localTestWorld(directory);
-    const session = createSession(leadAgent(reviewer), { identity: alice, world });
+    const session = await createSession(leadAgent(reviewer), { identity: alice, world });
     await session.send("Write the plan, and ask the reviewer.");
     await reviewer.started;
     await until(session, (seen) => said(seen, "Waiting on the reviewer."));

@@ -65,7 +65,7 @@ describe("a code agent on the host directory", () => {
   it("keeps the file tools inside the root when confined", async () => {
     await writeFile(join(root, "inside.txt"), "in the root");
     await writeFile(join(elsewhere, "outside.txt"), "in another tree");
-    const session = createSession(
+    const session = await createSession(
       defineAgent({
         definitions: eve.defaults({
           sandbox: hostSandbox({ confine: true, root: () => root }),
@@ -93,7 +93,7 @@ describe("a code agent on the host directory", () => {
   });
 
   it("runs approved bash in the directory the host is in", async () => {
-    const session = createSession(
+    const session = await createSession(
       defineAgent({
         definitions: eve.defaults({
           approval: { bash: always() },

@@ -72,7 +72,7 @@ describe("an agent defined in code, in this process", () => {
   it("asks before a tool that needs approval, then runs it as the session's identity", async () => {
     const deployed: unknown[] = [];
     const callers: (string | undefined)[] = [];
-    const session = createSession(releaseAgent(deployed, callers), { identity: alice });
+    const session = await createSession(releaseAgent(deployed, callers), { identity: alice });
     try {
       const asked = await (await session.send("Ship it.")).result();
       expect(asked.reply).toBeUndefined();
@@ -102,17 +102,21 @@ describe("an agent defined in code, in this process", () => {
     const callers: (string | undefined)[] = [];
     const release = releaseAgent(deployed, callers);
     const world = memoryWorld();
-    const first = createSession(release, { identity: alice, world });
+    const first = await createSession(release, { identity: alice, world });
     const asked = await (await first.send("Ship it.")).result();
     expect(asked.interactions.map((interaction) => interaction.call?.name)).toEqual(["deploy"]);
     // A snapshot taken now holds what the World holds.
-    expect((await first.snapshot()).open).toMatchObject({ at: "pause" });
+    expect((await first.checkpoint()).open).toMatchObject({ at: "pause" });
     // Suspended, not closed: closing would end the session.
     await first.suspend();
 
     const saved = await createWorldSessionStore(world).load(asked.sessionId);
     expect(saved?.open).toMatchObject({ at: "pause", pause: { on: "interaction" } });
-    const second = createSession(release, { identity: alice, resume: asked.sessionId, world });
+    const second = await createSession(release, {
+      identity: alice,
+      resume: asked.sessionId,
+      world,
+    });
     try {
       expect(second.id).toBe(asked.sessionId);
       const pending = await second.pending();

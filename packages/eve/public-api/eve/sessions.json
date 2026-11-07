@@ -5,9 +5,12 @@
   "EveError",
   "PrewarmSessionResult",
   "Session",
+  "SessionHandle",
   "SessionNotActiveError",
   "SessionReader",
   "SessionRespondOptions",
+  "SessionRespondTurnOptions",
   "SessionSendOptions",
+  "SessionSendTurnOptions",
   "SessionStreamOptions"
 ]
