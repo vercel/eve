@@ -11,7 +11,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 
 ## First Pass
 
-- Read `AGENTS.md` first. It requires reading the relevant guide under `node_modules/eve/dist/docs/public/` before writing code.
+- Read `AGENTS.md` first. It requires reading the relevant guide under `node_modules/eve/docs/` before writing code.
 - Read `docs/how-the-chatbot-works.md` for architecture changes and `docs/setup-and-deploy.md` for setup, auth, storage, or deployment changes.
 - Search with `rg "useEveAgent|ClientSession|SessionState|content.delta|interaction.opened|eveSession|chat_event|streamIndex|continuationToken|defineMcpClientConnection|defineTool"`.
 - Keep Eve runtime code separate from product shell code: `agent/` defines agent behavior; `app/_components/agent-chat.tsx` bridges Eve to the web UI; `lib/db/*` persists app state.
