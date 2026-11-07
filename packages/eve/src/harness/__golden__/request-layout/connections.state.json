@@ -167,6 +167,7 @@
     "snapshot": {
       "session": {
         "compaction": {
+          "estimateRatio": 0.0003151591553734636,
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 4,
           "requestEnvelopeTokens": 2989

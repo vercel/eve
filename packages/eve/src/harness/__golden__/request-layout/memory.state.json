@@ -173,8 +173,10 @@
     "snapshot": {
       "session": {
         "compaction": {
+          "estimateRatio": 0.00038402457757296467,
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 5,
+          "lastStage": "tail",
           "requestEnvelopeTokens": 2525
         },
         "continuationToken": "http:layout-memory",
