@@ -45,6 +45,8 @@ const weatherAuth = (grant: WeatherGrant) =>
       vercelConnect: { connector: grant === "weather" ? WEATHER_GRANT : OTHER_GRANT },
     }),
     async getToken({ principal }) {
+      // A sign-in with no grant leaves nothing at the provider, so every call asks again.
+      if (grant === "none") throw new ConnectionAuthorizationRequiredError("weather");
       const token = await readGrant(grantKey(principal, grant));
       if (token === undefined) throw new ConnectionAuthorizationRequiredError("weather");
       return { token };
@@ -60,7 +62,7 @@ const weatherAuth = (grant: WeatherGrant) =>
       const person = grantKey(principal, grant);
       const { code, error } = callback.params;
       if (code === ACCEPT_CODE) {
-        await storeGrant(person, GRANT_TOKEN);
+        if (grant !== "none") await storeGrant(person, GRANT_TOKEN);
         return { token: CODE_TOKEN };
       }
       if (code === FAILING_CODE) throw new Error(EXCHANGE_FAILURE);
