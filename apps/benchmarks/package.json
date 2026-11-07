@@ -9,7 +9,8 @@
     "benchmark:export": "node scripts/export-results.mjs",
     "test": "node --test lib/*.test.mjs lib/setups/*.test.mjs scripts/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "benchmark:timings": "node scripts/timings.mjs"
+    "benchmark:timings": "node scripts/timings.mjs",
+    "grader-kit:sync": "node scripts/grader-kit.mjs"
   },
   "dependencies": {
     "@vercel/agent-eval": "2.2.1",

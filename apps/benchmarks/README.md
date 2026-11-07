@@ -25,7 +25,9 @@ Every model runs the same eve package: the workflow pins `main`'s package to one
 model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
 `records.jsonl` and `manifest.json` under `authoring/runs/<run-id>/<attempt>/`. A record is one run
 of one case on one model. It holds the outcome, timings, turns, tokens, estimated cost, and which
-docs pages the agent read. A planned run that produced no result is recorded as `missing`. Objects
+docs pages the agent read. A planned run that produced no result is recorded as `missing`, and so
+is a run whose project lockfile resolved some other eve (e.g. npm's release after `npx eve@0.86.0
+init`), with the reason in `missing_reason`. Objects
 are immutable, and the manifest is written last. PR runs execute branch code, so they publish under
 `authoring/pull-requests/<pr-number>/<run-id>/<attempt>/` instead, and their manifest and records
 set `pull_request` to the PR number (it is `null` for `main`). Dispatches on other branches are not
@@ -61,7 +63,8 @@ are not supported by the native runner.
 
 The runner uses agent-eval's native Gateway harnesses: OpenCode for other providers, Claude Code
 for Anthropic models, and Codex for OpenAI models. Each attempt starts an isolated Vercel Sandbox,
-then scaffolds the selected immutable canary with `npx` before the coding agent starts.
+then scaffolds the selected immutable canary with `npx` before the coding agent starts. The canary
+is also npm's global `eve` and the `eve` on `PATH`, so `eve init` and `npx eve init` use it.
 The starting workspace includes pinned `just-bash@3.6.0` for the local default sandbox provider and `vitest@5.0.2` for the grader.
 Scaffolded workspaces must pass typecheck and build before any model inference starts.
 
@@ -146,6 +149,13 @@ Use `simpleProject` for the selected canary's `eve init` output and `emptyProjec
 the coding agent creates. A setup can seed an existing app instead, as `lib/setups/tally-app.ts` does
 from `fixtures/tally/`; pin its eve dependency to the setup context's `packageSpec`. Put reusable setup under `lib/setups/`. Native runs support one-turn
 cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
+
+Graders that call authored code use `lib/grader-kit.ts`: it runs tool calls the way eve does
+(context, session state, approvals, fresh call IDs), resolves `defineDynamic()` definitions, and
+imports the project's own eve. agent-eval hides only `EVAL.ts` from the agent, so a grader can't
+import it. Put the grader-kit markers after the grader's imports, run `pnpm grader-kit:sync`, and
+edit the kit in `lib/`, never in a copy; a test fails when a copy drifts. Prefer extending the kit
+over hand-faking eve in one grader.
 
 ## Partial credit
 

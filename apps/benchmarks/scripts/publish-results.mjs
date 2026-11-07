@@ -25,7 +25,9 @@
 // run_attempt, model_id, case, run), and carries its case's `category` from
 // CASE.ts so results can be narrowed to one. Planned runs with no result, including
 // every run of a model whose job uploaded nothing, become `missing` records so
-// coverage stays honest. A metric that can't be read is `null`, never zero.
+// coverage stays honest. So do runs whose project installed an eve other than the
+// subject; those keep their metrics and say why in `missing_reason`. A metric that
+// can't be read is `null`, never zero.
 //
 // Usage: node scripts/publish-results.mjs <artifacts-dir>
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT,
@@ -143,12 +145,27 @@ export function buildRecords({
             : {
                 raw_path: `raw/${modelId}/${relative(dir, result.path).replaceAll("\\", "/")}`,
                 ...runMetrics(result, benchmark),
+                ...otherEve(result.installedEve, plan.eve_revision),
               }),
         });
       }
     }
   }
   return records;
+}
+
+/**
+ * A run whose project installed some other eve, such as npm's release after `npx eve@0.86.0
+ * init`, measured that eve rather than the subject. It keeps its metrics and raw results but
+ * counts as `missing`, never as a pass or failure of the subject.
+ */
+export function otherEve(installs, revision) {
+  const other = installs.find(({ source }) => !String(source).includes(`pkg.eve.dev/${revision}/`));
+  if (other === undefined) return {};
+  return {
+    outcome: "missing",
+    missing_reason: `${other.lockfile} installed eve ${other.source}, not the subject ${revision.slice(0, 12)}`,
+  };
 }
 
 function runMetrics(result, benchmark) {
