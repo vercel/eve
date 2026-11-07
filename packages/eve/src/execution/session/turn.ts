@@ -32,10 +32,11 @@ import {
   isAppliedRunMessage,
   takeLeadingAppliedRunMessages,
 } from "#execution/session-workflow-tool-run.js";
-import {
-  applyRunMessagesStep,
-  type AppliedRunMessage,
-} from "#execution/tools/workflow/apply-run-messages-step.js";
+import type {
+  AppliedRunMessage,
+  ApplyRunMessagesInput,
+  ApplyRunMessagesResult,
+} from "#execution/tools/workflow/apply-run-messages.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import {
   isAgentSessionMessage,
@@ -95,6 +96,11 @@ export interface SessionTurnHost {
   dispatchRuns(
     input: CoordinationDispatchInput,
   ): Promise<WithSessionStateDelta<CoordinationDispatchResult>>;
+  /**
+   * Applies the messages the session's runs sent, as one step: `applyRunMessagesStep` on
+   * Workflow.
+   */
+  applyRunMessages(input: ApplyRunMessagesInput): Promise<ApplyRunMessagesResult>;
   /** Resolves once `ms` pass, for an `eve__task_wait` timeout. */
   sleep(ms: number): Promise<void>;
 }
@@ -201,7 +207,7 @@ export class SessionExecution {
   ): Promise<void> {
     if (messages.length === 0) return;
     const { cancelled } = await this.input.cursor.advance((state) =>
-      applyRunMessagesStep({ ...state, canCancelTurn: turn !== undefined, messages }),
+      this.input.host.applyRunMessages({ ...state, canCancelTurn: turn !== undefined, messages }),
     );
     if (cancelled) turn?.abort();
   }
