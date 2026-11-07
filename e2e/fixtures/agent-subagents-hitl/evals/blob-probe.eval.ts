@@ -18,11 +18,12 @@ export default defineEval({
     // test the cross-instance case; both IDs are logged.
     await Promise.all(
       [0, 1, 2, 3, 4, 5].map(async (round) => {
-        const key = `${randomUUID()}/cross`;
-        const reader = get(`/fixture-blob-probe/read-then-poll?key=${key}`);
+        // Rounds 0-2 use a key with a slash, rounds 3-5 the same shape without one.
+        const key = round < 3 ? `${randomUUID()}/cross` : `${randomUUID()}-cross`;
+        const reader = get(`/fixture-blob-probe/read-then-poll?key=${encodeURIComponent(key)}`);
         await sleep(1_500);
-        const writer = await get(`/fixture-blob-probe/write?key=${key}`);
-        t.log(`cross ${round} writer ${writer}`);
+        const writer = await get(`/fixture-blob-probe/write?key=${encodeURIComponent(key)}`);
+        t.log(`cross ${round} key=${key} writer ${writer}`);
         t.log(`cross ${round} reader ${await reader}`);
       }),
     );

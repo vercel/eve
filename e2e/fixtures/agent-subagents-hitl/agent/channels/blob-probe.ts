@@ -30,6 +30,7 @@ async function poll(key: string, since: number, limitMs: number) {
 export default defineChannel({
   routes: [
     // One instance: read missing, create, poll. Control: create without reading first, poll.
+    // Plain: the control with no slash in the key.
     GET("/fixture-blob-probe/same", async () => {
       const run = randomUUID();
       const readFirst = `${run}/read-first`;
@@ -39,8 +40,12 @@ export default defineChannel({
       const readFirstResult = await poll(readFirst, Date.now(), 35_000);
       await write(control);
       const controlResult = await poll(control, Date.now(), 35_000);
+      const plain = `${run}-plain`;
+      await write(plain);
+      const plainResult = await poll(plain, Date.now(), 35_000);
       return Response.json({
         control: controlResult,
+        plain: plainResult,
         firstRead,
         instance: INSTANCE,
         readFirst: readFirstResult,
