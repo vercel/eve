@@ -15,12 +15,12 @@ import {
 } from "./helpers";
 
 /**
- * One child signs in and checks Lisbon. Its next call, for Porto, finds the grant gone, so the
- * parent shows a new card after the first one settled. Accepting it runs Porto, and the turn
+ * One child signs in and checks Lisbon, then revokes the grant at the provider. Its next call, for
+ * Porto, finds the grant gone, so the parent shows a new card after the first one settled. Accepting it runs Porto, and the turn
  * finishes from that card.
  */
 export default defineEval({
-  description: "A call that finds the grant gone after an acceptance shows a new card.",
+  description: "A call after the provider revoked the accepted grant shows a new card.",
   tags: ["hitl", "sign-in"],
   timeoutMs: 150_000,
   async test(t) {
@@ -29,14 +29,17 @@ export default defineEval({
     const [first] = signIns(reader.events);
     await answer(t, first!, { code: ACCEPT_CODE });
 
-    await reader.readUntil((events) => signIns(events).length === 2);
+    // A turn that settles with no second card fails the check at once.
+    await reader.readUntil((events) => signIns(events).length === 2 || turnSettled(events));
+    t.check(signIns(reader.events).length, equals(2));
     const [, second] = signIns(reader.events);
-    t.check(second!.data.request.signIn?.waitsOn, equals(undefined));
+    if (second === undefined) return;
+    t.check(second.data.request.signIn?.waitsOn, equals(undefined));
     t.check(
       signInSettlements(reader.events).map((settled) => settled.data.interactionId),
       equals([first!.data.interactionId]),
     );
-    await answer(t, second!, { code: ACCEPT_CODE });
+    await answer(t, second, { code: ACCEPT_CODE });
     await reader.readUntil(turnSettled);
 
     const events = reader.events;

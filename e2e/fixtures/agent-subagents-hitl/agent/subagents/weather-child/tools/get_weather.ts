@@ -2,67 +2,87 @@ import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
   defineInteractiveAuthorization,
+  type ConnectionPrincipal,
 } from "eve/connections";
 import { defineTool } from "eve/tools";
-import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 
+import { awaitReturned, markReturned, readGrant, storeGrant } from "../../../lib/weather-grants";
 import {
   ACCEPT_CODE,
   CODE_TOKEN,
   EXCHANGE_FAILURE,
   FAILING_CODE,
   GRANT_TOKEN,
-  HOLD_MS,
+  HOLD_LIMIT_MS,
   WEATHER_GRANT,
   type WeatherResult,
 } from "../../../lib/weather-sign-in";
 
-/** The weather sign-in; `grant` is the one the call carries, if any. */
-function weatherAuth(grant: string | undefined) {
-  return defineInteractiveAuthorization<{ marker: string }>({
-    vercelConnect: { connector: WEATHER_GRANT },
-    async getToken() {
-      if (grant === CODE_TOKEN || grant === GRANT_TOKEN) return { token: GRANT_TOKEN };
-      throw new ConnectionAuthorizationRequiredError("weather");
-    },
-    async startAuthorization({ callbackUrl }) {
-      return {
-        challenge: { displayName: "Fixture Weather", url: callbackUrl },
-        resume: { marker: "fixture-weather" },
-      };
-    },
-    async completeAuthorization({ callback, resume }) {
-      if (resume?.marker !== "fixture-weather") throw new Error("Fixture weather state mismatch.");
-      const { code, error } = callback.params;
-      if (code === ACCEPT_CODE) return { token: CODE_TOKEN };
-      if (code === FAILING_CODE) throw new Error(EXCHANGE_FAILURE);
-      // The shown card was accepted: the provider holds the grant this sign-in waited on.
-      if (code === undefined && error === undefined) return { token: GRANT_TOKEN };
-      throw new ConnectionAuthorizationFailedError("weather", {
-        message: `The weather sign-in didn't finish (${error ?? "unknown code"}).`,
-      });
-    },
-  });
+/** The person a sign-in belongs to: the provider keeps one grant per person. */
+function personOf(principal: ConnectionPrincipal): string {
+  if (principal.type !== "user") throw new Error("The weather sign-in needs a person.");
+  return principal.id;
 }
+
+/** The weather sign-in, a Vercel Connect grant whose provider is faked at its edge. */
+const weatherAuth = defineInteractiveAuthorization<{ marker: string }>({
+  vercelConnect: { connector: WEATHER_GRANT },
+  async getToken({ principal }) {
+    const token = await readGrant(personOf(principal));
+    if (token === undefined) throw new ConnectionAuthorizationRequiredError("weather");
+    return { token };
+  },
+  async startAuthorization({ callbackUrl }) {
+    return {
+      challenge: { displayName: "Fixture Weather", url: callbackUrl },
+      resume: { marker: "fixture-weather" },
+    };
+  },
+  async completeAuthorization({ callback, principal, resume }) {
+    if (resume?.marker !== "fixture-weather") throw new Error("Fixture weather state mismatch.");
+    const person = personOf(principal);
+    const { code, error } = callback.params;
+    if (code === ACCEPT_CODE) {
+      await storeGrant(person, GRANT_TOKEN);
+      return { token: CODE_TOKEN };
+    }
+    if (code === FAILING_CODE) throw new Error(EXCHANGE_FAILURE);
+    // The shown card was accepted, so the provider now holds the grant this sign-in waited on.
+    if (code === undefined && error === undefined) {
+      const token = await readGrant(person);
+      if (token === undefined) throw new Error("The accepted weather sign-in left no grant.");
+      return { token };
+    }
+    throw new ConnectionAuthorizationFailedError("weather", {
+      message: `The weather sign-in didn't finish (${error ?? "unknown code"}).`,
+    });
+  },
+});
 
 export default defineTool({
   description: "Get the weather for a city. Needs the person's weather sign-in.",
   inputSchema: z.object({
     city: z.string(),
-    /** Hold for a while when this call's own sign-in minted its token. */
-    hold: z.boolean().optional(),
-    /** A grant to run on, with no sign-in. */
-    grant: z.string().optional(),
-    /** The sign-in's scope; another scope of the same grant asks again. */
-    scope: z.string().optional(),
+    /** When this call's own sign-in minted its token, hold until these cities' calls return. */
+    holdFor: z.array(z.string()).optional(),
   }),
   async execute(input, ctx): Promise<WeatherResult> {
-    const token = await ctx.getToken(weatherAuth(input.grant), {
-      authKey: input.scope ?? "weather",
+    const token = await ctx.getToken(weatherAuth, {
+      authKey: "weather",
       displayName: "Fixture Weather",
     });
-    if (input.hold === true && token.token === CODE_TOKEN) await sleep(HOLD_MS);
-    return { city: input.city, finishedAt: Date.now(), token: token.token };
+    if (input.holdFor === undefined)
+      return { city: input.city, finishedAt: Date.now(), token: token.token };
+    const person = ctx.session.auth.current?.principalId;
+    if (person === undefined) throw new Error("A held weather call needs a person.");
+    if (token.token === CODE_TOKEN) {
+      await awaitReturned(person, input.holdFor, HOLD_LIMIT_MS);
+      return { city: input.city, finishedAt: Date.now(), token: token.token };
+    }
+    // Stamped before it is recorded, so the held call that reads the record finishes after it.
+    const finishedAt = Date.now();
+    await markReturned(person, input.city);
+    return { city: input.city, finishedAt, token: token.token };
   },
 });

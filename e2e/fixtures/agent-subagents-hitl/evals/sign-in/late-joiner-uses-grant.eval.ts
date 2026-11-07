@@ -17,10 +17,8 @@ import {
 
 /**
  * The first child's sign-in shows a card, and the person accepts it. The second child asks for
- * the same grant only after that card settled. It runs on the stored grant, with no new card.
- *
- * The fixture keeps no grant between calls, so the parent hands the second child the grant the
- * first one reported, and the parent starts the second child only after the first reports.
+ * the same grant only after the first child reported. It reads the grant the provider stored for
+ * the person, with no new card. Without that stored grant, it would open a second card.
  */
 export default defineEval({
   description: "A child that asks after the card settled runs on the stored grant, with no card.",
@@ -32,7 +30,10 @@ export default defineEval({
     const [card] = signIns(reader.events);
 
     await answer(t, card!, { code: ACCEPT_CODE });
-    await reader.readUntil((events) => allSettled(events) && turnSettled(events));
+    // A second card fails the check at once rather than waiting for an answer that never comes.
+    await reader.readUntil(
+      (events) => signIns(events).length > 1 || (allSettled(events) && turnSettled(events)),
+    );
 
     const events = reader.events;
     t.check(signIns(events).length, equals(1));

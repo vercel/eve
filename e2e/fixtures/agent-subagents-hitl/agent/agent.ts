@@ -103,7 +103,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
 /**
  * The parent runs `children` weather children in one step and waits for every report. With
- * `late`, the last child starts only after the others report, with the grant they ran on.
+ * `late`, the last child starts only after the others report.
  */
 function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelResponse | string {
   const reports = taskResultsOf(request, "weather-child");
@@ -111,20 +111,21 @@ function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelRespo
   const first = plan.late === true ? plan.children - 1 : plan.children;
   if (started === 0)
     return { toolCalls: Array.from({ length: first }, (_, index) => weatherChild(plan, index)) };
-  if (started < plan.children && reports.length === started) {
-    const grant = /token=(\S+)/u.exec(reports.join(" "))?.[1];
-    return { toolCalls: [weatherChild(plan, started, grant)] };
-  }
+  if (started < plan.children && reports.length === started)
+    return { toolCalls: [weatherChild(plan, started)] };
   if (reports.length < plan.children) return waitForTasks();
   return [FAN_IN_DONE, ...reports].join("\n");
 }
 
-function weatherChild(plan: FanInPlan, index: number, grant?: string) {
+function weatherChild(plan: FanInPlan, index: number) {
   const child: ChildPlan = {
     city: `Lisbon ${index}`,
-    ...(plan.hold === true && { hold: true }),
+    ...(plan.hold === true && {
+      holdFor: Array.from({ length: plan.children }, (_, other) => `Lisbon ${other}`).filter(
+        (city) => city !== `Lisbon ${index}`,
+      ),
+    }),
     ...(plan.again === true && index === 0 && { again: true }),
-    ...(grant !== undefined && { grant }),
   };
   return {
     id: `weather-child-${index}`,

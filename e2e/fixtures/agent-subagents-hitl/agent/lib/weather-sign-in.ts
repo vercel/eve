@@ -3,8 +3,8 @@
  *
  * The person answers the shown card by calling its callback with `code`. A child that waited on
  * that card hears the answer as a callback with no `code` and no `error`, and reads the grant the
- * provider then holds. The fixture keeps no grant between calls: a call carries the grant it runs
- * on in its input, so evals that run at once on one deployment, across instances, never share one.
+ * provider then holds. The provider keeps one grant per person (`weather-grants.ts`), and each eval
+ * asks as a new person, so evals that run at once on one deployment never share a grant.
  */
 
 /** The Connect connector every weather sign-in names, so parallel children share one card. */
@@ -19,34 +19,33 @@ export const FAILING_CODE = "fixture-exchange-fails";
 /** Why the token exchange for {@link FAILING_CODE} fails. */
 export const EXCHANGE_FAILURE = "The fixture token endpoint answered 500.";
 
-/** The token the answered sign-in's own exchange mints. */
+/** The token the answered sign-in's own token exchange returns. */
 export const CODE_TOKEN = "fixture-weather-token-from-code";
 
-/** The token a sign-in that waited on the answered card reads from the stored grant. */
+/** The token the stored grant yields to every later read. */
 export const GRANT_TOKEN = "fixture-weather-token-from-grant";
 
-/** How long a held call runs after its answered sign-in completes. */
-export const HOLD_MS = 5_000;
+/** How long a held call waits for the others before it fails. */
+export const HOLD_LIMIT_MS = 30_000;
 
 /** What the parent's mock model reads from an eval's prompt. */
 export interface FanInPlan {
   /** How many weather children the parent runs. */
   readonly children: number;
-  /** Each child's call holds for {@link HOLD_MS} when its own exchange minted its token. */
+  /** The child whose own exchange minted its token holds its call until the others return. */
   readonly hold?: boolean;
-  /** Child 0 checks Porto under another scope once Lisbon returns. */
+  /** Child 0 revokes the grant once Lisbon returns, then checks Porto. */
   readonly again?: boolean;
-  /** The last child starts only after the others report, with the grant they ran on. */
+  /** The last child starts only after the others report. */
   readonly late?: boolean;
 }
 
 /** What the parent tells one weather child. */
 export interface ChildPlan {
   readonly city: string;
-  readonly hold?: boolean;
+  /** The other children's cities: this call holds until theirs return, if it answered the card. */
+  readonly holdFor?: readonly string[];
   readonly again?: boolean;
-  /** A grant the child's call runs on, with no sign-in. */
-  readonly grant?: string;
 }
 
 /** What one weather call returns. */

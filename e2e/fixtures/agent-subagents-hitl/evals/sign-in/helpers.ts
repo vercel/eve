@@ -9,7 +9,7 @@ export {
   EXCHANGE_FAILURE,
   FAILING_CODE,
   GRANT_TOKEN,
-  HOLD_MS,
+  HOLD_LIMIT_MS,
 } from "../../agent/lib/weather-sign-in";
 
 type Opened = Extract<SessionStreamEvent, { type: "interaction.opened" }>;
