@@ -1,11 +1,15 @@
+import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createChannelRouteArgs } from "#channel/route-args.js";
 import type { Runtime } from "#channel/types.js";
+import { eveChannel } from "#eve-channel/index.js";
 import { detached, matchRoute } from "#eve-channel/in-process.js";
+import type { EveChannelConfig } from "#eve-channel/types.js";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
@@ -19,7 +23,8 @@ const log = createLogger("execution.world-host.channels");
 
 export interface WorldHostChannelsOptions {
   readonly agentName: string;
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  /** The channels it serves, in the order requests are matched against them. */
+  readonly channels: () => Promise<readonly ResolvedChannelDefinition[]>;
   /** The host's runtime for the agent. */
   readonly runtime: Runtime;
   /** Work a route keeps going after its response; a serverless platform's `waitUntil`. */
@@ -32,10 +37,7 @@ export function worldHostChannels(
 ): (request: Request) => Promise<Response> {
   const { agentName, runtime } = options;
   let channels: Promise<readonly ResolvedChannelDefinition[]> | undefined;
-  const channelsOf = () =>
-    (channels ??= getCompiledRuntimeAgentBundle({
-      compiledArtifactsSource: options.compiledArtifactsSource,
-    }).then((bundle) => bundle.graph.root.channels));
+  const channelsOf = () => (channels ??= options.channels());
 
   return async (request) => {
     const path = new URL(request.url).pathname;
@@ -110,4 +112,47 @@ export function worldHostChannels(
       );
     }
   };
+}
+
+/** The channels of an agent compiled from files: its own, and the framework's. */
+export function compiledAgentChannels(
+  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+): () => Promise<readonly ResolvedChannelDefinition[]> {
+  return async () =>
+    (await getCompiledRuntimeAgentBundle({ compiledArtifactsSource })).graph.root.channels;
+}
+
+/**
+ * eve's own channel as an agent defined in code has it: `eveChannel(config)`'s HTTP routes (the
+ * session protocol, and the sign-in callback), as a compiled agent gets its framework eve channel
+ * (`channels/eve.ts`), with the auth `config` names in place of the deployment's.
+ */
+export function eveChannelDefinitions(
+  config: EveChannelConfig,
+): readonly ResolvedChannelDefinition[] {
+  const channel = eveChannel(config);
+  const sourceRef = createResolvedModuleSourceRef({
+    exportName: undefined,
+    logicalPath: "channels/eve.ts",
+    sourceId: "eve:root-defaults",
+  });
+  return channel.routes.flatMap((route): ResolvedChannelDefinition[] =>
+    route.transport === "websocket"
+      ? []
+      : [
+          {
+            name: "eve",
+            method: route.method,
+            urlPath: route.path,
+            // Dispatch calls `handler`, as it does a compiled channel's.
+            fetch: async () =>
+              Response.json({ error: "No matching route handler.", ok: false }, { status: 404 }),
+            handler: route.handler,
+            receive: channel.receive,
+            ...(isCompiledChannel(channel) && { adapter: channel.adapter, definition: channel }),
+            turnPolicy: channel.turnPolicy,
+            ...sourceRef,
+          },
+        ],
+  );
 }

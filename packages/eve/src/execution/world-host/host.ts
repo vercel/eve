@@ -1,47 +1,36 @@
 import type { StartWorkflowToolRun } from "#execution/tools/workflow/start.js";
-import { createChannelAddress } from "#channel/channel-address.js";
-import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import { codeAgentOf } from "#embed/agent.js";
-import type { ActivationOutcome, Entities } from "#execution/entity/entities.js";
+import type { ActivationOutcome } from "#execution/entity/entities.js";
 import {
   installDurableHost,
   installedDurableHost,
-  registerFallbackLineStore,
-  registerHost,
   uninstallDurableHost,
   type DurableHost,
 } from "#execution/hosts.js";
-import { logicalSessionInboxToken } from "#execution/session-inbox/address.js";
-import type { SessionLineStore } from "#execution/session-line-store.js";
 import type { QueueWorld, WorldQueueDelivery } from "#execution/world/runtime-world.js";
-import { sessionEntities } from "#execution/world/session-entities.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { randomUUID } from "node:crypto";
-import type { SessionStreamEvent } from "#protocol/session-event.js";
-import {
-  emptySessionView,
-  foldEvents,
-  openInteractions,
-} from "#protocol/session-projection/public-view.js";
-import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { DefinedAgent } from "#public/definitions/agent.js";
 import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { holdSessionAgent, type CodeAgent } from "#runtime/sessions/session-agent.js";
-import { parseAnswers } from "#shared/input.js";
-import type { SessionHandle } from "#shared/session.js";
 import { handleCallback } from "#compiled/@vercel/queue/index.js";
 import { createScheduleOccurrenceConsumer } from "#internal/schedules/occurrence-consumer.js";
-import { worldHostChannels } from "./channels.js";
+import { compiledAgentChannels, worldHostChannels } from "./channels.js";
 import { cronFiresAt } from "./cron.js";
 import { worldDurableHost } from "./durable-host.js";
 import { fireDueSchedules } from "./dynamic-schedules.js";
 import { registerWorldScheduleStore, worldScheduleStore } from "./schedule-store.js";
-import { sessionActivation, type SessionMessage, type SessionStart } from "./driver.js";
+import { sessionActivation } from "./driver.js";
 import { prepareInitialEntry } from "#execution/initial-entry.js";
-import { createFrontRuntime } from "./front.js";
+import { createWorldFront, type WorldFront } from "./world-front.js";
+
+export type {
+  WorldFront,
+  WorldFrontAgent,
+  WorldFrontOptions,
+  WorldHostSession,
+} from "./world-front.js";
 
 // A World host (experimental): agents defined in code, whose sessions run only when something
 // arrives for them. Each session is a durable entity (`#execution/entity`): its entity keeps it,
@@ -108,40 +97,21 @@ export interface WorldHostOptions {
 }
 
 /**
- * A conversation with a World host's agent, which runs wherever its wakes are delivered: a
- * `SessionHandle`, as a client's or an embedded session is, so code written against one runs
- * against any. Nothing here holds the session in this process.
+ * A World host: the front its callers reach sessions through (`world-front.ts`: `runtime`,
+ * `createSession`, `eveChannel`), and the process that runs them when their wakes arrive.
  */
-export interface WorldHostSession extends SessionHandle {
-  /** What the session waits on a person for, as its stream records so far. */
-  pending(): Promise<readonly Interaction[]>;
-}
-
-export interface WorldHost {
-  readonly world: QueueWorld;
-  /** The runtime sessions of `agent` are reached through: it runs nothing itself. */
-  runtime(agent: string): Runtime;
-  /**
-   * A conversation with `agent`, every call made as `identity`: a new one, created on the World
-   * before this resolves (so its `id` is set, and nothing runs until its first message), or the
-   * session `resume` names.
-   */
-  createSession(
-    agent: string,
-    options: { readonly identity: SessionAuthContext | null; readonly resume?: string },
-  ): Promise<WorldHostSession>;
-  /** The sessions, as the entities they are on the World. */
-  readonly entities: Entities;
-  /**
-   * A `fetch` serving the channels of the agent compiled from files named `agent`: its own, and
-   * the framework's (eve's channel, the sign-in callback). Serve it at the server's root.
-   */
+export interface WorldHost extends WorldFront {
   /**
    * The consumer route of the Vercel Schedules occurrences of the agent compiled from files named
    * `agent`: serve it at `/.well-known/eve/v1/schedules/consumer`, a queue trigger of the agent's
    * schedule topic. Occurrences start sessions on this host.
    */
   scheduleConsumer(agent: string): (request: Request) => Promise<Response>;
+  /**
+   * A `fetch` serving the channels of the agent compiled from files named `agent`: its own, and
+   * the framework's (eve's channel, the sign-in callback). Serve it at the server's root. An agent
+   * defined in code has eve's channel through `eveChannel`.
+   */
   channels(
     agent: string,
     options?: { readonly waitUntil?: (task: Promise<unknown>) => void },
@@ -160,7 +130,6 @@ export interface WorldHost {
   close(): Promise<void>;
 }
 
-const CHANNEL_NAME = "embedded";
 export function createWorldHost(options: WorldHostOptions): WorldHost {
   const { world } = options;
   const budgetMs = options.deliveryBudgetMs ?? 4 * 60_000;
@@ -178,41 +147,31 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
   }
   for (const [name, source] of Object.entries(options.compiledAgents ?? {}))
     add(name, { compiled: source });
-  const entities = sessionEntities(world, options.queueNamespace);
-  const activation = entities.activation;
-  if (activation === undefined) throw new Error("A World host needs a World with a queue.");
-  const fronts = new Map<string, Runtime>();
-  const runtime = (agent: string): Runtime => {
-    if (!agents.has(agent)) throw new Error(`This host has no agent "${agent}".`);
-    let front = fronts.get(agent);
-    if (front === undefined)
-      fronts.set(
-        agent,
-        (front = createFrontRuntime({
-          agent,
-          entities,
-          // As the session's start will decide it: its agent's retention, or its trace capture.
-          async purgesOnEnd(input) {
-            const hosted = agents.get(agent)!;
-            const config =
-              "compiled" in hosted
-                ? { compiledArtifactsSource: hosted.compiled }
-                : { agent: hosted.code };
-            const release = "code" in hosted ? holdSessionAgent(hosted.code) : () => {};
-            try {
-              return (await prepareInitialEntry(config, input)).entry.retention === 0;
-            } finally {
-              release();
-            }
-          },
-        })),
-      );
-    return front;
-  };
-  // A session this host doesn't hold (one a Workflow run opened, as a workflow tool's `ctx.agent`
-  // does) is read where it lives: Workflow's, when this host wraps it.
-  const lineStore = entityLineStore(entities, options.workflow?.host.lineStore);
-  const releaseLines = registerFallbackLineStore(lineStore);
+  const front = createWorldFront(
+    { world, agents: [...agents.keys()], queueNamespace: options.queueNamespace },
+    {
+      // A session this host doesn't hold (one a Workflow run opened, as a workflow tool's
+      // `ctx.agent` does) is read where it lives: Workflow's, when this host wraps it.
+      ...(options.workflow !== undefined && { fallbackLineStore: options.workflow.host.lineStore }),
+      // As the session's start will decide it: its agent's retention, or its trace capture.
+      async purgesOnEnd(agent, input) {
+        const hosted = agents.get(agent)!;
+        const config =
+          "compiled" in hosted
+            ? { compiledArtifactsSource: hosted.compiled }
+            : { agent: hosted.code };
+        const release = "code" in hosted ? holdSessionAgent(hosted.code) : () => {};
+        try {
+          return (await prepareInitialEntry(config, input)).entry.retention === 0;
+        } finally {
+          release();
+        }
+      },
+    },
+  );
+  const { entities, runtime } = front;
+  const activation = entities.activation!;
+  const { lineStore } = front;
   // What no route here holds goes to the World, unless this realm has a durable host already
   // (Workflow's, in a process that also runs a deployment's sessions).
   const durable = worldDurableHost({
@@ -239,21 +198,6 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
     name,
     source,
   }));
-  // A sign-in callback (`/.well-known/eve/connections/.../callback/...`) resumes the session's
-  // address in whichever process the route runs: sent to its entity, so it reaches the session
-  // wherever it runs next. Anything else delivered in this process (a run's message to the session
-  // it runs for) stays with the routes after this one: the session's activation holds it.
-  const releaseRoute = registerHost({
-    async deliver(token, payload) {
-      if ((payload as { readonly kind?: unknown } | undefined)?.kind !== "authorization-callback")
-        return undefined;
-      const alias = logicalSessionInboxToken(token) ?? token;
-      const sent = await entities.send({ alias }, { deliver: payload } satisfies SessionMessage);
-      return sent === undefined ? undefined : "delivered";
-    },
-    runEnded: () => undefined,
-    cancelRun: () => undefined,
-  });
   let ticker: ReturnType<typeof setTimeout> | undefined;
 
   const consumer = activation.consumer(
@@ -310,14 +254,10 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
   };
 
   return {
-    world,
-    entities,
-    runtime,
+    ...front,
     deliver: consumer.deliver,
     tick,
     queueHandler: () => consumer.route(),
-    createSession: async (agent, sessionOptions) =>
-      await worldHostSession(runtime(agent), entities, sessionOptions),
     scheduleConsumer(agent) {
       const hosted = agents.get(agent);
       if (hosted === undefined || !("compiled" in hosted))
@@ -334,7 +274,7 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
         throw new Error(`This host has no agent compiled from files named "${agent}".`);
       return worldHostChannels({
         agentName: agent,
-        compiledArtifactsSource: hosted.compiled,
+        channels: compiledAgentChannels(hosted.compiled),
         runtime: runtime(agent),
         ...(channelOptions.waitUntil !== undefined && { waitUntil: channelOptions.waitUntil }),
       });
@@ -356,101 +296,9 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
     },
     async close() {
       if (ticker !== undefined) clearTimeout(ticker);
-      releaseLines();
-      releaseRoute();
+      await front.close();
       uninstallDurableHost(durable);
       releaseSchedules();
-    },
-  };
-}
-
-/** A session's stream as its entity's, for readers in any process. */
-function entityLineStore(entities: Entities, fallback?: SessionLineStore): SessionLineStore {
-  // A purged session's stream may have chunks left behind on its World: none of it is read.
-  const assertPurgedUnread = async (sessionId: string) => {
-    if (await entities.purged(sessionId))
-      throw new RunExpiredError("Session history is no longer available.", sessionId, "completed");
-  };
-  const own: SessionLineStore = {
-    assertReadable: assertPurgedUnread,
-    readable: (sessionId, startIndex) => entities.read(sessionId, startIndex),
-    async tail(sessionId) {
-      await assertPurgedUnread(sessionId);
-      return (await entities.streamLength(sessionId)) - 1;
-    },
-  };
-  if (fallback === undefined) return own;
-  // Whether a session is this host's: it is once it has been, so it's asked once.
-  const held = new Set<string>();
-  const storeOf = async (sessionId: string): Promise<SessionLineStore> => {
-    if (held.has(sessionId)) return own;
-    // A key the entities can't hold (a Workflow session's run id) is no entity of theirs.
-    const meta = await entities.meta(sessionId).catch(() => undefined);
-    if (meta === undefined) return fallback;
-    held.add(sessionId);
-    return own;
-  };
-  return {
-    assertReadable: async (sessionId) => await (await storeOf(sessionId)).assertReadable(sessionId),
-    readable(sessionId, startIndex) {
-      // Decided as the stream opens: what's read pipes through once it's known where from.
-      const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-      void storeOf(sessionId)
-        .then((store) => store.readable(sessionId, startIndex).pipeTo(writable))
-        .catch((error: unknown) => writable.abort(error).catch(() => {}));
-      return readable;
-    },
-    tail: async (sessionId) => await (await storeOf(sessionId)).tail(sessionId),
-  };
-}
-
-async function worldHostSession(
-  runtime: Runtime,
-  entities: Entities,
-  options: { readonly identity: SessionAuthContext | null; readonly resume?: string },
-): Promise<WorldHostSession> {
-  const auth = options.identity;
-  // A resumed session's address is the one it started with.
-  const recorded =
-    options.resume === undefined
-      ? undefined
-      : ((await entities.meta(options.resume)) as SessionStart | undefined)?.input
-          .continuationToken;
-  if (options.resume !== undefined && recorded === undefined)
-    throw new Error(`The World holds no session "${options.resume}" to resume.`);
-  const address = createChannelAddress({
-    adapter: { kind: "http" },
-    channelName: CHANNEL_NAME,
-    continuationToken:
-      recorded?.startsWith(`${CHANNEL_NAME}:`) === true
-        ? recorded.slice(CHANNEL_NAME.length + 1)
-        : `embedded-${randomUUID()}`,
-    runtime,
-  });
-  const session =
-    options.resume === undefined
-      ? (await address.create({ auth })).session
-      : await address.resolveSession();
-  if (session === undefined)
-    throw new Error(`The World's session "${options.resume}" holds no address.`);
-  const { id } = session;
-  return {
-    id,
-    send: async (message, sendOptions = {}) =>
-      await session.send(message, { ...sendOptions, auth }),
-    respond: async (answers, respondOptions = {}) =>
-      await session.respond(parseAnswers(answers), { ...respondOptions, auth }),
-    cancel: async () => await session.cancel({ auth }),
-    clear: async () => await session.clear({ auth }),
-    compact: async () => await session.compact({ auth }),
-    end: async () => await session.end({ auth }),
-    stream: (streamOptions) => session.stream(streamOptions),
-    async pending() {
-      const reader = (await runtime.getEventStream(id, { follow: false })).getReader();
-      const events: SessionStreamEvent[] = [];
-      for (let next = await reader.read(); !next.done; next = await reader.read())
-        events.push(next.value);
-      return openInteractions(foldEvents(emptySessionView(), events));
     },
   };
 }
