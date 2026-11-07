@@ -12,8 +12,9 @@ import { cn } from "@/lib/utils";
 import { FeatureCard, Visual, pct, view } from "./control-visual";
 import { HomeSection } from "./section";
 
-// Turning off eve's default tools in agent.ts, from its built-in tools docs, verbatim: the agent
-// starts with none of the built-ins, and files under agent/tools add back only what it needs.
+// Turning off eve's default tools in agent.ts, from its built-in tools docs, with the model from
+// its default harness docs: the agent starts with none of the built-ins, and files under
+// agent/tools add back only what it needs.
 // Tokens are [text, tone]; keywords and strings recede so the names read first.
 type Token = [string, "name" | "muted"];
 const HARNESS_FILE = "agent/agent.ts";
@@ -57,7 +58,7 @@ const HARNESS_LINES: { n: number; added: boolean; tokens: Token[] }[] = [
     tokens: [
       ["  model", "name"],
       [": ", "muted"],
-      ['"openai/gpt-5.4"', "muted"],
+      ['"anthropic/claude-opus-5.5"', "muted"],
       [",", "muted"],
     ],
   },
