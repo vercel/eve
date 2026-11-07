@@ -6,7 +6,8 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { SessionExecution } from "#execution/session/turn.js";
+import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
@@ -45,6 +46,13 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+
+/** Turn steps and dispatches as Workflow runs them, and its sleep. */
+const WORKFLOW_TURN_HOST: SessionTurnHost = {
+  dispatchRuns: (input) => dispatchCoordinationStep(input),
+  runTurnStep: (input) => turnStep(input),
+  sleep: (ms) => sleep(ms),
+};
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -1375,6 +1383,7 @@ describe("SessionExecution checkpoints", () => {
       sessionWritable: new WritableStream<Uint8Array>(),
     });
     const execution = new SessionExecution({
+      host: WORKFLOW_TURN_HOST,
       cursor,
       inbox,
       queue: new SessionInputQueue([]),
@@ -2084,6 +2093,7 @@ function createExecution(input: {
 }): SessionExecution {
   const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
+    host: WORKFLOW_TURN_HOST,
     capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,

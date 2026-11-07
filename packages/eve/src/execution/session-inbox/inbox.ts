@@ -1,16 +1,5 @@
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
-import {
-  SESSION_INBOX_SESSION_ID_METADATA_KEY,
-  sessionInboxHookToken,
-} from "#execution/session-inbox/address.js";
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
-
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
-import {
-  claimHookOwnership,
-  disposeHook,
-  isHookForceClaimedError,
-} from "#execution/hook-ownership.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunMessageBatch,
@@ -62,9 +51,37 @@ export type SessionInboxPayload =
   | WorkflowToolRunMessage
   | AuthorizationCallbackPayload;
 
-interface Source {
+/** One claimed address: what it delivers, in arrival order, until it's disposed or taken over. */
+export interface InboxHook extends AsyncIterable<
+  SessionInboxPayload | WorkflowToolRunMessageBatch
+> {
+  /** The address's token as the transport names it. */
   readonly token: string;
-  readonly hook: Hook<SessionInboxPayload | WorkflowToolRunMessageBatch>;
+}
+
+/**
+ * Where a session's addresses come from: Workflow hooks for a deployed session, or a host's own
+ * channels. The inbox owns the queue, its order, interrupts, and handovers either way; a
+ * transport only opens, confirms, and closes addresses.
+ */
+export interface SessionInboxTransport<Hook extends InboxHook = InboxHook> {
+  /**
+   * Opens the address `token` names. With `force`, takes it from whoever holds it; with
+   * `claimedAtStart`, opens the one the session's start already claimed. Nothing is delivered
+   * until {@link confirm} settles.
+   */
+  open(token: string, options: { readonly force: boolean; readonly claimedAtStart: boolean }): Hook;
+  /** Confirms the address is this session's, or throws, as when another session holds it. */
+  confirm(hook: Hook): Promise<void>;
+  /** Closes the address. A read in flight may never settle. */
+  dispose(hook: Hook): Promise<void>;
+  /** Whether a reader's failure means another owner took the address over. */
+  isTakenOver(error: unknown): boolean;
+}
+
+interface Source<Hook extends InboxHook> {
+  readonly token: string;
+  readonly hook: Hook;
   registered?: Promise<void>;
   stopping: boolean;
   closed: boolean;
@@ -197,8 +214,10 @@ function isDelivery(value: SessionInboxPayload): boolean {
  * hold back the cancel behind them. Accepted payloads are already durable on
  * the hook, so the queue is a mirror rather than the source of truth.
  */
-export function createSessionInbox(sessionId: string): SessionInboxHandle {
-  const sources: Source[] = [];
+export function createSessionInbox<Hook extends InboxHook>(
+  transport: SessionInboxTransport<Hook>,
+): SessionInboxHandle {
+  const sources: Source<Hook>[] = [];
   const queue: SessionInboxPayload[] = [];
   const waiters = new Set<() => void>();
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
@@ -288,7 +307,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 
   // The SDK abandons (never settles) a read that is in flight when the hook
   // is disposed, so the loop exits on `stopping` rather than on `done`.
-  const pump = async (source: Source): Promise<void> => {
+  const pump = async (source: Source<Hook>): Promise<void> => {
     const iterator = source.hook[Symbol.asyncIterator]();
     try {
       while (!source.stopping) {
@@ -318,7 +337,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       if (source.stopping || source.replaced) return;
       // The SDK delivers every payload accepted before a takeover first, so
       // the queue already holds them; the address now belongs to another run.
-      if (isHookForceClaimedError(error)) {
+      if (transport.isTakenOver(error)) {
         sources.splice(sources.indexOf(source), 1);
         takenOver = true;
       } else {
@@ -337,7 +356,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     stopped = true;
     for (const source of released) source.stopping = true;
     notify();
-    await Promise.all(released.map(({ hook }) => disposeHook(hook)));
+    await Promise.all(released.map(({ hook }) => transport.dispose(hook)));
     queue.splice(0);
     notify();
   };
@@ -352,17 +371,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     if (existing !== undefined && !force) return await existing.registered;
     if (existing === undefined && sources.length >= 256)
       throw new Error("A session may claim at most 256 addresses.");
-    const source: Source = {
+    const source: Source<Hook> = {
       token,
-      hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>(
-        options.claimedAtStart === true
-          ? { token: sessionInboxHookToken(token) }
-          : {
-              token: sessionInboxHookToken(token),
-              metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
-              ...(force && { experimental_force: true }),
-            },
-      ),
+      hook: transport.open(token, { force, claimedAtStart: options.claimedAtStart === true }),
       stopping: false,
       closed: false,
       replaced: false,
@@ -379,7 +390,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     }
     stopped = false;
     try {
-      const confirm = () => claimHookOwnership(source.hook);
+      const confirm = () => transport.confirm(source.hook);
       source.registered = options.confirmAfter?.then(confirm, confirm) ?? confirm();
       await source.registered;
       // A takeover this run has reclaimed from no longer counts toward the next one.
