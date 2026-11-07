@@ -4,8 +4,8 @@ import {
   type DefaultToolName,
   SANDBOX_TOOLS,
 } from "#framework/sources/default-tools.js";
-import { codeSandbox, type CodeSandbox } from "#runtime/sandbox/code-sandbox.js";
-import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { defaultCodeSandbox } from "#platform/default-sandbox.js";
+import type { CodeSandbox } from "#runtime/sandbox/code-sandbox-registry.js";
 import { withToolApproval } from "#tools/definition.js";
 import {
   defaultWebSearch,
@@ -43,7 +43,8 @@ export interface EveDefaultsOptions {
   readonly without?: readonly CodeDefaultToolName[];
   /**
    * The sandbox the bash and file tools run in: by default just-bash under
-   * `<cwd>/.eve/sandbox-cache`, which needs no daemon or account.
+   * `<cwd>/.eve/sandbox-cache` in Node, which needs no daemon or account, and `memorySandbox()`
+   * in a browser.
    */
   readonly sandbox?: CodeSandbox;
   /** Approval policies by default tool, such as `{ bash: always(), write_file: always() }`. */
@@ -72,7 +73,7 @@ export const eve = {
     const definitions = names.map((name) => DEFAULT_TOOL_DEFINITIONS[name](options));
     if (!without.has("agent")) definitions.push(selfAgentToolDefinition);
     if (!names.some((name) => SANDBOX_TOOLS.has(name))) return definitions;
-    const sandbox = options.sandbox ?? codeSandbox(JustBashSandbox.environment({}));
+    const sandbox = options.sandbox ?? defaultCodeSandbox();
     return [sandboxDefinition(sandbox), ...definitions];
   },
 } as const;
