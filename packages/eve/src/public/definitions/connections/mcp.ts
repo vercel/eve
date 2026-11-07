@@ -52,6 +52,21 @@ export interface McpClientConnectionDefinition {
    */
   readonly forwardPrincipal?: boolean;
   /**
+   * Sends every HTTP request eve makes to this MCP server, in place of the
+   * global `fetch`. eve has already added the connection's `headers`, its
+   * bearer token, and `eve-forwarded-principal` when it calls this, and it
+   * reads the returned `Response` as the server's reply.
+   *
+   * Use it to adapt a server that strays from the protocol (for example,
+   * filling in a field it leaves out of its replies), to route through a
+   * proxy, or to record traffic. Return the response for a request you don't
+   * change: `(request, init) => fetch(request, init)`.
+   *
+   * Requests that carry `eve-forwarded-principal` set `redirect: "error"`;
+   * keep that option when you forward `init`.
+   */
+  readonly fetch?: typeof globalThis.fetch;
+  /**
    * Human-readable summary of the connection and its tools.
    *
    * The model sees it in the catalog listing eve announces, so it can

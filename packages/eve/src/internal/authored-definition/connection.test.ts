@@ -42,6 +42,14 @@ describe("normalizeMcpClientConnectionDefinition", () => {
     ).toThrow('"protocolVersionDiscovery" must be a boolean.');
   });
 
+  it("preserves an authored fetch and rejects one that is not a function", () => {
+    const fetch = async () => new Response(null);
+    expect(normalizeMcpClientConnectionDefinition(validInput({ fetch }), MSG).fetch).toBe(fetch);
+    expect(() =>
+      normalizeMcpClientConnectionDefinition(validInput({ fetch: "https://proxy" }), MSG),
+    ).toThrow('"fetch" must be a function.');
+  });
+
   describe("happy path", () => {
     it("accepts a valid definition with a getToken function", () => {
       const result = normalizeMcpClientConnectionDefinition(validInput(), MSG);
