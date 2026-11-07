@@ -80,6 +80,23 @@ export function describeEntities(name: string, make: () => Promise<EntitiesUnder
     );
 
     it(
+      "keeps values by name, beside the journal: a reader anywhere reads the latest",
+      withEntities(async ({ entities, elsewhere }) => {
+        const key = entities.newKey();
+        const handle = await entities.open(key);
+        expect(await entities.value(key, "child.a")).toBeUndefined();
+        await handle.keep("child.a", text("first"));
+        await handle.keep("child.a", text("second"));
+        await handle.keep("child.b", text("other"));
+        const decode = (value: Uint8Array | undefined) =>
+          value === undefined ? undefined : new TextDecoder().decode(value);
+        expect(decode(await elsewhere().value(key, "child.a"))).toBe("second");
+        expect(decode(await entities.value(key, "child.b"))).toBe("other");
+        expect(await entities.value(entities.newKey(), "child.a")).toBeUndefined();
+      }),
+    );
+
+    it(
       "keeps one writer: opening an entity fences out whoever held it, who writes nothing more",
       withEntities(async ({ entities, elsewhere }) => {
         const key = entities.newKey();

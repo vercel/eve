@@ -1,3 +1,4 @@
+import { deliverToHostedHook, installedDurableHost } from "#execution/hosts.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -112,7 +113,7 @@ export async function handleSessionCallbackRequest(
   if (result instanceof Response) return result;
 
   try {
-    await resumeRunnableHook(
+    await resumeCallbackHook(
       token,
       forwarded ?? { kind: "runtime-action-result", results: [result] },
     );
@@ -203,4 +204,19 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
     output: payload.error,
     subagentName: payload.subagentName,
   };
+}
+
+/**
+ * Resumes the session a callback names: a session a host in this process holds, one on the
+ * realm's durable host when that isn't Workflow (a World host, whose sessions have the token as an
+ * address), or else Workflow's run, while it can still run.
+ */
+async function resumeCallbackHook(token: string, payload: unknown): Promise<void> {
+  if (await deliverToHostedHook(token, payload)) return;
+  const durable = installedDurableHost();
+  if (durable !== undefined && durable.name !== "workflow") {
+    await durable.resumeHook(token, payload);
+    return;
+  }
+  await resumeRunnableHook(token, payload);
 }

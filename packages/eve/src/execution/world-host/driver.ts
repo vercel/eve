@@ -33,7 +33,10 @@ const log = createLogger("execution.world-host.driver");
  * What a World host's session is sent: a command, as a channel sends one, or a payload for one of
  * its addresses, as a callback route or another session resumes it (`via` names the address).
  */
-export type SessionMessage = { readonly command: SessionCommand } | { readonly deliver: unknown };
+export type SessionMessage =
+  | { readonly command: SessionCommand }
+  /** Delivered at `token` when it names one (a run's hook), else at the address it was sent to. */
+  | { readonly deliver: unknown; readonly token?: string };
 
 /** What a World host's session is created with: its entity's meta. */
 export interface SessionStart {
@@ -53,6 +56,8 @@ export interface SessionActivationOptions {
   readonly settleMs?: number;
   /** A timer due within this long is waited for, rather than set as the alarm. */
   readonly holdForTimerMs?: number;
+  /** How often an activation reads its mailbox while its session works (default 1 s). */
+  readonly mailboxPollMs?: number;
   /** Where sign-in links send the provider back to (`WorldHostOptions.callbackBaseUrl`). */
   readonly callbackBaseUrl?: string;
   /** The host's runtime for the agent named `name`: where a step reaches other sessions. */
@@ -65,6 +70,7 @@ export interface SessionActivationOptions {
 export function sessionActivation(options: SessionActivationOptions): ActivationRun {
   const settleMs = options.settleMs ?? 150;
   const holdForTimerMs = options.holdForTimerMs ?? 3_000;
+  const mailboxPollMs = options.mailboxPollMs ?? 1_000;
   return async (entity, { deadline }) => {
     const sessionId = entity.key;
     const start = entity.meta as Partial<SessionStart> | undefined;
@@ -78,6 +84,7 @@ export function sessionActivation(options: SessionActivationOptions): Activation
     const store = createWorldSessionStore(options.world, {
       entities: options.entities,
       handles: (key) => (key === sessionId ? entity : undefined),
+      root: sessionId,
     });
     const runtime = createInProcessRuntime(agent.config, {
       servesLines: false,
@@ -88,6 +95,7 @@ export function sessionActivation(options: SessionActivationOptions): Activation
         stepRuntime: () => options.runtime!(start.agent as string),
       }),
       ...(options.startDurableRun !== undefined && { startDurableRun: options.startDurableRun }),
+      runOwner: sessionId,
     });
     let outcome: ActivationOutcome = { kind: "continue" };
     try {
@@ -99,18 +107,37 @@ export function sessionActivation(options: SessionActivationOptions): Activation
         // arrives: an answer the session forwards to a child finds the child here.
         await settledAfterRestore(runtime, deadline);
       }
-      for (const message of await entity.inbox()) {
-        store.receive(sessionId, message.id);
-        const body = message.body as SessionMessage;
-        const token = message.via ?? sessionCommandHookToken(sessionId);
-        if ("deliver" in body) await runtime.deliver(token, body.deliver);
-        else if (message.via === undefined)
-          await runtime.dispatchSession({ command: body.command, sessionId });
-        else
-          await runtime.dispatchContinuation({ command: body.command, continuationToken: token });
-        store.received(sessionId);
-      }
-      outcome = await runUntilWaiting(runtime, { deadline, holdForTimerMs, settleMs });
+      // Each message once: it stays in the mailbox until a save consumes it, so a later read
+      // finds it again.
+      const handedOver = new Set<string>();
+      const handOver = async () => {
+        for (const message of await entity.inbox()) {
+          if (handedOver.has(message.id)) continue;
+          handedOver.add(message.id);
+          store.receive(sessionId, message.id);
+          const body = message.body as SessionMessage;
+          const token = message.via ?? sessionCommandHookToken(sessionId);
+          if ("deliver" in body) {
+            const at = body.token ?? token;
+            // No one here at its address: it's consumed with the rest, so say so.
+            if ((await runtime.deliver(at, body.deliver)) === undefined)
+              log.warn("a delivery found no one at its address", { sessionId, token: at });
+          } else if (message.via === undefined)
+            await runtime.dispatchSession({ command: body.command, sessionId });
+          else
+            await runtime.dispatchContinuation({ command: body.command, continuationToken: token });
+          store.received(sessionId);
+        }
+      };
+      await handOver();
+      // What arrives while it works (a cancel, a steering message) reaches it as it works, as on
+      // Workflow, not only once it stops.
+      outcome = await runUntilWaiting(runtime, {
+        deadline,
+        holdForTimerMs,
+        settleMs,
+        poll: { every: mailboxPollMs, read: handOver },
+      });
       // Out of time with work left: stopped where a step ends, so no call runs twice.
       if (outcome.kind === "continue") await runtime.drain();
     } finally {
@@ -160,11 +187,18 @@ async function runUntilWaiting(
     readonly deadline: number;
     readonly settleMs: number;
     readonly holdForTimerMs: number;
+    /** Reads the mailbox every `every` ms while the session works. */
+    readonly poll?: { readonly every: number; readonly read: () => Promise<void> };
   },
 ): Promise<ActivationOutcome> {
-  const { deadline, holdForTimerMs, settleMs } = options;
+  const { deadline, holdForTimerMs, poll, settleMs } = options;
   const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  let polled = Date.now();
   while (Date.now() < deadline) {
+    if (poll !== undefined && Date.now() - polled >= poll.every) {
+      polled = Date.now();
+      await poll.read();
+    }
     if ((await runtime.quiescent()) && (await pause(settleMs), await runtime.quiescent())) {
       const next = runtime.nextTimer();
       const soon = next !== undefined && next - Date.now() <= holdForTimerMs && next < deadline;
