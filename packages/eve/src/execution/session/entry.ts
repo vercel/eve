@@ -1,48 +1,30 @@
-import { workflowInboxTransport } from "#execution/session-inbox/workflow-transport.js";
-import { readSerializedSessionSchedule } from "#context/session-schedule.js";
+import {
+  workflowInboxTransport,
+  type SessionHook,
+} from "#execution/session-inbox/workflow-transport.js";
+import { runPreparedSession } from "#execution/session/program.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { workflowSessionHost } from "#execution/session/workflow-host.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
-
-import type {
-  DeliverHookPayload,
-  RunInput,
-  SessionCapabilities,
-  SessionAuthContext,
-} from "#channel/types.js";
-import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
-import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
+import {
+  bootInitialOwner,
+  stampSessionIdentity,
+  type BootOutcome,
+  type InitialOwnerPorts,
+} from "#execution/session/owner-boot.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
-import { createSessionStep } from "#execution/create-session-step.js";
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createSessionInbox,
-  type InboxHook,
   type SessionInboxHandle,
   type SessionInboxPayload,
-  type SessionInboxTransport,
 } from "#execution/session-inbox/inbox.js";
-import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
-import {
-  createSessionTimeoutControl,
-  type SessionTimeoutControl,
-} from "#execution/session/timeout-control.js";
-import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
-import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
-import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
-import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { attachClientContext, readClientContext } from "#internal/client-context.js";
-import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
+import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
-import {
-  SESSION_INBOX_CONTEXT_KEY,
-  sessionCommandHookToken,
-} from "#execution/session-inbox/address.js";
 import {
   prepareSuccessorStep,
   readSessionStreamTailStep,
+  signalSessionAnchorStep,
   signalSessionOwnerActivationStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
@@ -51,12 +33,12 @@ import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
   sendSessionHandover,
-  type SessionCheckpoint,
+  sessionAnchorToken,
 } from "#execution/session/handoff.js";
+import { type SessionCheckpoint } from "#execution/session/checkpoint.js";
 import { abandonHandoverIfRunEnds, watchRunEnd } from "#execution/session/run-watch.js";
 import type {
   HandoffWorkflowEntryInput,
-  InitialWorkflowEntryInput,
   WorkflowEntryInput,
   WorkflowEntryResult,
 } from "#execution/session/entry-input.js";
@@ -81,7 +63,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
 
   const boot =
     input.kind === "initial"
-      ? await bootInitialOwner(input, getWorkflowMetadata().workflowRunId)
+      ? await bootInitialOwner(
+          input,
+          getWorkflowMetadata().workflowRunId,
+          workflowOwnerPorts(getWorkflowMetadata().workflowRunId),
+        )
       : await bootHandoffOwner(input);
   if (boot === undefined) return { output: "" };
   const result = await runPreparedSession(
@@ -92,193 +78,15 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   return { output: result.output };
 }
 
-interface BootOutcome {
-  readonly inbox: SessionInboxHandle;
-  readonly session: SessionBoot;
-}
-
-function stampSessionIdentity(
-  serializedContext: Record<string, unknown>,
-  sessionId: string,
-): Record<string, unknown> {
+/** Workflow's ports for a first owner: its stream, addresses and timers are on its run. */
+export function workflowOwnerPorts(sessionId: string): InitialOwnerPorts<SessionHook> {
   return {
-    ...serializedContext,
-    "eve.sessionId": sessionId,
-    [SESSION_INBOX_CONTEXT_KEY]: { sessionId },
+    sessionWritable: getWritable<Uint8Array>(),
+    inboxTransport: workflowInboxTransport(sessionId),
+    timeouts: createSessionTimeoutControl,
+    // Called unbound: a step called as a method serializes its receiver, these ports.
+    settleContinuationConflict: (conflict) => settleContinuationConflictStep(conflict),
   };
-}
-
-interface OwnedInitialSession {
-  readonly kind: "owned";
-  readonly timeoutControl: SessionTimeoutControl | undefined;
-  readonly turnControl: TurnControl;
-}
-
-type InitialOwnerPreparation = OwnedInitialSession | { readonly kind: "alias-conflict" };
-
-async function prepareInitialOwner(
-  inbox: SessionInboxHandle,
-  input: {
-    readonly continuationToken: string;
-    /** The claims confirm after it, so it runs inline while their hooks commit. */
-    readonly sessionCreation: Promise<unknown>;
-    readonly sessionId: string;
-    readonly sessionTimeoutMs: number | false;
-    readonly startClaim: InitialWorkflowEntryInput["startClaim"];
-    readonly untimed: boolean;
-  },
-): Promise<InitialOwnerPreparation> {
-  const owner: OwnedInitialSession = {
-    kind: "owned",
-    // The session loop starts the timer once the claims are confirmed; one
-    // started sooner could signal a command hook that is not registered yet.
-    timeoutControl: input.untimed
-      ? undefined
-      : createSessionTimeoutControl({
-          sessionId: input.sessionId,
-          timeoutMs: input.sessionTimeoutMs,
-        }),
-    // Created before any await so its abort hooks commit with the session's
-    // hooks instead of beside the first turn's step.
-    turnControl: createTurnControl(),
-  };
-  const claim = { confirmAfter: input.sessionCreation };
-  const [stableClaim, aliasClaim] = await Promise.allSettled([
-    inbox.claimSessionHook(
-      sessionCommandHookToken(input.sessionId),
-      input.startClaim === "inbox" ? { ...claim, claimedAtStart: true } : claim,
-    ),
-    input.continuationToken === ""
-      ? Promise.resolve()
-      : inbox.claimSessionHook(
-          input.continuationToken,
-          input.startClaim === "continuation" ? { ...claim, claimedAtStart: true } : claim,
-        ),
-  ]);
-  if (stableClaim.status === "rejected") throw stableClaim.reason;
-  if (aliasClaim.status === "rejected") {
-    if (isHookConflictError(aliasClaim.reason)) return { kind: "alias-conflict" };
-    throw aliasClaim.reason;
-  }
-  return owner;
-}
-
-function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
-  if (result.status === "rejected") throw result.reason;
-  return result.value;
-}
-
-/**
- * Where a first owner keeps its session: the stream it writes, the transport its addresses
- * arrive on, and whether a timer can end it. Workflow's, on the owner's run, unless a host
- * keeps the session itself.
- */
-export interface InitialOwnerPorts<Hook extends InboxHook = InboxHook> {
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly inboxTransport: SessionInboxTransport<Hook>;
-  /** The host keeps no timer, so the session never times out. */
-  readonly untimed?: boolean;
-}
-
-/** Returns `undefined` when a competing continuation owner already exists. */
-export async function bootInitialOwner<Hook extends InboxHook>(
-  input: InitialWorkflowEntryInput,
-  sessionId: string,
-  ports?: InitialOwnerPorts<Hook>,
-): Promise<BootOutcome | undefined> {
-  const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
-  const sessionWritable = ports?.sessionWritable ?? getWritable<Uint8Array>();
-  const inbox =
-    ports === undefined
-      ? createSessionInbox(workflowInboxTransport(sessionId))
-      : createSessionInbox(ports.inboxTransport);
-  const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
-  const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
-  const serializedBundle = serializedContext["eve.bundle"] as {
-    source: DurableCompiledArtifactsSource;
-    nodeId?: string;
-  };
-  try {
-    const sessionCreationPromise = createSessionStep({
-      agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
-        | AgentSessionRuntimeOverrides
-        | undefined,
-      compiledArtifactsSource: serializedBundle.source,
-      continuationToken,
-      dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-        | DynamicSubagentAgentConfig
-        | undefined,
-      // With a first message, its delivery carries the history instead.
-      history: input.input.message === undefined ? input.input.history : undefined,
-      nodeId: serializedBundle.nodeId,
-      outputSchema: input.input.outputSchema,
-      rootSessionId: readRootSessionId(serializedContext),
-      sessionId,
-    });
-    const ownerPreparationPromise = prepareInitialOwner(inbox, {
-      continuationToken,
-      sessionCreation: sessionCreationPromise,
-      sessionId,
-      sessionTimeoutMs,
-      startClaim: input.startClaim,
-      untimed: ports?.untimed === true,
-    });
-    const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
-      ? resolveInitialTurnCallerStep({ serializedContext })
-      : Promise.resolve(undefined);
-    const [sessionCreation, ownerPreparation, callerResolution] = await Promise.allSettled([
-      sessionCreationPromise,
-      ownerPreparationPromise,
-      callerResolutionPromise,
-    ]);
-    const created = unwrapSettled(sessionCreation);
-    const prepared = unwrapSettled(ownerPreparation);
-    if (prepared.kind === "alias-conflict") {
-      if (input.continuationConflictCommand !== undefined) {
-        await settleContinuationConflictStep({
-          command: input.continuationConflictCommand,
-          continuationToken,
-        });
-      }
-      await inbox.dispose();
-      // This run never becomes the session, so nothing else would end its stream.
-      await closeSessionStreamStep({ sessionWritable });
-      return undefined;
-    }
-    const caller = unwrapSettled(callerResolution);
-    return {
-      inbox,
-      session: {
-        admittedDeliveryKeys: input.idempotencyKey === undefined ? [] : [input.idempotencyKey],
-        anchor: { kind: "self" },
-        caller,
-        capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
-        deploymentId: input.ownerDeploymentId,
-        history: created.history,
-        start:
-          input.input.message === undefined
-            ? { kind: "first-message" }
-            : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
-        initialTurnControl: prepared.turnControl,
-        retention: input.retention,
-        serializedContext,
-        sessionId,
-        sessionState: created.state,
-        sessionTimeoutControl: prepared.timeoutControl,
-        sessionTimeoutMs,
-        sessionWritable,
-      },
-    };
-  } catch (error) {
-    await inbox.dispose();
-    return await failSession({
-      error,
-      serializedContext,
-      sessionId,
-      sessionState: undefined,
-      sessionWritable,
-    });
-  }
 }
 
 /** A successor that may continue the session, before it owns any of its hooks. */
@@ -462,7 +270,11 @@ async function startSuccessor(
   return {
     inbox,
     session: {
-      anchor: { kind: "successor" },
+      anchor: {
+        kind: "successor",
+        notify: (result) =>
+          signalSessionAnchorStep({ result, token: sessionAnchorToken(sessionId) }),
+      },
       admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
@@ -490,40 +302,5 @@ async function startSuccessor(
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
       sessionWritable: input.sessionWritable,
     },
-  };
-}
-
-function createInitialDelivery(
-  input: InitialWorkflowEntryInput,
-  serializedContext: Record<string, unknown>,
-): DeliverHookPayload | undefined {
-  if (input.input.message === undefined) return undefined;
-  return {
-    auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
-    idempotencyKey: input.idempotencyKey,
-    schedule: readSerializedSessionSchedule(serializedContext),
-    deliveryMetadata:
-      serializedContext["eve.channelDelivery"] === undefined
-        ? undefined
-        : [
-            {
-              ...(serializedContext["eve.channelDelivery"] as NonNullable<RunInput["delivery"]>),
-              payloadIndex: 0,
-            },
-          ],
-    kind: "deliver",
-    payloads: [
-      attachClientContext(
-        {
-          message: input.input.message,
-          context: input.input.context,
-          history: input.input.history,
-          outputSchema: input.input.outputSchema,
-          state: input.input.state,
-        },
-        readClientContext(input.input),
-      ),
-    ],
-    requestId: readChannelRequestId(serializedContext),
   };
 }

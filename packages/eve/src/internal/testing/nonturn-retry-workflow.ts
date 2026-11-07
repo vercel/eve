@@ -4,7 +4,11 @@ import {
   getWorkflowMetadata,
   getWritable,
 } from "#compiled/@workflow/core/index.js";
-import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
+import {
+  commitSessionStep,
+  enterSessionStep,
+  publishSessionEvents,
+} from "#execution/publish-session-events.js";
 import { commitOf } from "#harness/session-machine/commit.js";
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
@@ -19,11 +23,11 @@ async function publishStart(context: Record<string, unknown>, failBeforePublicat
   }
   const sessionId = getWorkflowMetadata().workflowRunId;
   return await publishSessionEvents(
-    {
+    enterSessionStep({
       serializedContext: { ...context, "eve.sessionId": sessionId },
       sessionState: createTestSessionState({ sessionId }),
       sessionWritable: getWritable<Uint8Array>(),
-    },
+    }),
     [commitOf([fact("session.started", {})])],
   );
 }
@@ -32,11 +36,14 @@ async function publishNext(
   input: Pick<Awaited<ReturnType<typeof publishStart>>, "serializedContext" | "sessionState">,
 ) {
   "use step";
-  await publishSessionEvents({ ...input, sessionWritable: getWritable<Uint8Array>() }, [
-    commitOf([
-      fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
-    ]),
-  ]);
+  await publishSessionEvents(
+    enterSessionStep({ ...input, sessionWritable: getWritable<Uint8Array>() }),
+    [
+      commitOf([
+        fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
+      ]),
+    ],
+  );
 }
 
 export async function beforePublicationRetryWorkflow(context: Record<string, unknown>) {
@@ -48,11 +55,11 @@ export async function beforePublicationRetryWorkflow(context: Record<string, unk
 async function commitTwice(context: Record<string, unknown>) {
   "use step";
   const sessionId = getWorkflowMetadata().workflowRunId;
-  const initial = {
+  const initial = enterSessionStep({
     serializedContext: { ...context, "eve.sessionId": sessionId },
     sessionState: createTestSessionState({ sessionId }),
     sessionWritable: getWritable<Uint8Array>(),
-  };
+  });
   const started = await commitSessionStep(
     initial,
     (view) => [transition({ events: [fact("session.started", {})], turn: view.turn })],
@@ -105,7 +112,7 @@ async function publishProgress(
 ) {
   "use step";
   return await publishSessionEvents(
-    { ...state, sessionWritable: getWritable<Uint8Array>() },
+    enterSessionStep({ ...state, sessionWritable: getWritable<Uint8Array>() }),
     Array.from({ length: count }, (_, index) => ({
       type: "call.progress" as const,
       data: { callId: "long_call", output: { index } },
@@ -117,18 +124,21 @@ async function publishRunning(
   start: Pick<Awaited<ReturnType<typeof publishStart>>, "serializedContext" | "sessionState">,
 ) {
   "use step";
-  return await publishSessionEvents({ ...start, sessionWritable: getWritable<Uint8Array>() }, [
-    commitOf([
-      fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
-      fact("model.requested", { runId: "model", owner: { turnId: "turn_0" } }),
-      fact("call.requested", {
-        callId: "long_call",
-        owner: { runId: "model" },
-        capability: { kind: "tool", name: "long-running" },
-      }),
-      fact("call.started", { callId: "long_call" }),
-    ]),
-  ]);
+  return await publishSessionEvents(
+    enterSessionStep({ ...start, sessionWritable: getWritable<Uint8Array>() }),
+    [
+      commitOf([
+        fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
+        fact("model.requested", { runId: "model", owner: { turnId: "turn_0" } }),
+        fact("call.requested", {
+          callId: "long_call",
+          owner: { runId: "model" },
+          capability: { kind: "tool", name: "long-running" },
+        }),
+        fact("call.started", { callId: "long_call" }),
+      ]),
+    ],
+  );
 }
 
 export async function progressWindowRetryWorkflow(context: Record<string, unknown>) {
@@ -197,9 +207,10 @@ async function settleTurn(
   input: Pick<Awaited<ReturnType<typeof publishStart>>, "serializedContext" | "sessionState">,
 ) {
   "use step";
-  await publishSessionEvents({ ...input, sessionWritable: getWritable<Uint8Array>() }, [
-    commitOf([fact("turn.settled", { turnId: "turn_0", outcome: "completed" })]),
-  ]);
+  await publishSessionEvents(
+    enterSessionStep({ ...input, sessionWritable: getWritable<Uint8Array>() }),
+    [commitOf([fact("turn.settled", { turnId: "turn_0", outcome: "completed" })])],
+  );
 }
 
 export async function lessOnRetryWorkflow(

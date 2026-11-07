@@ -3,7 +3,7 @@ import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
-import { withStubPlayback } from "#execution/tool-stubs/playback.js";
+import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import {
@@ -27,8 +27,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
-import { sessionAnchorToken, type SessionHandoff } from "#execution/session/handoff.js";
-import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
+import type { SessionHandoff } from "#execution/session/handoff.js";
 import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -41,7 +40,7 @@ function createSafeOuterWorkflowError(): Error {
 
 /**
  * Who to tell when this owner exits. The original run anchors the public
- * stream itself; a successor signals the original run. A `self` anchor may
+ * stream itself; a successor signals the original run through `notify`. A `self` anchor may
  * also name a `notify` step that runs with the final result, which lets an
  * importer settle whatever predecessor still holds the stream open.
  */
@@ -50,7 +49,10 @@ export type SessionAnchor =
       readonly kind: "self";
       readonly notify?: (result: WorkflowEntryResult) => Promise<void>;
     }
-  | { readonly kind: "successor" };
+  | {
+      readonly kind: "successor";
+      readonly notify: (result: WorkflowEntryResult) => Promise<void>;
+    };
 
 /** What an owner does before it first waits on its inbox. */
 export type SessionStart =
@@ -118,6 +120,8 @@ export type SessionMoves = Pick<
 /** What runs a session besides its boot and inbox: its turn steps, its clock, and its moves. */
 export interface SessionHost extends SessionTurnHost {
   readonly moves: SessionMoves;
+  /** Serves a stubbed eval's tool stubs while its root session runs; see {@link ToolStubHost}. */
+  readonly toolStubs?: ToolStubHost;
 }
 
 /** Runs an already prepared owner against its session's existing stream. */
@@ -143,7 +147,7 @@ export async function runPreparedSession(
   let loop: SessionLoopOutcome | undefined;
   let finalizing = false;
   try {
-    result = await withStubPlayback(scope, boot.sessionId, async () => {
+    result = await runServingToolStubs(host.toolStubs, scope, boot.sessionId, async () => {
       try {
         loop = await runSessionLoop(boot, { cursor, host, inbox, progress });
       } finally {
@@ -224,7 +228,7 @@ async function reportResultToAnchor(
       return;
     case "successor":
       if (loop?.kind === "transferred") return;
-      await signalSessionAnchorStep({ result, token: sessionAnchorToken(boot.sessionId) });
+      await boot.anchor.notify(result);
       return;
   }
 }

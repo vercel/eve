@@ -1,0 +1,32 @@
+{
+  "src/execution/session/program.ts": {
+    "static.modules": 680,
+    "static.kib": 2643,
+    "static.builtinFiles": 51,
+    "static.workflow": 0,
+    "total.modules": 856,
+    "total.kib": 4471,
+    "total.builtinFiles": 129,
+    "total.workflow": 0
+  },
+  "src/execution/session/turn-step.ts": {
+    "static.modules": 674,
+    "static.kib": 3892,
+    "static.builtinFiles": 59,
+    "static.workflow": 0,
+    "total.modules": 851,
+    "total.kib": 6360,
+    "total.builtinFiles": 135,
+    "total.workflow": 0
+  },
+  "src/execution/session/owner-boot.ts": {
+    "static.modules": 686,
+    "static.kib": 2499,
+    "static.builtinFiles": 51,
+    "static.workflow": 0,
+    "total.modules": 862,
+    "total.kib": 4327,
+    "total.builtinFiles": 129,
+    "total.workflow": 0
+  }
+}

@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { sessionLineStore } from "#execution/session-line-store.js";
+import { sessionLineStore } from "#execution/hosts.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
 import { isV26Line } from "#protocol/v26-lines.js";

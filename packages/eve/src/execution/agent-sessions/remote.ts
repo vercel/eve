@@ -1,6 +1,6 @@
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
@@ -229,7 +229,7 @@ export async function startRemoteAgentSession(input: {
 
   if (!response.ok) {
     if (rejected)
-      throw new FatalError(
+      throw new NonRetryableError(
         formatRemoteAgentProtocolMismatch({
           name: input.action.remoteAgentName,
           receiverVersion: rejected.version,
@@ -244,20 +244,20 @@ export async function startRemoteAgentSession(input: {
   try {
     body = await response.json();
   } catch {
-    throw new FatalError(
+    throw new NonRetryableError(
       `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON. ${UNKNOWN_REMOTE_OUTCOME}`,
     );
   }
 
   const parsed = CreateSessionResponseSchema.safeParse(body);
   if (!parsed.success) {
-    throw new FatalError(
+    throw new NonRetryableError(
       `Remote agent "${input.action.remoteAgentName}" create-session response was invalid. ${UNKNOWN_REMOTE_OUTCOME}`,
     );
   }
   const receiverVersion = readRemoteAgentProtocolVersion(parsed.data.protocolVersion);
   if (!servesRemoteAgentCaller(receiverVersion)) {
-    throw new FatalError(
+    throw new NonRetryableError(
       `${formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion })} ${UNKNOWN_REMOTE_OUTCOME} Remote session: ${parsed.data.sessionId}.`,
     );
   }
@@ -532,7 +532,9 @@ export function resolveRemoteAgentForAction(input: {
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
     if (definition === undefined) {
-      throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
+      throw new NonRetryableError(
+        `Missing remote agent "${input.remoteAgentName}" in runtime registry.`,
+      );
     }
     const config = input.dynamicRemoteAgent;
     const remote: {
@@ -567,7 +569,9 @@ export function resolveRemoteAgentForAction(input: {
     return remote;
   }
   if (definition?.kind !== "remote") {
-    throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
+    throw new NonRetryableError(
+      `Missing remote agent "${input.remoteAgentName}" in runtime registry.`,
+    );
   }
   return definition;
 }
