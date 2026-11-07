@@ -932,7 +932,7 @@ To post without an agent turn, use `ctx.thread.post(...)` in an inbound handler,
 
 ### Slack API calls outside a handler
 
-Inbound handlers call the Slack Web API with `ctx.slack.request(operation, body)`, and a [renderer](#customize-rendering)'s event handlers use `ctx.channel.slack.request(...)`. Elsewhere, such as in a schedule, call `callSlackApi`:
+Inbound handlers call the Slack Web API with `ctx.slack.request(operation, body)`, and a [renderer](#customize-rendering)'s event handlers use `ctx.channel.slack.request(...)`. A tool uses [`slackToolContext(...)`](#slack-api-calls-from-a-tool). Elsewhere, such as in a schedule, call `callSlackApi`:
 
 ```ts
 import { callSlackApi } from "eve/channels/slack";
@@ -953,6 +953,36 @@ if (!response.ok) throw new Error(String(response.error));
 - It form-encodes the body, because some methods, such as `conversations.replies`, reject JSON.
 - It takes the same [`api`](#point-the-channel-at-a-different-slack-api-host) option as the channel. An `undefined` base keeps Slack's own hosts.
 - `resolveSlackBotToken` returns the bearer token as a string.
+
+### Slack API calls from a tool
+
+A tool reaches the Slack conversation its session runs on with `slackToolContext(ctx, slack)`. Pass the agent's own Slack channel. `request` uses that channel's credentials and [`api`](#point-the-channel-at-a-different-slack-api-host) option, so the tool needs no token of its own:
+
+```ts title="agent/tools/react.ts"
+import { slackToolContext } from "eve/channels/slack";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import slack from "../channels/slack";
+
+export default defineTool({
+  description: "React to the message that started this turn.",
+  inputSchema: z.object({ name: z.string().describe("Emoji name, such as eyes.") }),
+  async execute({ name }, ctx) {
+    const conversation = slackToolContext(ctx, slack);
+    if (conversation?.triggeringMessageTs === undefined) return "Not a Slack message.";
+    const response = await conversation.request("reactions.add", {
+      channel: conversation.channelId,
+      name,
+      timestamp: conversation.triggeringMessageTs,
+    });
+    return response.ok ? "Reacted." : String(response.error);
+  },
+});
+```
+
+- It returns `null` when the session isn't on a Slack channel.
+- `channelId`, `threadTs`, `codeChannel`, and `teamId` match [`ctx.slack`](#slack-api-calls-outside-a-handler). `threadTs` is empty in a code channel.
+- `triggeringMessageTs` is the message that started the current turn.
 
 ### Point the channel at a different Slack API host
 
