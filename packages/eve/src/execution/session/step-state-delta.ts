@@ -7,6 +7,8 @@ import type {
   SessionStateValues,
   WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
+import { produce } from "#compiled/@workflow/core/state.js";
+import { workflowStateRefsEnabled } from "#execution/install-workflow-state-refs.js";
 import { diffValue, snapshotValue } from "#shared/value-delta.js";
 
 // Steps only: the workflow body applies what this returns with `applySessionStateDelta`, and
@@ -22,6 +24,11 @@ const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as c
  * that returns only what changed keeps both replay and storage from carrying
  * the whole session once per step. The workflow body applies the delta to the
  * values it passed in; see `applySessionStateDelta`.
+ *
+ * With `WORKFLOW_STATE_REFS=1`, each changed value is instead returned whole,
+ * as a `workflow/state` `produce()` result of the value the step was given:
+ * Workflow then stores the next step's input as a reference and this output as
+ * only the change, and the workflow body adopts the value as given.
  *
  * The input is snapshotted before `work` runs because step code may edit it
  * in place, as a channel adapter does with its state. A retried step's state
@@ -49,7 +56,20 @@ export async function withSessionStateDelta(
       sessionWritable,
     });
   }
-  const { serializedContext, sessionState, history, ...result } = await work(input);
+  // With state references, `produce` needs the given values untouched, so step
+  // code edits copies. Without them, step code edits the given values as it
+  // always has, except values rebuilt from earlier references, which are frozen.
+  const byReference = workflowStateRefsEnabled();
+  const editable = <T>(value: T): T =>
+    byReference || (value !== null && typeof value === "object" && Object.isFrozen(value))
+      ? snapshotValue(value)
+      : value;
+  const given = {
+    ...input,
+    serializedContext: editable(input.serializedContext),
+    sessionState: editable(input.sessionState),
+  };
+  const { serializedContext, sessionState, history, ...result } = await work(given);
   const candidateState = sessionState ?? base.sessionState;
   const next = {
     serializedContext,
@@ -61,8 +81,15 @@ export async function withSessionStateDelta(
   };
   const stateDelta: { -readonly [K in keyof SessionStateDelta]: SessionStateDelta[K] } = {};
   for (const key of SESSION_VALUE_KEYS) {
-    const delta = next[key] === undefined ? undefined : diffValue(base[key], next[key]);
-    if (delta !== undefined) stateDelta[key] = delta;
+    const value = next[key];
+    if (value === undefined) continue;
+    if (byReference) {
+      const produced = produce<unknown>(input[key], () => value);
+      if (produced !== input[key]) stateDelta[key] = { kind: "value", value: produced };
+    } else {
+      const delta = diffValue(base[key], value);
+      if (delta !== undefined) stateDelta[key] = delta;
+    }
   }
   return { ...result, stateDelta };
 }

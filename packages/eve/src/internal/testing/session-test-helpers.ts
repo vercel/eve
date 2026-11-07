@@ -1,11 +1,42 @@
 import { expect, vi } from "vitest";
 import {
+  createStateResolver,
   hydrateStepArguments,
   hydrateStepReturnValue,
+  prepareReplayPayload,
 } from "#compiled/@workflow/core/serialization.js";
 import { applySessionStateDelta, type SessionStateValues } from "#execution/session/state-delta.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
 import { getWorld } from "#internal/workflow/runtime.js";
+
+/**
+ * Revivers that rebuild a run's `workflow/state` references and changes
+ * (`WORKFLOW_STATE_REFS=1`) from its run input, hook payloads and step outputs,
+ * so a single step's input or output reads as the values the session adopted.
+ */
+async function stateRevivers(runId: string): Promise<Record<string, (value: any) => any>> {
+  const world = await getWorld();
+  const resolver = createStateResolver();
+  const add = async (value: unknown) => {
+    if (value !== undefined) resolver.add((await prepareReplayPayload(value, undefined)).data);
+  };
+  await add((await world.runs.get(runId, { resolveData: "all" })).input);
+  let cursor: string | undefined;
+  do {
+    const page = await world.events.list({
+      runId,
+      resolveData: "all",
+      pagination: { sortOrder: "asc", limit: 1000, cursor },
+    });
+    for (const event of page.data) {
+      const data = event.eventData as { payload?: unknown; result?: unknown } | undefined;
+      if (event.eventType === "hook_received") await add(data?.payload);
+      else if (event.eventType === "step_completed") await add(data?.result);
+    }
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+  return resolver.revivers;
+}
 
 export async function waitForParkedTurnStep(runId: string, count = 1): Promise<void> {
   // Stream publication precedes the durable commit. Tests that require an
@@ -17,10 +48,17 @@ export async function waitForParkedTurnStep(runId: string, count = 1): Promise<v
     async () => {
       const world = await getWorld();
       const steps = await world.steps.list({ runId, resolveData: "all" });
+      const revivers = await stateRevivers(runId);
       let parkedSteps = 0;
       for (const step of steps.data) {
         if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
-        const result: TurnStepResult = await hydrateStepReturnValue(step.output, runId, undefined);
+        const result: TurnStepResult = await hydrateStepReturnValue(
+          step.output,
+          runId,
+          undefined,
+          globalThis,
+          revivers,
+        );
         const parked =
           result.action === "parked" || (result.action === "paused" && result.on === "calls");
         if (!parked) continue;
@@ -49,13 +87,27 @@ export async function readTurnStepStates(runId: string): Promise<SessionStateVal
     resolveData: "all",
     pagination: { limit: 1000, sortOrder: "asc" },
   });
+  const revivers = await stateRevivers(runId);
   const states: SessionStateValues[] = [];
   for (const step of steps.data) {
     if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
-    const { args } = (await hydrateStepArguments(step.input, runId, undefined)) as {
+    const { args } = (await hydrateStepArguments(
+      step.input,
+      runId,
+      undefined,
+      [],
+      globalThis,
+      revivers,
+    )) as {
       readonly args: readonly [TurnStepInput];
     };
-    const result: TurnStepResult = await hydrateStepReturnValue(step.output, runId, undefined);
+    const result: TurnStepResult = await hydrateStepReturnValue(
+      step.output,
+      runId,
+      undefined,
+      globalThis,
+      revivers,
+    );
     states.push(applySessionStateDelta(args[0], result.stateDelta));
   }
   return states;

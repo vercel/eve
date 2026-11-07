@@ -80,6 +80,12 @@ Graphile Worker recommends a pool size of at least the worker concurrency plus 2
 
 The Postgres world stores workflow inputs, outputs, and stream contents in the database without encryption, and it keeps the records of finished runs until you delete them. Protect database access and backups, and see [Manage run data](./self-hosted-operations#manage-run-data) for retention.
 
+## Session state storage
+
+eve stores each session step's state by reference: a step's input refers to the versions earlier steps already stored, and its output stores only what the step changed. This keeps a long conversation from storing its whole history again on every turn, and it works with every world.
+
+To store full copies instead, set `WORKFLOW_STATE_REFS=0` in the runtime environment. Runs that already stored references stay readable.
+
 ## Use another world
 
 Select any installed Workflow world package in the root `agent.ts`:

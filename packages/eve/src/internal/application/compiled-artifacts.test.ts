@@ -32,6 +32,10 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeLessThan(
       source.indexOf("await createWorldFromModule("),
     );
+    expect(source.indexOf("installWorkflowStateRefs();")).toBeGreaterThan(-1);
+    expect(source.indexOf("installWorkflowStateRefs();")).toBeLessThan(
+      source.indexOf("await createWorldFromModule("),
+    );
   });
 
   it("configures the vendored local World with eve's app-local data resolver", () => {
@@ -87,6 +91,9 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
     expect(source).toContain("createDevelopmentWorkflowWorld");
     expect(source).toContain(
       "await installWorkflowWorld({ world: createDevelopmentWorkflowWorld() });",
+    );
+    expect(source.indexOf("installWorkflowStateRefs();")).toBeLessThan(
+      source.indexOf("await installWorkflowWorld("),
     );
     expect(source).not.toContain("@workflow/world-local");
   });
