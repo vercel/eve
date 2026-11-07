@@ -27,7 +27,7 @@ const agent: DefinedAgent = defineAgent({
             input: {
               city: plan.city,
               holdFor: plan.holdFor,
-              ...(plan.other === true && { grant: "other" }),
+              ...(plan.grant !== undefined && { grant: plan.grant }),
               ...(plan.afterParent === true && { afterParent: true }),
             },
             name: "get_weather",

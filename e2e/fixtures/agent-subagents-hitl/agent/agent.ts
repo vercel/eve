@@ -130,7 +130,7 @@ function signInFanIn(request: MockModelRequest, plan: FanInPlan): MockModelRespo
 
 const parentWeather = {
   id: "parent-weather",
-  input: { city: "Lisbon parent", parent: true },
+  input: { city: "Lisbon parent" },
   name: "get_weather",
 };
 
@@ -144,7 +144,8 @@ function weatherChild(plan: FanInPlan, index: number) {
     }),
     ...(plan.again === true && index === 0 && { again: true }),
     ...(plan.retry === true && index === 0 && { retry: true }),
-    ...(plan.otherFrom !== undefined && index >= plan.otherFrom && { other: true }),
+    ...(plan.otherFrom !== undefined && index >= plan.otherFrom && { grant: "other" as const }),
+    ...(plan.noGrant === true && { grant: "none" as const }),
     ...(plan.parentFirst === true && { afterParent: true }),
   };
   return {

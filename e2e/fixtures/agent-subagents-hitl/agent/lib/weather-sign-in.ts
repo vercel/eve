@@ -49,6 +49,8 @@ export interface FanInPlan {
   readonly retry?: boolean;
   /** The children from this index on need the other grant. */
   readonly otherFrom?: number;
+  /** Every child's sign-in names no Connect grant, so none can share another's card. */
+  readonly noGrant?: boolean;
 }
 
 /** What the parent tells one weather child. */
@@ -59,8 +61,8 @@ export interface ChildPlan {
   readonly again?: boolean;
   /** Call again once after the first call fails. */
   readonly retry?: boolean;
-  /** Needs the other connector's grant. */
-  readonly other?: boolean;
+  /** The grant the call needs, when it isn't the weather grant. */
+  readonly grant?: "other" | "none";
   /** Asks for its sign-in only once the parent asked for its own. */
   readonly afterParent?: boolean;
 }

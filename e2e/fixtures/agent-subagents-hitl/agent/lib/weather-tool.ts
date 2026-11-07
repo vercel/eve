@@ -10,7 +10,6 @@ import { z } from "zod";
 import {
   awaitParentAsked,
   awaitReturned,
-  markParentAsked,
   markReturned,
   readGrant,
   storeGrant,
@@ -27,8 +26,11 @@ import {
   type WeatherResult,
 } from "./weather-sign-in";
 
-/** Which of the two fixture grants a call needs: `weather`, or `other`, another connector. */
-export type WeatherGrant = "weather" | "other";
+/**
+ * Which fixture grant a call needs: `weather`, `other`, another connector, or `none`, a sign-in
+ * that names no Connect grant.
+ */
+export type WeatherGrant = "weather" | "other" | "none";
 
 /** Where the provider keeps `principal`'s `grant`: one per person and grant. */
 function grantKey(principal: ConnectionPrincipal, grant: WeatherGrant): string {
@@ -39,7 +41,9 @@ function grantKey(principal: ConnectionPrincipal, grant: WeatherGrant): string {
 /** A weather sign-in, a Vercel Connect grant whose provider is faked at its edge. */
 const weatherAuth = (grant: WeatherGrant) =>
   defineInteractiveAuthorization<{ marker: string }>({
-    vercelConnect: { connector: grant === "weather" ? WEATHER_GRANT : OTHER_GRANT },
+    ...(grant !== "none" && {
+      vercelConnect: { connector: grant === "weather" ? WEATHER_GRANT : OTHER_GRANT },
+    }),
     async getToken({ principal }) {
       const token = await readGrant(grantKey(principal, grant));
       if (token === undefined) throw new ConnectionAuthorizationRequiredError("weather");
@@ -72,7 +76,11 @@ const weatherAuth = (grant: WeatherGrant) =>
     },
   });
 
-const auths = { other: weatherAuth("other"), weather: weatherAuth("weather") };
+const auths = {
+  none: weatherAuth("none"),
+  other: weatherAuth("other"),
+  weather: weatherAuth("weather"),
+};
 
 /** The weather tool the parent and the weather children both call. */
 export const weatherTool = defineTool({
@@ -82,10 +90,8 @@ export const weatherTool = defineTool({
     /** When this call's own sign-in minted its token, hold until these cities' calls return. */
     holdFor: z.array(z.string()).optional(),
     /** The grant the call needs; `weather` when absent. */
-    grant: z.enum(["weather", "other"]).optional(),
-    /** The parent's call: records that the parent asked, for children told to wait for it. */
-    parent: z.boolean().optional(),
-    /** Asks for the sign-in only once the parent asked for its own. */
+    grant: z.enum(["weather", "other", "none"]).optional(),
+    /** Asks for the sign-in only once the parent's own card opened; see `hooks/parent-asked.ts`. */
     afterParent: z.boolean().optional(),
   }),
   async execute(input, ctx): Promise<WeatherResult> {
@@ -95,13 +101,10 @@ export const weatherTool = defineTool({
       if (person === undefined) throw new Error("A call that waits on the parent needs a person.");
       await awaitParentAsked(person, HOLD_LIMIT_MS);
     }
-    const token = await ctx
-      .getToken(auths[grant], { authKey: grant, displayName: "Fixture Weather" })
-      .catch(async (error: unknown) => {
-        // The parent's sign-in opens as this error reaches the harness, in this same step.
-        if (input.parent === true && person !== undefined) await markParentAsked(person);
-        throw error;
-      });
+    const token = await ctx.getToken(auths[grant], {
+      authKey: grant,
+      displayName: "Fixture Weather",
+    });
     if (input.holdFor === undefined)
       return { city: input.city, finishedAt: Date.now(), token: token.token };
     if (person === undefined) throw new Error("A held weather call needs a person.");
