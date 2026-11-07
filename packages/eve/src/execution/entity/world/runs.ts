@@ -95,13 +95,11 @@ export async function write(
   runId: string,
   writer: Writer,
   data: EventRequest,
-): Promise<void> {
-  if (!writer.fenced) {
-    await world.events.create(runId, data);
-    return;
-  }
+): Promise<unknown> {
+  if (!writer.fenced) return await world.events.create(runId, data);
+  let result: unknown;
   try {
-    await world.events.create(
+    result = await world.events.create(
       runId,
       { ...data, specVersion: FENCED_SPEC },
       { eventCount: writer.eventCount, expectedSeqInBand: writer.seqInBand, inBand: true },
@@ -112,7 +110,12 @@ export async function write(
   }
   writer.seqInBand += 1;
   writer.eventCount += 1;
+  return result;
 }
+
+/** The type of the event a write landed as, where the World says (Workflow's Worlds do). */
+export const writtenAs = (result: unknown): string | undefined =>
+  (result as { readonly event?: { readonly eventType?: string } } | undefined)?.event?.eventType;
 
 /**
  * Creates `key`'s run with `meta` as its input, and returns its writer; `undefined` when the

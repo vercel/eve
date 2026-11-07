@@ -1,6 +1,5 @@
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createChannelRouteArgs, type ChannelRoutePorts } from "#channel/route-args.js";
-import type { HttpRouteDefinition } from "#channel/routes.js";
 import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#eve-channel/index.js";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
@@ -73,7 +72,7 @@ export function createInProcessChannelFetch(options: InProcessChannelOptions): t
     const path = new URL(request.url).pathname;
     for (const route of routes) {
       if (route.method !== request.method) continue;
-      const params = matchRoute(route, path);
+      const params = matchRoute(route.path, path);
       if (params === undefined) continue;
       try {
         return detached(
@@ -101,7 +100,7 @@ export function createInProcessChannelFetch(options: InProcessChannelOptions): t
  * `response` with a body of its own, as one that crossed a network: the client reads and cancels
  * its copy, and the server's stream ends when the client stops reading or the request aborts.
  */
-function detached(response: Response, signal: AbortSignal): Response {
+export function detached(response: Response, signal: AbortSignal): Response {
   if (response.body === null) return response;
   const reader = response.body.getReader();
   const stop = (reason?: unknown) => {
@@ -132,14 +131,11 @@ function detached(response: Response, signal: AbortSignal): Response {
 }
 
 /**
- * The path parameters `path` gives `route`'s pattern (`/a/:b/c`), or `undefined` when it doesn't
+ * The path parameters `path` gives a route's `pattern` (`/a/:b/c`), or `undefined` when it doesn't
  * match. Parameters are decoded except `%2F` and `%5C`, as Nitro's router leaves them.
  */
-function matchRoute(
-  route: HttpRouteDefinition<undefined>,
-  path: string,
-): Record<string, string> | undefined {
-  const want = route.path.split("/");
+export function matchRoute(pattern: string, path: string): Record<string, string> | undefined {
+  const want = pattern.split("/");
   const got = path.split("/");
   if (want.length !== got.length) return undefined;
   const params: Record<string, string> = {};
