@@ -12,6 +12,7 @@ import { markMockModel } from "#internal/mock-model-identity.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { APPROVE_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import type { ActivationOutcome } from "#execution/entity/entities.js";
@@ -102,9 +103,9 @@ async function serve(
   return host;
 }
 
-async function until(condition: () => boolean, ms = 15_000): Promise<void> {
+async function until(condition: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> {
   const deadline = Date.now() + ms;
-  while (!condition()) {
+  while (!(await condition())) {
     if (Date.now() > deadline) throw new Error("timed out");
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -545,5 +546,113 @@ describe("a World host", () => {
       () => outcomes.length > before + 1 && lastOutcome(asked.sessionId)?.kind === "idle",
     );
     expect(outcomes.slice(before).map((entry) => entry.outcome.kind)).toContain("continue");
+  }, 60_000);
+  it("reads a message that waited behind a budget question with the turn it waited on, after the session stopped between", async () => {
+    const requests: string[][] = [];
+    const agent = defineAgent({
+      instructions: "You write notes.",
+      model: markMockModel(
+        new MockLanguageModelV4({
+          doStream: async ({ prompt }) => {
+            const users = prompt
+              .filter((message) => message.role === "user")
+              .map((message) =>
+                message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+              );
+            requests.push(users);
+            return textStreamResult(`Reply ${String(requests.length)}.`);
+          },
+          modelId: "world-host-budget",
+          provider: "eve-test",
+        }),
+      ),
+      modelContextWindowTokens: 200_000,
+      name: "notes",
+      // The first turn spends the whole budget, so the next one parks on the question.
+      limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+    });
+    const world = await serve({ agents: [agent] });
+    const session = world.session("notes", { identity: alice });
+
+    const first = await (await session.send("Write a summary.")).result();
+    await until(() => lastOutcome(first.sessionId)?.kind === "idle");
+    await session.send("Write a status note.");
+    await until(async () => (await session.pending()).length > 0);
+    const [question] = await session.pending();
+    expect(question?.request.kind).toBe("budget");
+    // Held behind the question, while nothing runs the session.
+    const idle = outcomes.length;
+    await session.send("Mention the deadline.");
+    await until(() => outcomes.length > idle && lastOutcome(first.sessionId)?.kind === "idle");
+    const model = requests.length;
+
+    const answered = await (
+      await session.respond([
+        { interactionId: question!.interactionId, optionId: APPROVE_OPTION_ID },
+      ])
+    ).result();
+    expect(answered.sessionId).toBe(first.sessionId);
+    expect(requests.length).toBe(model + 1);
+    expect(requests.at(-1)).toEqual([
+      "Write a summary.",
+      "Write a status note.",
+      "Mention the deadline.",
+    ]);
+  }, 60_000);
+
+  // Known bug, kept failing until fixed: the resumed turn's prompt holds the message twice. The
+  // snapshot redelivers it once (one unread input, no admitted keys) and the mailbox hands over only
+  // the answer, so the second copy comes from how the resumed turn admits a held delivery.
+  it("reads a message that waited behind a budget question with the turn it waited on, when it arrived as the question did", async () => {
+    const requests: string[][] = [];
+    const agent = defineAgent({
+      instructions: "You write notes.",
+      model: markMockModel(
+        new MockLanguageModelV4({
+          doStream: async ({ prompt }) => {
+            const users = prompt
+              .filter((message) => message.role === "user")
+              .map((message) =>
+                message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+              );
+            requests.push(users);
+            return textStreamResult(`Reply ${String(requests.length)}.`);
+          },
+          modelId: "world-host-budget",
+          provider: "eve-test",
+        }),
+      ),
+      modelContextWindowTokens: 200_000,
+      name: "notes",
+      // The first turn spends the whole budget, so the next one parks on the question.
+      limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+    });
+    const world = await serve({ agents: [agent] });
+    const session = world.session("notes", { identity: alice });
+
+    const first = await (await session.send("Write a summary.")).result();
+    await until(() => lastOutcome(first.sessionId)?.kind === "idle");
+    await session.send("Write a status note.");
+    await until(async () => (await session.pending()).length > 0, 15_000);
+    const [question] = await session.pending();
+    expect(question?.request.kind).toBe("budget");
+    // Held behind the question, as the activation that asked it still runs.
+    const idle = outcomes.length;
+    await session.send("Mention the deadline.");
+    await until(() => outcomes.length > idle + 1 && lastOutcome(first.sessionId)?.kind === "idle");
+    const model = requests.length;
+
+    const answered = await (
+      await session.respond([
+        { interactionId: question!.interactionId, optionId: APPROVE_OPTION_ID },
+      ])
+    ).result();
+    expect(answered.sessionId).toBe(first.sessionId);
+    expect(requests.length).toBe(model + 1);
+    expect(requests.at(-1)).toEqual([
+      "Write a summary.",
+      "Write a status note.",
+      "Mention the deadline.",
+    ]);
   }, 60_000);
 });
