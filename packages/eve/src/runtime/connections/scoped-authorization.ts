@@ -24,7 +24,9 @@ import {
   consumeAuthorizationResult,
   createAuthorizationAttempt,
   requestAuthorization,
+  SignInCompletedKey,
 } from "#harness/authorization.js";
+import { toError } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   evictCachedToken,
@@ -359,24 +361,32 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   const result = consumeAuthorizationResult(scope, input.instanceId);
   if (result === undefined) return false;
 
-  // RFC 6749 section 4.1.2.1: the person refused consent, so there is nothing to complete.
-  if (result.callback.params.error === SIGN_IN_DECLINED)
-    throw new ConnectionAuthorizationFailedError(scope, {
-      message: `Sign-in to "${scope}" was declined.`,
-      reason: SIGN_IN_DECLINED,
-      retryable: false,
-    });
-  const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
-  const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
-  const token = await interactive.completeAuthorization({
-    callbackUrl: result.hookUrl,
-    connection,
-    principal,
-    resume: result.resume,
-    callback: result.callback,
-  });
-  writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
+  // The sign-in is reported as it completes, not when the call that completes it returns.
+  const report = ctx.get(SignInCompletedKey);
+  try {
+    // RFC 6749 section 4.1.2.1: the person refused consent, so there is nothing to complete.
+    if (result.callback.params.error === SIGN_IN_DECLINED)
+      throw new ConnectionAuthorizationFailedError(scope, {
+        message: `Sign-in to "${scope}" was declined.`,
+        reason: SIGN_IN_DECLINED,
+        retryable: false,
+      });
+    const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
+    const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
+    const token = await interactive.completeAuthorization({
+      callbackUrl: result.hookUrl,
+      connection,
+      principal,
+      resume: result.resume,
+      callback: result.callback,
+    });
+    writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
+  } catch (error) {
+    await report?.(result, toError(error));
+    throw error;
+  }
+  await report?.(result);
   return true;
 }
 

@@ -25,6 +25,8 @@ import type { ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { SignInCompletedKey } from "#harness/authorization.js";
+import { contextStorage } from "#context/container.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
@@ -54,7 +56,8 @@ export async function runApprovedCalls(input: {
 }> {
   /**
    * The sign-ins a call waited on end with the call, once `completeAuthorization` has run in it:
-   * accepted if it returned, failed with the reason it didn't. Reported before the call's result.
+   * accepted if it returned, failed with the reason it didn't. Reported before the call's result;
+   * one the call completed itself was reported as it completed (`SignInCompletedKey`).
    */
   const reportSignIns = async (call: ApprovedCall, failure?: Error | string): Promise<void> => {
     if ((call.signIns?.length ?? 0) === 0) return;
@@ -72,6 +75,16 @@ export async function runApprovedCalls(input: {
     );
     if (events.length > 0) await input.publish(commitOf(events));
   };
+  // A call that completes its sign-in reports it then, so the other askers for the same grant
+  // resume while the call is still running. Outside a step no call completes a sign-in.
+  const ctx = contextStorage.getStore();
+  ctx?.setVirtualContext(SignInCompletedKey, async (result, failure) => {
+    if (result.attemptId === undefined) return;
+    for (const call of input.approvals) {
+      const challenge = call.signIns?.find(({ attemptId }) => attemptId === result.attemptId);
+      if (challenge !== undefined) await reportSignIns({ ...call, signIns: [challenge] }, failure);
+    }
+  });
   const executed = await Promise.allSettled(
     input.approvals.map(async (approval): Promise<CallOutcome> => {
       const { call } = approval;
@@ -105,7 +118,7 @@ export async function runApprovedCalls(input: {
       await input.publish(settleCall(failed.result));
       return { settled: [{ part: failed.part }], toolResults: [] };
     }),
-  );
+  ).finally(() => ctx?.delete(SignInCompletedKey));
   const failed = executed.find((call) => call.status === "rejected");
   // Only a cancellation rejects a call, and only one that hadn't started: it stays approved. The
   // calls that settled keep their results, and the caller ends the cancelled turn after it

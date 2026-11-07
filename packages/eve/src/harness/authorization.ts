@@ -293,6 +293,15 @@ export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthor
   "eve.pendingAuthorizationResult",
 );
 
+/** Reports a callback's sign-in once a call completes it: with why it failed, if it did. */
+export type SignInCompleted = (result: AuthorizationResult, failure?: Error) => Promise<void>;
+
+/**
+ * How the step reports a sign-in the moment a resumed call completes it, so the other askers for
+ * the same grant resume then rather than when the call returns.
+ */
+export const SignInCompletedKey = new ContextKey<SignInCompleted>("eve.signInCompleted");
+
 /**
  * Deployment base URL for building callback URLs. Set by the
  * framework (turnStep) at the start of each step from workflow
