@@ -16,12 +16,28 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 
 /** What a runtime serves sessions of: an agent's compiled artifacts, and the node it runs. */
-export interface SessionRuntimeConfig {
+export interface CompiledSessionRuntimeConfig {
+  readonly agent?: never;
   readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }
+
+/**
+ * What a runtime serves sessions of: an agent this process holds, not one compiled from files.
+ * Its steps resolve it by id, so
+ * the process that runs them holds it (`holdSessionAgent`).
+ */
+export interface AgentSessionRuntimeConfig {
+  readonly agent: SessionAgent;
+  readonly agentSessionRuntimeOverrides?: never;
+  readonly compiledArtifactsSource?: never;
+  readonly dynamicSubagentAgentConfig?: never;
+  readonly nodeId?: never;
+}
+
+export type SessionRuntimeConfig = CompiledSessionRuntimeConfig | AgentSessionRuntimeConfig;
 
 /** What a session's first owner starts from, before a host decides where it runs. */
 export interface PreparedInitialEntry {
@@ -63,11 +79,13 @@ export async function prepareInitialEntry(
       continuationConflictCommand: { ...conflictCommand, delivery: input.delivery },
     };
   }
-  const agent = await loadCompiledSessionAgent({
-    compiledArtifactsSource: config.compiledArtifactsSource,
-    nodeId: config.nodeId,
-  });
-  // Only a compiled graph names tools ahead of a run.
+  const agent =
+    config.agent ??
+    (await loadCompiledSessionAgent({
+      compiledArtifactsSource: config.compiledArtifactsSource,
+      nodeId: config.nodeId,
+    }));
+  // Only a compiled graph names tools ahead of a run; a held agent builds its own.
   const graph = agent.compiled?.graph;
   if (
     graph !== undefined &&

@@ -139,23 +139,23 @@ export async function bootInitialOwner<Hook extends InboxHook>(
   const inbox = createSessionInbox(ports.inboxTransport);
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
-  const serializedBundle = serializedContext["eve.bundle"] as {
-    source: DurableCompiledArtifactsSource;
-    nodeId?: string;
-  };
+  // A held agent carries no bundle: this process holds the agent instead.
+  const serializedBundle = serializedContext["eve.bundle"] as
+    | { source: DurableCompiledArtifactsSource; nodeId?: string }
+    | undefined;
   try {
     const sessionCreationPromise = createSessionStep({
       agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
         | AgentSessionRuntimeOverrides
         | undefined,
-      compiledArtifactsSource: serializedBundle.source,
+      compiledArtifactsSource: serializedBundle?.source,
       continuationToken,
       dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
         | DynamicSubagentAgentConfig
         | undefined,
       // With a first message, its delivery carries the history instead.
       history: input.input.message === undefined ? input.input.history : undefined,
-      nodeId: serializedBundle.nodeId,
+      nodeId: serializedBundle?.nodeId,
       outputSchema: input.input.outputSchema,
       rootSessionId: readRootSessionId(serializedContext),
       sessionId,

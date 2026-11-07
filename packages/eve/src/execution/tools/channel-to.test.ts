@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -39,7 +40,7 @@ describe("createToolChannelTo", () => {
     const to = createToolChannelTo({
       createRuntime: createWorkflowRuntime,
       delegated: false,
-      loadBundle: () => bundle,
+      loadAgent: () => fromCompiledBundle(bundle),
     });
     const toolContext = new ContextContainer();
     toolContext.set(SessionIdKey, "session_alice");
