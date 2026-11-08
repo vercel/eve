@@ -41,6 +41,7 @@ import { createFrameworkUserMessage } from "#harness/messages.js";
 import { toolsDefinition } from "#definitions/tools.js";
 import type { MemoryToolsContext } from "#public/memory/index.js";
 import { isBrandedToolEntry } from "#tools/dynamic.js";
+import { recordMemoryToolStore } from "#tracing/eve/agent-memory-instrumentation.js";
 
 const log = createLogger("memory");
 
@@ -469,7 +470,17 @@ async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContex
         memory.description === undefined
           ? tool.description
           : `${memory.description}\n\n${tool.description}`;
-      return [name, { ...tool, description }];
+      return [
+        name,
+        {
+          ...tool,
+          description,
+          execute(input: unknown, toolContext: Parameters<typeof tool.execute>[1]) {
+            recordMemoryToolStore(scope.key, slot);
+            return tool.execute(input, toolContext);
+          },
+        },
+      ];
     }),
   );
 }
