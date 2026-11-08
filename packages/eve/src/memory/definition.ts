@@ -438,7 +438,7 @@ export function memoryToolsDefinition(memory: ResolvedMemoryDefinition): Definit
   );
 }
 
-async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContext) {
+export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContext) {
   const { provider, slot } = memory;
   if (provider.tools === undefined) return null;
   // The scope is the data the tools are made from: resolved once per turn and principal, as recall
