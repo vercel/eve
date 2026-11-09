@@ -139,6 +139,10 @@ import {
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
+import {
+  moveSessionOnCallSettled,
+  setSlackCodeChannelMove,
+} from "#public/channels/slack/move-to-code-channel.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -799,6 +803,20 @@ export type SlackApprovalChannelResolver = (
   ctx: SessionContext,
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
+/** `slackChannel({ codeChannels })` options; passing them enables code channels like `true`. */
+export interface SlackCodeChannelOptions {
+  /**
+   * The name of the agent's tool that calls `moveToCodeChannel()`. Only that
+   * tool's calls move a session, so no other tool's output can, such as a
+   * connection tool's.
+   */
+  readonly moveTool?: string;
+}
+
+function codeChannelsEnabled(option: SlackChannelConfig["codeChannels"]): boolean {
+  return option === true || (typeof option === "object" && option !== null);
+}
+
 export interface SlackChannelConfig {
   /** Slack API transport overrides: base URLs and a custom fetch. */
   readonly api?: SlackTransportOptions;
@@ -823,9 +841,10 @@ export interface SlackChannelConfig {
    * `onAppMention` (where `ctx.isBotMentioned()` returns `false`), else the
    * default handler. Adds the code channel scopes, events, and feature flag to
    * the app manifest. Without it, eve treats a code channel like any other
-   * channel and never looks one up.
+   * channel and never looks one up. Pass options instead of `true` to also
+   * name the tool that moves a thread's session into a code channel.
    */
-  readonly codeChannels?: boolean;
+  readonly codeChannels?: boolean | SlackCodeChannelOptions;
 
   /**
    * Inbound upload policy applied to file attachments before they reach
@@ -1046,29 +1065,66 @@ function rebuildSlackContext(
   api: SlackTransportOptions | undefined,
   credentials: SlackChannelCredentials | undefined,
 ): SlackChannelContext {
-  const { thread, slack } = buildSlackBinding({
-    api,
-    botToken: credentials?.botToken,
-    channelId: state.channelId ?? "",
-    threadTs: state.threadTs ?? "",
-    codeChannel: state.codeChannel === true,
-    // Read at post time: `deliver` may move replies to a new thread after the context is built.
-    replyThreadTs: () => state.replyThreadTs ?? undefined,
-    installationTeamId: state.installationTeamId ?? undefined,
-    teamId: state.teamId ?? undefined,
-    onThreadTsChanged(ts) {
-      state.threadTs = ts;
-      if (state.channelId) {
-        session.continuation?.alias(
-          slackContinuationToken({ channelId: state.channelId, threadTs: ts }),
-        );
-      }
+  const bind = () =>
+    buildSlackBinding({
+      api,
+      botToken: credentials?.botToken,
+      channelId: state.channelId ?? "",
+      threadTs: state.threadTs ?? "",
+      codeChannel: state.codeChannel === true,
+      // Read at post time: `deliver` may move replies to a new thread after the context is built.
+      replyThreadTs: () => state.replyThreadTs ?? undefined,
+      installationTeamId: state.installationTeamId ?? undefined,
+      teamId: state.teamId ?? undefined,
+      onThreadTsChanged(ts) {
+        state.threadTs = ts;
+        if (state.channelId) {
+          session.continuation?.alias(
+            slackContinuationToken({ channelId: state.channelId, threadTs: ts }),
+          );
+        }
+      },
+      onPosted() {
+        state.postedInThread = true;
+      },
+    });
+  // `moveToCodeChannel()` moves the session to another conversation mid-step; handlers later in
+  // the step must post there, so the binding follows the state's conversation.
+  let boundTo = slackConversationOf(state);
+  let binding = bind();
+  const current = () => {
+    const conversation = slackConversationOf(state);
+    if (conversation !== boundTo) {
+      boundTo = conversation;
+      binding = bind();
+    }
+    return binding;
+  };
+  return {
+    thread: followCurrent(() => current().thread),
+    slack: followCurrent(() => current().slack),
+    state,
+  };
+}
+
+function slackConversationOf(state: SlackChannelState): string {
+  return `${state.channelId ?? ""}:${state.codeChannel === true}`;
+}
+
+/** A stand-in that forwards every read to whatever `target()` returns now. */
+function followCurrent<T extends object>(target: () => T): T {
+  return new Proxy({} as T, {
+    get(_stub, key) {
+      const value: unknown = Reflect.get(target(), key);
+      return typeof value === "function" ? value.bind(target()) : value;
     },
-    onPosted() {
-      state.postedInThread = true;
+    has: (_stub, key) => Reflect.has(target(), key),
+    ownKeys: () => Reflect.ownKeys(target()),
+    getOwnPropertyDescriptor(_stub, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target(), key);
+      return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
     },
   });
-  return { thread, slack, state };
 }
 
 /**
@@ -1102,6 +1158,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const onAnswers = config.onAnswers ?? defaultOnAnswers;
   const interactionCard = composeInteractionCards(config.renderers ?? []);
+  const moveTool =
+    typeof config.codeChannels === "object" ? config.codeChannels?.moveTool : undefined;
   const rendering = composeSlackRenderers(config.renderers ?? [], {
     events: {
       ...defaultEvents,
@@ -1141,6 +1199,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           ctx.channel.state.quietStatus = null;
         }
         await renderCallSettled?.(event, ctx);
+        if (moveTool !== undefined) await moveSessionOnCallSettled(event, ctx, moveTool);
       },
       async "turn.settled"(event, ctx) {
         ctx.channel.state.quietStatus = null;
@@ -1247,7 +1306,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       return receiveOnSlack(input, {
         from,
         api,
-        codeChannels: config.codeChannels === true,
+        codeChannels: codeChannelsEnabled(config.codeChannels),
         credentials: config.credentials,
       });
     },
@@ -1257,7 +1316,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   const manifest = defineSlackAppManifest({
     botName: config.botName,
-    codeChannels: config.codeChannels === true,
+    codeChannels: codeChannelsEnabled(config.codeChannels),
     users: userResolver !== undefined,
     userEmails: typeof usersOption === "object" && usersOption.email === true,
   });
@@ -1265,6 +1324,18 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     externalCredentials: credentials?.vercelConnect,
     manifest: manifest.build(channelName),
   }));
+  if (moveTool !== undefined) {
+    setSlackCodeChannelMove(channel, {
+      moveTool,
+      request: ({ installationTeamId, teamId }) =>
+        buildSlackWorkspaceHandle({
+          api,
+          botToken: config.credentials?.botToken,
+          installationTeamId,
+          teamId,
+        }).request,
+    });
+  }
   return channel;
 }
 
@@ -1537,7 +1608,7 @@ async function handleEventPost(input: {
   const stopped = envelope.event;
   const stoppedChannelId = stopped.channel;
   if (
-    config.codeChannels === true &&
+    codeChannelsEnabled(config.codeChannels) &&
     stopped.type === "agent_session_stopped" &&
     typeof stoppedChannelId === "string"
   ) {
@@ -1599,7 +1670,7 @@ async function handleEventPost(input: {
     appId,
     botUserId,
     codeChannelOnly: undefined,
-    detectCodeChannels: config.codeChannels === true,
+    detectCodeChannels: codeChannelsEnabled(config.codeChannels),
     receivingBotUserId,
     from: input.from,
     resolveSession: input.resolveSession,
@@ -1670,7 +1741,7 @@ async function handleEventPost(input: {
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
-            codeChannels: config.codeChannels === true,
+            codeChannels: codeChannelsEnabled(config.codeChannels),
             envelope,
             handler: onEvent,
             installationTeamId,
@@ -1679,7 +1750,7 @@ async function handleEventPost(input: {
   // Slack asks agents to answer in a code channel without a mention. Every message
   // there is addressed to the agent, so an authored mention handler gates it. Only the
   // lookup tells a code channel apart, so a message elsewhere falls back to `onEvent`.
-  if (dispatch === null && builtinDefault === null && config.codeChannels === true) {
+  if (dispatch === null && builtinDefault === null && codeChannelsEnabled(config.codeChannels)) {
     const message = parseMessageEvent(envelope);
     if (
       message !== null &&
