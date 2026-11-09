@@ -28,6 +28,8 @@ export interface SignIn {
   readonly responseId?: string;
   /** The turn the sign-in holds. */
   readonly turnId?: string;
+  /** The sign-in the person already has a card for, whose answer completes this one too. */
+  readonly waitsOn?: string;
 }
 
 /** The sign-in an interaction is, or `undefined` for any other interaction. */
@@ -48,6 +50,7 @@ export function signInOf(view: SessionView, interactionId: string): SignIn | und
     ...(principalId !== undefined && { principalId }),
     ...("responseId" in row.subject && { responseId: row.subject.responseId }),
     ...(turnId !== undefined && { turnId }),
+    ...(challenge?.waitsOn !== undefined && { waitsOn: challenge.waitsOn }),
   };
 }
 
@@ -112,7 +115,8 @@ export async function showSignIn(
   surface: SignInSurface,
 ): Promise<void> {
   const signIn = signInOf(view, interactionId);
-  if (signIn === undefined || signIn.responseId !== undefined) return;
+  if (signIn === undefined || signIn.responseId !== undefined || signIn.waitsOn !== undefined)
+    return;
   if (surface.posted.get(signIn.name) !== undefined) return;
   let posted: string | undefined;
   if (surface.private) {
@@ -138,7 +142,8 @@ export async function settleSignIn(
   surface: SignInSurface,
 ): Promise<void> {
   const signIn = signInOf(view, data.interactionId);
-  if (signIn === undefined || signIn.responseId !== undefined) return;
+  if (signIn === undefined || signIn.responseId !== undefined || signIn.waitsOn !== undefined)
+    return;
   const posted = surface.posted.get(signIn.name);
   if (posted === undefined) return;
   surface.posted.set(signIn.name, undefined);

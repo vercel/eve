@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
@@ -20,6 +21,7 @@ import {
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
+import { LEASE_LOCK_PATH, withSandboxLeaseLock } from "../../extension/lib/sandbox-lease-lock.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
 
@@ -717,6 +719,199 @@ test("attributes pull requests to the person the tool context resolves", async (
   );
 });
 
+test("serializes credential leases across sessions that share one sandbox", async () => {
+  // Subagents share their parent's sandbox. Each lease replaces the sandbox's network policy, so
+  // overlapping leases would swap or clear each other's credential mid-command.
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  const policies: NetworkPolicy[] = [];
+  const events: string[] = [];
+  let active: NetworkPolicy | undefined;
+  let release!: () => void;
+  const firstCommandRunning = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const sandboxFake: Pick<SandboxSession, "resolvePath" | "run" | "removePath"> &
+    Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
+    resolvePath: (path: string) => (path === "." ? "/workspace" : path),
+    async removePath() {},
+    async setNetworkPolicy(policy: NetworkPolicy) {
+      policies.push(policy);
+      active = policy;
+    },
+    async run(input: Parameters<SandboxSession["run"]>[0]) {
+      if (input.command.includes(LEASE_LOCK_PATH)) return runLockCommand(input.command, lockPath);
+      const name = input.command.includes("'1'") ? "first" : "second";
+      const placeholder = input.env?.GH_TOKEN ?? "";
+      // The command's own credential must be leased for as long as it runs.
+      assert.match(JSON.stringify(active), new RegExp(placeholder, "u"));
+      events.push(`${name} start`);
+      if (name === "first") {
+        started();
+        await firstCommandRunning;
+        assert.match(JSON.stringify(active), new RegExp(placeholder, "u"));
+      }
+      events.push(`${name} end`);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+  };
+  const sandbox = sandboxFake as NetworkPolicySandboxSession;
+  const run = (pr: string, sessionId: string) =>
+    executeGitHubShell(
+      { ...READ, command: `gh pr view ${pr} --repo vercel/internal-agents` },
+      CONFIG,
+      {
+        sessionId,
+        getConnectToken: async () => `token-${pr}`,
+        getSandbox: async () => sandbox,
+      },
+    );
+
+  try {
+    const first = run("1", "child-1");
+    await firstStarted;
+    const second = run("2", "child-2");
+    // The second lease waits on the first command instead of replacing its credential.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(policies.length, 1);
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(events, ["first start", "first end", "second start", "second end"]);
+    assert.deepEqual(
+      policies.map((policy) => (policy === "allow-all" ? "cleared" : "leased")),
+      ["leased", "cleared", "leased", "cleared"],
+    );
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a lease does not release a lock another command holds", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    // A holder whose lock was broken as stale must not release its successor's lock.
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf successor > '${lockPath}/owner'`]);
+    let calls = 0;
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      async run(input: Parameters<SandboxSession["run"]>[0]) {
+        calls += 1;
+        // Skip acquisition: simulate the stale holder releasing after its lock was broken.
+        if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
+        return runLockCommand(input.command, lockPath);
+      },
+    };
+    let cleaned = false;
+    await withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "stale-holder",
+      async () => undefined,
+      {
+        cleanup: async () => {
+          cleaned = true;
+        },
+      },
+    );
+    // Nor clear its successor's credential.
+    assert.equal(cleaned, false);
+    assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "successor");
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock\n");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a lease breaks a lock whose holder stopped", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf stopped > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run: (input) => runLockCommand(input.command, lockPath),
+    };
+    let owner = "";
+    let cleanedWhileHeld = "";
+    await withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "next",
+      async () => {
+        owner = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+      },
+      {
+        cleanup: async () => {
+          cleanedWhileHeld = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+        },
+      },
+    );
+    assert.equal(owner, "next");
+    // The holder cleans up before it gives up the lock.
+    assert.equal(cleanedWhileHeld, "next");
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a lease waits on the host and stops when its call is cancelled", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    let attempts = 0;
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      run(input) {
+        attempts += 1;
+        return runLockCommand(input.command, lockPath);
+      },
+    };
+    const controller = new AbortController();
+    let ran = false;
+    const waiting = withSandboxLeaseLock(
+      sandboxFake as SandboxSession,
+      "waiter",
+      async () => {
+        ran = true;
+      },
+      { signal: controller.signal },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Each attempt returns at once instead of waiting inside the sandbox.
+    assert.ok(attempts > 1);
+    controller.abort(new Error("cancelled"));
+    await assert.rejects(waiting, /cancelled/u);
+    assert.equal(ran, false);
+    assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+/** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */
+async function runLockCommand(
+  command: string,
+  lockPath: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await promisify(execFile)("sh", [
+      "-c",
+      command.replaceAll(LEASE_LOCK_PATH, lockPath),
+    ]);
+    return { exitCode: 0, stdout, stderr };
+  } catch (error) {
+    const failed = error as { code?: number; stdout?: string; stderr?: string };
+    return { exitCode: failed.code ?? 1, stdout: failed.stdout ?? "", stderr: failed.stderr ?? "" };
+  }
+}
+
 function fakeSandbox(
   runs: Parameters<SandboxSession["run"]>[0][],
   result:
@@ -736,6 +931,8 @@ function fakeSandbox(
       return `/workspace/${path}`;
     },
     async run(input: Parameters<SandboxSession["run"]>[0]) {
+      // The sandbox lease lock is covered by its own test.
+      if (input.command.includes(LEASE_LOCK_PATH)) return { exitCode: 0, stdout: "", stderr: "" };
       runs.push(input);
       return typeof result === "function" ? result(input) : result;
     },

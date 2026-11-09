@@ -11,6 +11,7 @@ import {
   type GitHubCoAuthor,
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
+import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
 import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
@@ -126,8 +127,13 @@ interface GitHubShellDependencies {
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
-  /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
+  /**
+   * Orders this session's own credential leases in process; every `ctx.getSandbox()` call returns
+   * a new handle. Sessions that share a sandbox are serialized by a lock inside the sandbox.
+   */
   readonly sessionId: string;
+  /** Stops waiting for another command's credential lease when the tool call is cancelled. */
+  readonly abortSignal?: AbortSignal;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
@@ -229,7 +235,7 @@ export async function executeGitHubShell(
   try {
     result = await withGitHubCredentialLease(
       sandbox,
-      dependencies.sessionId,
+      dependencies,
       { authorization, placeholder, placeholderAuthorization, token },
       () => {
         const env: Record<string, string> = {
@@ -278,15 +284,18 @@ export async function executeGitHubShell(
   };
 }
 
+/** The real credential and the placeholder a leased command sends in its place. */
+interface LeaseCredential {
+  readonly authorization: string;
+  readonly placeholder: string;
+  readonly placeholderAuthorization: string;
+  readonly token: string;
+}
+
 async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
-  sessionId: string,
-  credential: {
-    readonly authorization: string;
-    readonly placeholder: string;
-    readonly placeholderAuthorization: string;
-    readonly token: string;
-  },
+  { sessionId, abortSignal }: Pick<GitHubShellDependencies, "sessionId" | "abortSignal">,
+  credential: LeaseCredential,
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
@@ -299,46 +308,62 @@ async function withGitHubCredentialLease<T>(
   leaseQueues.set(sessionId, current);
   await previous;
   try {
-    const api: GitHubLeaseRule[] = [
+    return await withSandboxLeaseLock(
+      sandbox,
+      credential.placeholder,
+      () => leaseCredential(sandbox, credential, run, broker),
+      {
+        // Clears the policy only while this command still holds the lock, so a command whose
+        // lock was broken as stale can't clear its successor's credential.
+        cleanup: () => broker(sandbox, null),
+        ...(abortSignal !== undefined && { signal: abortSignal }),
+      },
+    );
+  } finally {
+    release();
+    if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
+  }
+}
+
+/** Points the sandbox's network policy at `credential` for `run`; the lock's release clears it. */
+async function leaseCredential<T>(
+  sandbox: SandboxSession,
+  credential: LeaseCredential,
+  run: () => PromiseLike<T>,
+  broker: GitHubConfig["broker"],
+): Promise<T> {
+  const api: GitHubLeaseRule[] = [
+    {
+      match: {
+        headers: [
+          {
+            key: { exact: "authorization" },
+            value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+          },
+        ],
+      },
+      transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+    },
+  ];
+  await broker(sandbox, {
+    "api.github.com": api,
+    // `gh release upload` and `gh release create` with assets send files here.
+    "uploads.github.com": api,
+    "github.com": [
       {
         match: {
           headers: [
             {
               key: { exact: "authorization" },
-              value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+              value: { exact: credential.placeholderAuthorization },
             },
           ],
         },
-        transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+        transform: [{ headers: { authorization: credential.authorization } }],
       },
-    ];
-    await broker(sandbox, {
-      "api.github.com": api,
-      // `gh release upload` and `gh release create` with assets send files here.
-      "uploads.github.com": api,
-      "github.com": [
-        {
-          match: {
-            headers: [
-              {
-                key: { exact: "authorization" },
-                value: { exact: credential.placeholderAuthorization },
-              },
-            ],
-          },
-          transform: [{ headers: { authorization: credential.authorization } }],
-        },
-      ],
-    });
-    return await run();
-  } finally {
-    try {
-      await broker(sandbox, null);
-    } finally {
-      release();
-      if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
-    }
-  }
+    ],
+  });
+  return await run();
 }
 
 export function parseCommand(command: string): string[] {
