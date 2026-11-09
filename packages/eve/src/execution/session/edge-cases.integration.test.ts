@@ -1865,6 +1865,8 @@ describe("work delegated to a child session", () => {
   it("refuses another person's relayed approval that carries channel state, and keeps the child waiting", async () => {
     const receipts = observeReceipts();
     const callers: unknown[] = [];
+    let bobAnswer = "";
+    let aliceAnswer = "";
     const { events, ran } = await withSession(
       "edge-child-approval-state-refused",
       {
@@ -1882,7 +1884,7 @@ describe("work delegated to a child session", () => {
       async (session) => {
         await session.next("relayed approval pause");
         const [child] = childSessions(session.events());
-        await session.answer(session.approvals()[0]!, "approve", BOB, {
+        bobAnswer = await session.answer(session.approvals()[0]!, "approve", BOB, {
           state: { responder: "U_BOB" },
         });
         await vi.waitFor(
@@ -1893,7 +1895,7 @@ describe("work delegated to a child session", () => {
           { timeout: 20_000 },
         );
         expect(callers).toEqual([]);
-        await session.answer(session.approvals()[0]!, "approve", ALICE, {
+        aliceAnswer = await session.answer(session.approvals()[0]!, "approve", ALICE, {
           state: { responder: "U_ALICE" },
         });
         await session.until(
@@ -1911,14 +1913,13 @@ describe("work delegated to a child session", () => {
       "applied",
     ]);
     // Each answer reaches the child as a delivery of its own, under the person who sent it.
-    const settledAs = new Map(
-      receipts.of(child!, "delivery.settled").map(({ data }) => [data.deliveryId, data.outcome]),
-    );
+    const receiptOf = (type: string, deliveryId: string) =>
+      receipts.of(child!, type).find(({ data }) => data.deliveryId === deliveryId)?.data;
     expect(
-      receipts
-        .of(child!, "delivery.admitted")
-        .slice(1)
-        .map(({ data }) => [(data.principal as { id: string }).id, settledAs.get(data.deliveryId)]),
+      [bobAnswer, aliceAnswer].map((deliveryId) => [
+        (receiptOf("delivery.admitted", deliveryId)?.principal as { id: string } | undefined)?.id,
+        receiptOf("delivery.settled", deliveryId)?.outcome,
+      ]),
     ).toEqual([
       ["bob", "refused"],
       ["alice", "handled"],
@@ -1985,6 +1986,30 @@ describe("work delegated to a child session", () => {
     expect(callSaw).toEqual([{ caller: principal(ALICE), responder: principal(SLACK_BOB) }]);
   });
 
+  // The parent delegates two deploys, each behind an approval in its child, and waits for both.
+  const twoDelegatedDeploys = () =>
+    scriptedModel((_prompt, raw) => {
+      const prompt = JSON.stringify(raw);
+      const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
+      const first = raw.find((message) => message.role === "user");
+      if (JSON.stringify(first?.content).includes("CHILD:")) {
+        return called("deploy")
+          ? "Child deployed."
+          : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
+      }
+      if (!called("agent"))
+        return [
+          { input: { message: "CHILD: deploy a." }, toolName: "agent", toolCallId: "call_a" },
+          { input: { message: "CHILD: deploy b." }, toolName: "agent", toolCallId: "call_b" },
+        ];
+      // Waits until both children report.
+      const reported = prompt.split("Child deployed.").length - 1;
+      const waits = prompt.split('"toolName":"eve__task_wait"').length - 1;
+      if (reported < 2)
+        return [{ input: {}, toolName: "eve__task_wait", toolCallId: `call_wait_${waits}` }];
+      return "Both children are done.";
+    });
+
   // One payload that answers two children's prompts gives each child a share. Each share is a
   // delivery of its own in its child, named from the payload's id and the child's place in it,
   // so a retried forward names it the same way and the child admits it once.
@@ -1997,27 +2022,7 @@ describe("work delegated to a child session", () => {
       {
         hooks: receipts.hooks,
         message: "Delegate both deploys.",
-        model: scriptedModel((_prompt, raw) => {
-          const prompt = JSON.stringify(raw);
-          const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
-          const first = raw.find((message) => message.role === "user");
-          if (JSON.stringify(first?.content).includes("CHILD:")) {
-            return called("deploy")
-              ? "Child deployed."
-              : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
-          }
-          if (!called("agent"))
-            return [
-              { input: { message: "CHILD: deploy a." }, toolName: "agent", toolCallId: "call_a" },
-              { input: { message: "CHILD: deploy b." }, toolName: "agent", toolCallId: "call_b" },
-            ];
-          // Waits until both children report.
-          const reported = prompt.split("Child deployed.").length - 1;
-          const waits = prompt.split('"toolName":"eve__task_wait"').length - 1;
-          if (reported < 2)
-            return [{ input: {}, toolName: "eve__task_wait", toolCallId: `call_wait_${waits}` }];
-          return "Both children are done.";
-        }),
+        model: twoDelegatedDeploys(),
         tools: [
           {
             approval: true,
@@ -2094,10 +2099,11 @@ describe("work delegated to a child session", () => {
       expect(receipts.of(child, "response.settled").map(({ data }) => data)).toEqual([
         { outcome: "applied", responseId: answer!.data.responseId },
       ]);
-      expect(receipts.of(child, "delivery.settled").at(-2)?.data).toMatchObject({
-        deliveryId: answer!.data.deliveryId,
-        outcome: "handled",
-      });
+      expect(
+        receipts
+          .of(child, "delivery.settled")
+          .find(({ data }) => data.deliveryId === answer!.data.deliveryId)?.data,
+      ).toMatchObject({ outcome: "handled" });
     }
     expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
       "accepted",
@@ -2107,6 +2113,67 @@ describe("work delegated to a child session", () => {
       expect(
         ofType(events, "call.settled").find((event) => event.data.callId === callId)?.data,
       ).toMatchObject({ outcome: "completed", output: "Child deployed." });
+  });
+
+  // A child reports how it settled its share under the share's own id, which this session never
+  // recorded. It still credits the outcome to the answer that share came from, not to a later
+  // person's answer to the same prompt.
+  it("credits a child's refusal of its share to the answer it came from, not a later one", async () => {
+    let prompts: string[] = [];
+    let bobAnswer = "";
+    let aliceAnswer = "";
+    const { events, ran } = await withSession(
+      "edge-children-share-refused",
+      {
+        message: "Delegate both deploys.",
+        model: twoDelegatedDeploys(),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        let opened = 0;
+        await session.until(
+          "both relayed approvals",
+          (event) => event.type === "interaction.opened" && ++opened === 2,
+        );
+        // Bob answers both prompts, and Alice answers them too before either child has read
+        // Bob's answer. Only Alice, who asked, may approve.
+        prompts = session.approvals();
+        bobAnswer = await session.answer(prompts, "approve", BOB, {
+          state: { responder: "U_BOB" },
+        });
+        aliceAnswer = await session.answer(prompts, "approve", ALICE, {
+          state: { responder: "U_ALICE" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy", "deploy"]);
+    const settled = new Map(
+      ofType(events, "response.settled").map(({ data }) => [data.responseId, data.outcome]),
+    );
+    const answeredBy = new Map([
+      [bobAnswer, "bob"],
+      [aliceAnswer, "alice"],
+    ]);
+    const [a, b] = prompts;
+    expect(
+      ofType(events, "response.submitted")
+        .map(({ data }) => [
+          answeredBy.get(data.deliveryId),
+          data.interactionId === a ? "a" : data.interactionId === b ? "b" : data.interactionId,
+          settled.get(data.responseId),
+        ])
+        .toSorted(),
+    ).toEqual([
+      ["alice", "a", "applied"],
+      ["alice", "b", "applied"],
+      ["bob", "a", "refused"],
+      ["bob", "b", "refused"],
+    ]);
   });
 
   // #4923: a typed answer to a relayed prompt is a message, so only the turn's

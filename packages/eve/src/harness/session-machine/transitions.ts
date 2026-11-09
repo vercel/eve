@@ -55,7 +55,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
-import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
+import { forwardedFrom, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
 import { activeTurnId, answeredCallIds, turnPosition, type SessionView } from "./view.js";
@@ -627,8 +627,13 @@ function forwardedAnswer(
   const open = Object.values(tables.responses)
     .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
     .sort((a, b) => a.introducedAt - b.introducedAt);
+  const { deliveryId } = settled;
+  if (deliveryId === undefined) return open.at(-1)?.responseId;
+  // A child names a share of a payload this session forwarded by an id of its own.
+  const source = forwardedFrom(deliveryId);
   return (
-    open.find((row) => settled.deliveryId !== undefined && row.deliveryId === settled.deliveryId) ??
+    open.find((row) => row.deliveryId === deliveryId) ??
+    open.find((row) => row.deliveryId === source) ??
     open.at(-1)
   )?.responseId;
 }
