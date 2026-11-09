@@ -62,6 +62,11 @@ export interface SignInChallenge {
    * `"user"`, which has an `id`, and `"app"` today.
    */
   readonly principal?: { readonly type: string; readonly id?: string; readonly issuer?: string };
+  /**
+   * The open sign-in for the same grant and principal that the person already has a card for.
+   * This attempt completes with that one's answer, so channels show it no card of its own.
+   */
+  readonly waitsOn?: string;
 }
 
 /** Where a relayed request was asked: the child session's request, and the call it asks about. */
@@ -150,6 +155,7 @@ export const interactionRequestSchema = conforming<InteractionRequest>()(
           .optional(),
         url: z.string().optional(),
         userCode: z.string().optional(),
+        waitsOn: z.string().optional(),
       })
       .optional(),
     title: z.string().optional(),

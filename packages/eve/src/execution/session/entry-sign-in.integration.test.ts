@@ -24,7 +24,7 @@ import type { ToolContext } from "#tools/definition.js";
 import { toInputSchema } from "#tools/schema.js";
 
 describe("workflowEntry sign-ins", () => {
-  it("fails a sign-in when completeAuthorization rejects its callback", async () => {
+  it("declines a sign-in when the provider reports the person refused, without completing it", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-denied");
 
     await runtime.run(async () => {
@@ -35,16 +35,18 @@ describe("workflowEntry sign-ins", () => {
         const asked = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        // The provider redirects back with a denial, which completeAuthorization rejects.
+        // The provider redirects back with a denial: there is nothing to complete.
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [weatherCallback(signInId(asked), { error: "access_denied" })],
         });
 
         const resumed = await stream.nextUntil("resumed turn", isTurnSettled);
-        expect(completeCalls()).toBe(1);
+        expect(completeCalls()).toBe(0);
         expect(filterEventsByType(resumed, "interaction.settled")).toMatchObject([
-          { data: { interactionId: signInId(asked), outcome: "failed", reason: "access_denied" } },
+          {
+            data: { interactionId: signInId(asked), outcome: "declined", reason: "access_denied" },
+          },
         ]);
       } finally {
         stream.dispose();

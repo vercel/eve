@@ -7,8 +7,11 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 
 const turnId = "turn_0";
 
-/** A turn waiting on Alice to connect GitHub; `responseId` makes it an approver's sign-in. */
-function waitingOnGitHub(responseId?: string): SessionView {
+/**
+ * A turn waiting on Alice to connect GitHub; `responseId` makes it an approver's sign-in, and
+ * `waitsOn` one that waits on a card already shown.
+ */
+function waitingOnGitHub(responseId?: string, waitsOn?: string): SessionView {
   const view = emptySessionView();
   const facts: SessionEvent[] = [
     { data: {}, type: "session.started" },
@@ -21,7 +24,12 @@ function waitingOnGitHub(responseId?: string): SessionView {
         request: {
           kind: "sign-in",
           prompt: "Sign in to GitHub to continue.",
-          signIn: { name: "github", url: "https://github.test/login", userCode: "ABCD" },
+          signIn: {
+            name: "github",
+            url: "https://github.test/login",
+            userCode: "ABCD",
+            ...(waitsOn !== undefined && { waitsOn }),
+          },
         },
         subject: responseId === undefined ? { turnId } : { responseId },
       },
@@ -111,6 +119,37 @@ describe("a sign-in on a channel", () => {
       posting.surface,
     );
     expect(posting.posts).toEqual(["Github sign-in cancelled."]);
+  });
+
+  it("shows no card for a sign-in that waits on a card already shown", async () => {
+    for (const options of [{ private: true }, { delivers: true, private: false }]) {
+      const { posts, state, surface: channel } = surface(options);
+      await showSignIn(waitingOnGitHub(undefined, "sign-in-0"), "sign-in-1", channel);
+      expect(channel.postChallenge).not.toHaveBeenCalled();
+      expect(channel.deliverPrivately ?? vi.fn()).not.toHaveBeenCalled();
+      expect(posts).toEqual([]);
+      expect(state.pendingSignIns).toBeUndefined();
+    }
+  });
+
+  it("leaves the shown card alone when a sign-in that waited on it ends", async () => {
+    // Both sign-ins are for GitHub: the shown card's record is keyed by that name.
+    const shown = waitingOnGitHub();
+    const waiting = waitingOnGitHub(undefined, "sign-in-0");
+    for (const ending of [
+      { interactionId: "sign-in-1", outcome: "accepted" as const },
+      { interactionId: "sign-in-1", outcome: "failed" as const, reason: "access_denied" },
+    ]) {
+      const { posts, state, surface: channel } = surface({ edits: true, private: false });
+      await showSignIn(shown, "sign-in-1", channel);
+      await settleSignIn(waiting, ending, channel);
+      expect(channel.edit).not.toHaveBeenCalled();
+      expect(channel.typing).not.toHaveBeenCalled();
+      expect(posts).toEqual([
+        "Authorization required for Github. Continue in a direct message with this agent.",
+      ]);
+      expect(state.pendingSignIns).toEqual({ github: "status-1" });
+    }
   });
 
   it("leaves an approver's sign-in to its approval's prompt", async () => {

@@ -363,7 +363,9 @@ export function defaultInteractionEvents(
         return;
       }
       const signIn = signInOf(view, data.interactionId);
-      if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
+      // One waiting on a card already shown completes with that card's answer.
+      if (signIn !== undefined && signIn.waitsOn === undefined)
+        await showSlackSignIn(signIn, ctx.channel);
     },
 
     async "response.admitted"({ data }, ctx) {
@@ -394,7 +396,8 @@ export function defaultInteractionEvents(
     async "interaction.settled"({ data }, ctx) {
       const signIn = signInOf(sessionTables(ctx.view), data.interactionId);
       if (signIn !== undefined) {
-        await settleSlackSignIn(signIn, data, ctx.channel);
+        // A sign-in that waited on another's card had no card of its own to update.
+        if (signIn.waitsOn === undefined) await settleSlackSignIn(signIn, data, ctx.channel);
         return;
       }
       await settleRequestCard(data.interactionId, ctx, interactionCard);
