@@ -244,6 +244,7 @@ export function createMcpStreamableHttpServer(
 
     const handler = createMcpHandler(() => createServer(options, tools, auth), {
       legacy: "stateless",
+      maxRequestBodySize: MCP_REQUEST_BODY_MAX_BYTES,
     });
     if (request.method.toUpperCase() !== "POST") return await handler.fetch(request);
 
@@ -456,6 +457,7 @@ function createServer(
       CACHE_HINTED_METHODS.map((method) => [method, MCP_LIST_CACHE_HINT]),
     ),
     capabilities,
+    maxToolInputElements: 10_000,
   };
   if (options.instructions !== undefined) serverOptions.instructions = options.instructions;
   const server = new McpServer({ name: options.name, version: options.version }, serverOptions);

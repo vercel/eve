@@ -82,6 +82,7 @@ export interface McpServerOptions {
   readonly cacheHints?: Partial<Record<CacheableResultMethod, CacheHint>>;
   readonly capabilities?: McpJsonObject;
   readonly instructions?: string;
+  readonly maxToolInputElements?: number;
 }
 
 export declare class Server {
@@ -180,6 +181,7 @@ export declare function createMcpHandler(
   factory: (context: McpRequestContext) => McpServer | Server | Promise<McpServer | Server>,
   options?: {
     readonly legacy?: "reject" | "stateless";
+    readonly maxRequestBodySize?: number;
     readonly onerror?: (error: Error) => void;
     readonly responseMode?: "auto" | "json" | "stream";
   },

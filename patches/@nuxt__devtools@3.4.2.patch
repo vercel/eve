@@ -1,0 +1,13 @@
+diff --git a/dist/chunks/module-main.mjs b/dist/chunks/module-main.mjs
+index a4a4f8f688d3235db4ba006f9920beb0d8887e1e..8f3d19660dbd23ba59cd6047010fae0e6647c92c 100644
+--- a/dist/chunks/module-main.mjs
++++ b/dist/chunks/module-main.mjs
+@@ -13,7 +13,7 @@ import { runtimeDir, clientDir, packageDir, isGlobalInstall } from '../dirs.mjs'
+ import { createBirpcGroup } from 'birpc';
+ import { parse as parse$1, stringify } from 'structured-clone-es';
+ import { startSubprocess } from '@nuxt/devtools-kit';
+-import Git from 'simple-git';
++import { simpleGit as Git } from 'simple-git';
+ import { glob } from 'tinyglobby';
+ import { imageMeta } from 'image-meta';
+ import { debounce } from 'perfect-debounce';
