@@ -75,8 +75,8 @@ and `/repository` exports the storage contract and the default store.
   issuer, principal type, principal ID, and subject. Anonymous and runtime
   principals get none.
 - **No one person changes a shared prompt alone.** By default, a live change to
-  a shared scope needs a second person to approve it, and its instructions must
-  fit on the approval card in full.
+  a shared scope needs a second person to approve it, checked again when it
+  runs, and its approval card must show it in full.
 - **Storage failures stay local.** A scope that can't be read is skipped for
   the turn and reported to the model; unreadable entries are skipped and kept.
 - **Storage is a contract.** The default layout is versioned (`v1`), readable,

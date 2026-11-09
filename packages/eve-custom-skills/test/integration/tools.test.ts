@@ -200,7 +200,7 @@ test("by default the requester answers for personal skills, and someone else for
 test("an approval applies only to the skill it showed, not one recreated under its name", async () => {
   mount();
   const input = { ...deploy, scope: "channel" };
-  const approvedBy = { approvedBy: alice };
+  const approvedBy = { approvedBy: bob };
   const original = await run(create, input, context(approvedBy));
   await run(create, { ...input, instructions: "Check the build twice." }, context());
 
@@ -250,7 +250,7 @@ test("a shared draft save stays a draft when the skill is deleted before it comm
   };
   mount({ rule: adminOnly, storage: racing });
   const input = { ...deploy, scope: "channel" };
-  const original = await run(create, input, context({ approvedBy: alice }));
+  const original = await run(create, input, context({ approvedBy: bob }));
   assert.equal(original.status, "active");
 
   const admin = documentRepository({ backend });
@@ -381,4 +381,16 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
       ["channel", 0, true],
     ],
   );
+});
+
+test("a requester can't approve their own shared change, even when it reaches them", async () => {
+  mount();
+  const shared = { ...deploy, scope: "channel" };
+  const refused = await run(create, shared, context({ approvedBy: alice }));
+  assert.equal(refused.success, false);
+  assert.match(String(refused.error), /someone other than the person who asked/);
+  // A personal change still needs its owner, whoever else answered.
+  const notOwner = await run(create, { ...deploy }, context({ approvedBy: bob }));
+  assert.equal(notOwner.success, false);
+  assert.match(String(notOwner.error), /Only the person who asked/);
 });

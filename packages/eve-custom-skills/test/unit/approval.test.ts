@@ -5,6 +5,8 @@ import {
   approvalCard,
   defaultSkillApproval,
   defaultSkillResponse,
+  requireDefaultResponder,
+  samePrincipal,
 } from "../../extension/lib/approval.ts";
 import type { SkillApprovalRequest, SkillScope } from "../../extension/lib/types.ts";
 
@@ -49,7 +51,7 @@ test("the card names the change, who it affects, and the content that goes live"
           name: "deploy",
           version: 3,
           description: "Use when the user asks to deploy.",
-          instructions: `Check the build.\n${"x".repeat(2_500)}`,
+          instructions: `Check the build.\n${"x".repeat(3_500)}`,
           applicationMode: "always",
           warnings: [
             "Instructions mention moving secrets or credentials; review before activation.",
@@ -65,7 +67,7 @@ test("the card names the change, who it affects, and the content that goes live"
   );
   assert.match(card, /Description: Use when the user asks to deploy\./);
   assert.match(card, /Instructions:\nCheck the build\./);
-  assert.match(card, /Showing the first 2000 of 2517 characters/);
+  assert.match(card, /Showing the first 2000 of 3517 characters/);
   assert.match(card, /Warnings: Instructions mention moving secrets/);
   assert.ok(card.length <= 3_000);
 
@@ -82,18 +84,33 @@ test("the card names the change, who it affects, and the content that goes live"
   assert.match(removal, /"a" v1 is live \(always on\)\./);
 });
 
-test("a shared change too long to read on its card is refused", async () => {
-  const target = (length: number) => ({
+test("a shared change whose card can't show it in full is refused", async () => {
+  const target = (description: number, instructions: number) => ({
     name: "voice",
-    instructions: "x".repeat(length),
+    description: "d".repeat(description),
+    instructions: "x".repeat(instructions),
     warnings: [],
     live: { version: null, applicationMode: null },
   });
-  assert.equal(defaultSkillApproval(request({ scope: channel, targets: [target(2_000)] })), "ask");
-  const refused = await defaultSkillApproval(request({ scope: channel, targets: [target(2_001)] }));
-  assert.match(typeof refused === "object" ? refused.deny : "", /2001 characters/);
+  assert.equal(
+    await defaultSkillApproval(request({ scope: channel, targets: [target(100, 2_000)] })),
+    "ask",
+  );
+  // A long description pushes instructions off the card as surely as long instructions do.
+  for (const [description, instructions] of [
+    [100, 3_000],
+    [2_000, 2_000],
+  ]) {
+    const refused = await defaultSkillApproval(
+      request({ scope: channel, targets: [target(description!, instructions!)] }),
+    );
+    assert.match(
+      typeof refused === "object" ? refused.deny : "",
+      /more than the 3000 an approver can read/,
+    );
+  }
   // A personal change isn't seen by anyone else, so its length doesn't matter.
-  assert.equal(defaultSkillApproval(request({ targets: [target(5_000)] })), "allow");
+  assert.equal(await defaultSkillApproval(request({ targets: [target(2_000, 5_000)] })), "allow");
 });
 
 test("a shared change needs someone other than the requester to approve it", async () => {
@@ -109,4 +126,25 @@ test("a shared change needs someone other than the requester to approve it", asy
   assert.equal((await answer(false, bob)).status, "rejected");
   assert.equal((await answer(true, alice)).status, "rejected");
   assert.equal((await answer(true, bob)).status, "allowed");
+});
+
+test("a principal with a different subject isn't the requester", () => {
+  const alice = {
+    attributes: {},
+    authenticator: "a",
+    principalId: "alice",
+    principalType: "user",
+    subject: "s1",
+  };
+  assert.equal(samePrincipal(alice, { ...alice }), true);
+  assert.equal(samePrincipal(alice, { ...alice, subject: "s2" }), false);
+});
+
+test("the approver is checked again against the scope the change really targets", () => {
+  const alice = { attributes: {}, authenticator: "a", principalId: "alice", principalType: "user" };
+  const bob = { ...alice, principalId: "bob" };
+  assert.doesNotThrow(() => requireDefaultResponder(personal, alice, alice));
+  assert.throws(() => requireDefaultResponder(personal, alice, bob), /Only the person who asked/);
+  assert.throws(() => requireDefaultResponder(channel, alice, alice), /someone other than/);
+  assert.doesNotThrow(() => requireDefaultResponder(channel, alice, bob));
 });

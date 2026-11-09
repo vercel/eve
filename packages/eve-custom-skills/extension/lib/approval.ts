@@ -5,7 +5,7 @@ import type {
   ApprovalResponsePolicy,
 } from "eve/tools/approval";
 
-import { SkillLifecycleError } from "./errors.ts";
+import { SkillChangeRefusedError, SkillLifecycleError } from "./errors.ts";
 import type {
   SkillApprovalDecision,
   SkillApprovalRequest,
@@ -15,27 +15,19 @@ import type {
 } from "./types.ts";
 
 /**
- * The most instructions a shared change can carry and still be read in full
- * on its approval card.
- */
-export const REVIEWABLE_INSTRUCTIONS = 2_000;
-
-/**
  * Asks before publishing, rolling back, or removing a skill, and before any
  * change goes live in a shared scope. A personal first version and a personal
  * mode change run without asking, and a draft never needs approval. A shared
- * change whose instructions are too long to read in full on the approval card
- * is refused, so nobody approves text they couldn't see.
+ * change whose approval card can't show it in full is refused, so nobody
+ * approves text they couldn't read.
  */
 export const defaultSkillApproval: SkillApprovalRule = (request) => {
   if (!request.changesLive) return "allow";
   if (request.scope.shared) {
-    const long = request.targets.find(
-      ({ instructions }) => (instructions?.length ?? 0) > REVIEWABLE_INSTRUCTIONS,
-    );
-    if (long) {
+    const length = fullApprovalCard(request).length;
+    if (length > MAX_CARD) {
       return {
-        deny: `Skill "${long.name}" has ${long.instructions!.length} characters of instructions, more than the ${REVIEWABLE_INSTRUCTIONS} an approver can read on the card. Shorten it before it goes live for ${request.scope.label}.`,
+        deny: `This change's approval card would be ${length} characters, more than the ${MAX_CARD} an approver can read in full. Shorten the skill's description or instructions before it goes live for ${request.scope.label}.`,
       };
     }
     return "ask";
@@ -43,12 +35,14 @@ export const defaultSkillApproval: SkillApprovalRule = (request) => {
   return request.action === "create" || request.action === "set_mode" ? "allow" : "ask";
 };
 
-function samePrincipal(left: SessionAuthContext, right: SessionAuthContext): boolean {
+/** Whether two auth contexts are one principal, by every field of eve's principal identity. */
+export function samePrincipal(left: SessionAuthContext, right: SessionAuthContext): boolean {
   return (
     left.authenticator === right.authenticator &&
     (left.issuer ?? "") === (right.issuer ?? "") &&
     left.principalType === right.principalType &&
-    left.principalId === right.principalId
+    left.principalId === right.principalId &&
+    (left.subject ?? "") === (right.subject ?? "")
   );
 }
 
@@ -80,15 +74,15 @@ export function defaultSkillResponse(
   };
 }
 
-const MAX_PREVIEW = REVIEWABLE_INSTRUCTIONS;
 // Slack section text, the tightest card eve renders, holds 3,000 characters.
 const MAX_CARD = 3_000;
+const MAX_PREVIEW = 2_000;
 
-function preview(text: string | undefined): string | undefined {
+function preview(text: string | undefined, limit: number): string | undefined {
   if (!text) return undefined;
   const trimmed = text.trim();
-  if (trimmed.length <= MAX_PREVIEW) return trimmed;
-  return `${trimmed.slice(0, MAX_PREVIEW).trimEnd()}…\n(Showing the first ${MAX_PREVIEW} of ${trimmed.length} characters.)`;
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit).trimEnd()}…\n(Showing the first ${limit} of ${trimmed.length} characters.)`;
 }
 
 function modeLabel(mode: string | null | undefined): string {
@@ -97,17 +91,32 @@ function modeLabel(mode: string | null | undefined): string {
   return "loaded on demand";
 }
 
-function targetLines(target: SkillApprovalTarget): string[] {
+function targetLines(target: SkillApprovalTarget, limit: number): string[] {
   const lines: string[] = [];
   if (target.description) lines.push(`Description: ${target.description}`);
-  const instructions = preview(target.instructions);
+  const instructions = preview(target.instructions, limit);
   if (instructions) lines.push(`Instructions:\n${instructions}`);
   if (target.warnings.length > 0) lines.push(`Warnings: ${target.warnings.join(" ")}`);
   return lines;
 }
 
-/** The approval card for a change: what it does, for whom, and the content that will apply. */
+/**
+ * The approval card for a change: what it does, for whom, and the content that
+ * will apply. A card too long to show whole previews the instructions; a shared
+ * change's default rule refuses one, so its approver always reads everything.
+ */
 export function approvalCard(request: SkillApprovalRequest): string {
+  const full = fullApprovalCard(request);
+  if (full.length <= MAX_CARD) return full;
+  const card = composeCard(request, MAX_PREVIEW);
+  return card.length <= MAX_CARD ? card : `${card.slice(0, MAX_CARD - 1).trimEnd()}…`;
+}
+
+function fullApprovalCard(request: SkillApprovalRequest): string {
+  return composeCard(request, Number.POSITIVE_INFINITY);
+}
+
+function composeCard(request: SkillApprovalRequest, limit: number): string {
   const { action, scope } = request;
   const forWhom = scope.shared ? `for ${scope.label}` : "for you";
   const [target] = request.targets;
@@ -125,7 +134,7 @@ export function approvalCard(request: SkillApprovalRequest): string {
     headline = `Change custom skills ${forWhom}?`;
   } else if (action === "set_mode") {
     headline = `Make "${target.name}" v${target.version} ${modeLabel(target.applicationMode)} ${forWhom}? It is ${modeLabel(target.live.applicationMode)} now.`;
-    body = targetLines({ ...target, description: undefined });
+    body = targetLines({ ...target, description: undefined }, limit);
   } else {
     const verb =
       action === "create"
@@ -141,10 +150,9 @@ export function approvalCard(request: SkillApprovalRequest): string {
       action === "rollback"
         ? `Roll back "${target.name}" ${forWhom} to v${target.version}, ${modeLabel(target.applicationMode)}?${replaces}`
         : `${verb} "${target.name}" v${target.version} ${forWhom}, ${modeLabel(target.applicationMode)}?${replaces}`;
-    body = targetLines(target);
+    body = targetLines(target, limit);
   }
-  const card = [headline, ...body].join("\n\n");
-  return card.length <= MAX_CARD ? card : `${card.slice(0, MAX_CARD - 1).trimEnd()}…`;
+  return [headline, ...body].join("\n\n");
 }
 
 /** What a change would do, for the approval rule, the card, and the tool that runs it. */
@@ -243,4 +251,29 @@ export function skillApproval<TInput extends object, TPlan>(input: {
       takeCard(cardKey(toolName, callId, toolInput)) ?? input.fallbackCard(toolInput),
     response: (ctx) => input.response()(ctx as Parameters<ApprovalResponsePolicy>[0]),
   };
+}
+
+/**
+ * Re-checks who approved, once the change runs with its real scope. A response
+ * is judged without the conversation, so a scope that depends on it, such as
+ * a custom personal scope keyed by the channel, may have been taken for a
+ * shared one: here a personal change still needs its asker, and a shared one
+ * someone else.
+ */
+export function requireDefaultResponder(
+  scope: SkillScope,
+  requester: SessionAuthContext | null,
+  responder: SessionAuthContext,
+): void {
+  const isRequester = requester !== null && samePrincipal(requester, responder);
+  if (scope.shared && isRequester) {
+    throw new SkillChangeRefusedError(
+      "A change to shared skills needs someone other than the person who asked to approve it.",
+    );
+  }
+  if (!scope.shared && requester !== null && !isRequester) {
+    throw new SkillChangeRefusedError(
+      "Only the person who asked can approve a change to their own skills. Ask again and approve it yourself.",
+    );
+  }
 }

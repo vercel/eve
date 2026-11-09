@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   defaultSkillApproval,
   defaultSkillResponse,
+  requireDefaultResponder,
   skillApproval,
   type PlannedChange,
 } from "./approval.ts";
@@ -215,6 +216,11 @@ export function skillChange<
         const planned = await plan(ctx, toolInput);
         const decision = await rule()(planned.request);
         if (typeof decision === "object") throw new SkillChangeRefusedError(decision.deny);
+        // The default response policy judged the approver without the conversation; check them
+        // against the scope the change actually targets.
+        if (ctx.approval !== undefined && skillConfig().approval.response === undefined) {
+          requireDefaultResponder(planned.scope, ctx.session.auth.current, ctx.approval.responder);
+        }
         const approved = decision === "allow" || ctx.approval !== undefined;
         const { output, change } = await input.run(planned.plan, { ...planned, approved, ctx });
         if (change) await emit({ ...change, ...changeBase(planned.scope, ctx) });
