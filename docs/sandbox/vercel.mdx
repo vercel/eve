@@ -57,7 +57,7 @@ Outside Vercel and without a linked project, such as in CI or on a self-hosted s
 
 Set `image`, `source`, `tags`, project credentials, and `fetch` on the environment, because `open()` doesn't accept them. eve sets the sandbox's name and persistence itself.
 
-If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, eve runs the selector again to start a fresh sandbox.
+If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, or it stopped and its snapshot expired, eve runs the selector again to start a fresh sandbox, without the lost files.
 
 ## Snapshot preparation
 

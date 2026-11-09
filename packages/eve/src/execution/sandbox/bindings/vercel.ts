@@ -145,7 +145,7 @@ export function createVercelSandbox(
         });
       }
     },
-    async resume(_context, artifact, stateValue) {
+    async resume(context, artifact, stateValue) {
       requirePreparedVercelTemplate(artifact);
       const state = requireVercelSessionState(stateValue);
       const sandboxModule = await loadSandboxModule();
@@ -159,7 +159,17 @@ export function createVercelSandbox(
           `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
         );
       }
-      await ensureVercelSandboxBaseRuntime(sandbox);
+      try {
+        await ensureVercelSandboxBaseRuntime(sandbox);
+      } catch (error) {
+        // A stopped sandbox whose snapshot expired lost its filesystem; `start()` replaces it.
+        if (snapshotExpired(context)(error)) {
+          throw new SandboxSessionGoneError(
+            `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
+          );
+        }
+        throw error;
+      }
       return createVercelConnection(sandbox);
     },
     async start(context, options, artifact) {
@@ -206,8 +216,7 @@ export function createVercelSandbox(
     };
     try {
       const session = await ensureUsableSession({
-        // Only an expired snapshot gives a tool session a fresh sandbox.
-        expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
+        expired: snapshotExpired(context),
         inheritsBaseRuntime:
           artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,
         input: ensureSessionInput,
@@ -237,6 +246,13 @@ export function createVercelSandbox(
  */
 function vercelSessionName(sessionId: string): string {
   return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;
+}
+
+// Only an expired snapshot gives a tool session a fresh sandbox.
+function snapshotExpired(context: SandboxSessionContext): (error: unknown) => boolean {
+  return context.kind === "tool-session"
+    ? isVercelSnapshotNotFoundError
+    : isVercelSnapshotUnavailableError;
 }
 
 function vercelIdentityOptions(options: object | undefined): object | undefined {

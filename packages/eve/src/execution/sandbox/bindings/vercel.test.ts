@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
@@ -1117,6 +1118,48 @@ describe("createVercelSandbox", () => {
       await expect(open()).rejects.toThrow();
       expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
       expect(gone.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("resuming recorded state", () => {
+    const sandboxName = "eve-sbx-vercel-recorded";
+    const snapshotNotFound = () =>
+      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
+        json: { error: { code: "snapshot_not_found" } },
+        response: { status: 410 },
+      });
+
+    // A stopped sandbox that fails to resume with `error`.
+    function resumeFailing(error: Error, sessionId: string) {
+      const stopped = createMockSandbox({ name: sandboxName, status: "stopped" });
+      stopped.runCommand.mockRejectedValue(error);
+      const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => stopped) } };
+      const provider = createTestVercelSandbox({
+        loadSandboxModule: async () => sandboxModule as never,
+      });
+      return provider.openSession({
+        appRoot: "/tmp/test-app-root",
+        existing: { sandboxName, version: 3 },
+        prepared: { snapshotId: "prepared-snapshot" },
+        sandboxName: sessionId,
+      });
+    }
+
+    it.each(["session_abc", "tool_session_abc"])(
+      "reports %s gone when its sandbox's snapshot expired",
+      async (sessionId) => {
+        const error = await resumeFailing(snapshotNotFound(), sessionId).catch((e: unknown) => e);
+        expect(SandboxSessionGoneError.is(error)).toBe(true);
+      },
+    );
+
+    it("surfaces other resume failures unchanged", async () => {
+      const error = await resumeFailing(
+        Object.assign(new Error("Internal error"), { response: { status: 500 } }),
+        "session_abc",
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(SandboxSessionGoneError.is(error)).toBe(false);
     });
   });
 
