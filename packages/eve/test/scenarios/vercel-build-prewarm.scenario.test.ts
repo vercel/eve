@@ -8,6 +8,7 @@ import { prewarmAppSandboxes } from "../../src/execution/sandbox/prewarm.js";
 import { runVercelBuildPrewarm } from "../../src/internal/nitro/host/vercel-build-prewarm.js";
 import { populatedPaths } from "../../src/internal/testing/sandbox-provider-harness.js";
 import type { SandboxPrepareContext } from "../../src/sandbox/provider.js";
+import type { SandboxPreparedArtifactEntry } from "../../src/shared/sandbox-prepared-artifacts.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -44,6 +45,37 @@ describe("Vercel build-time sandbox prewarm", () => {
     ).rejects.toThrow(
       "Cannot build deployable Vercel output because this app requires sandbox templates and VERCEL_OIDC_TOKEN is missing. Run `vercel link` and `vercel pull`, then retry `vercel build`. Do not deploy the generated .vercel/output.",
     );
+  });
+
+  it("prepares empty sandbox templates without an OIDC token", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
+    const appRoot = await createAgentOnlyAppRoot();
+    const entries: SandboxPreparedArtifactEntry[] = [];
+
+    await compileAgent({
+      startPath: appRoot,
+    });
+
+    await expect(
+      runVercelBuildPrewarm({
+        appRoot,
+        preparedArtifactStore: {
+          async write(input) {
+            entries.push(...input.entries);
+          },
+        },
+      }),
+    ).resolves.toBe(true);
+    expect(entries).toEqual([
+      {
+        artifact: { artifact: {}, provider: "vercel" },
+        nodeId: expect.any(String),
+        providerName: "default",
+      },
+    ]);
   });
 
   it("prewarms sandbox templates for a local Vercel build without a deployment id", async () => {
@@ -97,6 +129,24 @@ function createVercelOidcToken(projectId: string): string {
     JSON.stringify({ owner_id: "team_test", project_id: projectId }),
   ).toString("base64url");
   return `header.${payload}.signature`;
+}
+
+/** An agent with no sandbox, skills, or workspace files of its own. */
+async function createAgentOnlyAppRoot(): Promise<string> {
+  const appRoot = await createScratchDirectory("eve-vercel-build-prewarm-");
+  await mkdir(join(appRoot, "agent"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(appRoot, "package.json"),
+    JSON.stringify({ name: "vercel-build-prewarm-test", type: "module" }, null, 2),
+  );
+  await writeFile(
+    join(appRoot, "agent", "agent.ts"),
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+  );
+  await writeFile(join(appRoot, "agent", "instructions.md"), "Root system prompt.\n");
+  return appRoot;
 }
 
 async function createScenarioAppRoot(

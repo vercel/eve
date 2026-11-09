@@ -27,8 +27,14 @@ export async function runVercelBuildPrewarm(input: PrewarmAppSandboxesInput): Pr
 
   await prewarmAppSandboxes({
     ...input,
-    async dispatch() {
-      throw new Error(MISSING_VERCEL_BUILD_OIDC_ERROR);
+    async dispatch({ context, provider }) {
+      // A template with nothing to prepare starts from the base image and needs no credentials.
+      if (!context.isEmpty) throw new Error(MISSING_VERCEL_BUILD_OIDC_ERROR);
+      try {
+        return await provider.implementation.prepare(context);
+      } catch (error) {
+        throw new Error(MISSING_VERCEL_BUILD_OIDC_ERROR, { cause: error });
+      }
     },
   });
   return true;
