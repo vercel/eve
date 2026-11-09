@@ -16,20 +16,23 @@ const session: HarnessSession = {
   sessionId: "test-session",
 };
 
-// Some models fill an optional string with "" instead of omitting it (#4819).
-it("starts a new task for an agent call whose taskId is empty", () => {
-  const committed = commitCallEntry(session, {
-    callId: "call-1",
-    definition: subagentTool("researcher"),
-    input: { message: "Find the March incidents.", taskId: "" },
-    toolName: "researcher",
-    turnId: "turn_0",
-  });
+// Some models fill an optional string with "" or a placeholder instead of omitting it (#4819).
+it.each(["", "undefined", "null"])(
+  "starts a new task for an agent call whose taskId is %j",
+  (taskId) => {
+    const committed = commitCallEntry(session, {
+      callId: "call-1",
+      definition: subagentTool("researcher"),
+      input: { message: "Find the March incidents.", taskId },
+      toolName: "researcher",
+      turnId: "turn_0",
+    });
 
-  const [task] = readTaskTable(committed.session.state).tasks;
-  expect(committed.entry).toEqual({ entryPoint: "serve", taskId: task?.id });
-  expect(committed.input).toEqual({ message: "Find the March incidents." });
-});
+    const [task] = readTaskTable(committed.session.state).tasks;
+    expect(committed.entry).toEqual({ entryPoint: "serve", taskId: task?.id });
+    expect(committed.input).toEqual({ message: "Find the March incidents." });
+  },
+);
 
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
 
