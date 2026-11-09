@@ -5,6 +5,7 @@ import { cascade } from "#harness/session-machine/cascade.js";
 import { dropClosedRecords, saveTransition, sessionView } from "#harness/session-machine/commit.js";
 import { readHitlState } from "#harness/hitl/requests.js";
 import { relayedInteractionEvents } from "#harness/interaction-relay.js";
+import { forwardedShareId, type Relay } from "#harness/hitl/relays.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import {
   awaitSignIns,
@@ -1009,8 +1010,10 @@ describe("crediting the answers this session forwarded", () => {
   function relayed(
     session: HarnessSession,
     events: SubagentInteractionHookPayload["events"],
+    relays?: ReadonlyMap<string, Relay>,
   ): readonly SessionEvent[] {
     return relay(viewOf(session), {
+      relays,
       payload: {
         callId: "probe",
         childSessionId: "child-1",
@@ -1048,6 +1051,28 @@ describe("crediting the answers this session forwarded", () => {
       ]),
     );
     expect(credited(settled)).toEqual({ "r-alice": "withdrawn", "r-bob": "withdrawn" });
+  });
+
+  it("resolves a remote child's answers only through the receipts it gave", () => {
+    const session = forwardedTwice();
+    const remote = { name: "deployer", sessionId: "child-1", url: "https://deployer.example" };
+    const relays = new Map<string, Relay>([
+      [
+        interactionId,
+        { childContinuationToken: "deployer-hook", receipts: { "receipt-1": "d-alice" }, remote },
+      ],
+    ]);
+    // A remote never received this session's delivery ids, so naming one, or a share of one,
+    // refuses nobody.
+    expect(relayed(session, refusesBob("d-bob"), relays)).toEqual([]);
+    expect(relayed(session, refusesBob(forwardedShareId("d-bob", 1)), relays)).toEqual([]);
+    // A local child names the delivery it received, so the same report refuses Bob there.
+    expect(credited(withPublished(session, relayed(session, refusesBob("d-bob"))))).toEqual({
+      "r-alice": "submitted",
+      "r-bob": "refused",
+    });
+    const refused = withPublished(session, relayed(session, refusesBob("receipt-1"), relays));
+    expect(credited(refused)).toEqual({ "r-alice": "refused", "r-bob": "submitted" });
   });
 
   it("credits nothing from an older child that names its own response as the cause", () => {

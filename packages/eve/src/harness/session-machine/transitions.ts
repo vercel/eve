@@ -557,7 +557,8 @@ export function relay(
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
-    const receipts = input.relays?.get(interactionId)?.receipts;
+    // The route this session keeps for the request, else the one the asker relays it by.
+    const answersRoute = input.relays?.get(interactionId) ?? route;
     if (event.type === "interaction.opened" && !serving) continue;
     if (
       event.type !== "interaction.opened" &&
@@ -588,7 +589,7 @@ export function relay(
       }
       case "interaction.settled":
         if (mirror?.status !== "open") break;
-        events.push(...mirrorSettled(tables, event.data, receipts));
+        events.push(...mirrorSettled(tables, event.data, answersRoute));
         break;
       case "response.admitted": {
         // The asker admitted an answer this session forwarded: it stands here too, while the
@@ -596,7 +597,7 @@ export function relay(
         const answer =
           mirror === undefined
             ? undefined
-            : forwardedAnswer(tables, interactionId, event.data.deliveryId, receipts);
+            : forwardedAnswer(tables, interactionId, event.data.deliveryId, answersRoute);
         if (answer !== undefined && tables.responses[answer]?.status === "submitted")
           events.push(responseAdmitted(answer));
         break;
@@ -607,7 +608,7 @@ export function relay(
         const answer =
           mirror === undefined
             ? undefined
-            : forwardedAnswer(tables, interactionId, event.data.deliveryId, receipts);
+            : forwardedAnswer(tables, interactionId, event.data.deliveryId, answersRoute);
         if (answer !== undefined && event.data.outcome !== "applied")
           events.push(responseSettled(answer, event.data.outcome, event.data.reason));
         break;
@@ -641,7 +642,7 @@ export function relayedMirror(
 function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
-  receipts: Relay["receipts"],
+  route: Relay | undefined,
 ): SessionEvent[] {
   const decided =
     settled.outcome === "accepted" ||
@@ -653,7 +654,7 @@ function mirrorSettled(
       : undefined;
   // The writer withdraws the answers that didn't decide (`cascade`).
   const decider = decided
-    ? forwardedAnswer(tables, settled.interactionId, named, receipts)
+    ? forwardedAnswer(tables, settled.interactionId, named, route)
     : undefined;
   const events: SessionEvent[] =
     decider === undefined ? [] : [responseSettled(decider, "applied", settled.reason)];
@@ -677,20 +678,23 @@ function forwardedAnswer(
   tables: PublicView,
   interactionId: string,
   deliveryId: string | undefined,
-  receipts: Relay["receipts"],
+  route: Relay | undefined,
 ): string | undefined {
   const open = Object.values(tables.responses).filter(
     (row) => row.interactionId === interactionId && row.status !== "settled",
   );
   if (deliveryId === undefined) return open.length === 1 ? open[0]!.responseId : undefined;
-  // A remote names the receipt it gave; a local child, a share of a payload by an id of its own.
-  const ours =
-    receipts !== undefined && Object.hasOwn(receipts, deliveryId)
-      ? receipts[deliveryId]!
-      : deliveryId;
-  const source = forwardedFrom(ours);
+  // A remote never sees this session's delivery ids, so it can name an answer only by a receipt.
+  if (route?.remote !== undefined) {
+    const receipts = route.receipts ?? {};
+    const ours = Object.hasOwn(receipts, deliveryId) ? receipts[deliveryId] : undefined;
+    return open.find((row) => row.deliveryId === ours)?.responseId;
+  }
+  // A local child names the delivery, or a share of a payload by an id of its own.
+  const source = forwardedFrom(deliveryId);
   return (
-    open.find((row) => row.deliveryId === ours) ?? open.find((row) => row.deliveryId === source)
+    open.find((row) => row.deliveryId === deliveryId) ??
+    open.find((row) => row.deliveryId === source)
   )?.responseId;
 }
 

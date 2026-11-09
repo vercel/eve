@@ -1131,6 +1131,31 @@ describe("respondToRemoteAgentSession", () => {
     });
   });
 
+  it("keeps no receipt that is too long to store or that another session gave", async () => {
+    const receipts = [
+      { deliveryId: "r".repeat(257), ok: true, sessionId: "remote-session" },
+      { deliveryId: "receipt-1", ok: true, sessionId: "other-session" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(receipts.shift(), { status: 202 })),
+    );
+    const respond = () =>
+      respondToRemoteAgentSession({
+        auth: null,
+        headers: {},
+        remote: {
+          name: "research",
+          sessionId: "remote-session",
+          url: "https://remote.example.com",
+        },
+        responses: [{ interactionId: "approval-1", optionId: "approve" }],
+      });
+    // The answers still stand; this session just cannot credit them by receipt.
+    await expect(respond()).resolves.toBeUndefined();
+    await expect(respond()).resolves.toBeUndefined();
+  });
+
   it("answers a protocol 2 child with the v26 responses it takes", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);

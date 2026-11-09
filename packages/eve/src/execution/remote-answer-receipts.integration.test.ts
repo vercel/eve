@@ -28,73 +28,83 @@ afterEach(() => {
 const interactionId = "approval-1";
 const remote = { name: "deployer", sessionId: "remote-session", url: "https://deployer.example" };
 
+/** A parent that forwarded the remote child's approval, and the child's receipt per request. */
+async function forwardingParent() {
+  // The remote child admits each forwarded request under a receipt of its own.
+  const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    const { answers } = JSON.parse(String(init?.body)) as { answers: { optionId: string }[] };
+    return Response.json(
+      { deliveryId: `receipt-${answers[0]!.optionId}`, ok: true, sessionId: remote.sessionId },
+      { status: 202 },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  let step = {
+    serializedContext: {
+      ...buildSerializedContext({ channelKind: "http" }),
+      [SessionIdKey.name]: "parent",
+    },
+    sessionState: runningCall(),
+    sessionWritable: new WritableStream<Uint8Array>(),
+  };
+  const relayed = async (events: SubagentInteractionHookPayload["events"]) => {
+    const published = await emitProxiedSubagentEvent({
+      ...(await restoreSessionStep(step)),
+      hookPayload: {
+        callId: "probe",
+        childSessionId: remote.sessionId,
+        events,
+        kind: "subagent-interaction",
+        route: { childContinuationToken: "deployer-hook", remote },
+        subagentName: "deployer",
+      },
+    });
+    step = { ...step, ...published };
+  };
+  // One step can carry several queued deliveries, one payload each.
+  const answered = async (...queued: [deliveryId: string, optionId: string][]) => {
+    const delivery: DeliverHookPayload = {
+      auth: null,
+      deliveryMetadata: queued.map(([deliveryId], payloadIndex) => ({
+        channelKind: "http",
+        channelName: "test",
+        deliveryId,
+        payloadIndex,
+      })),
+      kind: "deliver",
+      payloads: queued.map(([, optionId]) => ({ answers: [{ interactionId, optionId }] })),
+    };
+    const { stateDelta } = await routeProxiedDeliverStep({ ...step, delivery });
+    const { serializedContext, sessionState } = applySessionStateDelta(
+      { ...step, history: [] },
+      stateDelta,
+    );
+    step = { ...step, serializedContext, sessionState };
+  };
+
+  await relayed([
+    {
+      data: {
+        interactionId,
+        request: { kind: "approval", prompt: "Deploy?" },
+        subject: { turnId: "child-turn" },
+      },
+      type: "interaction.opened",
+    },
+  ]);
+  return { answered, fetchMock, relayed, state: () => stateOf(step.sessionState) };
+}
+
 it("refuses the forwarded answer a remote child names by the receipt it gave for it", async () => {
   const runtime = await createTestRuntime({ agent: { name: "remote-answer-receipts" } });
   await runtime.run(async () => {
-    // The remote child admits each forwarded answer under a receipt of its own.
-    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      const { answers } = JSON.parse(String(init?.body)) as { answers: { optionId: string }[] };
-      return Response.json(
-        { deliveryId: `receipt-${answers[0]!.optionId}`, ok: true, sessionId: remote.sessionId },
-        { status: 202 },
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    let step = {
-      serializedContext: {
-        ...buildSerializedContext({ channelKind: "http" }),
-        [SessionIdKey.name]: "parent",
-      },
-      sessionState: runningCall(),
-      sessionWritable: new WritableStream<Uint8Array>(),
-    };
-    const relayed = async (events: SubagentInteractionHookPayload["events"]) => {
-      const published = await emitProxiedSubagentEvent({
-        ...(await restoreSessionStep(step)),
-        hookPayload: {
-          callId: "probe",
-          childSessionId: remote.sessionId,
-          events,
-          kind: "subagent-interaction",
-          route: { childContinuationToken: "deployer-hook", remote },
-          subagentName: "deployer",
-        },
-      });
-      step = { ...step, ...published };
-    };
-    const answered = async (deliveryId: string, optionId: string) => {
-      const delivery: DeliverHookPayload = {
-        auth: null,
-        deliveryMetadata: [
-          { channelKind: "http", channelName: "test", deliveryId, payloadIndex: 0 },
-        ],
-        kind: "deliver",
-        payloads: [{ answers: [{ interactionId, optionId }] }],
-      };
-      const { stateDelta } = await routeProxiedDeliverStep({ ...step, delivery });
-      const { serializedContext, sessionState } = applySessionStateDelta(
-        { ...step, history: [] },
-        stateDelta,
-      );
-      step = { ...step, serializedContext, sessionState };
-    };
-
-    await relayed([
-      {
-        data: {
-          interactionId,
-          request: { kind: "approval", prompt: "Deploy?" },
-          subject: { turnId: "child-turn" },
-        },
-        type: "interaction.opened",
-      },
-    ]);
+    const { answered, fetchMock, relayed, state } = await forwardingParent();
     // Alice approves, then Bob rejects before the child settles: both answers go down.
-    await answered("d-alice", "approve");
-    await answered("d-bob", "reject");
+    await answered(["d-alice", "approve"]);
+    await answered(["d-bob", "reject"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(readHitlState(stateOf(step.sessionState)).relays.get(interactionId)?.receipts).toEqual({
+    expect(readHitlState(state()).relays.get(interactionId)?.receipts).toEqual({
       "receipt-approve": "d-alice",
       "receipt-reject": "d-bob",
     });
@@ -106,7 +116,7 @@ it("refuses the forwarded answer a remote child names by the receipt it gave for
         type: "response.settled",
       },
     ]);
-    expect(answersOf(step.sessionState)).toEqual({ "d-alice": "submitted", "d-bob": "refused" });
+    expect(answersOf(state())).toEqual({ "d-alice": "submitted", "d-bob": "refused" });
 
     // It applies Alice's answer, naming its receipt as the decider; the route retires.
     await relayed([
@@ -115,14 +125,34 @@ it("refuses the forwarded answer a remote child names by the receipt it gave for
         type: "interaction.settled",
       },
     ]);
-    expect(answersOf(step.sessionState)).toEqual({ "d-alice": "applied", "d-bob": "refused" });
-    expect(readHitlState(stateOf(step.sessionState)).relays.has(interactionId)).toBe(false);
+    expect(answersOf(state())).toEqual({ "d-alice": "applied", "d-bob": "refused" });
+    expect(readHitlState(state()).relays.has(interactionId)).toBe(false);
+  });
+});
+
+it("credits nobody for one receipt that covers answers from several deliveries", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "remote-answer-receipts" } });
+  await runtime.run(async () => {
+    const { answered, fetchMock, relayed, state } = await forwardingParent();
+    // Alice's and Bob's answers queue up and go down in one step, under one receipt.
+    await answered(["d-alice", "approve"], ["d-bob", "reject"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readHitlState(state()).relays.get(interactionId)?.receipts).toBeUndefined();
+
+    // The receipt cannot say whose answer the child applied, so neither person is credited.
+    await relayed([
+      {
+        data: { cause: { deliveryId: "receipt-approve" }, interactionId, outcome: "accepted" },
+        type: "interaction.settled",
+      },
+    ]);
+    expect(answersOf(state())).toEqual({ "d-alice": "withdrawn", "d-bob": "withdrawn" });
   });
 });
 
 /** How each forwarded answer stands, by the delivery it came in. */
-function answersOf(sessionState: DurableSessionState): Record<string, string> {
-  const { responses } = storedProjection(stateOf(sessionState)).view;
+function answersOf(state: ReturnType<typeof stateOf>): Record<string, string> {
+  const { responses } = storedProjection(state).view;
   return Object.fromEntries(
     Object.values(responses).map((row) => [row.deliveryId, row.outcome ?? row.status]),
   );

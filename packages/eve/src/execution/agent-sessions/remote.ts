@@ -61,6 +61,14 @@ const DeliveryReceiptResponseSchema = z.object({
   deliveryId: z.string().min(1),
 });
 
+/**
+ * The receipt a child gives forwarded answers. This session keeps it in its durable state until
+ * the request closes, so an id longer than any eve mints is not kept.
+ */
+const AnswerReceiptResponseSchema = DeliveryReceiptResponseSchema.extend({
+  deliveryId: z.string().min(1).max(256),
+});
+
 const ProtocolRejectionSchema = z.object({
   code: z.literal(REMOTE_AGENT_PROTOCOL_MISMATCH),
   ok: z.unknown().optional(),
@@ -347,8 +355,11 @@ export async function respondToRemoteAgentSession(input: {
   // A child on this protocol admits the answers as a delivery of its own and names it when it
   // relays how they settled. The answers stand without it, so an unreadable receipt isn't fatal.
   if (input.remote.earlierProtocol !== undefined) return undefined;
-  const receipt = DeliveryReceiptResponseSchema.safeParse(await response.json().catch(() => null));
-  return receipt.success ? receipt.data.deliveryId : undefined;
+  const receipt = AnswerReceiptResponseSchema.safeParse(await response.json().catch(() => null));
+  // A receipt from another session names none of this child's deliveries.
+  return receipt.success && receipt.data.sessionId === input.remote.sessionId
+    ? receipt.data.deliveryId
+    : undefined;
 }
 
 /** Continues one remote-agent session by its immutable session ID. */

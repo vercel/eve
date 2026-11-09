@@ -59,6 +59,8 @@ interface ChildBucket {
   readonly childSessionInbox?: SessionInboxAddress;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
+  /** The parent deliveries whose answers this child takes, by interaction. */
+  readonly answeredBy: Map<string, Set<string | undefined>>;
 }
 
 /**
@@ -202,7 +204,12 @@ async function routeProxiedDeliver(
         childSessionInbox: forChild.childSessionInbox,
         metadata: [],
         payloads: [],
+        answeredBy: new Map(),
       };
+      for (const { interactionId } of forChild.payload.answers) {
+        const deliveries = child.answeredBy.get(interactionId) ?? new Set();
+        child.answeredBy.set(interactionId, deliveries.add(answeredBy));
+      }
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
       // Each child admits its answers as a delivery of its own, even when this session keeps
@@ -308,14 +315,16 @@ async function routeProxiedDeliver(
           idempotencyKey: await answersIdempotencyKey(sourceDelivery, childKey),
           responses: remoteAnswers(tables, responses),
         });
-        // The child names these answers by its receipt: each maps back to the delivery it came in.
-        for (const { interactionId } of responses) {
+        // The child names these answers by one receipt, so it maps back to a delivery only when
+        // every answer for the interaction came in that delivery; otherwise it credits nobody.
+        for (const [interactionId, deliveryIds] of child.answeredBy) {
           const route = requests.get(interactionId);
-          const forwarded = answers.findLast((answer) => answer.interactionId === interactionId);
-          if (receipt === undefined || route === undefined || forwarded === undefined) continue;
+          const [deliveryId, ...others] = deliveryIds;
+          if (receipt === undefined || route === undefined) continue;
+          if (deliveryId === undefined || others.length > 0) continue;
           receiptRoutes[interactionId] = {
             ...route,
-            receipts: { ...route.receipts, [receipt]: forwarded.deliveryId },
+            receipts: { ...route.receipts, [receipt]: deliveryId },
           };
         }
         // A protocol 2 child relays how its approvals settle, but never its questions or budget
