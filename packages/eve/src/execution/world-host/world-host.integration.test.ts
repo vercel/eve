@@ -139,7 +139,7 @@ describe("a World host", () => {
       },
     });
     const world = await serve({ agents: [agent] });
-    const session = world.session("release", { identity: alice });
+    const session = await world.createSession("release", { identity: alice });
 
     const asked = await (await session.send("Ship it.")).result();
     expect(asked.interactions.map((interaction) => interaction.call?.name)).toEqual(["deploy"]);
@@ -189,7 +189,7 @@ describe("a World host", () => {
       },
     });
     const world = await serve({ agents: [agent], deliveryBudgetMs: 900 });
-    const session = world.session("worker", { identity: alice });
+    const session = await world.createSession("worker", { identity: alice });
     const done = await (await session.send("Work.")).result();
     expect(done.reply).toBe("Done after 4.");
     expect(ran).toHaveLength(4);
@@ -215,7 +215,7 @@ describe("a World host", () => {
       name: "greeter",
     });
     const world = await serve({ agents: [agent] });
-    const session = world.session("greeter", { identity: alice });
+    const session = await world.createSession("greeter", { identity: alice });
     const hello = await (await session.send("Hi.")).result();
     expect(hello.reply).toBe("Hello.");
     await until(() => lastOutcome(hello.sessionId)?.kind === "idle");
@@ -224,7 +224,7 @@ describe("a World host", () => {
     expect((waiting as { alarm?: number }).alarm).toBeGreaterThan(Date.now());
 
     const types: string[] = [];
-    const events = await session.events();
+    const events = ReadableStream.from(session.stream());
     const reader = events.getReader();
     const readAll = (async () => {
       for (let next = await reader.read(); !next.done; next = await reader.read()) {
@@ -280,12 +280,12 @@ describe("a World host", () => {
       subagents: { reviewer },
     });
     const world = await serve({ agents: [release] });
-    const session = world.session("release", { identity: alice });
+    const session = await world.createSession("release", { identity: alice });
     const asked = await (await session.send("Ship it?")).result();
     // The review is the call's result in this turn, or comes back as the task's result and
     // starts the parent's next one: either way the parent replies with it.
     const texts: string[] = [];
-    const reader = (await session.events()).getReader();
+    const reader = ReadableStream.from(session.stream()).getReader();
     const read = (async () => {
       for (let next = await reader.read(); !next.done; next = await reader.read())
         if (JSON.stringify(next.value).includes("Review: the release looks good.")) {
@@ -369,7 +369,7 @@ describe("a World host", () => {
       name: "talker",
     });
     const world = await serve({ agents: [agent] }, counting);
-    const session = world.session("talker", { identity: alice });
+    const session = await world.createSession("talker", { identity: alice });
     let sessionId = "";
     const logLength = async () =>
       (
@@ -387,12 +387,15 @@ describe("a World host", () => {
       const reply = await (await session.send(`Message ${turn}.`)).result();
       expect(reply.reply).toBe(`Turn ${turn}.`);
       sessionId = reply.sessionId;
-      await until(() => outcomes.filter((entry) => entry.outcome.kind === "idle").length >= turn);
+      // Creating the session woke it once, with nothing to run: one more idle wake than turns.
+      await until(
+        () => outcomes.filter((entry) => entry.outcome.kind === "idle").length >= turn + 1,
+      );
     }
     const before = { ...read };
     const last = await (await session.send("Message 5.")).result();
     expect(last.reply).toBe("Turn 5.");
-    await until(() => outcomes.filter((entry) => entry.outcome.kind === "idle").length >= 5);
+    await until(() => outcomes.filter((entry) => entry.outcome.kind === "idle").length >= 6);
     const log = await logLength();
     // The fifth wake reads its first page and what was written since message 4, forward, and its
     // state once, backward to the last whole one. It reads no line to restore.
@@ -421,8 +424,16 @@ describe("a World host", () => {
         return await inner.queue(name, message, options);
       },
     }));
-    const hello = await (await world.session("sleeper", { identity: alice }).send("Hi.")).result();
-    await until(() => lastOutcome(hello.sessionId)?.kind === "idle");
+    const hello = await (
+      await (await world.createSession("sleeper", { identity: alice })).send("Hi.")
+    ).result();
+    // Its create's wake and its message's, both idle: a turn's result settles before its wake ends.
+    await until(
+      () =>
+        outcomes.filter(
+          (entry) => entry.sessionId === hello.sessionId && entry.outcome.kind === "idle",
+        ).length >= 2,
+    );
     const seen = (
       await world.world.events.list({
         pagination: { limit: 1, sortOrder: "desc" },
@@ -444,7 +455,9 @@ describe("a World host", () => {
     expect(outcomes).toHaveLength(wakes);
     // Once something arrived after it was armed, the wake runs the session.
     await (
-      await world.session("sleeper", { identity: alice, resume: hello.sessionId }).send("Again.")
+      await (
+        await world.createSession("sleeper", { identity: alice, resume: hello.sessionId })
+      ).send("Again.")
     ).result();
     await until(() => outcomes.length > wakes);
     const after = outcomes.length;
@@ -484,7 +497,7 @@ describe("a World host", () => {
       },
     });
     const world = await serve({ agents: [agent], deliveryBudgetMs: 1_000 });
-    const session = world.session("slow", { identity: alice });
+    const session = await world.createSession("slow", { identity: alice });
     const done = await (await session.send("Go.")).result();
     expect(done.reply).toBe("Done.");
     await until(() => lastOutcome(done.sessionId)?.kind === "idle");
@@ -530,7 +543,7 @@ describe("a World host", () => {
       },
     });
     const world = await serve({ agents: [agent], deliveryBudgetMs: 1_000 });
-    const session = world.session("approver", { identity: alice });
+    const session = await world.createSession("approver", { identity: alice });
     const asked = await (await session.send("Ship it.")).result();
     await until(() => lastOutcome(asked.sessionId)?.kind === "idle");
     const pending = await session.pending();
@@ -572,7 +585,7 @@ describe("a World host", () => {
       limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
     });
     const world = await serve({ agents: [agent] });
-    const session = world.session("notes", { identity: alice });
+    const session = await world.createSession("notes", { identity: alice });
 
     const first = await (await session.send("Write a summary.")).result();
     await until(() => lastOutcome(first.sessionId)?.kind === "idle");
@@ -628,7 +641,7 @@ describe("a World host", () => {
       limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
     });
     const world = await serve({ agents: [agent] });
-    const session = world.session("notes", { identity: alice });
+    const session = await world.createSession("notes", { identity: alice });
 
     const first = await (await session.send("Write a summary.")).result();
     await until(() => lastOutcome(first.sessionId)?.kind === "idle");
@@ -654,5 +667,79 @@ describe("a World host", () => {
       "Write a status note.",
       "Mention the deadline.",
     ]);
+  }, 60_000);
+});
+
+describe("a World host's sessions, as session handles", () => {
+  /** Replies with how many user messages it reads. */
+  const countingModel = (prompts: string[]) =>
+    markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(JSON.stringify(prompt));
+          const users = prompt.filter((message) => message.role === "user").length;
+          return textStreamResult(`Heard ${String(users)}.`);
+        },
+        modelId: "world-host-counting",
+        provider: "eve-test",
+      }),
+    );
+
+  async function events(stream: AsyncIterable<SessionStreamEvent>): Promise<SessionStreamEvent[]> {
+    const seen: SessionStreamEvent[] = [];
+    for await (const event of stream) seen.push(event);
+    return seen;
+  }
+
+  it("creates a session before its first message, which nothing runs until that message arrives", async () => {
+    const prompts: string[] = [];
+    const agent = defineAgent({
+      instructions: "You listen.",
+      model: countingModel(prompts),
+      modelContextWindowTokens: 200_000,
+      name: "listener",
+    });
+    const world = await serve({ agents: [agent] });
+    const session = await world.createSession("listener", { identity: alice });
+    expect(session.id).toMatch(/^session_/u);
+    // Readable with nothing on it yet.
+    expect(await session.pending()).toEqual([]);
+    expect(await events(session.stream({ follow: false }))).toEqual([]);
+    // Creating it wakes it once, and that activation runs nothing: no model call, no lines.
+    await until(() => lastOutcome(session.id)?.kind === "idle");
+    expect(prompts).toEqual([]);
+    expect(await events(session.stream({ follow: false }))).toEqual([]);
+
+    const reply = await (await session.send("Hello.")).result();
+    expect(reply.sessionId).toBe(session.id);
+    expect(reply.reply).toBe("Heard 1.");
+  }, 60_000);
+
+  it("compacts, clears and ends a session through its handle", async () => {
+    const prompts: string[] = [];
+    const agent = defineAgent({
+      instructions: "You listen.",
+      model: countingModel(prompts),
+      modelContextWindowTokens: 200_000,
+      name: "listener",
+    });
+    const world = await serve({ agents: [agent] });
+    const session = await world.createSession("listener", { identity: alice });
+    expect((await (await session.send("First.")).result()).reply).toBe("Heard 1.");
+    expect((await (await session.send("Second.")).result()).reply).toBe("Heard 2.");
+
+    expect((await (await session.compact()).result()).status).toBe("completed");
+    expect((await (await session.clear()).result()).status).toBe("completed");
+    // Its history is gone: the next turn reads only its own message.
+    expect((await (await session.send("Third.")).result()).reply).toBe("Heard 1.");
+
+    // An end's delivery reads the stream as it is (`follow: false`); the host ends the session
+    // when its activation takes the command, so its stream records the end soon after.
+    await session.end();
+    await until(async () =>
+      (await events(session.stream({ follow: false }))).some(
+        (event) => event.type === "session.ended",
+      ),
+    );
   }, 60_000);
 });

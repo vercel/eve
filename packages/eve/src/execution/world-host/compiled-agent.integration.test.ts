@@ -101,7 +101,7 @@ describe("an agent compiled from files on a World host", () => {
         world: localWorld({ dataDir: join(dir, "world") }),
       });
       await host.serve();
-      const session = host.session("weather", { identity: alice });
+      const session = await host.createSession("weather", { identity: alice });
       const done = await (await session.send("What's the weather in Lisbon?")).result();
       expect(done.reply).toBe("It's sunny in Lisbon.");
       expect(looked).toEqual(["Lisbon"]);

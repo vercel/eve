@@ -149,10 +149,12 @@ describe("sign-in on a World host", () => {
       world: localWorld({ dataDir: join(dir, "world") }),
     });
     await host.serve();
-    const session = host.session("weather", { identity: alice });
+    const session = await host.createSession("weather", { identity: alice });
     const sent = await session.send("What's the weather in Lisbon?");
 
-    const asked = await eventsUntil(await session.events(), (seen) => seen.some(isSignIn));
+    const asked = await eventsUntil(ReadableStream.from(session.stream()), (seen) =>
+      seen.some(isSignIn),
+    );
     const signIn = asked.find(isSignIn)!;
     expect(JSON.stringify(signIn.data)).toContain(encodeURIComponent(CALLBACK_BASE_URL));
     // Nothing holds the session while Alice signs in.
@@ -176,7 +178,9 @@ describe("sign-in on a World host", () => {
     const completed = (event: SessionStreamEvent) =>
       event.type === "call.settled" &&
       (event.data as { outcome?: unknown }).outcome === "completed";
-    const settled = await eventsUntil(await session.events(), (seen) => seen.some(completed));
+    const settled = await eventsUntil(ReadableStream.from(session.stream()), (seen) =>
+      seen.some(completed),
+    );
     await until(() => outcomes.length > activations && lastIdle());
     // It ran in an activation the callback started, with the token the sign-in gave.
     expect(ran).toEqual(["weather-token"]);
