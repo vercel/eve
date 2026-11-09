@@ -129,7 +129,7 @@ function slowModelCallStart(handlerTimeoutMs: number) {
 
 describe("a model call's span", () => {
   // https://github.com/vercel/eve/issues/6174
-  it.fails("records its output when its start handler outlives the handler timeout", async () => {
+  it("records its output when its start handler outlives the handler timeout", async () => {
     const trace = slowModelCallStart(5);
     await trace.commit(...opening);
     const scope = instrumentationScope(

@@ -7,6 +7,7 @@ import {
   releaseAllInstrumentationAttemptState,
   releaseAllInstrumentationState,
   releaseAllInstrumentationTurnState,
+  reviveInstrumentationState,
   type InstrumentationStateOwner,
 } from "#instrumentation/state.js";
 import {
@@ -258,6 +259,10 @@ async function dispatchToProvider(
           abandonInstrumentationState(stateNamespace, event.idempotencyKey, owner);
         }
       },
+      () => {
+        // The start finished after all and may have opened work only its terminal ends.
+        if (startedBoundary) reviveInstrumentationState(stateNamespace, event.idempotencyKey);
+      },
     );
     if (!settled) {
       log.warn("instrumentation provider timed out", {
@@ -281,13 +286,23 @@ async function withTimeout(
   run: () => void | PromiseLike<void>,
   timeoutMs: number,
   onTimeout: () => void,
+  onLateSuccess: () => void,
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const running = Promise.resolve(run());
+  void running.then(
+    () => {
+      if (timedOut) onLateSuccess();
+    },
+    () => {},
+  );
   try {
     return await Promise.race([
-      Promise.resolve(run()).then(() => true),
+      running.then(() => true),
       new Promise<boolean>((resolve) => {
         timer = setTimeout(() => {
+          timedOut = true;
           onTimeout();
           resolve(false);
         }, timeoutMs);
