@@ -195,6 +195,10 @@ test("by default the requester answers for personal skills, and someone else for
   // The channel scope depends on the conversation, which a response doesn't carry, so it counts as shared.
   assert.equal(await answer("channel", alice), "rejected");
   assert.equal(await answer("channel", bob), "allowed");
+  // Alice under a new subject (a renamed login) is still Alice's account, so not a second person.
+  const renamed = { ...alice, subject: "alice-renamed" };
+  assert.equal(await answer("channel", renamed), "rejected");
+  assert.equal(await answer(undefined, renamed), "rejected");
 });
 
 test("an approval applies only to the skill it showed, not one recreated under its name", async () => {
@@ -389,6 +393,12 @@ test("a requester can't approve their own shared change, even when it reaches th
   const refused = await run(create, shared, context({ approvedBy: alice }));
   assert.equal(refused.success, false);
   assert.match(String(refused.error), /someone other than the person who asked/);
+  const renamed = await run(
+    create,
+    shared,
+    context({ approvedBy: { ...alice, subject: "alice-renamed" } }),
+  );
+  assert.match(String(renamed.error), /someone other than the person who asked/);
   // A personal change still needs its owner, whoever else answered.
   const notOwner = await run(create, { ...deploy }, context({ approvedBy: bob }));
   assert.equal(notOwner.success, false);

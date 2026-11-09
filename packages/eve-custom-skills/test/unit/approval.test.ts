@@ -6,7 +6,6 @@ import {
   defaultSkillApproval,
   defaultSkillResponse,
   requireDefaultResponder,
-  samePrincipal,
 } from "../../extension/lib/approval.ts";
 import type { SkillApprovalRequest, SkillScope } from "../../extension/lib/types.ts";
 
@@ -128,16 +127,26 @@ test("a shared change needs someone other than the requester to approve it", asy
   assert.equal((await answer(true, bob)).status, "allowed");
 });
 
-test("a principal with a different subject isn't the requester", () => {
-  const alice = {
+test("a changed subject isn't a second person for shared skills, nor the owner of personal ones", () => {
+  // A GitHub sender keeps their account ID but can rename the login that becomes the subject.
+  const before = {
     attributes: {},
-    authenticator: "a",
-    principalId: "alice",
+    authenticator: "github",
+    principalId: "github:42",
     principalType: "user",
-    subject: "s1",
+    subject: "alice",
   };
-  assert.equal(samePrincipal(alice, { ...alice }), true);
-  assert.equal(samePrincipal(alice, { ...alice, subject: "s2" }), false);
+  const renamed = { ...before, subject: "alice-renamed" };
+  for (const check of [
+    () => requireDefaultResponder(channel, before, renamed),
+    () => requireDefaultResponder(personal, before, renamed),
+  ]) {
+    assert.throws(check);
+  }
+  assert.doesNotThrow(() => requireDefaultResponder(personal, before, { ...before }));
+  assert.doesNotThrow(() =>
+    requireDefaultResponder(channel, before, { ...before, principalId: "github:7" }),
+  );
 });
 
 test("the approver is checked again against the scope the change really targets", () => {
