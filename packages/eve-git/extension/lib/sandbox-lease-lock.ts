@@ -1,3 +1,4 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
@@ -51,18 +52,23 @@ function acquireCommand(owner: string): string {
 }
 
 /**
- * Starts a release: takes the guard (briefly retrying) so no waiter can break the lock while the
- * holder clears its credential, then prints `<guarded> <held>`, where `held` says whether `owner`
- * still holds the lock. Only breakers and releases take the guard, so when it stays busy for the
- * whole short wait it was left behind and releasing without it is safe.
+ * Starts a release: takes the guard (briefly retrying, and breaking one a stopped sandbox left
+ * behind) so no waiter can break the lock while the holder clears its credential, then prints
+ * `<guarded> <held>`, where `held` says whether `owner` still holds the lock. A guard that stays
+ * busy belongs to a waiter breaking this holder's lock, whose successor replaces the policy.
  */
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
   const id = shellQuote(owner);
   return [
+    `age() { now=$(date +%s); echo $(( now - $(date -r "$1" +%s 2>/dev/null || echo "$now") )); }`,
     `guarded=0`,
-    `for _ in $(seq 20); do if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi; sleep 0.1; done`,
+    `for _ in $(seq 20); do`,
+    `  if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi`,
+    `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
+    `  sleep 0.1`,
+    `done`,
     `held=0`,
     `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
     `printf '%s %s' "$guarded" "$held"`,
@@ -120,30 +126,67 @@ export async function withSandboxLeaseLock<T>(
   run: () => PromiseLike<T>,
   { cleanup, signal }: SandboxLeaseLockOptions = {},
 ): Promise<T> {
-  const deadline = Date.now() + LEASE_WAIT_MS;
-  const command = acquireCommand(owner);
-  for (;;) {
-    signal?.throwIfAborted();
-    const attempt = signal
-      ? await sandbox.run({ command, signal })
-      : await sandbox.run({ command });
-    if (attempt.exitCode === 0) break;
-    if (attempt.exitCode !== BUSY_EXIT_CODE) {
-      throw new Error(
-        `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
-      );
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
-      );
-    }
-    await waitForRetry(signal);
-  }
+  await acquire(sandbox, acquireCommand(owner), signal);
   try {
     return await run();
   } finally {
     await release(sandbox, owner, cleanup);
+  }
+}
+
+/**
+ * How a wait for the lease ended, on the `agent.github.lease.wait` span. The span lasts as long as
+ * the wait, so its duration is how long a command waited for another to release the lease.
+ */
+type LeaseWaitOutcome = "acquired" | "timed_out" | "cancelled" | "failed";
+
+/** Polls for the lock from the host until it is acquired, the wait times out, or `signal` aborts. */
+async function acquire(
+  sandbox: SandboxSession,
+  command: string,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const span = trace.getTracer("eve.git").startSpan("agent.github.lease.wait");
+  const deadline = Date.now() + LEASE_WAIT_MS;
+  let attempts = 0;
+  let outcome: LeaseWaitOutcome = "failed";
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      attempts += 1;
+      const attempt = signal
+        ? await sandbox.run({ command, signal })
+        : await sandbox.run({ command });
+      if (attempt.exitCode === 0) {
+        outcome = "acquired";
+        return;
+      }
+      if (attempt.exitCode !== BUSY_EXIT_CODE) {
+        throw new Error(
+          `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
+        );
+      }
+      if (Date.now() >= deadline) {
+        outcome = "timed_out";
+        throw new Error(
+          "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
+        );
+      }
+      await waitForRetry(signal);
+    }
+  } catch (error) {
+    if (signal?.aborted) outcome = "cancelled";
+    throw error;
+  } finally {
+    span.setAttributes({
+      "agent.github.lease.attempts": attempts,
+      "agent.github.lease.outcome": outcome,
+      "agent.github.lease.waited": attempts > 1,
+    });
+    if (outcome === "timed_out" || outcome === "failed") {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+    }
+    span.end();
   }
 }
 
@@ -152,10 +195,8 @@ async function release(
   owner: string,
   cleanup: (() => PromiseLike<void>) | undefined,
 ): Promise<void> {
-  // When the sandbox can't say who holds the lock, clean up anyway: leaving a credential leased
-  // is worse than clearing a successor's.
   let guarded = false;
-  let held = true;
+  let held: boolean | undefined;
   try {
     const begun = await sandbox.run({ command: beginReleaseCommand(owner) });
     const [guard, holder] = begun.stdout.trim().split(" ");
@@ -165,7 +206,11 @@ async function release(
     }
   } catch {}
   try {
-    if (held) await cleanup?.();
+    // Clearing without the guard could clear a successor's credential: a waiter holding it is
+    // breaking this holder's lock, and the successor it lets in replaces the policy. When the
+    // sandbox can't say who holds the lock, clean up anyway: leaving a credential leased is worse
+    // than clearing a successor's.
+    if (held === undefined || (held && guarded)) await cleanup?.();
   } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
     await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(
