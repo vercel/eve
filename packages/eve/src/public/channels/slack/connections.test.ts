@@ -104,6 +104,7 @@ describe("buildAuthEphemeralBlocks", () => {
         elements: [
           {
             type: "button",
+            action_id: SIGN_IN_CONNECT_ACTION_ID,
             text: { type: "plain_text", text: "Connect Linear" },
             url: "https://connect.example.com/authorize/sca_abc",
             style: "primary",
@@ -134,7 +135,7 @@ describe("buildAuthEphemeralBlocks", () => {
   it("gives the Connect button an action and the prompt's session, keeping its URL", () => {
     const connect = {
       channelId: "C01",
-      displayName: "Linear",
+      interactionId: "int_linear",
       name: "linear",
       threadTs: "1700000000.000001",
       userId: "U_ALICE",
@@ -158,7 +159,7 @@ describe("buildAuthEphemeralBlocks", () => {
     const connect = {
       channelId: "C01",
       codeChannel: true,
-      displayName: "Linear",
+      interactionId: "int_linear",
       name: "linear",
       userId: "U1",
     } as const;

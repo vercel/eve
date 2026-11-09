@@ -115,10 +115,8 @@ export function buildAuthEphemeralBlocks(
       : [
           {
             type: "button",
-            ...(input.connect !== undefined && {
-              action_id: SIGN_IN_CONNECT_ACTION_ID,
-              value: JSON.stringify(input.connect),
-            }),
+            action_id: SIGN_IN_CONNECT_ACTION_ID,
+            ...(input.connect !== undefined && { value: JSON.stringify(input.connect) }),
             text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
             url: input.url,
             style: "primary",

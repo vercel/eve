@@ -209,7 +209,7 @@ export type SessionCommand =
   | ({
       readonly kind: "channel-state";
       /**
-       * Shallow patch of the channel adapter's state. It changes no turn, auth, or principal;
+       * JSON merge patch (RFC 7386) of the channel adapter's state. It changes no turn, auth, or principal;
        * an active turn's next step reads it.
        */
       readonly state: JsonObject;

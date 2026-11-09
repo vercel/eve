@@ -1,6 +1,7 @@
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createLogger } from "#internal/logging.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
 import type { SlackChannelState, SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
 import { slackSessionToken } from "#public/channels/slack/api.js";
 
@@ -29,11 +30,11 @@ export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | un
 }
 
 /**
- * The session a sign-in prompt's Connect button belongs to, the connection it signs in to, and the
- * one Slack user the prompt was shown to.
+ * The session a sign-in prompt's Connect button belongs to, the sign-in interaction it answers,
+ * the connection it signs in to, and the one Slack user the prompt was shown to.
  */
 export type SignInConnectTarget = SlackSessionTarget & {
-  readonly displayName: string;
+  readonly interactionId: string;
   readonly name: string;
   readonly userId: string;
 };
@@ -42,26 +43,29 @@ export type SignInConnectTarget = SlackSessionTarget & {
 export function parseSignInConnectTarget(value: unknown): SignInConnectTarget | undefined {
   const parsed = parseObject(value);
   if (parsed === undefined) return undefined;
-  const { channelId, codeChannel, displayName, name, threadTs, userId } = parsed;
+  const { channelId, codeChannel, interactionId, name, threadTs, userId } = parsed;
   if (
     typeof channelId !== "string" ||
-    typeof displayName !== "string" ||
+    typeof interactionId !== "string" ||
     typeof name !== "string" ||
     typeof userId !== "string"
   ) {
     return undefined;
   }
-  if (codeChannel === true) return { channelId, codeChannel, displayName, name, userId };
+  if (codeChannel === true) return { channelId, codeChannel, interactionId, name, userId };
   return typeof threadTs === "string"
-    ? { channelId, displayName, name, threadTs, userId }
+    ? { channelId, interactionId, name, threadTs, userId }
     : undefined;
 }
 
 /**
- * Handles a click on a sign-in prompt's Connect button: Slack opens the sign-in URL itself, eve
- * replaces the prompt with a line that has nothing to click, and records the click's
- * `response_url` in the session's channel state, so the line can be removed once the sign-in
- * ends. Only the person the prompt was shown to counts. Returns false for any other interaction.
+ * Handles a click on a sign-in prompt's Connect button. Slack opens the sign-in URL itself, and
+ * the click's `response_url` is the only way to change the ephemeral prompt. eve swaps the prompt
+ * for a line saying it waits on the sign-in, and records the URL in the session's channel state
+ * under the sign-in's interaction, so that line goes once the sign-in ends, in whichever order the
+ * click and the ending reach the session. A prompt that carries no
+ * session is removed at once. Only the person the prompt was shown to counts. Returns false for
+ * any other interaction.
  */
 export function dispatchSignInConnect(
   raw: Record<string, unknown>,
@@ -70,49 +74,53 @@ export function dispatchSignInConnect(
     readonly waitUntil: (task: Promise<unknown>) => void;
   },
 ): boolean {
-  const target = parseSignInConnectTarget(findAction(raw, SIGN_IN_CONNECT_ACTION_ID)?.value);
-  if (target === undefined) return false;
-  const user = isObjectRecord(raw.user) ? raw.user : undefined;
+  const action = findAction(raw, SIGN_IN_CONNECT_ACTION_ID);
+  if (action === undefined) return false;
   const responseUrl = raw.response_url;
-  if (user?.id !== target.userId || typeof responseUrl !== "string") return true;
-  ctx.waitUntil(
-    Promise.all([
-      rememberSignInPrompt(target, responseUrl, ctx),
-      respondToSignInPrompt(responseUrl, {
-        replace_original: true,
-        text: `Waiting for ${target.displayName}...`,
-      }),
-    ]),
-  );
+  if (typeof responseUrl !== "string") return true;
+  const target = parseSignInConnectTarget(action.value);
+  if (target === undefined) {
+    ctx.waitUntil(removeSignInPrompt(responseUrl));
+    return true;
+  }
+  const user = isObjectRecord(raw.user) ? raw.user : undefined;
+  if (user?.id !== target.userId) return true;
+  ctx.waitUntil(awaitSignIn(target, responseUrl, ctx));
   return true;
 }
 
-async function rememberSignInPrompt(
+/**
+ * Swaps the prompt for its waiting line, then records the click's `response_url`. A session that
+ * can't record it would never remove the line, so the prompt goes now instead.
+ */
+async function awaitSignIn(
   target: SignInConnectTarget,
   responseUrl: string,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
 ): Promise<void> {
+  await postToPrompt(responseUrl, {
+    replace_original: true,
+    text: `Waiting for you to finish connecting ${displayProperName(target.name)} in your browser…`,
+  });
   try {
     await ctx.from(slackSessionToken(target)).patchState({
-      signInPromptResponseUrls: { [target.name]: responseUrl },
+      signInPrompts: { [target.interactionId]: { responseUrl } },
     });
   } catch (error) {
     log.warn("failed to record the sign-in prompt for removal", { error, name: target.name });
+    await removeSignInPrompt(responseUrl);
   }
 }
 
 /**
- * Removes a sign-in prompt through the `response_url` of its Connect click. Best effort: Slack
- * keeps the URL for 30 minutes and five uses, and a prompt it can't remove stays on screen.
+ * Removes a sign-in prompt through the `response_url` of a click on it. Best effort: Slack keeps
+ * the URL for 30 minutes and five uses, and a prompt it can't remove stays on screen.
  */
 export async function removeSignInPrompt(responseUrl: string): Promise<void> {
-  await respondToSignInPrompt(responseUrl, { delete_original: true });
+  await postToPrompt(responseUrl, { delete_original: true });
 }
 
-async function respondToSignInPrompt(
-  responseUrl: string,
-  body: Record<string, unknown>,
-): Promise<void> {
+async function postToPrompt(responseUrl: string, body: Record<string, unknown>): Promise<void> {
   try {
     const response = await fetch(responseUrl, {
       body: JSON.stringify(body),

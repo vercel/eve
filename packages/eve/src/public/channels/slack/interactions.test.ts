@@ -200,7 +200,7 @@ describe("handleInteractionPost", () => {
           url: "https://idp.example/authorize",
           value: JSON.stringify({
             channelId: "C0123456789",
-            displayName: "Linear",
+            interactionId: "int_linear",
             name: "linear",
             threadTs: "1700000000.000000",
             userId: "U0123456789",
@@ -230,12 +230,19 @@ describe("handleInteractionPost", () => {
       command: {
         deliveryId: expect.any(String),
         kind: "channel-state",
-        state: { signInPromptResponseUrls: { linear: "https://hooks.slack.com/actions/T1/1/abc" } },
+        state: {
+          signInPrompts: {
+            int_linear: { responseUrl: "https://hooks.slack.com/actions/T1/1/abc" },
+          },
+        },
       },
       continuationToken: expect.stringContaining("C0123456789"),
     });
     expect(fetchMock).toHaveBeenCalledWith("https://hooks.slack.com/actions/T1/1/abc", {
-      body: JSON.stringify({ replace_original: true, text: "Waiting for Linear..." }),
+      body: JSON.stringify({
+        replace_original: true,
+        text: "Waiting for you to finish connecting Linear in your browser…",
+      }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });

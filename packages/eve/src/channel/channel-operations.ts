@@ -32,10 +32,19 @@ interface BaseChannelRespondOptions<TState = undefined> {
   readonly state?: Partial<TState>;
 }
 
-/** A shallow patch of a channel's state; a channel with no declared state takes any JSON object. */
+/**
+ * A JSON merge patch (RFC 7386) of a channel's state: objects merge key by key, `null` removes a
+ * key, and other values replace it. A channel with no declared state takes any JSON object.
+ */
 export type ChannelStatePatch<TState = undefined> = [TState] extends [undefined]
   ? Record<string, unknown>
-  : Partial<TState>;
+  : MergePatch<TState>;
+
+type MergePatch<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T]?: MergePatch<T[K]> | null }
+    : T;
 
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
@@ -71,7 +80,7 @@ export interface ChannelSource<TState = undefined> {
   /** Queues context compaction without creating a session. */
   compact(options?: SessionControlOptions): Promise<Delivery>;
   /**
-   * Shallow-merges `state` into the session's channel state without creating a session or
+   * Merges `state` into the session's channel state as a JSON merge patch, without creating a session or
    * running a turn, even while a turn waits on input. The state must be JSON. The delivery
    * settles once the state changed, or fails on an owner that predates this control.
    */

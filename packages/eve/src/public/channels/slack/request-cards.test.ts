@@ -5,7 +5,10 @@ import type { InteractionSettledData } from "#protocol/session-events/families/i
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import { defaultInteractionEvents } from "#public/channels/slack/defaults.js";
+import {
+  defaultInteractionEvents,
+  removeSettledSignInPrompts,
+} from "#public/channels/slack/defaults.js";
 import { answerFromSlackAction } from "#public/channels/slack/hitl.js";
 import {
   parseSignInConnectTarget,
@@ -999,6 +1002,7 @@ function controls(
 
 describe("Slack sign-in prompts", () => {
   const RESPONSE_URL = "https://hooks.slack.com/actions/T1/1/abc";
+  const OLD_RESPONSE_URL = "https://hooks.slack.com/actions/T1/1/old";
   const signIn: Asked = {
     call: { name: "get_weather" },
     interactionId: "s_weather",
@@ -1010,8 +1014,8 @@ describe("Slack sign-in prompts", () => {
   };
   // Bob must sign in, and the thread knows his Slack user.
   const bobsSignIn: Asked = { ...signIn, audience: { principalIds: ["p_bob"] } };
-  const deletePrompt = [
-    RESPONSE_URL,
+  const deleteOf = (url: string) => [
+    url,
     {
       body: JSON.stringify({ delete_original: true }),
       headers: { "content-type": "application/json" },
@@ -1023,10 +1027,30 @@ describe("Slack sign-in prompts", () => {
     vi.unstubAllGlobals();
   });
 
+  function stubFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
   async function heldSignIn() {
     const slack = harness();
     await slack.ask(bobsSignIn);
     return slack;
+  }
+
+  /** What a Connect click's channel-state control merges in, then its `delivery.settled` handler. */
+  async function recordClick(
+    slack: Awaited<ReturnType<typeof heldSignIn>>,
+    interactionId: string,
+    responseUrl: string,
+  ): Promise<void> {
+    const prompts = slack.channel.state.signInPrompts ?? {};
+    slack.channel.state.signInPrompts = {
+      ...prompts,
+      [interactionId]: { ...prompts[interactionId], responseUrl },
+    };
+    await removeSettledSignInPrompts(slack.channel);
   }
 
   it("lets the Connect click locate the prompt it was shown to", async () => {
@@ -1044,56 +1068,96 @@ describe("Slack sign-in prompts", () => {
     });
     expect(parseSignInConnectTarget(connect?.value)).toEqual({
       channelId: "C1",
-      displayName: "Weather",
+      interactionId: "s_weather",
       name: "weather",
       threadTs: "1.0",
       userId: "U_BOB",
     });
   });
 
-  it("removes the prompt its Connect click located once the sign-in ends", async () => {
+  it("removes the prompt when the click is recorded before the sign-in ends", async () => {
     for (const outcome of ["accepted", "declined"] as const) {
-      const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
-      vi.stubGlobal("fetch", fetchMock);
+      const fetchMock = stubFetch();
       const slack = await heldSignIn();
-      // What the Connect click's channel-state control merged in while the turn was held.
-      slack.channel.state.signInPromptResponseUrls = { weather: RESPONSE_URL };
+      await recordClick(slack, "s_weather", RESPONSE_URL);
+      expect(fetchMock, "nothing removed while the sign-in is open").not.toHaveBeenCalled();
 
       await slack.settle("s_weather", outcome);
 
-      expect(fetchMock, outcome).toHaveBeenCalledWith(...deletePrompt);
-      expect(slack.channel.state.signInPromptResponseUrls).toEqual({});
+      expect(fetchMock, outcome).toHaveBeenCalledTimes(1);
+      expect(fetchMock, outcome).toHaveBeenCalledWith(...deleteOf(RESPONSE_URL));
+      expect(slack.channel.state.signInPrompts).toEqual({});
       expect(slack.calls("chat.update"), "the public status still ends").toHaveLength(1);
     }
   });
 
-  it("removes the prompt even when the thread has no public status to edit", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
+  it("removes the prompt when the click is recorded after the sign-in ended", async () => {
+    const fetchMock = stubFetch();
     const slack = await heldSignIn();
-    slack.channel.state.pendingAuthMessageTs = {};
-    slack.channel.state.signInPromptResponseUrls = { weather: RESPONSE_URL };
 
     await slack.settle("s_weather", "accepted");
+    expect(fetchMock, "no click recorded yet").not.toHaveBeenCalled();
+    expect(slack.channel.state.signInPrompts).toEqual({ s_weather: { settled: true } });
 
-    expect(fetchMock).toHaveBeenCalledWith(...deletePrompt);
-    expect(slack.calls("chat.update")).toEqual([]);
+    await recordClick(slack, "s_weather", RESPONSE_URL);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(...deleteOf(RESPONSE_URL));
+    expect(slack.channel.state.signInPrompts).toEqual({});
+  });
+
+  it("keeps each pending prompt's click when several sign-ins wait", async () => {
+    const fetchMock = stubFetch();
+    const slack = harness();
+    await slack.ask(bobsSignIn, {
+      ...bobsSignIn,
+      interactionId: "s_issues",
+      request: {
+        kind: "sign-in",
+        prompt: "Sign in to Issues.",
+        signIn: { displayName: "Issues", name: "issues", url: "https://idp.example/issues" },
+      },
+    });
+    await recordClick(slack, "s_weather", RESPONSE_URL);
+    await recordClick(slack, "s_issues", OLD_RESPONSE_URL);
+    await recordClick(slack, "s_issues", OLD_RESPONSE_URL);
+
+    await slack.settle("s_weather", "accepted");
+    await slack.settle("s_issues", "accepted");
+
+    expect(fetchMock.mock.calls).toEqual([deleteOf(RESPONSE_URL), deleteOf(OLD_RESPONSE_URL)]);
+    expect(slack.channel.state.signInPrompts).toEqual({});
+  });
+
+  it("removes only the old prompt when it is clicked during a later attempt", async () => {
+    const fetchMock = stubFetch();
+    const slack = await heldSignIn();
+    await slack.settle("s_weather", "declined");
+    await slack.ask({ ...bobsSignIn, interactionId: "s_weather_again" });
+
+    await recordClick(slack, "s_weather", OLD_RESPONSE_URL);
+    expect(fetchMock.mock.calls).toEqual([deleteOf(OLD_RESPONSE_URL)]);
+    expect(slack.channel.state.signInPrompts).toEqual({});
+
+    await recordClick(slack, "s_weather_again", RESPONSE_URL);
+    expect(fetchMock, "the new attempt's prompt stays while it is open").toHaveBeenCalledTimes(1);
+    await slack.settle("s_weather_again", "accepted");
+    expect(fetchMock.mock.calls).toEqual([deleteOf(OLD_RESPONSE_URL), deleteOf(RESPONSE_URL)]);
   });
 
   it("still ends the public status when Slack can't remove the prompt", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
     const slack = await heldSignIn();
-    slack.channel.state.signInPromptResponseUrls = { weather: RESPONSE_URL };
+    await recordClick(slack, "s_weather", RESPONSE_URL);
 
     await slack.settle("s_weather", "accepted");
 
     expect(slack.calls("chat.update")).toHaveLength(1);
-    expect(slack.channel.state.signInPromptResponseUrls).toEqual({});
+    expect(slack.channel.state.signInPrompts).toEqual({});
   });
 
   it("removes nothing when no Connect click located the prompt", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetch();
     const slack = await heldSignIn();
 
     await slack.settle("s_weather", "accepted");

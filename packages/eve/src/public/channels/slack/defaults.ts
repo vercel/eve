@@ -285,7 +285,12 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
     const connect =
       session === undefined
         ? undefined
-        : { ...session, displayName, name: event.name, userId: recipientUserId };
+        : {
+            ...session,
+            interactionId: event.interactionId,
+            name: event.name,
+            userId: recipientUserId,
+          };
     const prompt = {
       cancel,
       connect,
@@ -318,7 +323,7 @@ async function settleSlackSignIn(
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
-  await removeSlackSignInPrompt(event.name, channel);
+  await settleSlackSignInPrompt(event.interactionId, channel);
 
   const pending = channel.state.pendingAuthMessageTs ?? {};
   const ts = pending[event.name];
@@ -348,15 +353,42 @@ async function settleSlackSignIn(
   channel.state.pendingAuthMessageTs = next;
 }
 
-/** Removes the private sign-in prompt its Connect click located, once the sign-in ends. */
-async function removeSlackSignInPrompt(name: string, channel: SlackEventContext): Promise<void> {
-  const prompts = channel.state.signInPromptResponseUrls;
-  const responseUrl = prompts?.[name];
-  if (responseUrl === undefined) return;
+/**
+ * Removes the sign-in's private prompt if its Connect click is recorded. Otherwise it records the
+ * settlement, so a click that lands later removes the prompt in {@link removeSettledSignInPrompts}.
+ */
+async function settleSlackSignInPrompt(
+  interactionId: string,
+  channel: SlackEventContext,
+): Promise<void> {
+  const prompts = channel.state.signInPrompts ?? {};
+  const responseUrl = prompts[interactionId]?.responseUrl;
+  if (responseUrl === undefined) {
+    channel.state.signInPrompts = { ...prompts, [interactionId]: { settled: true } };
+    return;
+  }
   const next = { ...prompts };
-  delete next[name];
-  channel.state.signInPromptResponseUrls = next;
+  delete next[interactionId];
+  channel.state.signInPrompts = next;
   await removeSignInPrompt(responseUrl);
+}
+
+/**
+ * Removes every private sign-in prompt whose sign-in settled before its Connect click was
+ * recorded, and forgets it.
+ */
+export async function removeSettledSignInPrompts(channel: {
+  state: SlackChannelState;
+}): Promise<void> {
+  const prompts = channel.state.signInPrompts ?? {};
+  const late = Object.entries(prompts).filter(
+    ([, prompt]) => prompt.settled === true && prompt.responseUrl !== undefined,
+  );
+  if (late.length === 0) return;
+  const next = { ...prompts };
+  for (const [interactionId] of late) delete next[interactionId];
+  channel.state.signInPrompts = next;
+  await Promise.all(late.map(([, prompt]) => removeSignInPrompt(prompt.responseUrl!)));
 }
 
 /**

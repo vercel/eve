@@ -70,15 +70,6 @@ function stubFetch(response = new Response("ok")) {
   return fetchMock;
 }
 
-const waitingPost = [
-  RESPONSE_URL,
-  {
-    body: JSON.stringify({ replace_original: true, text: "Waiting for Linear..." }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  },
-];
-
 const deletePost = [
   RESPONSE_URL,
   {
@@ -151,10 +142,6 @@ describe("dispatchSignInCancel", () => {
     await clickCancel(runtime);
 
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
-    expect(logger.error).toHaveBeenCalledWith(
-      "sign-in cancel delivery failed",
-      expect.objectContaining({ error: expect.any(Error) }),
-    );
   });
 
   it("logs when Slack refuses the delete", async () => {
@@ -171,19 +158,21 @@ describe("dispatchSignInCancel", () => {
   });
 });
 
-function connectClick(userId: string): Record<string, unknown> {
+function connectClick(userId: string, value?: string): Record<string, unknown> {
   return {
     actions: [
       {
         action_id: SIGN_IN_CONNECT_ACTION_ID,
         url: "https://connect.example.com/authorize/sca_abc",
-        value: JSON.stringify({
-          channelId: "C1",
-          displayName: "Linear",
-          name: "linear",
-          threadTs: "1.2",
-          userId: "U_ALICE",
-        }),
+        value:
+          value ??
+          JSON.stringify({
+            channelId: "C1",
+            interactionId: "int_linear",
+            name: "linear",
+            threadTs: "1.2",
+            userId: "U_ALICE",
+          }),
       },
     ],
     response_url: RESPONSE_URL,
@@ -192,33 +181,43 @@ function connectClick(userId: string): Record<string, unknown> {
   };
 }
 
-async function clickConnect(runtime: Runtime, userId: string): Promise<void> {
+async function clickConnect(runtime: Runtime, click: Record<string, unknown>): Promise<void> {
   const { from } = createChannelOperations<SlackChannelState>({
     adapter: { kind: "slack" },
     channelName: "slack",
     runtime,
   });
   const tasks: Promise<unknown>[] = [];
-  expect(
-    dispatchSignInConnect(connectClick(userId), { from, waitUntil: (task) => tasks.push(task) }),
-  ).toBe(true);
+  expect(dispatchSignInConnect(click, { from, waitUntil: (task) => tasks.push(task) })).toBe(true);
   await Promise.all(tasks);
 }
 
+const waitingPost = [
+  RESPONSE_URL,
+  {
+    body: JSON.stringify({
+      replace_original: true,
+      text: "Waiting for you to finish connecting Linear in your browser…",
+    }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  },
+];
+
 describe("dispatchSignInConnect", () => {
-  it("replaces the prompt with a waiting line and records its response_url", async () => {
+  it("swaps the prompt for a waiting line and records its response_url", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(
       vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
     );
 
-    await clickConnect(runtime, "U_ALICE");
+    await clickConnect(runtime, connectClick("U_ALICE"));
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         deliveryId: expect.any(String),
         kind: "channel-state",
-        state: { signInPromptResponseUrls: { linear: RESPONSE_URL } },
+        state: { signInPrompts: { int_linear: { responseUrl: RESPONSE_URL } } },
       },
       continuationToken: expect.stringContaining("C1"),
     });
@@ -226,40 +225,39 @@ describe("dispatchSignInConnect", () => {
     expect(fetchMock).toHaveBeenCalledWith(...waitingPost);
   });
 
+  it("removes a prompt that carries no session at once", async () => {
+    const fetchMock = stubFetch();
+    const runtime = createRuntime(vi.fn());
+
+    await clickConnect(runtime, connectClick("U_ALICE", ""));
+
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(...deletePost);
+  });
+
   it("ignores a click from anyone but the person the prompt was shown to", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(vi.fn());
 
-    await clickConnect(runtime, "U_MALLORY");
+    await clickConnect(runtime, connectClick("U_MALLORY"));
 
     expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("logs when Slack refuses the waiting line", async () => {
-    stubFetch(new Response("expired_url", { status: 404 }));
-    const runtime = createRuntime(
-      vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
-    );
-
-    await clickConnect(runtime, "U_ALICE");
-
-    expect(logger.warn).toHaveBeenCalledWith("Slack refused to change the sign-in prompt", {
-      body: "expired_url",
-      status: 404,
-    });
-  });
-
-  it("warns when the session cannot record the prompt", async () => {
-    stubFetch();
+  it("removes the prompt when the session cannot record it", async () => {
+    const fetchMock = stubFetch();
     const runtime = createRuntime(vi.fn().mockResolvedValue({ status: "no_active_session" }));
 
-    await clickConnect(runtime, "U_ALICE");
+    await clickConnect(runtime, connectClick("U_ALICE"));
 
     expect(logger.warn).toHaveBeenCalledWith(
       "failed to record the sign-in prompt for removal",
       expect.objectContaining({ name: "linear" }),
     );
+    expect(fetchMock).toHaveBeenNthCalledWith(1, ...waitingPost);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, ...deletePost);
   });
 
   it("leaves every other interaction alone", () => {
