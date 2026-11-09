@@ -47,7 +47,7 @@ Card-specific code stays out of core. json-render ships as an extension.
 
 ### 1. Tool reply parts
 
-A tool declares `reply` to add a part to the turn's reply when a call succeeds:
+A tool declares `replyPart` to add a part to the turn's reply when a call succeeds:
 
 ```ts title="agent/tools/card.ts"
 import { defineTool } from "eve/tools";
@@ -55,16 +55,16 @@ import { defineTool } from "eve/tools";
 export default defineTool({
   description: "Show structured data as a card.",
   inputSchema: cardSpecSchema,
-  reply: {
+  replyPart: {
     kind: "card",
     mediaType: "application/vnd.json-render+json",
     // Stream the call's input as the part's preview while the model writes it.
     streamInput: true,
     // After the call succeeds: the part's value and fallback text, or null for no part.
-    part: (input, output) => ({ value: input, fallbackText: cardText(input) }),
+    // A throw fails the call; the model reads why and can retry.
+    build: (input, output) => ({ value: toCardValue(input), fallbackText: cardText(input) }),
   },
-  async execute(spec) {
-    validateCard(spec); // Throwing fails the call; the model reads why and can retry.
+  async execute() {
     return { shown: true };
   },
 });
@@ -94,6 +94,10 @@ call.settled   { outcome: "completed" }
   it: channels without a renderer, ACP, the dev TUI, and eval reply assertions. A subagent's
   answer stays the text its model wrote.
 - The model sees the tool's ordinary result. `toModelOutput` still applies.
+- A tool with a reply part has no side effects. A throw from `build` fails the call after
+  `execute` ran, and the model's retry runs it again.
+- With `endsTurn: true`, the part is the whole answer and the turn ends without another model
+  call.
 
 ### 2. Text fallback everywhere
 
@@ -131,8 +135,9 @@ import { defineContentRenderer } from "eve/renderers";
 
 export default defineContentRenderer({
   mediaType: "application/vnd.json-render+json",
-  // A card for channels with rich messages, or null to fall back. While the part streams,
-  // `value` is the partially parsed JSON and `partial` is true.
+  // A card for channels with rich messages, or null to fall back. While the part streams, eve
+  // repairs the partial JSON of a `+json` media type and passes it with `partial: true`. The
+  // stream and `EveContentPart.text` keep the raw preview.
   card(value, { partial }) {
     return partial ? toPartialCard(value) : toCard(value);
   },
@@ -146,12 +151,12 @@ export default defineContentRenderer({
 - Cards use eve's card element types, which `eve/channels/slack` already exports and which
   move to `eve/cards`. They are Chat SDK's card format under eve-owned types.
 - Slack and the Chat SDK channel render cards natively: they post on the first renderable
-  preview, edit as it streams, and replace the message with the completed part. Teams and
-  Discord render cards once they convert eve cards to Adaptive Cards and embeds. GitHub and
+  preview, edit as it streams, and replace the message with the completed part. GitHub and
   Linear use `markdown`. Every other channel, and any renderer that returns `null` or throws,
-  falls back to `fallbackText`.
+  falls back to `fallbackText`. Native Teams and Discord cards follow this plan.
 - The file name supplies the renderer's name. A renderer in the agent wins over an extension's
   for the same media type; two extensions claiming one media type is a build error naming both.
+  There is no way to turn a media type's rendering off in favor of its fallback text.
 - Channel-specific overrides stay where they are: a Slack renderer's `content.completed`
   handler still sees every part first.
 
@@ -185,7 +190,7 @@ With these, `ask_question` is about 130 lines on public APIs, and an extension c
 
 ## json-render as an extension
 
-`@eve/json-render` contributes the `card` tool with `reply`, a renderer for
+`@eve/json-render` contributes the `card` tool with `replyPart`, a renderer for
 `application/vnd.json-render+json`, and instructions. It vendors `@json-render/core` and
 `@json-render/chat`, which are pre-1.0, so their API never becomes eve's. Mounting it is the
 only setup:
@@ -212,9 +217,22 @@ Each primitive is additive and ships on its own:
 4. Interaction bodies and `conversational`.
 5. `@eve/json-render`, replacing the example's manual wiring.
 
+## Decisions
+
+- The tool field is `replyPart`, not `reply`, so it doesn't read as the `eve__reply` tool that
+  structured output uses. Its function is `build`.
+- Renderers get the partial JSON of a `+json` part already parsed. The stream and clients keep
+  the raw preview text.
+- A subagent's answer stays the text its model wrote, without its reply parts' fallback text.
+- Native Teams and Discord cards follow this plan; until then, both show fallback text.
+- The public mark for tools that act only on the conversation is `conversational: true`.
+
+## Follow-ups
+
+- Native Teams cards (eve cards to Adaptive Cards) and Discord embeds.
+- Turning off a media type's renderer in favor of its fallback text, if agents need it.
+
 ## Open questions
 
-- `reply` as the tool field name, beside the `eve__reply` tool that structured output uses.
-- Whether previews of `+json` media types should reach renderers already parsed, or as text.
-- Whether a subagent's answer should include its reply parts' fallback text.
-- Whether Teams and Discord card support belongs in this plan or follows it.
+- How a renderer says a card body owns its question's options: a returned flag, or eve matching
+  the card's Button ids to the option ids.
