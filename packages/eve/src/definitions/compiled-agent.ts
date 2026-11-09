@@ -1,4 +1,5 @@
 import { compiledDelegates } from "#execution/agent-sessions/metadata.js";
+import { compiledAgentRoster } from "#execution/agent-sessions/roster.js";
 import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { memoryDefinition, memoryToolsDefinition } from "#memory/definition.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
@@ -41,6 +42,7 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
     },
     definitions: () => compiledDefinitions(bundle),
     delegates: (ctx) => compiledDelegates(bundle, ctx),
+    roster: (dynamicSelections) => compiledAgentRoster(bundle, dynamicSelections),
     get id() {
       return bundle.turnAgent.id;
     },

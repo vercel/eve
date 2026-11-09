@@ -58,20 +58,24 @@ export function resolveAgentAction(input: {
       `Agent target "${input.input.target}" is not available to this agent.`,
     );
   }
-  const actionInput: JsonObject = {
-    message: normalizeAgentMessage(input.input.message),
-    ...(input.input.outputSchema !== undefined && { outputSchema: input.input.outputSchema }),
-  };
   const common = {
     callId: input.callId,
     description: definition.description ?? "",
-    input: actionInput,
+    input: agentActionInput(input.input),
     name: definition.name,
     nodeId: definition.nodeId,
   };
   return definition.kind === "remote"
     ? { ...common, kind: "remote-agent-call", remoteAgentName: definition.name }
     : { ...common, kind: "subagent-call", subagentName: definition.name };
+}
+
+/** What a call to an agent carries: its message, normalized, and the output it asks for. */
+export function agentActionInput(input: AgentActionInput): JsonObject {
+  return {
+    message: normalizeAgentMessage(input.message),
+    ...(input.outputSchema !== undefined && { outputSchema: input.outputSchema }),
+  };
 }
 
 function findAgentDefinition(

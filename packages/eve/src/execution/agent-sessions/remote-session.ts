@@ -12,7 +12,6 @@ import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credent
 import {
   AGENT_SESSION_RUN_FINISHED_REASON,
   createParentContext,
-  loadAgentSessionBundle,
   type AgentSessionMessage,
   type AgentSessionReceipt,
   type RemoteAgentSession,
@@ -21,7 +20,8 @@ import {
   type StartedAgentSession,
 } from "#execution/agent-sessions/start.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { NonRetryableError } from "#shared/run-errors.js";
+import { loadAgentRoster, type AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
@@ -37,20 +37,21 @@ export async function startRemoteSession(
   input: SessionStart<RemoteStartTarget>,
   access: { readonly callbackBaseUrl: string; readonly operationId: string },
 ): Promise<StartedAgentSession> {
-  const { auth, bundle, context, target } = input;
+  const { auth, context, target } = input;
   const { action } = target;
+  const registry = remoteRegistryOf(input.roster, action.remoteAgentName);
   const dynamicBinding = bindingFor(context, action.nodeId);
   const remote = resolveRemoteAgentForAction({
     credentials:
       target.dynamicRemoteAgent === undefined
         ? undefined
-        : await credentialsOf(bundle, action.nodeId, dynamicBinding, {
+        : await credentialsOf(registry, action.nodeId, dynamicBinding, {
             name: action.remoteAgentName,
             url: target.dynamicRemoteAgent.url,
           }),
     dynamicRemoteAgent: target.dynamicRemoteAgent,
     nodeId: action.nodeId,
-    registry: bundle.subagentRegistry.subagentsByNodeId,
+    registry: registry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
   const { callbackBaseUrl } = access;
@@ -137,14 +138,14 @@ async function resolveSessionRemote(
   context: AgentSessionContext,
   address: RemoteAgentSession["address"],
 ): Promise<ResolvedRuntimeRemoteAgentNode> {
-  const bundle = await loadAgentSessionBundle(context);
+  const registry = remoteRegistryOf(await loadAgentRoster(context), address.name);
   const selection = context.dynamicSelections[address.nodeId];
   const resolved = resolveRemoteAgentForAction({
     // Credentials come from the binding the child was opened with, and go only to its destination.
-    credentials: await credentialsOf(bundle, address.nodeId, address.dynamicBinding, address),
+    credentials: await credentialsOf(registry, address.nodeId, address.dynamicBinding, address),
     dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
     nodeId: address.nodeId,
-    registry: bundle.subagentRegistry.subagentsByNodeId,
+    registry: registry.subagentsByNodeId,
     remoteAgentName: address.name,
   });
   return { ...resolved, url: address.url };
@@ -166,7 +167,7 @@ function bindingFor(
  * one without credentials, which keeps no binding.
  */
 async function credentialsOf(
-  bundle: CompiledBundle,
+  registry: RemoteRegistry,
   nodeId: string,
   binding: DynamicRemoteBinding | undefined,
   destination: { readonly name: string; readonly url: string },
@@ -176,6 +177,16 @@ async function credentialsOf(
     binding,
     destination,
     nodeId,
-    resolvers: bundle.subagentRegistry.dynamicResolvers,
+    resolvers: registry.dynamicResolvers,
   });
+}
+
+type RemoteRegistry = NonNullable<AgentRoster["remote"]>;
+
+/** The registry `name`, a remote agent, resolves from: a compiled agent's only. */
+function remoteRegistryOf(roster: AgentRoster, name: string): RemoteRegistry {
+  if (roster.remote !== undefined) return roster.remote;
+  throw new NonRetryableError(
+    `Agent "${name}" is remote, which only an agent compiled from files can call.`,
+  );
 }
