@@ -630,39 +630,48 @@ function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
 ): SessionEvent[] {
-  const open = Object.values(tables.responses)
-    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
-    .sort((a, b) => a.introducedAt - b.introducedAt);
   const decided =
     settled.outcome === "accepted" ||
     settled.outcome === "declined" ||
     settled.outcome === "invalid";
-  // The writer withdraws the answers that didn't decide (`cascade`).
-  const decider = decided ? open.at(-1) : undefined;
+  // The child names the delivery of the answer that decided; the writer withdraws the rest
+  // (`cascade`).
+  const named =
+    settled.cause !== undefined && "deliveryId" in settled.cause
+      ? settled.cause.deliveryId
+      : undefined;
+  const decider = decided
+    ? forwardedAnswer(tables, { deliveryId: named, interactionId: settled.interactionId })
+    : undefined;
   const events: SessionEvent[] =
-    decider === undefined ? [] : [responseSettled(decider.responseId, "applied", settled.reason)];
-  const cause = decider === undefined ? settled.cause : { responseId: decider.responseId };
+    decider === undefined ? [] : [responseSettled(decider, "applied", settled.reason)];
+  // A child's own ids mean nothing here.
+  const cause =
+    decider !== undefined ? { responseId: decider } : decided ? undefined : settled.cause;
   events.push(fact("interaction.settled", { ...settled, cause }));
   return events;
 }
 
-/** The answer this session forwarded that an asker's settlement is about. */
+/**
+ * The answer this session forwarded that an asker's settlement is about. An asker that names no
+ * delivery this session forwarded (a protocol-2 child names none, a remote child its own
+ * receipt) can only mean the one answer still open; with several open, it names none of them.
+ */
 function forwardedAnswer(
   tables: PublicView,
-  settled: { readonly interactionId: string; readonly deliveryId?: string },
+  settled: { readonly interactionId: string; readonly deliveryId?: string | undefined },
 ): string | undefined {
-  const open = Object.values(tables.responses)
-    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
-    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const open = Object.values(tables.responses).filter(
+    (row) => row.interactionId === settled.interactionId && row.status !== "settled",
+  );
   const { deliveryId } = settled;
-  if (deliveryId === undefined) return open.at(-1)?.responseId;
   // A child names a share of a payload this session forwarded by an id of its own.
-  const source = forwardedFrom(deliveryId);
-  return (
-    open.find((row) => row.deliveryId === deliveryId) ??
-    open.find((row) => row.deliveryId === source) ??
-    open.at(-1)
-  )?.responseId;
+  const named =
+    deliveryId === undefined
+      ? undefined
+      : (open.find((row) => row.deliveryId === deliveryId) ??
+        open.find((row) => row.deliveryId === forwardedFrom(deliveryId)));
+  return (named ?? (open.length === 1 ? open[0] : undefined))?.responseId;
 }
 
 /**
