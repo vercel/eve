@@ -50,7 +50,7 @@ describe("qualifyExtensionContributionLogicalPath", () => {
         agentRoot: "/extension",
         appRoot: "/package",
         subagents: [reviewer],
-        tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
+        sources: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
       });
       const manifest = createAgentSourceManifest({
         agentRoot: "/app/agent/subagents/research",

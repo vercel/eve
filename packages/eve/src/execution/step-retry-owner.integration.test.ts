@@ -20,7 +20,7 @@ import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
-import { forgetSessionLive } from "#reactions/state.js";
+import { forgetSessionLive } from "#definitions/state.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";

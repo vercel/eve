@@ -42,6 +42,7 @@ Rules:
 - A call that waits for approval hasn't started, and a denied call never runs.
 - Other calls from the same model response that need no approval run while it waits.
 - Omitted `approval` behaves like `never()`, so tool calls run without human approval by default. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
+- An [agent-wide policy](#gate-every-call-from-one-policy) can add a gate to any call, including one whose tool omits `approval`.
 - Approval doesn't make a charge or email happen exactly once. Give non-idempotent side effects their own idempotency keys.
 - Approval is consent only. The approved call, its policy recheck, and the rest of the turn run with the requesting user's identity, connections, and credentials, never the approver's. See [Act as the approver](#act-as-the-approver).
 
@@ -69,6 +70,14 @@ approval: auto({
 ```
 
 A dynamic tool rebuilds its policy each time eve evaluates the tool. To keep external data that configures a policy, save it with [`ctx.memo()`](/docs/guides/dynamic-capabilities).
+
+Pass `modelOptions.providerOptions` to configure the decision call, for example to keep it on Gateway providers with zero data retention:
+
+```ts
+approval: auto({
+  modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+});
+```
 
 ### Customize the approval prompt
 
@@ -138,6 +147,44 @@ The `call.started` event records what let the call run in `clearedBy`:
 | Nothing, because the call needed no approval | omitted                  |
 
 The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
+
+### Gate every call from one policy
+
+Set `approval` in `agent.ts` to apply one policy to every call the model makes: your tools, built-in and extension tools, dynamic and workflow tools, connection tools, and subagents. It's an ordinary approval policy, so the helpers above work:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: ({ toolName, toolAnnotations }) => {
+    if (toolName.startsWith("billing__")) return "user-approval";
+    if (toolAnnotations?.destructiveHint === true) return "user-approval";
+    return undefined; // leave the tool's own decision
+  },
+});
+```
+
+For each call, eve runs this policy and the tool's own `approval` and keeps the stricter result: denied, then user approval, then approved. The agent's policy can add a gate but never remove one, and `undefined` leaves the tool's decision. When both ask, the tool's prompt and response policy apply.
+
+A plain `"user-approval"` from the agent's policy asks on every call, like `always()`, even for a tool whose `once()` a person already approved. To let one approval cover the rest of the session, return `once()`'s status from the agent's policy; it shares the tool's `once()` memory:
+
+```ts
+import { once } from "eve/tools/approval";
+
+const askOnce = once();
+// ...
+approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx) : undefined),
+```
+
+`auto()` works here too, but it runs a decision model before every call, including reads, and asks a person when the model errors, times out, or the input is over 64 KB. A direct `invokeTool` call it would ask about is rejected. Put cheap rules first and call `auto()` only for the calls that need it.
+
+- Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
+- A [remote agent](/docs/guides/remote-agents) runs in its own deployment under that deployment's policy. Your policy gates the call to the remote agent, not the calls it makes.
+- A call through `eve__tool` runs the resolved entry's policy, such as `linear__create_issue`'s.
+- Not gated: `eve__search`, `eve__skill`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
+- A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
+- With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
 
 ### Remember approval for a tool
 
@@ -356,6 +403,8 @@ For approvals, a follow-up message that matches no option steers the turn, even 
 ### Request kinds
 
 On the stream, each request's `request.kind` is `approval`, `question`, `budget`, or `sign-in`. Its `subject` names the call, task, or turn that the request is about. Clients read the same `request.kind` on an `Interaction` to choose behavior and display. Keep a default branch, because a later release can add a kind.
+
+Traces record each request as an `agent.approval` span that lasts until the request settles, with `agent.approval.kind` set to `tool-approval`, `question`, `budget`, or `sign-in`, and `gen_ai.agent.name` set to the agent that asked. A sign-in span also names its connection in `eve.connection.name`. See [OpenTelemetry trace topology](/docs/observability/otel#trace-topology).
 
 `interactionId` identifies the request to answer, and `call.callId`, when present, identifies its call. Neither ID encodes what the request means.
 

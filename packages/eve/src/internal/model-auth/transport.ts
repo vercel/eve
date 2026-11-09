@@ -27,6 +27,8 @@ export function createDirectModelFetch(provider: "openai" | "anthropic"): typeof
 
 function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
   if (!isEveDevEnvironment()) return undefined;
+  // A custom AI SDK default provider owns model ids in `eve dev` too, as it does in `eve start`.
+  if (Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") != null) return undefined;
   const selected = process.env[MODEL_CONNECTION_ENV];
   if (
     !developmentModelBrokerAvailable() &&

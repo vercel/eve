@@ -145,12 +145,10 @@ function spec(
 }
 
 describe("createHostSpec", () => {
-  it("loads local tracing and compiled artifacts before the Workflow world in dev", async () => {
-    expect(spec(await compileAgent(), DEVELOPMENT).runtimePlugins).toEqual([
-      "local-tracing",
-      "compiled-artifacts",
-      "workflow-world",
-    ]);
+  it("captures traces locally in dev and adds no other runtime plugin", async () => {
+    const development = spec(await compileAgent(), DEVELOPMENT);
+    expect(development.runtime.localTracing).toBe(true);
+    expect(development.runtimePlugins).toEqual([]);
   });
 
   it("lets authored instrumentation replace local tracing and wrap the server entry", async () => {
@@ -158,7 +156,7 @@ describe("createHostSpec", () => {
       const instrumented = spec(await compileAgent(), mode, { instrumented: true });
       expect(instrumented.instrumented).toBe(true);
       expect(instrumented.runtimePlugins).toContain("instrumentation");
-      expect(instrumented.runtimePlugins).not.toContain("local-tracing");
+      expect(instrumented.runtime.localTracing).toBe(false);
     }
   });
 
@@ -167,12 +165,8 @@ describe("createHostSpec", () => {
     const production = spec(manifest, PRODUCTION);
     const development = spec(manifest, DEVELOPMENT);
 
-    expect(production.runtimePlugins).toEqual([
-      "compiled-artifacts",
-      "skill-files",
-      "workflow-world",
-      "sandbox-shutdown",
-    ]);
+    expect(production.runtimePlugins).toEqual(["skill-files", "sandbox-shutdown"]);
+    expect(production.runtime.localTracing).toBe(false);
     expect(production.externals.pruneDevelopmentRuntime).toBe(true);
     expect(development.runtimePlugins).not.toContain("skill-files");
     expect(development.runtimePlugins).not.toContain("sandbox-shutdown");
@@ -186,8 +180,8 @@ describe("createHostSpec", () => {
   ] as const)(
     "installs the workflow sandbox runtime for %s: %s",
     async (_label, tool, expected) => {
-      const plugins = spec(await compileAgent({ tool }), PRODUCTION).runtimePlugins;
-      expect(plugins.includes("workflow-sandbox")).toBe(expected);
+      const { runtime } = spec(await compileAgent({ tool }), PRODUCTION);
+      expect(runtime.workflowSandbox).toBe(expected);
     },
   );
 
@@ -196,7 +190,7 @@ describe("createHostSpec", () => {
       await compileAgent(),
       await compileAgent({ tool: "workflow-program" }, "researcher"),
     );
-    expect(spec(manifest, PRODUCTION).runtimePlugins).toContain("workflow-sandbox");
+    expect(spec(manifest, PRODUCTION).runtime.workflowSandbox).toBe(true);
   });
 
   it.each([

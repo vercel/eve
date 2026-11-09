@@ -115,8 +115,10 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
       const authorized = input.authorizationResults
         .filter((result) => !remaining.includes(result))
         .map((result) => result.attemptId);
+      // The result crosses the step boundary, so it carries the challenges, not the in-process
+      // signal whose brand can't be serialized.
       return isAuthorizationSignal(output)
-        ? { kind: "authorization-required", signal: output, authorized }
+        ? { kind: "authorization-required", challenges: output.challenges, authorized }
         : { kind: "result", output, authorized };
     });
   };

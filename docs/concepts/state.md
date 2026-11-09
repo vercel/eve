@@ -42,7 +42,7 @@ export default defineTool({
 });
 ```
 
-`get()` and `update()` require an active eve context. Calling them outside tools, hooks, or framework-managed code throws.
+`get()` and `update()` require an active eve context. They work in tools, hooks, channel handlers, dynamic functions, and OpenTelemetry [`runtimeContext`](../observability/otel#add-runtime-context) resolvers. Calling them outside code eve runs, such as at module scope, throws.
 
 ## Reset state between turns
 
@@ -61,7 +61,7 @@ export default defineHook({
 });
 ```
 
-The hook imports the same module-scope `budget` handle as the tool, so both read and write the same slot.
+The hook imports the same module-scope `budget` handle as the tool, so both read and write the same slot. A `turn.started` hook finishes before the turn's first model call, so the reset is in place before any tool of that turn runs.
 
 ## State is never shared with subagents
 

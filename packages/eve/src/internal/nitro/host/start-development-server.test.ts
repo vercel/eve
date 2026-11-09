@@ -33,10 +33,10 @@ const mocks = vi.hoisted(() => {
   const devServer = {
     close: vi.fn(async () => undefined),
     listen: vi.fn(() => listenerServer),
-    prepareSpareWorker: vi.fn(),
-    replaceWorker: vi.fn(async () => undefined),
+    prepareSpare: vi.fn(),
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
+    swapTo: vi.fn(async () => undefined),
   };
   const closeRebuildCoordinator = vi.fn(async () => undefined);
   const files = new Map<string, string>();
@@ -140,8 +140,8 @@ vi.mock("node:fs/promises", () => ({
   writeFile: mocks.writeFile,
 }));
 
-vi.mock("./drained-nitro-dev-server.js", () => ({
-  DrainedNitroDevServer: mocks.createDevServer,
+vi.mock("./dev-host-supervisor.js", () => ({
+  DevHostSupervisor: mocks.createDevServer,
 }));
 
 vi.mock("./dev-host-candidate.js", () => ({
@@ -491,7 +491,7 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     const handlerOrder = mocks.devServer.setControlHandler.mock.invocationCallOrder[0];
-    const workerOrder = mocks.devServer.replaceWorker.mock.invocationCallOrder[0];
+    const workerOrder = mocks.devServer.swapTo.mock.invocationCallOrder[0];
     const startOrder = mocks.worldInstance.start.mock.invocationCallOrder[0];
     expect(handlerOrder).toBeDefined();
     expect(workerOrder).toBeDefined();

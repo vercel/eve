@@ -9,8 +9,6 @@ interface BundlerLog {
   };
 }
 
-export type BundlerDefaultLogHandler = (level: string, log: unknown) => void;
-
 function normalizePath(value: string): string {
   return value.replaceAll("\\", "/");
 }

@@ -1,18 +1,15 @@
 import { APICallError, jsonSchema, type LanguageModel } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { eventsOf } from "#harness/publication.js";
 import { cascade } from "#harness/session-machine/cascade.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot be written.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamPart =
   Awaited<ReturnType<MockLanguageModelV4["doStream"]>>["stream"] extends ReadableStream<infer Part>
@@ -74,7 +71,8 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
   const violations: unknown[] = [];
   const searchFacts: string[] = [];
   let position = 0;
-  const runStep = createToolLoopHarness({
+  const runStep = createTestKernel({
+    agent: { model: { id: "deferred-result" } },
     handleEvent: async (publication) => {
       // As the session's writer stores them: an owner's end closes what it still holds.
       const facts = cascade(written, eventsOf(publication));
@@ -88,8 +86,7 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
     tools: new Map([["bash", bash]]),
   });
   const session: HarnessSession = {
-    agent: { modelReference: { id: "deferred-result" }, system: "You help Alice.", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:deferred-result",
     history: [],
     sessionId: "deferred-result",

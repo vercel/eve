@@ -6,14 +6,17 @@ on:
       - ".github/workflows/eve-code-benchmark.yml"
       - ".github/scripts/resolve-benchmark-request*"
       - "packages/eve-code/**"
-  # Every eve-code change on main publishes a fresh swe-lean result per harness,
-  # so PRs compare their HEAD against the latest main as the baseline. Pushes do
-  # not run deepswe-lean: its baseline is only as fresh as the last manual
-  # dispatch, so a PR's delta there also includes eve-code changes merged since.
+  # Every eve-code change on main publishes a fresh swe-lean result per harness on
+  # the default model, so PRs compare their HEAD against the latest main as the
+  # baseline. Pushes do not run deepswe-lean or the other model: the weekly
+  # schedule refreshes those baselines, so a PR's delta there can also include
+  # eve-code changes merged since.
   push:
     branches: [main]
     paths:
       - "packages/eve-code/**"
+  schedule:
+    - cron: "0 6 * * 1"
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -21,19 +24,20 @@ on:
       harness:
         description: Comma-separated harnesses to benchmark
         type: string
-        default: eve-code,opencode,pi
+        default: eve-code,opencode,pi,fx
       dataset:
         description: eve-bench dataset to run
         type: choice
         options: [swe-lean, deepswe-lean]
         default: swe-lean
+      model:
+        description: Model family to benchmark
+        type: choice
+        options: [all, anthropic, openai]
+        default: all
 
-# OIDC alternative: add `id-token: write` here and omit `vercel-token` below
-# after configuring a matching Vercel team OIDC policy.
 permissions:
   contents: read
-  actions: read
-  pull-requests: write
 
 jobs:
   request:
@@ -52,6 +56,8 @@ jobs:
       dataset: ${{ steps.request.outputs.dataset }}
       reasoning: ${{ steps.request.outputs.reasoning }}
       attempts: ${{ steps.request.outputs.attempts }}
+      models: ${{ steps.request.outputs.models }}
+      agent-source: ${{ steps.request.outputs.agentSource }}
       sha: ${{ steps.request.outputs.sha }}
       pr: ${{ steps.request.outputs.pr }}
     steps:
@@ -60,23 +66,50 @@ jobs:
           persist-credentials: false
       - id: request
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # Sonnet keeps Anthropic's prompt-cache behavior (tools first, cache writes)
+          # visible at half Opus's price. GPT checks that results hold on a second
+          # model family. Avoid Gemini: opencode drops its tool-call thought
+          # signatures, so it stops reasoning after the first steps there.
+          ANTHROPIC_MODEL: ${{ vars.EVE_CODE_BENCH_MODEL || 'anthropic/claude-sonnet-5.5' }}
+          OPENAI_MODEL: ${{ vars.EVE_CODE_BENCH_OPENAI_MODEL || 'openai/gpt-6.1-sol' }}
         with:
           script: |
             const { pathToFileURL } = await import('node:url');
             const { resolveBenchmarkRequest } = await import(pathToFileURL(
               `${process.env.GITHUB_WORKSPACE}/.github/scripts/resolve-benchmark-request.mjs`).href);
-            const request = await resolveBenchmarkRequest({ github, context });
+            const models = { anthropic: process.env.ANTHROPIC_MODEL, openai: process.env.OPENAI_MODEL };
+            const request = await resolveBenchmarkRequest({ github, context, models });
             core.setOutput('run', Boolean(request));
             if (request) for (const [key, value] of Object.entries(request)) core.setOutput(key, value);
 
   benchmark:
-    name: Benchmark harness
+    name: Benchmark harness (${{ matrix.family }})
     needs: request
     if: needs.request.outputs.run == 'true'
     concurrency:
-      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
-      cancel-in-progress: true
+      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-${{ matrix.family }}
+      # A newer PR head or comment supersedes a PR run. Runs on main publish
+      # baselines, so they queue instead of cancelling each other.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'issue_comment' }}
+    # One job per model family, one at a time: Vercel Sandbox rate-limits vCPU
+    # allocation, and two families at once fail trials with HTTP 429. Results and
+    # baselines are stored per model, so the families are never compared.
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.request.outputs.models) }}
     runs-on: ubuntu-latest
+    environment:
+      name: eve-bench
+      deployment: false
+    # OIDC alternative: add `id-token: write` here and omit `vercel-token` below
+    # after configuring a matching Vercel team OIDC policy.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     # Trials run in waves of up to 16 sandboxes; each trial can take up to its
     # dataset's agent timeout (20 minutes on deepswe-lean) plus preparation and
     # verification.
@@ -97,16 +130,15 @@ jobs:
         uses: ./.eve-bench-action
         with:
           harness: ${{ needs.request.outputs.harness }}
-          agent-repository: vercel/eve
-          agent-paths: '["packages/eve-code"]'
-          agent-ref: ${{ needs.request.outputs.sha }}
+          # Only eve-code reads the agent source; eve-bench rejects these inputs
+          # for a run of other harnesses alone.
+          agent-repository: ${{ needs.request.outputs.agent-source == 'true' && 'vercel/eve' || '' }}
+          agent-paths: ${{ needs.request.outputs.agent-source == 'true' && '["packages/eve-code"]' || '' }}
+          agent-ref: ${{ needs.request.outputs.agent-source == 'true' && needs.request.outputs.sha || '' }}
           dataset: ${{ needs.request.outputs.dataset }}
           # The PR comment's ranking tables show these plus each dimension's winner.
-          contenders: eve-code@baseline,eve-code@head
-          # Sonnet keeps Anthropic's prompt-cache behavior (tools first, cache writes)
-          # visible at half Opus's price. Avoid Gemini: opencode drops its tool-call
-          # thought signatures, so it stops reasoning after the first steps there.
-          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'anthropic/claude-sonnet-5.5' }}
+          contenders: ${{ needs.request.outputs.agent-source == 'true' && 'eve-code@baseline,eve-code@head' || '' }}
+          model: ${{ matrix.model }}
           # Reasoning and attempts are calibrated per dataset; see
           # .github/scripts/resolve-benchmark-request.mjs.
           reasoning: ${{ needs.request.outputs.reasoning }}
@@ -115,9 +147,11 @@ jobs:
           concurrency: "16"
           native-build: "false"
           # Baselines and cross-harness references resolve automatically from the
-          # durable result store; only dispatch/push/schedule runs publish to it.
+          # durable result store. Only dispatch, push, and schedule runs on main
+          # publish to it (`auto`); a dispatch on another branch does not.
           blob-token: ${{ secrets.EVE_BENCH_BLOB_READ_WRITE_TOKEN }}
-          artifact-name: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
+          publish: ${{ github.ref == 'refs/heads/main' && 'auto' || 'false' }}
+          artifact-name: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-${{ matrix.family }}
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           github-token: ${{ github.token }}
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
@@ -127,43 +161,82 @@ jobs:
   docs-snapshot:
     name: Refresh docs benchmark results
     needs: [request, benchmark]
-    # The docs report deepswe-lean only, which runs from manual dispatches on main;
-    # only trusted main runs publish to the result store.
+    # The docs report deepswe-lean on the default (Anthropic) model only: their
+    # component renders one model per dataset. deepswe-lean runs weekly and from
+    # manual dispatches on main; only trusted main runs publish to the result store.
+    # Another family's failure does not hold back the default family's refresh.
     if: >-
+      !cancelled() &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_dispatch' &&
-      needs.request.outputs.dataset == 'deepswe-lean'
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.request.outputs.dataset == 'deepswe-lean' &&
+      contains(fromJSON(needs.request.outputs.models).*.family, 'anthropic')
     concurrency:
       group: eve-code-docs-snapshot
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    # Main only accepts changes through a pull request with passing checks, so
+    # the job commits to a bot branch and opens a PR the same way changesets
+    # opens the Version Packages PR: with GITHUB_TOKEN.
     permissions:
       contents: write
+      pull-requests: write
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Download benchmark report
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
-        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # Merge onto the newest main so a concurrent refresh of the other dataset
-      # is never overwritten. createCommitOnBranch commits are signed by GitHub,
-      # which satisfies the signed-commit requirement without a bot signing key.
-      - name: Commit snapshot to main
+      # The branch restarts from the newest main on every refresh, so the PR
+      # holds one commit and never conflicts. createCommitOnBranch commits are
+      # signed by GitHub, which satisfies the signed-commit rule without a bot
+      # signing key. The snapshot script keeps generatedAt when the results are
+      # unchanged, so an identical report opens no PR.
+      - name: Open snapshot pull request
         env:
           GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-anthropic
           FILE: apps/docs/lib/evals/eve-code-benchmark.json
+          BRANCH: bot/eve-code-benchmark-snapshot
+          TITLE: "chore: refresh eve-code benchmark results"
         run: |
+          set -euo pipefail
+          if ! gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench" ||
+            [ ! -f "$RUNNER_TEMP/bench/report.json" ]; then
+            echo "::notice::eve-code docs snapshot not updated: the run uploaded no $ARTIFACT report."
+            exit 0
+          fi
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" -q .object.sha)
           gh api "repos/$GITHUB_REPOSITORY/contents/$FILE?ref=$head" -H "Accept: application/vnd.github.raw" > "$FILE"
           cp "$FILE" "$RUNNER_TEMP/before.json"
           node .github/scripts/eve-code-docs-snapshot.mjs "$RUNNER_TEMP/bench/report.json" "$FILE"
           if cmp -s "$FILE" "$RUNNER_TEMP/before.json"; then exit 0; fi
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" > /dev/null
+          fi
           HEAD_OID="$head" node .github/scripts/eve-code-docs-snapshot.mjs --commit-payload "$FILE" > "$RUNNER_TEMP/commit.json"
           gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          cat > "$RUNNER_TEMP/body.md" <<EOF
+          Refreshes \`$FILE\` from the deepswe-lean \`anthropic\` report of $run_url.
+
+          GitHub holds workflow runs on pull requests that \`GITHUB_TOKEN\` opens until a maintainer approves them. To run the required checks, select **Approve workflows to run** on this PR, as on the Version Packages PR. Then review and approve the PR; auto-merge squashes it once checks pass.
+
+          Every refresh resets \`$BRANCH\` to \`main\`, so do not push other changes to it.
+          EOF
+          pr=$(gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json url -q '.[0].url // empty')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
+          else
+            pr=$(gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md")
+          fi
+          echo "Snapshot pull request: $pr"
+          gh pr merge "$pr" -R "$GITHUB_REPOSITORY" --auto --squash \
+            --body "Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" ||
+            echo "::notice::Auto-merge was not enabled on $pr; merge it after approval."

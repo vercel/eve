@@ -6,11 +6,12 @@ import type { SandboxNetworkOptions } from "#shared/sandbox-network-policy.js";
  * (template during preparation, session at first creation).
  * Skipped on resume (`Sandbox.get`) since no create happens there.
  *
- * `networkPolicy` is deferred until after framework-owned base setup
- * for fresh templates and template-less sessions, so eve can install
- * required packages before authored environment preparation runs. Template-backed
- * session creates receive it at creation time because the template
- * already contains the prepared base runtime.
+ * Fresh templates receive `networkPolicy` after framework-owned base setup,
+ * before authored environment preparation runs. Session sandboxes receive
+ * it at creation time, including when no template snapshot is used. Base
+ * setup only checks local runtime paths and does not need network access.
+ * Reopening a session keeps its live policy, including changes made through
+ * `setNetworkPolicy()`.
  *
  * Framework-injected fields (`name`, `onResume`, `persistent`, `signal`)
  * are excluded: the framework owns those and overrides any

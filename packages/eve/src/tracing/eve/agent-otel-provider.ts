@@ -24,6 +24,7 @@ import type {
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,
   InstrumentationSessionEndedEvent,
+  InstrumentationTraceContext,
   InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
@@ -35,6 +36,7 @@ import {
   readGatewayCostData,
 } from "#tracing/eve/gateway.js";
 import type {
+  AgentRun,
   AgentSpanIdGenerator,
   AgentTelemetry,
   AttemptOperation,
@@ -66,6 +68,11 @@ interface AgentOtelInstrumentation {
   readonly prepareTurnTrace: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readonly readTurnTraceContext: (
+    sessionId: string,
+    turnId: string,
+  ) => Promise<InstrumentationTraceContext | undefined>;
+  readonly decision: AgentRun["decision"];
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -115,6 +122,7 @@ export function createAgentOtelInstrumentation(
   const approvals = createAgentApprovalInstrumentation({
     tracing,
     actionStateFor: tools.stateFor,
+    turnFor: (sessionId, turnId) => sessionTracing.turnFor(sessionId, turnId),
   });
   const memory = createAgentMemoryInstrumentation({ ...input, environment, tracing });
 
@@ -251,10 +259,13 @@ export function createAgentOtelInstrumentation(
       },
       name: "eve.otel",
       projectEvent: capturePolicy.projectEvent,
+      receivesTurnScopes: true,
       tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
     },
     prepareSessionTrace,
     prepareTurnTrace,
+    readTurnTraceContext: sessionTracing.readTurnTraceContext,
+    decision: tracing.decision,
     async runInContext(operation, execute) {
       if (operation.type === "memory.operation") return memory.runInContext(operation, execute);
       const ceiling = { emit: true, ...(await capturePolicy.forOperation(operation.scope)) };

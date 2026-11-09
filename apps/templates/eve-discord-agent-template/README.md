@@ -47,7 +47,7 @@ Edit the agent's behavior in `agent/instructions.md`, its tools in `agent/tools/
 
 ## Learn more
 
-This project uses the eve framework's bundled guides. After installing dependencies, see `node_modules/eve/dist/docs/public/`.
+This project uses the eve framework's bundled guides. After installing dependencies, see `node_modules/eve/docs/`.
 
 - [eve documentation](https://eve.dev/docs) - learn about eve features and API.
 - [Discord channel](https://eve.dev/docs/channels/discord) - the channel, the Gateway relay, and their options.

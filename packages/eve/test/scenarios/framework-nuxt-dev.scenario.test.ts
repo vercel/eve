@@ -1,39 +1,22 @@
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scenario-apps/nuxt-eve-service.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { stopChildProcess, waitForCondition } from "./dev-server-harness.js";
+import {
+  fetchStatus,
+  findFreePort,
+  stopChildProcess,
+  waitForCondition,
+} from "./dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
 const NUXT_EVE_SERVICE_DESCRIPTOR = createNuxtEveServiceDescriptor({
   installDependencies: true,
 });
-
-async function findFreePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  if (address === null || typeof address === "string") {
-    throw new Error("Expected a TCP address for the free-port probe.");
-  }
-  return address.port;
-}
-
-async function fetchStatus(url: string): Promise<number | undefined> {
-  try {
-    const response = await fetch(url);
-    await response.body?.cancel();
-    return response.status;
-  } catch {
-    return undefined;
-  }
-}
 
 describe("framework-nuxt dev", () => {
   it("serves the auto-imported useEveAgent from Vite's pre-bundled dependencies", async () => {

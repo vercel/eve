@@ -1,6 +1,8 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import type { RolldownPluginOption } from "rolldown";
+
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 
 const ENTRY = "\0eve-test-entry";
 
@@ -22,7 +24,7 @@ function fileKey(id: string): string {
  * and many packages are, so only a plugin can keep their top-level code.
  */
 export async function bundleThroughPlugins(input: {
-  readonly plugins: readonly unknown[];
+  readonly plugins: readonly RolldownPluginOption[];
   readonly imports?: readonly string[];
   readonly reexports?: readonly string[];
   readonly files?: Readonly<Record<string, string>>;

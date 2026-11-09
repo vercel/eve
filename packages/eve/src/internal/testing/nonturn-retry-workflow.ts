@@ -1,9 +1,11 @@
+import { transition } from "#harness/session-machine/commit.js";
 import {
   getStepMetadata,
   getWorkflowMetadata,
   getWritable,
 } from "#compiled/@workflow/core/index.js";
 import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
+import { commitOf } from "#harness/session-machine/commit.js";
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { fact } from "#harness/facts.js";
@@ -22,7 +24,7 @@ async function publishStart(context: Record<string, unknown>, failBeforePublicat
       sessionState: createTestSessionState({ sessionId }),
       sessionWritable: getWritable<Uint8Array>(),
     },
-    [fact("session.started", {})],
+    [commitOf([fact("session.started", {})])],
   );
 }
 
@@ -31,7 +33,9 @@ async function publishNext(
 ) {
   "use step";
   await publishSessionEvents({ ...input, sessionWritable: getWritable<Uint8Array>() }, [
-    fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
+    commitOf([
+      fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
+    ]),
   ]);
 }
 
@@ -51,18 +55,18 @@ async function commitTwice(context: Record<string, unknown>) {
   };
   const started = await commitSessionStep(
     initial,
-    (view) => [{ events: [fact("session.started", {})], turn: view.turn }],
+    (view) => [transition({ events: [fact("session.started", {})], turn: view.turn })],
     { origin: "own" },
   );
   await commitSessionStep(
     { ...initial, ...started },
     (view) => [
-      {
+      transition({
         events: [
           fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
         ],
         turn: view.turn,
-      },
+      }),
     ],
     { origin: "own" },
   );
@@ -114,14 +118,16 @@ async function publishRunning(
 ) {
   "use step";
   return await publishSessionEvents({ ...start, sessionWritable: getWritable<Uint8Array>() }, [
-    fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
-    fact("model.requested", { runId: "model", owner: { turnId: "turn_0" } }),
-    fact("call.requested", {
-      callId: "long_call",
-      owner: { runId: "model" },
-      capability: { kind: "tool", name: "long-running" },
-    }),
-    fact("call.started", { callId: "long_call" }),
+    commitOf([
+      fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
+      fact("model.requested", { runId: "model", owner: { turnId: "turn_0" } }),
+      fact("call.requested", {
+        callId: "long_call",
+        owner: { runId: "model" },
+        capability: { kind: "tool", name: "long-running" },
+      }),
+      fact("call.started", { callId: "long_call" }),
+    ]),
   ]);
 }
 
@@ -166,19 +172,19 @@ async function publishLessOnRetry(
       if (getStepMetadata().attempt > 1 && replay === "none") return {};
       const started = await commitSessionStep(
         state,
-        (view) => [{ events: [fact("session.started", {})], turn: view.turn }],
+        (view) => [transition({ events: [fact("session.started", {})], turn: view.turn })],
         { origin: "own" },
       );
       if (getStepMetadata().attempt > 1) return started;
       await commitSessionStep(
         { ...state, ...started },
         (view) => [
-          {
+          transition({
             events: [
               fact("turn.started", { turnId: "turn_0", follows: null, cause: { policy: "test" } }),
             ],
             turn: view.turn,
-          },
+          }),
         ],
         { origin: "own" },
       );
@@ -192,7 +198,7 @@ async function settleTurn(
 ) {
   "use step";
   await publishSessionEvents({ ...input, sessionWritable: getWritable<Uint8Array>() }, [
-    fact("turn.settled", { turnId: "turn_0", outcome: "completed" }),
+    commitOf([fact("turn.settled", { turnId: "turn_0", outcome: "completed" })]),
   ]);
 }
 

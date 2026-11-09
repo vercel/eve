@@ -12,8 +12,14 @@ import {
 } from "../common.js";
 import type { Cause, Envelope, ErrorInfo, JsonValue, ValueReference } from "../envelope.js";
 
-/** What a call belongs to: the model run that made it, or the call it runs inside. */
-export type CallOwner = { readonly runId: string } | { readonly callId: string };
+/**
+ * What made a call: a model run, the call it runs inside, or its turn, for a call no model run
+ * asked for. A newer eve can add one.
+ */
+export type CallOwner =
+  | { readonly runId: string }
+  | { readonly callId: string }
+  | { readonly turnId: string };
 
 /**
  * What a call can invoke: a tool, an agent, a skill to load, or `control`, the model managing its
@@ -29,6 +35,11 @@ export interface Capability {
   readonly label?: string;
   /** An `agent` another deployment serves: a remote agent, not a subagent of this one. */
   readonly remote?: true;
+  /**
+   * Its tool set `label: false`: readers showing activity leave the call out, as they do `control`
+   * calls.
+   */
+  readonly hidden?: true;
 }
 
 /** A preview of a call's input as the model writes it. The first record announces the call. */
@@ -94,7 +105,9 @@ export type CallSettled = Envelope<"call.settled", CallSettledData>;
 export type CallFact = CallRequested | CallStarted | CallSettled;
 export type CallProgressRecord = CallInput | CallProgress;
 
-const owner = conforming<CallOwner>()(z.union([z.object({ runId: id }), z.object({ callId: id })]));
+const owner = conforming<CallOwner>()(
+  z.union([z.object({ runId: id }), z.object({ callId: id }), z.object({ turnId: id })]),
+);
 
 export const clearedBySchema = conforming<ClearedBy>()(
   z.union([z.object({ policy: z.string() }), z.object({ interactionId: id })]),
@@ -111,6 +124,7 @@ export const callSchemas = {
           name: z.string(),
           remote: z.literal(true).optional(),
           label: z.string().optional(),
+          hidden: z.literal(true).optional(),
         }),
         input: jsonValue.optional(),
         inputError: errorInfo.optional(),

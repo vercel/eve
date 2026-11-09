@@ -22,8 +22,10 @@ export interface Span {
     exception: Error | string | { message?: string; name?: string; stack?: string },
   ): void;
   setAttribute(key: string, value: AttributeValue): this;
+  setAttributes(attributes: Attributes): this;
   setStatus(status: { code: SpanStatusCode; message?: string | undefined }): this;
   spanContext(): SpanContext;
+  updateName(name: string): this;
 }
 
 export interface Link {

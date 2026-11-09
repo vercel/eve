@@ -1,6 +1,5 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, ErrorInfo, JsonValue } from "#protocol/session-events/envelope.js";
-import type { FactOf } from "#protocol/session-events/facts.js";
+import type { FactOf, Progress } from "#protocol/session-events/facts.js";
 import type {
   Capability,
   CapabilityKind,
@@ -17,8 +16,15 @@ import { defined, fact } from "#harness/facts.js";
 // The facts for one call, built where the call streams and runs: what the model asked for, that
 // it started, and how it settled. Calls never reach the wire any other way.
 
-/** What a call invokes: a tool, an agent, the skill it loads, or a task control, with its label. */
-export function capabilityOf(action: RuntimeActionRequest, label?: string): Capability {
+/**
+ * What a call invokes: a tool, an agent, the skill it loads, or a task control, with its label, or
+ * `hidden` when its tool keeps it out of activity.
+ */
+export function capabilityOf(
+  action: RuntimeActionRequest,
+  label?: string,
+  hidden?: boolean,
+): Capability {
   const capability: Capability =
     action.kind === "load-skill"
       ? { kind: "skill", name: action.name }
@@ -27,6 +33,7 @@ export function capabilityOf(action: RuntimeActionRequest, label?: string): Capa
         : action.kind === "remote-agent-call"
           ? { kind: "agent", name: action.name, remote: true }
           : { kind: toolKind(action.toolName), name: action.toolName };
+  if (hidden === true) return { ...capability, hidden: true };
   return label === undefined ? capability : { ...capability, label };
 }
 
@@ -51,12 +58,13 @@ export function callRequested(input: {
   readonly action: RuntimeActionRequest;
   readonly owner: CallOwner;
   readonly label?: string;
+  readonly hidden?: boolean;
   readonly inputError?: ErrorInfo;
 }): FactOf<"call.requested"> {
   const { action, inputError } = input;
   return fact("call.requested", {
     callId: action.callId,
-    capability: capabilityOf(action, input.label),
+    capability: capabilityOf(action, input.label, input.hidden),
     input: inputError === undefined ? toJsonValue(action.input) : undefined,
     inputError,
     owner: input.owner,
@@ -94,8 +102,11 @@ export function callSettledFrom(
 }
 
 /** A call's partial output, as progress. */
-export function callProgress(callId: string, output: unknown, label?: string): SessionEvent {
-  return { data: defined({ callId, output: toJsonValue(output), label }), type: "call.progress" };
+export function callProgress(callId: string, output: unknown, label?: string): Progress {
+  return {
+    data: defined({ callId, output: toJsonValue(output), label }),
+    type: "call.progress",
+  } as Progress;
 }
 
 /** A value as the wire carries it: JSON, with anything else as its string form. */

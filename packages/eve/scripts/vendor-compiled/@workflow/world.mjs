@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { collectFilesRecursively, createDeclarationCopier } from "../_shared.mjs";
 
@@ -11,12 +12,10 @@ async function discoverDeclarationFiles({ distDir }) {
 }
 
 /**
- * Type-only vendored copy of `@workflow/world`. `@workflow/core`'s runtime
- * JS bundles world directly, so nothing imports this module's `index.js` at
- * runtime — it exists purely so core's vendored `.d.ts` files can resolve
- * `World`, `WorkflowRun`, `Event`, `Hook`, and friends against the real
- * upstream declarations instead of a hand-written stub that drifts on every
- * bump.
+ * Vendor the hook schema used to validate inbox handles, the start Hook id a
+ * session's claimed address is resumed by, and the full upstream
+ * declarations used by core's vendored types. Share runtime chunks with core
+ * so descriptor validation uses the same schema without duplicating it.
  *
  * The declaration tree only reaches `zod` (and the `zod/v4` subpath, which is
  * the same v4 surface in zod >= 4); both rewrite to eve's vendored zod. These
@@ -27,7 +26,13 @@ async function discoverDeclarationFiles({ distDir }) {
 export default {
   packageName: "@workflow/world",
   compiledPath: "@workflow/world",
-  typeOnly: true,
+  chunkGroup: "workflow",
+  entries: [
+    {
+      input: fileURLToPath(new URL("../entries/workflow-world.mjs", import.meta.url)),
+      outputPath: "index",
+    },
+  ],
   copyDeclarations: createDeclarationCopier({
     files: discoverDeclarationFiles,
     rewrites: {

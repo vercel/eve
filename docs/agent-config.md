@@ -510,6 +510,7 @@ During `eve dev`, packages listed in `externalDependencies` use normal Node.js r
 | ----------------------------- | -------------------------------------------------------------------------------- |
 | Instructions prompt           | `agent/instructions.md`, [Instructions](./instructions)                          |
 | Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools)                                             |
+| Agent-wide approval policy    | `approval` in `agent.ts`, [Human-in-the-Loop](./human-in-the-loop)               |
 | Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection) |
 | Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox)                                           |
 | Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./observability/instrumentation)     |

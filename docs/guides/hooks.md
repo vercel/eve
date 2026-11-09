@@ -29,6 +29,8 @@ The `events` map keys each handler by event type, and `*` matches every event. A
 
 Handlers can call external services, cancel the running turn, and [continue a finished turn](#continue-a-turn-from-a-hook) with a new message. They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
+Import the SDK clients that a handler calls inside the handler, not at the top of the file. See [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
+
 ## Hook structure and context
 
 Every handler receives a `HookContext`, which includes the shared [session context](./session-context) helpers. `HookContext<K>` is keyed by the handler's event key. Only `turn.settled` and `*` handlers get `continue`, so type a helper that calls it as `HookContext<"turn.settled">`:
@@ -168,6 +170,40 @@ eve handles each recorded line of the stream in this order:
 4. Cancellation. A cancel requested with `ctx.cancel()` takes effect after the handlers return.
 
 Hooks run after the line is saved, so a hook that throws can't corrupt the stream. [Dynamic functions](./dynamic-capabilities) don't subscribe to events; they run before each model call.
+
+The turn waits for a line's hooks before it continues. A `turn.started` hook finishes before the turn's first model call, so [state](../concepts/state) it writes is what the turn's dynamic functions, tools, and [OpenTelemetry `runtimeContext`](../observability/otel#add-runtime-context) read. This lets a hook decide something once per turn, such as a model rollout keyed on the session, and every model call of the turn use it:
+
+```ts title="agent/lib/turn-model.ts"
+import { defineState } from "eve/context";
+
+export const turnModel = defineState("my-agent.turn-model", () => "openai/gpt-5.4-mini");
+```
+
+```ts title="agent/hooks/choose-model.ts"
+import { defineHook } from "eve/hooks";
+import { modelForSession } from "../lib/rollout";
+import { turnModel } from "../lib/turn-model";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      const model = await modelForSession(ctx.session.id);
+      turnModel.update(() => model);
+    },
+  },
+});
+```
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+import { turnModel } from "./lib/turn-model";
+
+export default defineAgent({
+  model: defineDynamic(() => turnModel.get()),
+});
+```
+
+A message that steers a running turn doesn't start a new turn, so the hook doesn't run again until the next one.
 
 ## What happens when a hook throws
 

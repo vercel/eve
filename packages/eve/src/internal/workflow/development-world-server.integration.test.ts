@@ -307,12 +307,14 @@ describe("parent development Workflow World", () => {
       await first.close();
     }
     const deliveries: string[] = [];
+    const messages: unknown[] = [];
     process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       const message = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)) as {
         runId: string;
       };
       deliveries.push(message.runId);
+      messages.push(message);
       return Response.json({ ok: true });
     }) as typeof fetch;
     let activeGenerationId = "retained";
@@ -327,6 +329,10 @@ describe("parent development Workflow World", () => {
       await expect
         .poll(() => [...deliveries].sort())
         .toEqual([runIds[0], runIds[2], runIds[3], runIds[4]].sort());
+      // The restart lost the runs' queued step messages and wait timers.
+      for (const message of messages) {
+        expect(message).toMatchObject({ recovery: true, runSpecVersion: 6 });
+      }
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining('"invalid-json": Development generation metadata is invalid.'),
       );

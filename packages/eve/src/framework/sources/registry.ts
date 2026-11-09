@@ -9,7 +9,7 @@ import {
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 
-const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v53`;
+const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v54`;
 
 const localDefaults = defineProgrammaticAgentSource({
   id: "eve:defaults",
@@ -32,6 +32,10 @@ const localDefaults = defineProgrammaticAgentSource({
     {
       logicalPath: "tools/write_file.ts",
       loadNamespace: () => import("#tools/provided/write-file.js"),
+    },
+    {
+      logicalPath: "tools/edit_file.ts",
+      loadNamespace: () => import("#tools/provided/edit-file.js"),
     },
     {
       logicalPath: "tools/web_fetch.ts",
@@ -63,60 +67,15 @@ const rootDefaults = defineProgrammaticAgentSource({
   ],
 });
 
-const scheduleCollectionWrapperTemplateSource = defineProgrammaticAgentSource({
-  id: "eve:schedule-collection-wrapper",
-  revision,
-  modules: [
-    {
-      logicalPath: "tools/schedule-collection-wrapper.ts",
-      loadNamespace: async (context) => {
-        const { loadScheduleCollectionWrapperNamespace } =
-          await import("#framework/sources/modules/schedule-collection-wrapper.js");
-        return await loadScheduleCollectionWrapperNamespace(context);
-      },
-    },
-  ],
-});
-
-const memoryWrapperTemplateSource = defineProgrammaticAgentSource({
-  id: "eve:memory-wrapper",
-  revision,
-  modules: [
-    {
-      logicalPath: "tools/memory-wrapper.ts",
-      loadNamespace: async (context) => {
-        const { loadMemoryWrapperNamespace } =
-          await import("#framework/sources/modules/memory-wrapper.js");
-        return await loadMemoryWrapperNamespace(context);
-      },
-    },
-  ],
-});
-
-export const frameworkAgentSourceRegistry: AgentSourceRegistry = createAgentSourceRegistry(
-  [
-    { applyTo: "all-local-nodes", source: localDefaults },
-    { applyTo: "root", source: rootDefaults },
-  ],
-  { templates: [memoryWrapperTemplateSource, scheduleCollectionWrapperTemplateSource] },
-);
-
-export const memoryWrapperTemplate = frameworkAgentSourceRegistry.templates.get(
-  memoryWrapperTemplateSource.id,
-)!;
-export const scheduleCollectionWrapperTemplate = frameworkAgentSourceRegistry.templates.get(
-  scheduleCollectionWrapperTemplateSource.id,
-)!;
+export const frameworkAgentSourceRegistry: AgentSourceRegistry = createAgentSourceRegistry([
+  { applyTo: "all-local-nodes", source: localDefaults },
+  { applyTo: "root", source: rootDefaults },
+]);
 
 export async function loadFrameworkProgrammaticModule(
   backing: Extract<AgentModuleBacking, { readonly kind: "programmatic" }>,
-  dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>,
 ): Promise<ProgrammaticModuleNamespace> {
   return memoizeModuleNamespaceFactories(
-    await loadProgrammaticModuleNamespace({
-      backing,
-      dependencyNamespaces,
-      registries: [frameworkAgentSourceRegistry],
-    }),
+    await loadProgrammaticModuleNamespace({ backing, registries: [frameworkAgentSourceRegistry] }),
   );
 }

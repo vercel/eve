@@ -29,6 +29,7 @@ function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
     externals: NO_EXTERNALS,
     extensionMounts: [],
     extensionOverridePaths: new Map(),
+    runtimeModules: [],
     workflowArtifacts: {
       stepTargets: [],
       stepsPath: `${WORKFLOW_DIR}/steps.mjs`,

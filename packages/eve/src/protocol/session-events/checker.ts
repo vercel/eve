@@ -17,6 +17,7 @@ import {
 } from "./catalog.js";
 import type { StoredLine } from "./envelope.js";
 import type { Fact, Progress } from "./facts.js";
+import type { CallStartedData } from "./families/call.js";
 import { copyView, emptySessionView, foldReceivedEvent } from "../session-projection/fold.js";
 import type { InteractionRow, SessionView } from "../session-projection/tables.js";
 import {
@@ -57,7 +58,8 @@ export type ViolationRule =
   | "progress"
   | "paused-on-person"
   | "serves-running-task"
-  | "batch-settles-together";
+  | "batch-settles-together"
+  | "cleared-before-start";
 
 export interface StreamChecker {
   /** Checks the next line. Positions must increase; a repeated position is a duplicate, skipped. */
@@ -237,6 +239,7 @@ export function createStreamChecker(
           );
       }
     }
+    if (fact.type === "call.started") checkCleared(fact.data, fail);
     if (fact.type === "call.started" && fact.data.taskId !== undefined) {
       if (view.tasks[fact.data.taskId]?.status === "ended")
         fail(
@@ -256,9 +259,24 @@ export function createStreamChecker(
         return undefined;
       case "complete": {
         if (row !== undefined) fail("one-terminal", `${family} "${id}" completes twice.`);
-        const run = refOf({ runId: String(data.runId) })!;
-        if (rowOf(view, run.family, run.id) !== undefined && !isOpen(view, run))
-          fail("closure", `${family} "${id}" completes after its run settled.`);
+        // A part no run wrote belongs to the turn its scope names.
+        const owner =
+          data.runId !== undefined
+            ? refOf({ runId: String(data.runId) })
+            : refOf(fact.scope?.turnId === undefined ? undefined : { turnId: fact.scope.turnId });
+        if (owner === undefined) {
+          fail("schema", `${family} "${id}" names no run, and its scope names no turn.`);
+          return undefined;
+        }
+        // The reference check above covers `data.runId`, but not a turn named only in scope.
+        if (rowOf(view, owner.family, owner.id) === undefined) {
+          if (data.runId === undefined)
+            fail(
+              "introduce-before-reference",
+              `${family} "${id}" names turn "${owner.id}" before it was introduced.`,
+            );
+        } else if (!isOpen(view, owner))
+          fail("closure", `${family} "${id}" completes after its ${owner.family} settled.`);
         return undefined;
       }
       case "updates":
@@ -322,6 +340,46 @@ export function createStreamChecker(
           index,
         });
     });
+  }
+
+  /**
+   * A call a person was asked about starts only once its latest approval is accepted, and names
+   * that approval as what cleared it. A relayed approval asked about the child's call, not this one.
+   */
+  function checkCleared(
+    data: CallStartedData,
+    fail: (rule: ViolationRule, message: string) => void,
+  ): void {
+    const { callId, clearedBy } = data;
+    const own = Object.values(view.interactions)
+      .filter(
+        (row) =>
+          row.request.kind === "approval" &&
+          row.origin === undefined &&
+          "callId" in row.subject &&
+          row.subject.callId === callId,
+      )
+      .sort((a, b) => a.introducedAt - b.introducedAt);
+    const named =
+      clearedBy !== undefined && "interactionId" in clearedBy ? clearedBy.interactionId : undefined;
+    const latest = own.at(-1);
+    if (latest === undefined) {
+      if (named !== undefined)
+        fail("cleared-before-start", `call "${callId}" names "${named}", not an approval of it.`);
+      return;
+    }
+    if (own.some((row) => row.status === "open"))
+      fail("cleared-before-start", `call "${callId}" starts while its approval is open.`);
+    else if (latest.outcome !== "accepted")
+      fail(
+        "cleared-before-start",
+        `call "${callId}" starts after its approval settled "${String(latest.outcome)}".`,
+      );
+    else if (named !== latest.interactionId)
+      fail(
+        "cleared-before-start",
+        `call "${callId}" starts cleared by ${JSON.stringify(clearedBy ?? null)}, not by its approval "${latest.interactionId}".`,
+      );
   }
 
   /** A run's attempts go up, one `model.started` each; `model.retried` names the current one. */

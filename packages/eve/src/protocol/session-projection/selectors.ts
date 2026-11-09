@@ -13,6 +13,7 @@ import {
   refOf,
   rowOf,
 } from "#protocol/session-projection/tree.js";
+import type { CallOwner, Capability } from "#protocol/session-events/families/call.js";
 import type { InteractionSubject } from "#protocol/session-events/families/interaction.js";
 import type {
   CallRow,
@@ -433,6 +434,14 @@ export function callLabel(
   );
 }
 
+/**
+ * Whether readers showing activity show a call, from its capability or observation: not eve's task
+ * controls, and not a call whose tool set `label: false`.
+ */
+export function showsActivity(call: Pick<Capability, "kind" | "hidden">): boolean {
+  return call.kind !== "control" && call.hidden !== true;
+}
+
 /** What the session is doing right now, for status lines. */
 export type Activity =
   | { readonly kind: "idle" }
@@ -458,12 +467,14 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   if (waits?.on === "interaction")
     return { interactions: waits.interactions, kind: "waiting-on-interaction" };
   if (waits?.on === "work") {
-    const working = waits.tasks;
+    const working = waits.tasks.filter((task) => {
+      const starter = view.calls[task.startedBy.callId];
+      return starter === undefined || showsActivity(starter.capability);
+    });
     if (working.length > 0) return { kind: "waiting-on-tasks", tasks: working };
-    return {
-      kind: "calling",
-      names: waits.calls.map((entry) => callLabel(entry)),
-    };
+    const shown = waits.calls.filter((entry) => showsActivity(entry.capability));
+    if (shown.length === 0 && waits.calls.length > 0) return { kind: "thinking" };
+    return { kind: "calling", names: shown.map((entry) => callLabel(entry)) };
   }
   // A run stays open while the calls it made run in its step: a started call no task serves is
   // the turn's activity. A call only requested, such as an agent call before its task starts or
@@ -471,7 +482,7 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   const running = Object.values(view.calls).filter(
     (entry) =>
       entry.status === "running" &&
-      entry.capability.kind !== "control" &&
+      showsActivity(entry.capability) &&
       callTask(view, entry) === undefined &&
       callTurn(view, entry) === row.turnId,
   );
@@ -482,20 +493,32 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
 
 /** The run that made a call, directly or through the calls it was made inside. */
 export function callRun(view: SessionView, entry: CallRow): string | undefined {
+  const owner = callOwnerRoot(view, entry);
+  return owner !== undefined && "runId" in owner ? owner.runId : undefined;
+}
+
+/**
+ * What made a call in the end: past the calls it runs inside, the run or turn that made the
+ * outermost one. `undefined` when the chain breaks or loops.
+ */
+function callOwnerRoot(view: SessionView, entry: CallRow): CallOwner | undefined {
   const seen = new Set<string>();
   let current: CallRow | undefined = entry;
   while (current !== undefined && !seen.has(current.callId)) {
     seen.add(current.callId);
-    if ("runId" in current.owner) return current.owner.runId;
+    if (!("callId" in current.owner)) return current.owner;
     current = view.calls[current.owner.callId];
   }
   return undefined;
 }
 
-/** The turn a call belongs to: the turn of the run that made it. */
+/** The turn a call belongs to: the turn of the run that made it, or the turn that made it. */
 export function callTurn(view: SessionView, entry: CallRow): string | undefined {
-  const runId = callRun(view, entry);
-  return runId === undefined || view.runs[runId] === undefined ? undefined : runTurn(view, runId);
+  const owner = callOwnerRoot(view, entry);
+  if (owner === undefined) return undefined;
+  if ("turnId" in owner) return owner.turnId;
+  if (!("runId" in owner)) return undefined;
+  return view.runs[owner.runId] === undefined ? undefined : runTurn(view, owner.runId);
 }
 
 /** The task serving a call, directly or through a call it was made inside. */
@@ -506,6 +529,11 @@ export function callTask(view: SessionView, entry: CallRow): string | undefined 
 /** The turn a run belongs to: the turn that requested it, or the turn its context change is in. */
 export function runTurn(view: SessionView, runId: string): string | undefined {
   return ownerOf(view, { family: "run", id: runId }, "turn");
+}
+
+/** The turn a part belongs to: its run's, or the turn that wrote it when no run did. */
+export function partTurn(view: SessionView, row: PartRow): string | undefined {
+  return row.runId === undefined ? row.turnId : runTurn(view, row.runId);
 }
 
 /** What an owner leaves open: the entities that still need a terminal fact. */

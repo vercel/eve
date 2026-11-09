@@ -45,6 +45,8 @@ export function installInstrumentationRuntime(input: {
   let otelRuntime: RegisteredOtelPipeline | undefined;
   let prepareSessionTrace: InstrumentationRuntime["prepareSessionTrace"];
   let prepareTurnTrace: InstrumentationRuntime["prepareTurnTrace"];
+  let readTurnTraceContext: InstrumentationRuntime["readTurnTraceContext"];
+  let decision: InstrumentationRuntime["decision"];
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
   let idGenerator: AgentSpanIdGenerator;
 
@@ -75,6 +77,8 @@ export function installInstrumentationRuntime(input: {
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });
     prepareSessionTrace = agentOtel.prepareSessionTrace;
     prepareTurnTrace = agentOtel.prepareTurnTrace;
+    readTurnTraceContext = agentOtel.readTurnTraceContext;
+    decision = agentOtel.decision;
     runInContext = agentOtel.runInContext;
 
     const releasable = input.collected.configuration.spanProcessors
@@ -103,6 +107,8 @@ export function installInstrumentationRuntime(input: {
     ownsAgentSpans: otelRuntime !== undefined,
     prepareSessionTrace,
     prepareTurnTrace,
+    readTurnTraceContext,
+    decision,
     runtimeContextResolvers: input.runtimeContextResolvers,
     runInContext,
     samplesTrace: otelRuntime?.samplesTrace,

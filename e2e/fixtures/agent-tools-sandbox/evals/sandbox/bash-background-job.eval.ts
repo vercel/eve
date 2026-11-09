@@ -14,14 +14,14 @@ interface BashOutput {
 export default defineEval({
   description:
     "Sandbox Bash: a slow command returns running, keeps writing its output file, and stops with kill.",
-  // The first bash call waits the full 30-second yield before it reports the command.
+  // A model that omits `timeout` waits the default 60 seconds before the command is reported.
   timeoutMs: 150_000,
   async test(t) {
     const turn = await t.send(
       [
         "EVE_SANDBOX_BASH_JOB",
         "Alice is rebuilding a search index that prints one progress line per second for two minutes.",
-        `Start it with the \`${BASH_TOOL}\` tool by running: \`${INDEX_COMMAND}\``,
+        `Start it with the \`${BASH_TOOL}\` tool and a \`timeout\` of 5 seconds by running: \`${INDEX_COMMAND}\``,
         "The tool will report that the command is still running, with its process group and output directory.",
         "Check its latest progress line once with `tail`, then stop it with `kill` and read its exit code.",
         "After it stops, reply with exactly: index job stopped",

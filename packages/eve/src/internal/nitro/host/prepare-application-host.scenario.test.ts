@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
-import { compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   createApplicationBuildWorkspace,
