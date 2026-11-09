@@ -3,13 +3,15 @@ import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migratio
 import { stampSessionIdentity } from "#execution/session/owner-boot.js";
 import type { SessionCheckpoint } from "#execution/session/checkpoint.js";
 import { deliveriesReadBy } from "#execution/session/open-turn.js";
+import { runRecordOf, type RunSnapshot } from "./runs.js";
 import { deliveryIdOf } from "./session-record.js";
 import type { AcceptedInput } from "./session-store.js";
 import { checkpointPosition, SESSION_SNAPSHOT_FORMAT, type SessionSnapshot } from "./snapshot.js";
 
 // What restoring a snapshot does, decided before anything runs. The runtime applies the plan:
-// it opens the stream, claims the addresses, queues what the plan redelivers, and boots the
-// session from its checkpoint (`checkpoint-boot.ts`).
+// it opens the stream, claims the addresses, queues what the plan redelivers, reports each lost
+// run, starts the runs that go on, and boots the session from its checkpoint
+// (`checkpoint-boot.ts`).
 
 export interface RestorePlan {
   /** The checkpoint as this build continues it. */
@@ -23,10 +25,24 @@ export interface RestorePlan {
   readonly redeliver: readonly AcceptedInput[];
   /** The idle timeout's deadline, kept across the restore. */
   readonly deadline: Date | undefined;
+  /**
+   * Subagents' runs that go on: the store kept the sessions they opened. Each skips the messages
+   * the session heard from it.
+   */
+  readonly resumedRuns: readonly { readonly run: RunSnapshot; readonly heard: number }[];
+  /** Runs that don't survive, each reported once as interrupted. */
+  readonly lostRuns: readonly RunSnapshot[];
 }
 
-/** Plans restoring `snapshot`. A snapshot this build can't continue is refused, with why. */
-export function planRestore(snapshot: SessionSnapshot): RestorePlan {
+/**
+ * Plans restoring `snapshot`. With a store (`hasStore`), the sessions a subagent's run opened are
+ * kept there, so the run goes on; without one, every run is lost. A snapshot this build can't
+ * continue is refused, with why.
+ */
+export function planRestore(
+  snapshot: SessionSnapshot,
+  options: { readonly hasStore: boolean },
+): RestorePlan {
   const refuse = (why: string) =>
     new Error(`Session "${snapshot.sessionId}" can't be restored here: ${why}.`);
   if (snapshot.format !== SESSION_SNAPSHOT_FORMAT)
@@ -43,6 +59,8 @@ export function planRestore(snapshot: SessionSnapshot): RestorePlan {
   const { checkpoint } = migration;
   const { open } = snapshot;
   const reading = new Set(deliveriesReadBy(open));
+  const runs = snapshot.runs ?? [];
+  const goesOn = (run: RunSnapshot) => options.hasStore && runRecordOf(run).kind === "subagent";
   return {
     boot: {
       rerunFirst: snapshot.lines.length > checkpointPosition(checkpoint),
@@ -51,8 +69,12 @@ export function planRestore(snapshot: SessionSnapshot): RestorePlan {
     },
     checkpoint,
     deadline: snapshot.deadline === undefined ? undefined : new Date(snapshot.deadline),
+    lostRuns: runs.filter((run) => !goesOn(run)),
     redeliver: (snapshot.inputs?.unread ?? []).filter(
-      (input) => !reading.has(deliveryIdOf(input.command) ?? ""),
+      (input) => !("command" in input) || !reading.has(deliveryIdOf(input.command) ?? ""),
     ),
+    resumedRuns: runs
+      .filter(goesOn)
+      .map((run) => ({ heard: snapshot.inputs?.heard?.[run.runId] ?? 0, run })),
   };
 }

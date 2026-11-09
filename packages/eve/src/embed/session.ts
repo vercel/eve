@@ -12,14 +12,15 @@ import {
   openInteractions,
 } from "#protocol/session-projection/public-view.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
-import { holdSessionAgent, type SessionAgent } from "#runtime/sessions/session-agent.js";
+import { holdSessionAgent, type CodeAgent } from "#runtime/sessions/session-agent.js";
 import type { Delivery } from "#shared/delivery.js";
 import type { Answer } from "#shared/input.js";
 
 // One conversation with an agent defined in code, running in this process (internal): the same
 // session loop, approvals, history, and stream a deployed agent has. The session is a run on a
 // World: in this process's memory by default, or the one given, which keeps it as it runs so
-// `createSession(agent, { world, resume: id })` continues it in another process.
+// `createSession(agent, { world, resume: id })` continues it in another process. Its subagents,
+// tasks and workflow tools run in this process too, beside it.
 
 export interface EmbeddedSessionOptions {
   /**
@@ -71,14 +72,15 @@ export interface EmbeddedSession {
     readonly signal?: AbortSignal;
   }): Promise<ReadableStream<SessionStreamEvent>>;
   /**
-   * Ends the session: its turn is cancelled, its sandbox is released, and its stream (on its
-   * World too) records the end. Then stops its runtime.
+   * Ends the session: its turn is cancelled, the subagents it opened end with it, its sandbox
+   * is released, and its stream (on its World too) records the end. Then stops its runtime.
    */
   close(): Promise<void>;
   /**
    * Stops the session here without ending it, as when the process quits: the World it was given
-   * keeps it as it was, with its sandbox files, and `createSession(agent, { world, resume: id })`
-   * continues it. Without a World of its own, the session ends.
+   * keeps it as it was, with its sandbox files and the runs it started, and
+   * `createSession(agent, { world, resume: id })` continues it. Without a World of its own, the
+   * session ends.
    */
   suspend(): Promise<void>;
 }
@@ -86,10 +88,7 @@ export interface EmbeddedSession {
 const CHANNEL_NAME = "embedded";
 
 /** Starts a conversation with `agent` in this process. */
-export function createSession(
-  agent: SessionAgent,
-  options: EmbeddedSessionOptions,
-): EmbeddedSession {
+export function createSession(agent: CodeAgent, options: EmbeddedSessionOptions): EmbeddedSession {
   const auth = options.identity;
   // Its steps resolve the agent by id; the session holds it until it closes.
   const release = holdSessionAgent(agent);

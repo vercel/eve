@@ -1,7 +1,7 @@
-import type { AgentRoster } from "#execution/agent-sessions/roster.js";
-import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { ContextReader } from "#context/key.js";
 import type { Definition } from "#definitions/definition.js";
+import type { AgentRoster } from "#execution/agent-sessions/roster.js";
+import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -80,11 +80,14 @@ export interface SessionAgent {
   readonly id: string;
   /** The agent's display name (`agentName`), when it has one. */
   readonly name?: string;
+  /** What the agent is for, as a parent's model reads it when it can delegate to the agent. */
+  readonly description?: string;
   /** How a step boundary carries it. */
   readonly reference: SessionAgentReference;
   /**
-   * Its node in the agent graph its sessions run in, `undefined` at the root. Events, Workflow
-   * attributes, sandboxes and memory namespaces name the agent by it.
+   * Its node in the agent graph its sessions run in: a subagent's (`subagents/<name>` for one
+   * defined in code, the compiled node id for one from files), `undefined` at the root. Events,
+   * Workflow attributes, sandboxes and memory namespaces name the agent by it.
    */
   readonly nodeId?: string;
   /**
@@ -96,10 +99,10 @@ export interface SessionAgent {
   readonly settings: SessionAgentSettings;
   /** The channel adapters a session's channel rehydrates from at each step. */
   readonly adapters: RuntimeAdapterRegistry;
-  /** The agents a workflow tool's `ctx.agents` lists in the session `ctx` belongs to. */
-  delegates(ctx: ContextReader): Readonly<Record<string, WorkflowAgentMetadata>>;
   /** The agents its sessions delegate to, with the dynamic ones the calling turn selected. */
   roster(dynamicSelections: DynamicSubagentSelections): AgentRoster;
+  /** The agents a workflow tool's `ctx.agents` lists in the session `ctx` belongs to. */
+  delegates(ctx: ContextReader): Readonly<Record<string, WorkflowAgentMetadata>>;
   /** What opens its sessions' sandbox, when it has one. */
   sandbox(): Promise<AgentSandbox | undefined>;
   /**
@@ -114,6 +117,23 @@ export interface SessionAgent {
   readonly compiled?: CompiledRuntimeAgentBundle;
 }
 
+/** An agent another delegates to, under the name its tool and `ctx.agent(name)` use. */
+export interface SessionSubagent {
+  readonly name: string;
+  /** What the parent's model reads about it. */
+  readonly description: string;
+  readonly agent: CodeAgent;
+}
+
+/** An agent defined in code: the port, and what only a program's agent declares. */
+export interface CodeAgent extends SessionAgent {
+  readonly reference: HeldReference;
+  /** The agents it delegates to, by name, each under the id `<id>/<name>`. */
+  readonly subagents: ReadonlyMap<string, SessionSubagent>;
+  /** The same agent's code under another id and node, as a parent scopes its subagents. */
+  with(identity: { readonly id: string; readonly nodeId: string }): CodeAgent;
+}
+
 /** `agent`'s node, the root's id included: what a host names a session's agent node by. */
 export function runtimeNodeId(agent: Pick<SessionAgent, "nodeId">): string {
   return agent.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID;
@@ -122,7 +142,7 @@ export function runtimeNodeId(agent: Pick<SessionAgent, "nodeId">): string {
 // Agents this process holds, by id, rooted on `globalThis` as the runtime session store is: a
 // Workflow step can load its own copy of eve's modules, and must still find what the app held.
 interface HeldAgent {
-  readonly agent: SessionAgent;
+  readonly agent: CodeAgent;
   count: number;
 }
 
@@ -132,11 +152,11 @@ const held = ((globalThis as { [HELD_AGENTS_GLOBAL_KEY]?: Map<string, HeldAgent>
 ] ??= new Map());
 
 /**
- * Holds `agent` in this process so a step can resolve it by id, until every hold of it is
- * released. A later agent under the same id replaces it, as a program that builds its agent again
- * does.
+ * Holds `agent` and its subagents, at every depth, in this process so a step can resolve each by
+ * id, until every hold of it is released. A later agent under the same id replaces it, as a
+ * program that builds its agent again does.
  */
-export function holdSessionAgent(agent: SessionAgent): () => void {
+export function holdSessionAgent(agent: CodeAgent): () => void {
   let hold = held.get(agent.id);
   if (hold?.agent !== agent) {
     hold = { agent, count: 0 };
@@ -144,17 +164,19 @@ export function holdSessionAgent(agent: SessionAgent): () => void {
   }
   const thisHold = hold;
   thisHold.count += 1;
+  const releases = [...agent.subagents.values()].map((sub) => holdSessionAgent(sub.agent));
   let released = false;
   return () => {
     if (released) return;
     released = true;
+    for (const release of releases) release();
     thisHold.count -= 1;
     if (thisHold.count === 0 && held.get(agent.id) === thisHold) held.delete(agent.id);
   };
 }
 
 /** The agent this process holds under `id`. */
-export function resolveHeldSessionAgent(id: string): SessionAgent {
+export function resolveHeldSessionAgent(id: string): CodeAgent {
   const agent = held.get(id)?.agent;
   if (agent === undefined) {
     throw new Error(
