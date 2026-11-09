@@ -32,7 +32,7 @@ import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol
 import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
-import { forwardedShareId, type WorkflowAskRoute } from "#harness/hitl/relays.js";
+import { forwardedShareId, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
 import { admitDeliveries } from "#harness/session-machine/deliveries.js";
@@ -276,6 +276,7 @@ async function routeProxiedDeliver(
   }
 
   // A workflow run publishes nothing of its own: the session settles its questions as it answers.
+  const receiptRoutes: Record<string, Relay> = {};
   const decided: { answer: Answer; outcome: "accepted" | "declined" }[] = [];
   for (const [childKey, child] of children) {
     if (child.workflowAsk !== undefined) {
@@ -299,7 +300,7 @@ async function routeProxiedDeliver(
           url: remote.url,
         });
         const responses = coalesceDeliverPayloads(child.payloads).answers ?? [];
-        await respondToRemoteAgentSession({
+        const receipt = await respondToRemoteAgentSession({
           remote,
           headers,
           auth: sourceDelivery.auth,
@@ -307,6 +308,16 @@ async function routeProxiedDeliver(
           idempotencyKey: await answersIdempotencyKey(sourceDelivery, childKey),
           responses: remoteAnswers(tables, responses),
         });
+        // The child names these answers by its receipt: each maps back to the delivery it came in.
+        for (const { interactionId } of responses) {
+          const route = requests.get(interactionId);
+          const forwarded = answers.findLast((answer) => answer.interactionId === interactionId);
+          if (receipt === undefined || route === undefined || forwarded === undefined) continue;
+          receiptRoutes[interactionId] = {
+            ...route,
+            receipts: { ...route.receipts, [receipt]: forwarded.deliveryId },
+          };
+        }
         // A protocol 2 child relays how its approvals settle, but never its questions or budget
         // prompts: this session settles those as the child takes their answers, as its own
         // protocol did.
@@ -337,6 +348,7 @@ async function routeProxiedDeliver(
             : [...decided, { answer: parentAction.answer, outcome: "declined" }],
         deliveries: routedDeliveries,
         forwarded: answers,
+        relays: Object.keys(receiptRoutes).length === 0 ? undefined : receiptRoutes,
       }),
     ],
     { origin: "relayed" },

@@ -313,7 +313,7 @@ export async function respondToRemoteAgentSession(input: {
    */
   readonly idempotencyKey?: string;
   readonly responses: readonly Answer[];
-}): Promise<void> {
+}): Promise<string | undefined> {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
@@ -344,6 +344,11 @@ export async function respondToRemoteAgentSession(input: {
     throw new Error(
       `Remote agent "${input.remote.name}" input answer failed with HTTP ${response.status}.`,
     );
+  // A child on this protocol admits the answers as a delivery of its own and names it when it
+  // relays how they settled. The answers stand without it, so an unreadable receipt isn't fatal.
+  if (input.remote.earlierProtocol !== undefined) return undefined;
+  const receipt = DeliveryReceiptResponseSchema.safeParse(await response.json().catch(() => null));
+  return receipt.success ? receipt.data.deliveryId : undefined;
 }
 
 /** Continues one remote-agent session by its immutable session ID. */
