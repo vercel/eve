@@ -6,6 +6,7 @@ import { inMemory, type MemoryDocumentBackend } from "eve/memory/file";
 
 import extension from "../../extension/extension.ts";
 import { documentRepository } from "../../extension/lib/document-repository.ts";
+import { loadTurnSkills } from "../../extension/lib/runtime.ts";
 import { spaceScope } from "../../extension/lib/scopes.ts";
 import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
 import create from "../../extension/tools/create.ts";
@@ -179,20 +180,23 @@ test("removal reports who removed what", async () => {
   });
 });
 
-test("only the requester may answer by default", () => {
+test("by default the requester answers for personal skills, and someone else for shared ones", async () => {
   mount();
   const response = approvalOf(publish).response;
-  assert.deepEqual(response({ request: { principal: alice }, response: { principal: alice } }), {
-    status: "allowed",
-  });
-  assert.equal(
+  const answer = async (scope: string | undefined, responder: SessionAuthContext) =>
     (
-      response({ request: { principal: alice }, response: { principal: bob } }) as {
-        status: string;
-      }
-    ).status,
-    "rejected",
-  );
+      (await response({
+        request: { principal: alice, toolInput: { name: "deploy", id: "x", version: 1, scope } },
+        response: { principal: responder },
+        session: { id: "session-1", initiator: alice },
+      })) as { status: string }
+    ).status;
+
+  assert.equal(await answer(undefined, alice), "allowed");
+  assert.equal(await answer(undefined, bob), "rejected");
+  // The channel scope depends on the conversation, which a response doesn't carry, so it counts as shared.
+  assert.equal(await answer("channel", alice), "rejected");
+  assert.equal(await answer("channel", bob), "allowed");
 });
 
 test("an approval applies only to the skill it showed, not one recreated under its name", async () => {
@@ -344,5 +348,31 @@ test("a person can inspect, publish, roll back, and change the mode of their own
   assert.deepEqual(
     events.map(({ kind }) => kind),
     ["saved", "saved", "published", "published", "mode"],
+  );
+});
+
+test("a scope whose storage fails is skipped for the turn, with a note for the model", async () => {
+  const backend = inMemory();
+  const failing: MemoryDocumentBackend = {
+    async read(input) {
+      if (input.key.includes("space~3a")) throw new Error("Blob is down");
+      return backend.read(input);
+    },
+    write: backend.write,
+  };
+  mount({ storage: failing });
+  await run(create, { ...deploy }, context());
+
+  const loaded = await loadTurnSkills({
+    session: { id: "session-1", auth: { current: alice, initiator: alice } },
+    conversation: inChannel,
+    turnId: "turn-9",
+  });
+  assert.deepEqual(
+    loaded.map(({ scope, skills, unavailable }) => [scope.name, skills.length, unavailable]),
+    [
+      ["personal", 1, undefined],
+      ["channel", 0, true],
+    ],
   );
 });

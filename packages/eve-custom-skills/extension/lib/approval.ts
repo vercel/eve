@@ -15,13 +15,31 @@ import type {
 } from "./types.ts";
 
 /**
+ * The most instructions a shared change can carry and still be read in full
+ * on its approval card.
+ */
+export const REVIEWABLE_INSTRUCTIONS = 2_000;
+
+/**
  * Asks before publishing, rolling back, or removing a skill, and before any
  * change goes live in a shared scope. A personal first version and a personal
- * mode change run without asking, and a draft never needs approval.
+ * mode change run without asking, and a draft never needs approval. A shared
+ * change whose instructions are too long to read in full on the approval card
+ * is refused, so nobody approves text they couldn't see.
  */
 export const defaultSkillApproval: SkillApprovalRule = (request) => {
   if (!request.changesLive) return "allow";
-  if (request.scope.shared) return "ask";
+  if (request.scope.shared) {
+    const long = request.targets.find(
+      ({ instructions }) => (instructions?.length ?? 0) > REVIEWABLE_INSTRUCTIONS,
+    );
+    if (long) {
+      return {
+        deny: `Skill "${long.name}" has ${long.instructions!.length} characters of instructions, more than the ${REVIEWABLE_INSTRUCTIONS} an approver can read on the card. Shorten it before it goes live for ${request.scope.label}.`,
+      };
+    }
+    return "ask";
+  }
   return request.action === "create" || request.action === "set_mode" ? "allow" : "ask";
 };
 
@@ -34,19 +52,43 @@ function samePrincipal(left: SessionAuthContext, right: SessionAuthContext): boo
   );
 }
 
-/** eve's default: only the person who asked may answer. */
-export const requesterOnly: ApprovalResponsePolicy = ({ request, response }) =>
-  request.principal === null || samePrincipal(request.principal, response.principal)
-    ? { status: "allowed" }
-    : { status: "rejected", reason: "Only the person who asked can approve this change." };
+/**
+ * Who may answer by default. A personal change is the asker's alone. A change
+ * to a shared scope needs a second person, so no one member can put text into
+ * everyone's prompt by approving it themselves. `isShared` reports whether the
+ * call targets a shared scope; a scope it can't resolve counts as shared.
+ */
+export function defaultSkillResponse(
+  isShared: (ctx: Parameters<ApprovalResponsePolicy>[0]) => Promise<boolean>,
+): ApprovalResponsePolicy {
+  return async (ctx) => {
+    const { request, response } = ctx;
+    const isRequester =
+      request.principal !== null && samePrincipal(request.principal, response.principal);
+    if (await isShared(ctx)) {
+      return isRequester
+        ? {
+            status: "rejected",
+            reason:
+              "A change to shared skills needs someone other than the person who asked to approve it.",
+          }
+        : { status: "allowed" };
+    }
+    return request.principal === null || isRequester
+      ? { status: "allowed" }
+      : { status: "rejected", reason: "Only the person who asked can approve this change." };
+  };
+}
 
-const MAX_PREVIEW = 600;
-const MAX_CARD = 2_500;
+const MAX_PREVIEW = REVIEWABLE_INSTRUCTIONS;
+// Slack section text, the tightest card eve renders, holds 3,000 characters.
+const MAX_CARD = 3_000;
 
 function preview(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const trimmed = text.trim();
-  return trimmed.length <= MAX_PREVIEW ? trimmed : `${trimmed.slice(0, MAX_PREVIEW).trimEnd()}…`;
+  if (trimmed.length <= MAX_PREVIEW) return trimmed;
+  return `${trimmed.slice(0, MAX_PREVIEW).trimEnd()}…\n(Showing the first ${MAX_PREVIEW} of ${trimmed.length} characters.)`;
 }
 
 function modeLabel(mode: string | null | undefined): string {

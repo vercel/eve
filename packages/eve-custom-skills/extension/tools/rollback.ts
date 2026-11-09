@@ -47,6 +47,8 @@ const { approval, execute } = skillChange({
 });
 
 export default defineTool({
+  // Rarely needed, so it stays out of the tool list until the model searches for it.
+  deferred: true,
   label: {
     start: ({ name, version }) => `Rolling back ${name} to v${version}`,
     complete: ({ name, version }) => `Rolled back ${name} to v${version}`,

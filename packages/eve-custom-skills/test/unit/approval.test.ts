@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { approvalCard, defaultSkillApproval } from "../../extension/lib/approval.ts";
+import {
+  approvalCard,
+  defaultSkillApproval,
+  defaultSkillResponse,
+} from "../../extension/lib/approval.ts";
 import type { SkillApprovalRequest, SkillScope } from "../../extension/lib/types.ts";
 
 const personal: SkillScope = { name: "personal", key: "user:a", label: "you", shared: false };
@@ -45,7 +49,7 @@ test("the card names the change, who it affects, and the content that goes live"
           name: "deploy",
           version: 3,
           description: "Use when the user asks to deploy.",
-          instructions: `Check the build.\n${"x".repeat(1_000)}`,
+          instructions: `Check the build.\n${"x".repeat(2_500)}`,
           applicationMode: "always",
           warnings: [
             "Instructions mention moving secrets or credentials; review before activation.",
@@ -61,9 +65,9 @@ test("the card names the change, who it affects, and the content that goes live"
   );
   assert.match(card, /Description: Use when the user asks to deploy\./);
   assert.match(card, /Instructions:\nCheck the build\./);
-  assert.match(card, /…/);
+  assert.match(card, /Showing the first 2000 of 2517 characters/);
   assert.match(card, /Warnings: Instructions mention moving secrets/);
-  assert.ok(card.length <= 2_500);
+  assert.ok(card.length <= 3_000);
 
   const removal = approvalCard(
     request({
@@ -76,4 +80,33 @@ test("the card names the change, who it affects, and the content that goes live"
   );
   assert.match(removal, /^Delete skills "a", "b" for you, with every version\?/);
   assert.match(removal, /"a" v1 is live \(always on\)\./);
+});
+
+test("a shared change too long to read on its card is refused", async () => {
+  const target = (length: number) => ({
+    name: "voice",
+    instructions: "x".repeat(length),
+    warnings: [],
+    live: { version: null, applicationMode: null },
+  });
+  assert.equal(defaultSkillApproval(request({ scope: channel, targets: [target(2_000)] })), "ask");
+  const refused = await defaultSkillApproval(request({ scope: channel, targets: [target(2_001)] }));
+  assert.match(typeof refused === "object" ? refused.deny : "", /2001 characters/);
+  // A personal change isn't seen by anyone else, so its length doesn't matter.
+  assert.equal(defaultSkillApproval(request({ targets: [target(5_000)] })), "allow");
+});
+
+test("a shared change needs someone other than the requester to approve it", async () => {
+  const alice = { attributes: {}, authenticator: "a", principalId: "alice", principalType: "user" };
+  const bob = { ...alice, principalId: "bob" };
+  const answer = async (shared: boolean, responder: typeof alice) =>
+    (await defaultSkillResponse(async () => shared)({
+      request: { principal: alice },
+      response: { principal: responder },
+    } as never)) as { status: string };
+
+  assert.equal((await answer(false, alice)).status, "allowed");
+  assert.equal((await answer(false, bob)).status, "rejected");
+  assert.equal((await answer(true, alice)).status, "rejected");
+  assert.equal((await answer(true, bob)).status, "allowed");
 });

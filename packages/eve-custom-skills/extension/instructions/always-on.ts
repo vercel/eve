@@ -1,6 +1,6 @@
 import { defineDynamic, defineInstructions, type DynamicContext } from "eve/instructions";
 
-import { renderAlwaysOnSection } from "../lib/render.ts";
+import { renderAlwaysOnSection, renderUnavailableNote } from "../lib/render.ts";
 import { loadTurnSkills } from "../lib/runtime.ts";
 
 /** Injects the turn's always-on custom skills into the system prompt. */
@@ -17,5 +17,8 @@ export default defineDynamic(async (ctx: DynamicContext) => {
     );
     return section === null ? [] : [section];
   });
+  const unavailable = scopes.filter((loaded) => loaded.unavailable === true);
+  if (unavailable.length > 0)
+    sections.push(renderUnavailableNote(unavailable.map(({ scope }) => scope)));
   return sections.length > 0 ? defineInstructions({ content: sections.join("\n\n") }) : null;
 });

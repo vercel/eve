@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { MemoryDocumentConflictError, type MemoryDocumentBackend } from "eve/memory/file";
 import { z } from "zod";
 
-import { SkillConflictError, SkillLifecycleError, SkillNotFoundError } from "./errors.ts";
+import {
+  SkillConflictError,
+  SkillLifecycleError,
+  SkillNotFoundError,
+  SkillStorageCorruptError,
+} from "./errors.ts";
 import type {
   AppendVersionRequest,
   AppendVersionResult,
@@ -41,11 +46,30 @@ const skillEntrySchema = z.object({
   versions: z.array(versionEntrySchema).min(1),
 });
 
-const catalogSchema = z.object({
-  schemaVersion: z.literal(SCHEMA_VERSION),
-  /** Skills by ID. */
-  skills: z.record(z.string(), skillEntrySchema),
-});
+/**
+ * A scope's catalog. An entry that doesn't parse, such as one a newer layout
+ * or a bad write left, is set aside instead of failing the whole scope, and is
+ * written back unchanged so nothing is lost.
+ */
+const catalogSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    /** Skills by ID. */
+    skills: z.record(z.string(), z.unknown()),
+  })
+  .transform(({ schemaVersion, skills }) => {
+    const valid: Record<string, SkillEntry> = Object.create(null);
+    const unreadable: Record<string, unknown> = Object.create(null);
+    for (const [id, raw] of Object.entries(skills)) {
+      const parsed = skillEntrySchema.safeParse(raw);
+      if (parsed.success) valid[id] = parsed.data;
+      else {
+        console.warn("[custom-skills] skipping an unreadable catalog entry", { id });
+        unreadable[id] = raw;
+      }
+    }
+    return { schemaVersion, skills: valid, unreadable };
+  });
 
 const scopeEntrySchema = z.object({
   name: z.string(),
@@ -81,7 +105,19 @@ const versionDocumentSchema = z.object({
 });
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
-type Catalog = z.infer<typeof catalogSchema>;
+type Catalog = z.output<typeof catalogSchema>;
+
+function serializeCatalog({ schemaVersion, skills, unreadable }: Catalog): string {
+  return JSON.stringify({ schemaVersion, skills: { ...unreadable, ...skills } });
+}
+
+function emptyCatalog(): Catalog {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    skills: Object.create(null),
+    unreadable: Object.create(null),
+  };
+}
 type ScopeIndex = z.infer<typeof indexSchema>;
 type VersionDocument = z.infer<typeof versionDocumentSchema>;
 
@@ -198,20 +234,35 @@ class DocumentSkillRepository implements SkillRepository {
     return `${this.#root}/${this.#scopePath(scope)}/catalog.json`;
   }
 
-  async #read<T>(key: string, schema: z.ZodType<T>): Promise<{ value: T; version: string } | null> {
+  async #read<T>(
+    key: string,
+    schema: z.ZodType<T, unknown>,
+  ): Promise<{ value: T; version: string } | null> {
     const document = await this.#backend.read({ key, signal: this.#signal });
     if (!document || document.content === "") return null;
-    return { value: schema.parse(JSON.parse(document.content)), version: document.version };
+    let parsed: z.ZodSafeParseResult<T> | undefined;
+    try {
+      parsed = schema.safeParse(JSON.parse(document.content));
+    } catch {
+      parsed = undefined;
+    }
+    if (!parsed?.success) {
+      console.error("[custom-skills] unreadable document", { key });
+      throw new SkillStorageCorruptError();
+    }
+    return { value: parsed.data, version: document.version };
   }
 
   /** Applies `change` to the latest document, retrying when another write lands first. */
   async #update<T, R>(input: {
     readonly key: string;
-    readonly schema: z.ZodType<T>;
+    readonly schema: z.ZodType<T, unknown>;
     readonly empty: () => T;
     readonly change: (value: T) => R;
+    readonly serialize?: (value: T) => string;
     readonly expectedVersion?: string | null;
   }): Promise<R> {
+    const serialize = input.serialize ?? ((value: T) => JSON.stringify(value));
     for (let attempt = 1; ; attempt += 1) {
       const current = await this.#read(input.key, input.schema);
       const version = current?.version ?? null;
@@ -221,13 +272,14 @@ class DocumentSkillRepository implements SkillRepository {
         );
       }
       const value = current?.value ?? input.empty();
-      const before = JSON.stringify(value);
+      const before = serialize(value);
       const result = input.change(value);
-      if (JSON.stringify(value) === before) return result;
+      const after = serialize(value);
+      if (after === before) return result;
       try {
         await this.#backend.write({
           key: input.key,
-          content: JSON.stringify(value),
+          content: after,
           expectedVersion: version,
           signal: this.#signal,
         });
@@ -241,8 +293,8 @@ class DocumentSkillRepository implements SkillRepository {
   async #readCatalog(scope: SkillScope): Promise<{ catalog: Catalog; version: string | null }> {
     const read = await this.#read(this.#catalogKey(scope), catalogSchema);
     return read
-      ? { catalog: { ...read.value, skills: dictionary(read.value.skills) }, version: read.version }
-      : { catalog: { schemaVersion: SCHEMA_VERSION, skills: dictionary({}) }, version: null };
+      ? { catalog: read.value, version: read.version }
+      : { catalog: emptyCatalog(), version: null };
   }
 
   #updateCatalog<T>(
@@ -253,11 +305,9 @@ class DocumentSkillRepository implements SkillRepository {
     return this.#update({
       key: this.#catalogKey(scope),
       schema: catalogSchema,
-      empty: (): Catalog => ({ schemaVersion: SCHEMA_VERSION, skills: dictionary({}) }),
-      change: (catalog) => {
-        catalog.skills = dictionary(catalog.skills);
-        return change(catalog);
-      },
+      empty: emptyCatalog,
+      change,
+      serialize: serializeCatalog,
       ...(expectedRevision !== undefined && { expectedVersion: expectedRevision }),
     });
   }
@@ -284,8 +334,15 @@ class DocumentSkillRepository implements SkillRepository {
     this.#indexed.set(scope.key, serialized);
   }
 
+  /** A version's content; one that doesn't parse reads as missing, like a removed one. */
   async #readVersion(key: string): Promise<VersionDocument | null> {
-    return (await this.#read(key, versionDocumentSchema))?.value ?? null;
+    try {
+      return (await this.#read(key, versionDocumentSchema))?.value ?? null;
+    } catch (error) {
+      if (!(error instanceof SkillStorageCorruptError)) throw error;
+      console.warn("[custom-skills] skipping an unreadable skill version", { key });
+      return null;
+    }
   }
 
   async #tombstone(key: string): Promise<void> {
@@ -459,9 +516,31 @@ class DocumentSkillRepository implements SkillRepository {
         replayed: false,
       };
     } catch (error) {
+      // A catalog write can land and still report failure, such as on a dropped connection.
+      // Clearing the version then would leave a skill whose name is taken but has no content.
+      const committed = await this.#committedVersion(scope, id, key).catch(() => undefined);
+      if (committed !== undefined) {
+        return {
+          head: toHead(id, committed.entry),
+          version: toRecord(committed.version, document),
+          replayed: false,
+        };
+      }
       await this.#tombstone(key);
       throw error;
     }
+  }
+
+  /** The catalog entry that numbers the version document at `key`, if a write committed it. */
+  async #committedVersion(
+    scope: SkillScope,
+    id: string,
+    key: string,
+  ): Promise<{ entry: SkillEntry; version: number } | undefined> {
+    const { catalog } = await this.#readCatalog(scope);
+    const entry = catalog.skills[id];
+    const saved = entry?.versions.find((version) => version.key === key);
+    return entry && saved ? { entry, version: saved.version } : undefined;
   }
 
   async updateHead(scope: SkillScope, update: SkillHeadUpdate): Promise<SkillHead> {

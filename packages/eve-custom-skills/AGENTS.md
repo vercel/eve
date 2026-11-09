@@ -1,6 +1,6 @@
 # @eve/custom-skills Extension Package
 
-This private package is the source of the `eve/extensions/custom-skills` extension. It lets the people talking to an agent save their own versioned skills, personal or shared with everyone in a channel or group chat, and applies them on later turns.
+This private package is the source of the `eve/experimental/extensions/custom-skills` extension. It lets the people talking to an agent save their own versioned skills, personal or shared with everyone in a channel or group chat, and applies them on later turns.
 
 Before writing code, read the installed eve package docs for extensions, tools, skills, instructions, and memory as applicable.
 
@@ -8,7 +8,7 @@ Before writing code, read the installed eve package docs for extensions, tools, 
 
 - `extension/lib/lifecycle.ts` is storage-independent: it talks only to `SkillRepository`. Keep validation, drafts, publish, rollback, modes, and limits there.
 - `extension/lib/tool-support.ts` builds each changing tool's approval and execution from one planner, so the approval rule judges exactly what the tool runs. Keep approval logic in `lib/approval.ts`.
-- `extension/lib/public/` holds the files published as `eve/extensions/custom-skills/policies` and `/repository`.
+- `extension/lib/public/` holds the files published as `eve/experimental/extensions/custom-skills/policies` and `/repository`.
 - Storage details belong in a repository. `document-repository.ts` stores skills in an eve memory document backend; consumers can pass their own `repository` instead.
 - Tools address skills by their normalized name. Keep tool names bare (`create`, not `create_skill`); the mount supplies the namespace.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.

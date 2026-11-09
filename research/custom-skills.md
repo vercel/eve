@@ -1,6 +1,6 @@
 ---
 issue: "None (maintainer-requested in PR #6106)"
-status: proposed
+status: in-progress
 last_updated: "2026-11-09"
 ---
 
@@ -18,12 +18,12 @@ can share skills with the others.
 
 ## Proposal
 
-A built-in extension, `eve/extensions/custom-skills`, that turns saved skills
+An experimental built-in extension, `eve/experimental/extensions/custom-skills`, that turns saved skills
 into eve's existing dynamic skills and instructions. Mounting it is one file:
 
 ```ts
 // agent/extensions/skills.ts
-import customSkills from "eve/extensions/custom-skills";
+import customSkills from "eve/experimental/extensions/custom-skills";
 
 export default customSkills({});
 ```
@@ -57,7 +57,7 @@ scope (personal, channel, …)
 | `repository` | a versioned layout in any `eve/memory/file` store                             | storage                                  |
 | `onChange`   | none                                                                          | audit and mirroring                      |
 
-`eve/extensions/custom-skills/policies` exports the defaults to compose with,
+`eve/experimental/extensions/custom-skills/policies` exports the defaults to compose with,
 and `/repository` exports the storage contract and the default store.
 
 ## Invariants
@@ -70,7 +70,13 @@ and `/repository` exports the storage contract and the default store.
 - **Limits hold under concurrency.** Writes pass the scope revision they were
   checked at, so concurrent writers in a shared scope can't exceed the limits.
 - **Personal scopes are keyed by eve's full principal identity**: authenticator,
-  issuer, principal type, principal ID, and subject.
+  issuer, principal type, principal ID, and subject. Anonymous and runtime
+  principals get none.
+- **No one person changes a shared prompt alone.** By default, a live change to
+  a shared scope needs a second person to approve it, and its instructions must
+  fit on the approval card in full.
+- **Storage failures stay local.** A scope that can't be read is skipped for
+  the turn and reported to the model; unreadable entries are skipped and kept.
 - **Storage is a contract.** The default layout is versioned (`v1`), readable,
   and indexed so a whole store can be listed without key listing.
 

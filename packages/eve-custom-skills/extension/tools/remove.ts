@@ -64,6 +64,8 @@ const { approval, execute } = skillChange({
 });
 
 export default defineTool({
+  // Rarely needed, so it stays out of the tool list until the model searches for it.
+  deferred: true,
   label: {
     start: ({ skills }) => `Deleting ${subject(skills)}`,
     complete: ({ skills }) => `Deleted ${subject(skills)}`,

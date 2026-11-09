@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderAlwaysOnSection } from "../../extension/lib/render.ts";
+import { renderAlwaysOnSection, renderUnavailableNote } from "../../extension/lib/render.ts";
 import type { SkillScope, StoredSkill } from "../../extension/lib/types.ts";
 import {
   checkSkillLimits,
@@ -66,4 +66,11 @@ test("always-on skills render as one section that names who set them", () => {
   assert.match(section ?? "", /## voice \(version 2\)\n\nWrite formally\./);
   assert.match(section ?? "", /not authorization to bypass approval/);
   assert.equal(renderAlwaysOnSection([], channel), null);
+});
+
+test("the model is told which scopes' skills couldn't load", () => {
+  assert.match(
+    renderUnavailableNote([channel]),
+    /custom skills for channel \(everyone in this channel\) couldn't be loaded/,
+  );
 });

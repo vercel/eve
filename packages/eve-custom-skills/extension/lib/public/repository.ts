@@ -1,18 +1,8 @@
 /**
- * Storage for `eve/extensions/custom-skills`: the built-in document
- * repository, and the errors a custom `SkillRepository` throws.
+ * Storage for `eve/experimental/extensions/custom-skills`: the built-in
+ * document repository, and what a custom `SkillRepository` implements and
+ * throws.
  */
 export { documentRepository, type DocumentRepositoryOptions } from "../document-repository.ts";
-export { SkillConflictError, SkillLifecycleError, SkillNotFoundError } from "../errors.ts";
-export type {
-  AppendVersionRequest,
-  AppendVersionResult,
-  RemoveSkillsResult,
-  SkillCatalog,
-  SkillHead,
-  SkillHeadUpdate,
-  SkillRepository,
-  SkillVersionRecord,
-  SkillVersionRef,
-} from "../repository.ts";
-export type { SkillRef } from "../types.ts";
+export { SkillConflictError, SkillNotFoundError } from "../errors.ts";
+export type { SkillHead, SkillRepository, SkillVersionRecord } from "../repository.ts";

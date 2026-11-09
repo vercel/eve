@@ -65,6 +65,8 @@ const { approval, execute } = skillChange({
 });
 
 export default defineTool({
+  // Rarely needed, so it stays out of the tool list until the model searches for it.
+  deferred: true,
   label: {
     start: ({ name, mode }) => `Setting ${name} to ${mode}`,
     complete: ({ name, mode }) => `Set ${name} to ${mode}`,

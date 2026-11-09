@@ -1,10 +1,14 @@
 import type { ConversationContext, SessionAuth, SessionAuthContext } from "eve/context";
-import type { ApprovalConfiguration, ApprovalContext } from "eve/tools/approval";
+import type {
+  ApprovalConfiguration,
+  ApprovalContext,
+  ApprovalResponsePolicy,
+} from "eve/tools/approval";
 import { z } from "zod";
 
 import {
   defaultSkillApproval,
-  requesterOnly,
+  defaultSkillResponse,
   skillApproval,
   type PlannedChange,
 } from "./approval.ts";
@@ -201,7 +205,7 @@ export function skillChange<
     approval: skillApproval<TInput, TPlan>({
       plan: (ctx: ApprovalContext<TInput>, toolInput) => plan(ctx, toolInput),
       rule,
-      response: () => skillConfig().approval.response ?? requesterOnly,
+      response: () => skillConfig().approval.response ?? defaultResponse,
       fallbackCard: input.fallbackCard,
     }),
     async execute(toolInput, ctx) {
@@ -219,6 +223,29 @@ export function skillChange<
     },
   };
 }
+
+/**
+ * Whether an approval's call targets a shared scope, resolved as the requester
+ * without the conversation, which a response doesn't carry. A scope that
+ * depends on the conversation, such as a channel's, doesn't resolve, and counts
+ * as shared.
+ */
+async function targetsSharedScope(ctx: Parameters<ApprovalResponsePolicy>[0]): Promise<boolean> {
+  try {
+    const scopes = await skillScopes({
+      session: {
+        id: ctx.session.id,
+        auth: { current: ctx.request.principal, initiator: ctx.session.initiator },
+      },
+    });
+    const requested = (ctx.request.toolInput as { readonly scope?: unknown } | undefined)?.scope;
+    return requireScope(scopes, typeof requested === "string" ? requested : undefined).shared;
+  } catch {
+    return true;
+  }
+}
+
+const defaultResponse = defaultSkillResponse(targetsSharedScope);
 
 function changeBase(
   scope: SkillScope,

@@ -1,0 +1,8 @@
+[
+  "SkillApprovalRule",
+  "SkillChangeEvent",
+  "SkillScope",
+  "SkillScopeResolver",
+  "SkillValidator",
+  "default"
+]

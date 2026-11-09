@@ -70,8 +70,8 @@ export interface SkillScopeContext {
 }
 
 /**
- * The scopes whose skills apply on a turn, in precedence order. The first is
- * the default for lifecycle tools. Runs before every model call and tool call,
+ * The scopes whose skills apply on a turn, in precedence order. The first
+ * scope that isn't shared is the default for lifecycle tools. Runs before every model call and tool call,
  * so keep it fast.
  */
 export type SkillScopeResolver = (

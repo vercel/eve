@@ -26,3 +26,9 @@ export function renderAlwaysOnSection(
     ...entries,
   ].join("\n\n");
 }
+
+/** Tells the model which scopes' custom skills couldn't be read this turn. */
+export function renderUnavailableNote(scopes: readonly SkillScope[]): string {
+  const names = scopes.map(({ name, label }) => `${name} (${label})`).join(", ");
+  return `# Custom skills unavailable\n\nThe custom skills for ${names} couldn't be loaded for this turn, so they don't apply. If the user relies on one, tell them it's temporarily unavailable.`;
+}

@@ -23,13 +23,22 @@ export function skillAuthor(auth: SessionAuthContext | null): SkillAuthor {
 }
 
 /**
+ * Principals that act for nobody in particular: anonymous callers, and eve's
+ * own runtime, such as a schedule that runs as the app. Every such run would
+ * share one personal scope, so a skill saved in one would apply to all.
+ */
+const IMPERSONAL_PRINCIPAL_TYPES = new Set(["anonymous", "runtime"]);
+
+/**
  * The caller's own skills, which follow them into every conversation. Absent
- * for anonymous callers. A scheduled run gets the personal scope of the
- * principal it runs as.
+ * for anonymous callers and runtime principals. A scheduled run that runs as
+ * a person gets that person's personal scope.
  */
 export function personalScope(ctx: SkillScopeContext): SkillScope | null {
   const auth = ctx.session.auth.current;
-  if (!auth || !auth.principalId || auth.principalType === "anonymous") return null;
+  if (!auth || !auth.principalId || IMPERSONAL_PRINCIPAL_TYPES.has(auth.principalType)) {
+    return null;
+  }
   return {
     name: "personal",
     // eve's full principal identity, exact: two principals that differ in any field never share skills.
@@ -66,17 +75,30 @@ export function spaceScope(ctx: SkillScopeContext): SkillScope | null {
 export const defaultScopes: SkillScopeResolver = (ctx) =>
   [personalScope(ctx), spaceScope(ctx)].filter((scope): scope is SkillScope => scope !== null);
 
+/**
+ * The scope a tool acts on: the one it names, or else the first scope that
+ * isn't shared, since omitting the scope means the caller's own skills. A
+ * caller with no personal scope must name a shared one, so a change meant for
+ * themselves never lands where everyone sees it.
+ */
 export function requireScope(
   scopes: readonly SkillScope[],
   requested: string | undefined,
 ): SkillScope {
   const scope =
-    requested === undefined ? scopes[0] : scopes.find((candidate) => candidate.name === requested);
+    requested === undefined
+      ? scopes.find((candidate) => !candidate.shared)
+      : scopes.find((candidate) => candidate.name === requested);
   if (scope) return scope;
   const available = scopes.map((candidate) => candidate.name);
+  if (available.length === 0) {
+    throw new SkillScopeUnavailableError(
+      "Could not determine who is calling, so no skill scope is available.",
+    );
+  }
   throw new SkillScopeUnavailableError(
-    available.length === 0
-      ? "Could not determine who is calling, so no skill scope is available."
+    requested === undefined
+      ? `There are no personal skills here. Pass \`scope\` to act on a shared scope: ${available.join(", ")}.`
       : `The "${requested}" skill scope is not available here. Available scopes: ${available.join(", ")}.`,
   );
 }

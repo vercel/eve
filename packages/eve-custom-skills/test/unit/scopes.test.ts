@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   defaultScopes,
   personalScope,
+  requireScope,
   skillAuthor,
   spaceScope,
 } from "../../extension/lib/scopes.ts";
@@ -63,4 +64,22 @@ test("the shared scope comes from the conversation's space, not from DMs", async
 test("authors are labeled by email, then principal", () => {
   assert.deepEqual(skillAuthor(alice), { principalId: "slack:T1:U1", label: "alice@example.com" });
   assert.deepEqual(skillAuthor(null), { principalId: null, label: "unknown" });
+});
+
+test("runtime and anonymous principals have no personal scope", () => {
+  for (const principalType of ["runtime", "anonymous"]) {
+    const app = { ...alice, principalId: "eve:app", principalType };
+    assert.equal(
+      personalScope({ session: { id: "s1", auth: { current: app, initiator: app } } }),
+      null,
+    );
+  }
+});
+
+test("omitting the scope means the personal one, never a shared one", () => {
+  const channel = spaceScope(context({ id: "slack:T1:C1", type: "channel" }))!;
+  const personal = personalScope(context())!;
+  assert.equal(requireScope([channel, personal], undefined), personal);
+  assert.equal(requireScope([channel, personal], "channel"), channel);
+  assert.throws(() => requireScope([channel], undefined), /no personal skills here/i);
 });

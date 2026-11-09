@@ -8,6 +8,11 @@ description: Lifecycle rules for user-created custom skills — versions and dra
 These rules apply to custom skills saved with this extension's `create` tool.
 The agent's own authored skills have no lifecycle versions.
 
+`create`, `list`, and `publish` are always available. `read`, `versions`,
+`rollback`, `set_mode`, and `remove` are deferred: find them with
+`eve__search` (for example "custom skill rollback") and call them through
+`eve__tool`.
+
 - A clean first version goes live immediately. Every later save is an
   immutable draft: it changes neither the live version nor how it applies.
   The live version changes only when `publish` or `rollback` succeeds.

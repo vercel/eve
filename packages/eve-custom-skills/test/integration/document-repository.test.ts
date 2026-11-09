@@ -221,3 +221,61 @@ test("a skill can be named like a built-in object property", async () => {
     ["constructor", "proto", "tostring"],
   );
 });
+
+test("an unreadable catalog entry is skipped and kept, and the rest of the scope still works", async () => {
+  const backend = inMemory();
+  const { skills } = setup(backend, "repair");
+  await skills.save(
+    alice,
+    { name: "deploy", description: ROUTING, markdown: "Deploy." },
+    { savedBy },
+  );
+  const key = "repair/v1/scopes/user~3aalice/catalog.json";
+  const signal = new AbortController().signal;
+  const stored = (await backend.read({ key, signal }))!;
+  const catalog = JSON.parse(stored.content);
+  catalog.skills["broken-id"] = { name: 42 };
+  await backend.write({
+    key,
+    content: JSON.stringify(catalog),
+    expectedVersion: stored.version,
+    signal,
+  });
+
+  assert.deepEqual(
+    (await skills.listLive(alice)).map(({ name }) => name),
+    ["deploy"],
+  );
+  await skills.save(
+    alice,
+    { name: "triage", description: ROUTING, markdown: "Triage." },
+    { savedBy },
+  );
+  const kept = JSON.parse((await backend.read({ key, signal }))!.content);
+  assert.deepEqual(kept.skills["broken-id"], { name: 42 });
+});
+
+test("a catalog write that lands but reports failure doesn't leave a ghost skill", async () => {
+  const backend = inMemory();
+  let failAfterCatalogWrite = true;
+  const flaky: MemoryDocumentBackend = {
+    read: backend.read,
+    async write(input) {
+      const written = await backend.write(input);
+      if (input.key.endsWith("catalog.json") && failAfterCatalogWrite) {
+        failAfterCatalogWrite = false;
+        throw new Error("connection reset after the write");
+      }
+      return written;
+    },
+  };
+  const { skills } = setup(flaky);
+  const saved = await skills.save(
+    alice,
+    { name: "deploy", description: ROUTING, markdown: "Deploy." },
+    { savedBy },
+  );
+  assert.equal(saved.skill.status, "active");
+  const [live] = await skills.listLive(alice);
+  assert.equal(live?.instructions, "Deploy.");
+});

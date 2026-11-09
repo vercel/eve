@@ -4,6 +4,8 @@ import { z } from "zod";
 import { nameField, scopeField, withSkillScope } from "../lib/tool-support.ts";
 
 export default defineTool({
+  // Rarely needed, so it stays out of the tool list until the model searches for it.
+  deferred: true,
   label: {
     start: ({ name }) => `Listing versions of ${name}`,
     complete: ({ name }) => `Listed versions of ${name}`,

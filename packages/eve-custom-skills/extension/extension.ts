@@ -12,32 +12,22 @@ import type {
 } from "./lib/types.ts";
 
 export type {
-  SkillAction,
-  SkillApplicationMode,
-  SkillApprovalDecision,
-  SkillApprovalRequest,
   SkillApprovalRule,
-  SkillApprovalTarget,
-  SkillAuthor,
   SkillChangeEvent,
-  SkillLiveState,
-  SkillRef,
   SkillScope,
-  SkillScopeContext,
   SkillScopeResolver,
-  SkillValidation,
-  SkillValidationInput,
-  SkillValidationResult,
   SkillValidator,
-  SkillVersionStatus,
-  StoredSkill,
 } from "./lib/types.ts";
-export type { SkillLimits } from "./lib/validation.ts";
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 const object = <T>() => z.custom<T>((value) => typeof value === "object" && value !== null);
 const limit = (max: number) => z.number().int().positive().max(max).optional();
 
+/**
+ * Lets the people who talk to an agent save their own versioned skills.
+ * Experimental: this extension and its options may change in any release.
+ * See `docs/experimental/custom-skills.md`.
+ */
 export default defineExtension({
   config: z.object({
     /**
@@ -57,7 +47,7 @@ export default defineExtension({
     repository: object<SkillRepository>().optional(),
     /**
      * The scopes whose skills apply on a turn, in precedence order. Defaults
-     * to `defaultScopes` from `eve/extensions/custom-skills/scopes`: the
+     * to `defaultScopes` from `eve/experimental/extensions/custom-skills/policies`: the
      * caller's personal skills plus the shared skills of the conversation's
      * channel or group.
      */
@@ -81,7 +71,7 @@ export default defineExtension({
     /**
      * Checks a skill's description and instructions on save, publish, and
      * mode changes. Replaces the built-in rules (`defaultSkillValidator` from
-     * `eve/extensions/custom-skills/policies`): routing descriptions for
+     * `eve/experimental/extensions/custom-skills/policies`): routing descriptions for
      * on-demand and deferred skills, and warnings for instructions that try to
      * override higher-priority rules. Required fields, `limits`, and control
      * characters are always checked.

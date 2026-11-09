@@ -1,4 +1,4 @@
-import customSkills from "eve/extensions/custom-skills";
+import customSkills from "eve/experimental/extensions/custom-skills";
 import { inMemory } from "eve/memory/file";
 import { vercelBlob } from "eve/memory/file/vercel";
 

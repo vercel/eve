@@ -81,6 +81,8 @@ export async function skillScopes(ctx: SkillScopeContext): Promise<readonly Skil
 export interface ScopeSkills {
   readonly scope: SkillScope;
   readonly skills: readonly StoredSkill[];
+  /** The scope's skills couldn't be read this turn, such as during a storage outage. */
+  readonly unavailable?: true;
 }
 
 const MAX_CACHED_TURNS = 32;
@@ -90,16 +92,28 @@ async function readTurnSkills(
   lifecycle: SkillLifecycle,
   scopes: readonly SkillScope[],
 ): Promise<ScopeSkills[]> {
-  const skills = await Promise.all(scopes.map((scope) => lifecycle.listLive(scope)));
-  return scopes.map((scope, index) => ({ scope, skills: skills[index] ?? [] }));
+  // One scope's storage failing, such as a Blob outage or a corrupt catalog, skips that
+  // scope's skills for the turn instead of failing the turn.
+  return Promise.all(
+    scopes.map(async (scope): Promise<ScopeSkills> => {
+      try {
+        return { scope, skills: await lifecycle.listLive(scope) };
+      } catch (error) {
+        console.error("[custom-skills] could not load a scope's skills", {
+          scope: scope.name,
+          error,
+        });
+        return { scope, skills: [], unavailable: true };
+      }
+    }),
+  );
 }
 
 /**
  * The live skills for this turn, by scope in precedence order. The skill and
  * instruction resolvers both run before every model call; this shares one
- * read per turn, mount, and scope set between them. A storage failure rejects
- * instead of resolving to no skills, and the rejection is evicted so a retry
- * recovers.
+ * read per turn, mount, and scope set between them. A scope whose skills can't
+ * be read is marked `unavailable` for the turn, and the next turn reads again.
  */
 export async function loadTurnSkills(
   ctx: SkillScopeContext & { readonly turnId?: string },

@@ -16,6 +16,15 @@ export class SkillStorageNotConfiguredError extends SkillLifecycleError {
 
 export class SkillScopeUnavailableError extends SkillLifecycleError {}
 
+/** A stored document doesn't parse; the repository logs which one. */
+export class SkillStorageCorruptError extends SkillLifecycleError {
+  constructor() {
+    super(
+      "A stored custom skill document is unreadable, so skills in this scope can't change until an administrator repairs it.",
+    );
+  }
+}
+
 export class InvalidSkillNameError extends SkillLifecycleError {}
 
 export class InvalidSkillContentError extends SkillLifecycleError {

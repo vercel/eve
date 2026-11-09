@@ -1,5 +1,5 @@
 {
   "title": "Extensions",
   "defaultOpen": true,
-  "pages": ["../code-extension", "custom-skills", "../guides/self-modification"]
+  "pages": ["../code-extension", "../guides/self-modification"]
 }
