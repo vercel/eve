@@ -20,6 +20,13 @@ describe("Vercel service build output", () => {
       files: {
         "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });\n`,
         "agent/instructions.md": "Keep reminders.\n",
+        // A schedule task's name base64url-encodes its whole source path into
+        // one segment, so a long path must not become a chunk filename.
+        [`agent/schedules/${"nightly-".repeat(24)}digest.ts`]: [
+          'import { defineSchedule } from "eve/schedules";',
+          'export default defineSchedule({ cron: "0 0 * * *", content: "Send the digest." });',
+          "",
+        ].join("\n"),
         "agent/schedules/reminders.ts": [
           'import { defineDynamicSchedules } from "eve/experimental/schedules";',
           "const anyInput = { '~standard': { version: 1, vendor: 'test', validate: (value) => ({ value }) } };",

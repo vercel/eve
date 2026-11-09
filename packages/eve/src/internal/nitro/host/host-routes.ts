@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
@@ -351,8 +351,11 @@ export async function renderHostRoutes(
   const tasks: HostNitroRoutes["tasks"] = {};
   const scheduledTasks: Record<string, string[]> = {};
   for (const task of table.scheduleTasks) {
+    // The id's basename becomes the chunk filename, and a task name encodes its
+    // whole source path, so a digest keeps the filename short.
+    const digest = createHash("sha256").update(task.taskName).digest("hex").slice(0, 16);
     const handler = addVirtualModule(
-      `schedule-task/${task.taskName}`,
+      `schedule-task/${digest}`,
       renderScheduleTaskModule({ description: task.description }),
     );
     tasks[task.taskName] = { description: task.description, handler };
