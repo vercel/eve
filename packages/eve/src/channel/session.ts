@@ -300,14 +300,19 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
     get continuation() {
       const currentToken = accessor.get(ContinuationTokenKey);
       if (currentToken === undefined || currentToken.length === 0) return undefined;
+      // Read live: a handle kept for later callbacks sees the addresses its own calls changed.
+      const current = (): string => accessor.get(ContinuationTokenKey) || currentToken;
       return {
-        token: toChannelLocalContinuationToken(currentToken),
+        get token() {
+          return toChannelLocalContinuationToken(current());
+        },
         alias(rawToken: string): void {
           if (rawToken.length === 0) throw new Error("A session alias requires a nonempty token.");
-          const token = namespaceContinuationToken(currentToken, rawToken);
-          if (currentToken === token) return;
+          const from = current();
+          const token = namespaceContinuationToken(from, rawToken);
+          if (from === token) return;
           accessor.set(ContinuationHookTokensKey, (claimed) => {
-            const tokens = claimed ?? [currentToken];
+            const tokens = claimed ?? [from];
             return tokens.includes(token) ? tokens : [...tokens, token];
           });
           accessor.set(ContinuationTokenKey, token);
@@ -315,15 +320,14 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
         release(rawToken: string): void {
           if (rawToken.length === 0)
             throw new Error("Releasing an address requires a nonempty token.");
-          // Read live: an `alias` through this same handle may have moved the current address.
-          const current = accessor.get(ContinuationTokenKey) ?? currentToken;
-          const token = namespaceContinuationToken(current, rawToken);
-          if (token === current) {
+          const from = current();
+          const token = namespaceContinuationToken(from, rawToken);
+          if (token === from) {
             throw new Error(
               "A session can't release its current address. Alias its new address first.",
             );
           }
-          const claimed = accessor.get(ContinuationHookTokensKey) ?? [current];
+          const claimed = accessor.get(ContinuationHookTokensKey) ?? [from];
           if (!claimed.includes(token)) return;
           accessor.set(
             ContinuationHookTokensKey,

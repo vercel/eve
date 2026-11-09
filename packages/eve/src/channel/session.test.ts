@@ -353,6 +353,20 @@ describe("buildChannelContext", () => {
     expect(ctx.get(ContinuationHookTokensKey)).toEqual(["slack:code:C2"]);
   });
 
+  it("re-claims a released address through the same handle, reading the current address live", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ContinuationTokenKey, "slack:C1:T1");
+    const continuation = buildChannelContext(ctx).continuation;
+
+    continuation?.alias("code:C2");
+    continuation?.release("C1:T1");
+    continuation?.alias("C1:T1");
+
+    expect(continuation?.token).toBe("C1:T1");
+    expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
+    expect(ctx.get(ContinuationHookTokensKey)).toEqual(["slack:code:C2", "slack:C1:T1"]);
+  });
+
   it("throws clearly when no namespaced placeholder token exists", () => {
     const ctx = new ContextContainer();
     const channel = buildChannelContext(ctx);
