@@ -611,18 +611,14 @@ export function relay(
     : unchanged(view, events);
 }
 
-/**
- * The row this session mirrors for the asker that relayed `payload`, by the asker's own
- * interaction id. Only the asker that opened a mirror reaches it: the session it names as its
- * origin, about the call it serves.
- */
+/** The row this session mirrors for the asker that relayed `payload`, about the call it serves. */
 export function relayedMirror(
   tables: PublicView,
   payload: SubagentInteractionHookPayload,
   interactionId: string,
 ): InteractionRow | undefined {
   const mirror = tables.interactions[interactionId];
-  return mirror?.origin?.sessionId === payload.childSessionId &&
+  return mirror?.origin !== undefined &&
     "callId" in mirror.subject &&
     mirror.subject.callId === payload.callId
     ? mirror

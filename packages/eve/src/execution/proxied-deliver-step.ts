@@ -301,7 +301,13 @@ async function routeProxiedDeliver(
           auth: sourceDelivery.auth,
           // This delivery's answers for this child: a retried step repeats the same delivery.
           idempotencyKey: await answersIdempotencyKey(sourceDelivery, childKey),
-          responses,
+          // The remote knows each request by its own id, which its mirror here names as its origin.
+          responses: responses.map((answer) => ({
+            ...answer,
+            interactionId:
+              tables.interactions[answer.interactionId]?.origin?.interactionId ??
+              answer.interactionId,
+          })),
         });
         // A protocol 2 child relays how its approvals settle, but never its questions or budget
         // prompts: this session settles those as the child takes their answers, as its own
