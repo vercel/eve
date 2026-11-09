@@ -36,7 +36,9 @@ export function skillLifecycle(): SkillLifecycle | null {
     const repository = repositoryFor(config);
     lifecycles.set(
       config,
-      repository ? new SkillLifecycle({ repository, limits: config.limits }) : null,
+      repository
+        ? new SkillLifecycle({ repository, limits: config.limits, validator: config.validate })
+        : null,
     );
   }
   return lifecycles.get(config) ?? null;

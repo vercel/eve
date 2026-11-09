@@ -22,7 +22,7 @@ const inputSchema = z.object({
     .min(1)
     .max(INPUT_CEILINGS.description)
     .describe(
-      "One-line routing condition, e.g. 'Use when the user asks for a production deploy checklist.' On-demand and deferred skills must start with 'Use when the user asks', 'requests', 'wants', or 'needs'. No behavior instructions.",
+      "One-line routing condition, e.g. 'Use when the user asks for a production deploy checklist.' On-demand and deferred skills load by this description, so say when to load the skill, not how to behave. If a save is rejected, follow the error's wording rules.",
     ),
   instructions: z
     .string()

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  InvalidSkillContentError,
   InvalidSkillTransitionError,
   SkillConflictError,
   SkillNotFoundError,
@@ -16,17 +15,17 @@ import type {
   SkillScope,
   SkillSummary,
   SkillValidation,
+  SkillValidator,
   SkillVersionStatus,
   StoredSkill,
 } from "./types.ts";
 import {
   DEFAULT_LIMITS,
-  isRoutingDescription,
+  defaultSkillValidator,
   normalizeSkillContent,
   normalizeSkillName,
-  ROUTING_DESCRIPTION_REQUIREMENT,
   skillChecksum,
-  validateSkillContent,
+  validateSkill,
   type SkillLimits,
 } from "./validation.ts";
 
@@ -116,11 +115,41 @@ function materialize(version: SkillVersionRecord, head: SkillHead): StoredSkill 
  */
 export class SkillLifecycle {
   readonly #repository: SkillRepository;
+  readonly #validator: SkillValidator;
   readonly limits: SkillLimits;
 
-  constructor(options: { repository: SkillRepository; limits?: Partial<SkillLimits> }) {
+  constructor(options: {
+    repository: SkillRepository;
+    limits?: Partial<SkillLimits>;
+    validator?: SkillValidator;
+  }) {
     this.#repository = options.repository;
+    this.#validator = options.validator ?? defaultSkillValidator;
     this.limits = { ...DEFAULT_LIMITS, ...options.limits };
+  }
+
+  #validate(
+    action: "save" | "publish" | "set_mode",
+    scope: SkillScope,
+    input: {
+      name: string;
+      description: string;
+      markdown: string;
+      applicationMode: SkillApplicationMode;
+    },
+  ): Promise<SkillValidation> {
+    return validateSkill(
+      {
+        action,
+        scope,
+        name: input.name,
+        description: input.description,
+        instructions: input.markdown,
+        applicationMode: input.applicationMode,
+      },
+      this.limits,
+      this.#validator,
+    );
   }
 
   normalizeName(raw: string): string {
@@ -215,14 +244,10 @@ export class SkillLifecycle {
   async planSave(scope: SkillScope, input: SaveSkillInput): Promise<SavePlan> {
     const name = this.normalizeName(input.name);
     const content = normalizeSkillContent(input);
-    const validation = validateSkillContent(content, this.limits);
-    if (!validation.valid) throw new InvalidSkillContentError(validation.errors);
     const catalog = await this.#repository.listHeads(scope);
     const existing = catalog.heads.find((head) => head.name === name) ?? null;
     const applicationMode = input.applicationMode ?? existing?.applicationMode ?? "on-demand";
-    if (applicationMode !== "always" && !isRoutingDescription(content.description)) {
-      throw new InvalidSkillContentError([ROUTING_DESCRIPTION_REQUIREMENT]);
-    }
+    const validation = await this.#validate("save", scope, { name, ...content, applicationMode });
     if (existing === null) {
       if (catalog.heads.length >= this.limits.maxSkills) {
         throw new InvalidSkillTransitionError(
@@ -368,10 +393,9 @@ export class SkillLifecycle {
         `Skill "${name}" version ${target} failed validation: ${version.validation.errors.join(" ")}`,
       );
     }
+    await this.#validate("publish", scope, { name, ...version });
     if (version.applicationMode === "always") {
       await this.#assertAlwaysOnCapacity(scope, catalog, name, version.markdown);
-    } else if (!isRoutingDescription(version.description)) {
-      throw new InvalidSkillContentError([ROUTING_DESCRIPTION_REQUIREMENT]);
     }
     return { head, version, revision: catalog.revision };
   }
@@ -438,10 +462,9 @@ export class SkillLifecycle {
     }
     const version = await this.#requireVersion(scope, head, target);
     if (head.applicationMode !== mode) {
+      await this.#validate("set_mode", scope, { name, ...version, applicationMode: mode });
       if (mode === "always") {
         await this.#assertAlwaysOnCapacity(scope, catalog, name, version.markdown);
-      } else if (!isRoutingDescription(version.description)) {
-        throw new InvalidSkillContentError([ROUTING_DESCRIPTION_REQUIREMENT]);
       }
     }
     return { head, version, revision: catalog.revision };

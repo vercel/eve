@@ -5,8 +5,12 @@
   "SkillScope",
   "SkillScopeContext",
   "SkillScopeResolver",
+  "SkillValidationInput",
+  "SkillValidationResult",
+  "SkillValidator",
   "defaultScopes",
   "defaultSkillApproval",
+  "defaultSkillValidator",
   "personalScope",
   "spaceScope"
 ]

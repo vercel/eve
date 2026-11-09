@@ -186,3 +186,36 @@ export type SkillApprovalDecision = "allow" | "ask" | { readonly deny: string };
 export type SkillApprovalRule = (
   request: SkillApprovalRequest,
 ) => SkillApprovalDecision | Promise<SkillApprovalDecision>;
+
+/** What a validator checks: a version's content, the mode it would apply in, and why. */
+export interface SkillValidationInput {
+  /**
+   * `save` checks a new version. `publish` checks a version about to go live,
+   * including on rollback, and `set_mode` checks the live version in a new mode.
+   */
+  readonly action: "save" | "publish" | "set_mode";
+  readonly scope: SkillScope;
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly applicationMode: SkillApplicationMode;
+}
+
+/**
+ * What a validator found. Errors reject the change with a message the model
+ * sees; warnings keep a first version in draft and show on the approval card.
+ */
+export interface SkillValidationResult {
+  readonly errors: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Checks a skill's description and instructions. Replaces the built-in
+ * content rules: the routing-description requirement and the warnings for
+ * instructions that try to override higher-priority rules. Required fields,
+ * size limits, and control characters are always checked.
+ */
+export type SkillValidator = (
+  input: SkillValidationInput,
+) => SkillValidationResult | Promise<SkillValidationResult>;

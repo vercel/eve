@@ -16,6 +16,7 @@
  * ```
  */
 export { defaultSkillApproval } from "../approval.ts";
+export { defaultSkillValidator } from "../validation.ts";
 export { defaultScopes, personalScope, spaceScope } from "../scopes.ts";
 export type {
   SkillApprovalDecision,
@@ -24,4 +25,7 @@ export type {
   SkillScope,
   SkillScopeContext,
   SkillScopeResolver,
+  SkillValidationInput,
+  SkillValidationResult,
+  SkillValidator,
 } from "../types.ts";
