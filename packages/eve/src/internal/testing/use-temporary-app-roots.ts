@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach } from "vitest";
+import { afterAll, afterEach } from "vitest";
 import { resolvePackageRoot } from "#internal/application/package.js";
 
 /**
@@ -98,13 +98,16 @@ export function useTemporaryAppRoots(): (
 }
 
 /**
- * Registers an `afterEach` hook and returns a factory that creates fresh
- * temporary scratch directories.
+ * Returns a factory that creates fresh temporary scratch directories, removed
+ * after each test, or after the file with `{ scope: "file" }` so a
+ * `beforeAll` build can serve several tests.
  */
-export function useTemporaryDirectories(): (prefix: string) => Promise<string> {
+export function useTemporaryDirectories(
+  options: { readonly scope?: "file" | "test" } = {},
+): (prefix: string) => Promise<string> {
   const temporaryRoots: string[] = [];
 
-  afterEach(async () => {
+  (options.scope === "file" ? afterAll : afterEach)(async () => {
     await Promise.all(
       temporaryRoots.splice(0).map(async (directoryPath) => {
         try {

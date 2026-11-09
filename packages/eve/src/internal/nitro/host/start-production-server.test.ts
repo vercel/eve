@@ -68,6 +68,7 @@ describe("startProductionServer", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     globalThis.fetch = originalFetch;
     if (originalPort === undefined) {
       delete process.env.PORT;
@@ -118,6 +119,69 @@ describe("startProductionServer", () => {
     await server.close();
 
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("stops a built server that stays alive after its port turned out to be taken", async () => {
+    const { startProductionServer } = await import("./start-production-server.js");
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const child = createChildProcess();
+    (child.stderr as PassThrough).write(
+      "[srvx] Failed to start server: Error: listen EADDRINUSE: address already in use 127.0.0.1:4321\n",
+    );
+    mocks.spawn.mockReturnValueOnce(child);
+
+    await expect(
+      startProductionServer("/tmp/app", { host: "127.0.0.1", port: 4321 }),
+    ).rejects.toThrow(
+      "Port 4321 on 127.0.0.1 is already in use. Another process is listening there; stop it or choose another port with --port or the PORT environment variable.",
+    );
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it.each([
+    { schedules: undefined, inherited: undefined, expected: undefined },
+    { schedules: false, inherited: undefined, expected: "1" },
+    { schedules: undefined, inherited: "true", expected: "true" },
+    { schedules: false, inherited: "false", expected: "1" },
+  ])(
+    "passes EVE_SCHEDULES_DISABLED=$expected for schedules=$schedules over $inherited",
+    async ({ schedules, inherited, expected }) => {
+      vi.stubEnv("EVE_SCHEDULES_DISABLED", inherited);
+      const { startProductionServer } = await import("./start-production-server.js");
+      const child = createChildProcess();
+      (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
+      mocks.spawn.mockReturnValueOnce(child);
+
+      const server = await startProductionServer("/tmp/app", { schedules });
+      const spawnOptions = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
+      expect(spawnOptions.env.EVE_SCHEDULES_DISABLED).toBe(expected);
+      expect(process.env.EVE_SCHEDULES_DISABLED).toBe(inherited);
+      await server.close();
+    },
+  );
+
+  it("keeps inherited variables that change how the built server listens or shuts down out of it", async () => {
+    // srvx skips graceful shutdown, and so Nitro's close hooks, when CI or
+    // TEST is set, and SERVER_SHUTDOWN_TIMEOUT would outlast eve's kill
+    // grace; a socket path would replace the port eve waits on.
+    vi.stubEnv("CI", "1");
+    vi.stubEnv("NITRO_UNIX_SOCKET", "/tmp/eve.sock");
+    vi.stubEnv("SERVER_SHUTDOWN_TIMEOUT", "60");
+    vi.stubEnv("TEST", "1");
+    const { startProductionServer } = await import("./start-production-server.js");
+    const child = createChildProcess();
+    (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
+    mocks.spawn.mockReturnValueOnce(child);
+
+    const server = await startProductionServer("/tmp/app", { host: "127.0.0.1", port: 4321 });
+    const { env } = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
+    expect({
+      CI: env.CI,
+      NITRO_UNIX_SOCKET: env.NITRO_UNIX_SOCKET,
+      SERVER_SHUTDOWN_TIMEOUT: env.SERVER_SHUTDOWN_TIMEOUT,
+      TEST: env.TEST,
+    }).toEqual({});
+    await server.close();
   });
 
   it("uses PORT when no explicit port is provided", async () => {

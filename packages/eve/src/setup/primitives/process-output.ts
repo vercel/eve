@@ -45,3 +45,15 @@ export function createProcessOutputBuffer(onOutput: ProcessOutputHandler): Proce
     },
   };
 }
+
+/**
+ * The last meaningful stderr line of a failed Vercel CLI run, which is where
+ * the CLI prints its `Error: …` message after any progress output.
+ */
+export function vercelErrorDetail(stderr: string | undefined): string | undefined {
+  return stderr
+    ?.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("Vercel CLI "))
+    .at(-1);
+}

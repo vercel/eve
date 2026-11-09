@@ -1,8 +1,15 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import { DELIVERY_IDEMPOTENCY_WINDOW } from "#channel/delivery-idempotency.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
+
+/** The delivery a control arrived as: its id, and who sent it. */
+export interface ControlOrigin {
+  readonly deliveryId: string;
+  readonly auth?: SessionAuthContext | null;
+}
 
 export interface DeliveryAdmission {
   readonly delivery: DeliverHookPayload;
@@ -17,6 +24,7 @@ interface QueuedControl {
   readonly control: SessionControl;
   readonly kind: "control";
   readonly sequence: number;
+  readonly origin?: ControlOrigin;
 }
 
 interface QueuedAuthorization {
@@ -43,7 +51,7 @@ export interface TurnSelection {
 
 export type SessionInputSelection =
   | TurnSelection
-  | { readonly control: SessionControl; readonly kind: "control" };
+  | { readonly control: SessionControl; readonly kind: "control"; readonly origin?: ControlOrigin };
 
 /**
  * Ordered, admitted session input. Entries are private; callers receive typed
@@ -52,20 +60,63 @@ export type SessionInputSelection =
  */
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
+  private readonly admittedKeys: Set<string>;
   private nextSequence = 0;
+  private prewarmDeploymentId: string | undefined;
+
+  prepareOnDeployment(deploymentId: string): void {
+    this.prewarmDeploymentId = deploymentId;
+  }
+  takePrewarmDeployment(): string | undefined {
+    const target = this.prewarmDeploymentId;
+    this.prewarmDeploymentId = undefined;
+    return target;
+  }
+
+  constructor(admittedDeliveryKeys: readonly string[]) {
+    this.admittedKeys = new Set(admittedDeliveryKeys);
+  }
+
+  get admittedDeliveryKeys(): readonly string[] {
+    return [...this.admittedKeys];
+  }
+
+  isDuplicate(delivery: DeliverHookPayload): boolean {
+    return delivery.idempotencyKey !== undefined && this.admittedKeys.has(delivery.idempotencyKey);
+  }
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
+  /** The sequence the next admission receives; every earlier admission is below it. */
+  get nextAdmission(): number {
+    return this.nextSequence;
+  }
+
+  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+    if (this.isDuplicate(delivery)) return undefined;
+    if (delivery.idempotencyKey !== undefined) {
+      this.admittedKeys.add(delivery.idempotencyKey);
+      if (this.admittedKeys.size > DELIVERY_IDEMPOTENCY_WINDOW) {
+        this.admittedKeys.delete(this.admittedKeys.values().next().value!);
+      }
+    }
+    // A real message supersedes any speculative hint.
+    this.prewarmDeploymentId = undefined;
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;
   }
 
-  enqueueControl(control: SessionControl): void {
-    this.entries.push({ control, kind: "control", sequence: this.nextSequence++ });
+  enqueueControl(control: SessionControl, origin?: ControlOrigin): void {
+    const entry: { -readonly [K in keyof QueuedControl]: QueuedControl[K] } = {
+      control,
+      kind: "control",
+      sequence: this.nextSequence++,
+    };
+    if (origin !== undefined) entry.origin = origin;
+    this.entries.push(entry);
   }
 
   /** Keeps one payload per authorization attempt; a repeated callback for the same attempt is dropped. */
@@ -136,7 +187,9 @@ export class SessionInputQueue {
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn, options),
+        isSteeringDelivery(entry.delivery, turn, {
+          heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
+        }),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -159,7 +212,10 @@ export class SessionInputQueue {
     this.retain((entry) => entry.kind !== "authorization");
     const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
     if (first === undefined) return undefined;
-    if (first.kind === "control") return { control: first.control, kind: "control" };
+    if (first.kind === "control")
+      return first.origin === undefined
+        ? { control: first.control, kind: "control" }
+        : { control: first.control, kind: "control", origin: first.origin };
 
     const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first)];
     const sequences = turnEntries.map(({ sequence }) => sequence);
@@ -219,22 +275,25 @@ export interface SteeringTurn {
 
 export interface SteeringOptions {
   /**
-   * The turn waits on its own person for a sign-in or approval. Their message
-   * steers even with `turnPolicy: "queue"`: queued, it would wait for a turn
-   * that cannot end until they act.
+   * The turn waits on its own person for a sign-in or approval, held since
+   * this admission sequence. Their later messages steer even with
+   * `turnPolicy: "queue"`: queued, they would wait for a turn that cannot end
+   * until they act. Earlier ones were sent before the request existed, so
+   * they stay queued and never answer it.
    */
-  readonly heldOnPerson?: boolean;
+  readonly heldSince?: number;
 }
 
 /**
  * Only the turn's own principal steers it; another principal's message waits
  * for the turn to end. A delivery without auth acts as the session's current
- * identity, which is the turn's.
+ * identity, which is the turn's. `heldOnPerson` lets a queued message steer a
+ * turn that waits on its person.
  */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
-  options?: SteeringOptions,
+  options?: { readonly heldOnPerson?: boolean },
 ): boolean {
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
@@ -248,7 +307,7 @@ export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTu
   return (
     isSteeringDelivery(delivery, turn) &&
     delivery.payloads.some(
-      (payload) => payload.message !== undefined && payload.inputResponses === undefined,
+      (payload) => payload.message !== undefined && payload.answers === undefined,
     )
   );
 }

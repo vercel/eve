@@ -131,7 +131,6 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["remote", "remote"],
   ["remote:connect", "remote:connect"],
   ["remote:info", "remote:info"],
-  ["remote:invoke", "remote:invoke"],
   ["link", "link"],
   ["logs", "logs:show"],
   ["logs:list", "logs:list"],

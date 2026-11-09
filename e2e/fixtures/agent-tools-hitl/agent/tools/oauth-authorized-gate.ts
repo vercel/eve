@@ -40,7 +40,7 @@ export default defineTool({
     request: always(),
     async response({ auth, response }) {
       // Anyone may cancel; only an approval needs the responder's OAuth identity.
-      if (response.decision === "cancel") return { status: "allowed" };
+      if (response.decision === "deny") return { status: "allowed" };
       const credential = await auth.getToken(fakeOAuth, { authKey: "fixture-oauth" });
       return credential.providerSubject === response.principal.principalId
         ? { status: "allowed" }

@@ -6,7 +6,7 @@ import {
   trace,
   type Span,
 } from "#compiled/@opentelemetry/api/index.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
+import { withErrorContent } from "#compiled/@vercel/agent-runs/otel.js";
 
 import {
   createErrorId,
@@ -36,6 +36,11 @@ describe("span error content policy", () => {
 
   function mockSpan() {
     return {
+      setAttributes: vi.fn(),
+      addLink: vi.fn(),
+      addLinks: vi.fn(),
+      updateName: vi.fn(),
+      isRecording: vi.fn(() => true),
       addEvent: vi.fn(),
       end: vi.fn(),
       recordException: vi.fn(),

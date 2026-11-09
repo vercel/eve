@@ -1,8 +1,11 @@
 import {
-  getVercelSandboxCredentials,
   getVercelSandboxFetch,
+  resolveVercelSandboxCredentials,
 } from "#execution/sandbox/bindings/vercel-credentials.js";
-import { isVercelSandboxMissingError } from "#execution/sandbox/bindings/vercel-errors.js";
+import {
+  isVercelSandboxMissingError,
+  isVercelSnapshotUnavailableError,
+} from "#execution/sandbox/bindings/vercel-errors.js";
 import { errorMessage } from "#execution/sandbox/bindings/vercel-options.js";
 import type {
   VercelCreateOptions,
@@ -32,24 +35,40 @@ export async function getNamedVercelSandbox(input: {
   }
 }
 
+/** Whether a snapshot exists and finished, so a sandbox can still start from it. */
+export async function isVercelSnapshotCreated(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly sandboxModule: VercelModule;
+  readonly snapshotId: string;
+}): Promise<boolean> {
+  try {
+    const snapshot = await input.sandboxModule.Snapshot.get({
+      ...(await resolveVercelSandboxCredentials(input.createOptions)),
+      fetch: getVercelSandboxFetch(input.createOptions),
+      signal: input.createOptions.signal,
+      snapshotId: input.snapshotId,
+    });
+    return snapshot.status === "created";
+  } catch (error) {
+    if (isVercelSandboxMissingError(error) || isVercelSnapshotUnavailableError(error)) {
+      return false;
+    }
+    throw new Error(
+      `Failed to look up Vercel snapshot "${input.snapshotId}": ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+}
+
 async function getVercelSandboxGetOptions(input: {
   readonly createOptions: VercelCreateOptions;
   readonly sandboxName: string;
 }): Promise<VercelGetOptions> {
-  const baseOptions = {
+  return {
+    ...(await resolveVercelSandboxCredentials(input.createOptions)),
     fetch: getVercelSandboxFetch(input.createOptions),
     name: input.sandboxName,
     resume: false,
+    signal: input.createOptions.signal,
   };
-
-  try {
-    const credentials = await getVercelSandboxCredentials(input.createOptions);
-    return {
-      ...baseOptions,
-      ...credentials,
-      signal: input.createOptions.signal,
-    };
-  } catch {
-    return baseOptions;
-  }
 }

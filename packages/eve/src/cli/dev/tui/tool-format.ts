@@ -3,7 +3,7 @@
  *
  * Two registers: a *compact* one-line summary used while streaming and once a
  * call resolves (`get_weather  city="San Francisco" → 73°F`), and a *full*
- * pretty-printed value used when the user opts into `--tools full`. Both are
+ * pretty-printed value used when the user opts into `--show-tools full`. Both are
  * plain strings — color is applied by the block renderer.
  */
 
@@ -87,7 +87,7 @@ export function summarizeToolResult(output: unknown, maxLength = 80): string {
 }
 
 /**
- * Pretty-prints a value across multiple lines for the expanded `--tools full`
+ * Pretty-prints a value across multiple lines for the expanded `--show-tools full`
  * view. Strings render directly; everything else is JSON with 2-space
  * indentation.
  */

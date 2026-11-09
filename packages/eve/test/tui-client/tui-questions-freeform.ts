@@ -19,7 +19,7 @@ const FREEFORM_ANSWER = "indigo-sandbox-eu";
 process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
-  const client = new Client({ host: target.baseUrl });
+  const client = new Client({ baseUrl: target.baseUrl });
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({

@@ -1,0 +1,8 @@
+company_brain:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_CONNECTION', '../data/jaffle_shop.duckdb') }}"
+      schema: main
+      threads: 2

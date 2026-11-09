@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/pull/4028
 status: implemented
-last_updated: "2026-09-30"
+last_updated: "2026-10-29"
 ---
 
 # Slack task cards and composable rendering
@@ -196,7 +196,7 @@ Titles are capped at 80 characters and `output` at 200.
 
 - **Blocked rows.** A request or sign-in a task's run relays through the root carries the task's
   `taskId`, so its row shows `Waiting for approval`, `Waiting for a response`, or `Waiting for
-sign-in` in `details`. The row goes back to working on the request's `input.resolved`, the
+  sign-in` in `details`. The row goes back to working on the request's `input.resolved`, the
   sign-in's `authorization.completed`, or the task's `task.settled`. The request itself posts
   wherever `approvalChannel` sends it.
 - **Requests stay where `approvalChannel` sends them.** A blocked row names the request's prompt
@@ -384,7 +384,7 @@ root session ─ own events ─► renderers.events ─► replies, questions, s
 
 ## Removed and changed
 
-Everything below is breaking, which is allowed before 1.0.
+Everything below is breaking.
 
 - **Removed:** `slackChannel({ activity })`, `experimental_slackActivityStatus`,
   `experimental_slackActivityTree`, `experimental_slackActivityPlan`,

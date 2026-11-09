@@ -2,11 +2,14 @@ import { WORKFLOW_REGISTRY_GLOBAL } from "#execution/workflow-registry.js";
 import { builtinModules } from "node:module";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
-import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import {
+  normalizeEsmImportSpecifier,
+  stringifyNitroDataImportSpecifier,
+} from "#internal/application/import-specifier.js";
 import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
 import {
   applyWorkflowTransform,
@@ -28,16 +31,15 @@ export interface WorkflowBundleBuilderOptions {
   compiledArtifactsBootstrapPath: string;
   outDir: string;
   rootDir: string;
-  watch: boolean;
   /** Test-harness-only: also scans `src/internal/testing/`. */
   includeTestFixtures?: boolean;
+  /**
+   * Inlines a source map into the workflow driver code so errors thrown in workflow functions
+   * point at their source. Development builds keep it; production omits it, since every cold
+   * start would otherwise load the map with the code. Defaults to true.
+   */
+  inlineSourcemap?: boolean;
 }
-const PSEUDO_PACKAGES = new Set([
-  "server-only",
-  "client-only",
-  "next/dist/compiled/server-only",
-  "next/dist/compiled/client-only",
-]);
 const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
@@ -73,11 +75,8 @@ const IGNORED_INPUT_DIRECTORIES = new Set([
 ]);
 
 export interface WorkflowBundleBuilderConfig {
-  readonly buildTarget: "standalone";
   readonly dirs: readonly string[];
-  readonly externalPackages: readonly string[];
   readonly projectRoot: string;
-  readonly watch: boolean;
   readonly workingDir: string;
 }
 
@@ -88,22 +87,15 @@ export interface WorkflowBundleDiscoveredEntries {
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleOptions {
-  readonly additionalOutputs?: readonly WorkflowBundleOutput[];
   readonly appWorkflowFiles: readonly string[];
   readonly frameworkSerdeFiles: readonly string[];
   readonly frameworkWorkflowFiles: readonly string[];
   readonly outfile: string;
   readonly stepRegistrationsPath: string;
-  readonly tsconfigPath?: string;
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleResult {
   readonly manifest: WorkflowManifest;
-}
-
-export interface WorkflowBundleOutput {
-  readonly outfile: string;
-  readonly stepRegistrationsPath: string;
 }
 
 interface WorkflowGraph {
@@ -194,31 +186,8 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
   };
 }
 
-export function createWorkflowPseudoPackagePlugin(): WorkflowRolldownPlugin {
-  return {
-    name: "eve-workflow-pseudo-packages",
-    resolveId(source: string) {
-      if (!PSEUDO_PACKAGES.has(source)) {
-        return undefined;
-      }
-
-      return { id: `\0eve-workflow-pseudo-package:${source}` };
-    },
-    load(id: string) {
-      if (!id.startsWith("\0eve-workflow-pseudo-package:")) {
-        return undefined;
-      }
-
-      return {
-        code: "",
-        moduleType: "js",
-      };
-    },
-  };
-}
-
 /**
- * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * `eve/workflow` resolves to the body-side shim. An `eve/workflow/api` import still live
  * after step bodies were stubbed means a body calls the runtime API; fail the
  * build here rather than the driver later.
  */
@@ -230,7 +199,11 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         return resolveWorkflowModulePath(source);
       }
 
-      if (source === "workflow/api" || source === "workflow/runtime") {
+      if (
+        source === "eve/workflow/api" ||
+        source === "workflow/api" ||
+        source === "workflow/runtime"
+      ) {
         const via = importer ? ` (imported by "${importer}")` : "";
         throw new Error(
           `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
@@ -238,7 +211,7 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         );
       }
 
-      if (source !== "workflow") {
+      if (source !== "eve/workflow" && source !== "workflow") {
         return undefined;
       }
 
@@ -367,8 +340,15 @@ export async function bundleFinalWorkflowOutput(input: {
   queueNamespace: string;
   stepRegistrationsPath?: string;
 }): Promise<void> {
+  // The driver code ships as a text asset beside the entrypoint, so the host bundles it as a plain
+  // string: nothing decodes it at startup, and Nitro's `replace` cannot rewrite tokens inside it.
+  const codePath = workflowDriverCodePath(input.outfile);
+  await writeWorkflowBundleAtomically(
+    codePath,
+    input.code.endsWith("\n") ? input.code : `${input.code}\n`,
+  );
   const workflowFunctionCode = createWorkflowEntrypointSource({
-    code: input.code,
+    codePath,
     queueNamespace: input.queueNamespace,
     stepRegistrationsImport:
       input.stepRegistrationsPath === undefined
@@ -377,6 +357,11 @@ export async function bundleFinalWorkflowOutput(input: {
   });
 
   await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
+}
+
+/** Where the driver code for the entrypoint at `outfile` is written. */
+export function workflowDriverCodePath(outfile: string): string {
+  return join(dirname(outfile), `${basename(outfile, extname(outfile))}.code.txt`);
 }
 
 // The transform emits bare `.set(...)` calls, so the Map must exist before any chunk runs.
@@ -396,18 +381,13 @@ export function composeWorkflowDriverCode(chunks: readonly string[]): string {
 }
 
 export function createWorkflowEntrypointSource(input: {
-  readonly code: string;
+  readonly codePath: string;
   readonly queueNamespace: string;
   readonly stepRegistrationsImport?: string;
 }): string {
   const workflowRuntimePath = normalizeEsmImportSpecifier(
     resolveWorkflowModulePath("workflow/runtime"),
   );
-  const encodedWorkflowCode = Buffer.from(
-    input.code.endsWith("\n") ? input.code : `${input.code}\n`,
-    "utf8",
-  ).toString("base64");
-  const chunks = encodedWorkflowCode.match(/.{1,16384}/gu) ?? [""];
 
   const stepRegistrationsImport =
     input.stepRegistrationsImport === undefined
@@ -416,9 +396,8 @@ export function createWorkflowEntrypointSource(input: {
 
   return `// Generated by eve. Do not edit by hand.
 import { workflowEntrypoint } from ${JSON.stringify(workflowRuntimePath)};
+import workflowCode from ${stringifyNitroDataImportSpecifier("text", input.codePath)};
 ${stepRegistrationsImport}
-
-const workflowCode = Buffer.from(${JSON.stringify(chunks)}.join(""), "base64").toString("utf8");
 
 export const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(input.queueNamespace)} });
 `;

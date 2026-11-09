@@ -5,14 +5,19 @@ import {
 import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
-import { createWorld } from "#compiled/@workflow/world-local/index.js";
+import { createWorld, type LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
-  LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
+  displayLocalWorkflowWorldDataDirectory,
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
+import {
+  localRecoveryMessage,
+  releaseOrphanedLocalSteps,
+} from "#internal/workflow/local-world-recovery.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -67,7 +72,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #appRoot: string;
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
-  readonly #world: World;
+  readonly #world: LocalWorld;
   readonly #resume: boolean;
   // Owned by the host, not a worker: rebuilds preserve the startup admission decision.
   readonly #unrecoveredGenerations = new Map<
@@ -126,6 +131,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       if (!this.#resume) return;
       const skippedGenerations = new Set<string>();
       await reenqueueActiveDevelopmentRuns({
+        appRoot: this.#appRoot,
         enqueue: this.#queue.bind(this),
         prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
         world: this.#world,
@@ -202,7 +208,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         } catch (error) {
           throw new Error(
             `Failed to read the app's active local Workflow runs. ` +
-              `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
+              `Remove "${displayLocalWorkflowWorldDataDirectory(this.#appRoot)}" to discard them.`,
             { cause: error },
           );
         }
@@ -297,9 +303,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       const run = await this.#world.runs.get(hook.runId, { resolveData: "none" });
       const availability = await this.#generationAvailability(run.deploymentId);
       if (availability.kind === "dormant" || availability.kind === "ineligible") {
-        throw new Error(
-          "Local Workflow run was not resumed. Start a new conversation, or restart eve dev with --resume to attempt recovery.",
-        );
+        throw new DevelopmentRunUnavailableError({
+          availability: availability.kind,
+          runId: hook.runId,
+        });
       }
       return hook;
     }
@@ -353,10 +360,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function reenqueueActiveDevelopmentRuns(input: {
+  readonly appRoot: string;
   readonly enqueue: World["queue"];
   readonly canRecover: (generationId: string) => Promise<boolean>;
   readonly prefix: string;
-  readonly world: World;
+  readonly world: LocalWorld;
 }): Promise<void> {
   for (const status of ["pending", "running"] as const) {
     let cursor: string | undefined;
@@ -371,15 +379,23 @@ async function reenqueueActiveDevelopmentRuns(input: {
       } catch (error) {
         throw new Error(
           `Failed to read the app's active local Workflow runs. ` +
-            `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
+            `Remove "${displayLocalWorkflowWorldDataDirectory(input.appRoot)}" to discard them.`,
           { cause: error },
         );
       }
+      const recoverable = [];
       for (const run of page.data) {
-        if (!(await input.canRecover(run.deploymentId))) continue;
-        await input.enqueue(`${input.prefix}${run.workflowName}` as ValidQueueName, {
-          runId: run.runId,
-        });
+        if (await input.canRecover(run.deploymentId)) recoverable.push(run);
+      }
+      await releaseOrphanedLocalSteps(
+        input.world,
+        recoverable.map((run) => run.runId),
+      );
+      for (const run of recoverable) {
+        await input.enqueue(
+          `${input.prefix}${run.workflowName}` as ValidQueueName,
+          localRecoveryMessage(run),
+        );
       }
       cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
     } while (cursor !== undefined);

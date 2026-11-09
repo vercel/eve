@@ -11,7 +11,7 @@ async function execute(
   "use workflow";
 
   const response = await ctx.agent("agent").send("E2E_INTERNAL_ROOT_COPY");
-  const { message } = await response.result();
+  const { reply: message } = await response.result();
   return message ?? null;
 }
 

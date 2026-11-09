@@ -4,7 +4,6 @@ import type { ConnectTokenSubject } from "@vercel/connect";
 import {
   ConnectError,
   ConnectorInstallationRequiredError,
-  getToken,
   getTokenResponse,
   NoValidTokenError,
   revokeToken,

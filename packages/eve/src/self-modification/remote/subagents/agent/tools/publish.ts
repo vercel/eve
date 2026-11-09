@@ -112,8 +112,4 @@ export function publicationOperationId(ctx: Pick<ToolContext, "session">): strin
   return `${parent.rootSessionId}:${parent.sessionId}:${parent.turn.id}:${parent.callId}:${ctx.session.id}`;
 }
 
-export default defineDynamic({
-  events: {
-    "session.started": resolveTool,
-  },
-});
+export default defineDynamic(resolveTool);

@@ -1,8 +1,8 @@
-import type { SessionAuthContext } from "#channel/types.js";
 /** Shared owner-side dispatch context preparation. */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
+import type { SandboxState } from "#sandbox/state.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -22,6 +22,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { HarnessSessionBase } from "#harness/types.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { assertUniqueCoordinationCallIds } from "#harness/coordination.js";
 import {
   activeTurnId,
@@ -36,17 +37,15 @@ import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { readDynamicSubagentSelections } from "#context/dynamic-subagent-lifecycle.js";
+import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
-  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -56,7 +55,12 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
+  readonly pending: PendingDispatch;
 }
+
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
+export type { PendingDispatch };
 
 /** Everything preflight produces before either step's dispatch loop runs. */
 export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskRequest> {
@@ -77,6 +81,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
   readonly sandboxSessionId: string;
+  /** The state of that sandbox: this session's own, or else its owner's when it shares it. */
+  readonly sandboxState?: SandboxState;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
@@ -88,10 +94,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
 
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
- * deserialization, handle-store validation, and batch planning — before
- * the caller acquires the parent stream writer, so a preflight failure
- * never leaks the writer lock. Returns undefined when no actions are
- * pending.
+ * deserialization, handle-store validation, and batch planning — before any
+ * run starts. Returns undefined when no actions are pending.
  */
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
@@ -106,7 +110,7 @@ export async function prepareCoordinationDispatch(input: {
     waiting.event.turnId || activeTurnId(turnPosition(storedProjection(durableSession.state)));
   const ctx = await deserializeContext(input.serializedContext);
   const prepared = await prepareActionDispatch({
-    batch: { approvers: waiting.approvers, event: { ...waiting.event, turnId }, requests },
+    batch: { event: { ...waiting.event, turnId }, requests },
     ctx,
     durableSession,
     plan: () => requests,
@@ -116,7 +120,6 @@ export async function prepareCoordinationDispatch(input: {
 }
 
 interface DispatchBatch {
-  readonly approvers?: Readonly<Record<string, SessionAuthContext>>;
   readonly event: {
     readonly sequence: number;
     readonly stepIndex: number;
@@ -141,15 +144,9 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   assertUniqueCoordinationCallIds(batch.requests);
 
   const ctx = input.ctx;
+  enterSessionProjection(ctx, durableSession.state);
   const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
+  const session = hydrateDurableSession(durableSession);
   const adapter = ctx.require(ChannelKey);
 
   const plan = input.plan({
@@ -160,6 +157,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  const sandboxState = session.sandboxState ?? resolveOwnerSandboxState(adapter.state);
 
   return {
     adapter,
@@ -176,6 +174,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     parentSession: ctx.get(ParentSessionKey),
     plan,
     sandboxSessionId,
+    sandboxState,
     serializedContext: input.serializedContext,
     session,
     traceRoot: childTraceRoot(ctx, session.sessionId),
@@ -191,6 +190,12 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot | undefined {
   if (ctx.get(TraceRootKey) === undefined) return undefined;
   return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
+}
+
+/** A child that shares its owner's sandbox uses the owner's state until it records its own. */
+function resolveOwnerSandboxState(adapterState: unknown): SandboxState | undefined {
+  if (typeof adapterState !== "object" || adapterState === null) return undefined;
+  return (adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined;
 }
 
 function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {

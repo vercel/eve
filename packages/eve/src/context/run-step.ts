@@ -82,6 +82,10 @@ export async function withContextScope<T, S extends HarnessSessionBase>(
       );
     }
     throw error;
+  } finally {
+    for (const provider of createdProviders.toReversed()) {
+      await provider.dispose?.(ctx.require(provider.key));
+    }
   }
 }
 

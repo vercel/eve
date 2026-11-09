@@ -1,3 +1,4 @@
+import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { describe, expect, it } from "vitest";
 import {
   createDocsRedirects,
@@ -102,8 +103,8 @@ describe("createIntegrationRedirects", () => {
 
 describe("docsRedirects", () => {
   it.each([
-    ["/docs/channels", "/docs/channels/overview"],
-    ["/docs/guides/deployment.md", "/docs/guides/deployment/overview.md"],
+    ["/docs/channels/overview", "/docs/channels"],
+    ["/docs/guides/deployment/overview.md", "/docs/guides/deployment.md"],
     ["/docs/guides/frontend/add-a-web-app", "/docs/guides/frontend/nextjs"],
     ["/docs/guides/frontend/add-a-web-app.mdx", "/docs/guides/frontend/nextjs.mdx"],
     ["/docs/introduction.md", "/docs/getting-started.md"],
@@ -130,9 +131,18 @@ describe("docsRedirects", () => {
     ["/docs/guides/acp.md", "/docs/protocols/acp.md"],
     ["/docs/guides/ucp", "/docs/protocols/ucp"],
     ["/docs/guides/ucp.mdx", "/docs/protocols/ucp.mdx"],
-    ["/docs/evals", "/docs/evals/overview"],
+    ["/docs/evals/overview", "/docs/evals"],
+    ["/docs/guides/frontend/overview", "/docs/guides/frontend"],
+    ["/docs/guides/client/overview.md", "/docs/guides/client.md"],
     ["/docs/guides/evaluate", "/docs/guides/decide"],
     ["/docs/guides/evaluate.md", "/docs/guides/decide.md"],
+    ["/docs/sandbox/microsandbox", "/docs/sandbox"],
+    ["/docs/sandbox/microsandbox.md", "/docs/sandbox.md"],
+    ["/en/docs/sandbox/microsandbox.mdx", "/docs/sandbox.mdx"],
+    ["/docs/guides/prepare-for-1-0", "/docs/guides/upgrade"],
+    ["/docs/guides/prepare-for-1-0.md", "/docs/guides/upgrade.md"],
+    ["/docs/concepts/upgrade-to-v27-events", "/docs/guides/upgrade/session-events"],
+    ["/docs/concepts/upgrade-to-v27-events.md", "/docs/guides/upgrade/session-events.md"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
   });
@@ -171,6 +181,67 @@ describe("rootMarkdownRedirects", () => {
 });
 
 describe("compatibilityRedirects", () => {
+  it.each([
+    "/templates",
+    "/templates.md",
+    "/templates.mdx",
+    "/templates/unknown-template.mdx",
+    "/resources",
+    "/en/templates",
+    "/en/templates.md",
+    "/en/templates.mdx",
+    "/en/templates/unknown-template",
+    "/en/resources",
+  ])("falls back to the gallery for %s", async (source) => {
+    const response = await unstable_getResponseFromNextConfig({
+      url: `https://eve.dev${source}`,
+      nextConfig: {
+        redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+      },
+    });
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://vercel.com/templates/eve");
+  });
+
+  it.each([
+    ["eve-chat-template", "eve-chat-template"],
+    ["eve-agent-with-python", "eve-agent-with-python"],
+    ["eve-slack-agent", "eve-slack-agent"],
+    ["eve-voice-template", "eve-voice-template"],
+    ["eve-discord-agent", "eve-discord-agent"],
+    ["eve-company-brain-template", "eve-company-brain-template"],
+    ["eve-coding-agent-template", "eve-coding-agent-template"],
+    ["bell-stack", "bell-stack"],
+    ["eve-design-template", "eve-design-template"],
+    ["eve-data-analyst-template", "eve-data-analyst"],
+    ["eve-contentful-agent-template", "eve-contentful-agent"],
+    ["eve-vercel-drives-starter", "eve-vercel-drives-starter"],
+    ["eve-memory-agent-template", "eve-memory-agent"],
+    ["eve-tanstack-start-template", "eve-tanstack-agent"],
+    ["eve-software-factory-template", "eve-software-factory"],
+    ["marketing-team-eve-template", "eve-marketing-team"],
+    ["openinstinct-eve-template", "openinstinct-eve-agent"],
+    ["kody-eve-template", "eve-github-maintainer"],
+    ["typefully-eve-template", "eve-typefully-agent"],
+    ["eve-sre-agent-template", "eve-incident-response-agent"],
+    ["sanity-copilot-eve-template", "eve-sanity-copilot"],
+  ])("redirects %s directly to its matching Vercel listing", async (slug, destination) => {
+    for (const prefix of ["", "/en"]) {
+      for (const extension of ["", ".md", ".mdx"]) {
+        const response = await unstable_getResponseFromNextConfig({
+          url: `https://eve.dev${prefix}/templates/${slug}${extension}`,
+          nextConfig: {
+            redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+          },
+        });
+        expect(response.status).toBe(308);
+        expect(response.headers.get("location")).toBe(
+          `https://vercel.com/templates/eve/${destination}`,
+        );
+      }
+    }
+  });
+
   it("redirects the previous benchmark route", () => {
     expect(compatibilityRedirects).toContainEqual({
       source: "/evals",
@@ -194,6 +265,14 @@ describe("compatibilityRedirects", () => {
       permanent: true,
     });
   });
+
+  it("redirects the Hindsight extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/hindsight.json",
+      destination: "/r/memory/hindsight.json",
+      permanent: true,
+    });
+  });
 });
 
 describe("defaultLanguageRedirects", () => {
@@ -202,11 +281,6 @@ describe("defaultLanguageRedirects", () => {
       {
         source: "/en/docs",
         destination: "/docs/getting-started",
-        permanent: true,
-      },
-      {
-        source: "/en/resources",
-        destination: "/templates",
         permanent: true,
       },
       {

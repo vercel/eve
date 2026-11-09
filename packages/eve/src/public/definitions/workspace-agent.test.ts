@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { defineWorkspaceAgent } from "./workspace-agent.js";
+import { defineWorkspaceAgent } from "#public/experimental/workspace/index.js";
 
 const { getVercelOidcToken } = vi.hoisted(() => ({
   getVercelOidcToken: vi.fn().mockResolvedValue("oidc-token"),

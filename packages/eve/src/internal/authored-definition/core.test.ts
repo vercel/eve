@@ -31,54 +31,47 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.reasoning).toBe("high");
   });
 
-  it("accepts dynamic model definitions", () => {
-    const model = defineDynamic({
-      events: {
-        "session.started": () => "openai/gpt-5.5-mini",
-      },
-    });
-    const definition = normalizeAgentDefinition(
-      {
-        model,
-      },
-      FAILURE_MESSAGE,
-    );
+  it("accepts a dynamic model field beside static fields", () => {
+    const model = defineDynamic(() => "openai/gpt-5.5-mini");
+    const definition = normalizeAgentDefinition({ defaultTools: false, model }, FAILURE_MESSAGE);
 
-    expect(definition.model).toMatchObject({
-      kind: "eve:dynamic",
-    });
-    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
+    expect(definition.defaultTools).toBe(false);
+    expect(definition.model).toBe(model);
   });
 
-  it("rejects fallback-shaped dynamic models", () => {
+  it("rejects a dynamic agent.ts, pointing at the dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
-        {
-          model: {
-            events: { "session.started": () => "openai/gpt-5.5-mini" },
-            fallback: "openai/gpt-5.5",
-            kind: "eve:dynamic",
-          },
-        },
+        defineDynamic(() => ({ model: "openai/gpt-5.5-mini" })),
         FAILURE_MESSAGE,
       ),
-    ).toThrow('Unknown key "fallback"');
+    ).toThrow(/make the model field dynamic/);
   });
 
-  it("rejects definition-level model metadata for dynamic models", () => {
+  it("rejects model settings beside a dynamic model", () => {
     expect(() =>
       normalizeAgentDefinition(
         {
-          model: defineDynamic({
-            events: {
-              "session.started": () => "openai/gpt-5.5-mini",
-            },
-          }),
+          model: defineDynamic(() => "openai/gpt-5.5-mini"),
           modelContextWindowTokens: 128_000,
         },
         FAILURE_MESSAGE,
       ),
-    ).toThrow(/Dynamic model.*modelContextWindowTokens/);
+    ).toThrow(/returns its "modelContextWindowTokens" and "modelOptions" with the model/);
+  });
+
+  it("rejects keys beside a dynamic model's function", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: {
+            ...defineDynamic(() => "openai/gpt-5.5-mini"),
+            reasoning: "high",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/takes only a function; unknown key\(s\): reasoning/);
   });
 
   it("rejects a dynamic compaction model", () => {
@@ -86,17 +79,31 @@ describe("normalizeAgentDefinition", () => {
       normalizeAgentDefinition(
         {
           compaction: {
-            model: defineDynamic({
-              events: {
-                "session.started": () => "openai/gpt-5.5-mini",
-              },
-            }),
+            model: defineDynamic(() => "openai/gpt-5.5-mini"),
           },
           model: "openai/gpt-5.5",
         },
         FAILURE_MESSAGE,
       ),
     ).toThrow('"compaction.model" does not support defineDynamic');
+  });
+
+  it("accepts Anthropic prompt cache options", () => {
+    const definition = normalizeAgentDefinition(
+      { model: "openai/gpt-5.5", modelOptions: { promptCache: { anthropic: { ttl: "1h" } } } },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.modelOptions).toEqual({ promptCache: { anthropic: { ttl: "1h" } } });
+  });
+
+  it("rejects an unsupported Anthropic prompt cache TTL", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.5", modelOptions: { promptCache: { anthropic: { ttl: "24h" } } } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"modelOptions.promptCache.anthropic.ttl" must be "5m" or "1h"; received "24h".');
   });
 
   it("rejects unsupported reasoning effort", () => {
@@ -111,48 +118,84 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
-  it("accepts positive agent limits", () => {
-    const definition = normalizeAgentDefinition(
-      {
-        model: "openai/gpt-5.5",
-        limits: {
-          maxInputTokensPerSession: 200_000,
-          maxOutputTokensPerSession: 20_000,
-          maxTokenCostUsdPerSession: 1.5,
-          sessionTimeoutMs: 86_400_000,
-        },
-      },
-      FAILURE_MESSAGE,
-    );
-
-    expect(definition.limits).toEqual({
-      maxInputTokensPerSession: 200_000,
-      maxOutputTokensPerSession: 20_000,
-      maxTokenCostUsdPerSession: 1.5,
-      sessionTimeoutMs: 86_400_000,
-    });
+  it.each([0, 0.75, 1])("accepts compaction threshold %s", (threshold) => {
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { threshold } },
+        FAILURE_MESSAGE,
+      ).compaction,
+    ).toEqual({ threshold });
   });
 
-  it("accepts false to uncap session token limits", () => {
+  it.each([-0.1, 1.1, NaN, Infinity, "0.9"])(
+    "rejects invalid compaction threshold %s",
+    (threshold) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          { model: "openai/gpt-5.4", compaction: { threshold } },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow();
+    },
+  );
+
+  it("explains the compaction threshold rename", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { thresholdPercent: 0.9 } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Rename "compaction.thresholdPercent" to "compaction.threshold"');
+  });
+
+  it("accepts agent limits and keeps the session usage function", () => {
+    const sessionUsage = ({ window }: { window: { inputTokens: number } }) =>
+      window.inputTokens >= 1_000;
     const definition = normalizeAgentDefinition(
       {
         model: "openai/gpt-5.5",
         limits: {
-          maxInputTokensPerSession: false,
-          maxOutputTokensPerSession: false,
-          maxTokenCostUsdPerSession: false,
-          sessionTimeoutMs: false,
+          sessionTimeoutMs: 86_400_000,
+          sessionUsage,
         },
       },
       FAILURE_MESSAGE,
     );
 
     expect(definition.limits).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-      maxTokenCostUsdPerSession: false,
-      sessionTimeoutMs: false,
+      sessionTimeoutMs: 86_400_000,
+      sessionUsage,
     });
+    expect(definition.limits?.sessionUsage).toBe(sessionUsage);
+  });
+
+  it.each(["sessionTimeoutMs", "sessionUsage"])("accepts false to disable %s", (limit) => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        limits: { [limit]: false },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.limits).toEqual({ [limit]: false });
+  });
+
+  it.each([
+    ["maxInputTokensPerSession", 200_000],
+    ["maxOutputTokensPerSession", 20_000],
+    ["maxTokenCostUsdPerSession", 1.5],
+    ["maxInputTokensPerSession", false],
+  ])("rejects the removed numeric session limit %s=%j", (key, value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          limits: { [key]: value },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects the removed subagent max depth limit", () => {
@@ -180,22 +223,14 @@ describe("normalizeAgentDefinition", () => {
   });
 
   it.each([
-    ["maxInputTokensPerSession", 0],
-    ["maxInputTokensPerSession", 1.5],
-    ["maxInputTokensPerSession", -1],
-    ["maxInputTokensPerSession", "200000"],
-    ["maxOutputTokensPerSession", 0],
-    ["maxOutputTokensPerSession", 1.5],
-    ["maxOutputTokensPerSession", -1],
-    ["maxOutputTokensPerSession", "20000"],
-    ["maxTokenCostUsdPerSession", 0],
-    ["maxTokenCostUsdPerSession", -0.01],
-    ["maxTokenCostUsdPerSession", Number.POSITIVE_INFINITY],
-    ["maxTokenCostUsdPerSession", "1.50"],
     ["sessionTimeoutMs", 0],
     ["sessionTimeoutMs", 1.5],
     ["sessionTimeoutMs", -1],
     ["sessionTimeoutMs", "30d"],
+    ["sessionUsage", true],
+    ["sessionUsage", 40_000_000],
+    ["sessionUsage", { inputTokens: 40_000_000 }],
+    ["sessionUsage", "() => true"],
   ])("rejects invalid session runtime limit %s=%j", (key, value) => {
     expect(() =>
       normalizeAgentDefinition(
@@ -372,7 +407,7 @@ describe("normalizeScheduleDefinition", () => {
       normalizeScheduleDefinition(
         {
           cron: "0 9 * * *",
-          markdown: "Send a digest.",
+          content: "Send a digest.",
           [field]: () => "user-approval",
         },
         "Expected the schedule config to match the public eve shape.",
@@ -397,11 +432,10 @@ describe("normalizeInstructionsDefinition", () => {
     ).toEqual({ content: "Tenant context.", role: "user" });
   });
 
-  it("normalizes the deprecated markdown shape as system content", () => {
-    expect(normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toEqual({
-      content: "Legacy.",
-      role: "system",
-    });
+  it("rejects the retired markdown alias", () => {
+    expect(() => normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toThrow(
+      'Unknown key "markdown"',
+    );
   });
 
   it.each([

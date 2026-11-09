@@ -38,11 +38,12 @@ describe("createRuntimeToolResultFromValue", () => {
       createRuntimeToolResultFromValue({
         callId: "call_failed",
         isError: true,
-        output: new Error("tool failed"),
+        output: Object.assign(new Error("tool failed"), { name: "QuotaError" }),
         toolName: "broken",
       }),
     ).toEqual({
       callId: "call_failed",
+      errorName: "QuotaError",
       isError: true,
       kind: "tool-result",
       output: "tool failed",
@@ -57,16 +58,17 @@ describe("createRuntimeToolResultFromToolError", () => {
       createRuntimeToolResultFromToolError({
         error: new Error('No skill named "demo"'),
         input: { skill: "demo" },
-        toolCallId: "call_load_skill",
-        toolName: "load_skill",
+        toolCallId: "call_lookup",
+        toolName: "lookup",
         type: "tool-error",
       }),
     ).toEqual({
-      callId: "call_load_skill",
+      callId: "call_lookup",
+      errorName: "Error",
       isError: true,
       kind: "tool-result",
       output: 'No skill named "demo"',
-      toolName: "load_skill",
+      toolName: "lookup",
     });
   });
 });

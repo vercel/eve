@@ -1,5 +1,5 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
-import type { ChannelSourceRef } from "#discover/manifest.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
 import { getChannelBuildMetadata } from "#channel/compiled-channel.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
@@ -27,7 +27,7 @@ import {
  */
 export async function compileChannelDefinition(
   _agentRoot: string,
-  source: ChannelSourceRef,
+  source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<
   | { readonly kind: "disabled"; readonly name: string }

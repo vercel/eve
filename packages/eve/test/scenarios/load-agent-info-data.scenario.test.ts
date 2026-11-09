@@ -27,7 +27,10 @@ describe("loadAgentInfoData", () => {
   it("prefers bundled compiled artifacts over the app-root disk path", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-agent-info-data-", APP_ROOT_OPTIONS);
 
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "sandbox"), {
       recursive: true,

@@ -4,7 +4,9 @@
     "packages/eve/CHANGELOG.md",
     "packages/eve/src/internal/testing/channel-conformance/MATRIX.md",
     "apps/docs/registry.json",
+    "apps/frameworks/tanstack/src/routeTree.gen.ts",
     "packages/eve/src/setup/scaffold/create/web-template.ts",
-    "e2e/fixtures/agent-mcp/agent/skills/kennel-handbook/references/latin1.md"
+    "e2e/fixtures/agent-mcp/agent/skills/kennel-handbook/references/latin1.md",
+    "packages/eve/src/**/__golden__/**"
   ]
 }

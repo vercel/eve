@@ -1,11 +1,12 @@
 import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
+import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 import {
   omitProvidedArgumentsFromSchema,
   resolveProvidedArguments,
 } from "#runtime/connections/provided-arguments.js";
 import {
+  declaredOperationId,
   HTTP_METHODS,
   type OpenApiOperation,
   operationDescription,
@@ -14,11 +15,12 @@ import {
 } from "#runtime/connections/openapi-operations.js";
 import {
   buildInputSchema,
+  createSchemaConverter,
   deref,
-  derefSchema,
   isArray,
   type OpenApiParameter,
   type OpenApiRequestBody,
+  type SchemaConverter,
 } from "#runtime/connections/openapi-schema.js";
 import { applySecurity, resolveSecurity } from "#runtime/connections/openapi-security.js";
 import { extractServerUrl, parseSpecDocument } from "#runtime/connections/openapi-spec.js";
@@ -32,6 +34,8 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const log = createLogger("runtime.connections.openapi-client");
+
+type SchemaConvert = SchemaConverter["convert"];
 
 interface OpenApiToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
@@ -67,6 +71,8 @@ interface OpenApiToolResult {
   readonly status: number;
   readonly statusText: string;
   readonly body: unknown;
+  /** Target of a redirect to another origin, which eve returns instead of following. */
+  location?: string;
 }
 
 /**
@@ -145,28 +151,18 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const baseUrl = this.#resolveBaseUrl(document);
     const operations = this.#extractOperations(document);
 
-    const filter = this.#connection.tools;
-    const selected =
-      filter !== undefined
-        ? operations.filter((op) => passesToolFilter(op.toolName, filter))
-        : operations;
-
     const metadata: ConnectionToolMetadata[] = [];
     const operationMap = new Map<string, OpenApiOperation>();
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
 
-    for (const operation of selected) {
+    for (const operation of operations) {
       let inputSchema: JsonObject;
       try {
         inputSchema = parseJsonObject(
           omitProvidedArgumentsFromSchema(operation.inputSchema, providedArgumentNames),
         );
       } catch (error) {
-        log.warn("omitting OpenAPI operation with an invalid input schema", {
-          connectionName: this.#connection.connectionName,
-          error,
-          toolName: operation.toolName,
-        });
+        this.#warnInvalidInputSchema(operation.toolName, error);
         continue;
       }
 
@@ -175,10 +171,19 @@ export class OpenApiConnectionClient implements ConnectionClient {
         description: operation.description,
         inputSchema,
         name: operation.toolName,
+        ...(operation.operationId !== undefined && { operationId: operation.operationId }),
       });
     }
 
     return { metadata, operations: operationMap, baseUrl };
+  }
+
+  #warnInvalidInputSchema(toolName: string, error: unknown): void {
+    log.warn("omitting OpenAPI operation with an invalid input schema", {
+      connectionName: this.#connection.connectionName,
+      error,
+      toolName,
+    });
   }
 
   /**
@@ -280,21 +285,32 @@ export class OpenApiConnectionClient implements ConnectionClient {
 
         const opParams = isArray(operationValue.parameters) ? operationValue.parameters : [];
         const rawParameters = [...sharedParams, ...opParams];
-        const parameters = this.#resolveParameters(document, rawParameters);
-        const requestBody = this.#resolveRequestBody(
-          document,
-          operationValue.requestBody,
-          rawParameters,
-        );
+        const { convert, defs } = createSchemaConverter(document);
+        let parameters: OpenApiParameter[];
+        let requestBody: OpenApiRequestBody | undefined;
+        try {
+          parameters = this.#resolveParameters(document, rawParameters, convert);
+          requestBody = this.#resolveRequestBody(
+            document,
+            operationValue.requestBody,
+            rawParameters,
+            convert,
+          );
+        } catch (error) {
+          // A schema nested deeply enough to overflow the stack costs only its own operation.
+          this.#warnInvalidInputSchema(toolName, error);
+          continue;
+        }
 
         operations.push({
           toolName,
+          operationId: declaredOperationId(operationValue),
           method,
           pathTemplate,
           description: operationDescription(operationValue),
           parameters,
           requestBody,
-          inputSchema: buildInputSchema(parameters, requestBody),
+          inputSchema: buildInputSchema(parameters, requestBody, defs),
           security: resolveSecurity(document, operationValue),
         });
       }
@@ -306,6 +322,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
   #resolveParameters(
     document: Record<string, unknown>,
     raw: readonly unknown[],
+    convert: SchemaConvert,
   ): OpenApiParameter[] {
     const params: OpenApiParameter[] = [];
     for (const entry of raw) {
@@ -325,7 +342,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       if (typeof resolved.name !== "string") {
         continue;
       }
-      const schema = this.#resolveParameterSchema(document, resolved);
+      const schema = this.#resolveParameterSchema(resolved, convert);
       params.push({
         name: resolved.name,
         location,
@@ -340,7 +357,8 @@ export class OpenApiConnectionClient implements ConnectionClient {
   #resolveRequestBody(
     document: Record<string, unknown>,
     raw: unknown,
-    rawParameters: readonly unknown[] = [],
+    rawParameters: readonly unknown[],
+    convert: SchemaConvert,
   ): OpenApiRequestBody | undefined {
     if (isObject(raw)) {
       const resolved = deref(document, raw);
@@ -352,7 +370,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
           const media = content[contentType];
           const schema =
             isObject(media) && isObject(media.schema)
-              ? (derefSchema(document, media.schema) as Record<string, unknown>)
+              ? (convert(media.schema) as Record<string, unknown>)
               : {};
           return {
             required: resolved.required === true,
@@ -362,15 +380,15 @@ export class OpenApiConnectionClient implements ConnectionClient {
         }
       }
     }
-    return this.#resolveSwaggerBodyParameter(document, rawParameters);
+    return this.#resolveSwaggerBodyParameter(document, rawParameters, convert);
   }
 
   #resolveParameterSchema(
-    document: Record<string, unknown>,
     parameter: Record<string, unknown>,
+    convert: SchemaConvert,
   ): Record<string, unknown> {
     if (isObject(parameter.schema)) {
-      return derefSchema(document, parameter.schema) as Record<string, unknown>;
+      return convert(parameter.schema) as Record<string, unknown>;
     }
 
     const schema: Record<string, unknown> = {};
@@ -379,12 +397,13 @@ export class OpenApiConnectionClient implements ConnectionClient {
         schema[key] = parameter[key];
       }
     }
-    return derefSchema(document, schema) as Record<string, unknown>;
+    return convert(schema) as Record<string, unknown>;
   }
 
   #resolveSwaggerBodyParameter(
     document: Record<string, unknown>,
     rawParameters: readonly unknown[],
+    convert: SchemaConvert,
   ): OpenApiRequestBody | undefined {
     for (const entry of rawParameters) {
       const resolved = isObject(entry) ? deref(document, entry) : entry;
@@ -392,7 +411,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
         continue;
       }
       const schema = isObject(resolved.schema)
-        ? (derefSchema(document, resolved.schema) as Record<string, unknown>)
+        ? (convert(resolved.schema) as Record<string, unknown>)
         : {};
       return {
         required: resolved.required === true,
@@ -427,7 +446,14 @@ export class OpenApiConnectionClient implements ConnectionClient {
         continue;
       }
       if (param.location === "path") {
-        path = path.replace(`{${param.name}}`, encodeURIComponent(String(value)));
+        const pathValue = String(value);
+        // URL parsing normalizes dot segments even after encodeURIComponent.
+        if (pathValue === "." || pathValue === "..") {
+          throw new Error(
+            `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not be "." or "..".`,
+          );
+        }
+        path = path.replace(`{${param.name}}`, encodeURIComponent(pathValue));
       } else if (param.location === "query") {
         appendQuery(query, param.name, value);
       } else if (param.location === "cookie") {
@@ -454,19 +480,87 @@ export class OpenApiConnectionClient implements ConnectionClient {
       headers["content-type"] = operation.requestBody.contentType;
     }
 
-    const response = await fetch(url, {
-      method: operation.method.toUpperCase(),
-      headers,
-      body,
-      signal: options?.abortSignal,
-    });
+    const { response, location } = await fetchWithinOrigin(
+      url,
+      {
+        method: operation.method.toUpperCase(),
+        headers,
+        body,
+        signal: options?.abortSignal,
+      },
+      this.#connection.connectionName,
+    );
 
-    return {
+    const result: OpenApiToolResult = {
       status: response.status,
       statusText: response.statusText,
       body: await readResponseBody(response),
     };
+    if (location !== undefined) result.location = location;
+    return result;
   }
+}
+
+const MAX_REDIRECTS = 10;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+interface OperationRequestInit {
+  readonly method: string;
+  readonly headers: Record<string, string>;
+  readonly body: string | undefined;
+  readonly signal: AbortSignal | undefined;
+}
+
+/**
+ * Sends an operation request, following redirects only within the request's
+ * origin. Every hop carries the connection's credentials, and fetch forwards
+ * custom headers such as an api-key header to any origin a redirect names. A
+ * cross-origin redirect is therefore returned with its resolved `location`
+ * instead of followed, so the caller can fetch the target without credentials.
+ */
+async function fetchWithinOrigin(
+  url: URL,
+  init: OperationRequestInit,
+  connectionName: string,
+): Promise<{ readonly response: Response; readonly location?: string }> {
+  let current = url;
+  let request = init;
+  for (let redirects = 0; ; redirects++) {
+    const response = await fetch(current, { ...request, redirect: "manual" });
+    const location = response.headers.get("location");
+    if (!REDIRECT_STATUSES.has(response.status) || location === null) {
+      return { response };
+    }
+    const next = URL.parse(location, current.href);
+    if (next === null) {
+      return { response };
+    }
+    if (next.origin !== url.origin) {
+      return { response, location: next.href };
+    }
+    await response.body?.cancel();
+    if (redirects >= MAX_REDIRECTS) {
+      throw new Error(
+        `OpenAPI connection "${connectionName}" stopped after ${MAX_REDIRECTS} redirects from "${url.origin}${url.pathname}", last to "${next.pathname}". The API may be redirecting in a loop.`,
+      );
+    }
+    current = next;
+    request = redirectedRequest(request, response.status);
+  }
+}
+
+/** Applies fetch's method rewrite: 303, and 301/302 after a POST, re-send as a bodiless GET. */
+function redirectedRequest(init: OperationRequestInit, status: number): OperationRequestInit {
+  const becomesGet =
+    (status === 303 && init.method !== "GET" && init.method !== "HEAD") ||
+    ((status === 301 || status === 302) && init.method === "POST");
+  if (!becomesGet) {
+    return init;
+  }
+  const headers = Object.fromEntries(
+    Object.entries(init.headers).filter(([name]) => name.toLowerCase() !== "content-type"),
+  );
+  return { ...init, method: "GET", headers, body: undefined };
 }
 
 function appendQuery(query: URLSearchParams, name: string, value: unknown): void {

@@ -1,5 +1,7 @@
 import type { ModelMessage, SystemModelMessage, ToolSet } from "ai";
 
+import type { ModelProfile } from "#harness/model-profile.js";
+
 /**
  * Cache marker for models that take Anthropic prompt-cache breakpoints.
  *
@@ -13,17 +15,24 @@ import type { ModelMessage, SystemModelMessage, ToolSet } from "ai";
  *   Converse provider, which does not understand `anthropic.cacheControl`.
  *
  * A provider ignores namespaces it does not own, so carrying both is safe on
- * every request regardless of which provider serves it. Every breakpoint shares
- * this frozen instance.
+ * every request regardless of which provider serves it.
+ *
+ * Every breakpoint in a request carries the same TTL, because Anthropic rejects
+ * a 1-hour breakpoint that follows a 5-minute one. The 5-minute marker omits the
+ * TTL, which is the providers' default.
  */
-const ANTHROPIC_CACHE_MARKER = Object.freeze({
-  anthropic: Object.freeze({
-    cacheControl: Object.freeze({ type: "ephemeral" as const }),
+const ANTHROPIC_CACHE_MARKERS = Object.freeze({
+  "5m": Object.freeze({
+    anthropic: Object.freeze({ cacheControl: Object.freeze({ type: "ephemeral" }) }),
+    bedrock: Object.freeze({ cachePoint: Object.freeze({ type: "default" }) }),
   }),
-  bedrock: Object.freeze({
-    cachePoint: Object.freeze({ type: "default" as const }),
+  "1h": Object.freeze({
+    anthropic: Object.freeze({ cacheControl: Object.freeze({ type: "ephemeral", ttl: "1h" }) }),
+    bedrock: Object.freeze({ cachePoint: Object.freeze({ type: "default", ttl: "1h" }) }),
   }),
 });
+
+type AnthropicCache = NonNullable<ModelProfile["anthropicCache"]>;
 
 /**
  * Returns a new `providerOptions` object with
@@ -63,7 +72,7 @@ export function mergeGatewayAutoCaching(
  * No-op when `tools` has no entries. Preserves existing `providerOptions`
  * on tools (merges the cache marker in via spread).
  */
-export function applyLastToolCacheBreakpoint(tools: ToolSet): ToolSet {
+export function applyLastToolCacheBreakpoint(tools: ToolSet, cache: AnthropicCache): ToolSet {
   const entries = Object.entries(tools);
   if (entries.length === 0) {
     return tools;
@@ -81,7 +90,7 @@ export function applyLastToolCacheBreakpoint(tools: ToolSet): ToolSet {
         ...tool,
         providerOptions: {
           ...existingProviderOptions,
-          ...ANTHROPIC_CACHE_MARKER,
+          ...ANTHROPIC_CACHE_MARKERS[cache.ttl],
         },
       };
     } else {
@@ -103,6 +112,7 @@ export function applyLastToolCacheBreakpoint(tools: ToolSet): ToolSet {
  */
 export function applySystemCacheBreakpoint(
   instructions: readonly SystemModelMessage[],
+  cache: AnthropicCache,
 ): SystemModelMessage[] {
   if (instructions.length === 0) return [...instructions];
 
@@ -112,7 +122,7 @@ export function applySystemCacheBreakpoint(
     ...last,
     providerOptions: {
       ...last.providerOptions,
-      ...ANTHROPIC_CACHE_MARKER,
+      ...ANTHROPIC_CACHE_MARKERS[cache.ttl],
     },
   };
   return result;
@@ -140,7 +150,10 @@ export function applySystemCacheBreakpoint(
  * appends more content blocks than Anthropic's backward boundary scan
  * covers.
  */
-export function applyConversationCacheControl(messages: readonly ModelMessage[]): ModelMessage[] {
+export function applyConversationCacheControl(
+  messages: readonly ModelMessage[],
+  cache: AnthropicCache,
+): ModelMessage[] {
   if (messages.length === 0) {
     return [...messages];
   }
@@ -156,7 +169,7 @@ export function applyConversationCacheControl(messages: readonly ModelMessage[])
       ...message,
       providerOptions: {
         ...message.providerOptions,
-        ...ANTHROPIC_CACHE_MARKER,
+        ...ANTHROPIC_CACHE_MARKERS[cache.ttl],
       },
     };
   };

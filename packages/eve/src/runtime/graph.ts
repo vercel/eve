@@ -1,5 +1,4 @@
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
@@ -22,11 +21,6 @@ export interface ResolvedRuntimeAgentNode {
    * combine framework defaults with the resolved-agent's authored channels.
    */
   readonly channels: readonly ResolvedChannelDefinition[];
-  /**
-   * Per-node hook registry. Stream-event subscribers fan out alongside
-   * channel adapter event handlers.
-   */
-  readonly hookRegistry: RuntimeHookRegistry;
   readonly nodeId: string;
   readonly sandboxRegistry: RuntimeSandboxRegistry;
   readonly sourceId?: string;

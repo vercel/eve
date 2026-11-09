@@ -20,7 +20,7 @@ export default defineEval({
     completed.messageIncludes(CHILD_TOKEN);
 
     t.succeeded();
-    t.calledSubagent("agent", { status: "completed", count: 1 });
-    t.noFailedActions();
+    t.calledAgent("agent", { status: "completed", count: 1 });
+    t.noFailedCalls();
   },
 });

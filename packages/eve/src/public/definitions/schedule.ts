@@ -45,9 +45,9 @@ export type ScheduleRunHandler = GenericScheduleRunHandler<ScheduleHandlerArgs>;
 
 /**
  * Public definition for a schedule authored in TypeScript. Provide a required
- * `cron` expression plus exactly one of `markdown` or `run`:
+ * `cron` expression plus exactly one of `content` or `run`:
  *
- * - `markdown`: fire-and-forget agent invocation. The framework runs the agent
+ * - `content`: fire-and-forget agent invocation. The framework runs the agent
  *   on the prompt and discards the output (equivalent to the `<name>.md`
  *   markdown form).
  * - `run`: full handler ({@link ScheduleRunHandler}). Receives
@@ -61,7 +61,7 @@ export type ScheduleDefinition = GenericScheduleDefinition<ScheduleHandlerArgs>;
 /**
  * Defines a schedule in TypeScript. Export as the default from
  * `agent/schedules/<name>.ts`. Pass a `cron` expression plus exactly one of
- * `markdown` (fire-and-forget prompt) or `run` (handler); the schedule name
+ * `content` (fire-and-forget prompt) or `run` (handler); the schedule name
  * comes from the file path under `agent/schedules/`.
  *
  * @example Start a session on Slack:
@@ -86,7 +86,7 @@ export type ScheduleDefinition = GenericScheduleDefinition<ScheduleHandlerArgs>;
  *   // The real value is "asterisk-slash-5 * * * *" (every 5 minutes). The
  *   // space below is only here so the literal stays inside this block comment.
  *   cron: "* / 5 * * * *",
- *   markdown: "Sync open Linear issues to the metrics dashboard.",
+ *   content: "Sync open Linear issues to the metrics dashboard.",
  * });
  * ```
  */

@@ -1,9 +1,11 @@
 import type {
   Schedule as VercelSchedule,
   SchedulesClient,
+  UpdateScheduleParams,
 } from "#compiled/@vercel/schedules/index.js";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
 import type {
   ScheduleExpression,
   SchedulePage,
@@ -24,6 +26,11 @@ export function readVercelScheduleClientOptions(
   return CLIENT_OPTIONS.get(provider);
 }
 
+/** Sent with every Schedules API request so Vercel Schedules can attribute eve's traffic. */
+export const VERCEL_SCHEDULES_CLIENT_HEADERS: Readonly<Record<string, string>> = {
+  "x-vss-framework": "eve",
+};
+
 export interface VercelScheduleProviderOptions {
   /** Overrides the public Vercel Schedules endpoint. */
   readonly baseUrl?: string;
@@ -34,7 +41,7 @@ export interface VercelScheduleProviderOptions {
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {
-  if (isEveDevEnvironment()) return DEVELOPMENT_PROVIDER;
+  if (isEveDevEnvironment() && !isVercelSchedulesDevEnvironment()) return DEVELOPMENT_PROVIDER;
 
   const client = (signal: AbortSignal) => createClient(options, signal);
 
@@ -70,6 +77,19 @@ export function vercelScheduleProvider(
         context.namespace,
       );
       return response === null ? null : fromVercelSchedule(response);
+    },
+    async update(context, name, patch) {
+      const expression = patch.expression;
+      const params: UpdateScheduleParams = { name, namespace: context.namespace };
+      if (expression !== undefined) {
+        params.expression = toVercelExpression(expression);
+        params.timezone = expression.timezone ?? "UTC";
+        params.jitter = expression.type === "cron" ? (expression.jitter ?? null) : null;
+      }
+      if (patch.payload !== undefined)
+        params.payload = createDispatchPayload(context, patch.payload);
+      const schedule = await (await client(context.abortSignal)).update(params);
+      return fromVercelSchedule(schedule);
     },
     async enable(context, name) {
       return fromVercelSchedule(
@@ -108,6 +128,7 @@ async function createClient(
   const fetchImpl = options.fetch ?? fetch;
   return new SchedulesClient({
     ...options,
+    headers: VERCEL_SCHEDULES_CLIENT_HEADERS,
     fetch: (input, init) => fetchImpl(input, { ...init, signal }),
   });
 }
@@ -175,12 +196,8 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 function assertSupportedVercelEnvironment(): void {
+  if (isVercelSchedulesDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
-    throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
-  }
-  if (process.env.VERCEL_ENV !== "production") {
-    throw new Error(
-      "Vercel Schedules currently supports production deployments only. Deploy with `vercel --prod`.",
-    );
+    throw new Error("vercelScheduleProvider() requires a Vercel deployment or eve dev.");
   }
 }

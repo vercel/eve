@@ -4,7 +4,22 @@ import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { TokenResult } from "#shared/connection-types.js";
 
-type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
+export type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
+
+/** Context passed to an approval prompt callback. */
+export interface ApprovalPromptContext<TInput = Record<string, unknown>> {
+  /** Id of the tool call awaiting approval. */
+  readonly callId: string;
+  /** Validated input proposed for the tool call. */
+  readonly input: TInput;
+  /** Final runtime name of the tool. */
+  readonly toolName: string;
+}
+
+/** Builds the human-readable prompt shown when a tool call requires approval. */
+export type ApprovalPrompt<TInput = Record<string, unknown>> = (
+  context: ApprovalPromptContext<TInput>,
+) => string;
 
 /**
  * Context passed to an {@link ApprovalPolicy} function.
@@ -15,10 +30,34 @@ type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInp
 export interface ApprovalContext<TInput = Record<string, unknown>> extends SessionContext {
   /** Cancels policy work when the active model generation is cancelled. */
   readonly abortSignal: AbortSignal;
-  readonly approvedTools: ReadonlySet<string>;
   readonly callId: string;
+  /**
+   * Behavior hints the connection's server declared for this tool, such as
+   * MCP's `readOnlyHint` and `destructiveHint`. Absent for authored tools and
+   * for servers that declare none. Hints are only as trustworthy as the server.
+   */
+  readonly toolAnnotations?: ConnectionToolAnnotations;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;
+}
+
+/**
+ * Behavior hints a connection's server declares for one of its tools. The
+ * named fields follow MCP's `ToolAnnotations`; other keys pass through as the
+ * server sent them.
+ */
+export interface ConnectionToolAnnotations {
+  /** Human-readable tool title. */
+  readonly title?: string;
+  /** The tool does not modify its environment. */
+  readonly readOnlyHint?: boolean;
+  /** The tool may perform destructive updates. Meaningful only when not read-only. */
+  readonly destructiveHint?: boolean;
+  /** Repeating a call with the same arguments has no additional effect. */
+  readonly idempotentHint?: boolean;
+  /** The tool may interact with an open world of external entities. */
+  readonly openWorldHint?: boolean;
+  readonly [key: string]: unknown;
 }
 
 /** Request-time approval decision returned by an {@link ApprovalPolicy}. */
@@ -42,7 +81,7 @@ export type ApprovalPolicy<TInput = Record<string, unknown>> = (
 /** Stable tool request passed to a response authorizer. */
 export interface ApprovalRequest<TInput = Record<string, unknown>> {
   readonly callId: string;
-  readonly requestId: string;
+  readonly interactionId: string;
   /**
    * Who requested the tool call: the auth of the caller whose turn made it,
    * captured when the approval was requested. It stays the same while the
@@ -70,7 +109,7 @@ export interface ApprovalResponseAuth {
 
 /** Submitted response passed to an approval response policy. */
 export interface ApprovalResponse {
-  readonly decision: "approve" | "cancel";
+  readonly decision: "approve" | "deny";
   /**
    * Who submitted the response: the authenticated principal, including its
    * `principalId`, `principalType`, `authenticator`, and `attributes`.
@@ -101,6 +140,8 @@ export type ApprovalResponsePolicy<TInput = Record<string, unknown>> = (
 
 /** Approval definition with request- and response-time policy. */
 export interface ApprovalConfiguration<TInput = Record<string, unknown>> {
+  /** Optional human-readable prompt shown when this call requires approval. */
+  readonly prompt?: ApprovalPrompt<TInput>;
   readonly request: ApprovalPolicy<TInput>;
   readonly response?: ApprovalResponsePolicy<TInput>;
 }

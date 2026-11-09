@@ -16,6 +16,7 @@ export const metadata: Metadata = {
   openGraph: {
     ...titleMetadata.openGraph,
     images: ["/benchmarks/opengraph-image"],
+    url: canonicalRoutes.benchmarks,
   },
   twitter: {
     ...titleMetadata.twitter,

@@ -1,0 +1,11 @@
+[
+  "JustBashCommand",
+  "JustBashCommandContext",
+  "JustBashCommandResult",
+  "JustBashCustomCommand",
+  "JustBashDirectoryEntry",
+  "JustBashFileStat",
+  "JustBashFilesystem",
+  "JustBashFilesystemContext",
+  "JustBashLazyCommand"
+]

@@ -1,0 +1,21 @@
+import { defineEval } from "eve/evals";
+
+import { REPLY, asAlice, budgetQuestion, expectResolved } from "../helpers.ts";
+
+/** Alice types "approve": it names the question's option, so it answers it like the button. */
+export default defineEval({
+  description: "A typed reply naming a budget option answers the budget question.",
+  tags: ["hitl", "budget", "text-reply"],
+  timeoutMs: 60_000,
+  async test(t) {
+    const { request, session } = await budgetQuestion(t);
+
+    const typed = (await session.send("approve", asAlice)).expectOk();
+    expectResolved(typed, request, "accepted");
+    typed.event("interaction.settled", {
+      data: { interactionId: request.interactionId, response: { optionId: "approve" } },
+    });
+    typed.notEvent("turn.started");
+    typed.event("content.completed", { data: { phase: "reply", value: REPLY.statusNote } });
+  },
+});

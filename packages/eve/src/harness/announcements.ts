@@ -1,45 +1,58 @@
-import type { ContextContainer } from "#context/container.js";
-import { ContextKey } from "#context/key.js";
+import { createHash } from "node:crypto";
+import type { ModelMessage } from "ai";
+
+import type { HistoryState } from "#context/keys.js";
+import type { UserMessageKind } from "#harness/messages.js";
 
 /**
- * Framework state announced to the model as an append-only `context.state`
- * message. The harness appends a message only when `value` differs from the
- * last value it announced for the same key, so the cached prompt prefix never
- * changes. Compaction clears the record, which makes the next announcement a
- * fresh baseline.
+ * Something a definition tells the model once, and again each time it changes: it joins the
+ * history as one message ahead of the turn's input, so the cached prompt before it never changes.
+ * eve records each key's last announced value with the history, and the message that said it. A
+ * rewrite of the history, such as a compaction, announces again each key whose message it dropped.
  */
 export interface Announcement {
-  /** Canonical state. Only a changed value produces a message. */
+  /** Canonical state. Only a value other than the last one announced adds a message. */
   readonly value: string;
   /**
-   * Renders the message for `value`. `previous` is the last announced value,
-   * or `undefined` for a baseline. Returning `undefined` records the value
-   * without adding a message.
+   * The message for `value`; `previous` is the value last announced, `undefined` the first time.
+   * `undefined` adds no message, and the key still records `value`.
    */
   render(previous: string | undefined): string | undefined;
+  /** What the model knows without an announcement: a key never announced stays quiet at it. */
+  readonly initial?: string;
+  /** The message's kind. `"context.state"` where omitted. */
+  readonly kind?: Extract<UserMessageKind, "context.instruction" | "context.state">;
 }
 
-/** Step-local announcements keyed by producer, set before the model call. */
-const PendingAnnouncementsKey = new ContextKey<Readonly<Record<string, Announcement>>>(
-  "eve.pendingAnnouncements",
-);
+/** Names an announcement's message by its kind and content, which a rewrite keeps verbatim. */
+export function announcementDigest(kind: unknown, content: unknown): string {
+  return createHash("sha256")
+    .update(JSON.stringify([kind, content]))
+    .digest("base64url")
+    .slice(0, 22);
+}
 
-/** Sets or clears the announcement `key` for the current step. */
-export function setPendingAnnouncement(
-  ctx: ContextContainer,
-  key: string,
-  announcement: Announcement | undefined,
-): void {
-  const { [key]: _previous, ...rest } = ctx.get(PendingAnnouncementsKey) ?? {};
-  ctx.setVirtualContext(
-    PendingAnnouncementsKey,
-    announcement === undefined ? rest : { ...rest, [key]: announcement },
+/** What the history state still says once the history is `history`: the keys whose message it kept. */
+export function keptAnnouncements(
+  state: HistoryState,
+  history: readonly ModelMessage[],
+): HistoryState {
+  const held = new Set(
+    history.flatMap((message) =>
+      message.role === "user"
+        ? [announcementDigest((message as { readonly kind?: unknown }).kind, message.content)]
+        : [],
+    ),
   );
-}
-
-/** The announcements set for the current step. */
-export function getPendingAnnouncements(
-  ctx: Pick<ContextContainer, "get"> | undefined,
-): Readonly<Record<string, Announcement>> {
-  return ctx?.get(PendingAnnouncementsKey) ?? {};
+  const kept = Object.entries(state.messages ?? {}).filter(([, digest]) => held.has(digest));
+  if (kept.length === 0) return {};
+  return {
+    announcements: Object.fromEntries(
+      kept.flatMap(([key]) => {
+        const value = state.announcements?.[key];
+        return value === undefined ? [] : [[key, value]];
+      }),
+    ),
+    messages: Object.fromEntries(kept),
+  };
 }

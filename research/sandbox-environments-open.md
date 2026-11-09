@@ -1,10 +1,13 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-09-16"
+last_updated: "2026-10-22"
 ---
 
 # Sandbox environments and provider sessions
+
+> [!NOTE]
+> [`sandbox-provider-api.md`](./sandbox-provider-api.md) supersedes the provider contract, provider-handle lifecycle hooks, the rule that core never reserves `prepare`, and the native identity section of this plan. The environment `open()` model, immutable session state, and gone semantics still apply.
 
 ## Decision
 
@@ -44,7 +47,7 @@ Provider callbacks and runtime callback arguments are never stored in prepared a
 
 Authors use `ctx.session.id` for durable eve identity. Provider-native IDs and core artifact keys remain private. `resolvePath()` remains unchanged: relative paths resolve beneath `/workspace`, and absolute paths pass through.
 
-`setNetworkPolicy()` is required on the session types returned by dedicated Vercel, Docker, and microsandbox environments. just-bash and providers that reuse one native network boundary omit it from their session types and require policy at creation time.
+`setNetworkPolicy()` is required on the session types returned by dedicated Vercel and Docker environments. just-bash and providers that reuse one native network boundary omit it from their session types and require policy at creation time.
 
 ## Provider contract
 
@@ -113,7 +116,7 @@ Core evaluates `defineSandbox()` and calls `start()` when no serialized provider
 
 `start()` receives provider-owned open options and the exact artifact. `resume()` receives only the current session context, the target deployment's exact artifact, and persisted provider state. Open options and callbacks are never serialized or reconstructed by core. Credentials, clients, fetch implementations, and signals needed for lookup belong to environment/provider configuration rather than start-only open options. A provider must include any immutable option-derived data needed for reconnection in its own JSON-compatible state.
 
-Provider state is immutable after `start()` in this contract. `resume()` reconnects or restarts persisted native state but does not recreate missing native compute from unavailable callbacks. If native state is gone, resume fails. Deletion clears provider state; the next access evaluates the selector and starts again.
+Provider state is immutable after `start()` in this contract. `resume()` reconnects or restarts persisted native state but does not recreate missing native compute from unavailable callbacks. If native state is gone, resume reports it and core treats it like deletion: it clears provider state and evaluates the selector to start again.
 
 During deployment handoff, the target provider validates state against its current implementation and artifact. Incompatibility rejects activation, leaving the existing owner on its current deployment. Core does not persist old artifacts or migrate provider state.
 
@@ -183,7 +186,7 @@ Concurrent creation, initialization recovery, attachment accounting, active-hand
 
 ## Default selection
 
-`defineSandboxProvider()` has one implementation contract and no `select` escape hatch. `DefaultSandbox` is an explicit facade that probes the host and returns a concrete Vercel, Docker, microsandbox, or just-bash environment. Every concrete provider uses `defineSandboxProvider()`.
+`defineSandboxProvider()` has one implementation contract and no `select` escape hatch. `DefaultSandbox` is an explicit facade that probes the host and returns a concrete Vercel, Docker, or just-bash environment. Every concrete provider uses `defineSandboxProvider()`.
 
 Core exposes no public environment `kind`. Providers discover their own preparation inputs through the tracked filesystem.
 

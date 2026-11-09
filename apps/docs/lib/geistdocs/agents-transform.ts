@@ -1,8 +1,4 @@
-interface TemplateDiscoveryEntry {
-  description: string;
-  slug: string;
-  title: string;
-}
+import { templateGalleryUrl } from "../templates/links";
 
 const GENERIC_MARKDOWN_INSTRUCTION =
   "- Page-level Markdown: append .md or .mdx to a documentation URL";
@@ -11,11 +7,9 @@ const INTERNAL_GETTING_STARTED_INSTRUCTION =
 const fullDocumentationInstruction = (origin: string): string =>
   `- [Full documentation context](${origin}/llms.txt): All configured documentation as Markdown`;
 
-const escapeMarkdown = (value: string): string => value.replace(/([\\[\]])/g, "\\$1");
-
 export const transformAgentsMarkdown = (
   markdown: string,
-  { origin, templates }: { origin: string; templates: TemplateDiscoveryEntry[] },
+  { origin }: { origin: string },
 ): string => {
   const upstreamFullDocumentationInstruction = fullDocumentationInstruction(origin);
 
@@ -31,9 +25,8 @@ export const transformAgentsMarkdown = (
     .replace(
       GENERIC_MARKDOWN_INSTRUCTION,
       [
-        "- Canonical HTML pages use `/docs/...`, `/integrations/...`, and `/templates/...` URLs.",
+        "- Canonical HTML pages use `/docs/...` and `/integrations/...` URLs.",
         "- Docs and integration pages expose alternate Markdown by appending `.md` or `.mdx` to their canonical HTML URL.",
-        "- Template pages are HTML discovery pages; use their setup prompt or source link instead of appending a Markdown extension.",
       ].join("\n"),
     )
     .replace(
@@ -48,10 +41,5 @@ export const transformAgentsMarkdown = (
       ].join("\n"),
     );
 
-  const templateLines = templates.map(
-    (template) =>
-      `- [${escapeMarkdown(template.title)}](${origin}/templates/${template.slug}): ${template.description}`,
-  );
-
-  return `${corrected.trimEnd()}\n\n## Templates\n\n${templateLines.join("\n")}\n`;
+  return `${corrected.trimEnd()}\n\n## Templates\n\n- [eve templates](${templateGalleryUrl}): Browse example projects on Vercel.\n`;
 };

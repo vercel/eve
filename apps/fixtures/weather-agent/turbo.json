@@ -3,6 +3,11 @@
   "tasks": {
     "build": {
       "dependsOn": ["$TURBO_EXTENDS$", "eve#build"]
+    },
+    "build:analysis": {
+      "cache": false,
+      "dependsOn": ["eve#build"],
+      "env": ["VERCEL"]
     }
   }
 }

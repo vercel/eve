@@ -1,0 +1,222 @@
+---
+title: "Client SDK"
+description: "Call an eve agent from TypeScript with Client, sessions, auth, and health checks."
+---
+
+The `eve/client` entrypoint is the typed TypeScript client for eve's default HTTP API. It replaces a hand-written POST and NDJSON (newline-delimited JSON) stream loop in scripts, server-to-server integrations, tests, evals, backend jobs, and custom UIs.
+
+For browser chat UIs, start with [`useEveAgent`](/docs/guides/frontend). For wire-level details, read [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming).
+
+## Create a client
+
+A `Client` binds one base URL, auth policy, and header policy:
+
+```ts
+import { Client } from "eve/client";
+
+const client = new Client({
+  baseUrl: "http://127.0.0.1:2000",
+});
+```
+
+`baseUrl` is the URL where the eve routes are mounted, often `""` in a same-origin browser integration. Query parameters on `baseUrl` are sent on every request, including event streams. When names overlap, request-specific parameters such as a stream cursor win.
+
+## Check health
+
+`health()` lets a script fail early before creating a session:
+
+```ts
+const health = await client.health();
+console.log(health.status, health.workflowId);
+```
+
+A successful response must match `{ ok: true, status: "ready", workflowId: string }`. A non-2xx response throws `ClientError` with the HTTP `status` and response `body`; invalid JSON or a malformed payload throws `HealthResponseError`.
+
+## Inspect an agent
+
+`info()` returns the agent's inspection payload. The client accepts only a complete agent-info version 5 response:
+
+```ts
+const info = await client.info();
+console.log(info.agent.name, info.agent.model.id);
+```
+
+Pass `info({ signal })` to cancel the HTTP request. The signal applies only after custom header and credential callbacks resolve, so it doesn't bound how long those callbacks take.
+
+The response contains:
+
+- static definitions and dynamic resolvers, each with the source that defines it
+- composition diagnostics and memory slots
+- local and remote agents, listed separately
+- the compiled channel route order
+
+The response includes authored instructions, skill and schedule Markdown, and server paths. So the server answers only operator callers, with `principalType` `service`, `runtime`, or `local-dev`, unless the channel's auth grants `allowAgentInfo`. Authenticate the client with an operator credential, such as Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`. Any other caller gets a `ClientError` with `status` `403` and `code` `"info_forbidden"`.
+
+The version changes only when the response shape breaks. Within a version, a server can add fields and enum values:
+
+- The client ignores fields it doesn't know.
+- An enum-like field with a string the client can't interpret, such as `mode`, `sourceKind`, or a channel `method`, reads as `"unrecognized"`. Handle that value when you switch on these fields.
+- `kind` discriminants are closed. A new variant comes with a version change, and an unknown one throws `AgentInfoResponseError`.
+
+A non-success response throws `ClientError`. Invalid JSON, a missing or non-string enum value, a different agent-info version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`. For a version mismatch, its `issues` say which side to upgrade: eve in the agent, or the eve package the client runs from.
+
+## Authentication
+
+Pass `auth` when the [eve channel](/docs/channels/eve) route requires credentials:
+
+```ts
+const client = new Client({
+  baseUrl: "https://agent.example.com",
+  auth: {
+    bearer: async () => await getAccessToken(),
+  },
+});
+```
+
+Bearer values and Basic auth passwords can be strings or functions. Functions run before every HTTP call, including stream reconnects:
+
+```ts
+const client = new Client({
+  baseUrl: "https://agent.example.com",
+  auth: {
+    basic: {
+      username: "agent-client",
+      password: async () => await getRotatingSecret(),
+    },
+  },
+});
+```
+
+For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves the token once per request and sends it as both the bearer credential and the `x-vercel-trusted-oidc-idp-token` header:
+
+```ts
+import { getVercelOidcToken } from "@vercel/oidc";
+
+const client = new Client({
+  baseUrl: "https://agent.example.com",
+  auth: {
+    vercelOidc: {
+      token: async () => await getVercelOidcToken(),
+    },
+  },
+});
+```
+
+Use `headers`, static or dynamic, for route-specific credentials such as bypass tokens or tenant hints:
+
+```ts
+const client = new Client({
+  baseUrl: "https://agent.example.com",
+  headers: async () => ({
+    "x-vercel-protection-bypass": await getBypassToken(),
+  }),
+  redirect: "manual",
+});
+```
+
+Clients reject redirects by default (`redirect: "error"`), so fetch can't forward your custom credentials to another destination. The policy applies to every request the client makes, including event streams, and overrides per-request settings.
+
+| `redirect`          | Behavior                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `"error"` (default) | Rejects any redirect.                                                                                           |
+| `"manual"`          | Stops at a redirect. Node.js shows its status and headers; browsers return an opaque response with neither.     |
+| `"follow"`          | Follows redirects. Use it only when you trust every possible destination with your custom headers and requests. |
+
+Attach per-request headers to an individual turn:
+
+```ts
+const response = await session.send("Run the check.", {
+  headers: { "x-request-id": requestId },
+});
+
+await response.result();
+```
+
+Per-request headers override client-level headers with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` still sends the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
+
+## Faster sends with `inbox`
+
+`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup.
+
+Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret, at least 32 characters, on every deployment that shares sessions. Omit it to disable handles. The server verifies a handle's signature before using it. After a secret rotation, the server ignores old handles and looks the session up as usual.
+
+eve validates handles with the bundled Workflow SDK's hook schema. Reusing a handle also requires a world adapter that declares `deploymentAffinity` and `resolvedHookResume`, and a backend that supports guarded, deduplicated hook resumes. Without that support, sends use the normal lookup path even with the secret set.
+
+Handles contain no user metadata, short-lived runtime access, or trace data. The signature proves a handle is authentic but doesn't hide its contents.
+
+A handle can't route a message to a session other than the one requested. When a handle is stale, the server looks up the current session again. When a write's outcome is uncertain, the request reports an error instead of delivering the message twice.
+
+## Sessions
+
+Create a session before its first turn so it starts while the user is still typing:
+
+```ts
+const { session } = await client.sessions.create();
+
+const response = await session.send("Summarize account A.");
+await response.result();
+```
+
+`create()` resolves when the server accepts the session. It doesn't open the event stream or wait for the session to start. An early `session.send()` retries for a limited time while the session starts, like any follow-up.
+
+To create the session and start its first turn in one request, include the message:
+
+```ts
+const { session, delivery } = await client.sessions.create({ message: "Summarize account A." });
+await delivery.result();
+
+await (await session.send("Now list the risks.")).result();
+await session.compact();
+await session.clear();
+```
+
+If you already know the session ID, attach a handle without making a request:
+
+```ts
+const session = client.sessions.attach("wrun_A");
+```
+
+The handle exposes every session operation for that ID:
+
+```ts
+const response = await session.send("Continue the analysis.");
+await response.result();
+
+await session.cancel({ turnId: "turn_123" });
+await session.compact();
+await session.clear();
+
+for await (const event of session.stream({ follow: false })) {
+  console.log(event.type);
+}
+
+await session.end({ reason: "User requested a fresh session" });
+```
+
+Each handle stores the session ID, stream cursor, and optional `inbox` value. Every method calls a `/eve/v1/session/:sessionId/...` route for that ID. Sending to an unknown or ended session fails instead of creating a new one. After `end()`, the handle keeps pointing at the retired ID; call `client.sessions.create()` to start a different session. A server must serve `/end` before a client can call `end()` on it.
+
+One client can run many independent sessions at once:
+
+```ts
+const { session: alice, delivery: aliceDelivery } = await client.sessions.create({
+  message: "Summarize account A.",
+});
+const { session: bob, delivery: bobDelivery } = await client.sessions.create({
+  message: "Summarize account B.",
+});
+
+await Promise.all([aliceDelivery.result(), bobDelivery.result()]);
+```
+
+Read more about working with sessions:
+
+- [Messages](/docs/guides/client/messages): send turns and collect results
+- [Continuations](/docs/guides/client/continuations): persist and resume sessions
+- [Streaming](/docs/guides/client/streaming): render events as they arrive
+- [Output schema](/docs/guides/client/output-schema): request structured results
+
+## What to read next
+
+- [eve channel](/docs/channels/eve): the HTTP API this client calls
+- [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the raw HTTP contract
+- [Frontend](/docs/guides/frontend): browser UI with `useEveAgent`

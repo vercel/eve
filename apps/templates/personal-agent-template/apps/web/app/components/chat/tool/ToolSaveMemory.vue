@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EveDynamicToolPart } from "eve/vue";
+import type { EveToolUIPart } from "~/composables/chat/providers/eve/adapter";
 import { MEMORY_CATEGORY_LABELS, type MemoryCategory } from "#eve/types/memory";
 import type { AgentInputResponse } from "~/components/AgentInputRequest.vue";
 import { isSaveMemoryPending, normalizeSaveMemoryInput } from "~/utils/chat/save-memory";
@@ -14,7 +14,7 @@ interface SaveMemoryOutput {
 }
 
 const props = defineProps<{
-  parts: EveDynamicToolPart[];
+  parts: EveToolUIPart[];
   canRespond?: boolean;
 }>();
 
@@ -61,7 +61,7 @@ function categoryLabel(category?: string) {
 
 const allSaved = computed(() => props.parts.every((part) => part.state === "output-available"));
 
-function saveResultsForPart(part: EveDynamicToolPart): SaveMemoryResult[] {
+function saveResultsForPart(part: EveToolUIPart): SaveMemoryResult[] {
   if (part.state !== "output-available") {
     return [];
   }
@@ -81,12 +81,11 @@ const allUnchanged = computed(
 
 const allDeclined = computed(() =>
   props.parts.every(
-    (part) =>
-      part.state === "output-denied" || part.toolMetadata?.eve?.inputResponse?.optionId === "deny",
+    (part) => part.state === "output-denied" || part.interaction?.outcome === "declined",
   ),
 );
 
-const hasError = computed(() => props.parts.some((part) => part.state === "output-error"));
+const hasError = computed(() => props.parts.some((part) => part.callState === "failed"));
 
 const statusLabel = computed(() => {
   if (isPendingApproval.value) {
@@ -132,8 +131,8 @@ const errorText = computed(() =>
 
 function respond(optionId: "approve" | "deny") {
   const responses = pendingParts.value.flatMap((part) => {
-    const requestId = part.toolMetadata?.eve?.inputRequest?.requestId;
-    return requestId ? [{ optionId, requestId }] : [];
+    const interactionId = part.interaction?.interactionId;
+    return interactionId ? [{ optionId, interactionId }] : [];
   });
 
   if (!responses.length) {

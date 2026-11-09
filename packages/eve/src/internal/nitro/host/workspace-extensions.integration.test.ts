@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
   EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+  EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
   EXTENSION_COMPATIBILITY_MANIFEST_KIND,
   writeExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
@@ -281,7 +282,7 @@ async function writeDistributionManifest(
     kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
     formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
     builtWithEve: input.builtWithEve ?? resolveInstalledPackageInfo().version,
-    requires: {},
+    contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
   });
   const manifestPath = join(distRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
   await utimes(manifestPath, input.builtAt, input.builtAt);

@@ -1,32 +1,25 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  description: "A session-scoped dynamic OpenAPI connection is announced and searchable.",
+  description:
+    "A session-scoped dynamic OpenAPI connection is announced in the catalog listing and searchable by name.",
 
   async test(t) {
-    if (process.env.EVE_E2E_MODEL !== "mock") {
-      t.skip("Requires the deterministic mock model; the fixture API endpoint is non-routable.");
-    }
+    requireMockModel(
+      t,
+      "Requires the deterministic mock model; the fixture API endpoint is non-routable.",
+    );
 
-    await t.send("DYNAMIC_CONNECTION_E2E");
+    const turn = await t.send("DYNAMIC_CONNECTION_E2E");
 
-    t.succeeded();
-    t.toolOrder(["connection_search"]);
-    t.calledTool("connection_search", { count: 1, output: hasDynamicStatusTool });
+    turn.expectOk();
+    turn.calledTool(SEARCH_TOOL, {
+      count: 1,
+      input: { query: "dynamic-catalog__" },
+      output: (value) => JSON.stringify(value).includes('"tool":"dynamic-catalog__getStatus"'),
+    });
     t.messageIncludes("DYNAMIC_CONNECTION_FOUND");
   },
 });
-
-function hasDynamicStatusTool(value: unknown): boolean {
-  const tools = typeof value === "object" && value !== null ? Reflect.get(value, "tools") : [];
-  return (
-    Array.isArray(tools) &&
-    tools.some(
-      (entry) =>
-        typeof entry === "object" &&
-        entry !== null &&
-        Reflect.get(entry, "connection") === "dynamic-catalog" &&
-        Reflect.get(entry, "tool") === "getStatus",
-    )
-  );
-}

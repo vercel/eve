@@ -1,6 +1,6 @@
 /**
- * The value a connection tool call returns: what `connection_execute` hands
- * the model today and what a code mode program receives later.
+ * The value a connection tool call returns: what the model receives for the
+ * call and what a code mode program receives later.
  *
  * - MCP results return `structuredContent` when present, otherwise their text,
  *   parsed as JSON when the tool declares no output schema. Results with image,

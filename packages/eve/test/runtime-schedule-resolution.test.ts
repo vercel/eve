@@ -17,7 +17,7 @@ describe("resolveSchedules", () => {
         },
         {
           loadNamespace: async () => ({
-            default: defineSchedule({ cron: "0 0 * * 0", markdown: "Clean stale data." }),
+            default: defineSchedule({ cron: "0 0 * * 0", content: "Clean stale data." }),
           }),
           logicalPath: "schedules/cleanup.ts",
         },

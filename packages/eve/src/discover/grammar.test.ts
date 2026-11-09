@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
+} from "../internal/testing/catalog-fixtures.js";
 import { buildMemoryAgentProject } from "../internal/testing/memory-agent-source.js";
-import { discoverNamedSourceDirectory, readSortedDirectoryEntries } from "./grammar.js";
+import {
+  createExtensionNameDiagnostic,
+  discoverNamedSourceDirectory,
+  readSortedDirectoryEntries,
+} from "./grammar.js";
+
+describe("createExtensionNameDiagnostic", () => {
+  it.each(EVE_NAMESPACE_NAMES)("rejects an extension mounted as %s, in eve's namespace", (name) => {
+    expect(createExtensionNameDiagnostic(name, `extensions/${name}.ts`)).toMatchObject({
+      message: `Extension mount "${name}" uses the reserved name "${name}". Rename it; ${EVE_NAMESPACE_RESERVATION}.`,
+      sourcePath: `extensions/${name}.ts`,
+    });
+  });
+
+  it.each(NAMES_OUTSIDE_EVE_NAMESPACE)("accepts an extension mounted as %s", (name) => {
+    expect(createExtensionNameDiagnostic(name, `extensions/${name}.ts`)).toBeNull();
+  });
+});
 
 /**
  * Direct coverage for the unified discovery helper. The channels, tools,

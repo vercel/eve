@@ -1,4 +1,6 @@
 import type { ResolvedAgentGraphBundle } from "#runtime/graph.js";
+import { declared } from "#runtime/types.js";
+import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 
 export class InvalidToolStubTargetError extends Error {}
@@ -25,16 +27,22 @@ function hasToolPath(graph: ResolvedAgentGraphBundle, path: readonly string[]): 
     if (index === path.length - 1) {
       if (tool !== undefined) return tool.behavior?.handling?.kind !== "provider-tool";
       return (
-        // The reserved connection resolver only supplies the two framework wrappers.
-        node.agent.dynamicToolResolvers.some(
+        declared(node.agent, "tool").some(
           (resolver) =>
-            resolver.slug !== "connection_tools" &&
-            (resolver.extensionNamespace === undefined ||
-              name.startsWith(`${resolver.extensionNamespace}__`)),
+            resolver.extensionNamespace === undefined ||
+            name.startsWith(`${resolver.extensionNamespace}__`),
         ) ||
         node.subagentRegistry.dynamicResolvers.some((resolver) => resolver.name === name) ||
+        declared(node.agent, "memory").some(
+          (memory) => memory.offersTools === true && name.startsWith(`${memory.slot}__`),
+        ) ||
+        declared(node.agent, "schedules").some(
+          (collection) =>
+            collection.offersTools === true &&
+            name.startsWith(`${scheduleCollectionToolPrefix(collection.name)}__`),
+        ) ||
         (name.includes("__") &&
-          ((node.agent.dynamicConnectionResolvers?.length ?? 0) > 0 ||
+          (declared(node.agent, "connection").length > 0 ||
             node.agent.connections.some((connection) =>
               name.startsWith(`${connection.connectionName}__`),
             )))

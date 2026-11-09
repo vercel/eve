@@ -2,11 +2,8 @@ import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
   CompiledAgentResources,
-  CompiledDynamicInstructionsDefinition,
-  CompiledDynamicSkillDefinition,
-  CompiledDynamicToolDefinition,
 } from "#compiler/manifest.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { compiledOf, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { AgentSourceOwner, CompiledModuleBinding } from "#compiler/source-graph.js";
 import type { AgentInfoResult, AgentInfoSource } from "#client/agent-info-schema.js";
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
@@ -28,11 +25,11 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v4 exclusively from the effective compiled graph. */
+/** Projects agent info exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
-    readonly mode: AgentInfoResponse["mode"];
+    readonly mode: "development" | "production";
     readonly gatewayCredentials: GatewayCredentialPresence;
     readonly chatgptAuth?: ChatGptAuthState;
   },
@@ -108,13 +105,13 @@ export function buildAgentInfoResponse(
       discoveryErrors: manifest.diagnosticsSummary.errors,
       discoveryWarnings: manifest.diagnosticsSummary.warnings,
     },
-    hooks: manifest.hooks.map((hook) => ({
+    hooks: compiledOf(manifest, "hook").map((hook) => ({
       ...toModuleSource(manifest, hook),
-      eventNames: [...hook.eventNames],
+      eventNames: [...(hook.eventNames ?? [])],
       slug: hook.slug,
     })),
     instructions: {
-      dynamic: manifest.dynamicInstructions.map((resolver) =>
+      dynamic: compiledOf(manifest, "instructions").map((resolver) =>
         renderDynamicResolver(manifest, resolver),
       ),
       static: manifest.instructions.map((definition) => ({
@@ -126,11 +123,10 @@ export function buildAgentInfoResponse(
     },
     kernelEffects: projectPreparedKernelEffects(manifest),
     kind: "eve-agent-info",
-    memories: manifest.memories.map((memory) => ({
+    memories: compiledOf(manifest, "memory").map((memory) => ({
       ...toModuleSource(manifest, memory),
       description: memory.description,
-      slot: memory.slot,
-      visibility: memory.visibility,
+      slot: memory.slug,
     })),
     mode: input.mode,
     remoteAgents: {
@@ -151,12 +147,14 @@ export function buildAgentInfoResponse(
       name: schedule.name,
     })),
     skills: {
-      dynamic: manifest.dynamicSkills.map((resolver) => renderDynamicResolver(manifest, resolver)),
+      dynamic: compiledOf(manifest, "skill").map((resolver) =>
+        renderDynamicResolver(manifest, resolver),
+      ),
       static: manifest.skills.map((skill) => ({
         ...toOwnedSource(manifest, skill),
         description: skill.description,
         license: skill.license,
-        markdown: skill.markdown,
+        markdown: skill.content,
         metadata: skill.metadata,
         name: skill.name,
       })),
@@ -185,7 +183,9 @@ export function buildAgentInfoResponse(
       total: manifest.subagents.length,
     },
     tools: {
-      dynamic: manifest.dynamicTools.map((resolver) => renderDynamicResolver(manifest, resolver)),
+      dynamic: compiledOf(manifest, "tool").map((resolver) =>
+        renderDynamicResolver(manifest, resolver),
+      ),
       static: manifest.tools.map((tool) => ({
         ...toModuleSource(manifest, tool),
         description: tool.description,
@@ -294,22 +294,16 @@ function toAgentInfoSourceKind(sourceKind: string): AgentInfoSource["sourceKind"
 
 function renderDynamicResolver(
   node: CompiledAgentNodeManifest | CompiledAgentResources,
-  resolver:
-    | CompiledDynamicInstructionsDefinition
-    | CompiledDynamicSkillDefinition
-    | CompiledDynamicToolDefinition
-    | {
-        readonly eventNames: readonly string[];
-        readonly exportName?: string;
-        readonly logicalPath: string;
-        readonly slug: string;
-        readonly sourceId: string;
-        readonly sourceKind: "module";
-      },
+  resolver: {
+    readonly exportName?: string;
+    readonly logicalPath: string;
+    readonly slug: string;
+    readonly sourceId: string;
+    readonly sourceKind: "module";
+  },
 ) {
   return {
     ...toModuleSource(node, resolver),
-    eventNames: [...resolver.eventNames],
     slug: resolver.slug,
   };
 }
@@ -318,9 +312,9 @@ function summarizeNode(node: CompiledAgentNodeManifest | CompiledAgentResources)
   return {
     channels: node.channelRoutes.effective.length,
     connections: node.connections.length,
-    hooks: node.hooks.length,
+    hooks: compiledOf(node, "hook").length,
     instructions: node.instructions.length,
-    memories: node.memories.length,
+    memories: compiledOf(node, "memory").length,
     schedules: node.schedules.length,
     skills: node.skills.length,
     tools: node.tools.length,

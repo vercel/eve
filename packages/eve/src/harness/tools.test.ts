@@ -1,6 +1,7 @@
+import { mintClearance } from "#harness/clearance.js";
 import { asSchema, type JSONSchema7, jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -8,7 +9,6 @@ import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { always, never, once } from "#tools/approval/policies.js";
 
-import { resolveModelProfile } from "#harness/model-profile.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -19,10 +19,20 @@ import {
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
+import { resolveModelProfile } from "#harness/model-profile.js";
+import {
+  decideApproval,
+  buildToolSet,
+  buildToolSetWithProviderTools,
+  invokeTool,
+  isRunnableTool,
+} from "#harness/tools.js";
+import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import type { ApprovalContext } from "#approval/definition.js";
+import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import type { ApprovalEvaluation, ApprovalMemory } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#tools/provided/bash.js";
@@ -36,80 +46,69 @@ function directModel(provider: string): LanguageModel {
   return new MockLanguageModelV3({ provider });
 }
 
+function describeTool(definition: HarnessToolDefinition): string {
+  return definition.description;
+}
+
 function getOutputJsonSchema(tool: unknown): unknown {
   return (tool as { outputSchema: { jsonSchema: unknown } }).outputSchema.jsonSchema;
 }
 
 async function resolveApproval(
-  tools: ReturnType<typeof buildToolSet>,
+  tools: HarnessToolMap,
   toolName: string,
   input: unknown,
   session?: Session,
-  options: { readonly abortSignal?: AbortSignal } = {},
+  options: {
+    readonly abortSignal?: AbortSignal;
+    readonly approvalMemory?: ApprovalMemory;
+  } = {},
 ): Promise<unknown> {
-  const approval = buildToolApproval(tools, options.abortSignal);
+  const definition = tools.get(toolName);
+  if (definition === undefined) throw new TypeError(`Missing test tool "${toolName}".`);
   const activeSession = session ?? {
     auth: { current: null, initiator: null },
     sessionId: "session-1",
     turn: { id: "turn-1", sequence: 0 },
   };
-  if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
   const ctx = new ContextContainer();
   ctx.set(SessionKey, activeSession);
-  return contextStorage.run(ctx, () =>
-    approval({
-      messages: [],
-      runtimeContext: {},
-      toolCall: { input, toolCallId: "call_1", toolName } as never,
-      tools,
-      toolsContext: {} as never,
-    }),
-  );
+  // The approval decision; the clearance a cleared call gets is the gate's, tested on its own.
+  return contextStorage.run(ctx, async () => {
+    const { clearance: _clearance, ...decision } = await decideApproval(definition, {
+      abortSignal: options.abortSignal,
+      approvalMemory: options.approvalMemory,
+      callId: "call_1",
+      input,
+    });
+    return decision;
+  });
 }
 
 async function executeSdkTool(input: {
   readonly abortSignal?: AbortSignal;
   readonly messages?: ToolExecuteOptions["messages"];
-  readonly tool: unknown;
+  readonly tool: HarnessToolDefinition | undefined;
   readonly toolCallId?: string;
   readonly toolInput?: unknown;
 }): Promise<unknown> {
-  const execute = (
-    input.tool as {
-      readonly execute?: (
-        toolInput: unknown,
-        options: ToolExecuteOptions,
-      ) => Promise<unknown> | unknown;
-    }
-  ).execute;
-  expect(execute).toBeTypeOf("function");
-  return await execute!(input.toolInput ?? {}, {
-    abortSignal: input.abortSignal,
-    messages: input.messages ?? [],
-    toolCallId: input.toolCallId ?? "call_1",
-  });
+  if (!isRunnableTool(input.tool)) throw new TypeError("Missing runnable test tool.");
+  const toolCallId = input.toolCallId ?? "call_1";
+  return await invokeTool(
+    input.tool,
+    input.toolInput ?? {},
+    { abortSignal: input.abortSignal, messages: input.messages ?? [], toolCallId },
+    mintClearance(toolCallId),
+  );
 }
 
 async function projectSdkToolOutput(input: {
   readonly output: unknown;
-  readonly tool: unknown;
+  readonly tool: HarnessToolDefinition | undefined;
   readonly toolCallId?: string;
 }): Promise<unknown> {
-  const toModelOutput = (
-    input.tool as {
-      readonly toModelOutput?: (options: {
-        readonly input: unknown;
-        readonly output: unknown;
-        readonly toolCallId: string;
-      }) => Promise<unknown> | unknown;
-    }
-  ).toModelOutput;
-  expect(toModelOutput).toBeTypeOf("function");
-  return await toModelOutput!({
-    input: {},
-    output: input.output,
-    toolCallId: input.toolCallId ?? "call_1",
-  });
+  if (input.tool === undefined) throw new TypeError("Missing test tool.");
+  return await toolCallModelOutput(input.tool, input.output, input.toolCallId ?? "call_1");
 }
 
 describe("buildToolSet", () => {
@@ -131,10 +130,9 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
     await executeSdkTool({
       abortSignal: abortController.signal,
-      tool: result.observe_options,
+      tool: tools.get("observe_options"),
       toolCallId: "call_observe",
     });
 
@@ -169,11 +167,10 @@ describe("buildToolSet", () => {
       turn: { id: "turn-1", sequence: 0 },
     });
 
-    const result = buildToolSet({ tools });
     await contextStorage.run(ctx, () =>
       executeSdkTool({
         abortSignal: abortController.signal,
-        tool: result.observe_signal,
+        tool: tools.get("observe_signal"),
       }),
     );
 
@@ -206,18 +203,14 @@ describe("buildToolSet", () => {
     });
 
     await contextStorage.run(ctx, async () => {
-      const result = buildToolSet({ tools });
-      const execute = (
-        result.stream_progress as {
-          readonly execute?: (
-            input: unknown,
-            options: ToolExecuteOptions,
-          ) => Promise<unknown> | AsyncIterable<unknown>;
-        }
-      ).execute;
-      expect(execute).toBeTypeOf("function");
-
-      const output = execute!({}, { messages: [], toolCallId: "call_stream" });
+      const definition = tools.get("stream_progress");
+      if (!isRunnableTool(definition)) throw new TypeError("Missing runnable test tool.");
+      const output = invokeTool(
+        definition,
+        {},
+        { messages: [], toolCallId: "call_stream" },
+        mintClearance("call_stream"),
+      );
       expect(isAsyncIterable(output)).toBe(true);
 
       const values: unknown[] = [];
@@ -254,8 +247,7 @@ describe("buildToolSet", () => {
       turn: { id: "turn-1", sequence: 0 },
     });
 
-    const result = buildToolSet({ tools });
-    await contextStorage.run(ctx, () => executeSdkTool({ tool: result.observe_signal }));
+    await contextStorage.run(ctx, () => executeSdkTool({ tool: tools.get("observe_signal") }));
 
     expect(receivedSignal).toBeInstanceOf(AbortSignal);
     expect(receivedSignal?.aborted).toBe(false);
@@ -287,9 +279,8 @@ describe("buildToolSet", () => {
       turn: { id: "turn-1", sequence: 0 },
     });
 
-    const result = buildToolSet({ tools });
     await contextStorage.run(ctx, () =>
-      executeSdkTool({ tool: result.observe_call_id, toolCallId: "call_observe" }),
+      executeSdkTool({ tool: tools.get("observe_call_id"), toolCallId: "call_observe" }),
     );
 
     expect(receivedCallId).toBe("call_observe");
@@ -325,9 +316,8 @@ describe("buildToolSet", () => {
       { content: "Let me check.", role: "assistant" },
     ];
 
-    const result = buildToolSet({ tools });
     await contextStorage.run(ctx, () =>
-      executeSdkTool({ messages, tool: result.observe_messages }),
+      executeSdkTool({ messages, tool: tools.get("observe_messages") }),
     );
 
     expect(receivedMessages).toEqual(messages);
@@ -351,7 +341,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
+    const result = buildToolSet({ describe: describeTool, tools });
 
     expect(getJsonSchema(result.echo_city)).toEqual(schema);
   });
@@ -375,7 +365,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
+    const result = buildToolSet({ describe: describeTool, tools });
 
     expect(getOutputJsonSchema(result.summarize)).toEqual(outputSchema);
   });
@@ -421,7 +411,7 @@ describe("buildToolSet", () => {
       ]),
     );
 
-    const result = buildToolSet({ tools });
+    const result = buildToolSet({ describe: describeTool, tools });
 
     for (const tool of Object.values(result)) {
       for (const schema of [tool.inputSchema, tool.outputSchema]) {
@@ -461,7 +451,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
+    const result = buildToolSet({ describe: describeTool, tools });
 
     expect(getJsonSchema(result.pick_color)).toEqual(schema);
   });
@@ -495,6 +485,7 @@ describe("buildToolSet", () => {
     ]);
 
     const result = buildToolSet({
+      describe: describeTool,
       disabledProviderTools: new Set(["web_search"]),
       tools,
     });
@@ -530,6 +521,7 @@ describe("buildToolSet", () => {
 
       const result = await buildToolSetWithProviderTools({
         profile: resolveModelProfile(model),
+        describe: describeTool,
         tools,
       });
 
@@ -555,6 +547,7 @@ describe("buildToolSet", () => {
 
     const result = await buildToolSetWithProviderTools({
       profile: resolveModelProfile("openai/gpt-5.4"),
+      describe: describeTool,
       tools,
     });
 
@@ -578,6 +571,7 @@ describe("buildToolSet", () => {
     ]);
     const result = await buildToolSetWithProviderTools({
       profile: resolveModelProfile("openai/gpt-5.4"),
+      describe: describeTool,
       tools,
     });
     const search = result.web_search!;
@@ -597,6 +591,7 @@ describe("buildToolSet", () => {
 
     const disabled = await buildToolSetWithProviderTools({
       profile: resolveModelProfile("openai/gpt-5.4"),
+      describe: describeTool,
       tools,
       disabledProviderTools: new Set(["web_search"]),
     });
@@ -604,9 +599,53 @@ describe("buildToolSet", () => {
 
     const direct = await buildToolSetWithProviderTools({
       profile: resolveModelProfile(directModel("openai.chat")),
+      describe: describeTool,
       tools,
     });
     expect(direct.web_search).toMatchObject({ id: "openai.web_search" });
+  });
+
+  it("injects Tako search with its Gateway schemas", async () => {
+    const tools: HarnessToolMap = new Map([
+      [
+        "web_search",
+        {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "tako" },
+          },
+          description: "Search.",
+          inputSchema: jsonSchema({}),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const result = await buildToolSetWithProviderTools({
+      profile: resolveModelProfile("openai/gpt-5.4"),
+      describe: describeTool,
+      tools,
+    });
+    const search = result.web_search!;
+    expect(search).toMatchObject({ type: "provider", id: "gateway.tako_search", args: {} });
+    expect(search.execute).toBeUndefined();
+    await expect(
+      asSchema(search.outputSchema!).validate?.({
+        request_id: "search-1",
+        cards: [
+          {
+            title: "Intel Revenue",
+            webpage_url: "https://tako.com/card/abc/",
+            content: {
+              content_format: "csv",
+              data: "date,revenue\n2025-12-31,13.7",
+              total_rows: 1,
+              truncated: false,
+            },
+          },
+        ],
+        web_results: [{ title: "Example Domain", url: "https://example.com" }],
+      }),
+    ).resolves.toMatchObject({ success: true });
   });
 
   it("omits provider-managed web_search when no provider backend is available", async () => {
@@ -627,6 +666,7 @@ describe("buildToolSet", () => {
 
     const result = await buildToolSetWithProviderTools({
       profile: resolveModelProfile(directModel("some-provider")),
+      describe: describeTool,
       tools,
     });
 
@@ -646,54 +686,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({
-      tools,
-    });
-
-    await expect(resolveApproval(result, "dangerous_tool", {})).resolves.toBeUndefined();
-  });
-
-  it("forwards toModelOutput to the SDK tool", () => {
-    const toModelOutput = (output: unknown) => ({
-      type: "text" as const,
-      value: String(output),
-    });
-    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-      [
-        "report",
-        {
-          description: "Generate a report.",
-          execute: async () => ({ full: "data", internal: "details" }),
-          inputSchema: jsonSchema({}),
-          name: "report",
-          toModelOutput,
-        },
-      ],
-    ]);
-
-    const result = buildToolSet({ tools });
-    const sdkTool = result.report as { toModelOutput?: (...args: unknown[]) => unknown };
-
-    expect(sdkTool.toModelOutput).toBeTypeOf("function");
-  });
-
-  it("adds default toModelOutput for executable tools without an authored mapper", () => {
-    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-      [
-        "echo",
-        {
-          description: "Echo.",
-          execute: async () => "ok",
-          inputSchema: jsonSchema({}),
-          name: "echo",
-        },
-      ],
-    ]);
-
-    const result = buildToolSet({ tools });
-    const sdkTool = result.echo as { toModelOutput?: unknown };
-
-    expect(sdkTool.toModelOutput).toBeTypeOf("function");
+    await expect(resolveApproval(tools, "dangerous_tool", {})).resolves.toEqual({ denied: false });
   });
 
   it("toModelOutput wrapper passes only output to the authored function", async () => {
@@ -714,15 +707,9 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-    const sdkTool = result.report as {
-      toModelOutput?: (options: { toolCallId: string; input: unknown; output: unknown }) => unknown;
-    };
-
-    const projected = await sdkTool!.toModelOutput!({
-      toolCallId: "call_1",
-      input: { query: "test" },
+    const projected = await projectSdkToolOutput({
       output: { full: "data", secret: "hidden" },
+      tool: tools.get("report"),
     });
 
     expect(capturedOutput).toEqual({ full: "data", secret: "hidden" });
@@ -742,11 +729,9 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-
     await expect(
       executeSdkTool({
-        tool: result.timestamp,
+        tool: tools.get("timestamp"),
         toolCallId: "call_timestamp",
       }),
     ).rejects.toThrow(
@@ -768,9 +753,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-
-    await expect(executeSdkTool({ tool: result.report })).resolves.toBe(output);
+    await expect(executeSdkTool({ tool: tools.get("report") })).resolves.toBe(output);
   });
 
   it("normalizes top-level undefined execute output to null", async () => {
@@ -786,9 +769,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-
-    await expect(executeSdkTool({ tool: result.maybe_empty })).resolves.toBeNull();
+    await expect(executeSdkTool({ tool: tools.get("maybe_empty") })).resolves.toBeNull();
   });
 
   it("rejects non-JSON-serializable toModelOutput JSON values", async () => {
@@ -808,12 +789,10 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-
     await expect(
       projectSdkToolOutput({
         output: { ok: true },
-        tool: result.timestamp,
+        tool: tools.get("timestamp"),
         toolCallId: "call_timestamp",
       }),
     ).rejects.toThrow(
@@ -848,10 +827,8 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-
     await expect(
-      projectSdkToolOutput({ output: { ok: true }, tool: result.screenshot }),
+      projectSdkToolOutput({ output: { ok: true }, tool: tools.get("screenshot") }),
     ).resolves.toEqual({
       type: "content",
       value: [
@@ -880,12 +857,10 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({ tools });
-
     await expect(
       projectSdkToolOutput({
         output: { ok: true },
-        tool: result.report,
+        tool: tools.get("report"),
       }),
     ).resolves.toEqual({
       type: "text",
@@ -918,9 +893,11 @@ describe("buildToolSet", () => {
         ],
       ]);
 
-      const result = buildToolSet({ tools });
-      await expect(resolveApproval(result, "dangerous", {})).resolves.toBe("user-approval");
-      await expect(resolveApproval(result, "safe", {})).resolves.toBe("not-applicable");
+      await expect(resolveApproval(tools, "dangerous", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
+      await expect(resolveApproval(tools, "safe", {})).resolves.toEqual({ denied: false });
     });
 
     it("preserves async AI SDK 7 approval statuses", async () => {
@@ -937,9 +914,8 @@ describe("buildToolSet", () => {
         ],
       ]);
 
-      const result = buildToolSet({ tools });
-      await expect(resolveApproval(result, "delete_account", {})).resolves.toEqual({
-        type: "denied",
+      await expect(resolveApproval(tools, "delete_account", {})).resolves.toEqual({
+        denied: true,
         reason: "Account is protected.",
       });
     });
@@ -957,11 +933,10 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-
-      const result = buildToolSet({
-        tools,
+      await expect(resolveApproval(tools, "bash", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
       });
-      await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
     });
 
     it("never() skips approval", async () => {
@@ -977,11 +952,7 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-
-      const result = buildToolSet({
-        tools,
-      });
-      await expect(resolveApproval(result, "bash", {})).resolves.toBe("not-applicable");
+      await expect(resolveApproval(tools, "bash", {})).resolves.toEqual({ denied: false });
     });
 
     it("once() requires approval when tool not yet approved", async () => {
@@ -997,15 +968,14 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-
-      const result = buildToolSet({
-        tools,
+      await expect(resolveApproval(tools, "bash", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
       });
-      await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
     });
 
-    it("once() skips approval when tool already approved", async () => {
-      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+    const bashWith = (approval: ApprovalPolicy): HarnessToolMap =>
+      new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -1013,16 +983,141 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            approval: once(),
+            approval,
           },
         ],
       ]);
+    const perTool = once();
+    /** What the session remembers once Alice accepts the prompt `once()` asked for bash. */
+    const acceptedOnce = async (pending = false): Promise<ApprovalMemory> => {
+      const asked = (await resolveApproval(bashWith(perTool), "bash", {})) as ApprovalDecision;
+      const key = asked.remember!.key;
+      return {
+        pending: pending ? [key] : [],
+        remembered: { [key]: { interactionId: "approval-1", outcome: "accepted" } },
+      };
+    };
 
-      const result = buildToolSet({
-        approvedTools: new Set(["bash"]),
-        tools,
+    it.each([
+      ["returned directly", perTool],
+      ["returned through a context spread", (context: ApprovalContext) => perTool({ ...context })],
+    ] as const)(
+      "asks to remember, then uses, an approval when once() is %s",
+      async (_name, approval) => {
+        await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toMatchObject({
+          awaitsPerson: true,
+          remember: { key: expect.any(String) },
+        });
+        await expect(
+          resolveApproval(bashWith(approval), "bash", {}, undefined, {
+            approvalMemory: await acceptedOnce(),
+          }),
+        ).resolves.toEqual({ denied: false, clearedBy: { policy: "approval" } });
+      },
+    );
+
+    it("asks again while another remembering prompt for the tool is open", async () => {
+      await expect(
+        resolveApproval(bashWith(perTool), "bash", {}, undefined, {
+          approvalMemory: await acceptedOnce(true),
+        }),
+      ).resolves.toMatchObject({ awaitsPerson: true, remember: { key: expect.any(String) } });
+    });
+
+    it("reads once() imported from a separate copy of eve's modules", async () => {
+      // Bundled authored tools can load eve/tools/approval apart from the harness's copy.
+      const approvalMemory = await acceptedOnce();
+      vi.resetModules();
+      const copy = await import("#tools/approval/policies.js");
+      vi.resetModules();
+      await expect(
+        resolveApproval(bashWith(copy.once()), "bash", {}, undefined, { approvalMemory }),
+      ).resolves.toEqual({ denied: false, clearedBy: { policy: "approval" } });
+      await expect(resolveApproval(bashWith(copy.once()), "bash", {})).resolves.toMatchObject({
+        awaitsPerson: true,
+        remember: { key: expect.any(String) },
       });
-      await expect(resolveApproval(result, "bash", {})).resolves.toBe("not-applicable");
+    });
+
+    it.each([
+      ["user-approval", "user-approval"],
+      ["an equal status object", { type: "user-approval" }],
+    ] as const)(
+      "remembers nothing when a policy consults once() but returns %s",
+      async (_name, result) => {
+        const approval = async (context: ApprovalContext) => {
+          await perTool(context);
+          return result;
+        };
+        await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toEqual({
+          denied: false,
+          awaitsPerson: true,
+        });
+      },
+    );
+
+    it("gives policies a frozen evaluation without leaking memory into JSON", async () => {
+      let seen: ApprovalContext | undefined;
+      const approval = (context: ApprovalContext) => {
+        seen = context;
+        return perTool(context);
+      };
+      await resolveApproval(bashWith(approval), "bash", {}, undefined, {
+        approvalMemory: await acceptedOnce(),
+      });
+      const evaluation = Reflect.get(seen!, Symbol.for("eve.approval-evaluation"));
+      expect(Object.isFrozen(evaluation)).toBe(true);
+      expect(JSON.stringify(seen)).not.toContain("approval-1");
+    });
+
+    it("reads the tool the harness resolved, not a renamed policy context", async () => {
+      const other = (await resolveApproval(
+        new Map([["other", { ...bashWith(perTool).get("bash")!, name: "other" }]]),
+        "other",
+        {},
+      )) as ApprovalDecision;
+      const approvalMemory: ApprovalMemory = {
+        pending: [],
+        remembered: { [other.remember!.key]: { interactionId: "approval-1", outcome: "accepted" } },
+      };
+      const renamed = bashWith((context) => perTool({ ...context, toolName: "other" }));
+      await expect(
+        resolveApproval(renamed, "bash", {}, undefined, { approvalMemory }),
+      ).resolves.toMatchObject({ awaitsPerson: true });
+    });
+
+    describe("another tool's policy", () => {
+      const lookupWith = (approval: ApprovalPolicy): HarnessToolMap =>
+        new Map([["lookup", { ...bashWith(approval).get("bash")!, name: "lookup" }]]);
+
+      it.each([
+        ["once()'s key", "once"],
+        ["bash's scoped key", JSON.stringify(["bash", "once"])],
+      ])("can't record bash's decision by asking under %s", async (_name, key) => {
+        const forged: ApprovalPolicy = (context) =>
+          (Reflect.get(context, Symbol.for("eve.approval-evaluation")) as ApprovalEvaluation).ask({
+            key,
+          });
+        const asked = (await resolveApproval(lookupWith(forged), "lookup", {})) as ApprovalDecision;
+        // Settlement records an accepted decision under exactly the key the request carried.
+        const approvalMemory: ApprovalMemory = {
+          pending: [],
+          remembered: {
+            [asked.remember!.key]: { interactionId: "approval-1", outcome: "accepted" },
+          },
+        };
+        await expect(
+          resolveApproval(bashWith(perTool), "bash", {}, undefined, { approvalMemory }),
+        ).resolves.toMatchObject({ awaitsPerson: true });
+      });
+
+      it("can't read bash's decisions", async () => {
+        await expect(
+          resolveApproval(lookupWith(perTool), "lookup", {}, undefined, {
+            approvalMemory: await acceptedOnce(),
+          }),
+        ).resolves.toMatchObject({ awaitsPerson: true });
+      });
     });
 
     it("tool without approval defaults to false when another tool has an override", async () => {
@@ -1047,12 +1142,11 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-
-      const result = buildToolSet({
-        tools,
+      await expect(resolveApproval(tools, "bash", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
       });
-      await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
-      await expect(resolveApproval(result, "write_file", {})).resolves.toBeUndefined();
+      await expect(resolveApproval(tools, "write_file", {})).resolves.toEqual({ denied: false });
     });
 
     it("passes toolInput from the AI SDK into approval", async () => {
@@ -1073,9 +1167,8 @@ describe("buildToolSet", () => {
         ],
       ]);
 
-      const result = buildToolSet({ tools });
       const toolInput = { teamId: "team_abc", limit: 20 };
-      await resolveApproval(result, "vercel__list_projects", toolInput);
+      await resolveApproval(tools, "vercel__list_projects", toolInput);
 
       expect(capturedInput).toEqual(toolInput);
     });
@@ -1098,8 +1191,7 @@ describe("buildToolSet", () => {
         ],
       ]);
 
-      const result = buildToolSet({ tools });
-      await resolveApproval(result, "vercel__list_projects", {});
+      await resolveApproval(tools, "vercel__list_projects", {});
 
       expect(capturedCallId).toBe("call_1");
     });
@@ -1123,8 +1215,7 @@ describe("buildToolSet", () => {
       ]);
       const abortSignal = new AbortController().signal;
 
-      const result = buildToolSet({ tools });
-      await resolveApproval(result, "deploy", {}, undefined, { abortSignal });
+      await resolveApproval(tools, "deploy", {}, undefined, { abortSignal });
 
       expect(capturedSignal).toBe(abortSignal);
     });
@@ -1173,10 +1264,10 @@ describe("buildToolSet", () => {
         turn: { id: "turn_current", sequence: 2 },
       };
 
-      const result = buildToolSet({ tools });
-      await expect(resolveApproval(result, "delete_project", {}, session)).resolves.toBe(
-        "user-approval",
-      );
+      await expect(resolveApproval(tools, "delete_project", {}, session)).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
 
       expect(capturedCtx?.session).toEqual({
         auth: session.auth,
@@ -1224,52 +1315,13 @@ describe("buildToolSet", () => {
         sessionId: "schedule-session",
         turn: { id: "human-turn", sequence: 1 },
       };
-      const result = buildToolSet({ tools });
 
-      await expect(resolveApproval(result, "refund", {}, scheduleSession)).resolves.toBe(
-        "not-applicable",
-      );
-      await expect(resolveApproval(result, "refund", {}, humanResumedSession)).resolves.toBe(
-        "user-approval",
-      );
-    });
-
-    it("input-aware approval skips when compound key is in approvedTools", async () => {
-      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-        [
-          "vercel__list_projects",
-          {
-            description: "List projects in the team.",
-            execute: async () => "ok",
-            inputSchema: jsonSchema({}),
-            name: "vercel__list_projects",
-            approval: ({ approvedTools, toolName, toolInput }) => {
-              if (approvedTools.has(toolName)) return "not-applicable";
-              const team = (toolInput as { teamId?: string } | undefined)?.teamId;
-              if (team === undefined) return "user-approval";
-              return approvedTools.has(`${toolName}:${team}`) ? "not-applicable" : "user-approval";
-            },
-          },
-        ],
-      ]);
-
-      const withCompoundKey = buildToolSet({
-        approvedTools: new Set(["vercel__list_projects:team_abc"]),
-        tools,
+      await expect(resolveApproval(tools, "refund", {}, scheduleSession)).resolves.toMatchObject({
+        denied: false,
       });
       await expect(
-        resolveApproval(withCompoundKey, "vercel__list_projects", {
-          teamId: "team_abc",
-          limit: 10,
-        }),
-      ).resolves.toBe("not-applicable");
-
-      await expect(
-        resolveApproval(withCompoundKey, "vercel__list_projects", {
-          teamId: "team_xyz",
-          limit: 10,
-        }),
-      ).resolves.toBe("user-approval");
+        resolveApproval(tools, "refund", {}, humanResumedSession),
+      ).resolves.toMatchObject({ denied: false, awaitsPerson: true });
     });
   });
 });

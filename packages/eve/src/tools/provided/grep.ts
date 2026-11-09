@@ -1,24 +1,14 @@
-import { type GrepInput, executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
+import {
+  executeGrepSearch,
+  GREP_OUTPUT_MODES,
+  type GrepToolInput,
+  type GrepSearchResult as GrepToolOutput,
+} from "#execution/sandbox/grep-search.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
-export interface GrepToolInput {
-  context?: number;
-  glob?: string;
-  ignoreCase?: boolean;
-  limit?: number;
-  literal?: boolean;
-  path?: string;
-  pattern: string;
-}
-
-export interface GrepToolOutput {
-  content: string;
-  matchCount: number;
-  path: string;
-  truncated: boolean;
-}
+export type { GrepToolInput, GrepToolOutput };
 
 /**
  * Input schema for the provided `grep` tool.
@@ -43,19 +33,25 @@ export const GREP_INPUT_SCHEMA = defineJsonSchema<GrepToolInput>({
     limit: {
       type: "integer",
       minimum: 1,
-      maximum: 1000,
-      description: "Maximum number of matches to return per file. Defaults to 100.",
+      maximum: 200,
+      description: "Maximum rows to return. Defaults to 50; capped at 200.",
     },
     literal: {
       type: "boolean",
       description:
-        "Treat the pattern as a literal string instead of a regular expression. Defaults to false.",
+        "Use a literal match. Defaults to true for identifier-like patterns, false for regex syntax.",
     },
     path: {
       type: "string",
       description:
-        "The directory or file to search in. Defaults to /workspace. " +
-        "Must be an absolute path or begin with $HOME/. Omit to use the default.",
+        "Directory or file inside the workspace. Defaults to the workspace root. " +
+        "Relative paths resolve within the workspace.",
+    },
+    outputMode: {
+      type: "string",
+      enum: GREP_OUTPUT_MODES,
+      description:
+        "files_with_matches (default) lists paths; content returns matching lines; count returns per-file totals.",
     },
     pattern: {
       type: "string",
@@ -75,10 +71,11 @@ export const GREP_OUTPUT_SCHEMA = defineJsonSchema<GrepToolOutput>({
   properties: {
     content: { type: "string" },
     matchCount: { type: "integer" },
+    outputMode: { type: "string", enum: GREP_OUTPUT_MODES },
     path: { type: "string" },
     truncated: { type: "boolean" },
   },
-  required: ["content", "matchCount", "path", "truncated"],
+  required: ["content", "matchCount", "outputMode", "path", "truncated"],
   additionalProperties: false,
 });
 
@@ -88,19 +85,10 @@ export const GREP_OUTPUT_SCHEMA = defineJsonSchema<GrepToolOutput>({
 export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Search", input.pattern) },
-    description: [
-      "Fast content search tool that works with any codebase size.",
-      "",
-      "Usage:",
-      "- Searches file contents using regular expressions.",
-      '- Supports full regex syntax (e.g. "log.*Error", "function\\s+\\w+").',
-      '- Filter files by pattern with the glob parameter (e.g. "*.js", "*.{ts,tsx}").',
-      "- Returns matching lines with file paths and line numbers.",
-      "- Call this tool in parallel when you have multiple independent searches.",
-      "- Any line longer than 2000 characters is truncated.",
-    ].join("\n"),
+    description:
+      "Search sandbox files with ripgrep (or a POSIX fallback). Start with files_with_matches and a narrow path or glob; use content for matching lines or count for totals. Includes hidden files, excludes .git; ripgrep respects .gitignore. The POSIX fallback does not read .gitignore. Output is bounded by rows and bytes.",
     async execute(input, ctx) {
-      return await executeGrepOnSandbox(await ctx.getSandbox(), input as GrepInput);
+      return await executeGrepSearch(input, await ctx.getSandbox(), ctx.abortSignal);
     },
     inputSchema: GREP_INPUT_SCHEMA,
     outputSchema: GREP_OUTPUT_SCHEMA,

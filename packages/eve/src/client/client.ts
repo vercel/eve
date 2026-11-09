@@ -3,7 +3,10 @@ import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { HealthResponseError } from "#client/health-response-error.js";
 import { HealthResultSchema } from "#client/health-schema.js";
 import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
-import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
+import {
+  AgentInfoResultSchema,
+  describeAgentInfoVersionMismatch,
+} from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSessions } from "#client/sessions.js";
 import { createClientUrl } from "#client/url.js";
@@ -21,25 +24,25 @@ import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 /**
  * HTTP client for talking to a deployed eve agent.
  *
- * A single client is bound to one host and auth configuration. Its
+ * A single client is bound to one base URL and auth configuration. Its
  * `sessions` collection can create or attach many independent fixed session
  * handles.
  */
 export class Client {
   readonly #auth: ClientAuth | undefined;
   readonly #headers: HeadersValue | undefined;
-  readonly #host: string;
-  readonly #redirect: ClientRedirectPolicy | undefined;
+  readonly #baseUrl: string;
+  readonly #redirect: ClientRedirectPolicy;
   /** Explicit create/attach surface for ID-addressed sessions. */
   readonly sessions: ClientSessions;
 
   constructor(options: ClientOptions) {
-    this.#host = options.host;
+    this.#baseUrl = options.baseUrl;
     this.#auth = options.auth;
     this.#headers = options.headers;
-    this.#redirect = options.redirect;
+    this.#redirect = options.redirect ?? "error";
     this.sessions = new ClientSessions({
-      host: this.#host,
+      baseUrl: this.#baseUrl,
       redirect: this.#redirect,
       resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
     });
@@ -51,7 +54,7 @@ export class Client {
    * @throws {ClientError} If the server returns a non-successful status.
    */
   async health(): Promise<HealthResult> {
-    const url = createClientUrl(this.#host, EVE_HEALTH_ROUTE_PATH);
+    const url = createClientUrl(this.#baseUrl, EVE_HEALTH_ROUTE_PATH);
     const headers = await this.#resolveHeaders();
     const response = await fetch(url, withRedirectPolicy({ headers }, this.#redirect));
 
@@ -88,9 +91,11 @@ export class Client {
    *
    * @throws {ClientError} If the server returns a non-successful status.
    * @throws {AgentInfoResponseError} If an authorized response carries a body
-   * that is not a recognized agent-info payload (not JSON, or a mismatched
-   * shape). Inspection is best-effort: a working connection does not depend on
-   * this route, so connection probes treat this distinctly from a failed request.
+   * that is not a recognized agent-info payload (not JSON, another agent-info
+   * version, or a mismatched shape). Unknown fields are ignored and unknown
+   * enum values read as `"unrecognized"`. Inspection is best-effort: a working
+   * connection does not depend on this route, so connection probes treat this
+   * distinctly from a failed request.
    */
   async info(options: { readonly signal?: AbortSignal } = {}): Promise<AgentInfoResult> {
     const response = await this.fetch(EVE_INFO_ROUTE_PATH, options);
@@ -106,6 +111,9 @@ export class Client {
     } catch {
       throw new AgentInfoResponseError();
     }
+
+    const versionMismatch = describeAgentInfoVersionMismatch(payload);
+    if (versionMismatch !== undefined) throw new AgentInfoResponseError([versionMismatch]);
 
     const result = AgentInfoResultSchema.safeParse(payload);
     if (!result.success) {
@@ -128,7 +136,7 @@ export class Client {
    * auth/header cascade used by {@link health}, {@link info}, and sessions.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const url = createClientUrl(this.#host, path);
+    const url = createClientUrl(this.#baseUrl, path);
     const headers = await this.#resolveHeaders(headersInitToRecord(init.headers));
     return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }
@@ -224,9 +232,6 @@ function headersInitToRecord(
   return Object.fromEntries(new Headers(headers).entries());
 }
 
-function withRedirectPolicy(
-  init: RequestInit,
-  redirect: ClientRedirectPolicy | undefined,
-): RequestInit {
-  return redirect === undefined ? init : { ...init, redirect };
+function withRedirectPolicy(init: RequestInit, redirect: ClientRedirectPolicy): RequestInit {
+  return { ...init, redirect };
 }

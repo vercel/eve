@@ -1,5 +1,5 @@
 import { readdir, realpath, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
@@ -25,6 +25,7 @@ import {
 } from "#internal/nitro/host/build-extension.js";
 import { withExtensionBuildLock } from "#internal/nitro/host/extension-build-lock.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 /**
  * A mounted extension package whose authored source lives in the consuming
@@ -260,14 +261,6 @@ function sameBuildInputs(left: WorkspaceExtension, right: WorkspaceExtension): b
     sameBuildConfig(left.config, right.config) &&
     left.buildConfigPaths.length === right.buildConfigPaths.length &&
     left.buildConfigPaths.every((path, index) => path === right.buildConfigPaths[index])
-  );
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
   );
 }
 

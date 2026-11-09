@@ -8,7 +8,7 @@ export interface TaskWaitInput {
 }
 
 /**
- * `task_wait`, offered to agents that can start tasks. It is not a workflow tool: the
+ * `eve__task_wait`, offered to agents that can start tasks. It is not a workflow tool: the
  * call defers out of the model step and the session parks the turn itself.
  */
 export const taskWaitTool: HarnessToolDefinition = {

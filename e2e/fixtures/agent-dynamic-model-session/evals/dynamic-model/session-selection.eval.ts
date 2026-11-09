@@ -17,7 +17,9 @@ export default defineEval({
     first.expectOk();
     first.messageIncludes("session model turn one");
     first.eventsSatisfy("the session resolver selects the configured model", (events) =>
-      events.some((event) => event.type === "step.started" && event.data.modelId === selectedModel),
+      events.some(
+        (event) => event.type === "model.started" && event.data.modelId === selectedModel,
+      ),
     );
 
     const second = await session.send(
@@ -29,7 +31,7 @@ export default defineEval({
       "the second turn reuses the session selection",
       (events) =>
         events.some(
-          (event) => event.type === "step.started" && event.data.modelId === selectedModel,
+          (event) => event.type === "model.started" && event.data.modelId === selectedModel,
         ) && events.every((event) => event.type !== "session.started"),
     );
 

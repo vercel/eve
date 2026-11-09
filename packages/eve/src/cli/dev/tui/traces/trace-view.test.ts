@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
 import { createTheme } from "../theme.js";
 import { deriveTraceViewerSurfaces } from "./trace-surfaces.js";
@@ -312,7 +312,7 @@ describe("renderTraceViewer", () => {
     // and inject a phantom blank line into the frame.
     const turn = span("a".repeat(16), "agent.turn", 0, 0);
     const selected = span("f".repeat(16), "agent.action", 100, 200, turn.spanId, {
-      "agent.action.name": "load_skill",
+      "agent.action.name": "lookup",
       "gen_ai.tool.call.result": "When the user asks about weather, call the tool.\n",
     });
     const frame = render(viewerState([turn, selected], { panelOpen: true }), 100, 24);

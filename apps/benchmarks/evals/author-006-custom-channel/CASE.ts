@@ -1,6 +1,7 @@
 import { defineAuthoringCase, simpleProject } from "../../lib/authoring-case.js";
 
 export default defineAuthoringCase({
+  category: "features/channels",
   startingPoint: simpleProject,
   async interact({ send }) {
     await send(

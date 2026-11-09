@@ -22,8 +22,8 @@ interface EveAttachmentErrorInput {
 }
 
 /**
- * Error surfaced when an attachment resolver fails to produce bytes for
- * an {@link AttachmentRef}.
+ * Error surfaced when a channel's `fetchFile` fails to produce bytes for an
+ * attachment URL.
  *
  * Channels can inspect the `.kind` discriminator to decide whether to
  * drop the attachment and continue the turn (the default posture for

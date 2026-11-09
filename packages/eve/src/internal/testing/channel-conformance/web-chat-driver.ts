@@ -53,7 +53,7 @@ let bundled: Promise<string> | undefined;
 export function webChatDriver(): ClientDriver {
   return {
     name: "web chat",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["attachments", "buttons", "text-replies"],
     // A browser tab shows only the person using it.
     surface: "private",
     async open(host, wait) {
@@ -99,7 +99,17 @@ export function webChatDriver(): ClientDriver {
       }
 
       return {
-        async say(text) {
+        async say(text, _person, files) {
+          if (files !== undefined && files.length > 0) {
+            // The composer's "Add photos or files" button opens this input.
+            await page.locator('input[type="file"]').setInputFiles(
+              files.map((file) => ({
+                buffer: Buffer.from(file.bytes),
+                mimeType: file.mediaType,
+                name: file.name,
+              })),
+            );
+          }
           await composer.fill(text);
           await composer.press("Enter");
         },
@@ -313,7 +323,9 @@ async function bundleTemplate(): Promise<string> {
       alias: [
         { find: /^@\//u, replacement: `${appRoot}/` },
         // Test the eve source under change, not its last build.
+        { find: /^eve\/client$/u, replacement: join(EVE_SOURCE_ROOT, "client/index.ts") },
         { find: /^eve\/react$/u, replacement: join(EVE_SOURCE_ROOT, "react/index.ts") },
+        { find: /^eve\/events$/u, replacement: join(EVE_SOURCE_ROOT, "public/events/index.ts") },
       ],
       // Resolves eve's `#*.js` imports to `src/*.ts`.
       conditions: [...defaultClientConditions, "eve-source"],

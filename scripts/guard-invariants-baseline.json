@@ -1,8 +1,6 @@
 {
   "_description": "Baselines for framework mechanical lints. Each rule guard refuses to let new violations slip in beyond what is recorded here. Lower a count by removing offenders, never raise it. Empty allowlists/maps mean the rule is fully enforced.",
-  "rule13_spreadTernaryByFile": {
-    "packages/eve/src/public/channels/auth.ts": 7
-  },
+  "rule13_spreadTernaryByFile": {},
   "rule19_asyncLocalStorageAllowlist": [
     "packages/eve/src/context/container.ts",
     "packages/eve/src/public/channels/slack/slackChannel.ts",
@@ -17,11 +15,6 @@
     "packages/eve/src/harness/prompt-cache.test.ts": 6,
     "packages/eve/src/harness/tool-loop-compaction-accounting.test.ts": 2,
     "packages/eve/src/harness/tool-loop.test.ts": 16,
-    "packages/eve/src/internal/nitro/host/build-application.scenario.test.ts": 2,
-    "packages/eve/src/internal/nitro/host/create-application-nitro.scenario.test.ts": 2,
-    "packages/eve/src/internal/nitro/host/cron-handler-route.test.ts": 1,
-    "packages/eve/src/internal/nitro/host/dev-authored-source-watcher.scenario.test.ts": 2,
-    "packages/eve/src/internal/nitro/host/schedule-task-routes.test.ts": 1,
     "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts": 1,
     "packages/eve/src/runtime/agent/bootstrap-model-utils.ts": 3,
     "packages/eve/src/runtime/agent/mock-model-adapter.test.ts": 1,
@@ -44,11 +37,12 @@
     "packages/eve/src/tools/provided/bash.ts",
     "packages/eve/src/tools/provided/glob.ts",
     "packages/eve/src/tools/provided/grep.ts",
-    "packages/eve/src/tools/provided/load-skill.ts",
     "packages/eve/src/tools/provided/read-file.ts",
     "packages/eve/src/tools/provided/web-fetch.ts",
     "packages/eve/src/tools/provided/web-search.ts",
     "packages/eve/src/tools/provided/workflow.ts",
     "packages/eve/src/tools/provided/write-file.ts"
-  ]
+  ],
+  "rule59_nitroVirtualIdAllowlist": [],
+  "rule51_factBuildersByFile": {}
 }

@@ -1,3 +1,5 @@
+import type { SessionSendOptions } from "#channel/session.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { SessionSchedule } from "#context/session-schedule.js";
 import type { SessionAuth } from "#context/keys.js";
@@ -11,12 +13,13 @@ import type {
   ApprovalResponseContext,
   ApprovalResponseDecision,
 } from "#approval/definition.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReference } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
-import type { Session } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
 
 /** A provider namespace scope, represented by one key or a hierarchical key path. */
@@ -27,6 +30,7 @@ export type ScheduleOperation =
   | "create"
   | "get"
   | "list"
+  | "update"
   | "enable"
   | "disable"
   | "invoke"
@@ -42,11 +46,7 @@ export interface ScheduleScopeContext {
     readonly auth: SessionAuth;
     readonly schedule?: SessionSchedule;
   };
-  readonly channel: {
-    readonly kind?: string;
-    readonly continuationToken?: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: InstrumentationChannel;
 }
 
 /** Stable creator reference; never a snapshot of credentials or permissions. */
@@ -128,6 +128,10 @@ export interface ScheduleCreate<TPayload> {
   readonly payload: TPayload;
   readonly name: string;
 }
+export interface SchedulePatch<TPayload> {
+  readonly expression?: ScheduleExpression;
+  readonly payload?: TPayload;
+}
 export interface ScheduleList {
   readonly cursor?: string;
   readonly limit?: number;
@@ -148,6 +152,12 @@ export interface ScheduleProvider {
   ): Promise<ScheduleRecord>;
   list(context: ScheduleProviderContext, query: ScheduleList): Promise<SchedulePage>;
   get(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord | null>;
+  /** Patch supplied fields; preserve identity, state, target, and omitted fields. */
+  update<TPayload>(
+    context: ScheduleProviderContext,
+    name: string,
+    patch: SchedulePatch<TPayload>,
+  ): Promise<ScheduleRecord>;
   enable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
   disable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
   invoke(context: ScheduleProviderContext, name: string): Promise<void>;
@@ -165,7 +175,12 @@ export interface SchedulePageResult {
   readonly data: readonly ScheduleRecord[];
 }
 
-/** Authenticated client; payload and creator identity are immutable after creation. */
+/** Requires timing or complete replacement input, which captures the updating caller as creator. */
+export type ScheduleClientUpdate<TPayload> =
+  | { readonly expression: ScheduleTiming; readonly payload?: TPayload }
+  | { readonly expression?: ScheduleTiming; readonly payload: TPayload };
+
+/** Authenticated client; timing-only updates preserve payload and creator identity. */
 export interface ScheduleClient<TPayload> {
   create(input: ScheduleClientCreate<TPayload>): Promise<ScheduleRecord>;
   delete(name: string): Promise<boolean>;
@@ -174,15 +189,30 @@ export interface ScheduleClient<TPayload> {
   get(name: string): Promise<ScheduleRecord | null>;
   invoke(name: string): Promise<void>;
   list(input?: ScheduleList): Promise<SchedulePageResult>;
+  /** Requires timing or payload. Payload replacement captures the updating caller as creator. */
+  update(name: string, patch: ScheduleClientUpdate<TPayload>): Promise<ScheduleRecord>;
 }
 
 /** Starts fresh unattended work bound to the resolved creator; callers cannot choose another identity. */
 export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
-) => { send(message: string | UserContent): Promise<Session> };
+) => {
+  /**
+   * Accepts the `to().send()` options that apply to a fresh session. `auth` is
+   * the schedule's creator. A send never reaches a session the schedule didn't
+   * start, so `turnPolicy` has nothing to act on. A send with an
+   * `idempotencyKey` reaches the session an earlier send from this schedule
+   * with the same key and target started, so a retried callback whose key
+   * includes `occurrence.executionId` doesn't start a second session.
+   */
+  send(
+    message: MessageContent,
+    options?: Omit<SessionSendOptions, "auth" | "turnPolicy">,
+  ): Promise<Delivery>;
+};
 
-export type ScheduleCreateApproval<TPrepared> =
+type SchedulePayloadApproval<TPrepared> =
   | ((
       context: ApprovalContext & { readonly payload: TPrepared },
     ) => ApprovalStatus | Promise<ApprovalStatus>)
@@ -194,10 +224,14 @@ export type ScheduleCreateApproval<TPrepared> =
         context: ApprovalResponseContext & { readonly payload: TPrepared },
       ) => ApprovalResponseDecision | Promise<ApprovalResponseDecision>;
     };
+export type ScheduleCreateApproval<TPrepared> = SchedulePayloadApproval<TPrepared>;
+
 export type ScheduleApprovals<TPrepared> = Partial<
-  Record<Exclude<ScheduleOperation, "create">, Approval>
+  Record<Exclude<ScheduleOperation, "create" | "update">, Approval>
 > & {
   readonly create?: ScheduleCreateApproval<TPrepared>;
+  /** Prepared replacement payload, or undefined for timing-only updates. */
+  readonly update?: SchedulePayloadApproval<TPrepared | undefined>;
 };
 
 /** Execution context; `to` starts fresh, unattended sessions as the resolved creator. */
@@ -220,22 +254,23 @@ export interface DynamicSchedulesDefinition<
   /** Resolved backend. defineDynamicSchedules defaults omitted providers to Vercel Schedules. */
   readonly provider: ScheduleProvider;
   /**
-   * Validates application policy and enriches a creation payload before the provider write.
-   * The caller constructs input; eve validates it with `inputSchema`, authorizes creation
-   * through `scope`, then calls `preparePayload` with trusted creation context. eve checks that the
+   * Validates application policy and enriches a creation or replacement payload before the provider write.
+   * The caller constructs input; eve validates it with `inputSchema`, authorizes the write
+   * through `scope`, then calls `preparePayload` with trusted caller context. eve checks that the
    * result is bounded JSON and persists it; `inputSchema` describes caller input, not stored prepared output.
-   * Throw an actionable error to reject creation without writing a schedule.
+   * Throw an actionable error to reject the write without changing a schedule.
    *
    * A common use is capturing the current channel destination: derive channel/workspace
    * references from verified caller context, replace any model-supplied references, and
    * return them with the task. Keep captured fields out of the input schema.
    * Channel-less or delegated callers may lack that context; reject those cases explicitly.
    *
-   * Runs only on creation. Model calls invoke preparePayload before approval and again before
-   * writing; execution fails if the prepared result differs from the approved snapshot.
-   * Authenticated clients invoke preparePayload once before writing without model approval. Reads, enable/disable operations, and occurrence execution do not call it. Omission
-   * stores validated input unchanged. Creation retries may call it again, so avoid
-   * irreversible side effects; state changes never recapture a different destination.
+   * Runs on creation and payload replacement. Model calls invoke preparePayload before approval
+   * and again before writing; execution fails if the prepared result differs from the approved snapshot.
+   * Authenticated clients invoke preparePayload once before writing without model approval.
+   * Reads, timing-only updates, state changes, and occurrence execution do not call it. Omission
+   * stores validated input unchanged. Write retries may call it again, so avoid irreversible
+   * side effects. Payload replacement recaptures the destination and creator from the updating caller.
    * `auth`, `run`, and occurrence events receive the inferred return type. Declare `preparePayload`
    * before those callbacks for contextual inference, or annotate its return type explicitly.
    * Prepared application data is not revalidated against the input schema at execution;
@@ -243,7 +278,10 @@ export interface DynamicSchedulesDefinition<
    */
   readonly preparePayload?: (
     payload: TPayload,
-    context: ScheduleScopeContext & { readonly operation: "create"; readonly name: string },
+    context: ScheduleScopeContext & {
+      readonly operation: "create" | "update";
+      readonly name: string;
+    },
   ) => TPrepared | Promise<TPrepared>;
   /** Authorizes every management operation. Defaults to `byPrincipal`. */
   readonly scope?: (
@@ -263,9 +301,9 @@ export interface DynamicSchedulesDefinition<
     /** On a permanent provider failure or after its retry budget is exhausted. */
     readonly "occurrence.failed"?: ScheduleOccurrenceEventHandler<NoInfer<TPrepared>>;
   };
-  /** Expose operation tools directly (default true), or false for code-only scheduling. */
-  readonly tool?: boolean;
-  /** Model-call policies keyed by operation. Create receives the validated prepared payload. */
+  /** Expose operation tools directly (default true), defer them to the catalog, or disable them. */
+  readonly tool?: AgentToolExposure;
+  /** Model-call policies keyed by operation. Create and update receive the prepared payload. */
   readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
 }
 
@@ -289,7 +327,10 @@ type DynamicSchedulesOptions<
   readonly provider?: ScheduleProvider;
 } & (
     | { readonly tool: false; readonly approval?: never }
-    | { readonly tool?: true; readonly approval?: ScheduleApprovals<NoInfer<TPrepared>> }
+    | {
+        readonly tool?: true | "deferred";
+        readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
+      }
   );
 
 /**
@@ -298,7 +339,7 @@ type DynamicSchedulesOptions<
  * while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
  * Provider defaults to vercelScheduleProvider(); pass provider explicitly to select another backend.
- * The default supports Vercel production and eve dev, not preview or self-hosted scheduling.
+ * The default supports Vercel deployments and eve dev, not self-hosted scheduling.
  */
 export function defineDynamicSchedules<TInput, TPrepared>(
   definition: Omit<
@@ -307,7 +348,10 @@ export function defineDynamicSchedules<TInput, TPrepared>(
   > & {
     readonly preparePayload: (
       payload: TInput,
-      context: ScheduleScopeContext & { readonly operation: "create"; readonly name: string },
+      context: ScheduleScopeContext & {
+        readonly operation: "create" | "update";
+        readonly name: string;
+      },
     ) => TPrepared | Promise<TPrepared>;
   },
 ): DefinedDynamicSchedules<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>;

@@ -1,5 +1,5 @@
 import { observeToolOutput } from "#tool-stubs/execute.js";
-import type { ModelMessage } from "ai";
+import type { JSONValue, ModelMessage } from "ai";
 
 import type {
   RuntimeActionRequest,
@@ -7,9 +7,11 @@ import type {
   RuntimeWorkflowTaskRequest,
   WorkflowToolCallEntry,
 } from "#shared/action-types.js";
+import { SKILL_ENTRY_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import {
   findBlockingWorkflowToolRun,
   removeBlockingWorkflowToolRuns,
@@ -18,7 +20,7 @@ import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup } from "#harness/types.js";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
@@ -50,7 +52,7 @@ export function forgetFinishedRuns(
     if (result.kind !== "tool-result") continue;
     const record = findBlockingWorkflowToolRun(next.state, result.callId, turnId);
     if (record === undefined) continue;
-    for (const [requestId, route] of getProxyInputRequests(next.state)) {
+    for (const [requestId, route] of readHitlState(next.state).relays) {
       if (route.runId === record.address.runId) requestIds.push(requestId);
     }
     next = removeBlockingWorkflowToolRuns(next, turnId, record.callId);
@@ -61,14 +63,15 @@ export function forgetFinishedRuns(
 /** Each runtime result as the model reads it, beside the result the stream reports. */
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
-  tools: HarnessToolMap | undefined,
+  tools: HarnessToolLookup | undefined,
 ): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
     switch (result.kind) {
+      // A skill load is always an `eve__skill` call in history.
       case "load-skill-result":
         settled.push({
-          part: toolResult(result, "load_skill", toToolResultOutput(result)),
+          part: toolResult(result, SKILL_TOOL_NAME, toToolResultOutput(result)),
           result,
         });
         continue;
@@ -103,14 +106,14 @@ function toolResult(
 }
 
 /**
- * Turns a step's deferred calls into workflow runs, committing a task record
- * for each call that starts a task. Task tool calls stay in the response
- * alone: the session reads them from there.
+ * Turns a step's workflow tool calls into workflow runs, committing a task
+ * record for each call that starts a task. Task tool calls stay in the
+ * response alone: the session reads them from there.
  */
-export function collectDeferredCalls(input: {
+export function collectWorkflowCalls(input: {
   readonly session: HarnessSession;
   readonly toolCalls: readonly CoordinationToolCall[];
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
   readonly turnId: string;
 }): {
   readonly session: HarnessSession;
@@ -156,19 +159,16 @@ export interface CoordinationToolCall {
  */
 export function createRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: CoordinationToolCall;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
   const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: toolInput,
-      kind: "load-skill",
-    };
+  const skill = input.toolCall.toolName === SKILL_ENTRY_NAME ? skillTarget(toolInput) : undefined;
+  if (skill !== undefined) {
+    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill", name: skill };
   }
   const handling = definition?.behavior?.handling;
   if (
@@ -198,18 +198,18 @@ export function createRuntimeActionRequestFromToolCall(input: {
 }
 
 /**
- * Projects one deferred harness tool call into a workflow run request. The
- * input is the tool's own, without anything eve added to its model input.
+ * Projects one workflow tool call into a workflow run request. The input is
+ * the tool's own, without anything eve added to its model input.
  */
 export function createCoordinationRequestFromToolCall(input: {
   readonly entry: WorkflowToolCallEntry;
   readonly input: JsonObject;
   readonly toolCall: CoordinationToolCall;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): RuntimeWorkflowTaskRequest {
   const definition = input.tools.get(input.toolCall.toolName);
   if (definition?.workflowId === undefined) {
-    throw new Error(`Deferred tool "${input.toolCall.toolName}" has no workflow.`);
+    throw new Error(`Workflow tool "${input.toolCall.toolName}" has no workflow.`);
   }
   return {
     callId: input.toolCall.toolCallId,
@@ -244,7 +244,7 @@ export function resolveToolCallInputObject(
   }
 
   try {
-    return parseJsonObject(typeof value === "string" ? parseJsonStringInput(value) : value);
+    return parseJsonObject(typeof value === "string" ? JSON.parse(value) : value);
   } catch (error) {
     // This module is bundled into the workflow driver body, which cannot
     // import the logger, so enrich the error (and keep the original as
@@ -255,10 +255,6 @@ export function resolveToolCallInputObject(
       { cause: error },
     );
   }
-}
-
-function parseJsonStringInput(value: string): unknown {
-  return JSON.parse(value);
 }
 
 /** Errors bypass `toModelOutput`, as they do for local execution. */
@@ -284,60 +280,11 @@ async function projectToolResultOutput(
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {
-  if (typeof result.output === "string") {
-    if (result.isError === true) {
-      return {
-        type: "error-text",
-        value: result.output,
-      };
-    }
-
-    return {
-      type: "text",
-      value: result.output,
-    };
-  }
-
-  if (result.isError === true) {
-    return {
-      type: "error-json",
-      value: toMutableJsonValue(result.output),
-    };
-  }
-
+  if (typeof result.output === "string")
+    return { type: result.isError === true ? "error-text" : "text", value: result.output };
   return {
-    type: "json",
-    value: toMutableJsonValue(result.output),
+    type: result.isError === true ? "error-json" : "json",
+    // Runtime results are already JSON; detach them for the SDK's mutable message types.
+    value: structuredClone(result.output) as JSONValue,
   };
 }
-
-function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonValue {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => toMutableJsonValue(item));
-  }
-
-  const next: Record<string, MutableJsonValue> = {};
-
-  for (const [key, item] of Object.entries(value)) {
-    next[key] = toMutableJsonValue(item);
-  }
-
-  return next;
-}
-
-type MutableJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | MutableJsonValue[]
-  | { [key: string]: MutableJsonValue };

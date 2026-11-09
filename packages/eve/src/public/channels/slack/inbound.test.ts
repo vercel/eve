@@ -4,6 +4,7 @@ import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js"
 import {
   parseAppMentionEvent,
   parseDirectMessageEvent,
+  parseMessageEditEvent,
   parseMessageEvent,
   parseSlackEventEnvelope,
   slackEventReceivingBotUserId,
@@ -177,7 +178,7 @@ describe("parseAppMentionEvent", () => {
     expect(message?.author?.isBot).toBe(true);
   });
 
-  it("collects file attachments with inferred type", () => {
+  it("collects file attachments with inferred type, skipping remote files", () => {
     const message = parseAppMentionEvent({
       type: "event_callback",
       event: {
@@ -193,6 +194,14 @@ describe("parseAppMentionEvent", () => {
             mimetype: "image/png",
             url_private: "https://files.slack.com/a/chart.png",
             size: 1024,
+          },
+          // A Google Drive file shared through Slack's integration (#855).
+          {
+            id: "F2",
+            mode: "external",
+            name: "Plan",
+            mimetype: "application/vnd.google-apps.document",
+            url_private: "https://docs.google.com/document/d/1",
           },
         ],
       },
@@ -249,6 +258,70 @@ describe("parseMessageEvent", () => {
       expect(message).toBeNull();
     },
   );
+});
+
+describe("parseMessageEditEvent", () => {
+  function changed(
+    message: Record<string, unknown>,
+    previous: Record<string, unknown> | null = { text: "Weather in Pari?", ts: "1.0" },
+  ) {
+    return parseMessageEditEvent({
+      type: "event_callback",
+      team_id: "T01",
+      event: {
+        type: "message",
+        subtype: "message_changed",
+        channel: "D01",
+        channel_type: "im",
+        ts: "1.5",
+        message: {
+          text: "Weather in Paris?",
+          thread_ts: "0.5",
+          ts: "1.0",
+          user: "U01",
+          edited: { ts: "1.4", user: "U01" },
+          ...message,
+        },
+        ...(previous !== null && { previous_message: previous }),
+      },
+    });
+  }
+
+  it("reads the edited message at its original ts, with the text before the edit", () => {
+    const edit = changed({});
+
+    expect(edit).toMatchObject({ editedTs: "1.4", previousText: "Weather in Pari?" });
+    expect(edit?.message).toMatchObject({
+      author: { userId: "U01", isBot: false },
+      channelId: "D01",
+      teamId: "T01",
+      text: "Weather in Paris?",
+      threadTs: "0.5",
+      ts: "1.0",
+    });
+    expect(edit?.message.raw.channel_type).toBe("im");
+  });
+
+  it("keeps an edit whose previous text Slack left out", () => {
+    const edit = changed({}, null);
+
+    expect(edit?.message.text).toBe("Weather in Paris?");
+    expect(edit?.previousText).toBeUndefined();
+  });
+
+  const preview = { attachments: [{ title: "Paris weather", text: "Sunny, 21°C" }] };
+  it.each<[string, Record<string, unknown>, Record<string, unknown>?]>([
+    ["a bot or app update", { bot_id: "B01" }],
+    ["a change Slack didn't mark as an edit", { edited: undefined }],
+    ["an unfurl that leaves the text as it was", { text: "Weather in Pari?", ...preview }],
+    [
+      "a link preview added to an already-edited message",
+      preview,
+      { text: "Weather in Paris?", ts: "1.0", edited: { ts: "1.4", user: "U01" } },
+    ],
+  ])("drops %s", (_name, message, previous) => {
+    expect(changed(message, previous)).toBeNull();
+  });
 });
 
 describe("parseDirectMessageEvent", () => {
@@ -426,6 +499,15 @@ describe("parseDirectMessageEvent", () => {
               name: "diagram.png",
               size: 2048,
             },
+            // A Dropbox file shared through Slack's integration is skipped (#855).
+            {
+              id: "F02",
+              is_external: true,
+              mimetype: "application/pdf",
+              mode: "external",
+              name: "plan.pdf",
+              url_private: "https://www.dropbox.com/s/abc/plan.pdf",
+            },
           ],
         },
       }),
@@ -446,6 +528,35 @@ describe("parseDirectMessageEvent", () => {
         size: 2048,
       },
     ]);
+  });
+
+  // A thread reply posted with "Also send to direct message" (#5774).
+  it("keeps a DM thread reply that is also sent to the conversation", () => {
+    const payload = parseSlackWebhookBody(
+      JSON.stringify({
+        type: "event_callback",
+        team_id: "T01",
+        event: {
+          type: "message",
+          channel_type: "im",
+          subtype: "thread_broadcast",
+          user: "U01",
+          text: "also sending this to the DM",
+          channel: "D01",
+          ts: "1700000000.000200",
+          thread_ts: "1700000000.000100",
+        },
+      }),
+    );
+    if (payload.kind !== "direct_message") throw new Error("expected direct_message");
+
+    const message = slackMessageFromWebhookPayload(payload);
+
+    expect(message).toMatchObject({
+      channelId: "D01",
+      text: "also sending this to the DM",
+      threadTs: "1700000000.000100",
+    });
   });
 
   it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(

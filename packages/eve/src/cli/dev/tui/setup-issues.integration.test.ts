@@ -75,7 +75,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
   it("opens only login during onboarding when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
     vi.stubGlobal(
       "fetch",

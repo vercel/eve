@@ -1,0 +1,16 @@
+enableGlobalVirtualStore: false
+
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - node-liblzma
+
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - "@vercel/*"
+  - "@workflow/*"
+  - ai
+  - eve
+  - workflow
+
+allowBuilds:
+  esbuild: true

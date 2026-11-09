@@ -12,27 +12,22 @@ export default defineEval({
   async test(t) {
     const session = await t.session();
     const live = await session.start("WORKFLOW-HOLD-START");
-    await live.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => "toolName" in action && action.toolName === "hold_deploy"),
-      },
-    });
+    await live.waitForEvent("call.requested", { data: { capability: { name: "hold_deploy" } } });
 
     const cancelled = await live.cancel();
     await t.require(
       cancelled,
       satisfies(
-        (value: typeof cancelled) => value.status === "accepted",
+        (value: typeof cancelled) => typeof value.deliveryId === "string",
         "cancel request is accepted",
       ),
     );
 
     const turn = await live.result();
-    turn.event("turn.cancelled", { count: 1 });
-    turn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    turn.notEvent("turn.failed");
-    turn.notEvent("session.failed");
+    turn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    turn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    turn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    turn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const next = await session.send("WORKFLOW-IDLE-PING");
     next.expectOk();

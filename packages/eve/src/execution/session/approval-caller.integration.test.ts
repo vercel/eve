@@ -1,3 +1,5 @@
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { markMockModel } from "#internal/mock-model-identity.js";
@@ -7,7 +9,8 @@ import {
   toolCallsStreamResult,
 } from "#internal/testing/approval-resume.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineDynamic } from "#dynamic/definition.js";
+import { defineHook } from "#public/definitions/hook.js";
+import { defineDynamic } from "#public/definitions/model.js";
 import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
@@ -17,7 +20,7 @@ import {
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
@@ -79,12 +82,16 @@ const BOB = testUser("bob");
 // need Bob to approve Alice's calls.
 const anyoneResponds: ApprovalResponsePolicy = () => ({ status: "allowed" });
 
-/** Records `ctx.session.auth.current` for every tool that runs. */
+/**
+ * Records `ctx.session.auth.current` for every tool that runs, and in `approvedBy` who
+ * approved each call that ran after an approval.
+ */
 function recordingTool(
   name: string,
   seen: Array<{ tool: string; caller: string | null }>,
   log: string[],
   approval?: Approval,
+  approvedBy?: Array<{ tool: string; responder: string }>,
 ) {
   return {
     loadNamespace: async () => ({
@@ -96,6 +103,9 @@ function recordingTool(
           // Yield so calls running in parallel interleave before reading the caller.
           await new Promise((resolve) => setTimeout(resolve, 20));
           seen.push({ tool: name, caller: ctx.session.auth.current?.principalId ?? null });
+          if (ctx.approval !== undefined) {
+            approvedBy?.push({ tool: name, responder: ctx.approval.responder.principalId });
+          }
           log.push(`end ${name}`);
           return { ran: name };
         },
@@ -110,12 +120,26 @@ type User = ReturnType<typeof testUser>;
 type Stage = Awaited<ReturnType<ReturnType<typeof captureTurnEvents>["nextTurn"]>>;
 
 interface ChainRun {
-  /** Approves the pending request for `toolName`, or the first one. */
-  readonly approve: (approver: User | null, toolName?: string) => Promise<Stage>;
+  /**
+   * Approves the pending request for `toolName`, or the first one, and reads to the turn's next
+   * boundary, or to the answer's `response.settled` for one the session refuses.
+   */
+  readonly approve: (
+    approver: User | null,
+    toolName?: string,
+    until?: "response.settled",
+  ) => Promise<Stage>;
   /** Reads the session's next turn segment. */
   readonly next: (label: string) => Promise<Stage>;
-  /** Sends `payload` as one delivery on the session's command inbox. */
-  readonly deliver: (auth: User, payload: Record<string, unknown>) => Promise<Stage>;
+  /**
+   * Sends `payload` as one delivery on the session's command inbox, and reads to the turn's
+   * next boundary, or to the `response.settled` of an answer the session refuses.
+   */
+  readonly deliver: (
+    auth: User,
+    payload: Record<string, unknown>,
+    until?: "response.settled",
+  ) => Promise<Stage>;
   readonly send: (auth: User, message: string) => Promise<Stage>;
   readonly stages: Stage[];
 }
@@ -136,6 +160,7 @@ async function withChainRun(
   } = {},
 ) {
   const seen: Array<{ tool: string; caller: string | null }> = [];
+  const approvedBy: Array<{ tool: string; responder: string }> = [];
   const log: string[] = [];
   const secondRequesters: Array<string | null> = [];
   const secondApproval: Approval = {
@@ -148,14 +173,10 @@ async function withChainRun(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        model: defineDynamic({
-          events: {
-            "step.started": () => ({
-              model: options.model ?? scriptedModel,
-              modelContextWindowTokens: 200_000,
-            }),
-          },
-        }),
+        model: defineDynamic(() => ({
+          model: options.model ?? scriptedModel,
+          modelContextWindowTokens: 200_000,
+        })),
       }),
       name,
     },
@@ -165,9 +186,10 @@ async function withChainRun(
         seen,
         log,
         options.firstApproval ?? { request: always(), response: anyoneResponds },
+        approvedBy,
       ),
-      recordingTool("read_notes", seen, log),
-      recordingTool("publish_change", seen, log, secondApproval),
+      recordingTool("read_notes", seen, log, undefined, approvedBy),
+      recordingTool("publish_change", seen, log, secondApproval, approvedBy),
       ...(options.modules ?? []),
     ],
   });
@@ -175,7 +197,7 @@ async function withChainRun(
   const stages: Stage[] = [];
 
   await runtime.run(async () => {
-    const run = await start(workflowEntry, [
+    const run = await startSessionOwner(workflowEntry, [
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",
@@ -203,28 +225,52 @@ async function withChainRun(
       await body({
         next,
         stages,
-        async approve(approver, toolName) {
-          const request = stages
-            .flatMap((stage) => filterEventsByType(stage, "input.requested"))
-            .flatMap((event) => event.data.requests)
-            .filter((entry) => toolName === undefined || entry.action.toolName === toolName)
+        async approve(approver, toolName, until) {
+          const request = approvalsIn(stages)
+            .filter((entry) => toolName === undefined || entry.toolName === toolName)
             .at(toolName === undefined ? -1 : 0);
-          expect(request?.kind).toBe("tool-approval");
+          expect(request).toBeDefined();
           await resumeHook(commandInbox, {
             auth: approver,
             kind: "send",
-            payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload: {
+              answers: [{ interactionId: request!.interactionId, optionId: "approve" }],
+            },
           });
+          // A refused answer changes nothing the turn waits on, so it announces no pause.
+          if (until === "response.settled") {
+            const stage = await withTimeout(
+              stream.nextUntil((event) => event.type === "response.settled"),
+              "refused",
+            );
+            stages.push(stage);
+            return stage;
+          }
           return await next("approved");
         },
-        async deliver(auth, payload) {
-          await resumeHook(commandInbox, { auth, kind: "send", payload });
+        async deliver(auth, payload, until) {
+          await resumeHook(commandInbox, {
+            auth,
+            kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload,
+          });
+          if (until === "response.settled") {
+            const stage = await withTimeout(
+              stream.nextUntil((event) => event.type === "response.settled"),
+              "refused",
+            );
+            stages.push(stage);
+            return stage;
+          }
           return await next("delivered");
         },
         async send(auth, message) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { message },
           });
           return await next("message");
@@ -235,20 +281,49 @@ async function withChainRun(
       await run.cancel().catch(() => {});
     }
   });
-  return { log, secondRequesters, seen, stages };
+  return { approvedBy, log, secondRequesters, seen, stages };
 }
 
 function turnBoundaries(stage: Stage) {
   return stage
-    .filter((event) => event.type === "turn.started" || event.type === "turn.completed")
+    .filter((event) => event.type === "turn.started" || event.type === "turn.settled")
     .map((event) => `${event.type} ${(event.data as { turnId: string }).turnId}`);
+}
+
+/** The approvals the stages opened, oldest first, with the tool each asks to call. */
+function approvalsIn(stages: readonly Stage[]) {
+  const events = stages.flat();
+  const toolOf = new Map(
+    filterEventsByType(events, "call.requested").map((event) => [
+      event.data.callId,
+      event.data.capability.name,
+    ]),
+  );
+  return filterEventsByType(events, "interaction.opened")
+    .filter((event) => event.data.request.kind === "approval")
+    .map((event) => {
+      const callId = "callId" in event.data.subject ? event.data.subject.callId : undefined;
+      return {
+        interactionId: event.data.interactionId,
+        toolName: callId === undefined ? undefined : toolOf.get(callId),
+      };
+    });
+}
+
+/** The output each settlement of `callId` carries, in order. */
+function outputsOf(stages: readonly Stage[], callId: string) {
+  return stages
+    .flat()
+    .flatMap((event) =>
+      event.type === "call.settled" && event.data.callId === callId ? [event.data.output] : [],
+    );
 }
 
 describe("approval caller", () => {
   it.each([false, true])(
-    "runs only the call another person approves as that person (unmatched stub: %s)",
+    "runs a call another person approves as its requester (unmatched stub: %s)",
     async (withStub) => {
-      const { secondRequesters, seen, stages } = await withChainRun(
+      const { approvedBy, secondRequesters, seen, stages } = await withChainRun(
         `approval-caller-${withStub}`,
         async (run) => {
           await run.approve(BOB);
@@ -272,14 +347,19 @@ describe("approval caller", () => {
       expect(stages.map(turnBoundaries)).toEqual([
         ["turn.started turn_0"],
         [],
-        ["turn.completed turn_0"],
+        ["turn.settled turn_0"],
       ]);
       expect(seen).toEqual([
-        { tool: "deploy_change", caller: "bob" },
+        { tool: "deploy_change", caller: "alice" },
         { tool: "read_notes", caller: "alice" },
         { tool: "publish_change", caller: "alice" },
       ]);
       expect(secondRequesters).toEqual(["alice"]);
+      // Each approved call reads who approved it; the call that needed no approval reads nobody.
+      expect(approvedBy).toEqual([
+        { tool: "deploy_change", responder: "bob" },
+        { tool: "publish_change", responder: "alice" },
+      ]);
     },
     60_000,
   );
@@ -289,23 +369,55 @@ describe("approval caller", () => {
       await run.approve(BOB);
       // The turn is still Alice's, so her message steers past publish_change.
       const steered = await run.send(ALICE, "Never mind, skip publishing.");
-      expect(filterEventsByType(steered, "input.resolved")[0]?.data.resolutions).toMatchObject([
-        { outcome: "ignored" },
-      ]);
+      expect(
+        filterEventsByType(steered, "interaction.settled").map((event) => event.data.outcome),
+      ).toEqual(["withdrawn"]);
     });
 
     expect(stages.map(turnBoundaries)).toEqual([
       ["turn.started turn_0"],
       [],
-      ["turn.completed turn_0"],
+      ["turn.settled turn_0"],
     ]);
     expect(seen).toEqual([
-      { tool: "deploy_change", caller: "bob" },
+      { tool: "deploy_change", caller: "alice" },
       { tool: "read_notes", caller: "alice" },
     ]);
   }, 60_000);
 
-  it("starts an approved workflow tool's run as its approver", async () => {
+  it("lets a message delivered with one answer steer past the step's other approval", async () => {
+    const { seen, stages } = await withChainRun(
+      "approval-caller-steer-with-answer",
+      async (run) => {
+        const publish = approvalsIn(run.stages).find(
+          (entry) => entry.toolName === "publish_change",
+        );
+        expect(approvalsIn(run.stages)).toHaveLength(2);
+        // publish_change waits for its response policy; deploy_change has none. The message
+        // queues behind the policy's answer and must still steer past deploy_change.
+        await run.deliver(ALICE, {
+          answers: [{ interactionId: publish!.interactionId, optionId: "approve" }],
+          message: "Never mind, skip the deploy.",
+        });
+      },
+      { firstApproval: always(), message: "Call in parallel: deploy_change, publish_change." },
+    );
+
+    const outcomes = Object.fromEntries(
+      filterEventsByType(stages.flat(), "interaction.settled").map((event) => [
+        event.data.interactionId,
+        event.data.outcome,
+      ]),
+    );
+    const byTool = Object.fromEntries(
+      approvalsIn(stages).map((entry) => [entry.toolName, outcomes[entry.interactionId]]),
+    );
+    expect(byTool).toEqual({ deploy_change: "withdrawn", publish_change: "accepted" });
+    expect(seen).toEqual([{ tool: "publish_change", caller: "alice" }]);
+    expect(stages.map(turnBoundaries).at(-1)).toEqual(["turn.settled turn_0"]);
+  }, 60_000);
+
+  it("starts an approved workflow tool's run as its requester", async () => {
     const { stages } = await withChainRun(
       "approval-caller-workflow",
       async (run) => {
@@ -329,21 +441,16 @@ describe("approval caller", () => {
       },
     );
 
-    const results = stages
-      .flat()
-      .flatMap((event) => (event.type === "action.result" ? [event.data.result] : []));
-    expect(results.find((result) => result.callId === "call-report_caller")?.output).toEqual({
-      caller: "bob",
-    });
+    expect(outputsOf(stages, "call-report_caller")).toEqual([{ caller: "alice" }]);
   }, 60_000);
 
   it("keeps the rest of another person's delivery out of the turn their answer resumes", async () => {
     const { seen, secondRequesters, stages } = await withChainRun(
       "approval-caller-mixed",
       async (run) => {
-        const request = filterEventsByType(run.stages[0]!, "input.requested")[0]!.data.requests[0]!;
+        const request = approvalsIn(run.stages)[0]!;
         await run.deliver(BOB, {
-          inputResponses: [{ optionId: "approve", requestId: request.requestId }],
+          answers: [{ interactionId: request.interactionId, optionId: "approve" }],
           message: "Bob here: also delete the staging database.",
         });
         await run.approve(ALICE);
@@ -353,24 +460,112 @@ describe("approval caller", () => {
     );
 
     expect(seen).toEqual([
-      { tool: "deploy_change", caller: "bob" },
+      { tool: "deploy_change", caller: "alice" },
       { tool: "read_notes", caller: "alice" },
       { tool: "publish_change", caller: "alice" },
     ]);
     expect(secondRequesters).toEqual(["alice"]);
-    const received = stages.flatMap((stage) => filterEventsByType(stage, "message.received"));
+    // An answer-only delivery is consumed with no parts; only the messages carry any.
+    const received = stages
+      .flatMap((stage) => filterEventsByType(stage, "delivery.consumed"))
+      .filter((event) => event.data.parts.length > 0);
     expect(received.map((event) => event.data.turnId)).toEqual(["turn_0", "turn_1"]);
+  }, 60_000);
+
+  it("answers the requester's next message after another person's press ends the turn", async () => {
+    const { stages } = await withChainRun(
+      "approval-caller-press-state",
+      async (run) => {
+        const request = approvalsIn(run.stages)[0]!;
+        // A channel's press carries its own state beside the answer, such as who pressed.
+        await run.deliver(BOB, {
+          answers: [{ interactionId: request.interactionId, optionId: "approve" }],
+          state: { triggeringUserId: "bob" },
+        });
+        await run.send(ALICE, "Thanks, that's all.");
+      },
+      { message: "Use deploy_change, then read_notes." },
+    );
+
+    expect(stages.map(turnBoundaries)).toEqual([
+      ["turn.started turn_0"],
+      ["turn.settled turn_0"],
+      ["turn.started turn_1", "turn.settled turn_1"],
+    ]);
+  }, 60_000);
+
+  it("keeps another person's approval theirs when their delivery also carries a stale answer", async () => {
+    const turnAuth: Array<string | null> = [];
+    const { seen, stages } = await withChainRun(
+      "approval-caller-stale-mixed",
+      async (run) => {
+        const request = approvalsIn(run.stages)[0]!;
+        // Requester-only: Bob's answer can't settle Alice's call, even beside a stale one.
+        const refused = await run.deliver(
+          BOB,
+          {
+            answers: [
+              {
+                interactionId: "answered-earlier",
+                optionId: "approve",
+                text: "Also drop the staging db.",
+              },
+              { interactionId: request.interactionId, optionId: "approve" },
+            ],
+          },
+          "response.settled",
+        );
+        expect(filterEventsByType(refused, "interaction.settled")).toEqual([]);
+        await run.approve(ALICE, "deploy_change");
+        await run.approve(ALICE, "publish_change");
+      },
+      {
+        firstApproval: always(),
+        modules: [
+          {
+            logicalPath: "hooks/turn-auth.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "response.settled"(_event, ctx) {
+                    turnAuth.push(ctx.session.auth.current?.principalId ?? null);
+                  },
+                  "turn.paused"(_event, ctx) {
+                    turnAuth.push(ctx.session.auth.current?.principalId ?? null);
+                  },
+                  "turn.settled"(_event, ctx) {
+                    turnAuth.push(ctx.session.auth.current?.principalId ?? null);
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+      },
+    );
+
+    expect(stages.map(turnBoundaries).flat()).toEqual([
+      "turn.started turn_0",
+      "turn.settled turn_0",
+    ]);
+    expect(seen.map((entry) => entry.caller)).toEqual(["alice", "alice", "alice"]);
+    // Bob's delivery never made him the turn's caller, not even while it was refused.
+    expect(new Set(turnAuth)).toEqual(new Set(["alice"]));
+    // Bob's stale answer never reached Alice's turn as text.
+    expect(JSON.stringify(stages)).not.toContain("staging db");
   }, 60_000);
 
   it("never credits an approval sent with null auth to the turn's caller", async () => {
     const { secondRequesters, seen, stages } = await withChainRun(
       "approval-caller-null-auth",
       async (run) => {
-        // Without a response policy, the approval stands; the call runs as the turn's caller.
-        await run.approve(null, "deploy_change");
-        // A response policy needs an authenticated responder, so this one stays pending.
-        const refused = await run.approve(null, "publish_change");
-        expect(filterEventsByType(refused, "input.resolved")).toEqual([]);
+        // The call has a requester, so an unauthenticated answer settles nothing, with or
+        // without a response policy; the requester's own answer still decides it.
+        const refusedDirect = await run.approve(null, "deploy_change", "response.settled");
+        expect(filterEventsByType(refusedDirect, "interaction.settled")).toEqual([]);
+        await run.approve(ALICE, "deploy_change");
+        const refused = await run.approve(null, "publish_change", "response.settled");
+        expect(filterEventsByType(refused, "interaction.settled")).toEqual([]);
         await run.approve(ALICE, "publish_change");
       },
       { firstApproval: always() },
@@ -378,12 +573,29 @@ describe("approval caller", () => {
 
     expect(seen.map((entry) => entry.caller)).toEqual(["alice", "alice", "alice"]);
     expect(secondRequesters).toEqual(["alice"]);
-    expect(stages.flatMap((stage) => filterEventsByType(stage, "approval.settled"))).toMatchObject([
-      { data: { outcome: "approved", responderPrincipalId: "alice" } },
-    ]);
+    // Each approval settles on Alice's answer, the only one a responder sent.
+    const events = stages.flat();
+    for (const toolName of ["deploy_change", "publish_change"]) {
+      const approval = approvalsIn(stages).find((entry) => entry.toolName === toolName);
+      const settled = filterEventsByType(events, "interaction.settled").find(
+        (event) => event.data.interactionId === approval?.interactionId,
+      );
+      expect(settled?.data.outcome).toBe("accepted");
+      const decider = settled?.data.cause;
+      const submitted = filterEventsByType(events, "response.submitted").find(
+        (event) =>
+          decider !== undefined &&
+          "responseId" in decider &&
+          event.data.responseId === decider.responseId,
+      );
+      const admitted = filterEventsByType(events, "delivery.admitted").find(
+        (event) => event.data.deliveryId === submitted?.data.deliveryId,
+      );
+      expect(admitted?.data.principal?.id).toBe("alice");
+    }
   }, 60_000);
 
-  it("runs approved calls in parallel, each as its own approver", async () => {
+  it("runs approved calls in parallel as their requester", async () => {
     const { log, seen } = await withChainRun(
       "approval-caller-parallel",
       async (run) => {
@@ -397,13 +609,13 @@ describe("approval caller", () => {
     expect(log.slice(0, 2).every((entry) => entry.startsWith("start "))).toBe(true);
     expect(new Map(seen.map((entry) => [entry.tool, entry.caller]))).toEqual(
       new Map([
-        ["deploy_change", "bob"],
+        ["deploy_change", "alice"],
         ["publish_change", "alice"],
       ]),
     );
   }, 60_000);
 
-  it("does not reuse an earlier approver for a later call with the same call id", async () => {
+  it("keeps requester identity when a later call repeats an approved call id", async () => {
     // Some providers repeat call ids. Turn 1's report_caller is gated and Bob
     // approves it; turn 2 calls it again ungated, with the same id.
     const model = markMockModel(
@@ -451,13 +663,8 @@ describe("approval caller", () => {
       },
     );
 
-    const callers = stages
-      .flat()
-      .flatMap((event) =>
-        event.type === "action.result" && event.data.result.callId === "call-repeated"
-          ? [(event.data.result.output as { caller: string }).caller]
-          : [],
-      );
-    expect(callers).toEqual(["bob", "alice"]);
+    // The repeat gets its own id, so turn 1's call keeps its row and both run as Alice.
+    expect(outputsOf(stages, "call-repeated")).toEqual([{ caller: "alice" }]);
+    expect(outputsOf(stages, "call-repeated_2")).toEqual([{ caller: "alice" }]);
   }, 60_000);
 });

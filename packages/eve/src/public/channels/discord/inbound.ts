@@ -126,15 +126,18 @@ const DISCORD_RESPONSE_INSTRUCTIONS =
 
 /**
  * Fields rendered into the model-visible `<discord_context>` block by
- * {@link formatDiscordContextBlock}. The optional fields (username, guildId,
- * commandName) are omitted from the block when not provided.
+ * {@link formatDiscordContextBlock}. Optional fields are omitted from the
+ * block when not provided.
  */
 export interface DiscordInboundContext {
   readonly applicationId?: string;
   readonly channelId: string;
   readonly commandName?: string;
   readonly guildId?: string;
-  readonly interactionId: string;
+  /** Set for interactions such as slash commands. */
+  readonly interactionId?: string;
+  /** Set for ordinary messages forwarded from the Discord Gateway. */
+  readonly messageId?: string;
   readonly userId: string;
   readonly username?: string;
 }
@@ -175,7 +178,8 @@ export function formatDiscordContextBlock(context: DiscordInboundContext): strin
     ...(context.username ? [`username: ${context.username}`] : []),
     `channel_id: ${context.channelId}`,
     ...(context.guildId ? [`guild_id: ${context.guildId}`] : []),
-    `interaction_id: ${context.interactionId}`,
+    ...(context.interactionId ? [`interaction_id: ${context.interactionId}`] : []),
+    ...(context.messageId ? [`message_id: ${context.messageId}`] : []),
     ...(context.commandName ? [`command_name: ${context.commandName}`] : []),
     "</discord_context>",
   ];
@@ -260,7 +264,7 @@ function parseInteractionBase(raw: Record<string, unknown>): DiscordInteractionB
 }
 
 function parseInteractionUser(raw: Record<string, unknown>): DiscordUser | null {
-  const directUser = parseUser(raw.user);
+  const directUser = parseDiscordUser(raw.user);
   if (directUser) return directUser;
   const member = parseMember(raw.member);
   return member?.user ?? null;
@@ -268,7 +272,7 @@ function parseInteractionUser(raw: Record<string, unknown>): DiscordUser | null 
 
 function parseMember(value: unknown): DiscordMember | undefined {
   if (!isObject(value)) return undefined;
-  const user = parseUser(value.user);
+  const user = parseDiscordUser(value.user);
   if (!user) return undefined;
   return {
     nick: isNonEmptyString(value.nick) ? value.nick : undefined,
@@ -279,7 +283,8 @@ function parseMember(value: unknown): DiscordMember | undefined {
   };
 }
 
-function parseUser(value: unknown): DiscordUser | null {
+/** Parses a raw Discord user object, as interactions and Gateway messages carry it. */
+export function parseDiscordUser(value: unknown): DiscordUser | null {
   if (!isObject(value) || !isNonEmptyString(value.id) || !isNonEmptyString(value.username)) {
     return null;
   }
@@ -318,20 +323,28 @@ function resolveAttachments(
     isObject(resolved) && isObject(resolved.attachments) ? resolved.attachments : undefined;
   if (byId === undefined) return [];
   return attachmentOptionIds(options).flatMap((id) => {
-    const raw = byId[id];
-    if (!isObject(raw) || !isNonEmptyString(raw.url) || !isNonEmptyString(raw.filename)) {
-      return [];
-    }
-    return [
-      {
-        contentType: isNonEmptyString(raw.content_type) ? raw.content_type : undefined,
-        filename: raw.filename,
-        id,
-        size: typeof raw.size === "number" ? raw.size : undefined,
-        url: raw.url,
-      },
-    ];
+    const attachment = parseDiscordAttachment({ ...(isObject(byId[id]) ? byId[id] : {}), id });
+    return attachment ? [attachment] : [];
   });
+}
+
+/** Parses a raw Discord attachment object, as Gateway messages and resolved command data carry it. */
+export function parseDiscordAttachment(raw: unknown): DiscordAttachment | null {
+  if (
+    !isObject(raw) ||
+    !isNonEmptyString(raw.id) ||
+    !isNonEmptyString(raw.url) ||
+    !isNonEmptyString(raw.filename)
+  ) {
+    return null;
+  }
+  return {
+    contentType: isNonEmptyString(raw.content_type) ? raw.content_type : undefined,
+    filename: raw.filename,
+    id: raw.id,
+    size: typeof raw.size === "number" ? raw.size : undefined,
+    url: raw.url,
+  };
 }
 
 function attachmentOptionIds(options: readonly DiscordCommandOption[]): string[] {

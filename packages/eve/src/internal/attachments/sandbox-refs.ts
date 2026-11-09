@@ -9,7 +9,10 @@
  * ```
  */
 
-import type { MediaMetadata } from "#internal/attachments/media-metadata.js";
+import {
+  INLINE_IMAGE_MEDIA_TYPES,
+  type MediaMetadata,
+} from "#internal/attachments/media-metadata.js";
 
 /**
  * Custom URL scheme used by every sandbox-resident attachment ref. The
@@ -27,6 +30,9 @@ const METADATA_QUERY_KEYS = ["width", "height", "pages"] as const;
  * Larger images reach the model as a text reference to their sandbox path.
  */
 const INLINE_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
+
+/** Providers reject an image wider or taller than this, failing the whole request. */
+const INLINE_IMAGE_MAX_SIDE_PX = 8000;
 
 /** Upper bound, in bytes, on inbound PDFs that hydrate as inline bytes. */
 const INLINE_PDF_MAX_BYTES = 20 * 1024 * 1024;
@@ -116,13 +122,20 @@ export function decodeSandboxRef(value: URL | string): SandboxRef {
 }
 
 /**
- * Whether an inbound attachment ref reaches the model as bytes rather than a
- * text reference. Only shapes every major provider reads natively qualify:
- * images up to 3 MiB and PDFs up to 20 MiB. Pure in the ref, so a message
- * renders the same way on every model call.
+ * Whether an attachment ref reaches the model as bytes as well as its label.
+ * Only shapes every major provider reads natively qualify: PNG, JPEG, GIF,
+ * and WebP images up to 3 MiB and 8000 px per side, and PDFs up to 20 MiB.
+ * Staging verifies these media types from the bytes. Pure in the ref, so a
+ * message renders the same way on every model call.
  */
 export function inlinesSandboxRefAsBytes(ref: SandboxRef): boolean {
-  if (ref.mediaType.startsWith("image/")) return ref.size <= INLINE_IMAGE_MAX_BYTES;
+  if (INLINE_IMAGE_MEDIA_TYPES.has(ref.mediaType)) {
+    return (
+      ref.size <= INLINE_IMAGE_MAX_BYTES &&
+      (ref.width ?? 0) <= INLINE_IMAGE_MAX_SIDE_PX &&
+      (ref.height ?? 0) <= INLINE_IMAGE_MAX_SIDE_PX
+    );
+  }
   if (ref.mediaType === "application/pdf") return ref.size <= INLINE_PDF_MAX_BYTES;
   return false;
 }
@@ -133,7 +146,7 @@ export function inlinesSandboxRefAsBytes(ref: SandboxRef): boolean {
  * Accepts `URL` instances with the `eve-sandbox:` scheme. Strings are
  * NOT accepted — the staging and hydration layers only inspect
  * URL-instance `FilePart.data` values, matching the existing
- * `data instanceof URL` branch in `fileDataToBytes`.
+ * `data instanceof URL` branch in `readFileData`.
  */
 export function isSandboxRefUrl(value: unknown): value is URL {
   return value instanceof URL && value.protocol === SANDBOX_URL_SCHEME;

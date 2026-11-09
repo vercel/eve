@@ -1,7 +1,23 @@
 import type { ModuleDefinitionExport } from "#public/definitions/source.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
+import type { AgentModelOptionsDefinition, AgentToolExposure } from "#shared/agent-definition.js";
+
+/**
+ * Returns the exports of transpiled CommonJS as its module namespace. Bundlers
+ * expose a CommonJS module's whole `exports` object as the ESM default, so a
+ * module marked `__esModule` would otherwise read its namespace as
+ * `{ default: { default, ...named } }`.
+ */
+export function interopAuthoredModuleNamespace(namespace: unknown): unknown {
+  if (typeof namespace !== "object" || namespace === null) return namespace;
+  const exports: unknown = Reflect.get(namespace, "default");
+  return typeof exports === "object" &&
+    exports !== null &&
+    Reflect.get(exports, "__esModule") === true
+    ? exports
+    : namespace;
+}
 
 /**
  * Returns the selected authored module export from one namespace.
@@ -58,6 +74,11 @@ export function expectBoolean(value: unknown, message: string): boolean {
   }
 
   return value;
+}
+
+export function expectAgentToolExposure(value: unknown, message: string): AgentToolExposure {
+  if (value === "deferred") return value;
+  return expectBoolean(value, `${message} Expected "tool" to be true, false, or "deferred".`);
 }
 
 /**

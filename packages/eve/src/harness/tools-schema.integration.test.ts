@@ -1,5 +1,5 @@
 import { asSchema, generateText } from "ai";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { createOpenAI } from "#compiled/@ai-sdk/openai/index.js";
@@ -72,8 +72,8 @@ describe("tool schemas at the model provider boundary", () => {
         });
       },
     }).responses("gpt-5.4");
-    const execute = vi.fn(async (_input: unknown) => ({ issues: [] }));
     const tools = buildToolSet({
+      describe: (definition) => definition.description,
       tools: new Map([
         [
           "linear__list_issues",
@@ -81,13 +81,13 @@ describe("tool schemas at the model provider boundary", () => {
             name: "linear__list_issues",
             description: "Search issues by query or saved custom view.",
             inputSchema: schema(),
-            execute,
+            execute: async () => ({ issues: [] }),
           },
         ],
       ]),
     });
 
-    await generateText({
+    const result = await generateText({
       model,
       tools,
       prompt: "Find issues about sandbox errors.",
@@ -102,8 +102,8 @@ describe("tool schemas at the model provider boundary", () => {
         parameters: inputSchema,
       }),
     ]);
-    expect(execute).toHaveBeenCalledOnce();
-    expect(execute.mock.calls[0]?.[0]).toEqual({ query: "sandbox error" });
+    // eve runs the call; the AI SDK parses its input against the same schema.
+    expect(result.toolCalls.map((call) => call.input)).toEqual([{ query: "sandbox error" }]);
 
     const validation = asSchema(tools.linear__list_issues!.inputSchema).validate!;
     for (const input of [

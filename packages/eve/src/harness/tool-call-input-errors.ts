@@ -5,7 +5,7 @@ import {
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
-import type { HarnessToolMap } from "#harness/types.js";
+import type { HarnessToolLookup } from "#harness/types.js";
 
 /**
  * Returns true when the AI SDK marked the tool call `invalid` (typically
@@ -75,7 +75,7 @@ export function resolveProviderToolCallRequest(
     readonly toolCallId: string;
     readonly toolName: string;
   },
-  tools: HarnessToolMap,
+  tools: HarnessToolLookup,
 ):
   | { readonly request: RuntimeActionRequestProjection; readonly toolError?: undefined }
   | { readonly request?: undefined; readonly toolError: TypedToolError<ToolSet> } {

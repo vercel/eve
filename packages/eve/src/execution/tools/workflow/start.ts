@@ -58,8 +58,19 @@ export interface StartWorkflowTaskInput {
   };
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
+  /**
+   * The call's run, when its batch already started it alongside the others.
+   * The dispatch records it in place of starting one.
+   */
+  readonly prestarted?: PrestartedWorkflowToolRun;
   readonly session: HarnessSessionBase;
   readonly task: RuntimeWorkflowTaskRequest;
+}
+
+/** A call's run its batch started early, and the entry it was started with. */
+export interface PrestartedWorkflowToolRun {
+  readonly entry: WorkflowToolRunEntry;
+  readonly run: Promise<WorkflowToolRunAddress>;
 }
 
 /** Starts the run for one call, which invokes `entry`. */
@@ -67,6 +78,13 @@ export async function startWorkflowToolCallRun(
   input: StartWorkflowTaskInput,
   entry: WorkflowToolRunEntry,
 ): Promise<WorkflowToolRunAddress> {
+  const { prestarted } = input;
+  if (prestarted !== undefined) {
+    if (!isSameRunEntry(prestarted.entry, entry)) {
+      throw new Error(`Call "${input.task.callId}" was started for a different entry point.`);
+    }
+    return await prestarted.run;
+  }
   const { task, batchEvent, session } = input;
   return await startWorkflowToolRun({
     agentContext: input.agentContext,
@@ -85,6 +103,12 @@ export async function startWorkflowToolCallRun(
     toolName: task.toolName,
     workflowId: task.workflowId,
   });
+}
+
+function isSameRunEntry(a: WorkflowToolRunEntry, b: WorkflowToolRunEntry): boolean {
+  if (a.entryPoint === "execute" || b.entryPoint === "execute")
+    return a.entryPoint === b.entryPoint;
+  return a.entryPoint === b.entryPoint && a.taskId === b.taskId;
 }
 
 /** Starts the run of an `execute` call the turn waits on and records it on the owning session. */

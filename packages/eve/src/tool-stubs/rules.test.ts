@@ -14,6 +14,14 @@ describe("tool stubs", () => {
     ).toThrow(/prototype/i);
   });
 
+  it("rejects stubbing the catalog tools and points at the tool a call reaches", () => {
+    for (const tool of ["eve__search", "researcher/eve__tool", "eve__skill"]) {
+      expect(() => parseToolStubs([{ id: "a", tool, outcome: { response: null } }])).toThrow(
+        "Cannot stub eve__search, eve__tool, or eve__skill. Stub the tool an eve__tool call reaches, such as linear__list_issues.",
+      );
+    }
+  });
+
   it("selects a response by partial input without changing the arguments", () => {
     const playback = new StubPlayback(
       parseToolStubs([

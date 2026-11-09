@@ -43,7 +43,7 @@ export async function availableHelperModels(
   };
   if (token.accountId) headers["ChatGPT-Account-Id"] = token.accountId;
   const value = await authJson(
-    "https://chatgpt.com/backend-api/codex/models?client_version=0.148.0",
+    "https://chatgpt.com/backend-api/codex/models?client_version=0.162.0",
     { headers, signal },
     MODEL_CATALOG_MAX_BYTES,
   );

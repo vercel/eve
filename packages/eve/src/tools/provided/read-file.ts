@@ -17,10 +17,11 @@ export interface ReadFileToolInput {
 
 export interface ReadFileToolOutput {
   content: string;
-  /** Set when the file is a PNG, JPEG, GIF, or WebP image the model sees as an image. */
-  image?: {
+  /** Set when the file is a PNG, JPEG, GIF, or WebP image or a PDF that the model reads natively. */
+  file?: {
     height?: number;
     mediaType: string;
+    pages?: number;
     size: number;
     width?: number;
   };
@@ -38,7 +39,8 @@ export const READ_FILE_INPUT_SCHEMA = defineJsonSchema<ReadFileToolInput>({
   properties: {
     filePath: {
       type: "string",
-      description: "The absolute path to the file to read. A leading $HOME is supported.",
+      description:
+        "The path to the file to read: absolute, relative to the workspace root, or beginning with $HOME/.",
     },
     limit: {
       type: "integer",
@@ -62,11 +64,12 @@ export const READ_FILE_OUTPUT_SCHEMA = defineJsonSchema<ReadFileToolOutput>({
   type: "object",
   properties: {
     content: { type: "string" },
-    image: {
+    file: {
       type: "object",
       properties: {
         height: { type: "integer", minimum: 1 },
         mediaType: { type: "string" },
+        pages: { type: "integer", minimum: 1 },
         size: { type: "integer", minimum: 0 },
         width: { type: "integer", minimum: 1 },
       },
@@ -92,13 +95,13 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
       "Read a file from the local filesystem. If the path does not exist, an error is returned.",
       "",
       "Usage:",
-      "- The filePath parameter should be an absolute path or begin with $HOME/.",
+      "- The filePath parameter is an absolute path, a path relative to the workspace root (where `bash` commands start), or a path beginning with $HOME/.",
       "- By default, this tool returns up to 2000 lines from the start of the file.",
       "- The offset parameter is the line number to start from (1-indexed).",
       "- To read later sections, call this tool again with a larger offset.",
       '- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents "foo\\n", you will receive "1: foo\\n".',
       "- Any line longer than 2000 characters is truncated.",
-      "- PNG, JPEG, GIF, and WebP files up to 3 MiB are shown to you as images, including files named in `Attached file <path>` references.",
+      "- PNG, JPEG, GIF, and WebP images up to 3 MiB and PDFs up to 20 MiB are shown to you as files, including files named in `Attached file <path>` references.",
       "- Call this tool in parallel when you know there are multiple files you want to read.",
       "- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
     ].join("\n"),
@@ -108,8 +111,8 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
     inputSchema: READ_FILE_INPUT_SCHEMA,
     outputSchema: READ_FILE_OUTPUT_SCHEMA,
     async toModelOutput(output) {
-      if (output.image === undefined) return toolOutput.json(output);
-      // The bytes load here rather than in `execute`, so `action.result` never
+      if (output.file === undefined) return toolOutput.json(output);
+      // The bytes load here rather than in `execute`, so `call.settled` never
       // carries them. The harness then stages this file part under its own name
       // as a sandbox ref before it enters history.
       const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();
@@ -119,19 +122,18 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
           : await sandbox.readBinaryFile({
               path: await resolveAbsoluteFilePath(sandbox, output.path),
             });
-      if (bytes === null)
-        return toolOutput.text(`${output.content} The image could not be loaded.`);
+      if (bytes === null) return toolOutput.text(`${output.content} The file could not be loaded.`);
       // A file replaced after `execute` would otherwise skip its size cap.
-      if (bytes.byteLength !== output.image.size) {
+      if (bytes.byteLength !== output.file.size) {
         return toolOutput.text(
-          `${output.content} The image changed after it was read; read it again.`,
+          `${output.content} The file changed after it was read; read it again.`,
         );
       }
       return toolOutput.content([
         toolOutputPart.text(output.content),
         toolOutputPart.file(Buffer.from(bytes).toString("base64"), {
           filename: basename(output.path),
-          mediaType: output.image.mediaType,
+          mediaType: output.file.mediaType,
         }),
       ]);
     },

@@ -22,6 +22,15 @@ export function normalizeChatGptModelId(model: string): string | undefined {
   return isBareChatGptModelId(modelId) ? modelId : undefined;
 }
 
+/**
+ * Codex has no `-fast` model slugs: it serves Fast mode as the `priority`
+ * service tier on the base model and rejects `gpt-6-luna-fast` outright.
+ */
+export function parseChatGptFastModelId(modelId: string): { slug: string; fast: boolean } {
+  const slug = modelId.replace(/-fast$/u, "");
+  return { slug, fast: slug !== modelId };
+}
+
 function isBareChatGptModelId(modelId: string): boolean {
   return modelId.length > 0 && modelId === modelId.trim() && !modelId.includes("/");
 }

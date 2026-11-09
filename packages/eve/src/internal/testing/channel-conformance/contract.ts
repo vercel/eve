@@ -6,6 +6,7 @@ import {
   type ChannelCapability,
   type ChannelConversation,
   type ConversationOptions,
+  deployPrompt,
   GATED_TOOL,
   type GatedTool,
   OPEN_GATED_TOOL,
@@ -65,11 +66,14 @@ const OWN_WORDS = "Mostly the billing migration";
 
 const PLAN_REVIEW = `Use ${TWO_QUESTIONS_TOOL} to plan the review.`;
 
-const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
+// The mock model fills the tool's `release` input from this, and the tool's
+// custom approval prompt reads it back, so rules see the prompt the tool built.
+const RELEASE = 'release "v2.4"';
+const DEPLOY = `Use ${GATED_TOOL} to ship ${RELEASE}.`;
 // Channels word the two approval choices differently; the TUI asks Yes or No.
 const APPROVE_LABELS = ["Approve", "Yes"];
-const CANCEL_LABELS = ["Cancel", "No"];
-const APPROVAL_PROMPT = "Approve Deploy release?";
+const DENY_LABELS = ["Deny", "No"];
+const APPROVAL_PROMPT = deployPrompt("v2.4");
 
 async function askToDeploy(conversation: ChannelConversation) {
   await conversation.say(DEPLOY);
@@ -78,8 +82,8 @@ async function askToDeploy(conversation: ChannelConversation) {
 
 const PUBLISH_PROMPT = "Approve Publish notes?";
 
-const DEPLOY_AND_PUBLISH = `Call tools in parallel: ${GATED_TOOL}, ${SECOND_GATED_TOOL}`;
-const ASK_AND_DEPLOY = `Call tools in parallel: ask_question, ${GATED_TOOL}\n${ASK}`;
+const DEPLOY_AND_PUBLISH = `Call tools in parallel: ${GATED_TOOL}, ${SECOND_GATED_TOOL}\nShip ${RELEASE}.`;
+const ASK_AND_DEPLOY = `Call tools in parallel: ask_question, ${GATED_TOOL}\n${ASK}\nShip ${RELEASE}.`;
 
 /** Answers each prompt with its option, in whatever order the client shows them. */
 function answerEach(
@@ -224,7 +228,7 @@ async function expectButtonsKept(conversation: ChannelConversation, prompt: stri
     message,
   ).toBe(true);
   expect(
-    labels.some((label) => CANCEL_LABELS.includes(label)),
+    labels.some((label) => DENY_LABELS.includes(label)),
     message,
   ).toBe(true);
 }
@@ -307,10 +311,12 @@ async function expectFileReachesAgent(conversation: ChannelConversation, file: S
   ).toEqual([{ ...asSeen(file), url: undefined }]);
 }
 
-const ONE_TOKEN_BUDGET = { limits: { maxInputTokensPerSession: 1 } } as const;
+const ONE_TOKEN_BUDGET = {
+  limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+} as const satisfies Pick<ConversationOptions, "limits">;
 const BUDGET_PROMPT =
-  "This session has hit the input-token limit (1) per session. This is a guardrail against " +
-  "defective long-running sessions. If session activity looks fine, just approve to keep going.";
+  "This session has hit its usage limit. This is a guardrail against defective " +
+  "long-running sessions. If session activity looks fine, just approve to keep going.";
 const LOOK_UP_NOTES = `Use ${PLAIN_TOOL} to find Bob's review notes.`;
 const LATER_MESSAGE = "Carol wants the review by Friday.";
 
@@ -368,6 +374,37 @@ async function requestSignIn(conversation: ChannelConversation, message: string)
 }
 
 const SIGN_IN_OPENERS = /^(?:authori[sz]e|sign in)$/iu;
+
+/**
+ * Fails when a person can still see the calendar sign-in: its link, its code,
+ * or a Cancel that would act on it.
+ */
+async function expectSignInPromptGone(conversation: ChannelConversation, after: string) {
+  const left = (await conversation.visible()).filter(
+    ({ options, text }) =>
+      text.includes(CALENDAR.url) ||
+      text.includes(CALENDAR.userCode) ||
+      options.some((option) => option.label === SIGN_IN_CANCEL_LABEL),
+  );
+  expect(
+    left.map(({ text }) => text),
+    `the sign-in prompt is still shown ${after}`,
+  ).toEqual([]);
+}
+
+const SIGN_IN_CANCEL_LABEL = "Cancel";
+
+/**
+ * Presses the Cancel the calendar sign-in's prompt shows. The press settles once the channel's
+ * background work for it does, so whatever it shows the person has been shown.
+ */
+async function pressSignInCancel(conversation: ChannelConversation) {
+  const cancel = (await conversation.visible())
+    .flatMap(({ options }) => options)
+    .find((option) => option.label === SIGN_IN_CANCEL_LABEL);
+  expect(cancel, "a Cancel on the sign-in prompt to press").toBeDefined();
+  await conversation.press(cancel!);
+}
 
 /** Starts a calendar sign-in, then moves on with a new message before finishing it. */
 async function abandonSignIn(conversation: ChannelConversation) {
@@ -505,7 +542,7 @@ const questionRules = [
 
 const approvalRules = [
   {
-    rule: "a tool approval shows a choice to approve and one to cancel",
+    rule: "a tool approval shows the tool's prompt with a choice to approve and one to deny",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: [],
     async run(conversation) {
@@ -518,7 +555,7 @@ const approvalRules = [
         message,
       ).toHaveLength(1);
       expect(
-        labels.filter((label) => CANCEL_LABELS.includes(label)),
+        labels.filter((label) => DENY_LABELS.includes(label)),
         message,
       ).toHaveLength(1);
     },
@@ -537,14 +574,14 @@ const approvalRules = [
     },
   },
   {
-    rule: "pressing Cancel stops the gated tool without running it",
+    rule: "pressing Deny stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: ["buttons"],
     async run(conversation) {
       const options = await askToDeploy(conversation);
-      const cancel = options.find((option) => CANCEL_LABELS.includes(option.label));
-      expect(cancel, "a Cancel option to press").toBeDefined();
-      await conversation.press(cancel!);
+      const deny = options.find((option) => DENY_LABELS.includes(option.label));
+      expect(deny, "a Deny option to press").toBeDefined();
+      await conversation.press(deny!);
       await expectNotDeployed(conversation);
     },
   },
@@ -560,13 +597,13 @@ const approvalRules = [
     },
   },
   {
-    rule: "a text reply of cancel stops the gated tool without running it",
+    rule: "a text reply of deny stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
       await askToDeploy(conversation);
-      await conversation.say("cancel");
+      await conversation.say("deny");
       await expectNotDeployed(conversation);
     },
   },
@@ -593,7 +630,7 @@ const approvalRules = [
       await conversation.say(DEPLOY_AND_PUBLISH);
       await answerEach(conversation, {
         [APPROVAL_PROMPT]: APPROVE_LABELS,
-        [PUBLISH_PROMPT]: CANCEL_LABELS,
+        [PUBLISH_PROMPT]: DENY_LABELS,
       });
       // Results reach the model in the order they settle, so the reply names the approved call.
       await expectDeployed(conversation);
@@ -607,7 +644,7 @@ const approvalRules = [
     variesByConversation: true,
     async run(conversation) {
       await conversation.say(DEPLOY_AND_PUBLISH);
-      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "cancel" });
+      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "deny" });
       await expectDeployed(conversation);
       expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
     },
@@ -753,6 +790,67 @@ const answeredPromptRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
+/**
+ * A run cancelled outside eve, such as by an operator in the workflow world,
+ * never withdraws its pending prompts, so their buttons stay pressable. A press
+ * can then reach no session (#4835).
+ */
+async function pressAfterRunEnded(
+  conversation: ChannelConversation,
+  kind: "approval" | "question",
+) {
+  const options =
+    kind === "approval" ? await askToDeploy(conversation) : await askWhichDay(conversation);
+  await conversation.cancelRunsInWorld();
+  await conversation.press(option(options, kind === "approval" ? APPROVE_LABELS : "Saturday"));
+}
+
+const NO_LONGER_ACTIVE = /no longer active/iu;
+
+const inactivePromptRules = [
+  {
+    rule: "pressing Approve after the session's run ended outside eve runs nothing and clears the approval's buttons",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "approval");
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} ran with no session`).toBe(0);
+      await expectButtonsCleared(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "pressing an option after the session's run ended outside eve clears the question's buttons",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "question");
+      await expectButtonsCleared(conversation, PROMPT);
+    },
+  },
+  {
+    rule: "pressing an option after the session's run ended outside eve tells the person it is no longer active",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "question");
+      await conversation.waitForShown(NO_LONGER_ACTIVE);
+    },
+  },
+  {
+    rule: "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "question");
+      await conversation.waitForShown(NO_LONGER_ACTIVE);
+      const { text } = await conversation.shownPrompt(PROMPT);
+      const message = `the inactive prompt reads ${JSON.stringify(text)}`;
+      expect(text, message).toContain(PROMPT);
+      expect(text, message).toMatch(NO_LONGER_ACTIVE);
+    },
+  },
+] as const satisfies readonly ContractRule[];
+
 const budgetRules = [
   {
     rule: "running out of budget opens budget prompt",
@@ -839,7 +937,7 @@ const budgetRules = [
 const signInRules = [
   {
     rule: "a sign-in names the service and shows its sign-in link",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     // A public surface has nowhere private to show a link.
@@ -854,7 +952,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in shows its confirmation code",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     surfaces: ["shared", "private"],
@@ -866,7 +964,7 @@ const signInRules = [
   {
     rule: "only the person signing in sees the sign-in link and code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: [],
     variesByConversation: true,
     surfaces: ["public", "shared"],
@@ -883,8 +981,33 @@ const signInRules = [
     },
   },
   {
+    rule: "someone else pressing a sign-in isn't shown its link or code",
+    source:
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+    requires: ["another-person", "buttons"],
+    variesByConversation: true,
+    surfaces: ["shared"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      const challenges = async () =>
+        (await conversation.shownTexts()).filter(
+          (text) => text.includes(CALENDAR.url) || text.includes(CALENDAR.userCode),
+        ).length;
+      const before = await challenges();
+      const open = (await conversation.shownOptions()).find((option) =>
+        SIGN_IN_OPENERS.test(option.label),
+      );
+      expect(open, "a Sign in button for Bob to press").toBeDefined();
+      await conversation.press(open!, "bob");
+      await conversation.waitForRest();
+      expect(await challenges(), "Bob's press showed him the sign-in link or code").toBe(before);
+    },
+  },
+  {
     rule: "a sign-in without a link shows its instructions",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -894,7 +1017,7 @@ const signInRules = [
   },
   {
     rule: "after signing in, the agent carries on with the request",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     async run(conversation) {
       await conversation.say(READ_CALENDAR);
@@ -906,7 +1029,7 @@ const signInRules = [
   },
   {
     rule: "completing a sign-in tells the person it succeeded",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -917,8 +1040,52 @@ const signInRules = [
     },
   },
   {
+    rule: "completing a sign-in stops showing its link and code",
+    source: "#5995",
+    requires: [],
+    variesByConversation: true,
+    // A public surface never shows the link or code, so there is nothing to take away.
+    surfaces: ["shared", "private"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      await conversation.waitForShown(CALENDAR.url);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after signing in");
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      await pressSignInCancel(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran after Cancel").toBe(0);
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in after the session's run ended removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      // An ended run never withdraws its sign-in, so Cancel finds no turn left to cancel.
+      await conversation.cancelRunsInWorld();
+      await pressSignInCancel(conversation);
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+    },
+  },
+  {
     rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -935,7 +1102,7 @@ const signInRules = [
   },
   {
     rule: "message after ignored sign-in tells user it was cancelled",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -957,32 +1124,32 @@ const approvalPermissionRules = [
     },
   },
   {
-    rule: "another person pressing Cancel or Approve on a requester-only approval leaves it pending",
+    rule: "another person pressing Deny or Approve on a requester-only approval leaves it pending",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
     async run(conversation) {
       const options = await askToReleaseHotfix(conversation);
       const approve = option(options, APPROVE_LABELS);
-      await conversation.press(option(options, CANCEL_LABELS), "bob");
+      await conversation.press(option(options, DENY_LABELS), "bob");
       await conversation.press(approve, "bob");
       await expectStillPending(conversation);
-      // A cancel that got through would settle the call as denied before this approval.
+      // A denial that got through would settle the call as denied before this approval.
       await conversation.press(approve);
       await expectReleased(conversation);
     },
   },
   {
-    rule: "another person typing cancel or approve doesn't settle a requester-only approval",
+    rule: "another person typing deny or approve doesn't settle a requester-only approval",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
       // Today another person's message waits for the turn to end, so it never reaches the
       // response policy; the approval stays pending either way.
-      await conversation.say("cancel", "bob");
+      await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A cancel taken as Alice's would settle the call as denied before this approval.
+      // A denial taken as Alice's would settle the call as denied before this approval.
       await conversation.say("approve");
       await expectReleased(conversation);
     },
@@ -1013,7 +1180,7 @@ const approvalPermissionRules = [
 const callerRules = [
   {
     rule: "a tool sees the person who sent the message as its caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: [],
     // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
     variesByConversation: true,
@@ -1030,7 +1197,7 @@ const callerRules = [
   },
   {
     rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: ["another-person"],
     async run(conversation) {
       const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
@@ -1044,7 +1211,7 @@ const callerRules = [
 const attachmentRules = [
   {
     rule: "an image a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     variesByConversation: true,
     async run(conversation) {
@@ -1053,7 +1220,7 @@ const attachmentRules = [
   },
   {
     rule: "a PDF a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       await expectFileReachesAgent(conversation, REPORT);
@@ -1076,7 +1243,7 @@ const attachmentRules = [
   },
   {
     rule: "a file sent earlier in the conversation is still there on a later message",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       const text = `Alice attached ${DIAGRAM.name}.`;
@@ -1099,6 +1266,7 @@ export const channelContractSections = [
   { title: "Tool approvals", rules: approvalRules },
   { title: "Approval permissions", rules: approvalPermissionRules },
   { title: "Answered prompts", rules: answeredPromptRules },
+  { title: "Inactive prompts", rules: inactivePromptRules },
   { title: "Budget prompts", rules: budgetRules },
   { title: "Sign-ins", rules: signInRules },
   { title: "Tool callers", rules: callerRules },

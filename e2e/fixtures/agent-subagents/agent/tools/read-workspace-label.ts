@@ -13,7 +13,7 @@ const membershipByPrincipal: Readonly<Record<string, string>> = {
 
 // Models a provider-side workspace membership store selected by eve for the current principal.
 const userGrant: ToolAuthProvider = {
-  credentialOwner: "user",
+  principalType: "user",
   async getToken({ principal }) {
     if (principal.type !== "user") throw new Error("A user workspace membership is required.");
     const token = membershipByPrincipal[principal.id];

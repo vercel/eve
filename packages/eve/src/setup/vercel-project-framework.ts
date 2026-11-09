@@ -32,6 +32,7 @@ const EVE_FRAMEWORK_INTEGRATIONS: Readonly<Record<string, EveFrameworkIntegratio
   nuxt: { label: "Nuxt", importSpecifier: "eve/nuxt" },
   nuxtjs: { label: "Nuxt", importSpecifier: "eve/nuxt" },
   sveltekit: { label: "SvelteKit", importSpecifier: "eve/sveltekit" },
+  "tanstack-start": { label: "TanStack Start", importSpecifier: "eve/tanstack" },
 };
 
 const FRAMEWORK_INTEGRATION_SOURCE_EXTENSIONS = new Set([
@@ -55,6 +56,7 @@ const FRAMEWORK_INTEGRATION_IGNORED_DIRECTORIES = new Set([
   ".nuxt",
   ".output",
   ".svelte-kit",
+  ".tanstack",
   ".turbo",
   ".vercel",
   "build",

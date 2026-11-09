@@ -41,7 +41,7 @@ describe("buildAuthRequiredPublicText", () => {
 
 describe("buildAuthCompletedText", () => {
   it("renders the success outcome with a check glyph", () => {
-    expect(buildAuthCompletedText({ displayName: "Linear", outcome: "authorized" })).toBe(
+    expect(buildAuthCompletedText({ displayName: "Linear", outcome: "accepted" })).toBe(
       ":white_check_mark: Linear connected",
     );
   });
@@ -56,10 +56,10 @@ describe("buildAuthCompletedText", () => {
     expect(
       buildAuthCompletedText({
         displayName: "Linear",
-        outcome: "timed-out",
+        outcome: "expired",
         reason: "the code expired",
       }),
-    ).toBe(":x: Linear authorization timed-out (the code expired)");
+    ).toBe(":x: Linear authorization timed out (the code expired)");
   });
 
   it("reports a cancelled sign-in plainly", () => {
@@ -71,6 +71,15 @@ describe("buildAuthCompletedText", () => {
       }),
     ).toBe("Linear sign-in cancelled");
   });
+
+  it.each(["withdrawn", "interrupted", "abandoned"] as const)(
+    "reports a %s sign-in as cancelled, without the runtime's reason code",
+    (outcome) => {
+      expect(
+        buildAuthCompletedText({ displayName: "GitHub", outcome, reason: "turn-cancelled" }),
+      ).toBe("GitHub sign-in cancelled");
+    },
+  );
 });
 
 describe("buildAuthEphemeralBlocks", () => {
@@ -85,7 +94,7 @@ describe("buildAuthEphemeralBlocks", () => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "*Connect Linear*\nTo continue, I need access to your Linear account. Only you can see this message.",
+          text: "*Connect Linear*\nTo continue, I need access to your Linear account.",
         },
       },
       {
@@ -110,13 +119,20 @@ describe("buildAuthEphemeralBlocks", () => {
       url: "https://connect.example.com/authorize/sca_abc",
     });
     expect((blocks[0] as { text: { text: string } }).text.text).toBe(
-      "*Connect Linear*\nI've paused until you connect your Linear account or cancel. Only you can see this message.",
+      "*Connect Linear*\nI've paused until you connect your Linear account or cancel.",
     );
     const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[1];
     expect(cancel).toMatchObject({
       action_id: SIGN_IN_CANCEL_ACTION_ID,
       text: { text: "Cancel", type: "plain_text" },
     });
+    expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
+  });
+
+  it("round-trips a code channel's Cancel target", () => {
+    const target = { channelId: "C01", codeChannel: true, turnId: "turn_0" } as const;
+    const blocks = buildAuthEphemeralBlocks({ cancel: target, displayName: "Linear" });
+    const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[0];
     expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
   });
 

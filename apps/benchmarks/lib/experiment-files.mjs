@@ -10,10 +10,24 @@ export function fixtureNames(evalsRoot) {
     .sort();
 }
 
+/** Fixtures the native agent-eval runner can run, which excludes multi-turn cases. */
+export async function nativeFixtureNames(evalsRoot) {
+  const names = [];
+  for (const name of fixtureNames(evalsRoot)) {
+    const prompts = await casePrompts(await loadCase(join(evalsRoot, name)));
+    if (prompts.length === 1) names.push(name);
+  }
+  return names;
+}
+
 export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(evalsRoot)) {
+  let timeoutSeconds;
   for (const name of names) {
     const fixtureRoot = join(evalsRoot, name);
     const authoringCase = await loadCase(fixtureRoot);
+    if (authoringCase.timeoutSeconds !== undefined) {
+      timeoutSeconds = Math.max(timeoutSeconds ?? 0, authoringCase.timeoutSeconds);
+    }
     writeFileSync(
       join(fixtureRoot, "PROMPT.md"),
       `${await promptForCase(authoringCase, fixtureRoot)}\n`,
@@ -23,6 +37,7 @@ export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(e
       `${JSON.stringify({
         startingPoint: authoringCase.startingPoint.workspace,
         projectDirectory: authoringCase.projectDirectory,
+        skipSandboxPrewarm: authoringCase.skipSandboxPrewarm,
         revision: subject.revision,
         setupIds: [authoringCase.startingPoint.setup, authoringCase.setup]
           .filter(Boolean)
@@ -34,6 +49,7 @@ export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(e
       `${JSON.stringify({ name: `eve-authoring-${name}`, private: true, type: "module" }, null, 2)}\n`,
     );
   }
+  return { timeoutSeconds };
 }
 
 async function loadCase(fixtureRoot) {
@@ -48,7 +64,7 @@ async function loadCase(fixtureRoot) {
   return authoringCase;
 }
 
-async function promptForCase(authoringCase, fixtureRoot) {
+async function casePrompts(authoringCase) {
   const prompts = [];
   await authoringCase.interact({
     send: async (prompt) => {
@@ -56,6 +72,11 @@ async function promptForCase(authoringCase, fixtureRoot) {
       return { text: "", toolCalls: [] };
     },
   });
+  return prompts;
+}
+
+async function promptForCase(authoringCase, fixtureRoot) {
+  const prompts = await casePrompts(authoringCase);
   if (prompts.length !== 1) {
     throw new Error(
       `${fixtureRoot}/CASE.ts is multi-turn and cannot run on a native agent-eval runner.`,
@@ -86,6 +107,9 @@ export function writeExperiment(experimentsRoot, name, options) {
       `  packageSpec: ${JSON.stringify(options.packageSpec)},\n` +
       `  runs: ${options.runs},\n` +
       (options.evals === undefined ? "" : `  evals: ${JSON.stringify(options.evals)},\n`) +
+      (options.timeoutSeconds === undefined
+        ? ""
+        : `  timeoutSeconds: ${options.timeoutSeconds},\n`) +
       `  benchmark: ${JSON.stringify(options.benchmark)},\n` +
       `  treatment: ${JSON.stringify(options.treatment)},\n` +
       (options.verbose === undefined ? "" : `  verbose: ${options.verbose},\n`) +

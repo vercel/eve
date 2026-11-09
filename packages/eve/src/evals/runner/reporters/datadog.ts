@@ -1,7 +1,10 @@
+import { outputOf } from "#evals/output.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
+import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtime-trace-links.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import {
   composeAssertionScoreMetadata,
+  exportedAssertionName,
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
 import {
@@ -79,7 +82,7 @@ type DatadogRecordingOptions = Required<
  * package and `DD_API_KEY`/`DD_APP_KEY` credentials unless `config.client` is
  * provided.
  */
-export function Datadog(config: DatadogReporterConfig = {}): EvalReporter {
+export function datadogReporter(config: DatadogReporterConfig = {}): EvalReporter {
   return new DatadogReporter(config);
 }
 
@@ -214,9 +217,14 @@ class DatadogReporter implements EvalReporter {
     }
 
     const newRecords: DatadogDatasetRecordInput[] = [];
+    const syncedRecordKeys = new Set<string>();
     for (const result of results) {
+      // Repeated attempts share one dataset record per eval.
+      const recordKey = this.#getRecordKey(result.id);
+      if (syncedRecordKeys.has(recordKey)) continue;
+      syncedRecordKeys.add(recordKey);
       const nextRecord = this.#composeDatasetRecord(result);
-      const index = recordIndexes.get(this.#getRecordKey(result.id));
+      const index = recordIndexes.get(recordKey);
       if (index === undefined) {
         newRecords.push({
           inputData: nextRecord.input,
@@ -313,7 +321,7 @@ class DatadogReporter implements EvalReporter {
       spanInput.input = toOptionalDatadogJsonValue(resolveInput(result, evaluation));
     }
     if (this.#recording.recordOutputs) {
-      spanInput.output = toOptionalDatadogJsonValue(result.result.output);
+      spanInput.output = toOptionalDatadogJsonValue(outputOf(result.result));
     }
     if (this.#recording.recordExpectedOutputs) {
       spanInput.expectedOutput = toOptionalDatadogJsonValue(resolveExpectedOutput(evaluation));
@@ -323,6 +331,9 @@ class DatadogReporter implements EvalReporter {
     }
     if (datasetRecordId !== undefined) {
       spanInput.datasetRecordId = datasetRecordId;
+    }
+    if (result.attempt !== undefined) {
+      spanInput.runIteration = result.attempt;
     }
 
     const span = await this.#experiment.submitSpan(spanInput);
@@ -439,8 +450,8 @@ function resolveResultTags(
 
 function resolveInput(result: EveEvalResult, evaluation: EveEval | undefined): unknown {
   for (const event of result.result.events) {
-    if (event.type !== "message.received") continue;
-    return event.data.message;
+    if (event.type !== "delivery.consumed") continue;
+    return event.data.parts;
   }
 
   return evaluation?.description ?? "";
@@ -473,11 +484,17 @@ function resolveResultMetadata(
     eveSkipReason: result.skipReason,
     eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
-    eveParked: result.result.derived.parked,
+    eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
+    eveAwaitingInput: result.result.status === "awaiting-input",
+    eveSessionEnded: result.result.sessionEnded,
   });
+  const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
+  if (runtimeTraceLinks.length > 0) {
+    metadata.experimentRuntimeTraceLinks = runtimeTraceLinks;
+  }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
+      .filter((assertion) => assertion.passed === false)
       .map((assertion) => ({ name: assertion.name, message: assertion.message }));
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;
@@ -494,16 +511,22 @@ function resolveEvaluationMetrics(result: EveEvalResult): DatadogEvaluationMetri
   const metrics: DatadogEvaluationMetricInput[] = [];
   const usedLabels = new Set<string>(BUILT_IN_METRIC_LABELS);
   const groups = groupAssertionScores(result.assertions, (assertion) =>
-    toDatadogMetricLabel(assertion.severity === "gate" ? `gate_${assertion.name}` : assertion.name),
+    toDatadogMetricLabel(exportedAssertionName(assertion)),
   );
 
   for (const [label, group] of groups) {
+    if (group.score === undefined) continue;
+    const verdicts = group.assertions.flatMap((assertion) =>
+      assertion.passed === undefined ? [] : [assertion.passed],
+    );
     metrics.push({
       label: reserveDatadogMetricLabel(label, usedLabels),
       value: group.score,
       tags: {
         assertion_severity: group.assertions[0]?.severity ?? "soft",
-        assertion_passed: String(group.assertions.every((assertion) => assertion.passed)),
+        ...(verdicts.length > 0 && {
+          assertion_passed: String(verdicts.every((passed) => passed)),
+        }),
         assertion_count: String(group.assertions.length),
       },
     });
@@ -539,5 +562,9 @@ function elapsedMs(startedAt: string, completedAt: string): number | undefined {
   const start = Date.parse(startedAt);
   const completed = Date.parse(completedAt);
   if (!Number.isFinite(start) || !Number.isFinite(completed)) return undefined;
-  return Math.max(0, completed - start);
+
+  // ISO timestamps have millisecond precision, so fast failures can start and
+  // finish in the same millisecond. Datadog Experiment spans require a
+  // positive duration; use the smallest representable duration in these units.
+  return Math.max(1, completed - start);
 }

@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { EveDynamicToolPart } from "eve/vue";
+import type { EveToolUIPart } from "~/composables/chat/providers/eve/adapter";
 
 export type AgentInputResponse = {
   optionId?: string;
-  requestId: string;
+  interactionId: string;
   text?: string;
 };
 
 const props = defineProps<{
   canRespond: boolean;
-  part: EveDynamicToolPart;
+  part: EveToolUIPart;
   compact?: boolean;
 }>();
 
@@ -17,8 +17,8 @@ const emit = defineEmits<{
   inputResponses: [responses: AgentInputResponse[]];
 }>();
 
-const inputRequest = computed(() => props.part.toolMetadata?.eve?.inputRequest);
-const inputResponse = computed(() => props.part.toolMetadata?.eve?.inputResponse);
+const inputRequest = computed(() => props.part.interaction?.request);
+const inputResponse = computed(() => props.part.interaction?.answer);
 
 const hidePrompt = computed(() => !props.compact && props.part.toolName === "ask_question");
 
@@ -26,7 +26,7 @@ const showOptions = computed(() => (inputRequest.value?.options?.length ?? 0) > 
 
 const showFreeform = computed(() => {
   const request = inputRequest.value;
-  if (!request || inputResponse.value) {
+  if (!request || props.part.interaction?.status !== "open") {
     return false;
   }
   return request.allowFreeform === true || request.display === "text" || !showOptions.value;
@@ -34,7 +34,12 @@ const showFreeform = computed(() => {
 
 const freeformText = ref("");
 
-const canSubmitFreeform = computed(() => props.canRespond && freeformText.value.trim().length > 0);
+const canSubmitFreeform = computed(
+  () =>
+    props.canRespond &&
+    props.part.interaction?.status === "open" &&
+    freeformText.value.trim().length > 0,
+);
 
 const selectedOption = computed(() => {
   const request = inputRequest.value;
@@ -49,17 +54,18 @@ const responseLabel = computed(
   () => selectedOption.value?.label ?? inputResponse.value?.text ?? inputResponse.value?.optionId,
 );
 
-function respond(optionId: string, requestId: string) {
-  emit("inputResponses", [{ optionId, requestId }]);
+function respond(optionId: string) {
+  const interactionId = props.part.interaction?.interactionId;
+  if (interactionId !== undefined) emit("inputResponses", [{ optionId, interactionId }]);
 }
 
 function respondText() {
-  const request = inputRequest.value;
+  const interaction = props.part.interaction;
   const text = freeformText.value.trim();
-  if (!request || !text) {
+  if (!interaction || !text) {
     return;
   }
-  emit("inputResponses", [{ requestId: request.requestId, text }]);
+  emit("inputResponses", [{ interactionId: interaction.interactionId, text }]);
 }
 
 function onFreeformKeydown(event: KeyboardEvent) {
@@ -91,7 +97,7 @@ function onFreeformKeydown(event: KeyboardEvent) {
       <span class="text-highlighted">{{ responseLabel }}</span>
     </p>
 
-    <template v-else>
+    <template v-else-if="part.interaction?.status === 'open'">
       <div v-if="showOptions" class="flex flex-wrap gap-1.5">
         <UButton
           v-for="option in inputRequest.options"
@@ -100,7 +106,7 @@ function onFreeformKeydown(event: KeyboardEvent) {
           :variant="compact ? 'soft' : 'solid'"
           :disabled="!canRespond"
           size="xs"
-          @click="respond(option.id, inputRequest.requestId)"
+          @click="respond(option.id)"
         >
           {{ option.label }}
         </UButton>

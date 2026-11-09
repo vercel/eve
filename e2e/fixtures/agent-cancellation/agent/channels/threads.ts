@@ -27,14 +27,14 @@ export default defineChannel({
         auth: body.actor === null ? null : { ...AUTH, principalId: body.actor ?? AUTH.principalId },
         turnPolicy: body.turnPolicy,
       });
-      return Response.json({ ok: true, sessionId: session.id });
+      return Response.json({ ok: true, sessionId: session.sessionId });
     }),
     POST("/threads/:threadId/stop", async (_request, { from, params }) => {
       const result = await from(params.threadId ?? "").cancel();
       return Response.json(result);
     }),
     POST("/threads/:threadId/new", async (_request, { from, params }) => {
-      const result = await from(params.threadId ?? "").reset({
+      const result = await from(params.threadId ?? "").end({
         reason: "E2E user requested /new",
       });
       return Response.json({ acknowledgement: "Started a new conversation.", ...result });

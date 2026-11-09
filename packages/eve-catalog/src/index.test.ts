@@ -108,10 +108,15 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
 
-  it("exposes Buzz as a gallery-only channel", () => {
-    expect(getIntegrationEntry("buzz")).toMatchObject({
-      kind: "channel",
-      surfaces: { scaffoldable: false, registry: false, gallery: true },
+  it("uses FLORA's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("flora")).toMatchObject({
+      name: "FLORA",
+      kind: "connection",
+      surfaces: { scaffoldable: false, registry: true, gallery: true },
+      connection: {
+        description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+        mcp: { url: "https://agents.flora.ai/mcp" },
+      },
     });
   });
 
@@ -126,6 +131,10 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",
     );
+  });
+
+  it("uses Waydock's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("waydock")!.connection!.mcp!.url).toBe("https://mcp.waydock.ai/mcp");
   });
 
   it("uses Natural's streamable HTTP MCP endpoint", () => {

@@ -4,20 +4,14 @@ import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
 import { transformSitemapMarkdown } from "@/lib/geistdocs/sitemap-transform";
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { integrationSource } from "@/lib/integrations/source";
-import { templateManifest } from "@/lib/templates/manifest";
 
 const sitemapRoute = createSitemapMarkdownRoute({
   config,
   sources: [{ source: geistdocsSource }, { source: integrationSource }],
-  transform: (markdown, { lang }) =>
+  transform: (markdown) =>
     transformSitemapMarkdown(markdown, {
       resolveTitle: (title, url) =>
-        resolveDocsPageTitle({
-          pageTitle: title,
-          pageUrl: url,
-          tree: geistdocsSource.source.getPageTree(lang),
-        }) ?? title,
-      templates: templateManifest,
+        resolveDocsPageTitle({ pageTitle: title, pageUrl: url }) ?? title,
     }),
 });
 

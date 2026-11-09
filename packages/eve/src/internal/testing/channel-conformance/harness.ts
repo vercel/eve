@@ -1,3 +1,12 @@
+import { internalSession } from "#channel/session.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { Delivery } from "#shared/delivery.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { endsTurn } from "#client/session-utils.js";
+import { viewOfEvents } from "#protocol/session-projection/fold.js";
+import { classifyRecord } from "#protocol/session-events/envelope.js";
+import { createEventReader } from "#protocol/session-lines.js";
+import { idle } from "#protocol/session-projection/selectors.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
@@ -11,7 +20,7 @@ import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-
 import type { SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
-import type { ApprovalResponsePolicy } from "#approval/definition.js";
+import type { ApprovalPrompt, ApprovalResponsePolicy } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
@@ -20,8 +29,7 @@ import {
   askDayAndTimeWorkflow,
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
-import { getWorld } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -70,6 +78,11 @@ export interface ShownMessage {
    * Slack's ephemeral messages.
    */
   readonly onlyPerson?: boolean;
+  /**
+   * The call took the message `id` away, such as Slack deleting an ephemeral
+   * message through its `response_url`. A person no longer sees it at all.
+   */
+  readonly removed?: true;
 }
 
 /** What a client shows a person, and whether anyone else in the conversation sees it too. */
@@ -100,6 +113,8 @@ export type ChannelCapability =
   | "another-person"
   /** A person can press a rendered choice. */
   | "buttons"
+  /** The sign-in prompt offers a Cancel a person can press to give up on the held request. */
+  | "sign-in-cancel"
   /** A person can send a plain-text message to the conversation. */
   | "text-replies";
 
@@ -163,6 +178,11 @@ export interface ChannelDriver {
    * {@link postedText}.
    */
   shownMessage?(call: PlatformCall): ShownMessage | undefined;
+  /**
+   * The message a webhook's JSON answer shows the person who sent it, such as
+   * the card Teams shows only whoever pressed an `Action.Execute` button.
+   */
+  shownReply?(body: unknown): ShownMessage | undefined;
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
   /**
@@ -226,8 +246,16 @@ export interface ChannelConversation {
   waitForShown(pattern: string | RegExp): Promise<string>;
   /** Everything the bot has shown that everyone in the conversation sees, joined. */
   sharedText(): Promise<string>;
+  /** Every message the bot has shown anyone, privately or not. */
+  shownTexts(): Promise<readonly string[]>;
   /** Every choice the bot's messages let a person press now, newest message first. */
   shownOptions(): Promise<readonly RenderedOption[]>;
+  /**
+   * What a person sees now: each message at its latest edit, without the ones
+   * the bot removed. Unlike {@link shownTexts}, a message that once showed
+   * something but no longer does isn't counted.
+   */
+  visible(): Promise<readonly ShownText[]>;
   /** Waits for the turn to hold for a sign-in, however the channel shows it. */
   waitForSignIn(): Promise<void>;
   /**
@@ -239,6 +267,11 @@ export interface ChannelConversation {
   waitForToolOutcome(tool: string): Promise<ToolOutcome>;
   /** Waits until every session has stopped working and waits only on a person. */
   waitForRest(): Promise<void>;
+  /**
+   * Cancels every session's workflow run through the workflow world, as an
+   * operator would, so no eve code runs for those sessions again.
+   */
+  cancelRunsInWorld(): Promise<void>;
   /** How many times a gated tool actually executed, as its side effect would show. */
   runsOf(tool: GatedTool): number;
   /**
@@ -299,6 +332,11 @@ export interface ClientView {
   nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
   shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
+  /**
+   * What the client shows now, each message at its latest edit and without
+   * removed ones; {@link shown} when unset, for clients that render only the present.
+   */
+  visible?(): readonly ShownText[] | Promise<readonly ShownText[]>;
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -332,8 +370,16 @@ const WAIT_TIMEOUT_MS = 30_000;
 /** Stand-in origin for the agent a {@link ClientDriver} talks to. */
 const CLIENT_HOST = "https://agent.example.com";
 
-/** The test agent's tool that always needs a person's approval before it runs. */
+/**
+ * The test agent's tool that always needs a person's approval before it runs.
+ * Its approval prompt is built from the call's input, as {@link deployPrompt}.
+ */
 export const GATED_TOOL = "deploy_release";
+
+/** The approval prompt {@link GATED_TOOL} shows for `release`. */
+export function deployPrompt(release: string): string {
+  return `Deploy release ${release} to production?`;
+}
 
 /** A second always-gated tool, so two approvals can be pending at once. */
 export const SECOND_GATED_TOOL = "publish_notes";
@@ -499,12 +545,25 @@ function webhookView(
   dispatch: Dispatch,
   wait: Wait,
 ): ClientView {
+  /** What webhook answers showed the person who sent each request. */
+  const answered: ShownMessage[] = [];
+  const describe = () =>
+    `Platform calls:\n${JSON.stringify(calls, null, 2)}\nWebhook answers:\n${JSON.stringify(answered, null, 2)}`;
   async function post(request: Request): Promise<void> {
     const { response, settled } = await dispatch(request);
     await settled;
     if (!response.ok) throw new Error(`${driver.name} webhook answered ${response.status}.`);
+    if (driver.shownReply === undefined) return;
+    const text = await response.text();
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return;
+    }
+    const shown = driver.shownReply(body);
+    if (shown !== undefined) answered.push(shown);
   }
-  const describe = () => `Platform calls:\n${JSON.stringify(calls, null, 2)}`;
   /** Where each prompt may next appear: after the call it was last found in. */
   const promptsFrom = new Map<string, number>();
 
@@ -550,19 +609,48 @@ function webhookView(
     personShownAs: driver.personShownAs ?? [],
     personId: driver.personId,
     nextAddress: driver.nextAddress?.bind(driver),
-    shown: () =>
-      calls.flatMap((call) => {
+    shown: () => [
+      ...calls.flatMap((call) => {
         const shown = driver.shownMessage?.(call);
-        if (shown !== undefined) {
-          const text = [shown.text, ...(shown.links ?? [])].join("\n");
-          return [{ onlyPerson: shown.onlyPerson === true, options: shown.options, text }];
-        }
+        if (shown?.removed === true) return [];
+        if (shown !== undefined) return [shownText(shown)];
         const text = driver.postedText(call);
         return text === undefined ? [] : [{ onlyPerson: false, options: [], text }];
       }),
+      ...answered.map(shownText),
+    ],
+    visible() {
+      // One slot per message, holding its latest edit. Without `shownMessage` a driver can't tie
+      // an edit to the message it rewrites, so each of its posts and edits is its own message.
+      const latest = new Map<string, ShownMessage>();
+      const order: (string | ShownText)[] = [];
+      for (const call of calls) {
+        const shown = driver.shownMessage?.(call);
+        if (shown === undefined) {
+          const text = driver.postedText(call);
+          if (text !== undefined) order.push({ onlyPerson: false, options: [], text });
+          continue;
+        }
+        if (!latest.has(shown.id)) order.push(shown.id);
+        latest.set(shown.id, shown);
+      }
+      return [
+        ...order.flatMap((slot) => {
+          if (typeof slot !== "string") return [slot];
+          const shown = latest.get(slot)!;
+          return shown.removed === true ? [] : [shownText(shown)];
+        }),
+        ...answered.map(shownText),
+      ];
+    },
     describe,
     close: async () => {},
   };
+}
+
+function shownText(shown: ShownMessage): ShownText {
+  const text = [shown.text, ...(shown.links ?? [])].join("\n");
+  return { onlyPerson: shown.onlyPerson === true, options: shown.options, text };
 }
 
 /** Starts `driver`'s client with the client host's `fetch` routed to the channel until it closes. */
@@ -674,12 +762,18 @@ async function converse(
       signInTool("read_mail"),
       {
         logicalPath: "tools/ask_question.ts",
-        loadNamespace: async () => ({ default: askQuestion() }),
+        loadNamespace: async () => ({ default: askQuestion }),
       },
-      gatedTool(GATED_TOOL, "Deploys a release.", () => {
-        runs[GATED_TOOL] += 1;
-        return { deployed: true };
-      }),
+      gatedTool(
+        GATED_TOOL,
+        "Deploys a release.",
+        () => {
+          runs[GATED_TOOL] += 1;
+          return { deployed: true };
+        },
+        undefined,
+        ({ input }) => deployPrompt(input.release ?? "unknown"),
+      ),
       gatedTool(SECOND_GATED_TOOL, "Publishes release notes.", () => {
         runs[SECOND_GATED_TOOL] += 1;
         return { published: true };
@@ -754,10 +848,12 @@ async function converse(
     });
     const sessions = new Map<string, Session>();
     const background: Promise<unknown>[] = [];
+    // A cancelled run's hooks are gone, so its address is never claimed again.
+    let runsCancelledInWorld = false;
 
-    function track(session: Session): Session {
-      sessions.set(session.id, session);
-      return session;
+    function track(delivery: Delivery): Delivery {
+      sessions.set(delivery.sessionId, attachSession(delivery.sessionId));
+      return delivery;
     }
 
     const dispatch: Dispatch = async (request) => {
@@ -772,7 +868,7 @@ async function converse(
               ...source,
               send: async (...sendArgs) => track(await source.send(...sendArgs)),
               respond: async (...respondArgs) => {
-                await waitForAddress(address);
+                if (!runsCancelledInWorld) await waitForAddress(address);
                 return track(await source.respond(...respondArgs));
               },
             };
@@ -788,8 +884,17 @@ async function converse(
           waitUntil: (task) => void pending.push(task),
         },
         async (input) => {
+          const generated = createChannelDeliveryMetadata({
+            channelKind: `channel:${channelName}`,
+            channelName,
+          });
+          const delivery =
+            input.deliveryId === undefined
+              ? generated
+              : { ...generated, deliveryId: input.deliveryId };
           const handle = await workflowRuntime.createSession({
             ...input,
+            delivery,
             adapter,
             channelName,
             continuationToken:
@@ -797,8 +902,8 @@ async function converse(
                 ? undefined
                 : `${channelName}:${input.continuationToken}`,
           });
-          track(attachSession(handle.sessionId));
-          return handle;
+          sessions.set(handle.sessionId, attachSession(handle.sessionId));
+          return { ...handle, deliveryId: delivery.deliveryId };
         },
       );
       const response = await route.handler(request, args);
@@ -897,6 +1002,8 @@ async function converse(
           view.describe,
         ),
       shownOptions: async () => (await view.shown()).toReversed().flatMap(({ options }) => options),
+      shownTexts: async () => (await view.shown()).map(({ text }) => text),
+      visible: async () => await (view.visible ?? view.shown).call(view),
       sharedText: async () =>
         (await view.shown())
           .filter((shown) => !shown.onlyPerson)
@@ -925,6 +1032,13 @@ async function converse(
       runsOf: (tool) => runs[tool],
       callersOf: () => callers,
       waitForRest: () => waitForRest([...sessions.values()], wait),
+      async cancelRunsInWorld() {
+        await waitForStepsToFinish([...sessions.values()], wait);
+        await Promise.all([...sessions.keys()].map((runId) => getRun(runId).cancel()));
+        runsCancelledInWorld = true;
+        // A cancelled run never rests, so there is nothing left to settle.
+        sessions.clear();
+      },
       async shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
         return await view.shownPrompt(prompt);
@@ -934,7 +1048,7 @@ async function converse(
     };
 
     /**
-     * The turn emits `turn.waiting` inside the step that raised the request, but
+     * The turn emits `turn.paused` inside the step that raised the request, but
      * an address the channel aliased in that step (such as Discord's message id)
      * is only claimed once the step commits. Answering through it before then
      * finds no session.
@@ -1006,29 +1120,54 @@ async function converse(
 const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /**
- * Cancels `session` until it waits for its next message with none of its steps
- * still running. A turn that starts after the first cancel needs another.
+ * Cancels `session` until it rests: idle, as the shared fold reads its stream, with none of its
+ * steps still running. A turn that starts after the first cancel needs another. A cancel is a
+ * delivery the stream records, so a resting session isn't cancelled again.
  */
 async function cancelUntilResting(session: Session): Promise<void> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   let last: string | undefined;
   let running: string[] = [];
   while (Date.now() < deadline) {
-    await session.cancel();
-    const tail = await session.getStreamTailIndex();
-    // An empty stream has nothing to read, and reading it waits for its first event.
-    if (tail >= 0) {
-      const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-      last = (await reader.read().finally(() => reader.cancel())).value?.type;
-    }
+    const events = await readThroughTail(session);
+    last = events.at(-1)?.type;
     running = await runningSteps(session);
-    if (last === "session.waiting" && running.length === 0) return;
+    if (idle(viewOfEvents(events).view) && running.length === 0) return;
+    await session.cancel();
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(
     `Timed out waiting for session ${session.id} to rest. Its stream ends with ${last ?? "nothing"}` +
       (running.length === 0 ? "." : `, and these steps are still running: ${running.join(", ")}.`),
   );
+}
+
+/**
+ * Every event `session` recorded from line `startIndex` through its tail. It reads stored lines,
+ * not events, so a tail line that materializes no event (one a reader skips) still ends the read.
+ */
+async function readThroughTail(session: Session, startIndex = 0): Promise<SessionStreamEvent[]> {
+  const tail = await internalSession(session).getStreamTailIndex();
+  if (tail < startIndex) return [];
+  const events: SessionStreamEvent[] = [];
+  const eventsOf = createEventReader();
+  const reader = (await internalSession(session).getLineStream({ startIndex })).getReader();
+  try {
+    for (let position = startIndex; position <= tail; position += 1) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const record = classifyRecord(value);
+      if (record.kind === "commit" || record.kind === "progress") {
+        events.push(...eventsOf.read(record.line, position));
+      } else if (record.kind === "transport") {
+        // The route's records don't take positions; read on to the next stored line.
+        position -= 1;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return events;
 }
 
 /** The names of `session`'s steps that haven't finished. */
@@ -1074,12 +1213,8 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
     async () => {
       const states = await Promise.all(
         sessions.map(async (session) => {
-          const tail = await session.getStreamTailIndex();
-          const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-          const last = await reader.read().finally(() => reader.cancel());
-          const waiting =
-            last.value?.type === "session.waiting" ||
-            (last.value?.type === "turn.waiting" && last.value.data.on === "input");
+          const tail = await internalSession(session).getStreamTailIndex();
+          const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
           const steps = await world.steps.list({ resolveData: "none", runId: session.id });
           const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
           return { resting: waiting && idle, tail };
@@ -1100,74 +1235,55 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
 }
 
 /** Whether an event asks the person `prompt`. */
-const asks = (prompt: string) => (event: MessageStreamEvent) =>
-  event.type === "input.requested" &&
-  event.data.requests.some((request) => request.prompt === prompt);
+const asks = (prompt: string) => (event: SessionStreamEvent) =>
+  event.type === "interaction.opened" &&
+  event.data.request.kind !== "sign-in" &&
+  event.data.request.prompt === prompt;
 
-/** Whether `session` settled the request that asked `prompt`, answered or withdrawn. */
+/**
+ * Whether `session` settled the request that asked `prompt`, answered or withdrawn, or admitted
+ * an answer to it: an approval's answer waits, admitted, for the rest of its batch.
+ */
 async function settles(session: Session, prompt: string): Promise<boolean> {
-  const tail = await session.getStreamTailIndex();
-  if (tail < 0) return false;
-  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
   const requestIds = new Set<string>();
-  try {
-    for (let index = 0; index <= tail; index += 1) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value.type === "input.requested") {
-        for (const request of value.data.requests) {
-          if (request.prompt === prompt) requestIds.add(request.requestId);
-        }
-      } else if (value.type === "approval.settled" && requestIds.has(value.data.requestId)) {
-        return true;
-      } else if (
-        value.type === "input.resolved" &&
-        value.data.resolutions.some((resolution) => requestIds.has(resolution.requestId))
-      ) {
-        return true;
-      }
+  const answers = new Set<string>();
+  for (const event of await readThroughTail(session)) {
+    if (event.type === "interaction.opened" && event.data.request.prompt === prompt) {
+      requestIds.add(event.data.interactionId);
+    } else if (event.type === "interaction.settled" && requestIds.has(event.data.interactionId)) {
+      return true;
+    } else if (event.type === "response.submitted" && requestIds.has(event.data.interactionId)) {
+      answers.add(event.data.responseId);
+    } else if (event.type === "response.admitted" && answers.has(event.data.responseId)) {
+      return true;
     }
-  } finally {
-    await reader.cancel();
   }
   return false;
 }
 
 /** Whether an event asks the person to sign in. */
-const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.required";
+const isSignIn = (event: SessionStreamEvent) =>
+  event.type === "interaction.opened" && event.data.request.kind === "sign-in";
 
 /**
  * Whether the session held for the person after it last emitted an event
  * `asked` matches. A question, approval, or sign-in parks the open turn
- * (`turn.waiting`) after each request, or once after requests raised
- * together; a session-limit prompt ends the turn (`session.waiting`).
+ * (`turn.paused`) after each request, or once after requests raised
+ * together; a session-limit prompt pauses it the same way.
  */
 async function holdsFor(
   session: Session,
-  asked: (event: MessageStreamEvent) => boolean,
+  asked: (event: SessionStreamEvent) => boolean,
 ): Promise<boolean> {
-  const tail = await session.getStreamTailIndex();
-  if (tail < 0) return false;
-  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
   let seen = false;
   let held = false;
-  try {
-    for (let index = 0; index <= tail; index += 1) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (asked(value)) {
-        seen = true;
-        held = false;
-      } else if (
-        seen &&
-        ((value.type === "turn.waiting" && value.data.on === "input") ||
-          value.type === "session.waiting")
-      ) {
-        held = true;
-      }
+  for (const event of await readThroughTail(session)) {
+    if (asked(event)) {
+      seen = true;
+      held = false;
+    } else if (seen && endsTurn(event)) {
+      held = true;
     }
-  } finally {
-    await reader.cancel();
   }
   return held;
 }
@@ -1177,12 +1293,16 @@ function gatedTool(
   description: string,
   execute: () => unknown,
   response?: ApprovalResponsePolicy,
+  prompt?: ApprovalPrompt<{ readonly release?: string }>,
 ) {
   return {
     logicalPath: `tools/${name}.ts`,
     loadNamespace: async () => ({
       default: defineTool({
-        approval: response === undefined ? always() : { request: always(), response },
+        approval:
+          response === undefined && prompt === undefined
+            ? always()
+            : { request: always(), prompt, response },
         description: `${description} Only call when asked to use ${name}.`,
         execute: async () => execute(),
         inputSchema: z.object({ release: z.string().optional() }),

@@ -98,6 +98,12 @@ describe("defineEvalConfig", () => {
     );
   });
 
+  it("rejects a non-positive or non-integer repeat", () => {
+    for (const repeat of [0, -1, 1.5]) {
+      expect(() => defineInvalidConfig({ repeat })).toThrow("`repeat` must be a positive integer");
+    }
+  });
+
   it("rejects an invalid timeoutMs", () => {
     expect(() => defineInvalidConfig({ timeoutMs: -1 })).toThrow(
       "`timeoutMs` must be a non-negative finite number",

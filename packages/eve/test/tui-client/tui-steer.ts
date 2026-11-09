@@ -26,7 +26,7 @@ const CANCEL_FOLLOW_UP_TOKEN = "CANCEL-FOLLOW-UP-MARKER-P8N";
 process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
-  const client = new Client({ host: target.baseUrl });
+  const client = new Client({ baseUrl: target.baseUrl });
   const screen = new MockScreen({ columns: 110, rows: 44 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({

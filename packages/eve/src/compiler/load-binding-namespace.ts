@@ -9,6 +9,7 @@ import {
   loadAuthoredModuleNamespace,
   type AuthoredModuleLoadOptions,
 } from "#internal/authored-module-loader.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
 export type CompiledBindingNamespaceLoader = (
   sourceId: string,
@@ -38,6 +39,7 @@ export function createCompiledBindingNamespaceLoader(input: {
    */
   readonly appRoot: string | undefined;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
+  readonly graph?: AuthoredModuleGraph;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
   readonly mountSourceId?: (binding: AgentModuleBinding) => string | undefined;
@@ -73,7 +75,7 @@ export function createCompiledBindingNamespaceLoader(input: {
       return await loadCompiledBindingNamespace({
         appRoot: input.appRoot,
         binding,
-        loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
+        graph: input.graph,
         registries: input.registries,
         mounts: input.mounts,
         evaluationId: input.evaluationId,
@@ -89,7 +91,7 @@ export function createCompiledBindingNamespaceLoader(input: {
 async function loadCompiledBindingNamespace(input: {
   readonly appRoot: string | undefined;
   readonly binding: AgentModuleBinding;
-  readonly loadDependency: CompiledBindingNamespaceLoader;
+  readonly graph?: AuthoredModuleGraph;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
   readonly registries: readonly AgentSourceRegistry[];
@@ -115,18 +117,11 @@ async function loadCompiledBindingNamespace(input: {
       appRoot: input.binding.owner.kind === "application" ? input.appRoot : undefined,
       externalDependencies: input.binding.backing.externalDependencies,
       extension,
+      graph: input.graph,
     });
   }
-  const dependencyNamespaces = Object.fromEntries(
-    await Promise.all(
-      Object.entries(input.binding.backing.dependencies ?? {}).map(
-        async ([alias, sourceId]) => [alias, await input.loadDependency(sourceId)] as const,
-      ),
-    ),
-  );
   return await loadProgrammaticModuleNamespace({
     backing: input.binding.backing,
-    dependencyNamespaces,
     registries: input.registries,
   });
 }

@@ -6,7 +6,7 @@ export const prefixSchema = z.array(
   z.object({ role: z.enum(["assistant", "system", "tool", "user"]), text: z.string() }),
 );
 
-export const prefixModel = mockModel({
+export const prefixModel: ReturnType<typeof mockModel> = mockModel({
   modelId: "prompt-prefix-check",
   respond(request) {
     const result = request.toolResults.find((entry) => entry.name === "capture_prompt");

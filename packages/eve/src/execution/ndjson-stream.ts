@@ -9,7 +9,7 @@
  * Cancellation is forwarded to the source. When the returned stream is
  * cancelled — e.g. an SSE client disconnects and the server cancels the
  * response body — the underlying reader is cancelled too. This matters for
- * runs that never reach EOF: a parked (`session.waiting`) durable run keeps
+ * runs that never reach EOF: a parked durable run keeps
  * its event stream open indefinitely, and the world-local streamer runs a
  * filesystem poll until its reader is cancelled. Without forwarding the
  * cancel, a pending `reader.read()` would block forever and that poll would

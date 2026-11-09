@@ -1,11 +1,15 @@
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
-import { activateDevelopmentGeneration } from "#internal/nitro/development-generation.js";
+import {
+  activateDevelopmentGeneration,
+  createDevelopmentGenerationPruner,
+} from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -303,12 +307,14 @@ describe("parent development Workflow World", () => {
       await first.close();
     }
     const deliveries: string[] = [];
+    const messages: unknown[] = [];
     process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       const message = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)) as {
         runId: string;
       };
       deliveries.push(message.runId);
+      messages.push(message);
       return Response.json({ ok: true });
     }) as typeof fetch;
     let activeGenerationId = "retained";
@@ -323,6 +329,10 @@ describe("parent development Workflow World", () => {
       await expect
         .poll(() => [...deliveries].sort())
         .toEqual([runIds[0], runIds[2], runIds[3], runIds[4]].sort());
+      // The restart lost the runs' queued step messages and wait timers.
+      for (const message of messages) {
+        expect(message).toMatchObject({ recovery: true, runSpecVersion: 6 });
+      }
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining('"invalid-json": Development generation metadata is invalid.'),
       );
@@ -404,9 +414,17 @@ describe("parent development Workflow World", () => {
       await second.start();
       expect(startupFetch).not.toHaveBeenCalled();
       startupFetch.mockRestore();
-      await expect(createDevelopmentWorkflowWorld().hooks.getByToken(token)).rejects.toThrow(
-        "Local Workflow run was not resumed",
-      );
+      // Ingress reports the session stranded from this error, so its identity
+      // must survive the worker boundary.
+      const refusal = await createDevelopmentWorkflowWorld()
+        .hooks.getByToken(token)
+        .catch((error: unknown) => error);
+      expect(DevelopmentRunUnavailableError.is(refusal)).toBe(true);
+      expect(refusal).toMatchObject({
+        availability: "dormant",
+        message: expect.stringContaining("Local Workflow run was not resumed"),
+        runId,
+      });
       for (const message of [
         { runId },
         { workflowRunId: runId },
@@ -523,6 +541,9 @@ describe("parent development Workflow World", () => {
           snapshotSourceRoot: join(snapshotRoot, "source"),
           sourceRoot: appRoot,
         },
+      });
+      createDevelopmentGenerationPruner({
+        appRoot,
         onRuntimePruned: async () => {
           try {
             await world.reconcileExpiredRuns();
@@ -531,7 +552,7 @@ describe("parent development Workflow World", () => {
             reconciled.reject(error);
           }
         },
-      });
+      }).request();
       await reconciled.promise;
       for (const runId of [old, running]) {
         await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({

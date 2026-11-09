@@ -1,3 +1,5 @@
+import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
+
 /**
  * Slack API string-length guards.
  *
@@ -129,12 +131,6 @@ export function truncateMessageText(value: string): string {
  */
 export function truncateModalTitle(value: string): string {
   return truncateWithEllipsis(value, SLACK_MODAL_TITLE_MAX_LENGTH);
-}
-
-function truncateWithEllipsis(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
 }
 
 function stripTypingStatusMarkdown(status: string): string {

@@ -43,7 +43,7 @@ export default defineEval({
       input: {},
       output: { completed: true },
     });
-    t.event("compaction.completed", { count: 1 });
+    t.event("context.settled", { count: 1, data: { kind: "compaction", outcome: "completed" } });
     t.messageIncludes(CONTENT_OUTPUT_COMPACTION_MARKER);
     t.messageIncludes(EXPECTED_HISTORY);
   },

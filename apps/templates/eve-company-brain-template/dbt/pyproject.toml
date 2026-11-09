@@ -1,0 +1,5 @@
+[project]
+name = "company-brain-data"
+version = "0.0.0"
+requires-python = ">=3.11,<3.14"
+dependencies = ["dbt-duckdb==1.10.1", "duckdb==1.4.4"]

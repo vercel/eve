@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
 
 import { resolveModelProfile } from "#harness/model-profile.js";
+import type { WebSearchSelection } from "#shared/web-search.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -89,24 +90,36 @@ describe("resolveWebSearchBackend", () => {
     openaiWebSearch.mockClear();
   });
 
-  it.each([
+  it.each<[string, WebSearchSelection | undefined, string | null]>([
     ["openai/gpt-5.4", undefined, "exa"],
-    ["openai/gpt-5.4", "parallel", "parallel"],
+    ["openai/gpt-5.4", { provider: "parallel" }, "parallel"],
     ["anthropic/claude-opus-4.6", undefined, "exa"],
-  ] as const)("uses Gateway search for Gateway model %s", (model, provider, expected) => {
-    expect(resolveWebSearchBackend(resolveModelProfile(model), provider)).toBe(expected);
+    ["openai/gpt-5.4", { provider: "native" }, "openai"],
+    ["anthropic/claude-opus-4.6", { provider: "native" }, "anthropic"],
+    ["google/gemini-3-flash", { provider: "native" }, "google"],
+    // Native search would drop a pre-Gemini 3 model's other tools; models without one use the
+    // fallback, if any.
+    ["google/gemini-2.5-flash", { provider: "native" }, null],
+    ["xai/grok-4", { provider: "native" }, null],
+    ["xai/grok-4", { fallback: "parallel", provider: "native" }, "parallel"],
+  ])("uses Gateway search for Gateway model %s with %o", (model, selection, expected) => {
+    expect(resolveWebSearchBackend(resolveModelProfile(model), selection)).toBe(expected);
   });
 
   it.each([
     ["openai.responses", "openai"],
     ["anthropic.messages", "anthropic"],
     ["google.generative-ai", "google"],
+    ["google.generative-ai", null, "gemini-2.5-pro"],
     ["openrouter.chat", null],
     ["some-provider", null],
-  ] as const)("uses native search for direct provider %s when it has one", (provider, expected) => {
-    const model = new MockLanguageModelV3({ provider });
-    expect(resolveWebSearchBackend(resolveModelProfile(model), "exa")).toBe(expected);
-  });
+  ] as const)(
+    "uses native search for direct provider %s when it has one",
+    (provider, expected, modelId?: string) => {
+      const model = new MockLanguageModelV3({ modelId, provider });
+      expect(resolveWebSearchBackend(resolveModelProfile(model))).toBe(expected);
+    },
+  );
 
   it("uses Anthropic webSearch_20250305 to avoid the unsupported beta header", async () => {
     const tool = await resolveWebSearchProviderTool("anthropic");
@@ -164,6 +177,13 @@ describe("resolveWebSearchBackend", () => {
 describe("resolveFrameworkToolFromUpstreamType", () => {
   it("maps the Anthropic web_search_20250305 type back to web_search", () => {
     expect(resolveFrameworkToolFromUpstreamType("web_search_20250305")).toBe("web_search");
+  });
+
+  it("maps OpenAI web search's tool type and include value back to web_search", () => {
+    expect(resolveFrameworkToolFromUpstreamType("web_search")).toBe("web_search");
+    expect(resolveFrameworkToolFromUpstreamType("web_search_call.action.sources")).toBe(
+      "web_search",
+    );
   });
 
   it("returns null for unknown upstream tool types", () => {

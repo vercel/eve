@@ -120,14 +120,19 @@ export class ContextContainer implements AlsContext {
   }
 }
 
+interface ContextScope {
+  readonly context: AlsContext | undefined;
+  readonly values?: ReadonlyMap<symbol, unknown>;
+}
+
 type AlsContextStorageGlobal = typeof globalThis & {
-  [EVE_CONTEXT_STORAGE_KEY]?: AsyncLocalStorage<AlsContext>;
+  [EVE_CONTEXT_STORAGE_KEY]?: AsyncLocalStorage<ContextScope>;
 };
 
 const globalContextStorage = globalThis as AlsContextStorageGlobal;
 
 if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
-  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = new AsyncLocalStorage<AlsContext>();
+  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = new AsyncLocalStorage<ContextScope>();
 }
 
 /**
@@ -139,7 +144,24 @@ if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
  * symbol keeps those copies on the same ALS instance so authored tools,
  * model callbacks, and step code observe one unified eve context.
  */
-export const contextStorage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
+const storage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
+export const contextStorage = {
+  getStore: (): AlsContext | undefined => storage.getStore()?.context,
+  run: <T>(context: AlsContext, fn: () => T): T => storage.run({ context }, fn),
+};
+
+/** Reads branch-local metadata without changing the identity of the active context. */
+export function contextScopeValue<T>(key: symbol): T | undefined {
+  return storage.getStore()?.values?.get(key) as T | undefined;
+}
+
+/** Runs one async branch with metadata on the existing context storage, not another ALS. */
+export function withContextScopeValue<T>(key: symbol, value: unknown, fn: () => T): T {
+  const parent = storage.getStore();
+  const values = new Map(parent?.values);
+  values.set(key, value);
+  return storage.run({ context: parent?.context, values }, fn);
+}
 
 /**
  * Returns the active context, throwing when called outside a managed scope.

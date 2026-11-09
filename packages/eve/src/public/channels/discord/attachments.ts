@@ -1,4 +1,4 @@
-import type { FilePart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart, MessagePart } from "#shared/message-content.js";
 
 import type { FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -18,9 +18,9 @@ const DISCORD_CDN_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]
 export function discordCommandContent(
   text: string,
   attachments: readonly DiscordAttachment[],
-): string | UserContent {
+): MessageContent {
   if (attachments.length === 0) return text;
-  const parts: Exclude<UserContent, string> = text.trim() ? [{ text, type: "text" }] : [];
+  const parts: MessagePart[] = text.trim() ? [{ text, type: "text" }] : [];
   for (const attachment of attachments) {
     if (attachment.size !== undefined && attachment.size > DEFAULT_UPLOAD_POLICY.maxBytes) {
       parts.push({
@@ -29,7 +29,7 @@ export function discordCommandContent(
       });
       continue;
     }
-    const file: FilePart = {
+    const file: MessageFilePart = {
       data: new URL(attachment.url),
       filename: attachment.filename,
       mediaType: attachment.contentType ?? "application/octet-stream",

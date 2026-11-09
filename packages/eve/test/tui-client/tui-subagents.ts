@@ -29,7 +29,7 @@ const SUBAGENT_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
 process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
-  const client = new Client({ host: target.baseUrl });
+  const client = new Client({ baseUrl: target.baseUrl });
   const screen = new MockScreen({ columns: 120, rows: 50 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
@@ -72,7 +72,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
 
   const finalSnapshot = screen.snapshot();
   // The model's own task bookkeeping never reaches the transcript.
-  for (const internal of ["task_wait", "task_cancel", "<task_result"]) {
+  for (const internal of ["eve__task_wait", "eve__task_cancel", "<task_result"]) {
     if (finalSnapshot.includes(internal)) {
       throw new Error(`Final screen shows internal task text "${internal}":\n${finalSnapshot}`);
     }

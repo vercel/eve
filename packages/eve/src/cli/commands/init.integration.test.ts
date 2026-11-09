@@ -197,7 +197,7 @@ describe("runInitCommand", () => {
         captureForeignOutput: false,
         unicode: true,
       });
-      const client = new Client({ host: "http://eve-test.invalid" });
+      const client = new Client({ baseUrl: "http://eve-test.invalid" });
       const baseInfo = createTestAgentInfoResult();
       const info = {
         ...baseInfo,
@@ -1290,6 +1290,27 @@ describe("runInitCommand", () => {
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectRoot);
+  });
+
+  it("creates missing parent directories for a nested fresh target", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-nested-parent-"));
+    const projectRoot = join(parentDirectory, "apps", "my-agent");
+    const deps = dependencies();
+
+    await runInitCommand(
+      logger(),
+      parentDirectory,
+      "apps/my-agent",
+      { nonInteractive: true },
+      deps,
+    );
+
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      expect.any(String),
+      projectRoot,
+      expect.anything(),
+    );
   });
 
   it("restores a preexisting empty named directory when installation fails", async () => {

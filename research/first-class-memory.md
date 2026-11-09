@@ -266,7 +266,9 @@ interface MemoryNamespaceContext {
 }
 
 type MemoryNamespaceDefinition =
-  string | null | ((context: MemoryNamespaceContext) => string | null | Promise<string | null>);
+  | string
+  | null
+  | ((context: MemoryNamespaceContext) => string | null | Promise<string | null>);
 
 function defaultNamespace(context: MemoryNamespaceContext): string;
 ```
@@ -1228,7 +1230,7 @@ checks remain the merge gate. M2 must not begin on the pre-M1 base.
 - [Programmatic agent sources](./programmatic-agent-sources.md)
 - [Supermemory: how it works](https://supermemory.ai/docs/concepts/how-it-works)
 - [Hermes Agent memory](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/memory.md)
-- [eve dynamic capabilities](../docs/guides/dynamic-capabilities.md)
+- [eve dynamic capabilities](../docs/dynamic-configuration/index.md)
 - [eve agent configuration](../docs/agent-config.md)
 - [eve turn execution](../packages/eve/src/execution/workflow-steps.ts)
 

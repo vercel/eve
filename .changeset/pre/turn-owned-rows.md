@@ -1,0 +1,7 @@
+---
+"eve": patch
+---
+
+Session events can now record a call or a content part that its turn made without a model run: `call.requested` accepts an `owner` of `{ turnId }`, and `content.completed` leaves out `runId`, with `scope.turnId` naming the turn.
+
+The fold, the client's conversation, and the Slack channel place both under their turn. `ContentCompletedData.runId` is optional and `CallOwner` has a third variant in TypeScript, so code that reads `runId` as always present or switches over owners needs a default branch. Stream version 27 also now allows a later release to add call owners, and a reader treats a call whose owner it doesn't know as the session's.

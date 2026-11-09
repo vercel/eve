@@ -1,4 +1,4 @@
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 
 import { describePlan, hashPlan } from "./plan.ts";
 

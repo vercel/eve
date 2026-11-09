@@ -9,12 +9,12 @@ import type {
 /** Parsed `eve dev` options that control terminal-UI behavior. */
 interface DevelopmentTuiOptions {
   readonly assistantResponseStats?: AssistantResponseStatsMode;
-  readonly connectionAuth?: TerminalPartDisplayMode;
+  readonly showConnectionAuth?: TerminalPartDisplayMode;
   readonly contextSize?: number;
   readonly logs?: LogDisplayMode;
-  readonly reasoning?: TerminalPartDisplayMode;
-  readonly subagents?: SubagentDisplayMode;
-  readonly tools?: TerminalPartDisplayMode;
+  readonly showReasoning?: TerminalPartDisplayMode;
+  readonly showSubagents?: SubagentDisplayMode;
+  readonly showTools?: TerminalPartDisplayMode;
   readonly ui?: boolean;
 }
 
@@ -33,14 +33,14 @@ export function resolveDevUiMode(input: {
 export function resolveTuiDisplayOptions(options: DevelopmentTuiOptions): TuiDisplayOptions {
   const display: TuiDisplayOptions = {
     logs: options.logs ?? "error",
-    // Collapsed reasoning renders as the fixed thinking line; `--reasoning
+    // Collapsed reasoning renders as the fixed thinking line; `--show-reasoning
     // full` restores the streaming transcript trace.
-    reasoning: options.reasoning ?? "auto-collapsed",
-    tools: options.tools ?? "auto-collapsed",
+    reasoning: options.showReasoning ?? "auto-collapsed",
+    tools: options.showTools ?? "auto-collapsed",
   };
 
-  if (options.subagents !== undefined) display.subagents = options.subagents;
-  if (options.connectionAuth !== undefined) display.connectionAuth = options.connectionAuth;
+  if (options.showSubagents !== undefined) display.subagents = options.showSubagents;
+  if (options.showConnectionAuth !== undefined) display.connectionAuth = options.showConnectionAuth;
   if (options.assistantResponseStats !== undefined) {
     display.assistantResponseStats = options.assistantResponseStats;
   }

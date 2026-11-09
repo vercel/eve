@@ -1,3 +1,5 @@
+import type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
+export type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 /**
  * Minimal Discord REST API wrapper. The channel talks directly to Discord's
  * JSON HTTP API rather than exposing a third-party SDK through eve.
@@ -6,7 +8,7 @@
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
 
-import { resolveDiscordPublicKey, type DiscordPublicKey } from "#public/channels/discord/verify.js";
+import { resolveDiscordPublicKey } from "#public/channels/discord/verify.js";
 
 /** Discord application id, materialized directly or from an async secret provider. */
 export type DiscordApplicationId = string | (() => string | Promise<string>);
@@ -21,19 +23,11 @@ export type DiscordFetch = typeof fetch;
  * Credentials used by the native Discord channel. Each field falls back to the
  * matching `DISCORD_*` env var when omitted.
  */
-export interface DiscordCredentials {
-  /** Required to edit or follow up on interaction responses. Falls back to `DISCORD_APPLICATION_ID`. */
-  readonly applicationId?: DiscordApplicationId;
-  /** Required for channel messages and typing indicators. Falls back to `DISCORD_BOT_TOKEN`. */
-  readonly botToken?: DiscordBotToken;
-  /** Required for inbound Ed25519 interaction verification. Falls back to `DISCORD_PUBLIC_KEY`. */
-  readonly publicKey?: DiscordPublicKey;
-}
 
 /** Shared Discord API options. */
 export interface DiscordApiOptions {
   readonly apiBaseUrl?: string;
-  readonly credentials?: DiscordCredentials;
+  readonly credentials?: DiscordChannelCredentials;
   readonly fetch?: DiscordFetch;
 }
 
@@ -61,10 +55,13 @@ export const DISCORD_NO_MENTIONS: JsonObject = { parse: [] };
 export const DISCORD_MESSAGE_CONTENT_MAX_LENGTH = 2000;
 
 /** Builds the channel-local continuation token (`<channelId>:<conversationId>`). */
-export function discordContinuationToken(
-  channelId: string,
-  conversationId: string | undefined,
-): string {
+export function discordContinuationToken({
+  channelId,
+  conversationId,
+}: {
+  readonly channelId: string;
+  readonly conversationId?: string | undefined;
+}): string {
   return `${channelId}:${conversationId ?? ""}`;
 }
 

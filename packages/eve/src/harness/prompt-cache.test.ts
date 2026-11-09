@@ -4,13 +4,46 @@ import { describe, expect, it } from "vitest";
 import {
   applyConversationCacheControl,
   applyLastToolCacheBreakpoint,
+  applySystemCacheBreakpoint,
   mergeGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
+const fiveMinutes = { ttl: "5m" } as const;
 const marker = {
   anthropic: { cacheControl: { type: "ephemeral" } },
   bedrock: { cachePoint: { type: "default" } },
 };
+
+describe("Anthropic cache breakpoints with a 1-hour TTL", () => {
+  it("carry the TTL on every breakpoint in both provider namespaces", () => {
+    const oneHour = { ttl: "1h" } as const;
+    const hourMarker = {
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+      bedrock: { cachePoint: { type: "default", ttl: "1h" } },
+    };
+    const tools = applyLastToolCacheBreakpoint(
+      { only: { description: "one" } } as unknown as ToolSet,
+      oneHour,
+    ) as Record<string, { providerOptions?: unknown }>;
+    const system = applySystemCacheBreakpoint([{ role: "system", content: "rules" }], oneHour);
+    const messages = applyConversationCacheControl(
+      [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "yo" },
+        { role: "user", content: "hi2" },
+      ],
+      oneHour,
+    );
+
+    expect(tools.only?.providerOptions).toEqual(hourMarker);
+    expect(system[0]?.providerOptions).toEqual(hourMarker);
+    expect(messages.map((message) => message.providerOptions)).toEqual([
+      undefined,
+      hourMarker,
+      hourMarker,
+    ]);
+  });
+});
 
 describe("mergeGatewayAutoCaching", () => {
   it("creates a fresh gateway block when base is undefined", () => {
@@ -52,7 +85,7 @@ describe("mergeGatewayAutoCaching", () => {
 describe("applyLastToolCacheBreakpoint", () => {
   it("is a no-op for an empty tool set", () => {
     const tools = {} as ToolSet;
-    expect(applyLastToolCacheBreakpoint(tools)).toEqual({});
+    expect(applyLastToolCacheBreakpoint(tools, fiveMinutes)).toEqual({});
   });
 
   it("attaches the marker only to the last tool", () => {
@@ -62,7 +95,7 @@ describe("applyLastToolCacheBreakpoint", () => {
       gamma: { description: "third" },
     } as unknown as ToolSet;
 
-    const result = applyLastToolCacheBreakpoint(tools) as Record<
+    const result = applyLastToolCacheBreakpoint(tools, fiveMinutes) as Record<
       string,
       { description: string; providerOptions?: unknown }
     >;
@@ -83,7 +116,7 @@ describe("applyLastToolCacheBreakpoint", () => {
       },
     } as unknown as ToolSet;
 
-    const result = applyLastToolCacheBreakpoint(tools) as Record<
+    const result = applyLastToolCacheBreakpoint(tools, fiveMinutes) as Record<
       string,
       { providerOptions: Record<string, unknown> } | undefined
     >;
@@ -102,7 +135,7 @@ describe("applyLastToolCacheBreakpoint", () => {
       two: { description: "second" },
     } as unknown as ToolSet;
     const snapshot = JSON.parse(JSON.stringify(tools));
-    applyLastToolCacheBreakpoint(tools);
+    applyLastToolCacheBreakpoint(tools, fiveMinutes);
     expect(tools).toEqual(snapshot);
   });
 });
@@ -110,14 +143,14 @@ describe("applyLastToolCacheBreakpoint", () => {
 describe("applyConversationCacheControl", () => {
   it("returns a fresh empty array for empty input", () => {
     const input: readonly ModelMessage[] = [];
-    const out = applyConversationCacheControl(input);
+    const out = applyConversationCacheControl(input, fiveMinutes);
     expect(out).toEqual([]);
     expect(out).not.toBe(input);
   });
 
   it("marks a sole user message", () => {
     const messages: ModelMessage[] = [{ role: "user", content: "hi" }];
-    const out = applyConversationCacheControl(messages);
+    const out = applyConversationCacheControl(messages, fiveMinutes);
     expect(out[0]).toEqual({
       role: "user",
       content: "hi",
@@ -132,7 +165,7 @@ describe("applyConversationCacheControl", () => {
       { role: "user", content: "hi2" },
       { role: "assistant", content: "yo2" },
     ];
-    const out = applyConversationCacheControl(messages);
+    const out = applyConversationCacheControl(messages, fiveMinutes);
 
     expect(out[0]).toEqual({ role: "user", content: "hi" });
     expect(out[1]).toEqual({
@@ -167,7 +200,7 @@ describe("applyConversationCacheControl", () => {
         ],
       },
     ];
-    const out = applyConversationCacheControl(messages);
+    const out = applyConversationCacheControl(messages, fiveMinutes);
 
     // The trailing tool-result message carries the final breakpoint.
     expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
@@ -187,7 +220,7 @@ describe("applyConversationCacheControl", () => {
         providerOptions: { openai: { someKey: "someValue" } },
       },
     ];
-    const out = applyConversationCacheControl(messages);
+    const out = applyConversationCacheControl(messages, fiveMinutes);
     expect((out[0] as { providerOptions: Record<string, unknown> }).providerOptions).toEqual({
       openai: { someKey: "someValue" },
       ...marker,
@@ -203,7 +236,7 @@ describe("applyConversationCacheControl", () => {
     const originalRef0 = messages[0];
     const originalRef1 = messages[1];
 
-    const out = applyConversationCacheControl(messages);
+    const out = applyConversationCacheControl(messages, fiveMinutes);
 
     expect(messages).toEqual(snapshot);
     expect(messages[0]).toBe(originalRef0);

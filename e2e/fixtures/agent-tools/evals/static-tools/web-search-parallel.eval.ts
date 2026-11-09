@@ -1,4 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
@@ -15,19 +16,14 @@ const EXPECTED_WINNERS = [
   /Raptors/iu,
 ];
 
-function completedToolResultCount(events: readonly MessageStreamEvent[], toolName: string) {
-  const callIds = new Set<string>();
-  for (const event of events) {
-    if (
-      event.type === "action.result" &&
-      event.data.status === "completed" &&
-      event.data.result.kind === "tool-result" &&
-      event.data.result.toolName === toolName
-    ) {
-      callIds.add(event.data.result.callId);
-    }
-  }
-  return callIds.size;
+function completedToolResultCount(events: readonly SessionStreamEvent[], toolName: string) {
+  const view = foldEvents(emptySessionView(), events);
+
+  return new Set(
+    calls(view)
+      .filter((call) => call.name === toolName && call.outcome === "completed")
+      .map((call) => call.callId),
+  ).size;
 }
 
 export default defineEval({
@@ -47,7 +43,7 @@ export default defineEval({
       "at least eight completed web_search calls",
       (events) => completedToolResultCount(events, TOOL_NAME) >= MIN_COMPLETED_SEARCHES,
     );
-    t.noFailedActions();
+    t.noFailedCalls();
     for (const winner of EXPECTED_WINNERS) {
       turn.messageIncludes(winner);
     }

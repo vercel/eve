@@ -1,5 +1,8 @@
+import { issueInboxHandle } from "#execution/session-inbox/handle.js";
+import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError, WorkflowWorldError } from "#compiled/@workflow/errors/index.js";
+import { startHookId } from "#compiled/@workflow/world/index.js";
 import type {
   DeliverHookPayload,
   SessionCommand,
@@ -12,63 +15,118 @@ import {
 } from "#execution/legacy-session/inbox.js";
 import {
   isSessionInboxAddress,
+  logicalSessionInboxToken,
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   sessionCommandHookToken,
-  sessionHandoffMarkerToken,
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import {
+  assertRunnableSessionOwner,
+  findSessionHookHolder,
+  resumeRunnableHook,
+  strandedIfDeploymentDeleted,
+} from "#execution/session-inbox/owner.js";
+import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
+import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
-
-/** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
-const HANDOFF_RETRY_WINDOW_MS = 5_000;
-const HANDOFF_RETRY_INTERVAL_MS = 20;
 
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
+  readonly inbox?: string;
   /** Lazy identity resolution; delivery never needs to decrypt hook metadata. */
   readonly sessionId: Promise<string>;
+  /**
+   * The logical address that took the command when the session had not yet
+   * claimed its stable inbox; see {@link resumeSessionStartHook}.
+   */
+  readonly startAddress?: string;
 }
 
 /**
- * Resumes the current owner with the current command shape. During a
- * deployment handoff the address is briefly unowned; the releasing owner
- * leaves a marker for that interval, so delivery retries instead of
- * reporting the session gone and letting a channel start a replacement.
+ * Resumes the current owner with the current command shape. A handoff never
+ * leaves an address unowned: the successor force-claims the source's hooks.
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | SessionFailurePayload,
+  command:
+    | DeliverHookPayload
+    | SessionCommand
+    | SessionTimeoutHookPayload
+    | SessionFailurePayload
+    | SessionPrewarmPayload,
 ): Promise<ResumedSessionInboxHook> {
-  const token = logicalToken(address);
-  const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
-  while (true) {
-    let hook;
-    try {
-      hook = await resumeHook(sessionInboxHookToken(token), command);
-    } catch (error) {
-      if (!HookNotFoundError.is(error)) throw error;
-      if (await isHandoffInProgress(token, deadline)) continue;
-      if (command.kind === "session-failure") throw error;
-      return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
+  command = withPreV27Answers(command);
+  const token = logicalSessionToken(address);
+  const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
+  let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
+  try {
+    hook = await resumeCurrentOwner(
+      sessionInboxHookToken(token),
+      command,
+      typeof address === "string" ? undefined : address.inbox,
+    );
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+    if (knownSessionId !== undefined) {
+      const started = await resumeSessionStartHook(knownSessionId, command);
+      if (started !== undefined) {
+        return {
+          ownerRunId: started.runId,
+          sessionId: Promise.resolve(knownSessionId),
+          startAddress: started.address,
+        };
+      }
     }
-    let identity: Promise<string> | undefined;
-    return {
-      ownerRunId: hook.runId,
-      get sessionId() {
-        return (identity ??= (async () => {
-          try {
-            return typeof address === "string"
-              ? requireSessionId(await hook.metadata)
-              : address.sessionId;
-          } catch (cause) {
-            // A failed identity read must never cause a second delivery.
-            throw new AcceptedSessionIdentityError(cause);
-          }
-        })());
-      },
-    };
+    if (command.kind === "session-failure" || command.kind === "session-prewarm") throw error;
+    return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
+  }
+  let identity: Promise<string> | undefined;
+  return {
+    ownerRunId: hook.runId,
+    inbox: issueInboxHandle(hook),
+    get sessionId() {
+      return (identity ??= (async () => {
+        try {
+          return knownSessionId ?? requireSessionId(await hook.metadata);
+        } catch (cause) {
+          // A failed identity read must never cause a second delivery. An owner whose
+          // deployment was deleted can never replay what it accepted, so replacing it
+          // delivers the command once.
+          const stranded = await strandedIfDeploymentDeleted(cause, hook);
+          throw stranded === cause ? new AcceptedSessionIdentityError(cause) : stranded;
+        }
+      })());
+    },
+  };
+}
+
+/**
+ * Resumes the token's owner. A run without a public key needs its deployment's
+ * key to accept anything, so a deleted deployment fails the resume itself. A
+ * concurrent delivery may have replaced that owner since: the current holder
+ * is stranded only when its own key lookup fails too, and a live one gets the
+ * command by token, because a cached inbox handle names the dead owner.
+ */
+async function resumeCurrentOwner(
+  token: string,
+  command: unknown,
+  inbox: string | undefined,
+): Promise<Awaited<ReturnType<typeof resumeRunnableHook>>> {
+  try {
+    return await resumeRunnableHook(token, command, inbox);
+  } catch (error) {
+    if (!isOwnerDeploymentDeletedError(error)) throw error;
+    const holder = await findSessionHookHolder(token);
+    if (holder?.hook === undefined) throw error;
+    const readFailure = await holder.hook.metadata.then(
+      () => undefined,
+      (cause: unknown) => cause ?? error,
+    );
+    if (readFailure === undefined) return await resumeRunnableHook(token, command);
+    const stranded = await strandedIfDeploymentDeleted(readFailure, holder.hook);
+    throw stranded === readFailure ? error : stranded;
   }
 }
 
@@ -86,15 +144,64 @@ export function requireSessionId(metadata: unknown): string {
   return value;
 }
 
+/**
+ * The session holding a logical token. Throws `StrandedSessionOwnerError` when
+ * its owner's deployment was deleted, which hides the session ID.
+ */
 export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
+  let hook: Hook | undefined;
   try {
-    const hook = await getHookByToken(sessionInboxHookToken(token));
+    hook = await getHookByToken(sessionInboxHookToken(token));
     return { sessionId: requireSessionId(await hook.metadata) };
   } catch (error) {
+    if (hook !== undefined) {
+      const stranded = await strandedIfDeploymentDeleted(error, hook);
+      if (stranded !== error) throw stranded;
+    }
     if (!HookNotFoundError.is(error)) throw error;
     const target = await resolveLegacyInbox(token);
     return { sessionId: target.sessionId };
   }
+}
+
+/**
+ * Resumes the hook a session's `start()` claimed with its run. The run takes
+ * commands there before it boots and claims its stable inbox, so a command
+ * by session id needs no wait for the boot. Resolves `undefined` when the
+ * session was started without one or has released it. The hook is resumed by
+ * id, so it never reaches a later session's claim of the same address.
+ */
+export async function resumeSessionStartHook(
+  sessionId: string,
+  payload: unknown,
+): Promise<{ readonly address: string; readonly runId: string } | undefined> {
+  // Only a run id names a start Hook; a caller can send any session id.
+  if (!sessionId.startsWith("wrun_")) return undefined;
+  let hook: Awaited<ReturnType<WorldHooks["get"]>>;
+  try {
+    hook = await (await getWorld()).hooks.get(startHookId(sessionId), { resolveData: "none" });
+  } catch (error) {
+    if (isMissingHook(error)) return undefined;
+    throw error;
+  }
+  const address = logicalSessionInboxToken(hook.token);
+  if (hook.runId !== sessionId || address === undefined) return undefined;
+  await assertRunnableSessionOwner({ runId: hook.runId });
+  const { metadata: _metadata, ...resumable } = hook;
+  try {
+    const resumed = await resumeHook(resumable, payload);
+    return { address, runId: resumed.runId };
+  } catch (error) {
+    if (HookNotFoundError.is(error)) return undefined;
+    throw error;
+  }
+}
+
+type WorldHooks = Awaited<ReturnType<typeof getWorld>>["hooks"];
+
+/** world-vercel answers a lookup of an absent hook by id with a bare 404. */
+function isMissingHook(error: unknown): boolean {
+  return HookNotFoundError.is(error) || (WorkflowWorldError.is(error) && error.status === 404);
 }
 
 /** A driver too old to import is, for every caller, a session that no longer exists. */
@@ -103,22 +210,10 @@ function rethrowUnsupportedAsNotFound(error: unknown): never {
   throw error;
 }
 
-function logicalToken(address: string | SessionInboxAddress): string {
+/** Logical token behind an address: the address itself, or the session's stable command token. */
+export function logicalSessionToken(address: string | SessionInboxAddress): string {
   if (typeof address === "string") return address;
   if (!isSessionInboxAddress(address))
     throw new Error("Session inbox target has an invalid address.");
   return sessionCommandHookToken(address.sessionId);
-}
-
-/** Waits one retry interval when a handoff marker exists; false once the window closes or no marker exists. */
-async function isHandoffInProgress(token: string, deadline: number): Promise<boolean> {
-  if (Date.now() >= deadline) return false;
-  try {
-    await getHookByToken(sessionHandoffMarkerToken(token));
-  } catch (error) {
-    if (HookNotFoundError.is(error)) return false;
-    throw error;
-  }
-  await new Promise<void>((resolve) => setTimeout(resolve, HANDOFF_RETRY_INTERVAL_MS));
-  return true;
 }

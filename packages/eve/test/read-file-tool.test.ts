@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
@@ -22,6 +24,10 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
       return { initialized: false, session: null };
     },
 
+    open() {
+      return this.get();
+    },
+    prepare() {},
     async stop() {},
 
     async get() {
@@ -42,7 +48,7 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         async setNetworkPolicy() {},
         async removePath() {},
         resolvePath(path: string) {
-          return path;
+          return posix.resolve("/workspace", path);
         },
         async run({ command }: { command: string }) {
           if (command === HOME_PROBE_COMMAND) {
@@ -55,6 +61,7 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         },
         async writeFile() {},
         async writeBinaryFile() {},
+        async writeFiles() {},
         async writeTextFile() {},
       };
     },
@@ -232,12 +239,27 @@ describe("executeReadFileOnSandbox", () => {
   // Path validation
   // ---------------------------------------------------------------------------
 
-  it("rejects relative paths", async () => {
-    await expect(
-      runInContext({ "/workspace/foo.ts": "content" }, (sandbox) =>
-        executeReadFileOnSandbox(sandbox, { filePath: "foo.ts" }),
+  it("resolves relative paths from the sandbox's workspace root", async () => {
+    const result = (await runInContext({ "/srv/app/notes.md": "hello\n" }, (sandbox) =>
+      executeReadFileOnSandbox(
+        { ...sandbox, resolvePath: (path) => posix.resolve("/srv/app", path) },
+        { filePath: "src/../notes.md" },
       ),
-    ).rejects.toThrow("filePath must be an absolute path");
+    )) as ReadFileResult;
+
+    expect(result.path).toBe("/srv/app/notes.md");
+    expect(result.content).toContain("1: hello");
+  });
+
+  it("rejects a $HOME path when the sandbox has no usable home", async () => {
+    await expect(
+      runInContext({}, (sandbox) =>
+        executeReadFileOnSandbox(
+          { ...sandbox, run: async () => ({ exitCode: 0, stderr: "", stdout: "\n" }) },
+          { filePath: "$HOME/notes.md" },
+        ),
+      ),
+    ).rejects.toThrow('Cannot resolve "$HOME/notes.md": the sandbox has no usable $HOME.');
   });
 
   it("reads skill files through the model-facing $HOME path", async () => {
@@ -305,7 +327,7 @@ describe("executeReadFileOnSandbox", () => {
   // ---------------------------------------------------------------------------
 
   it("canonicalizes paths with dot segments", async () => {
-    const access = createFakeAccess({ "/workspace/./foo.ts": "hello\n" });
+    const access = createFakeAccess({ "/workspace/foo.ts": "hello\n" });
     const sandbox = (await access.get())!;
 
     const ctx = new ContextContainer();

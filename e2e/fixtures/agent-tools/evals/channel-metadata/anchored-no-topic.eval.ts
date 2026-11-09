@@ -19,10 +19,11 @@ export default defineEval({
       threadId,
     });
 
-    const session = await t.target.attachSession(sessionId);
+    const session = t.target.attach(sessionId);
+    await session.nextTurn();
     session.succeeded();
     session.notCalledTool(METADATA_TOOL);
-    session.noFailedActions();
+    session.noFailedCalls();
 
     const resumedSessionId = await startChannelSession(t.target, "/anchor/start", {
       message: "Reply exactly: resumed through the initial address.",

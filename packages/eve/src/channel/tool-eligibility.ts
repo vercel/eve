@@ -20,8 +20,7 @@ export interface CompiledToolBindings {
  *    conservative phase-1 policy, stricter than the mechanical predicate in
  *    the research plan (`hasExecute` minus handled tools and framework
  *    actions). It is not a claim that every framework tool needs a turn: some,
- *    such as `load_skill` and `agent`, depend on the turn's harness or
- *    session, while others, such as `web_fetch`, could run without one. They
+ *    such as `agent`, depend on the turn's harness or session, while others, such as `web_fetch`, could run without one. They
  *    are all withheld so that phase 1 publishes only tools the application or
  *    an extension authored; exposing individual framework tools is a later,
  *    explicit decision. An application or extension tool that overrides a

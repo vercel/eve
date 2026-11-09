@@ -1,147 +1,146 @@
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { Client } from "eve/client";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EveTUIRunner, FakeEveServer, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 import { theme } from "./lib/theme.ts";
 
 /**
- * Drives the full `authorization.*` lifecycle through the
- * runner + renderer without spinning up a real eve server. The other
- * smoke (`tui-connection-auth.ts`) covers the realistic `_required`
- * path through a live runtime, but the live runtime cannot easily
- * emit `_completed` in this repo (interactive auth
- * requires a `principalType: "user"` session, which apps/fixtures/agent-tui-client
- * doesn't currently provide). This smoke fills that gap with an in-memory
- * eve server whose callback continuation the smoke emits after asserting the
- * parked challenge, so we get deterministic coverage of:
- *
- *   1. `_required` with a populated challenge (URL, user code,
- *      instructions). That proves the renderer surfaces all three
- *      challenge fields, which the live smoke can't show.
- *   2. `_completed` with `outcome: "authorized"` after `session.waiting`.
- *      That proves the TUI keeps following the session until the OAuth
- *      callback resumes the durable workflow, flips the right-title, and
- *      settles the section.
- *   3. A second turn with `outcome: "failed"` + a reason. That
- *      proves the failure path renders distinctly and the reason
- *      string surfaces in the section content.
+ * Drives sign-in interaction opening and settlement through the runner and renderer. The fake
+ * server supplies a callback after the parked challenge, covering its URL, code, instructions,
+ * successful completion, and a failed sign-in's reason without interactive OAuth.
  */
 
-const turnId = "turn-0";
-const stepIndex = 0;
-
-let sequence = 0;
-const next = () => ++sequence;
-
-const firstTurn: UnstampedMessageStreamEvent[] = [
-  { type: "session.started", data: {} },
-  { type: "turn.started", data: { sequence: next(), turnId } },
-  { type: "step.started", data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId } },
-  {
-    type: "authorization.required",
-    data: {
-      authorization: {
-        url: "https://example.com/authorize/stub-mcp",
-        userCode: "STUB-1234",
-        instructions: "Visit the URL above and enter the user code.",
+/** A turn that opens a sign-in for `name` and pauses on it, leaving its delivery open. */
+function signInTurn(input: {
+  readonly deliveryId: string;
+  readonly turnId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly signIn: {
+    readonly url: string;
+    readonly userCode?: string;
+    readonly instructions?: string;
+  };
+  readonly started?: boolean;
+}): SessionEvent[] {
+  const { deliveryId, turnId } = input;
+  const runId = `${turnId}.run`;
+  const scope = { turnId };
+  const interactionId = `${input.name}-attempt`;
+  const opening: SessionEvent[] =
+    input.started === true ? [] : [{ type: "session.started", data: {} }];
+  return [
+    ...opening,
+    { type: "delivery.admitted", data: { deliveryId } },
+    {
+      type: "turn.started",
+      data: { cause: { deliveryId }, follows: input.started === true ? "turn_0" : null, turnId },
+      scope,
+    },
+    { type: "delivery.consumed", data: { deliveryId, parts: [], turnId }, scope },
+    { type: "model.requested", data: { owner: { turnId }, runId }, scope: { runId, turnId } },
+    {
+      type: "model.started",
+      data: { attempt: 0, modelId: "eve-mock/test", runId },
+      scope: { runId, turnId },
+    },
+    {
+      type: "model.settled",
+      data: { finishReason: "stop", outcome: "completed", runId },
+      scope: { runId, turnId },
+    },
+    {
+      type: "interaction.opened",
+      data: {
+        interactionId,
+        request: {
+          kind: "sign-in",
+          prompt: input.description,
+          signIn: { name: input.name, ...input.signIn },
+        },
+        subject: { turnId },
       },
-      name: "stub-mcp",
-      description: "Stub MCP server",
-      sequence: next(),
-      stepIndex,
-      turnId,
-      webhookUrl: "http://localhost:3000/eve/v1/connections/stub-mcp/callback/xyz",
+      scope,
     },
-  },
-  {
-    type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
-  },
-  {
-    type: "session.waiting",
-    data: { continuationToken: "session-id", wait: "next-user-message" },
-  },
-];
+    { type: "turn.paused", data: { awaiting: [{ interactionId }], turnId }, scope },
+  ];
+}
 
-const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
-  { type: "turn.started", data: { sequence: next(), turnId: "turn-1" } },
-  {
-    type: "authorization.completed",
-    data: {
-      name: "stub-mcp",
-      outcome: "authorized",
-      sequence: next(),
-      stepIndex,
-      turnId: "turn-1",
+/** The sign-in's callback: it settles the interaction, and the turn resumes and completes. */
+function callbackTurn(input: {
+  readonly turnId: string;
+  readonly name: string;
+  readonly outcome: "accepted" | "failed";
+  readonly messageDeliveryId: string;
+  readonly reason?: string;
+}): SessionEvent[] {
+  const { turnId } = input;
+  const scope = { turnId };
+  const interactionId = `${input.name}-attempt`;
+  const deliveryId = `${input.name}-callback`;
+  const responseId = `${input.name}-response`;
+  const settled: { -readonly [K in keyof InteractionSettledData]: InteractionSettledData[K] } = {
+    cause: { responseId },
+    interactionId,
+    outcome: input.outcome,
+  };
+  if (input.reason !== undefined) settled.reason = input.reason;
+  return [
+    { type: "delivery.admitted", data: { deliveryId, source: { callback: input.name } } },
+    { type: "response.submitted", data: { deliveryId, interactionId, responseId } },
+    {
+      type: "response.settled",
+      data: { outcome: input.outcome === "accepted" ? "applied" : "failed", responseId },
     },
-  },
-  {
-    type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-1" },
-  },
-  { type: "turn.completed", data: { sequence: next(), turnId: "turn-1" } },
-  {
-    type: "session.waiting",
-    data: { continuationToken: "session-id", wait: "next-user-message" },
-  },
-];
+    {
+      type: "interaction.settled",
+      data: settled,
+      scope,
+    },
+    { type: "delivery.settled", data: { deliveryId, outcome: "applied", turnId } },
+    { type: "turn.settled", data: { outcome: "completed", turnId }, scope },
+    {
+      type: "delivery.settled",
+      data: { deliveryId: input.messageDeliveryId, outcome: "handled", turnId },
+    },
+  ];
+}
 
-const secondTurnId = "turn-2";
-const secondTurn: UnstampedMessageStreamEvent[] = [
-  { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
-  {
-    type: "step.started",
-    data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId: secondTurnId },
+const firstTurn = signInTurn({
+  deliveryId: "delivery_1",
+  turnId: "turn_0",
+  name: "stub-mcp",
+  description: "Stub MCP server",
+  signIn: {
+    url: "https://example.com/authorize/stub-mcp",
+    userCode: "STUB-1234",
+    instructions: "Visit the URL above and enter the user code.",
   },
-  {
-    type: "authorization.required",
-    data: {
-      authorization: {
-        url: "https://example.com/authorize/other-mcp",
-      },
-      name: "other-mcp",
-      description: "Other MCP server",
-      sequence: next(),
-      stepIndex,
-      turnId: secondTurnId,
-      webhookUrl: "http://localhost:3000/eve/v1/connections/other-mcp/callback/xyz",
-    },
-  },
-  {
-    type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
-  },
-  {
-    type: "session.waiting",
-    data: { continuationToken: "session-id", wait: "next-user-message" },
-  },
-];
-
-const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
-  { type: "turn.started", data: { sequence: next(), turnId: "turn-3" } },
-  {
-    type: "authorization.completed",
-    data: {
-      name: "other-mcp",
-      outcome: "failed",
-      reason: "access_denied",
-      sequence: next(),
-      stepIndex,
-      turnId: "turn-3",
-    },
-  },
-  {
-    type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-3" },
-  },
-  { type: "turn.completed", data: { sequence: next(), turnId: "turn-3" } },
-  {
-    type: "session.waiting",
-    data: { continuationToken: "session-id", wait: "next-user-message" },
-  },
-];
+});
+const firstCallbackTurn = callbackTurn({
+  turnId: "turn_0",
+  name: "stub-mcp",
+  messageDeliveryId: "delivery_1",
+  outcome: "accepted",
+});
+const secondTurn = signInTurn({
+  deliveryId: "delivery_2",
+  turnId: "turn_1",
+  name: "other-mcp",
+  description: "Other MCP server",
+  signIn: { url: "https://example.com/authorize/other-mcp" },
+  started: true,
+});
+const secondCallbackTurn = callbackTurn({
+  turnId: "turn_1",
+  name: "other-mcp",
+  messageDeliveryId: "delivery_2",
+  outcome: "failed",
+  reason: "access_denied",
+});
 
 process.env.EVE_TUI_UNICODE = "1";
 
@@ -153,7 +152,7 @@ void (async () => {
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    client: new Client({ host: "http://fake.invalid" }),
+    client: new Client({ baseUrl: "http://fake.invalid" }),
     screen,
     userInput: input,
     name: "TUI states smoke",
@@ -174,7 +173,7 @@ void (async () => {
     input.type("turn 1, drive stub-mcp through required → authorized");
     input.enter();
 
-    await screen.waitForText("● Stub-mcp · authorization", 10_000);
+    await screen.waitForText("● stub-mcp · authorization", 10_000);
     console.log(theme.muted("[states] stub-mcp section header rendered"));
 
     await waitForCondition(
@@ -232,7 +231,7 @@ void (async () => {
     input.type("turn 2, drive other-mcp through required → failed");
     input.enter();
 
-    await screen.waitForText("● Other-mcp · authorization", 10_000);
+    await screen.waitForText("● other-mcp · authorization", 10_000);
     console.log(theme.muted("[states] other-mcp section header rendered"));
     server.emit(secondCallbackTurn);
 

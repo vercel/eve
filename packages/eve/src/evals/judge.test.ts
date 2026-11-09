@@ -5,7 +5,7 @@ import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type { AssertionHandle, EveEvalTaskResult, JudgeContext } from "#evals/types.js";
 
 const decide = vi.hoisted(() => vi.fn());
-vi.mock("#ai/decide.js", () => ({ decide }));
+vi.mock("#ai/decision-adapter.js", () => ({ decideWithMetadata: decide }));
 afterEach(() => vi.resetAllMocks());
 
 function setup() {
@@ -30,10 +30,11 @@ function result(answers: Record<string, unknown>) {
 }
 function emptyTaskResult(): EveEvalTaskResult {
   return {
+    sessionEnded: false,
     derived: createEmptyDerivedFacts(),
     events: [],
-    finalMessage: null,
-    output: null,
+    reply: undefined,
+    data: null,
     status: "completed",
     traceContexts: [],
   };
@@ -48,7 +49,7 @@ describe("judge", () => {
     expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
         model: undefined,
-        abortSignal: controller.signal,
+        signal: controller.signal,
         state: { input: "Name the source.", output: "A sourced answer." },
         questions: { judgment: { type: "boolean", instructions: "cites a source" } },
       }),
@@ -97,7 +98,7 @@ describe("judge", () => {
     expect(decide.mock.calls[0]?.[0].questions.outcome).not.toHaveProperty("expected");
     const assertions = await collector.finalize(emptyTaskResult());
     expect(assertions.map(({ name, score, passed }) => ({ name, score, passed }))).toEqual([
-      { name: "judge.boolean.accurate", score: 0.2, passed: true },
+      { name: "judge.boolean.accurate", score: 0.2, passed: undefined },
       { name: "judge.score.clarity", score: 0.75, passed: false },
       { name: "judge.choice.outcome", score: 1, passed: true },
     ]);
@@ -132,6 +133,19 @@ describe("judge", () => {
       state: { output: { values: [1] } },
       questions: { judgment: { instructions: "Original" } },
     });
+  });
+
+  it("sends JSON array state as one JSON part", async () => {
+    decide.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
+    const { judge, collector } = setup();
+    judge({
+      state: ["first", { second: 2 }],
+      questions: { judgment: { type: "boolean", instructions: "Is it ordered?" } },
+    });
+    await collector.finalize(emptyTaskResult());
+    expect(decide.mock.calls[0]?.[0].state).toEqual([
+      { type: "json", value: ["first", { second: 2 }] },
+    ]);
   });
 
   it("preserves explicit null and transcript values", async () => {

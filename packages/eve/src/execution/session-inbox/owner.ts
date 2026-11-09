@@ -1,0 +1,163 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { readInboxHandle } from "#execution/session-inbox/handle.js";
+import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
+import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  findRetiredOwnerRun,
+  routesToOwnerDeployment,
+  type OwnerRun,
+} from "#execution/session-inbox/runnable-owner.js";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
+import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
+
+/**
+ * The session's owner can never execute again: another eve version built it,
+ * or its Vercel deployment was deleted. Ingress refuses a command for an owner
+ * another eve version built before committing it. A deleted deployment shows
+ * only when a read fails, possibly after the owner accepted the command, but
+ * that owner can never replay it. Internal: carries the owner run, which never
+ * reaches a client.
+ */
+export class StrandedSessionOwnerError extends Error {
+  /** The owner's hook, when ingress looked it up; its metadata names the session. */
+  readonly hook: Hook | undefined;
+  readonly ownerRun: OwnerRun;
+
+  constructor(ownerRun: OwnerRun, hook?: Hook) {
+    super(`Session owner run "${ownerRun.runId}" is stranded.`);
+    this.name = "StrandedSessionOwnerError";
+    this.hook = hook;
+    this.ownerRun = ownerRun;
+  }
+
+  get ownerRunId(): string {
+    return this.ownerRun.runId;
+  }
+
+  /** eve version that built the owner, when it recorded one. */
+  get eveVersion(): string | undefined {
+    return this.ownerRun.attributes[EVE_VERSION_ATTRIBUTE];
+  }
+}
+
+/**
+ * The single ingress path into a hook: refuses a session inbox whose owner
+ * cannot execute before anything is committed. Vercel can reuse a validated
+ * inbox handle: Workflow requires its guarded, deduplicated write endpoint.
+ * Only a definite refusal falls back to resolving the current token owner.
+ */
+export async function resumeRunnableHook(
+  token: string,
+  payload: unknown,
+  inbox?: string,
+): Promise<Awaited<ReturnType<typeof resumeHook>>> {
+  const world = inbox !== undefined ? await getWorld() : undefined;
+  if (
+    inbox !== undefined &&
+    inbox.length <= 8_192 &&
+    world !== undefined &&
+    routesToOwnerDeployment(world) &&
+    world.capabilities !== undefined &&
+    "resolvedHookResume" in world.capabilities &&
+    world.capabilities.resolvedHookResume === true
+  ) {
+    const parsed = readInboxHandle(inbox);
+    const cached = parsed?.token === token ? parsed : undefined;
+    if (cached !== undefined) {
+      try {
+        return await resumeHook(cached, payload);
+      } catch (error) {
+        // Only a definite refusal may be retried against a freshly resolved owner.
+        if (!HookNotFoundError.is(error)) throw error;
+      }
+    }
+  }
+  if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
+  return await resumeHook(token, payload);
+}
+
+/**
+ * Throws {@link StrandedSessionOwnerError} when the run holding a physical
+ * session inbox token cannot execute. An unheld token passes: resuming it
+ * reports the absence. Where the World replays each run on its own
+ * deployment, nothing is looked up: an owner whose deployment was deleted
+ * shows only through {@link isOwnerDeploymentDeletedError} on a failed read,
+ * so a healthy owner pays nothing for the check.
+ */
+export async function assertRunnableSessionInbox(token: string): Promise<void> {
+  const world = await getWorld();
+  if (routesToOwnerDeployment(world)) return;
+  const holder = await findSessionHookHolder(token);
+  if (holder !== undefined) await assertRunnableOwner(world, holder.runId, holder.hook);
+}
+
+/** {@link assertRunnableSessionInbox} for a holder the caller already looked up. */
+export async function assertRunnableSessionOwner(holder: {
+  readonly runId: string;
+  readonly hook?: Hook;
+}): Promise<void> {
+  const world = await getWorld();
+  if (routesToOwnerDeployment(world)) return;
+  await assertRunnableOwner(world, holder.runId, holder.hook);
+}
+
+/**
+ * The run holding a session hook token, or `undefined` when none does. The
+ * `eve dev` World refuses to expose the hooks of a run it will not execute
+ * (a dormant or ineligible generation) and names only the run, so `hook` is
+ * then absent. This is the only place that refusal is interpreted.
+ */
+export async function findSessionHookHolder(
+  token: string,
+): Promise<{ readonly runId: string; readonly hook?: Hook } | undefined> {
+  try {
+    const hook = await getHookByToken(token);
+    return { hook, runId: hook.runId };
+  } catch (error) {
+    if (HookNotFoundError.is(error)) return undefined;
+    if (DevelopmentRunUnavailableError.is(error)) return { runId: error.runId };
+    throw error;
+  }
+}
+
+/**
+ * Looks up a session hook. A run the `eve dev` World refuses to expose is
+ * stranded only when another eve version built it; otherwise a restart with
+ * `--resume` may run it, so the refusal propagates and nothing is ended.
+ */
+export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
+  try {
+    return await getHookByToken(token);
+  } catch (error) {
+    if (!DevelopmentRunUnavailableError.is(error)) throw error;
+    await assertRunnableOwner(await getWorld(), error.runId);
+    throw error;
+  }
+}
+
+/**
+ * `hook`'s owner as {@link StrandedSessionOwnerError} when `error` shows its
+ * deployment was deleted; otherwise, or when the run cannot be read, `error`.
+ * `error` must come from reading or resuming this exact hook: a token may have
+ * moved to a live owner since.
+ */
+export async function strandedIfDeploymentDeleted(error: unknown, hook: Hook): Promise<unknown> {
+  if (!isOwnerDeploymentDeletedError(error)) return error;
+  try {
+    const world = await getWorld();
+    const ownerRun = await world.runs.get(hook.runId, { resolveData: "none" });
+    return new StrandedSessionOwnerError(ownerRun, hook);
+  } catch {
+    return error;
+  }
+}
+
+async function assertRunnableOwner(
+  world: Awaited<ReturnType<typeof getWorld>>,
+  runId: string,
+  hook?: Hook,
+): Promise<void> {
+  const ownerRun = await findRetiredOwnerRun(world, runId);
+  if (ownerRun !== undefined) throw new StrandedSessionOwnerError(ownerRun, hook);
+}

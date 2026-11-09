@@ -11,7 +11,7 @@ function createTestSkill(
   return {
     description: "A test skill",
     logicalPath: `skills/${name}/SKILL.md`,
-    markdown: "# Test\nDo the thing.",
+    content: "# Test\nDo the thing.",
     name,
     sourceId: "test-skill-source",
     sourceKind: "markdown",
@@ -32,14 +32,11 @@ describe("formatAvailableSkillsSection", () => {
     expect(result).not.toBeNull();
     expect(result).toContain("Available skills");
     expect(result).toContain(
-      "If the user names a skill or the request clearly matches one of the descriptions below, call load_skill before proceeding.",
-    );
-    expect(result).toContain(
       "If multiple skills match, activate the minimal set that covers the task.",
     );
     expect(result).toContain("Skill files live under `$HOME/.agents/skills/<skill>/`");
     expect(result).toContain(
-      "`/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable",
+      "`skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable",
     );
     expect(result).toContain(
       "resolve them relative to the directory containing that specific SKILL.md",
@@ -69,7 +66,7 @@ describe("formatAvailableSkillsSection", () => {
   });
 
   it("never includes active skill markdown content", () => {
-    const skill = createTestSkill({ markdown: "# Full Instructions\nStep 1: Do this." });
+    const skill = createTestSkill({ content: "# Full Instructions\nStep 1: Do this." });
 
     const result = formatAvailableSkillsSection([skill]);
 

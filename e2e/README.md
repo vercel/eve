@@ -73,8 +73,9 @@ Each retained fixture package also exposes the same command as:
 pnpm --filter agent-basic-runtime test:e2e
 ```
 
-The root convenience command runs every fixture package with a `test:e2e`
-script:
+The root convenience command uses Turbo to build each fixture's workspace
+dependencies and then run every `test:e2e` script. A fixture that needs
+`e2e:prepare` invokes it from its own test script:
 
 ```sh
 pnpm test:e2e
@@ -159,6 +160,21 @@ message, and ordering a side effect after the result it depends on. Every eval
 in it is tagged `real-model`. Deterministic task coverage lives with the
 surfaces it exercises, in `agent-workflow-tools` and `agent-subagents`.
 
+`agent-deferred-tools` owns the catalog: about 40 deferred tools (20 of them
+under the `ledger` namespace), agents, skills, and a connection, reached only
+through `search` and `execute`. Its mock-model evals cover dispatch through
+`execute`; its `real-model` evals gate prompt-cache reuse after discovery and
+that web questions go to `web_search`.
+
+`agent-tool-discovery` is the real-model gate for how models use the catalog
+tools: a catalog of 70 deferred tools (60 in the `sre`, `d0`, `index`, and
+`support` namespaces), a deferred skill, and a deferred agent, with no
+connections, beside the default `web_search` and `bash`. Its evals check that
+models find deferred tools with `eve__search` and run them with `eve__tool`,
+send web and shell requests to `web_search` and `bash` instead, and leave the
+catalog alone for questions they can answer themselves. Every eval in it is
+tagged `real-model`.
+
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps
 should stay out of the e2e matrix unless they intentionally own evals.
@@ -179,7 +195,9 @@ The matrix models and worlds are registered in [`e2e/matrix.json`](./matrix.json
 discovers every fixture with an `evals/` directory and emits the suite
 matrices from the registry:
 
-- `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
+- `model_matrix` — fixture × model legs for `e2e-local.yml`. Each leg includes
+  the fixture's workspace package name so Turbo can select its dependency
+  graph. The first
   registry model is the default that every fixture runs on; the rest run only
   on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
   A fixture can set `e2e.localOnly: true` when it requires local-runner hardware
@@ -193,7 +211,8 @@ matrices from the registry:
   selected model into one job per shard. This partitions only the local model
   suite; world matrices remain one leg per fixture.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
-  workflow. A fixture can set `e2e.worlds` to a subset of registered world
+  workflow, including its workspace package name for Turbo filtering. A
+  fixture can set `e2e.worlds` to a subset of registered world
   names, or to `[]` when its evals require local dev behavior; omitting it
   selects every world. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
@@ -208,11 +227,13 @@ newly added fixtures and models become required automatically. Add a new
 aggregate to the ruleset only after its workflow lands on `main`: a required
 check nothing reports blocks every PR as permanently "expected".
 
-`.github/workflows/e2e-local.yml` (the model suite) builds the eve package
-once per leg, then runs one fixture directory with the leg's real model:
+`.github/workflows/e2e-local.yml` (the model suite) asks Turbo to prepare the
+selected fixture's workspace dependencies, then runs one fixture directory
+with the leg's real model. The `dist-extensions` task also builds and re-packs
+its file-protocol extension dependencies:
 
 ```sh
-pnpm --filter eve run build
+pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
 cd "$FIXTURE_DIR"
 pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"

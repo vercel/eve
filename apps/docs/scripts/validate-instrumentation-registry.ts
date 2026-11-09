@@ -25,6 +25,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "honeycomb-instrumentation": "honeycomb",
   arize: "arize",
   raindrop: "raindrop",
+  oodle: "oodle",
   jaeger: "jaeger",
 };
 

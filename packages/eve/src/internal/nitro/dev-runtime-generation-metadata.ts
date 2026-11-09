@@ -1,5 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { resolveDevelopmentStateDirectory } from "#internal/application/dev-environment.js";
 
 export interface DevelopmentGenerationMetadata {
   readonly runtimeAppRoot: string;
@@ -8,7 +9,7 @@ export interface DevelopmentGenerationMetadata {
 const GENERATION_METADATA = "generation.json";
 
 export function resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot: string): string {
-  return join(appRoot, ".eve", "dev-runtime", "snapshots");
+  return join(resolveDevelopmentStateDirectory(appRoot), "dev-runtime", "snapshots");
 }
 
 export async function listDevelopmentGenerationIds(appRoot: string): Promise<string[]> {

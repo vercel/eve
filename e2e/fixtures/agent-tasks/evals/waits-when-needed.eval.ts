@@ -5,7 +5,7 @@ import { heldTurn } from "./task-events";
 
 /**
  * The answer depends on the researcher's result, so the model waits for it
- * with `task_wait` instead of ending its step while the task works.
+ * with `eve__task_wait` instead of ending its step while the task works.
  */
 export default defineEval({
   description: "The model waits for an agent's result when its answer depends on it.",
@@ -16,13 +16,13 @@ export default defineEval({
     );
     turn.expectOk();
 
-    t.calledSubagent("researcher", { status: "completed" });
-    turn.calledTool("task_wait");
+    t.calledAgent("researcher", { status: "completed" });
+    turn.calledTool("eve__task_wait");
     turn.eventsSatisfy(
       "the model never replies while the researcher works",
       (events) => !heldTurn(events),
     );
     turn.messageIncludes(EMEA_CHURN.findingId);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

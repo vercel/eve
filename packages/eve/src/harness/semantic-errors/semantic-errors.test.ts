@@ -48,6 +48,14 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-credit-exhausted",
     },
     {
+      title: "gateway credit balance check throttled despite insufficient_funds",
+      error: gatewayUpstreamBillingError(
+        "insufficient_funds",
+        "AI Gateway credit balance verification is temporarily throttled. Please retry shortly.",
+      ),
+      id: "gateway-credit-check-throttled",
+    },
+    {
       title: "gateway project budget exhausted by upstream type",
       error: gatewayUpstreamBillingError(
         "quota_for_entity_exceeded",
@@ -169,6 +177,32 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "model-response-content-filtered",
     },
     {
+      title: "cybersecurity policy refusal",
+      error: named(
+        "AI_StreamProviderError",
+        "This content was flagged for possible cybersecurity risk.",
+        {
+          code: "cyber_policy",
+          statusCode: 400,
+          type: "invalid_request",
+        },
+      ),
+      id: "model-request-cyber-policy-refused",
+    },
+    {
+      title: "biological policy refusal",
+      error: named(
+        "AI_StreamProviderError",
+        "This content was flagged for possible biological risk.",
+        {
+          code: "bio_policy",
+          statusCode: 400,
+          type: "invalid_request",
+        },
+      ),
+      id: "model-request-bio-policy-refused",
+    },
+    {
       title: "unsupported model capability",
       error: named("AI_UnsupportedFunctionalityError", "tool type not supported"),
       id: "model-capability-unsupported",
@@ -210,11 +244,6 @@ describe("summarizeKnownError (catalog table)", () => {
         "The Docker sandbox backend requires a running Docker daemon.",
       ),
       id: "sandbox-docker-daemon-unreachable",
-    },
-    {
-      title: "microsandbox provisioning failure",
-      error: named("MicrosandboxDiagnosticError", "pulling template [T001]: registry unreachable."),
-      id: "sandbox-provisioning-failed",
     },
     {
       title: "port in use",
@@ -309,13 +338,6 @@ describe("summarizeKnownError (catalog table)", () => {
     );
     expect(summary?.message).toBe("the `docker` CLI was not found.");
     expect(summary?.hint).toBe("Install and start Docker Desktop.");
-  });
-
-  it("passes eve-authored sandbox messages through unchanged", () => {
-    const summary = summarizeKnownError(
-      named("MicrosandboxDiagnosticError", "pulling template [T001]: registry unreachable."),
-    );
-    expect(summary?.message).toBe("pulling template [T001]: registry unreachable.");
   });
 
   it("matches plain-object throwables that crossed a workflow step boundary", () => {

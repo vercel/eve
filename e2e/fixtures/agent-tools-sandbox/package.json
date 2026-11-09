@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "eve build",
+    "build:analysis": "eve build --profile .eve/bundle-analysis-profile.json",
     "dev": "eve dev",
     "start": "eve start",
     "typecheck": "eve build --skip-sandbox-prewarm && tsc",

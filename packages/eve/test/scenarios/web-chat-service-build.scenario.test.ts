@@ -49,7 +49,10 @@ it("builds the generated Web Chat service with pnpm dependencies installed only 
     prompter: createFakePrompter().prompter,
     resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
   });
-  await applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, contexts.apply);
+  await applyWebSetup(
+    { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+    contexts.apply,
+  );
   const configured = await runFile(
     process.execPath,
     [

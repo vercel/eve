@@ -6,7 +6,8 @@ last_updated: "2026-09-11"
 
 # Versioned wire schema for the session inbox
 
-Superseded by [single-workflow sessions](./single-workflow-session-upgrades.md).
+Superseded by single-workflow sessions ([#876](https://github.com/vercel/eve/issues/876)), whose
+handoff is now described in [atomic session handoff](./atomic-session-handoff.md).
 The implementation uses one inbox protocol with no negotiation or migration chain.
 The proposal below records the previous deployment model, not current guidance.
 

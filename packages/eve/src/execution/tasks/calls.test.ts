@@ -9,7 +9,7 @@ it("reads task_wait's timeoutSeconds as the milliseconds the turn waits", () => 
         {
           input: { timeoutSeconds: 90 },
           toolCallId: "wait-1",
-          toolName: "task_wait",
+          toolName: "eve__task_wait",
           type: "tool-call",
         },
       ],
@@ -17,5 +17,5 @@ it("reads task_wait's timeoutSeconds as the milliseconds the turn waits", () => 
     },
   ]);
 
-  expect(calls).toEqual([{ callId: "wait-1", kind: "task_wait", timeoutMs: 90_000 }]);
+  expect(calls).toEqual([{ callId: "wait-1", kind: "eve__task_wait", timeoutMs: 90_000 }]);
 });

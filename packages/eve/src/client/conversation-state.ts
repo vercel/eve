@@ -1,180 +1,158 @@
-import { conversationProjection } from "#client/conversation-projection.js";
-import type { EveAuthorizationPart, EveMessageData } from "#client/message-reducer-types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
-import {
-  type ConversationTask,
-  type ConversationTaskCall,
-  openSignIns,
-} from "#protocol/session-projection.js";
+import type { EveMessage } from "#client/message-types.js";
+import type { DeliveryOutcome } from "#protocol/session-events/families/delivery.js";
+import type { CallRow, DeliveryRow, TaskRow } from "#protocol/session-projection/tables.js";
+import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 
-export type { ConversationTask, ConversationTaskCall };
-
-export interface ConversationTurn {
-  readonly turnId: string;
-  readonly status: "active" | "completed" | "cancelled" | "failed";
-  /** The open turn is parked, holding on its tasks or on a question one of its calls asked. */
-  readonly waiting?: boolean;
+export interface FollowedChild {
+  /** Root depth is zero; its immediate children have depth one. */
+  readonly depth: number;
+  readonly name: string;
+  readonly sessionId: string;
+  readonly owner: { readonly callId: string } | { readonly taskId: string };
 }
 
-export interface ConversationInput {
-  readonly request: InputRequest;
-  readonly turnId: string;
-  readonly stepIndex: number;
-  /** The task whose run asks, when a task asks. */
-  readonly taskId?: string;
-  readonly status: "open" | "responded" | "settled";
-  readonly response?: InputResponse;
-  readonly outcome?: string;
-}
+/** A synchronous selection policy, evaluated once per relationship at each known reachable depth. */
+export type FollowAgents = boolean | ((child: FollowedChild) => boolean);
+
+export type AgentObservationReason =
+  | "predicate"
+  | "depth-limit"
+  | "session-limit"
+  | "cycle"
+  | "unauthorized"
+  | "expired"
+  | "unsupported"
+  | "transport"
+  | "detached";
 
 export type AgentObservation =
-  | { readonly status: "not-followed" }
-  | { readonly status: "following"; readonly conversation: ConversationState }
-  /** Every call so far has shown its content; a later call to the task resumes following. */
-  | { readonly status: "idle"; readonly conversation: ConversationState }
+  | { readonly status: "not-followed"; readonly reason?: AgentObservationReason }
   | {
-      /** The stream failed; this does not mean the agent failed. */
-      readonly status: "unavailable";
-      readonly conversation?: ConversationState;
+      readonly status: "queued" | "following" | "caught-up" | "interrupted" | "unavailable";
+      /** Identity in this store's authorized reader scope, established by the server. */
+      readonly key?: string;
+      readonly conversation: ConversationState;
+      /** Committed source-line position, coherent with conversation. */
+      readonly position: number;
+      /** Reached the tail captured when this read opened, not execution completion. */
+      readonly caughtUp: boolean;
+      readonly reason?: AgentObservationReason;
     };
 
-/** A session a run opened with `ctx.agent`, as its `agent.started` announced it. */
+/** A child session linked by the root's `child.opened`, with its independent observation state. */
 export interface ConversationAgentSession {
   readonly sessionId: string;
   readonly name: string;
-  /** The call whose invocation opened the session. */
-  readonly callId: string;
-  readonly turnId: string;
-  /** The task whose run opened the session; absent when an `execute` call opened it. */
+  readonly owner: FollowedChild["owner"];
+  readonly callId?: string;
+  readonly turnId?: string;
   readonly taskId?: string;
   readonly observation: AgentObservation;
 }
 
-/**
- * Renderable conversation state. Root and agent-session input IDs occupy separate scopes.
- */
-export interface ConversationState extends EveMessageData {
-  readonly activeTurnId?: string;
-  readonly turns: Readonly<Record<string, ConversationTurn>>;
-  readonly inputs: Readonly<Record<string, ConversationInput>>;
-  readonly tasks: Readonly<Record<string, ConversationTask>>;
-  /** Sessions opened by this session's runs, by session ID. */
+/** Immutable lifecycle observations, with renderable messages and local answers. */
+export interface ConversationState {
+  readonly view: SessionView;
+  readonly messages: readonly EveMessage[];
   readonly agents: Readonly<Record<string, ConversationAgentSession>>;
 }
 
-/** Inputs awaiting an answer, including requests introduced in earlier turns. */
-export function openConversationInputs(state: ConversationState): readonly ConversationInput[] {
-  return Object.values(state.inputs).filter((input) => input.status === "open");
-}
-
-/** Authorization attempts remain visible across turns, including parked callbacks. */
-export function conversationAuthorizations(
-  state: ConversationState,
-): readonly EveAuthorizationPart[] {
-  return state.messages.flatMap((message) =>
-    message.role === "assistant"
-      ? message.parts.filter((part): part is EveAuthorizationPart => part.type === "authorization")
-      : [],
-  );
-}
-
-/** A sign-in the session still waits on, which resumes its work when the callback arrives. */
-export function hasPendingAuthorizations(state: ConversationState): boolean {
-  return openSignIns(conversationProjection(state)).some(
-    (attempt) => attempt.awaitsCallback === true,
-  );
-}
-
-/**
- * The agent task whose calls a session receives, when the session is that agent's own. eve's agent
- * tools send each call as one message, in call order, which is what lets a client attribute the
- * session's turns to calls. A session an authored tool opens with `ctx.agent` has no such task.
- */
 export function agentToolTask(
   state: ConversationState,
   agent: ConversationAgentSession,
-): ConversationTask | undefined {
-  const task = agent.taskId === undefined ? undefined : state.tasks[agent.taskId];
+): TaskRow | undefined {
+  const task =
+    agent.taskId === undefined ? undefined : sessionTables(state.view).tasks[agent.taskId];
   return task?.kind === "agent" ? task : undefined;
 }
 
-/** The session an agent tool forwards its task's calls to. */
 export function agentToolSession(
   state: ConversationState,
-  task: ConversationTask,
+  task: TaskRow,
 ): ConversationAgentSession | undefined {
-  return Object.values(state.agents).find(
+  return Object.values(state.agents).findLast(
     (agent) => agentToolTask(state, agent)?.taskId === task.taskId,
   );
 }
 
-/**
- * Whether a followed agent tool session has shown everything its task's calls produced so far:
- * no call is working, the session has no open turn, question, or sign-in, and every completed call's
- * message has arrived. The last check covers a child stream that lags the root stream.
- */
-export function isAgentSessionCaughtUp(
-  state: ConversationState,
-  agent: ConversationAgentSession,
-): boolean {
-  if (agent.observation.status !== "following" && agent.observation.status !== "idle") {
-    return false;
-  }
-  const task = agentToolTask(state, agent);
-  if (task === undefined) return false;
-  const calls = Object.values(task.calls);
-  if (calls.some((call) => call.status === "working")) return false;
-  const child = agent.observation.conversation;
-  if (child.activeTurnId !== undefined) return false;
-  if (Object.values(child.inputs).some((input) => input.status !== "settled")) return false;
-  if (hasPendingAuthorizations(child)) return false;
-  const received = child.messages.filter((message) => message.role === "user").length;
-  return received >= calls.filter((call) => call.status === "completed").length;
+/** Direct model calls served by this task, in call order. */
+export function taskCalls(view: SessionView, taskId: string): readonly CallRow[] {
+  return Object.values(sessionTables(view).calls).filter((call) => call.taskId === taskId);
+}
+
+/** A delivery a call sent, as this reader has seen it on the child's stream. */
+export interface AgentCallDelivery {
+  readonly deliveryId: string;
+  /** `unseen` until this reader reads the child's admission, including when it follows none. */
+  readonly status: "unseen" | DeliveryRow["status"];
+  /** The child turn that consumed it. */
+  readonly turnId?: string;
+  readonly outcome?: DeliveryOutcome;
+}
+
+/** One child session's part in a call: what the call sent it, and the turns that read it. */
+export interface AgentCallSession {
+  readonly sessionId: string;
+  readonly deliveries: readonly AgentCallDelivery[];
+  /**
+   * Child turns that consumed the call's deliveries, oldest first. `sharedWith` names the other
+   * calls whose deliveries the same turn consumed, so its content answers them together.
+   */
+  readonly turns: readonly { readonly turnId: string; readonly sharedWith: readonly string[] }[];
 }
 
 /**
- * Attributes an agent tool session's turns to the calls that produced them. The k-th message the
- * session received came from the task's k-th call; a turn without a message of its own, such as
- * one resumed after an approval, continues the previous call. A call whose message joined a
- * running turn owns no turn.
+ * The child activity a call caused, from the `child.sent` links its session recorded: `unlinked`
+ * when it recorded none, as for a call that sent nothing or reached an earlier-protocol remote
+ * agent.
  */
-export function agentCallTurns(
-  task: ConversationTask,
-  conversation: ConversationState,
-): ReadonlyMap<string, readonly string[]> {
-  const callIds = Object.keys(task.calls);
-  const owners = new Map<string, string>();
-  let index = 0;
-  for (const message of conversation.messages) {
-    if (message.role !== "user") continue;
-    const callId = callIds[index++];
-    const turnId = message.metadata?.turnId;
-    if (callId !== undefined && turnId !== undefined && !owners.has(turnId)) {
-      owners.set(turnId, callId);
-    }
-  }
-  const turns = new Map<string, string[]>(callIds.map((callId) => [callId, []]));
-  let owner: string | undefined;
-  for (const turnId of Object.keys(conversation.turns)) {
-    owner = owners.get(turnId) ?? owner;
-    if (owner !== undefined) turns.get(owner)?.push(turnId);
-  }
-  return turns;
-}
+export type AgentCallActivity =
+  | { readonly status: "unlinked" }
+  | { readonly status: "linked"; readonly sessions: readonly AgentCallSession[] };
 
-/**
- * Whether a call's content may still arrive on its agent tool session: one of the call's turns is
- * still open there, or the call completed before its message reached the session.
- */
-export function isAgentCallContentPending(
-  task: ConversationTask,
-  call: ConversationTaskCall,
-  conversation: ConversationState,
-): boolean {
-  const turnIds = agentCallTurns(task, conversation).get(call.callId) ?? [];
-  const { activeTurnId } = conversation;
-  if (activeTurnId !== undefined && turnIds.includes(activeTurnId)) return true;
-  if (call.status !== "completed") return false;
-  const received = conversation.messages.filter((message) => message.role === "user").length;
-  return received <= Object.keys(task.calls).indexOf(call.callId);
+export function agentCallActivity(state: ConversationState, callId: string): AgentCallActivity {
+  const sessions = Object.values(sessionTables(state.view).children).flatMap(
+    (child): AgentCallSession[] => {
+      const sent = child.deliveries ?? [];
+      if (!sent.some((entry) => entry.callId === callId)) return [];
+      const callOf = new Map(sent.map((entry) => [entry.deliveryId, entry.callId]));
+      const observation = state.agents[child.sessionId]?.observation;
+      const tables =
+        observation === undefined || observation.status === "not-followed"
+          ? undefined
+          : sessionTables(observation.conversation.view);
+      const deliveries = sent.flatMap((entry): AgentCallDelivery[] => {
+        if (entry.callId !== callId) return [];
+        const row = tables?.deliveries[entry.deliveryId];
+        if (row === undefined) return [{ deliveryId: entry.deliveryId, status: "unseen" }];
+        return [
+          {
+            deliveryId: entry.deliveryId,
+            status: row.status,
+            ...(row.turnId !== undefined && { turnId: row.turnId }),
+            ...(row.outcome !== undefined && { outcome: row.outcome }),
+          },
+        ];
+      });
+      const read = new Set(
+        deliveries.flatMap(({ turnId }) => (turnId === undefined ? [] : [turnId])),
+      );
+      const turns = Object.values(tables?.turns ?? {})
+        .filter((turn) => read.has(turn.turnId))
+        .sort((a, b) => a.introducedAt - b.introducedAt)
+        .map((turn) => ({
+          turnId: turn.turnId,
+          sharedWith: [
+            ...new Set(
+              Object.values(tables!.deliveries).flatMap((row) => {
+                const other = row.turnId === turn.turnId ? callOf.get(row.deliveryId) : undefined;
+                return other === undefined || other === callId ? [] : [other];
+              }),
+            ),
+          ],
+        }));
+      return [{ sessionId: child.sessionId, deliveries, turns }];
+    },
+  );
+  return sessions.length === 0 ? { status: "unlinked" } : { status: "linked", sessions };
 }

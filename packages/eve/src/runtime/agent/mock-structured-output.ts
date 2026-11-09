@@ -1,6 +1,6 @@
 /**
  * Builds a deterministic sample value satisfying a JSON Schema, used by the
- * mock model to populate a `final_output` tool call in tests.
+ * mock model to populate an `eve__reply` tool call in tests.
  */
 export function createJsonSchemaSample(schema: unknown): unknown {
   if (!isRecord(schema)) {

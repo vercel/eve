@@ -5,7 +5,7 @@ import { byPrincipal } from "#public/memory/scope.js";
 
 const baseContext: MemoryScopeContext = {
   abortSignal: new AbortController().signal,
-  channel: { kind: "eve" },
+  channel: { kind: "channel:eve", metadata: {} },
   session: { auth: { current: null, initiator: null }, id: "session_1" },
 };
 

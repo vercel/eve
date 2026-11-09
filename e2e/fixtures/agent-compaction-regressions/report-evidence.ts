@@ -7,9 +7,12 @@ export function assistantHasReport(
   const escapedReference = reference.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const recordReference = new RegExp(`(?<![\\w/-])${escapedReference}(?![\\w/-])`);
 
-  // Only successful tool results introduce these references. Requiring their
-  // retention in assistant text proves they survived a checkpoint or trail.
+  // Only successful tool results introduce these references. Their presence in
+  // what the model is shown (a surviving tool result, or assistant text after a
+  // checkpoint or trail) proves they survived compaction.
   return messages.some(
-    (message) => message.role === "assistant" && recordReference.test(message.text),
+    (message) =>
+      (message.role === "assistant" || message.role === "tool") &&
+      recordReference.test(message.text),
   );
 }

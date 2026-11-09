@@ -7,9 +7,10 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
  */
 export const EXTENSION_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
-    "agent/agent.cjs": `module.exports = {
+    "agent/agent.cjs": `const { defineAgent } = require("eve");
+module.exports = defineAgent({
   model: "openai/gpt-5.4",
-};
+});
 `,
     "agent/lib/weather/bridge.js": `export const TOOL_MIDDLE = "using lib extension imports";
 `,
@@ -33,12 +34,12 @@ exports.default = defineSandbox(async () => {
 `,
     "agent/schedules/nightly.cts": `export default {
   cron: "0 0 * * *",
-  markdown: "Run the nightly extension fixture schedule.",
+  content: "Run the nightly extension fixture schedule.",
 };
 `,
     "agent/skills/handoff.mts": `export default {
   description: "Hand off the task to the next specialist.",
-  markdown: "Use this skill when routing tasks across specialized agents.",
+  content: "Use this skill when routing tasks across specialized agents.",
 };
 `,
     "agent/instructions.md": `You are an extension fixture agent.

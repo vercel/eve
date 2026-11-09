@@ -9,12 +9,7 @@ import type { HarnessSession } from "#harness/types.js";
 
 function createSession(): HarnessSession {
   return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "test",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:test",
     history: [],
     sessionId: "session-test",
@@ -25,6 +20,7 @@ describe("buildStepHooks", () => {
   it("starts the step from onStepStart, not prepareStep", async () => {
     const startStep = vi.fn(async () => {});
     const hooks = buildStepHooks({
+      model: { id: "test-model" },
       profile: resolveModelProfile("openai/gpt-5"),
       session: createSession(),
       startStep,
@@ -52,21 +48,19 @@ describe("buildStepHooks", () => {
   });
 
   it("sends the trace conversation ID to Gateway without changing direct-provider options", async () => {
-    const session: HarnessSession = {
-      ...createSession(),
-      rootSessionId: "root-session",
-      agent: {
-        ...createSession().agent,
-        modelReference: {
-          id: "anthropic/claude-sonnet-4-5",
-          providerOptions: { gateway: { order: ["bedrock"] }, openai: { store: false } },
-        },
-      },
+    const session: HarnessSession = { ...createSession(), rootSessionId: "root-session" };
+    const reference = {
+      id: "anthropic/claude-sonnet-4-5",
+      providerOptions: { gateway: { order: ["bedrock"] }, openai: { store: false } },
     };
     const context = new ContextContainer();
     context.set(ConversationIdKey, "forwarded-conversation");
     const prepare = (model: LanguageModel) =>
-      buildStepHooks({ profile: resolveModelProfile(model), session }).prepareStep({
+      buildStepHooks({
+        model: reference,
+        profile: resolveModelProfile(model),
+        session,
+      }).prepareStep({
         messages: [],
         model,
         instructions: undefined,
@@ -116,17 +110,12 @@ describe("buildStepHooks", () => {
 
   it("preserves an authored Gateway session ID", async () => {
     const hooks = buildStepHooks({
-      profile: resolveModelProfile("anthropic/claude-sonnet-4-5"),
-      session: {
-        ...createSession(),
-        agent: {
-          ...createSession().agent,
-          modelReference: {
-            id: "anthropic/claude-sonnet-4-5",
-            providerOptions: { gateway: { sessionId: "authored-session" } },
-          },
-        },
+      model: {
+        id: "anthropic/claude-sonnet-4-5",
+        providerOptions: { gateway: { sessionId: "authored-session" } },
       },
+      profile: resolveModelProfile("anthropic/claude-sonnet-4-5"),
+      session: createSession(),
     });
 
     const prepared = await hooks.prepareStep({
@@ -145,5 +134,60 @@ describe("buildStepHooks", () => {
     expect(prepared?.providerOptions).toEqual({
       gateway: { caching: "auto", sessionId: "authored-session" },
     });
+  });
+
+  it("marks an opaque Bedrock profile with the authored Anthropic cache TTL", async () => {
+    const model = new MockLanguageModelV3({
+      modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+      provider: "amazon-bedrock",
+    });
+    const hooks = buildStepHooks({
+      model: { id: "test-model" },
+      profile: resolveModelProfile(model, { anthropic: { ttl: "1h" } }),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [{ content: "c", role: "user" }],
+      model,
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.messages?.[0]?.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+      bedrock: { cachePoint: { type: "default", ttl: "1h" } },
+    });
+  });
+
+  it("gives a direct OpenAI model only a prompt cache key", async () => {
+    const model = new MockLanguageModelV3({ modelId: "gpt-5", provider: "openai.chat" });
+    const hooks = buildStepHooks({
+      model: { id: "test-model" },
+      profile: resolveModelProfile(model),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [{ content: "hi", role: "user" }],
+      model,
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.providerOptions).toEqual({ openai: { promptCacheKey: expect.any(String) } });
+    expect(prepared?.messages?.[0]?.providerOptions).toBeUndefined();
   });
 });

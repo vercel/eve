@@ -19,7 +19,7 @@ function readDuration(value, label) {
   return value;
 }
 
-function readBuildProfile(value, sourceLabel) {
+export function readBuildProfile(value, sourceLabel) {
   if (!isRecord(value)) {
     throw new Error(`${sourceLabel} must be a JSON object.`);
   }

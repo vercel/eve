@@ -1,5 +1,6 @@
 // Build-time generator for the setup island's Web Chat template. Reads the
-// `apps/docs/registry/channel/web` source item, applies the declared scaffold transforms,
+// `apps/docs/registry/channel/web` source item, its `web-sign-in-with-vercel`
+// overlay, and the `web-tanstack` host config files, applies the declared scaffold transforms,
 // and writes `scaffold/create/web-template.ts`. Not part of the shipped package: it is
 // excluded from tsconfig.build.json and run on demand via the package scripts
 // `generate:web-template` (--write) and `check:web-template` (--check, drift).
@@ -17,6 +18,9 @@ const SIGN_IN_WITH_VERCEL_SOURCE_ROOT = join(
   REPO_ROOT,
   "apps/docs/registry/channel/web-sign-in-with-vercel",
 );
+const TANSTACK_SOURCE_ROOT = join(REPO_ROOT, "apps/docs/registry/channel/web-tanstack");
+// Only the host config files Web Chat setup and `eve add` read or write.
+const TANSTACK_TEMPLATE_FILES = ["tsconfig.json", "vite.config.ts"] as const;
 const REGISTRY_PATH = join(REPO_ROOT, "apps/docs/registry.json");
 const OUTPUT_PATH = join(SETUP_ROOT, "scaffold/create/web-template.ts");
 
@@ -174,6 +178,14 @@ async function renderGeneratedModule(): Promise<string> {
       return renderFileEntry(relativePath, source);
     }),
   );
+  const tanStackEntries = await Promise.all(
+    TANSTACK_TEMPLATE_FILES.map(async (relativePath) =>
+      renderFileEntry(
+        relativePath,
+        await readFile(join(TANSTACK_SOURCE_ROOT, relativePath), "utf8"),
+      ),
+    ),
+  );
   const packageTemplate = parsePackageTemplate(await readFile(REGISTRY_PATH, "utf8"));
   const webChannelTemplate = await readFile(join(SOURCE_ROOT, WEB_CHANNEL_SOURCE_PATH), "utf8");
   const webSignInWithVercelChannelTemplate = await readFile(
@@ -196,6 +208,10 @@ async function renderGeneratedModule(): Promise<string> {
     "",
     "export const WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES = {",
     ...signInWithVercelEntries,
+    "} as const;",
+    "",
+    "export const WEB_APP_TANSTACK_TEMPLATE_FILES = {",
+    ...tanStackEntries,
     "} as const;",
     "",
     "export const WEB_APP_TEMPLATE_PACKAGE_JSON = {",

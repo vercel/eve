@@ -1,4 +1,3 @@
-import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
@@ -13,21 +12,20 @@ import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
-import { resolveAgent } from "#runtime/resolve-agent.js";
-import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
+import { disabledToolNames, resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveDynamicDefinition } from "#runtime/resolve-definition.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
+import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type {
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
 } from "#runtime/types.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 /**
  * Input for resolving the compiled authored manifest and flattened module graph
@@ -135,25 +133,18 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const toolRegistry = await createRuntimeToolRegistry({ tools: agent.tools }, { nodeId });
+  const toolRegistry = await createRuntimeToolRegistry(
+    { tools: agent.tools },
+    { deferSelfAgent: agent.config?.tool === "deferred", nodeId },
+  );
 
   const sandboxRegistry = createRuntimeSandboxRegistry({
     sandbox: agent.sandbox,
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
-    disabledToolNames: input.manifest.sourceComposition.entries.flatMap((entry) => {
-      if (entry.kind !== "disabled" || !entry.source.logicalPath.startsWith("tools/")) return [];
-      return [
-        stripLogicalPathExtension(entry.source.logicalPath)
-          .replace(/^tools\//, "")
-          .replaceAll("/", "-"),
-      ];
-    }),
-    reservedToolNames: [
-      LOAD_SKILL_TOOL_NAME,
-      ...toolRegistry.preparedTools.map((tool) => tool.name),
-    ],
+    disabledToolNames: disabledToolNames(input.manifest),
+    reservedToolNames: toolRegistry.preparedTools.map((tool) => tool.name),
     subagents: await resolveRuntimeSubagents({
       childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
       manifest: input.manifest,
@@ -166,7 +157,6 @@ async function resolveRuntimeAgentNode(
   const node: ResolvedAgentGraphBundle["root"] = {
     agent,
     channels: agent.channels,
-    hookRegistry: createRuntimeHookRegistry(agent.hooks),
     nodeId,
     sandboxRegistry,
     sourceId: input.sourceId,
@@ -241,7 +231,7 @@ async function resolveRuntimeSubagent(input: {
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const variant:
-    | { readonly description: string; readonly dynamic?: never; readonly tool?: boolean }
+    | { readonly description: string; readonly dynamic?: never; readonly tool?: AgentToolExposure }
     | {
         readonly description?: never;
         readonly dynamic: ResolvedDynamicSubagentDefinition;
@@ -250,8 +240,8 @@ async function resolveRuntimeSubagent(input: {
     input.sourceRef.configResolver === undefined
       ? { description: input.sourceRef.description, tool: input.sourceRef.agent.config.tool }
       : {
-          dynamic: await resolveDynamicSubagentDefinition({
-            definition: input.sourceRef.configResolver,
+          dynamic: await resolveDynamicDefinition(input.sourceRef.configResolver, {
+            kindLabel: "dynamic subagent",
             moduleMap: input.moduleMap,
             nodeId: input.sourceRef.nodeId,
           }),
@@ -307,7 +297,7 @@ async function resolveRuntimeRemoteAgent(input: {
     path: string;
     sourceId: string;
     sourceKind: "module";
-    tool?: boolean;
+    tool?: AgentToolExposure;
     url: string;
   } = {
     description: input.sourceRef.description,
@@ -399,7 +389,7 @@ function attachInheritedSandboxWorkspaceResources(input: {
 
   for (const [nodeId, node] of input.nodesByNodeId) {
     if (node.sandboxRegistry.sandbox.definition.kind !== "parent") continue;
-    if (node.agent.dynamicSkillResolvers.length > 0) {
+    if (node.agent.definitions.some(({ kind }) => kind === "skill")) {
       throw new ResolveRuntimeAgentGraphError(
         `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" defines dynamic skills. Remove the child dynamic skills or give the child its own sandbox.`,
         { nodeId },
@@ -409,7 +399,8 @@ function attachInheritedSandboxWorkspaceResources(input: {
     const parentNodeId = parentNodeIdByChildNodeId.get(nodeId);
     if (parentNodeId === undefined) {
       throw new ResolveRuntimeAgentGraphError(
-        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" has no parent.`,
+        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" has no parent. ` +
+          "Only a declared subagent can share its parent's sandbox with defineParentSandbox(). Give this agent its own sandbox with defineSandbox() and an exported environment.",
         { nodeId },
       );
     }
@@ -423,13 +414,9 @@ function attachInheritedSandboxWorkspaceResources(input: {
       nodeId: owner.nodeId,
       workspaceResourceRoot: owner.sandboxRegistry.sandbox.workspaceResourceRoot,
     };
-    const workspacePrompt = createWorkspacePromptSection(owner.agent.workspaceSpec);
-    if (workspacePrompt !== undefined) {
-      (node.turnAgent as { instructions: readonly string[] }).instructions = [
-        ...node.turnAgent.instructions,
-        workspacePrompt,
-      ];
-    }
+    // The subagent works in its owner's sandbox, so its prompt describes that workspace.
+    (node.turnAgent as { workspaceSpec: WorkspaceRuntimeSpec }).workspaceSpec =
+      owner.agent.workspaceSpec;
   }
 }
 

@@ -4,20 +4,9 @@ import type { ScheduleOccurrenceEvent } from "#public/schedules/subscription.js"
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
-type Callback = (message: unknown, metadata: Record<string, unknown>) => Promise<void>;
-type RetryHandler = (error: unknown) => unknown;
-
 const mocks = vi.hoisted(() => ({
   admit: vi.fn(),
   failed: vi.fn(),
-  queue: {} as { callback?: Callback; retry?: RetryHandler },
-}));
-vi.mock("@vercel/queue", () => ({
-  handleCallback: (callback: Callback, options: { retry: RetryHandler }) => {
-    mocks.queue.callback = callback;
-    mocks.queue.retry = options.retry;
-    return async () => new Response(null);
-  },
 }));
 vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
   resolveNitroCompiledArtifactsSource: () => ({}),
@@ -39,7 +28,7 @@ vi.mock("#runtime/schedules/load-collection.js", () => ({
   }),
 }));
 
-const { handleScheduleCollectionConsumer } =
+const { createScheduleCollectionConsumer } =
   await import("#internal/nitro/routes/schedule-collection-consumer.js");
 const { EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES } =
   await import("#internal/schedules/consumer-route.js");
@@ -57,7 +46,10 @@ const payload = createScheduleCollectionPayload({
 });
 
 async function deliver(deliveryCount: number) {
-  await handleScheduleCollectionConsumer({} as never, new Request("https://agent.test"));
+  const consumer = createScheduleCollectionConsumer({
+    kind: "production",
+    sandboxScope: "fixture",
+  });
   const message = {
     source: "dynamic",
     scheduleId: "sch-1",
@@ -69,14 +61,18 @@ async function deliver(deliveryCount: number) {
   };
   const metadata = {
     createdAt: new Date(),
+    expiresAt: new Date("2026-10-09T19:00:00Z"),
     deliveryCount,
     messageId: "msg-1",
     topicName: deriveEveScheduleQueueTopic("fixture"),
+    consumerGroup: "fixture",
+    region: "dev1",
   };
-  return await mocks.queue.callback!(message, metadata).then(
+  const thrown = await Promise.resolve(consumer.handler(message, metadata)).then(
     () => undefined,
     (error: unknown) => error,
   );
+  return { thrown, directive: consumer.retry(thrown, metadata) };
 }
 
 describe("schedule collection consumer", () => {
@@ -108,10 +104,10 @@ describe("schedule collection consumer", () => {
       mocks.failed.mockClear();
       mocks.admit.mockRejectedValueOnce(error);
 
-      const thrown = await deliver(count);
+      const result = await deliver(count);
 
-      expect(thrown).toBe(error);
-      expect(mocks.queue.retry!(thrown)).toEqual(directive);
+      expect(result.thrown).toBe(error);
+      expect(result.directive).toEqual(directive);
       expect(mocks.failed).toHaveBeenCalledTimes(reported ? 1 : 0);
       if (reported)
         expect(mocks.failed.mock.calls[0]![0] as ScheduleOccurrenceEvent).toMatchObject({

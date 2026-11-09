@@ -34,7 +34,7 @@ export default defineChannel({
         },
       );
 
-      return Response.json({ ok: true, sessionId: session.id });
+      return Response.json({ ok: true, sessionId: session.sessionId });
     }),
   ],
 });

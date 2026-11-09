@@ -3,6 +3,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "#client/client.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
+import {
+  formatAgentInfoForbiddenMessage,
+  isAgentInfoForbidden,
+} from "#shared/agent-info-access.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
@@ -23,8 +27,7 @@ export async function resolveEvalTargetHandle(input: {
   readonly url: string;
 }): Promise<EveEvalTargetHandle> {
   await waitForTargetHealth(input.client, input.url);
-  const info = await input.client.info();
-  assertAgentInfoShape(info, input.url);
+  const info = await readTargetInfo(input.client, input.url);
 
   if (
     input.expectedAgentName !== undefined &&
@@ -35,12 +38,30 @@ export async function resolveEvalTargetHandle(input: {
     );
   }
 
-  return createEvalTargetHandle({
+  const target = createEvalTargetHandle({
     capabilities: capabilitiesFromInfo(info),
     client: input.client,
     kind: input.kind,
     url: input.url,
   });
+  toolsByTarget.set(target, {
+    dynamic: info.tools.dynamic.length > 0,
+    static: info.tools.static.map((tool) => tool.name),
+  });
+  return target;
+}
+
+/** The root agent's static tool names, and whether it has a dynamic tool resolver. */
+export interface TargetTools {
+  readonly dynamic: boolean;
+  readonly static: readonly string[];
+}
+
+const toolsByTarget = new WeakMap<EveEvalTargetHandle, TargetTools>();
+
+/** The tools of a target resolved from `/eve/v1/info`; undefined for a hand-built handle. */
+export function targetTools(target: EveEvalTargetHandle): TargetTools | undefined {
+  return toolsByTarget.get(target);
 }
 
 export function createEvalTargetHandle(input: {
@@ -96,41 +117,12 @@ function createHandle(input: {
     kind: input.kind,
     url: input.url,
 
-    async attachSession(
-      sessionId: string,
-      opts?: { readonly startIndex?: number },
-    ): Promise<EveEvalSession> {
-      if (input.sessions !== undefined) {
-        return await input.sessions.attachSession(sessionId, opts);
-      }
-
-      if (base !== undefined) {
-        return await base.attachSession(sessionId, opts);
-      }
-
-      if (client === undefined) {
+    attach(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalSession {
+      if (input.sessions !== undefined) return input.sessions.attach(sessionId, opts);
+      if (base !== undefined) return base.attach(sessionId, opts);
+      if (client === undefined)
         throw new Error("Eval target cannot attach sessions without a client.");
-      }
-
-      const sessions = new EvalSessionManager({ client });
-      return await sessions.attachSession(sessionId, opts);
-    },
-
-    watchTurn(sessionId: string, opts?: { readonly startIndex?: number }) {
-      if (input.sessions !== undefined) {
-        return input.sessions.watchTurn(sessionId, opts);
-      }
-
-      if (base !== undefined) {
-        return base.watchTurn(sessionId, opts);
-      }
-
-      if (client === undefined) {
-        throw new Error("Eval target cannot watch sessions without a client.");
-      }
-
-      const sessions = new EvalSessionManager({ client });
-      return sessions.watchTurn(sessionId, opts);
+      return new EvalSessionManager({ client }).attach(sessionId, opts);
     },
 
     async dispatchSchedule(scheduleId: string): Promise<EveEvalScheduleDispatchResult> {
@@ -188,9 +180,14 @@ async function waitForTargetHealth(client: Client, url: string): Promise<void> {
   );
 }
 
-function assertAgentInfoShape(info: AgentInfoResult, url: string): void {
-  if (info.kind !== "eve-agent-info" || info.version !== 5) {
-    throw new Error(`Eval target ${url} returned an unrecognized /eve/v1/info payload.`);
+async function readTargetInfo(client: Client, url: string): Promise<AgentInfoResult> {
+  try {
+    return await client.info();
+  } catch (error) {
+    if (isAgentInfoForbidden(error)) {
+      throw new Error(formatAgentInfoForbiddenMessage(`Eval target ${url}`), { cause: error });
+    }
+    throw error;
   }
 }
 

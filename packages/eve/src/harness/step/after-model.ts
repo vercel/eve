@@ -1,18 +1,12 @@
+import { changeHistory } from "#harness/session-machine/history.js";
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import type { CompactionConfig, StepResult } from "#harness/types.js";
-import {
-  FINAL_OUTPUT_BESIDE_PENDING_CALLS,
-  FINAL_OUTPUT_TOOL_NAME,
-} from "#harness/final-output.js";
-import {
-  type HarnessModelMessage,
-  resolveAssistantStepText,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
+import type { StepResult } from "#harness/types.js";
+import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { resolveAssistantStepText } from "#harness/messages.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   appendMissingToolResultMessages,
   extractToolResultCallIds,
@@ -20,37 +14,26 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import type { Step } from "#harness/step/context.js";
-import {
-  fail,
-  finishTurn,
-  hold,
-  suspendStep,
-  type ToolResultPart,
-  withResult,
-} from "#harness/session-machine/transitions.js";
+import { failTurnForEffect, type Step } from "#harness/step/context.js";
+import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
+import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import { collectDeferredCalls } from "#harness/coordination.js";
+import { collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import {
-  extractToolApprovalInputRequests,
-  hasRunnableQueue,
-  parkOnApprovals,
-  stopForToolSignIn,
-} from "#harness/hitl/index.js";
-import { getAdvertisedTools } from "#harness/advertised-tools.js";
+import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
+import { hasQueuedTurnInput, park } from "#harness/step/park.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
-import { isTaskTool, workingTaskIds } from "#execution/tasks/model-step.js";
+import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { setRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("harness.tool-loop");
@@ -61,7 +44,7 @@ function getInvalidToolCallInputErrors(input: {
   const errors: TypedToolError<ToolSet>[] = [];
 
   for (const toolCall of input.toolCalls) {
-    if (toolCall.toolName === FINAL_OUTPUT_TOOL_NAME) {
+    if (toolCall.toolName === REPLY_TOOL_NAME) {
       continue;
     }
 
@@ -109,188 +92,128 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  // eve runs approved calls itself, so the SDK's approval parts never reach history.
-  const responseMessages = await stageToolResultMedia(
-    withoutApprovalParts(normalizedProviderHistory.messages),
-  );
+  const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
 
-  step.session = setRequestEnvelopeTokens(
-    {
-      ...step.session,
-      compaction: createNextCompactionConfig(
-        step.session.compaction,
-        input.durableModelPromptMessageCount,
-        result,
-      ),
-    },
-    result.usage?.inputTokens !== undefined && input.durableModelPromptMessageCount !== undefined
-      ? input.requestEnvelopeTokens
-      : undefined,
-  );
+  step.session = {
+    ...step.session,
+    compaction: withPromptMeasurement(step.session.compaction, {
+      inputTokens: result.usage?.inputTokens,
+      promptMessageCount: input.durableModelPromptMessageCount,
+      requestEnvelopeTokens: input.requestEnvelopeTokens,
+    }),
+  };
 
-  const approvalRequests = extractToolApprovalInputRequests({
-    content: result.content ?? [],
-    excludedCallIds: invalidInputToolCallIds,
-  });
-  const advertisedCoordinationTools = getAdvertisedTools({
-    session: step.session,
-    tools: input.coordinationTools,
-  });
+  const approvalRequests = result.approvalRequests ?? [];
   // Only unanswered calls can dispatch: automatic denials already have results.
   const blockedCallIds = new Set([
-    ...approvalRequests.map((request) => request.action.callId),
+    ...approvalRequests.map((ask) => ask.call.callId),
     ...extractToolResultCallIds(responseMessages),
   ]);
-  const unadvertised: TypedToolCall<ToolSet>[] = [];
-  const deferredToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+  const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
-    .filter((toolCall) => isDeferredHarnessTool(input.coordinationTools.get(toolCall.toolName)))
-    .filter((toolCall) => {
-      if (isDeferredHarnessTool(advertisedCoordinationTools.get(toolCall.toolName))) {
-        return true;
-      }
-      log.warn("deferred tool call blocked because tool is not advertised", {
-        callId: toolCall.toolCallId,
-        sessionId: step.session.sessionId,
-        toolName: toolCall.toolName,
-      });
-      unadvertised.push(toolCall);
-      return false;
-    });
+    .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
+
+  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
+    signIns: result.signIns ?? [],
+  });
 
   // --- Park on approvals or runtime calls ----------------------------------
 
-  if (deferredToolCalls.length > 0 || approvalRequests.length > 0) {
+  if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
     const { sequence, stepIndex, turnId } = step.position();
-    const deferred = collectDeferredCalls({
+    const dispatched = collectWorkflowCalls({
       session: step.session,
-      toolCalls: deferredToolCalls,
-      tools: advertisedCoordinationTools,
+      toolCalls: workflowToolCalls,
+      tools: input.catalog,
       turnId,
     });
-    step.session = { ...deferred.session, history: validateHarnessModelMessages(promptMessages) };
+    step.session = changeHistory(dispatched.session, { extend: promptMessages });
     const parked = {
       event: { sequence, stepIndex, turnId },
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
-      messages: answerCallsThatWontRun(responseMessages, result, unadvertised),
-      tasks: deferred.workflowRequests,
+      messages: answerCallsThatWontRun(responseMessages, result),
+      tasks: dispatched.workflowRequests.map((task) => ({
+        ...task,
+        clearedBy: result.policyApprovals?.[task.callId]?.clearedBy,
+      })),
     };
     if (approvalRequests.length > 0) {
-      return parkOnApprovals(step, {
-        ...parked,
-        requests: approvalRequests,
-        waitsOnRuntime: deferredToolCalls.length > 0,
-      });
+      await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
+    } else {
+      await step.apply(suspendStep(step.view(), parked));
     }
-    await step.apply(suspendStep(step.view(), parked));
-    return { next: null, session: step.session };
+    // Approval only precedes sign-in for the same call, not an executing sibling.
+    if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
+    return park(step);
   }
-
-  // --- Park on authorization request ------------------------------------------
-
-  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
-    messages: [...promptMessages, ...responseMessages],
-    toolResults: result.toolResults,
-  });
-  if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
 
   // --- Continue or terminate ------------------------------------------------
 
   // History grows by append only; nothing rewrites earlier messages mid-turn,
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
-  // history, and it runs before the model call (see `maybeCompact`).
-  step.session = {
-    ...step.session,
-    history: validateHarnessModelMessages([...promptMessages, ...responseMessages]),
-  };
-
-  // A `final_output` call is terminal even when the model emits it alongside
+  // history, and it runs before the model call (see `historyBeforeCall`).
+  // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
-  const calledFinalOutput =
-    step.session.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
+  const finalOutput =
+    step.session.outputSchema === undefined ? undefined : extractFinalOutput(result);
+  const calledFinalOutput = finalOutput !== undefined;
   const workingTasks = workingTaskIds(step.session);
   const finalOutputRejected = calledFinalOutput && workingTasks.length > 0;
-  let responseTail: readonly ModelMessage[] = responseMessages;
-  if (finalOutputRejected) {
-    responseTail = rejectFinalOutput(responseMessages, result, workingTasks);
-    step.session = {
-      ...step.session,
-      history: validateHarnessModelMessages([...promptMessages, ...responseTail]),
-    };
-  }
+  const responseTail: readonly ModelMessage[] = finalOutputRejected
+    ? rejectFinalOutput(responseMessages, result, workingTasks)
+    : responseMessages;
+  // A delivered structured value replaces the un-executed `eve__reply` call, which would be a
+  // dangling tool_use on the next turn.
+  const historyTail: readonly ModelMessage[] =
+    calledFinalOutput && !finalOutputRejected
+      ? [{ content: JSON.stringify(finalOutput), role: "assistant" }]
+      : responseTail;
+  step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
+  const delivered = calledFinalOutput && !finalOutputRejected;
   const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
+  // The model reads what it hasn't yet: its calls' results, unless every call ended the turn; a
+  // provider-run call's outcome; and input that joined the turn while it ran.
   const continueLoop =
-    (!calledFinalOutput || finalOutputRejected) &&
+    !delivered &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
-      hasRunnableQueue(step.view()));
+      hasQueuedTurnInput(step.view()));
   if (continueLoop) return { next: step.runStep, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The session waits for
-  // one to settle, then calls the model again in the same turn.
+  // No turn ends while its tasks work: the session waits for one to settle, then calls the model
+  // again in the same turn.
   if (workingTasks.length > 0) {
-    await step.apply(hold(step.view(), { on: "tasks" }));
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
-
-  return settleTurn(step, {
-    history: promptMessages,
-    result,
-    // Text written before an `endsTurn` call was narration, not the reply.
-    stepOutput: endsTurn ? null : stepOutput,
-  });
+  // Text written before an `endsTurn` call was narration, not the reply.
+  return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
 }
 
 /**
  * Answers the calls of a response that waits on others which will never get a result: a
- * `final_output` written before the results it waits beside, and a deferred call to a tool this
- * step didn't advertise.
+ * `eve__reply` written before the results it waits beside.
  */
 function answerCallsThatWontRun(
   messages: readonly ModelMessage[],
   result: HarnessStepResult,
-  unadvertised: readonly TypedToolCall<ToolSet>[],
 ): ModelMessage[] {
   const answered = extractToolResultCallIds(messages);
   const finalOutputs = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[]).filter(
-    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME,
+    (call) => call.toolName === REPLY_TOOL_NAME,
   );
-  const answers: ToolResultPart[] = [
-    ...finalOutputs.map((call) => ({
-      output: { type: "error-text" as const, value: FINAL_OUTPUT_BESIDE_PENDING_CALLS },
-      toolCallId: call.toolCallId,
-      toolName: call.toolName,
-      type: "tool-result" as const,
-    })),
-    ...unadvertised.map((call) => ({
-      output: {
-        type: "error-text" as const,
-        value: `The tool "${call.toolName}" isn't available in this step, so the call didn't run.`,
-      },
-      toolCallId: call.toolCallId,
-      toolName: call.toolName,
-      type: "tool-result" as const,
-    })),
-  ];
+  const answers: ToolResultPart[] = finalOutputs.map((call) => ({
+    output: { type: "error-text" as const, value: FINAL_OUTPUT_BESIDE_PENDING_CALLS },
+    toolCallId: call.toolCallId,
+    toolName: call.toolName,
+    type: "tool-result" as const,
+  }));
   return answers
     .filter((part) => !answered.has(part.toolCallId))
     .reduce<ModelMessage[]>((next, part) => withResult(next, part), [...messages]);
-}
-
-/** The SDK's approval parts: eve answers approvals itself, so history never holds them. */
-export function withoutApprovalParts(messages: readonly ModelMessage[]): ModelMessage[] {
-  return messages.flatMap((message): ModelMessage[] => {
-    if (message.role !== "assistant" && message.role !== "tool") return [message];
-    if (!Array.isArray(message.content)) return [message];
-    const content = message.content.filter(
-      (part) => part.type !== "tool-approval-request" && part.type !== "tool-approval-response",
-    );
-    return content.length === 0 ? [] : [{ ...message, content } as ModelMessage];
-  });
 }
 
 /**
@@ -350,24 +273,18 @@ async function callEndsTurn(
   }
 }
 
-function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
-  return tool?.workflowId !== undefined || isTaskTool(tool);
-}
-
-/** Answers a `final_output` call made while tasks work with an error naming them. */
+/** Answers an `eve__reply` call made while tasks work with an error naming them. */
 function rejectFinalOutput(
   responseMessages: readonly ModelMessage[],
   result: HarnessStepResult,
   workingTasks: readonly string[],
 ): ModelMessage[] {
-  const call = (result.toolCalls ?? []).find(
-    (toolCall) => toolCall.toolName === FINAL_OUTPUT_TOOL_NAME,
-  );
+  const call = (result.toolCalls ?? []).find((toolCall) => toolCall.toolName === REPLY_TOOL_NAME);
   if (call === undefined) return [...responseMessages];
   const rejection: ToolResultPart = {
     output: { type: "error-text", value: renderFinalOutputWhileWorkingError(workingTasks) },
     toolCallId: call.toolCallId,
-    toolName: FINAL_OUTPUT_TOOL_NAME,
+    toolName: REPLY_TOOL_NAME,
     type: "tool-result",
   };
   return [...responseMessages, { content: [rejection], role: "tool" }];
@@ -380,35 +297,35 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
 
 /**
  * The structured value the model delivered by calling the framework
- * `final_output` tool, or `undefined` when the terminal turn ended in prose.
+ * `eve__reply` tool, or `undefined` when the terminal turn ended in prose.
  */
 function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
   return (result.toolCalls ?? []).find(
-    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
+    (call) => call.toolName === REPLY_TOOL_NAME && !isInvalidToolCall(call),
   )?.input as JsonValue | undefined;
 }
 
 /**
  * Closes a terminal turn. An unmet output schema fails the turn recoverably;
  * otherwise the structured value (or prose) ends the turn and the session
- * waits for the next message. The structured value replaces the un-executed
- * `final_output` call, which would be a dangling tool_use on the next turn,
- * and the schema, scoped to the turn, clears.
+ * waits for the next message, and the schema, scoped to the turn, clears.
  */
 async function settleTurn(
   step: Step,
   input: {
-    readonly history: readonly HarnessModelMessage[];
     readonly result: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
-  const { history, result, stepOutput } = input;
+  const { result, stepOutput } = input;
+  // A hook that failed after the turn's last model call fails it rather than let it complete.
+  const hookFailure = await failTurnForEffect(step);
+  if (hookFailure !== undefined) return hookFailure;
   const schema = step.session.outputSchema;
   step.session = clearTurnClientContextState(step.session);
 
   if (schema === undefined) {
-    await step.apply(finishTurn(step.view()), step.session.history);
+    await step.apply(complete(step.view()), step.session.history);
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
@@ -425,36 +342,7 @@ async function settleTurn(
     };
   }
 
-  step.session = {
-    ...step.session,
-    history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
-    outputSchema: undefined,
-  };
-  await step.apply(finishTurn(step.view(), { result: structured }), step.session.history);
+  step.session = { ...step.session, outputSchema: undefined };
+  await step.apply(complete(step.view()), step.session.history);
   return { next: null, session: step.session, settledTurn: { output: structured } };
-}
-
-function createNextCompactionConfig(
-  current: CompactionConfig,
-  durablePromptMessageCount: number | undefined,
-  result: HarnessStepResult,
-): CompactionConfig {
-  const next: {
-    lastKnownInputTokens?: number;
-    lastKnownPromptMessageCount?: number;
-    recentWindowSize: number;
-    threshold: number;
-    thresholdPercent?: number;
-  } = {
-    recentWindowSize: current.recentWindowSize,
-    threshold: current.threshold,
-    thresholdPercent: current.thresholdPercent,
-  };
-
-  if (result.usage?.inputTokens !== undefined && durablePromptMessageCount !== undefined) {
-    next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = durablePromptMessageCount;
-  }
-
-  return next;
 }

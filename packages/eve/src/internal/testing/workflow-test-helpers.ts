@@ -1,4 +1,29 @@
-import { getWorld } from "#internal/workflow/runtime.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import {
+  getHookByToken,
+  getWorld,
+  start,
+  type WorkflowFunction,
+} from "#internal/workflow/runtime.js";
+
+/**
+ * Starts a session owner run stamped with the running eve version, as
+ * `createSession` does. Ingress on single-deployment Worlds treats an owner
+ * without the stamp as stranded, so a bare `start` would never accept input.
+ */
+export async function startSessionOwner<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult>,
+  args: TArgs,
+) {
+  return await start(workflow, args, {
+    allowReservedAttributes: true,
+    attributes: {
+      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+    },
+  });
+}
 
 interface WorkflowRunLike {
   readonly runId: string;
@@ -54,6 +79,22 @@ export async function waitForHook(
       options.token === undefined ? "" : ` with token "${options.token}"`
     }`,
   );
+}
+
+/** Waits until some run holds the hook `token`, and resolves that run. */
+export async function waitForHookOwner(
+  token: string,
+  timeout = 30_000,
+): Promise<{ readonly runId: string }> {
+  const deadline = Date.now() + timeout;
+  while (true) {
+    try {
+      return { runId: (await getHookByToken(token)).runId };
+    } catch (error) {
+      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 async function fetchAllEvents(

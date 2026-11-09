@@ -1,15 +1,19 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
-import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
-import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { createLogger } from "#internal/logging.js";
+import { AuthKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import { DefinitionsStateKey } from "#definitions/state.js";
+import { withContextScope } from "#context/run-step.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
 import { appliedSession, saveSessionProjection } from "#harness/session-machine/current.js";
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
-import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { preserveSerializedAgentTraceState } from "#tracing/eve/agent-trace-context-store.js";
+
+const log = createLogger("execution.cancelled-turn");
 
 export interface CompletedModelCallCheckpoint {
   readonly result: StepResult;
@@ -25,7 +29,7 @@ export interface CompletedModelCallCheckpoint {
 async function cancelledWithoutCheckpoint(
   ctx: ContextContainer,
   initial: HarnessSession,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): Promise<HarnessSession> {
   const applied = appliedSession<HarnessSession>(ctx);
   let session = applied ?? initial;
@@ -35,7 +39,35 @@ async function cancelledWithoutCheckpoint(
     session = deferred.session;
     if (deferred.message !== undefined) preserved = { ...stepInput, message: deferred.message };
   }
+  return await preserveStoppedTurnMessage(ctx, session, preserved);
+}
+
+/** The session with the message of a step that stopped before the model read it kept in history. */
+export async function preserveStoppedTurnMessage(
+  ctx: ContextContainer,
+  session: HarnessSession,
+  preserved: HarnessStepInput | undefined,
+): Promise<HarnessSession> {
+  // A step stopped at entry stops before the framework providers exist, and staging the
+  // message's attachments needs the sandbox.
+  if (ctx.get(SandboxKey) === undefined && hasFileParts(preserved?.message)) {
+    try {
+      const scoped = await withContextScope(ctx, session, async (current) => ({
+        result: undefined,
+        session: await preserveCancelledTurnMessage(current, preserved),
+      }));
+      return scoped.session;
+    } catch (error) {
+      // A cancellation must still settle; without a sandbox the attachments become notes.
+      log.warn("staging a cancelled turn's attachments failed", { error });
+      ctx.clearVirtualContext();
+    }
+  }
   return await contextStorage.run(ctx, () => preserveCancelledTurnMessage(session, preserved));
+}
+
+function hasFileParts(message: HarnessStepInput["message"]): boolean {
+  return Array.isArray(message) && message.some((part) => part.type === "file");
 }
 
 /** Builds the successful step result that commits a cancelled batch's completed model calls. */
@@ -44,11 +76,13 @@ export async function createCancelledModelCallBatchResult(input: {
   readonly checkpoint: CompletedModelCallCheckpoint | undefined;
   readonly ctx: ContextContainer;
   readonly initialSession: HarnessSession;
-  readonly stepInput: StepInput | undefined;
+  readonly stepInput: HarnessStepInput | undefined;
 }): Promise<DurableStepResult> {
   const interruptedContext = serializeContext(input.ctx);
   // Without a completed call, the batch keeps what its last call applied before the cut, such as
   // answers it resolved and published, so the session never rolls back past its own events.
+  // With one, keep its private state; the live projection below retains every committed usage
+  // fact, including summary spend published by the cut call before a hook cancelled it.
   const cancelledSession =
     input.checkpoint?.result.session ??
     (await cancelledWithoutCheckpoint(input.ctx, input.initialSession, input.stepInput));
@@ -57,15 +91,14 @@ export async function createCancelledModelCallBatchResult(input: {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
+    // Reactions saw every commit the stream kept.
+    [DefinitionsStateKey.name]: interruptedContext[DefinitionsStateKey.name],
   };
 
   return {
     action: "cancelled",
     serializedContext: preserveSerializedInstrumentationState(
-      preserveSerializedAgentTraceState(
-        preserveSerializedSessionDynamicModelSelection(checkpointContext, interruptedContext),
-        interruptedContext,
-      ),
+      preserveSerializedAgentTraceState(checkpointContext, interruptedContext),
       interruptedContext,
     ),
     ...createDurableSessionValues(saveSessionProjection(cancelledSession, input.ctx)),

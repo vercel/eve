@@ -1,6 +1,6 @@
 import {
   estimateMediaTokens,
-  readMediaMetadata,
+  readImageDimensions,
   type MediaMetadata,
 } from "#internal/attachments/media-metadata.js";
 import {
@@ -37,7 +37,8 @@ export function estimateTokens(value: unknown): number {
     };
     return { mediaType, type };
   });
-  return Buffer.byteLength(serialized ?? "") / 4 + mediaTokens;
+  // Whole tokens: the count reaches events, which carry integers.
+  return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
 }
 
 /**
@@ -65,11 +66,7 @@ function estimateFilePartTokens(value: unknown): number | undefined {
 }
 
 function estimateFileDataTokens(data: unknown, mediaType: string): number | undefined {
-  if (isSandboxRefUrl(data)) {
-    // Inbound attachments that hydrate as text references stay text.
-    const ref = decodeSandboxRef(data);
-    return inlinesSandboxRefAsBytes(ref) ? estimateMediaTokens(ref) : undefined;
-  }
+  if (isSandboxRefUrl(data)) return estimateSandboxRefTokens(data);
   if (data instanceof URL) return estimateRemoteTokens(mediaType);
   if (isTaggedFileData(data)) {
     switch (data.type) {
@@ -77,7 +74,7 @@ function estimateFileDataTokens(data: unknown, mediaType: string): number | unde
         return estimateInlineTokens(data.data, mediaType);
       case "url":
         return isSandboxRefUrl(data.url)
-          ? estimateMediaTokens(decodeSandboxRef(data.url))
+          ? estimateSandboxRefTokens(data.url)
           : estimateRemoteTokens(mediaType);
       case "reference":
         return estimateRemoteTokens(mediaType);
@@ -86,6 +83,12 @@ function estimateFileDataTokens(data: unknown, mediaType: string): number | unde
     }
   }
   return estimateInlineTokens(data, mediaType);
+}
+
+/** Attachments that render as their label alone stay text. */
+function estimateSandboxRefTokens(url: URL): number | undefined {
+  const ref = decodeSandboxRef(url);
+  return inlinesSandboxRefAsBytes(ref) ? estimateMediaTokens(ref) : undefined;
 }
 
 function isTaggedFileData(
@@ -127,5 +130,5 @@ function base64Header(base64: string): Uint8Array {
 // payload, so inline PDFs fall back to their size.
 function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number): MediaMetadata {
   if (!mediaType.startsWith("image/")) return { mediaType, size };
-  return { ...readMediaMetadata(header, mediaType), size };
+  return { ...readImageDimensions(header), mediaType, size };
 }

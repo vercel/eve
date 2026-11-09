@@ -42,7 +42,8 @@ export interface InstrumentationMemoryOperationStartedEvent extends Instrumentat
 }
 
 export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.completed";
+  readonly type: "memory.operation.settled";
+  readonly outcome: "completed";
   /** The number of records the operation returned or changed, when known. */
   readonly recordCount?: number;
   /** Content. Absent unless this provider's trace policy records inputs. */
@@ -50,7 +51,8 @@ export interface InstrumentationMemoryOperationCompletedEvent extends Instrument
 }
 
 export interface InstrumentationMemoryOperationFailedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.failed";
+  readonly type: "memory.operation.settled";
+  readonly outcome: "failed";
   /** Content. Absent unless this provider's trace policy records outputs. */
   readonly error?: unknown;
 }
@@ -59,10 +61,7 @@ export type InstrumentationMemoryOperationTerminalEvent =
   | InstrumentationMemoryOperationCompletedEvent
   | InstrumentationMemoryOperationFailedEvent;
 
-export interface InstrumentationMemoryExecutionOperation {
-  readonly idempotencyKey: string;
-  readonly sessionId: string;
-  readonly turnId?: string;
+export interface InstrumentationMemoryExecutionOperation extends InstrumentationMemoryOperationEvent {
   readonly type: "memory.operation";
 }
 
@@ -98,22 +97,26 @@ export function createMemoryInstrumentation(input: {
       try {
         const result = await input.runInContext(
           {
-            idempotencyKey: operation.idempotencyKey,
-            sessionId: input.sessionId,
-            turnId: operation.turnId,
+            ...event,
             type: "memory.operation",
           },
           execute,
         );
         await hooks.publish({
+          outcome: "completed",
           ...event,
           outputRecords: result.outputRecords,
           recordCount: result.recordCount,
-          type: "memory.operation.completed",
+          type: "memory.operation.settled",
         });
         return result.value;
       } catch (error) {
-        await hooks.publish({ ...event, error, type: "memory.operation.failed" });
+        await hooks.publish({
+          outcome: "failed",
+          ...event,
+          error,
+          type: "memory.operation.settled",
+        });
         throw error;
       }
     },

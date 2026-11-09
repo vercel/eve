@@ -1,0 +1,19 @@
+[
+  "SANDBOX_AGENT_ENV",
+  "SandboxConnection",
+  "SandboxDeleteOptions",
+  "SandboxIdentity",
+  "SandboxJson",
+  "SandboxPrepareContext",
+  "SandboxPrepareOption",
+  "SandboxProvider",
+  "SandboxProviderDefinition",
+  "SandboxProviderFiles",
+  "SandboxProviderImplementation",
+  "SandboxSessionContext",
+  "SandboxSessionEndOptions",
+  "SandboxSessionGoneError",
+  "SandboxTemplateNotProvisionedError",
+  "WithPrepareOption",
+  "defineSandboxProvider"
+]

@@ -24,7 +24,6 @@ class TestLogger {
 
 function dependencies(): NonInteractiveLinkDependencies {
   return {
-    isEveProject: vi.fn(async () => true),
     runVercel: vi.fn(async () => true),
     runVercelEnvPull: vi.fn(async () => true),
     readProjectLink: vi.fn(async () => ({

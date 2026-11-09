@@ -1,4 +1,8 @@
-import { handleCallback } from "@vercel/queue";
+import {
+  handleCallback,
+  type MessageHandler,
+  type RetryHandler,
+} from "#compiled/@vercel/queue/index.js";
 import { SchedulesApiError, SchedulesClient } from "#compiled/@vercel/schedules/index.js";
 
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -14,7 +18,10 @@ import type {
   DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
 } from "#public/schedules/subscription.js";
-import { readVercelScheduleClientOptions } from "#public/schedules/providers/vercel.js";
+import {
+  readVercelScheduleClientOptions,
+  VERCEL_SCHEDULES_CLIENT_HEADERS,
+} from "#public/schedules/providers/vercel.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import {
@@ -30,8 +37,17 @@ export async function handleScheduleCollectionConsumer(
   config: NitroArtifactsConfig,
   request: Request,
 ): Promise<Response> {
-  const handler = handleCallback<unknown>(
-    async (message, metadata) => {
+  const { handler, retry } = createScheduleCollectionConsumer(config);
+  return await handleCallback(handler, { retry })(request);
+}
+
+/** Shares occurrence verification and dispatch between hosted callbacks and local queue polling. */
+export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): {
+  readonly handler: MessageHandler<unknown>;
+  readonly retry: RetryHandler;
+} {
+  return {
+    handler: async (message, metadata) => {
       const queue = expectScheduleQueueMessage(message);
       const application = queue.payload.eve.application;
       const collection = queue.payload.eve.collection;
@@ -109,15 +125,12 @@ export async function handleScheduleCollectionConsumer(
         throw error;
       }
     },
-    {
-      retry(error) {
-        return error instanceof PermanentScheduleMessageError
-          ? { acknowledge: true as const }
-          : undefined;
-      },
+    retry(error) {
+      return error instanceof PermanentScheduleMessageError
+        ? { acknowledge: true as const }
+        : undefined;
     },
-  );
-  return await handler(request);
+  };
 }
 
 /** Reads the delivered schedule with the collection provider's own client options. */
@@ -126,9 +139,10 @@ async function getSchedule(
   queue: VerifiedScheduleMessage,
 ) {
   try {
-    return await new SchedulesClient(
-      readVercelScheduleClientOptions(definition.provider) ?? {},
-    ).get({ name: queue.name, namespace: queue.namespace });
+    return await new SchedulesClient({
+      ...readVercelScheduleClientOptions(definition.provider),
+      headers: VERCEL_SCHEDULES_CLIENT_HEADERS,
+    }).get({ name: queue.name, namespace: queue.namespace });
   } catch (error) {
     if (error instanceof SchedulesApiError && error.status === 404)
       throw new PermanentScheduleMessageError("Schedule delivery does not match this agent.");

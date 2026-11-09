@@ -20,6 +20,8 @@
       "dependencies": ["eve"],
       "packages": [
         "eve-code",
+        "@eve/agent-desktop",
+        "@eve/agent-browser",
         "gadget-extension",
         "gizmo-extension",
         "js-only-extension",
@@ -27,13 +29,6 @@
       ],
       "dependencyTypes": ["peer"],
       "isIgnored": true
-    },
-    {
-      "label": "Separately published eve packages accept compatible eve patch releases",
-      "dependencies": ["eve"],
-      "packages": ["@eve/buzz-acp-adapter"],
-      "dependencyTypes": ["prod"],
-      "pinVersion": "workspace:^"
     },
     {
       "label": "Blooio is an externally published integration",

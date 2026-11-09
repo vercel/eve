@@ -14,7 +14,7 @@ describe("normalizeSkillPackage", () => {
     const packageDefinition = normalizeSkillPackage({
       name: "research",
       description: "Research unfamiliar topics.",
-      markdown: "Use primary sources.\n",
+      content: "Use primary sources.\n",
       files: {
         "references/checklist.md": "# Checklist\n",
         "assets/query.json": new Uint8Array([1, 2, 3]),
@@ -48,7 +48,7 @@ describe("normalizeSkillPackage", () => {
         normalizeSkillPackage({
           name,
           description: "Broken.",
-          markdown: "Broken.",
+          content: "Broken.",
         }),
       ).toThrow("Expected skill name");
     }
@@ -58,7 +58,7 @@ describe("normalizeSkillPackage", () => {
         normalizeSkillPackage({
           name: "safe",
           description: "Broken.",
-          markdown: "Broken.",
+          content: "Broken.",
           files: {
             [path]: "nope",
           },
@@ -78,7 +78,7 @@ describe("writeSkillPackageToSandbox", () => {
     const skill = normalizeSkillPackage({
       name: "tenant",
       description: "Tenant-specific procedures.",
-      markdown: "Follow tenant policy.",
+      content: "Follow tenant policy.",
       files: {
         "references/policy.md": "Policy body",
       },
@@ -99,7 +99,7 @@ describe("writeSkillPackageToSandbox", () => {
     const skill = normalizeSkillPackage({
       name: "tenant",
       description: "Tenant-specific procedures.",
-      markdown: "Follow tenant policy.",
+      content: "Follow tenant policy.",
     });
 
     await writeSkillPackageToSandbox({ sandbox: sandbox.session, skill });

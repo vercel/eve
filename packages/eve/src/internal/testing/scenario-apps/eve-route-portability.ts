@@ -7,6 +7,11 @@ import { eveChannel } from "eve/channels/eve";
 
 export default eveChannel({
   auth: none(),
+  cors: {
+    allowHeaders: ["authorization", "content-type"],
+    exposeHeaders: ["x-request-id"],
+    preflight: { statusCode: 204 },
+  },
 });
 `,
   },

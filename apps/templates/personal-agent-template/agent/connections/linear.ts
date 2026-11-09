@@ -7,11 +7,10 @@ const USER_ISSUER = "app";
 const connectAuth = connect({
   connector: CONNECTOR,
   validate: true,
-  principalToSubject: (principal) => ({
-    type: "user",
-    id: principal.id,
-    issuer: principal.issuer ?? principal.authenticator ?? USER_ISSUER,
-  }),
+  principalToSubject: (principal) =>
+    principal.type === "user"
+      ? { type: "user", id: principal.id, issuer: principal.issuer ?? USER_ISSUER }
+      : { type: "app" },
 });
 
 async function completeAuthorizationWithRetry(

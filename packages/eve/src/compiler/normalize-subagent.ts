@@ -1,18 +1,18 @@
 import {
+  expectAgentToolExposure,
   expectBoolean,
-  expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#dynamic/definition.js";
-import type { LocalSubagentSourceRef } from "#discover/manifest.js";
-
-const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-]);
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
+import {
+  type AgentSourceKind,
+  type LocalSubagentSourceRef,
+  sourcesOf,
+} from "#discover/manifest.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 export type NormalizedSubagentConfig =
   | {
@@ -20,38 +20,23 @@ export type NormalizedSubagentConfig =
       readonly definition: unknown;
     }
   | {
-      readonly build?: { readonly externalDependencies?: readonly string[] };
-      readonly eventNames: readonly DynamicToolEventName[];
       readonly kind: "dynamic";
     }
   | {
       readonly description: string;
       readonly kind: "remote";
       readonly path: string;
-      readonly tool?: boolean;
+      readonly tool?: AgentToolExposure;
       readonly url?: string;
     };
 
 export function normalizeSubagentConfig(value: unknown, message: string): NormalizedSubagentConfig {
+  // A dynamic subagent chooses the whole subagent: its description, or whether there is one. A
+  // subagent the parent always sees, with a model chosen per session, is a defineAgent() whose
+  // model field is dynamic.
   if (isDynamicSentinel(value)) {
-    const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
-    const rawEvents = expectObjectRecord(record.events, message);
-    const eventNames: DynamicToolEventName[] = [];
-    for (const [eventName, handler] of Object.entries(rawEvents)) {
-      if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(eventName as DynamicToolEventName)) {
-        throw new Error(
-          `${message} Dynamic subagents support only "session.started" and "turn.started" handlers.`,
-        );
-      }
-      expectFunction(handler, message);
-      eventNames.push(eventName as DynamicToolEventName);
-    }
-    const build =
-      record.build === undefined ? undefined : normalizeDynamicSubagentBuild(record.build, message);
-    return build === undefined
-      ? { eventNames, kind: "dynamic" }
-      : { build, eventNames, kind: "dynamic" };
+    assertDynamicSentinelKeys(value, message);
+    return { kind: "dynamic" };
   }
 
   if (
@@ -75,7 +60,7 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
       description: expectString(record.description, message),
       kind: "remote",
       path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
-      tool: record.tool === undefined ? undefined : expectBoolean(record.tool, message),
+      tool: record.tool === undefined ? undefined : expectAgentToolExposure(record.tool, message),
       url: typeof record.url === "function" ? undefined : expectString(record.url, message),
     };
   }
@@ -87,34 +72,22 @@ export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(
   source: LocalSubagentSourceRef,
 ): void {
   const manifest = source.manifest;
+  const has = (kind: AgentSourceKind) => sourcesOf(manifest, kind).length > 0;
   const extraEntries = [
-    manifest.connections.length > 0 ? "connections/" : undefined,
-    manifest.hooks.length > 0 ? "hooks/" : undefined,
-    manifest.instructions.length > 0 ? "instructions" : undefined,
+    has("connection") ? "connections/" : undefined,
+    has("hook") ? "hooks/" : undefined,
+    has("instructions") ? "instructions" : undefined,
     manifest.lib.length > 0 ? "lib/" : undefined,
-    manifest.sandbox !== null ? "sandbox/" : undefined,
+    has("sandbox") ? "sandbox/" : undefined,
     manifest.sandboxWorkspaces.length > 0 ? "sandbox/workspace/" : undefined,
-    manifest.schedules.length > 0 ? "schedules/" : undefined,
-    manifest.skills.length > 0 ? "skills/" : undefined,
+    has("schedule") ? "schedules/" : undefined,
+    has("skill") ? "skills/" : undefined,
     manifest.subagents.length > 0 ? "subagents/" : undefined,
-    manifest.tools.length > 0 ? "tools/" : undefined,
+    has("tool") ? "tools/" : undefined,
   ].filter((entry) => entry !== undefined);
   if (extraEntries.length > 0) {
     throw new Error(
       `Remote subagent definition "${source.logicalPath}" cannot include local package entries. Remove unsupported entries: ${extraEntries.join(", ")}.`,
     );
   }
-}
-
-function normalizeDynamicSubagentBuild(
-  value: unknown,
-  message: string,
-): { readonly externalDependencies?: readonly string[] } {
-  const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["externalDependencies"], message);
-  if (record.externalDependencies === undefined) return {};
-  if (!Array.isArray(record.externalDependencies)) throw new Error(message);
-  return {
-    externalDependencies: record.externalDependencies.map((entry) => expectString(entry, message)),
-  };
 }

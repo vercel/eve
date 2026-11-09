@@ -1,4 +1,6 @@
 import type { InvokeToolFn } from "#channel/invoke-tool.js";
+import { withAgentApprovalOnEntries } from "#approval/agent.js";
+import { resolveAgentApproval } from "#execution/effective-agent-config.js";
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -9,7 +11,7 @@ import {
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import type { InvokeToolTraceOrigin } from "#tracing/invoke-tool-span.js";
+import type { InvokeToolTraceOrigin } from "#tracing/eve/invoke-tool-span.js";
 
 /**
  * Builds the route's `invokeTool`. The agent's static tools and sandbox load on
@@ -56,6 +58,11 @@ export async function loadInvokeToolRuntime(input: {
     loadCompiledManifest({ compiledArtifactsSource }),
   ]);
   const node = bundle.graph.root;
+  // A channel's direct `invokeTool` runs under the same agent-wide policy as a model's call.
+  const tools = withAgentApprovalOnEntries(
+    createNodeHarnessTools({ node }),
+    resolveAgentApproval(bundle),
+  );
   return {
     bundle,
     callbackBaseUrl: input.callbackBaseUrl,
@@ -63,6 +70,6 @@ export async function loadInvokeToolRuntime(input: {
     manifest,
     nodeId: node.nodeId,
     sandboxRegistry: node.sandboxRegistry,
-    tools: createNodeHarnessTools({ node }),
+    tools,
   };
 }

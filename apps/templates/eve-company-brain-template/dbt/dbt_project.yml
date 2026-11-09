@@ -1,0 +1,35 @@
+name: jaffle_shop
+version: "1.0.0"
+config-version: 2
+profile: company_brain
+
+model-paths: [models]
+seed-paths: [seeds]
+clean-targets: [target, dbt_packages]
+
+models:
+  jaffle_shop:
+    +materialized: table
+    customers:
+      +tags: [company_brain]
+      +meta:
+        grain: One row per customer, including customers with no orders.
+        joins:
+          - "customers.customer_id = orders.customer_id (one customer to many orders); aggregate order values before joining customer totals."
+        metrics:
+          customer_lifetime_value: "Lifetime payment amount in AUD across all orders, including returned orders; not net revenue. Use orders.amount for date-filtered totals."
+          number_of_orders: "All orders placed by the customer, regardless of status."
+    orders:
+      +tags: [company_brain]
+      +meta:
+        grain: One row per order.
+        joins:
+          - "orders.customer_id = customers.customer_id (many orders to one customer)."
+        metrics:
+          amount: "Sum of all recorded payments for this order in AUD, including coupons and gift cards, regardless of order status. Not net revenue or profit."
+          order_count: "COUNT(*) on orders. For completed orders filter status = 'completed'."
+          average_order_amount: "AVG(amount) on orders; excludes NULL amounts."
+        caveats:
+          - "No refund ledger, tax breakdown, costs, or payment timestamps are available."
+          - "order_date is the order placement date, not the payment date."
+          - "The bundled seeds are historical synthetic data. Inspect MIN/MAX(order_date) before choosing dates."

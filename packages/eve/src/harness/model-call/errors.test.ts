@@ -1,3 +1,4 @@
+import { APICallError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,10 +8,18 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  ModelStreamStalledError,
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+
+const cyberPolicyBody = {
+  code: "cyber_policy",
+  message: "This content was flagged for possible cybersecurity risk.",
+  type: "invalid_request",
+};
 
 /**
  * Builds the shape `ai@7.0.0-canary.169+` rejects with when a model
@@ -175,6 +184,11 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(new EmptyModelResponseError())).toBe("recoverable");
   });
 
+  it("retries a stalled model stream", () => {
+    const timeout = new DOMException("Chunk timeout of 600000ms exceeded", "TimeoutError");
+    expect(classifyModelCallError(new ModelStreamStalledError({ cause: timeout }))).toBe("retry");
+  });
+
   it("returns terminal for a turn cancellation, even when marked retryable", () => {
     expect(classifyModelCallError(new TurnCancelledError())).toBe("terminal");
 
@@ -245,6 +259,21 @@ describe("classifyModelCallError", () => {
     ).toBe("recoverable");
   });
 
+  // Issue #5427: the gateway reuses `insufficient_funds` when it only throttled the balance check.
+  it("retries an AI Gateway 402 that asks to retry shortly instead of reporting exhausted credits", () => {
+    const err = gatewayModelCallError({
+      gatewayName: "GatewayInternalServerError",
+      gatewayType: "internal_server_error",
+      statusCode: 402,
+      upstreamMessage:
+        "AI Gateway credit balance verification is temporarily throttled. Please retry shortly.",
+      upstreamType: "insufficient_funds",
+    });
+
+    expect(summarizeKnownError(err)?.id).toBe("gateway-credit-check-throttled");
+    expect(classifyModelCallError(err)).toBe("retry");
+  });
+
   it.each([
     "AI Gateway requires a valid credit card on file to service requests.",
     "Model call failed: Free tier users do not have access to this model.",
@@ -269,6 +298,25 @@ describe("classifyModelCallError", () => {
     });
 
     expect(classifyModelCallError(err)).toBe("terminal");
+  });
+
+  // `@ai-sdk/openai` keeps the provider code only in the body: in `data` for an error frame
+  // received before any output, and in the response body for an HTTP 400.
+  it.each([
+    { title: "an error frame before any output", body: { type: "error", error: cyberPolicyBody } },
+    { title: "an HTTP 400", body: { error: cyberPolicyBody } },
+  ])("returns recoverable when OpenAI refuses a prompt as $title", ({ body }) => {
+    const err = new APICallError({
+      message: cyberPolicyBody.message,
+      url: "https://api.openai.com/v1/responses",
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: JSON.stringify(body),
+      data: body,
+      isRetryable: false,
+    });
+
+    expect(classifyModelCallError(err)).toBe("recoverable");
   });
 
   it("returns terminal for structural 4xx errors", () => {
@@ -524,6 +572,26 @@ describe("extractUnsupportedProviderToolTypes", () => {
     expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
   });
 
+  it("returns the upstream tool type from Bedrock's raw rejection when every host failed", () => {
+    const upstream = Object.assign(new Error("Bad Request"), {
+      data: {
+        providerAttempts: [
+          {
+            error:
+              "tools.0: Input tag 'web_search_20250305' found using 'type' does not match any of the expected tags: 'bash_20250124', 'custom'",
+            provider: "bedrock",
+          },
+          { error: "Bad Request", provider: "vertexAnthropic" },
+        ],
+      },
+    });
+    const error = Object.assign(new Error("gateway", { cause: upstream }), {
+      name: "GatewayInternalServerError",
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
+  });
+
   it("deduplicates when multiple providerAttempts reference the same tool type", () => {
     const error = gatewayProviderToolFailure({
       unsupportedTypes: ["web_search_20250305", "web_search_20250305"],
@@ -601,6 +669,69 @@ describe("extractUnsupportedProviderToolTypes", () => {
     });
 
     expect(extractUnsupportedProviderToolTypes(error)).toEqual([]);
+  });
+
+  it("returns the include value an OpenAI-compatible endpoint rejected", () => {
+    // Bedrock Mantle's response when the request carries OpenAI web search.
+    const body = {
+      error: {
+        code: "invalid_value",
+        message:
+          "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+        param: "include",
+        type: "invalid_request_error",
+      },
+    };
+    const error = Object.assign(new Error(body.error.message), {
+      data: body,
+      name: "AI_APICallError",
+      responseBody: JSON.stringify(body),
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_call.action.sources"]);
+  });
+
+  it("returns only the rejected value, not the supported values listed after it", () => {
+    const upstream = Object.assign(new Error("Bad Request"), {
+      responseBody: JSON.stringify({
+        error: {
+          message:
+            "Invalid value: 'file_search_call.results'. Supported values are: 'web_search_call.action.sources'.",
+          param: "include",
+        },
+      }),
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(upstream)).toEqual(["file_search_call.results"]);
+  });
+
+  it("returns OpenAI's web search type when AI Gateway routed it to a host without web search", () => {
+    // AI Gateway's response for OpenAI web search routed to Bedrock.
+    const body = {
+      error: {
+        message: "web search is not supported for this request",
+        param: {
+          message: "web search is not supported for this request",
+          name: "AI_APICallError",
+          statusCode: 400,
+        },
+        type: "AI_APICallError",
+      },
+    };
+    const upstream = Object.assign(new Error(body.error.message), {
+      data: body,
+      name: "AI_APICallError",
+      responseBody: JSON.stringify(body),
+      statusCode: 400,
+    });
+    const error = Object.assign(new Error(body.error.message, { cause: upstream }), {
+      name: "GatewayInternalServerError",
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search"]);
   });
 
   it("returns empty for plain Error and null/undefined inputs", () => {

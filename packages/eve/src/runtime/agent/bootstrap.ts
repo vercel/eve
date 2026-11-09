@@ -1,8 +1,3 @@
-import type { HarnessModelMessage } from "#harness/messages.js";
-
-import { createFrameworkUserMessage } from "#harness/messages.js";
-
-import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
@@ -11,7 +6,6 @@ import type {
   InternalAgentModelDefinition,
 } from "#shared/agent-definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { AvailableSkillDescription } from "#execution/skills/instructions.js";
 
 /**
  * Fixed internal model reference used only by the framework-owned bootstrap
@@ -29,20 +23,13 @@ export type RuntimeModelReference = Readonly<
 /**
  * Runtime-owned reference to a dynamic model resolver authored in `agent.ts`.
  */
-export type RuntimeDynamicModelReference = Readonly<
-  ModuleSourceRef & {
-    readonly eventNames: readonly string[];
-  }
->;
+export type RuntimeDynamicModelReference = Readonly<ModuleSourceRef>;
 
 /**
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
 interface RuntimeTurnAgentBase {
-  readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
-  readonly instructions: readonly string[];
-  readonly initialMessages?: readonly HarnessModelMessage[];
   /**
    * Optional model used only for compaction summaries.
    *
@@ -97,19 +84,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     throw new Error("Expected a path-derived agent id while resolving agent resources.");
   }
   const base: RuntimeTurnAgentBase = {
-    availableSkills: agent.skills.map((skill) => ({
-      description: skill.description,
-      name: skill.name,
-    })),
     id,
-    initialMessages: agent.instructions
-      .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
-      .map((entry) => createFrameworkUserMessage("context.instruction", entry.content.trim())),
-    instructions: composeRuntimeBasePrompt({
-      instructions: agent.instructions,
-      toolsAvailable: input.tools.length > 0,
-      workspaceSpec: agent.workspaceSpec,
-    }),
     compactionModel: config?.compaction?.model,
     nodeId: input.nodeId,
     reasoning: config?.reasoning,

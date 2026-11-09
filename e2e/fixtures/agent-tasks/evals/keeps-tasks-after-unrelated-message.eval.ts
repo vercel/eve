@@ -29,7 +29,7 @@ export default defineEval({
     const answered = await question.result();
     turn.expectOk();
 
-    turn.notCalledTool("task_cancel");
+    turn.notCalledTool("eve__task_cancel");
     const started = taskStarts(turn.events, "compile_report");
     t.check(started.length, equals(1)).label("the report is compiled once");
     const settled = settlementsOf(
@@ -37,12 +37,12 @@ export default defineEval({
       started.map((call) => call.callId),
     );
     t.check(
-      settled.map((settlement) => settlement.status),
+      settled.map((settlement) => settlement.outcome),
       equals(["completed"]),
     ).label("the report task completes");
     const reportIds = settled.flatMap((settlement) => reportIdOf(settlement) ?? []);
     t.check(
-      turn.message,
+      turn.reply,
       satisfies(
         (reply: string | undefined) =>
           reportIds.length === 1 && reply?.includes(reportIds[0]!) === true,
@@ -57,6 +57,6 @@ export default defineEval({
         "Alice's unrelated question gets an answer",
       ),
     );
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

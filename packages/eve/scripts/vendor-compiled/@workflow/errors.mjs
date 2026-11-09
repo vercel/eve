@@ -31,18 +31,22 @@ function buildMsStub(names, moduleName) {
  * sync on every bump.
  *
  * Co-copies `error-codes.d.ts` (re-exported by `index.d.ts` via
- * `./error-codes.js`). The two unused-by-eve entry-point declarations
- * (`ansi.d.ts`, `internal-chalk.d.ts`) are intentionally not copied —
- * they describe sub-paths eve never imports.
+ * `./error-codes.js`). The SDK runtime also uses the `ansi` entry.
  */
 export default {
   packageName: "@workflow/errors",
   compiledPath: "@workflow/errors",
   chunkGroup: "workflow",
+  // Workflow bodies need the SDK's realm registration and duration parsing,
+  // without the Node-only interop prelude shared by the runtime bundle.
+  platform: "neutral",
+  entries: [{ outputPath: "index" }, { input: "@workflow/errors/ansi", outputPath: "ansi" }],
+  sharedSpecifiers: { "@workflow/errors": "index", "@workflow/errors/ansi": "ansi" },
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       ms: { kind: "stub", stubBaseName: "_ms", build: buildMsStub },
     },
-    discoverExtraFiles: (distEntries) => distEntries.filter((name) => name === "error-codes.d.ts"),
+    discoverExtraFiles: (distEntries) =>
+      distEntries.filter((name) => name === "error-codes.d.ts" || name === "ansi.d.ts"),
   }),
 };

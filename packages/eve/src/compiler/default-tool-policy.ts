@@ -3,29 +3,9 @@ import type {
   FinalizedNodeSourceState,
   PhaseOneNodeSourceState,
 } from "#compiler/node-source-state.js";
-import {
-  canonicalSourceSlot,
-  composeAgentModuleCandidates,
-  type AgentSourceCandidate,
-} from "#compiler/source-graph.js";
-
-const CONNECTION_TOOLS_SLOT = "tools/connection_tools";
-/** Slots of the closed connection tools and the framework module that provides them. */
-const CONNECTION_TOOL_SLOTS = new Set([
-  CONNECTION_TOOLS_SLOT,
-  "tools/connection_search",
-  "tools/connection_execute",
-]);
-
-/** Rejects authored sources that would replace or disable the connection tools. */
-export function assertFrameworkToolPolicy(candidate: AgentSourceCandidate): void {
-  if (candidate.layer === "framework-default") return;
-  const slot = canonicalSourceSlot(candidate.logicalPath);
-  if (!CONNECTION_TOOL_SLOTS.has(slot)) return;
-  throw new Error(
-    `"agent/${slot}.ts" is reserved. connection_search and connection_execute are framework tools that cannot be replaced or disabled; they exist only while the agent has connections. Rename the file.`,
-  );
-}
+import { deriveMemorySlot } from "#compiler/normalize-definitions.js";
+import { canonicalSourceSlot, composeAgentModuleCandidates } from "#compiler/source-graph.js";
+import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 
 export function applyAgentToolPolicy(
   phaseOne: PhaseOneNodeSourceState,
@@ -49,11 +29,32 @@ export function applyAgentToolPolicy(
   );
 }
 
+/**
+ * A tool file can disable what eve offers under its name with no file beneath it: a subagent's
+ * tool, a memory slot's tools, or a schedule collection's.
+ */
 export function canDisableToolWithoutSelectedSource(
   state: FinalizedNodeSourceState,
   toolName: string,
 ): boolean {
-  return state.projected.subagents.some((entry) => entry.source.subagentId === toolName);
+  return (
+    state.projected.subagents.some((entry) => entry.source.subagentId === toolName) ||
+    state.orderedCandidates.some(
+      (candidate) =>
+        candidate.backing.kind !== "resource" &&
+        featureToolName(candidate.logicalPath) === toolName,
+    )
+  );
+}
+
+/** The tool file name a memory slot's or schedule collection's tools take. */
+function featureToolName(logicalPath: string): string | undefined {
+  const slot = canonicalSourceSlot(logicalPath);
+  if (slot === "memory" || slot.startsWith("memory/")) return deriveMemorySlot(logicalPath);
+  if (slot.startsWith("schedules/")) {
+    return scheduleCollectionToolPrefix(slot.slice("schedules/".length));
+  }
+  return undefined;
 }
 
 export function applyDefaultToolPolicy(
@@ -73,7 +74,6 @@ export function applyDefaultToolPolicy(
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
-        slot === CONNECTION_TOOLS_SLOT ||
         overriddenSlots.has(slot)
       );
     }),

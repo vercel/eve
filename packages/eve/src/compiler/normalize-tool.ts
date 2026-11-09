@@ -1,12 +1,13 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
-import type { ToolSourceRef } from "#discover/manifest.js";
-import type { CompiledToolDefinition, CompiledDynamicToolDefinition } from "#compiler/manifest.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { CompiledDefinition, CompiledToolDefinition } from "#compiler/manifest.js";
 import {
+  compiledDefinition,
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { TASK_TOOL_NAMES } from "#protocol/task-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -22,7 +23,7 @@ export type CompiledToolEntry =
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
     }
-  | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
+  | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
 /**
  * Compiles one authored tool module into the normalized tool entry
@@ -38,7 +39,7 @@ export type CompiledToolEntry =
  */
 export async function compileToolEntry(
   _agentRoot: string,
-  source: ToolSourceRef,
+  source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledToolEntry> {
   const entry = normalizeToolDefinition(
@@ -54,9 +55,11 @@ export async function compileToolEntry(
     .replace(/^tools\//, "")
     .replaceAll("/", "-");
 
-  if (TASK_TOOL_NAMES.includes(toolName)) {
+  // Checked before a disabled tool returns: a runtime tool can't be disabled either.
+  const reservation = eveNamespaceReservation(toolName);
+  if (reservation !== undefined) {
     throw new Error(
-      `Tool "${source.logicalPath}" uses the reserved name "${toolName}". Rename its path; eve reserves "${toolName}" for its built-in task tool.`,
+      `Tool "${source.logicalPath}" uses the reserved name "${toolName}". Rename its path; ${reservation}.`,
     );
   }
 
@@ -74,7 +77,7 @@ export async function compileToolEntry(
       definition: {
         behavior: {
           availability: [],
-          handling: { kind: "provider-tool", provider: entry.provider },
+          handling: { kind: "provider-tool", ...entry.selection },
         },
         description:
           "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
@@ -93,18 +96,7 @@ export async function compileToolEntry(
   }
 
   if (entry.kind === "dynamic-tool") {
-    return {
-      kind: "dynamic-tool",
-      definition: {
-        eventNames: [...entry.eventNames],
-        exportName: source.exportName,
-        logicalPath: source.logicalPath,
-        rebindMissingCallbacks: entry.rebindMissingCallbacks || undefined,
-        slug: toolName,
-        sourceId: source.sourceId,
-        sourceKind: "module",
-      },
-    };
+    return { definition: compiledDefinition("tool", source, toolName), kind: "dynamic" };
   }
 
   const { workflow } = entry.definition;
@@ -115,6 +107,7 @@ export async function compileToolEntry(
     kind: "tool",
     definition: {
       availableInSubagents: entry.definition.availableInSubagents,
+      deferred: entry.definition.deferred,
       behavior:
         workflow === undefined
           ? entry.definition.behavior === undefined

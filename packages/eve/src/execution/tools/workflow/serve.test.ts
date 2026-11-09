@@ -7,13 +7,14 @@ import type { WorkflowBodyInput } from "#execution/tools/workflow/body.js";
 import { WORKFLOW_CANCELLATION_CLEANUP_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import type {
   WorkflowBodyCommand,
+  WorkflowToolRunAnswer,
   WorkflowToolRunMessage,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { startServeBody } from "#execution/tools/workflow/serve.js";
 import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 import type { JsonValue } from "#shared/json.js";
-import type { ToolInputResponse } from "#tools/definition.js";
+import type { ToolAnswer } from "#tools/definition.js";
 import type {
   WorkflowServeCall,
   WorkflowServeContext,
@@ -28,7 +29,12 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (input: { readonly context: AgentSessionContext; readonly name: string }) => Promise<unknown>
     >(),
-  sendAgent: vi.fn<(input: { readonly context: AgentSessionContext }) => Promise<void>>(),
+  sendAgent:
+    vi.fn<
+      (input: {
+        readonly context: AgentSessionContext;
+      }) => Promise<{ sessionId: string; deliveryId: string }>
+    >(),
   serve: vi.fn(),
   sleep: vi.fn<(ms: number) => Promise<void>>(),
   wakeCommands: () => {},
@@ -44,14 +50,17 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (options?: { readonly token?: string }) =>
     options?.token === "control"
-      ? (async function* () {
-          while (true) {
-            const command = mocks.commands.shift();
-            if (command !== undefined) yield command;
-            else await new Promise<void>((resolve) => (mocks.wakeCommands = resolve));
-          }
-        })()
-      : // Agent turns and the run's inbox never report; only what the run sends matters here.
+      ? Object.assign(
+          (async function* () {
+            while (true) {
+              const command = mocks.commands.shift();
+              if (command !== undefined) yield command;
+              else await new Promise<void>((resolve) => (mocks.wakeCommands = resolve));
+            }
+          })(),
+          { getConflict: async () => null },
+        )
+      : // Agent turns never report; only what the run sends matters here.
         {
           [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
           token: "agent-turn",
@@ -169,16 +178,20 @@ it("serves every call to its task, one stretch of work at a time, until the sess
     },
   );
   mocks.openAgent.mockImplementation(async ({ name }) => ({
-    kind: "local",
-    name,
-    nodeId: name,
-    sessionId: `${name}-session`,
+    address: { kind: "local", name, nodeId: name, sessionId: `${name}-session` },
+    deliveryId: `${name}-opening`,
   }));
+  mocks.sendAgent.mockResolvedValue({
+    deliveryId: "reviewer-follow-up",
+    sessionId: "reviewer-replacement",
+  });
   const started = startServeBody(input);
 
   await vi.waitFor(() => expect(pendings).toHaveLength(2));
   started.control.apply(call("call-2", "Add a rollback step."));
-  await vi.waitFor(() => expect(mocks.deliver).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() =>
+    expect(mocks.deliver.mock.calls.some(([, message]) => message.kind === "reply")).toBe(true),
+  );
   started.control.apply(call("call-3", "Move it to Friday."));
   await vi.waitFor(() => expect(received).toHaveLength(3));
   started.control.apply({ kind: "cancel", reason: "The task was cancelled." });
@@ -218,7 +231,39 @@ it("serves every call to its task, one stretch of work at a time, until the sess
       turnId: "turn-call-2",
     },
   ]);
-  // Questions, sign-ins, `agent.started`, `ctx.session`, and `ctx.agents`
+  // Each delivery a session accepted is recorded for the call served when it was sent.
+  expect(
+    mocks.deliver.mock.calls.flatMap(([, message]) =>
+      message.kind === "agent-sent"
+        ? [
+            {
+              callId: message.from.callId,
+              deliveryId: message.deliveryId,
+              sessionId: message.sessionId,
+            },
+          ]
+        : [],
+    ),
+  ).toEqual([
+    { callId: "call-1", deliveryId: "reviewer-opening", sessionId: "reviewer-session" },
+    { callId: "call-2", deliveryId: "reviewer-follow-up", sessionId: "reviewer-replacement" },
+    {
+      callId: "call-2",
+      deliveryId: "release-captain-opening",
+      sessionId: "release-captain-session",
+    },
+  ]);
+  expect(sent("agent-started").map(({ session }) => session.sessionId)).toEqual([
+    "reviewer-session",
+    "reviewer-replacement",
+    "release-captain-session",
+  ]);
+  expect(sent("agent-started").map(({ from }) => from.callId)).toEqual([
+    "call-1",
+    "call-1",
+    "call-2",
+  ]);
+  // Questions, sign-ins, `ctx.session`, and `ctx.agents`
   // while serving a later call describe that call, not the call that started
   // the task.
   expect(servingSecond).toMatchObject({
@@ -256,12 +301,82 @@ it("serves every call to its task, one stretch of work at a time, until the sess
   expect(fourth?.aborted).toBe(true);
 });
 
+it("announces a replacement child once, before linking concurrent sends to it, in send order", async () => {
+  const announced = Promise.withResolvers<void>();
+  mocks.deliver.mockClear();
+  mocks.deliver.mockImplementation(async (_inbox, message) => {
+    if (message.kind === "agent-started" && message.session.sessionId === "replacement")
+      await announced.promise;
+  });
+  mocks.sendAgent.mockClear();
+  const accept = Promise.withResolvers<void>();
+  let delivery = 0;
+  mocks.openAgent.mockResolvedValue({
+    address: { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId: "original" },
+    deliveryId: "opening",
+  });
+  mocks.sendAgent.mockImplementation(async () => {
+    const deliveryId = `followup-${delivery++}`;
+    await accept.promise;
+    return { deliveryId, sessionId: "replacement" };
+  });
+  mocks.serve.mockImplementation(
+    async (receive: WorkflowServeReceive<JsonValue>, ctx: WorkflowServeContext<JsonValue>) => {
+      await receive();
+      const agent = ctx.agent("reviewer");
+      await agent.send("Alice opens the review.");
+      await Promise.all([
+        agent.send("Alice adds a checklist."),
+        agent.send("Bob adds a rollout note."),
+      ]);
+      await agent.send("Alice confirms the inputs.");
+      ctx.reply("Review inputs accepted.");
+      return await receive();
+    },
+  );
+  const started = startServeBody(input);
+  await vi.waitFor(() => expect(mocks.sendAgent).toHaveBeenCalledTimes(1));
+  // Bob's message waits until Alice's, sent first, is accepted, so the child admits them in order.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(mocks.sendAgent).toHaveBeenCalledTimes(1);
+  accept.resolve();
+  await vi.waitFor(() => expect(sent("agent-started")).toHaveLength(2));
+  // No delivery links to the replacement, and none is sent to it, before it is announced.
+  expect(sent("agent-sent")).toHaveLength(1);
+  expect(mocks.sendAgent).toHaveBeenCalledTimes(1);
+  announced.resolve();
+  await vi.waitFor(() => expect(sent("reply")).toHaveLength(1));
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+
+  const relationships = mocks.deliver.mock.calls.flatMap(([, message]) =>
+    message.kind === "agent-started"
+      ? [`opened:${message.session.sessionId}`]
+      : message.kind === "agent-sent"
+        ? [`sent:${message.sessionId}:${message.deliveryId}`]
+        : [],
+  );
+  expect(relationships).toEqual([
+    "opened:original",
+    "sent:original:opening",
+    "opened:replacement",
+    "sent:replacement:followup-0",
+    "sent:replacement:followup-1",
+    "sent:replacement:followup-2",
+  ]);
+  expect(mocks.sendAgent.mock.calls.map(([sentInput]) => sentInput)).toMatchObject([
+    { address: { sessionId: "original" }, message: "Alice adds a checklist." },
+    { address: { sessionId: "replacement" }, message: "Bob adds a rollout note." },
+    { address: { sessionId: "replacement" }, message: "Alice confirms the inputs." },
+  ]);
+});
+
 it("withdraws a question once its call has a reply, without aborting the stretch", async () => {
   mocks.deliver.mockClear();
   mocks.deliver.mockResolvedValue(undefined);
   const replyNow = Promise.withResolvers<void>();
   let stretch: AbortSignal | undefined;
-  let answer: PromiseLike<ToolInputResponse> | undefined;
+  let answer: PromiseLike<ToolAnswer> | undefined;
   mocks.serve.mockImplementation(
     async (receive: WorkflowServeReceive<JsonValue>, ctx: WorkflowServeContext<JsonValue>) => {
       stretch = (await receive()).abortSignal;
@@ -315,6 +430,29 @@ it("holds the outcome of a body that returns right after replying until its with
   expect(finished).toBe(false);
   withdrawalLands.resolve();
   await expect(started.outcome).resolves.toEqual({ output: null, status: "completed" });
+});
+
+it("replies and settles with a selected ctx.ask() answer as JSON, without its undefined text (#3836)", async () => {
+  mocks.deliver.mockReset();
+  const answer: WorkflowToolRunAnswer = { optionId: "yes", status: "answered", text: undefined };
+  mocks.serve.mockImplementation(
+    async (
+      receive: WorkflowServeReceive<JsonValue>,
+      ctx: WorkflowServeContext<WorkflowToolRunAnswer>,
+    ) => {
+      await receive();
+      ctx.reply(answer);
+      return answer;
+    },
+  );
+  const started = startServeBody(input);
+
+  const outcome = await started.outcome;
+  expect(outcome).toEqual({ output: { optionId: "yes", status: "answered" }, status: "completed" });
+  const output = outcome.status === "completed" ? outcome.output : null;
+  expect(Object.hasOwn(output as object, "text")).toBe(false);
+  const [reply] = sent("reply");
+  expect(Object.hasOwn(reply?.output as object, "text")).toBe(false);
 });
 
 it.each([
