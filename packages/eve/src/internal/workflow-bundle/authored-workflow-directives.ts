@@ -17,6 +17,18 @@ function formatEntryPointMethods(): string {
 // of surfacing a generic missing-export error.
 const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
+// Exports that moved from the stable entries to experimental ones; name the new entry instead of
+// surfacing a missing export, or a value that is `undefined` at runtime.
+const MOVED_WORKFLOW_EXPORTS: Readonly<
+  Record<string, { readonly entry: string; readonly names: ReadonlySet<string> }>
+> = {
+  "eve/workflow": { entry: "eve/experimental/workflow", names: new Set(["getWorkflowMetadata"]) },
+  "eve/workflow/api": {
+    entry: "eve/experimental/workflow/api",
+    names: new Set(["start", "getRun"]),
+  },
+};
+
 type AstNode = {
   async?: boolean;
   generator?: boolean;
@@ -29,6 +41,8 @@ type AstNode = {
   expression?: AstNode | boolean | null;
   id?: AstNode | null;
   imported?: AstNode | null;
+  importKind?: string;
+  exportKind?: string;
   key?: AstNode | null;
   kind?: string;
   local?: AstNode | null;
@@ -96,6 +110,16 @@ export async function prepareAuthoredWorkflowDirectives(input: {
         throw new Error(
           `${input.filePath}: "${specifierName(removed)}" is no longer exported from "eve/workflow". ` +
             'Use defineWorkflowTool() from "eve/tools" and call ctx.agent(target, input) or ctx.ask(request) in its executor.',
+        );
+      }
+    }
+    const moved = typeof specifier === "string" ? MOVED_WORKFLOW_EXPORTS[specifier] : undefined;
+    if (moved !== undefined && node.importKind !== "type" && node.exportKind !== "type") {
+      const name = node.specifiers?.map(valueSpecifierName).find((n) => n && moved.names.has(n));
+      if (name !== undefined) {
+        throw new Error(
+          `${input.filePath}: "${name}" moved from "${specifier}" to "${moved.entry}". ` +
+            `Import it from "${moved.entry}"; experimental entries have no compatibility promise.`,
         );
       }
     }
@@ -319,6 +343,15 @@ function isFunctionLike(node: AstNode): boolean {
 function specifierName(specifier: AstNode): unknown {
   const name = specifier.type === "ImportSpecifier" ? specifier.imported : specifier.local;
   return name?.name ?? name?.value;
+}
+
+// Type-only specifiers are erased, so TypeScript reports them; only runtime imports reach here.
+function valueSpecifierName(specifier: AstNode): string | undefined {
+  if (specifier.type !== "ImportSpecifier" && specifier.type !== "ExportSpecifier")
+    return undefined;
+  if (specifier.importKind === "type" || specifier.exportKind === "type") return undefined;
+  const name = specifierName(specifier);
+  return typeof name === "string" ? name : undefined;
 }
 
 function isRemovedWorkflowHelper(specifier: AstNode): boolean {

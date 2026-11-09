@@ -47,14 +47,6 @@ export interface WorkflowWebhook<T extends Request = Request> extends WorkflowHo
   readonly url: string;
 }
 
-/** The current workflow run, from {@link getWorkflowMetadata}. */
-export interface WorkflowMetadata {
-  readonly workflowName: string;
-  readonly workflowRunId: string;
-  readonly workflowStartedAt: Date;
-  readonly url: string;
-}
-
 /** An error that fails a step or workflow without retrying. */
 export interface FatalError extends Error {
   readonly fatal: boolean;
@@ -82,9 +74,6 @@ export const createWebhook: {
 /** Suspends the workflow for a duration such as `"1h"`, a number of milliseconds, or until a date. */
 // The SDK declares one overload per input kind, which a union argument cannot call.
 export const sleep = sdk.sleep as (duration: string | number | Date) => Promise<void>;
-
-/** Returns metadata for the current workflow run. */
-export const getWorkflowMetadata: () => WorkflowMetadata = sdk.getWorkflowMetadata;
 
 export const FatalError: {
   new (message: string): FatalError;

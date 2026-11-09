@@ -42,7 +42,7 @@ describe("authored workflow scope", () => {
           "agent/tools/probe.ts":
             'import { defineWorkflowTool } from "eve/tools"; import { run } from "@/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
           "agent/channels/probe.ts": `import { defineChannel, GET } from "eve/channels";
-import { start, getRun } from "eve/workflow/api";
+import { start, getRun } from "eve/experimental/workflow/api";
 import { run } from "@/lib/run";
 export default defineChannel({ routes: [GET("/workflow-api", async () => {
   const started = await start(run);

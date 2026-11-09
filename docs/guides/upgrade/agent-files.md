@@ -168,16 +168,19 @@ export default disableTool();
 
 ## Workflow imports
 
-Workflow tools import the Workflow SDK through eve. Import durable primitives from `eve/workflow` and run and hook operations from `eve/workflow/api`. Bare `workflow` and `workflow/*` imports fail the build.
+Workflow tools import the Workflow SDK through eve. Import durable primitives from `eve/workflow` and hook operations from `eve/workflow/api`. Run operations and run metadata are experimental. Bare `workflow` and `workflow/*` imports fail the build.
 
 ```ts
 import { createHook, sleep, FatalError } from "workflow"; // [!code --]
 import { createHook, sleep, FatalError } from "eve/workflow"; // [!code ++]
+import { getWorkflowMetadata } from "workflow"; // [!code --]
+import { getWorkflowMetadata } from "eve/experimental/workflow"; // [!code ++]
 import { start, getRun, resumeHook } from "workflow/api"; // [!code --]
-import { start, getRun, resumeHook } from "eve/workflow/api"; // [!code ++]
+import { resumeHook } from "eve/workflow/api"; // [!code ++]
+import { start, getRun } from "eve/experimental/workflow/api"; // [!code ++]
 ```
 
-`eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata`. `eve/workflow/api` exports `start`, `getRun`, and `resumeHook`. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
+`eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, and `RetryableError`. `eve/workflow/api` exports `resumeHook`. `getWorkflowMetadata` is in `eve/experimental/workflow`, and `start` and `getRun` are in `eve/experimental/workflow/api`; experimental entries have no compatibility promise. Importing a moved export from its old entry fails the build with an error that names the new one. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
 
 - `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`.
 - `start(workflow, args?)` takes a `"use workflow"` function, not a source string. It takes no options such as `deploymentId` or `world`, because eve runs the workflow on the agent's own queue and deployment.
@@ -190,7 +193,7 @@ await resumeHook(hook, payload); // [!code --]
 await resumeHook(token, payload); // [!code ++]
 ```
 
-Annotate with `WorkflowHook`, `WorkflowWebhook`, and `WorkflowMetadata` from `eve/workflow`, and `WorkflowRun` and `WorkflowRunStatus` from `eve/workflow/api`. Call `eve/workflow/api` operations from routes or `"use step"` helpers, not from replayed workflow bodies. Don't install another Workflow SDK; both entries use eve's bundled copy. You can remove `eve/workflow-modules` from tsconfig `types` and reference directives. See [Workflow imports](/docs/tools/workflows#workflow-imports).
+Annotate with `WorkflowHook` and `WorkflowWebhook` from `eve/workflow`, `WorkflowMetadata` from `eve/experimental/workflow`, and `WorkflowRun` and `WorkflowRunStatus` from `eve/experimental/workflow/api`. Call `eve/workflow/api` and `eve/experimental/workflow/api` operations from routes or `"use step"` helpers, not from replayed workflow bodies. Don't install another Workflow SDK; every entry uses eve's bundled copy. You can remove `eve/workflow-modules` from tsconfig `types` and reference directives. See [Workflow imports](/docs/tools/workflows#workflow-imports).
 
 ## Replace removed helpers
 

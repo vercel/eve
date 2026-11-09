@@ -187,9 +187,9 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
 }
 
 /**
- * `eve/workflow` resolves to the body-side shim. An `eve/workflow/api` import still live
- * after step bodies were stubbed means a body calls the runtime API; fail the
- * build here rather than the driver later.
+ * `eve/workflow` and `eve/experimental/workflow` resolve to the body-side shim. An
+ * `eve/workflow/api` or `eve/experimental/workflow/api` import still live after step bodies were
+ * stubbed means a body calls the runtime API; fail the build here rather than the driver later.
  */
 export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRolldownPlugin {
   return {
@@ -201,6 +201,7 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
 
       if (
         source === "eve/workflow/api" ||
+        source === "eve/experimental/workflow/api" ||
         source === "workflow/api" ||
         source === "workflow/runtime"
       ) {
@@ -211,7 +212,11 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         );
       }
 
-      if (source !== "eve/workflow" && source !== "workflow") {
+      if (
+        source !== "eve/workflow" &&
+        source !== "eve/experimental/workflow" &&
+        source !== "workflow"
+      ) {
         return undefined;
       }
 

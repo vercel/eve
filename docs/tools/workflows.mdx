@@ -84,8 +84,8 @@ continues, deploys, and returns one tool result.
   randomness, `process.env`, and Node.js APIs in steps. Keep values you need after a wait in local
   variables in the body.
 - Import durable primitives such as `createHook`, `sleep`, and `FatalError` from `eve/workflow` in
-  the body. Call `start`, `getRun`, and `resumeHook` from `eve/workflow/api` in routes or steps, not
-  in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
+  the body. Call `resumeHook` from `eve/workflow/api` in routes or steps, not in the body. Both use
+  eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
 - Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
@@ -116,7 +116,7 @@ step helpers.
 
 ### Workflow imports
 
-Import durable primitives from `eve/workflow`, and run and hook operations from `eve/workflow/api`:
+Import durable primitives from `eve/workflow`, and hook operations from `eve/workflow/api`:
 
 ```ts
 import { createHook, sleep } from "eve/workflow";
@@ -128,17 +128,26 @@ import { resumeHook } from "eve/workflow/api";
 | `createHook<T>({ token?, metadata? })` | `eve/workflow`     | Returns a `WorkflowHook<T>`. Await it for the next payload, or iterate it with `for await`. `metadata` is JSON stored with the hook.                                                     |
 | `createWebhook({ respondWith? })`      | `eve/workflow`     | Returns a `WorkflowWebhook` whose `url` resumes it with the incoming `Request`. With `respondWith: "manual"`, answer each `WorkflowWebhookRequest` with `request.respondWith(response)`. |
 | `sleep(duration)`                      | `eve/workflow`     | Waits for a duration such as `"1h"` or a number of milliseconds, or until a `Date`.                                                                                                      |
-| `getWorkflowMetadata()`                | `eve/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`.                                                                                                       |
 | `FatalError`, `RetryableError`         | `eve/workflow`     | Throw `FatalError` to fail without a retry. Throw `RetryableError`, with an optional `{ retryAfter }`, to retry a step.                                                                  |
-| `start(workflow, args)`                | `eve/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none.                                      |
-| `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
 | `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
 
 A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to `{ runId }` for the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
 
-Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
+Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, and `WorkflowWebhookRequest` from `eve/workflow` for explicit types.
 
 Only these exports are public. A bare `workflow` or `workflow/*` import in an application module fails the build with an error that names these entries.
+
+#### Experimental run operations
+
+Starting and inspecting standalone workflow runs is experimental. These exports have [no compatibility promise](/docs/reference/typescript-api#stability-policy) and can change in a minor release:
+
+| Export                  | Entry                           | What it does                                                                                                                                        |
+| ----------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getWorkflowMetadata()` | `eve/experimental/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`. Call it in the body.                                             |
+| `start(workflow, args)` | `eve/experimental/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none. |
+| `getRun(runId)`         | `eve/experimental/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                    |
+
+Call `start` and `getRun` from routes or steps, not in the body. Import `WorkflowMetadata` from `eve/experimental/workflow`, and `WorkflowRun` and `WorkflowRunStatus` from `eve/experimental/workflow/api`. For background work inside a session, prefer a [`task`](#run-calls-as-tasks-task) or [`serve`](#resumable-tasks-serve) tool.
 
 ## Wait for the result
 
