@@ -7,14 +7,13 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 
 - `agent/instructions.md`: the root prompt. Keep it about behavior that applies
   to every turn: grounding, source routing, and Slack style.
-- `agent/instructions/{github,notion,linear,pagerduty,google-drive}.ts`: until
-  the matching `<service>/company-brain` connector is attached, tell the agent
-  that source isn't connected and give the `vercel connect create` command.
-  Delete each once its source works.
-- `agent/connections/{notion,linear,pagerduty}.ts` and
-  `agent/tools/google_drive.ts`: turn on once their connectors are attached.
-  Google Drive uses tools on the Drive API because Connect offers it as OAuth,
-  not MCP. Detection and setup notes live in `agent/lib/connect.ts`.
+- `agent/instructions/{github,notion,linear,pagerduty}.ts`: until the matching
+  `<service>/company-brain` connector is attached, tell the agent that source
+  isn't connected and give the `vercel connect create` command. Delete each
+  once its source works.
+- `agent/connections/{notion,linear,pagerduty}.ts`: turn on once their
+  connectors are attached. Detection and setup notes live in
+  `agent/lib/connect.ts`.
 - `agent/channels/slack.ts`: who can reach the agent and what context each
   message carries.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
