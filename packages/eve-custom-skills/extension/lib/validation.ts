@@ -46,6 +46,9 @@ export function isRoutingDescription(description: string): boolean {
   return ROUTING_CONDITION.test(description.trim());
 }
 
+/** The extension's own skill names, which a custom skill without a load prefix would shadow. */
+const RESERVED_NAMES = new Set(["manage"]);
+
 export function normalizeSkillName(raw: string, maxLength: number): string {
   const normalized = raw
     .trim()
@@ -59,6 +62,11 @@ export function normalizeSkillName(raw: string, maxLength: number): string {
   }
   if (normalized.length > maxLength) {
     throw new InvalidSkillNameError(`Skill name must be ${maxLength} characters or fewer.`);
+  }
+  if (RESERVED_NAMES.has(normalized)) {
+    throw new InvalidSkillNameError(
+      `"${normalized}" is the name of this extension's own skill. Pick another name.`,
+    );
   }
   return normalized;
 }

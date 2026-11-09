@@ -52,8 +52,11 @@ export interface SkillScope {
   /** Lists and loads the scope's skills but refuses every change. */
   readonly readOnly?: boolean;
   /**
-   * Prefix for the names the scope's on-demand skills load under, such as
-   * `channel-`, so two scopes' skills can't collide. Defaults to none.
+   * Prefix for the names the scope's on-demand skills load under: with
+   * `channel`, skill `deploy` loads as `channel_deploy`. Skill names never
+   * contain `_`, so a prefixed name can't collide with another scope's. Use
+   * lowercase letters, digits, and hyphens. At most one scope of a turn may
+   * omit it.
    */
   readonly loadPrefix?: string;
   /** Anything a custom repository needs to address the scope, such as a tenant ID. */

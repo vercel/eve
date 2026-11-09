@@ -6,8 +6,8 @@ import { loadName } from "../lib/tool-support.ts";
 /**
  * Advertises the turn's on-demand and deferred custom skills so `eve__skill`
  * can load them. eve names each entry `<mount>__<key>`, so a custom skill can
- * never shadow one of the agent's own skills, and `create` refuses a name that
- * starts with another scope's prefix, so scopes can't shadow each other.
+ * never shadow one of the agent's own skills, and a scope prefix joins with
+ * `_`, which skill names never contain, so scopes can't shadow each other.
  */
 export default defineDynamic(async (ctx: DynamicContext) => {
   const scopes = await loadTurnSkills({

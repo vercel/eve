@@ -45,7 +45,7 @@ test("the shared scope comes from the conversation's space, not from DMs", async
   const channel = spaceScope(context({ id: "slack:T1:C1", type: "channel" }));
   assert.deepEqual(
     [channel?.name, channel?.key, channel?.shared, channel?.loadPrefix],
-    ["channel", "space:slack:T1:C1", true, "channel-"],
+    ["channel", "space:slack:T1:C1", true, "channel"],
   );
   assert.equal(
     spaceScope(context({ id: "teams:t:g", type: "group" }))?.label,

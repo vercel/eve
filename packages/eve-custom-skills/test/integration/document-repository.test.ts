@@ -17,10 +17,10 @@ const channel: SkillScope = {
 };
 const savedBy = { principalId: "alice", label: "alice@example.com" };
 
-function setup(backend: MemoryDocumentBackend = inMemory(), namespace?: string) {
+function setup(backend: MemoryDocumentBackend = inMemory(), namespace?: string, limits = {}) {
   return {
     backend,
-    skills: new SkillLifecycle({ repository: documentRepository({ backend, namespace }) }),
+    skills: new SkillLifecycle({ repository: documentRepository({ backend, namespace }), limits }),
   };
 }
 
@@ -121,4 +121,19 @@ test("deleting a skill clears its version documents", async () => {
   const cleared = await backend.read({ key: versionKey, signal: new AbortController().signal });
   assert.equal(cleared?.content, "");
   assert.deepEqual(await skills.listSummaries(alice), []);
+});
+
+test("concurrent writers can't exceed a scope's always-on limit", async () => {
+  const { skills } = setup(inMemory(), undefined, { maxAlwaysOn: 1 });
+  const results = await Promise.allSettled(
+    ["one", "two", "three"].map((name) =>
+      skills.save(
+        channel,
+        { name, description: "x", markdown: "Always.", applicationMode: "always" },
+        { savedBy },
+      ),
+    ),
+  );
+  assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
+  assert.equal((await skills.listLive(channel)).length, 1);
 });

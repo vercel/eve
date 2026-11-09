@@ -10,6 +10,8 @@ import type { SkillScope, SkillScopeContext, StoredSkill } from "./types.ts";
 
 type Config = typeof extension.config;
 
+const LOAD_PREFIX = /^[a-z0-9][a-z0-9-]*$/;
+
 const lifecycles = new WeakMap<Config, SkillLifecycle | null>();
 
 function blobConfigured(): boolean {
@@ -52,11 +54,24 @@ export async function skillScopes(ctx: SkillScopeContext): Promise<readonly Skil
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
   });
   const names = new Set<string>();
+  const prefixes = new Set<string>();
   for (const scope of scopes) {
+    const prefix = scope.loadPrefix ?? "";
+    if (prefix !== "" && !LOAD_PREFIX.test(prefix)) {
+      throw new Error(
+        `[custom-skills] scope "${scope.name}" has load prefix "${prefix}"; use lowercase letters, digits, and hyphens.`,
+      );
+    }
     if (names.has(scope.name)) {
       throw new Error(`[custom-skills] two scopes share the name "${scope.name}".`);
     }
+    if (prefixes.has(prefix)) {
+      throw new Error(
+        `[custom-skills] two scopes share the load prefix "${prefix}", so their skills could collide.`,
+      );
+    }
     names.add(scope.name);
+    prefixes.add(prefix);
   }
   return scopes;
 }

@@ -11,7 +11,6 @@ import {
   scopeField,
   skillChange,
 } from "../lib/tool-support.ts";
-import { InvalidSkillNameError } from "../lib/errors.ts";
 import { INPUT_CEILINGS } from "../lib/validation.ts";
 
 const inputSchema = z.object({
@@ -39,21 +38,13 @@ const { approval, execute } = skillChange<z.infer<typeof inputSchema>, SavePlan,
   failure: "Failed to save the skill.",
   fallbackCard: ({ name, scope }) =>
     `Save skill "${name}"${scope ? ` in the ${scope} scope` : ""}?`,
-  async plan(input, { skills, scope, scopes }) {
+  async plan(input, { skills, scope }) {
     const plan = await skills.planSave(scope, {
       name: input.name,
       description: input.description,
       markdown: input.instructions,
       applicationMode: input.applicationMode,
     });
-    const shadowed = scopes.find(
-      (other) => other !== scope && other.loadPrefix && plan.name.startsWith(other.loadPrefix),
-    );
-    if (shadowed) {
-      throw new InvalidSkillNameError(
-        `Skill names in this scope can't start with "${shadowed.loadPrefix}", which names ${shadowed.name} skills. Pick another name.`,
-      );
-    }
     return {
       plan,
       changesLive: plan.activates,

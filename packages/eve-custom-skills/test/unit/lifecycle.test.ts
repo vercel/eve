@@ -9,8 +9,8 @@ const ROUTING = "Use when the user asks for a deploy checklist.";
 const alice: SkillScope = { name: "personal", key: "user:alice", label: "you", shared: false };
 const savedBy = { principalId: "alice", label: "alice@example.com" };
 
-function lifecycle(limits = {}) {
-  return new SkillLifecycle({ repository: memoryRepository(), limits });
+function lifecycle(limits = {}, hooks = {}) {
+  return new SkillLifecycle({ repository: memoryRepository(hooks), limits });
 }
 
 test("a clean first version goes live and later saves are drafts", async () => {
@@ -187,4 +187,48 @@ test("scopes keep their skills apart", async () => {
     notFound: ["missing"],
   });
   assert.equal((await skills.listLive(alice)).length, 1);
+});
+
+test("concurrent first saves can't exceed the scope's limits", async () => {
+  const skills = lifecycle({ maxSkills: 1, maxAlwaysOn: 1 });
+  const results = await Promise.allSettled(
+    ["one", "two"].map((name) =>
+      skills.save(
+        alice,
+        { name, description: "x", markdown: "Always.", applicationMode: "always" },
+        { savedBy },
+      ),
+    ),
+  );
+  assert.deepEqual(results.map(({ status }) => status).sort(), ["fulfilled", "rejected"]);
+  assert.equal((await skills.listLive(alice)).length, 1);
+});
+
+test("a mode change fails rather than change a version published in the meantime", async () => {
+  let race: (() => Promise<unknown>) | undefined;
+  const skills = lifecycle(
+    {},
+    {
+      async beforeWrite() {
+        const publish = race;
+        race = undefined;
+        await publish?.();
+      },
+    },
+  );
+  const input = { name: "lookup", description: ROUTING, markdown: "v1" };
+  await skills.save(alice, input, { savedBy });
+  await skills.save(alice, { ...input, markdown: "v2" }, { savedBy });
+  race = () => skills.publish(alice, "lookup", 2);
+
+  await assert.rejects(skills.setMode(alice, "lookup", 1, "deferred"), /version 1 is not active/);
+  const [live] = await skills.listLive(alice);
+  assert.deepEqual([live?.version, live?.applicationMode], [2, "on-demand"]);
+});
+
+test("the extension's own skill name is reserved", async () => {
+  await assert.rejects(
+    lifecycle().planSave(alice, { name: "Manage", description: ROUTING, markdown: "x" }),
+    /extension's own skill/,
+  );
 });
