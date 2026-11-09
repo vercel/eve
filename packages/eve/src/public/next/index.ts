@@ -431,7 +431,10 @@ async function buildAgentWorkspaceExtensions(
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
  * rewrites eve protocol endpoints to that local URL. During `next build`,
  * builds each agent's mounted source-backed workspace extensions so the
- * Next.js type check can resolve them. In Vercel production,
+ * Next.js type check can resolve them. When `eveRoot` is an `agents/`
+ * workspace, `next build` also writes `<eveRoot>/.eve/agent-summary.json`, the
+ * multi-agent summary index Vercel uses for the project dashboard. In Vercel
+ * production,
  * writes Build Output service routes so Vercel sends eve protocol endpoints to
  * the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
