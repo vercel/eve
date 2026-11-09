@@ -36,3 +36,32 @@ export async function callSlack<T extends object = Record<string, unknown>>(
   });
   return response as { ok: boolean; error?: string } & Partial<T>;
 }
+
+/**
+ * Whether a Slack user is a full member of the home workspace: not deactivated,
+ * not external, and not a guest. Guests can only see the channels they were
+ * invited to, but the agent reads with the bot's broader access, so it must not
+ * answer them. Throws on errors other than `user_not_found`, which may be transient.
+ */
+export async function isFullMember(teamId: string, userId: string): Promise<boolean> {
+  const response = await callSlack<{
+    user: {
+      deleted?: boolean;
+      is_restricted?: boolean;
+      is_ultra_restricted?: boolean;
+      team_id?: string;
+    };
+  }>(teamId, "users.info", { user: userId });
+  if (!response.ok) {
+    if (response.error === "user_not_found") return false;
+    throw new Error(`Slack users.info failed: ${response.error ?? "unknown error"}`);
+  }
+  const { user } = response;
+  return (
+    user !== undefined &&
+    user.deleted !== true &&
+    user.is_restricted !== true &&
+    user.is_ultra_restricted !== true &&
+    isHomeTeam(user.team_id)
+  );
+}

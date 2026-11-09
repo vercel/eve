@@ -1,7 +1,7 @@
 import { defineDynamicSchedules } from "eve/experimental/schedules";
 import { z } from "zod";
 import slack from "../channels/slack.ts";
-import { callSlack, isHomeTeam, slackTeamId } from "../lib/slack.ts";
+import { isFullMember, slackTeamId } from "../lib/slack.ts";
 
 interface TaskPayload {
   task: string;
@@ -15,21 +15,6 @@ interface TaskPayload {
 function attribute(attributes: Readonly<Record<string, unknown>>, key: string) {
   const value = attributes[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-// A deactivated or external account stops its schedules from running.
-async function isActiveMember(payload: TaskPayload): Promise<boolean> {
-  const response = await callSlack<{ user: { deleted?: boolean; team_id?: string } }>(
-    payload.teamId,
-    "users.info",
-    { user: payload.userId },
-  );
-  if (!response.ok) {
-    if (response.error === "user_not_found") return false;
-    // Anything else may be transient; throwing lets the provider retry.
-    throw new Error(`Slack users.info failed: ${response.error ?? "unknown error"}`);
-  }
-  return response.user?.deleted !== true && isHomeTeam(response.user?.team_id);
 }
 
 // People ask in Slack ("every Monday at 9, post open questions from #support
@@ -79,7 +64,9 @@ export default defineDynamicSchedules({
   async auth({ principal, payload }) {
     if (principal.type !== "user" || principal.authenticator !== "slack-webhook") return null;
     if (principal.principalId !== `slack:${payload.teamId}:${payload.userId}`) return null;
-    if (!(await isActiveMember(payload))) return null;
+    // A member who is deactivated, leaves, or becomes a guest stops their
+    // schedules. A failed lookup throws so the provider retries.
+    if (!(await isFullMember(payload.teamId, payload.userId))) return null;
     const { type: _type, ...identity } = principal;
     return {
       ...identity,
