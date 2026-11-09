@@ -24,7 +24,7 @@ import { memoryWorld } from "#execution/world/memory-world.js";
 import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import type { InProcessRuntime } from "./runtime.js";
 import { stoppableStore, type SessionStore } from "./session-store.js";
-import { createWorldSessionStore } from "./world-store.js";
+import { createWorldSessionStore, type WorldSessionStore } from "./world-store.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
@@ -48,6 +48,14 @@ const IN_PROCESS_MOVES: SessionMoves = {
   tryPrewarmTransfer: async () => ({ kind: "retained", reason: "same-deployment" }),
   tryTransfer: async () => ({ kind: "retained", reason: "same-deployment" }),
 };
+
+/** Whether `settled` resolves without waiting on anything but what's already done. */
+async function settledNow(settled: Promise<void>): Promise<boolean> {
+  return await Promise.race([
+    settled.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 0)),
+  ]);
+}
 
 function unavailable(what: string): never {
   throw new Error(
@@ -89,6 +97,19 @@ export interface InProcessHostOptions {
    * serializer (`workflowStepBoundary`) hands steps exactly what a deployment would.
    */
   readonly stepBoundary?: StepBoundary;
+  /**
+   * Whether readers in this process read the sessions here from this host's memory, as they're
+   * kept. A World host's runtimes don't: a session runs in many short deliveries, and its readers
+   * follow its World throughout (`registerFallbackLineStore`). Defaults to `true`.
+   */
+  readonly servesLines?: boolean;
+  /**
+   * The store its sessions are kept in, when its creator holds one already: a World host's
+   * delivery, which writes through its activation's handle and consumes its messages
+   * (`WorldSessionStore.receive`). Its readers read from the World, so a takeover reaches them
+   * there. Without one, a store on `world`.
+   */
+  readonly worldStore?: WorldSessionStore;
 }
 
 /** A session running here: what the host records of it, and its loop. */
@@ -109,6 +130,8 @@ export interface InProcessHost {
   readonly store: SessionStore;
   /** Whether the host keeps its sessions for another runtime: it was given a World. */
   readonly keeps: boolean;
+  /** Whether readers here read its sessions from its memory; see `servesLines`. */
+  readonly servesLines: boolean;
   /** The record of each session as it boots and runs here, by session id. */
   readonly records: Map<string, HostedSession>;
   /** Each session's loop, once it runs. */
@@ -127,6 +150,20 @@ export interface InProcessHost {
    * stop without ending (`SessionRecorder.suspended`).
    */
   suspended(): boolean;
+  /**
+   * Whether nothing here runs, or is about to: no delivery is on its way, every session waits on
+   * its addresses or a timer with no step running, and every run is replayable (a subagent's,
+   * `ask_question`'s), waiting on its hooks. Stopped now, each would continue from its World as
+   * it is, woken by what arrives next or by its next timer (`timers.next()`). An authored
+   * workflow tool's run doesn't survive a stop, so a host running one isn't quiescent.
+   */
+  quiescent(): Promise<boolean>;
+  /**
+   * Lets each running step finish and be saved, and starts no other: resolves once every session
+   * is between steps. A step that would start waits until `dispose`, which stops it unstarted, so
+   * a host disposed after draining leaves each session at a step boundary.
+   */
+  drain(): Promise<void>;
   /** Releases `release` when the host is disposed. */
   onDispose(release: () => void): void;
   /** Stops serving: suspends the sessions a store keeps, and ends the rest. */
@@ -146,11 +183,13 @@ export function createInProcessHost(
   const inboxes = createMemoryInboxRegistry(stepBoundary);
   const timers = createInProcessTimers();
   const world = options.world ?? memoryWorld();
-  const onWorld = createWorldSessionStore(world, {
-    // Another process continued a session: what this one writes of it is refused from now on,
-    // and its readers here hear why after the lines it kept.
-    onTakenOver: (sessionId, error) => lines.fail(sessionId, error),
-  });
+  const onWorld =
+    options.worldStore ??
+    createWorldSessionStore(world, {
+      // Another process continued a session: what this one writes of it is refused from now on,
+      // and its readers here hear why after the lines it kept.
+      onTakenOver: (sessionId, error) => lines.fail(sessionId, error),
+    });
   const kept = options.world === undefined ? undefined : stoppableStore(onWorld);
   const store = kept?.store ?? onWorld;
   const records = new Map<string, HostedSession>();
@@ -158,6 +197,21 @@ export function createInProcessHost(
   const running = new Map<string, Promise<void>>();
   const releases: (() => void)[] = [];
   let suspending = false;
+  // Once draining, a step that would start waits for `dispose`, which refuses it.
+  let draining: Promise<never> | undefined;
+  let refuseDrained: (error: Error) => void = () => {};
+  /** How many of each session's waits are on a timer (`SessionHost.sleep`). */
+  const sleeping = new Map<string, number>();
+  const sleepFor = (sessionId: string) => async (ms: number) => {
+    sleeping.set(sessionId, (sleeping.get(sessionId) ?? 0) + 1);
+    try {
+      await timers.until(Date.now() + ms);
+    } finally {
+      const left = (sleeping.get(sessionId) ?? 1) - 1;
+      if (left === 0) sleeping.delete(sessionId);
+      else sleeping.set(sessionId, left);
+    }
+  };
 
   const deliverCommand: InProcessHost["deliverCommand"] = async (token, command) => {
     const identified = identifyCommand(command);
@@ -223,6 +277,7 @@ export function createInProcessHost(
    * deployment's serializer. Its stream and signals are services, which cross as they are.
    */
   const runTurnStepAcrossBoundary: SessionHost["runTurnStep"] = async (input) => {
+    if (draining !== undefined) await draining;
     const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
     const crossed = await acrossStepBoundary(stepBoundary, data);
     return await acrossStepBoundary(
@@ -253,6 +308,7 @@ export function createInProcessHost(
     runs,
     sessions,
     keeps: kept !== undefined,
+    servesLines: options.servesLines ?? true,
     store,
     timers,
     world,
@@ -262,9 +318,32 @@ export function createInProcessHost(
       moves: IN_PROCESS_MOVES,
       recorder,
       runTurnStep: runTurnStepAcrossBoundary,
-      sleep: (ms) => timers.until(Date.now() + ms),
+      sleep: sleepFor(recorder.sessionId),
     }),
     suspended: () => suspending,
+    async quiescent() {
+      if (!inboxes.quiet()) return false;
+      for (const [sessionId, live] of sessions) {
+        if (!(await settledNow(live.loop.settledStep()))) return false;
+        if (!inboxes.waiting(sessionId) && !sleeping.has(sessionId)) return false;
+      }
+      // A run waiting on its hooks may stop with the session if it goes on after a restore.
+      for (const run of runs.active())
+        if (!run.replayable || !inboxes.waiting(run.runId)) return false;
+      // A delivery may have started crossing while this looked.
+      return inboxes.quiet();
+    },
+    async drain() {
+      if (draining === undefined) {
+        draining = new Promise<never>((_, reject) => (refuseDrained = reject));
+        draining.catch(() => {});
+      }
+      // A session a step opened (a subagent's) may start its first step meanwhile.
+      for (let settled = 0; settled !== sessions.size;) {
+        settled = sessions.size;
+        await Promise.all([...sessions.values()].map(({ loop }) => loop.settledStep()));
+      }
+    },
     onDispose(release) {
       releases.push(release);
     },
@@ -278,6 +357,7 @@ export function createInProcessHost(
       // session's stream holds every line it wrote.
       if (kept !== undefined) await lines.flushAll().catch(() => {});
       kept?.stop();
+      refuseDrained(new Error("The host stopped before this step started."));
       inboxes.closeAll();
       // A run whose body waits on a session that ended never settles, so nothing waits for
       // runs: their sessions end, and their hooks are closed.

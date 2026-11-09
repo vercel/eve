@@ -34,6 +34,7 @@ function stateWith(history: readonly string[], step: number): SessionState {
   };
 }
 
+/** The kinds of every journal record the session's run holds, oldest first. */
 async function kinds(world: ReturnType<typeof memoryWorld>): Promise<string[]> {
   const page = await world.events.list({
     pagination: { limit: 1000, sortOrder: "asc" },

@@ -36,7 +36,23 @@ export type WorldEventRequest =
         readonly deploymentId: string;
         readonly workflowName: string;
         readonly input: Uint8Array;
+        /** `queueNamespace` names the queue a World's recovery re-enqueues the run on. */
+        readonly executionContext?: Readonly<Record<string, unknown>>;
       };
+      readonly specVersion?: number;
+    }
+  | {
+      /** An address on the run: what's sent to `token` arrives as its `hook_received`. */
+      readonly eventType: "hook_created";
+      readonly correlationId: string;
+      readonly eventData: { readonly token: string };
+      readonly specVersion?: number;
+    }
+  | {
+      /** What arrived at the hook `correlationId` names, written by whoever sent it. */
+      readonly eventType: "hook_received";
+      readonly correlationId: string;
+      readonly eventData: { readonly payload: Uint8Array };
       readonly specVersion?: number;
     }
   | { readonly eventType: "run_started"; readonly specVersion?: number }
@@ -80,6 +96,44 @@ export interface WorldStreamChunk {
   readonly data: Uint8Array;
 }
 
+/** One delivery of a queue message, as Workflow's `Queue.createQueueHandler` describes it. */
+export interface WorldQueueDelivery {
+  /** Deliveries counted toward the message's retries: a handoff's next one isn't. */
+  readonly attempt: number;
+  /** 1 on the message's first delivery, then one more on every redelivery, when known. */
+  readonly deliveryCount?: number;
+  /** The message's id, the same on each of its deliveries. */
+  readonly messageId: string;
+  /** When the invocation running this delivery began (epoch ms), when the World knows. */
+  readonly invocationStartedAt?: number;
+}
+
+/**
+ * A World with its queue and hooks: what a host that runs sessions only when something arrives
+ * needs (`#execution/world-host`). Workflow's Worlds are one. A message names a run
+ * (`{ runId, runSpecVersion: 9 }`), and the World delivers one of a spec 9 run's messages at a
+ * time, which keeps one process driving a session. A handler's `{ timeoutSeconds: 0 }` asks for
+ * the same message again at once (a handoff); `{ timeoutSeconds: n }`, again in about `n`
+ * seconds. Anything else acknowledges it; a throw retries it.
+ */
+export interface QueueWorld extends RuntimeWorld {
+  readonly hooks: NonNullable<RuntimeWorld["hooks"]>;
+  queue(
+    queueName: string,
+    message: unknown,
+    options?: { readonly delaySeconds?: number; readonly idempotencyKey?: string },
+  ): Promise<unknown>;
+  createQueueHandler(
+    prefix: string,
+    handler: (message: unknown, delivery: WorldQueueDelivery) => Promise<unknown>,
+  ): (request: Request) => Promise<Response>;
+  /** Delivers a prefix's messages in this process, where the World's queue runs here. */
+  registerHandler?(prefix: string, handler: (request: Request) => Promise<Response>): void;
+  /** Starts delivering, where the World's queue runs in this process. */
+  start?(): Promise<void>;
+  close?(): Promise<void>;
+}
+
 export interface RuntimeWorld {
   readonly specVersion?: number;
   /** What the World supports; eve reads only the in-band fence. */
@@ -98,6 +152,12 @@ export interface RuntimeWorld {
       readonly resolveData?: "none" | "all";
       readonly specVersion?: number;
     }): Promise<WorldPage<WorldEvent> & { readonly snapshot?: WorldLogSnapshot }>;
+  };
+  /** The run holding a hook, by its token: what a sender resolves an address to. */
+  readonly hooks?: {
+    getByToken(
+      token: string,
+    ): Promise<{ readonly hookId: string; readonly runId: string; readonly token: string }>;
   };
   readonly runs: {
     list(params: {
@@ -130,5 +190,10 @@ export interface RuntimeWorld {
       runId: string,
       name: string,
     ): Promise<{ readonly tailIndex: number; readonly done: boolean }>;
+    /**
+     * A live read from chunk `startIndex` on, which waits for chunks written later, when the World
+     * has one: a reader far into a long stream starts there rather than paging from its start.
+     */
+    get?(runId: string, name: string, startIndex?: number): Promise<ReadableStream<Uint8Array>>;
   };
 }

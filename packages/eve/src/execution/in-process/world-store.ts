@@ -1,4 +1,5 @@
 import {
+  type Entities,
   type EntityHandle,
   type JournalRecord,
   TakenOverError,
@@ -27,8 +28,12 @@ import type { SessionSnapshot } from "./snapshot.js";
 // and adds the inputs after those.
 //
 // One process writes a session: this store opens it (creating it, or fencing out whoever wrote it
-// before) at its first write. Once the entity refuses a write, every later write of that session
-// fails here (`TakenOverError`), before it reaches the World.
+// before) at its first write, or writes through the handle an activation opened (`handles`).
+// Once the entity refuses a write, every later write of that session fails here
+// (`TakenOverError`), before it reaches the World.
+//
+// An input taken from the session's mailbox (a World host's arrivals) consumes its message in the
+// same write (`receive`), so a crash either keeps both or neither.
 
 const STATE_RECORD = "eve.state";
 const INPUT_RECORD = "eve.input";
@@ -83,22 +88,40 @@ function stateOf(journal: {
 export interface WorldSessionStoreOptions {
   /** Once, when the World refuses a session's write because another process took it over. */
   readonly onTakenOver?: (sessionId: string, error: TakenOverError) => void;
+  /** The sessions as entities; `sessionEntities(world)` by default. */
+  readonly entities?: Entities;
+  /** A handle this process holds already, such as an activation's: written through, not reopened. */
+  readonly handles?: (sessionId: string) => EntityHandle | undefined;
+}
+
+export interface WorldSessionStore extends SessionStore {
+  /**
+   * The next input `sessionId` keeps comes from its mailbox's `messageId`: keeping it consumes
+   * the message in the same write.
+   */
+  receive(sessionId: string, messageId: string): void;
+  /** Consumes the message `receive` named, if no input kept it (the session dropped it). */
+  received(sessionId: string): Promise<void>;
 }
 
 export function createWorldSessionStore(
   world: RuntimeWorld,
   options: WorldSessionStoreOptions = {},
-): SessionStore {
-  const entities = sessionEntities(world);
+): WorldSessionStore {
+  const entities = options.entities ?? sessionEntities(world);
   const opened = new Map<string, Promise<EntityHandle>>();
   // What this store last saved of each session, which its next save is a change from.
   const saved = new Map<string, Saved>();
   // Sessions another process took over: this one writes them no more.
   const lost = new Map<string, TakenOverError>();
+  // The message each session's next kept input consumes.
+  const receiving = new Map<string, string>();
   // A session's writes land in the order they were made.
   const writes = serialPerKey();
 
   const handleOf = async (sessionId: string): Promise<EntityHandle> => {
+    const held = options.handles?.(sessionId);
+    if (held !== undefined) return held;
     let handle = opened.get(sessionId);
     if (handle === undefined) {
       handle = entities.open(sessionId);
@@ -149,6 +172,11 @@ export function createWorldSessionStore(
     saved.set(sessionId, { changes: 0, messages });
   };
 
+  const journalOf = async (sessionId: string) => {
+    const held = options.handles?.(sessionId);
+    return held !== undefined ? await held.load() : await entities.load(sessionId);
+  };
+
   return {
     async appendLines(sessionId, position, lines) {
       await write(sessionId, async () => {
@@ -163,17 +191,40 @@ export function createWorldSessionStore(
     },
     async appendInput(sessionId, input) {
       await write(sessionId, async () => {
-        await (await handleOf(sessionId)).append([{ kind: INPUT_RECORD, value: input }]);
+        const message = receiving.get(sessionId);
+        receiving.delete(sessionId);
+        await (
+          await handleOf(sessionId)
+        ).append(
+          [{ kind: INPUT_RECORD, value: input }],
+          message === undefined ? {} : { consumedThrough: message },
+        );
       });
     },
     async saveState(state) {
       await write(state.sessionId, () => saveOf(state));
     },
-    async load(sessionId): Promise<SessionSnapshot | undefined> {
+    receive(sessionId, messageId) {
+      receiving.set(sessionId, messageId);
+    },
+    async received(sessionId) {
+      await write(sessionId, async () => {
+        const message = receiving.get(sessionId);
+        receiving.delete(sessionId);
+        if (message !== undefined)
+          await (await handleOf(sessionId)).append([], { consumedThrough: message });
+      });
+    },
+    async load(sessionId, loadOptions = {}): Promise<SessionSnapshot | undefined> {
       await writes.settled(sessionId);
-      const journal = await entities.load(sessionId);
+      const journal = await journalOf(sessionId);
       const log = journal === undefined ? undefined : stateOf(journal);
       if (log === undefined) return undefined;
+      if (loadOptions.lines === "count")
+        return withAppendedInputs(
+          { ...log.state, lines: [], linesFrom: await entities.streamLength(sessionId) },
+          log.inputs,
+        );
       const decoder = new TextDecoder();
       const lines = (await entities.chunks(sessionId)).map((line) => decoder.decode(line));
       return withAppendedInputs({ ...log.state, lines }, log.inputs);

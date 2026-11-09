@@ -1,4 +1,4 @@
-import type { RuntimeWorld } from "./runtime-world.js";
+import type { QueueWorld } from "./runtime-world.js";
 
 // Vercel's World (`@workflow/world-vercel`) for sessions an in-process runtime keeps: in a Vercel
 // deployment, the deployment's own; anywhere else (a laptop, a devbox, CI), the same project's
@@ -28,9 +28,9 @@ export interface VercelWorldOptions {
 const IN_PROCESS_DEPLOYMENT = "dpl_eve_in_process";
 
 /** Vercel's World for this project; see the module comment. */
-export function vercelWorld(options: VercelWorldOptions = {}): RuntimeWorld {
-  let loading: Promise<{ readonly world: RuntimeWorld; readonly deploymentId: string }> | undefined;
-  let loaded: RuntimeWorld | undefined;
+export function vercelWorld(options: VercelWorldOptions = {}): QueueWorld {
+  let loading: Promise<{ readonly world: QueueWorld; readonly deploymentId: string }> | undefined;
+  let loaded: QueueWorld | undefined;
   const opened = () =>
     (loading ??= open(options).then((open) => {
       loaded = open.world;
@@ -48,12 +48,18 @@ export function vercelWorld(options: VercelWorldOptions = {}): RuntimeWorld {
         await (await world()).events.create(runId, data, params),
       list: async (params) => await (await world()).events.list(params),
     },
+    hooks: { getByToken: async (token) => await (await world()).hooks.getByToken(token) },
     runs: { list: async (params) => await (await world()).runs.list(params) },
     streams: {
       close: async (runId, name) => await (await world()).streams.close(runId, name),
       getChunks: async (runId, name, chunks) =>
         await (await world()).streams.getChunks(runId, name, chunks),
       getInfo: async (runId, name) => await (await world()).streams.getInfo(runId, name),
+      get: async (runId, name, startIndex) => {
+        const { streams } = await world();
+        if (streams.get === undefined) throw new Error("This World has no live stream read.");
+        return await streams.get(runId, name, startIndex);
+      },
       write: async (runId, name, chunk) => await (await world()).streams.write(runId, name, chunk),
       writeMulti: async (runId, name, chunks) => {
         const streams = (await world()).streams;
@@ -61,12 +67,22 @@ export function vercelWorld(options: VercelWorldOptions = {}): RuntimeWorld {
         else for (const chunk of chunks) await streams.write(runId, name, chunk);
       },
     },
+    // Vercel Queues deliver to a deployment's subscribed function, not to this process: a host
+    // serves `createQueueHandler`'s handler there.
+    queue: async (name, message, queueOptions) =>
+      await (await world()).queue(name, message, queueOptions),
+    createQueueHandler(prefix, handler) {
+      let made: ((request: Request) => Promise<Response>) | undefined;
+      return async (request) =>
+        await (made ??= (await world()).createQueueHandler(prefix, handler))(request);
+    },
+    close: async () => await loaded?.close?.(),
   };
 }
 
 async function open(
   options: VercelWorldOptions,
-): Promise<{ readonly world: RuntimeWorld; readonly deploymentId: string }> {
+): Promise<{ readonly world: QueueWorld; readonly deploymentId: string }> {
   const { createWorld } = await import("#compiled/@workflow/world-vercel/index.js");
   const deployment = process.env.VERCEL_DEPLOYMENT_ID;
   if (deployment !== undefined && options.token === undefined && options.projectId === undefined) {

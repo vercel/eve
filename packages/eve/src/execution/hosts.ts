@@ -60,6 +60,8 @@ export interface DurableHost {
 interface Hosts {
   readonly routes: Set<HostedRoute>;
   readonly streams: Map<string, SessionLineStore>;
+  /** Where a session no store here holds is read from: a World host's World. */
+  fallbackStreams?: SessionLineStore;
   durable?: DurableHost;
 }
 
@@ -206,10 +208,29 @@ export function registerSessionLineStore(sessionId: string, store: SessionLineSt
   };
 }
 
-/** The store that holds `sessionId`'s stream: a registered one, or the durable host's. */
+/**
+ * Reads the stream of any session no store is registered for from `store`, until the returned
+ * release: a World host's, whose sessions run in whichever process a wake reached.
+ */
+export function registerFallbackLineStore(store: SessionLineStore): () => void {
+  const held = hosts();
+  if (held.fallbackStreams !== undefined)
+    throw new Error("This realm reads sessions from a World already.");
+  held.fallbackStreams = store;
+  return () => {
+    if (held.fallbackStreams === store) held.fallbackStreams = undefined;
+  };
+}
+
+/**
+ * The store that holds `sessionId`'s stream: a registered one, a World host's, or the durable
+ * host's.
+ */
 export function sessionLineStore(sessionId: string): SessionLineStore {
   const registered = hosts().streams.get(sessionId);
   if (registered !== undefined) return registered;
+  const fallback = hosts().fallbackStreams;
+  if (fallback !== undefined) return fallback;
   const { durable } = hosts();
   if (durable === undefined) throw new Error(`No host in this realm holds session "${sessionId}".`);
   return durable.lineStore;

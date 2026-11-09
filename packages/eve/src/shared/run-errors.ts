@@ -80,7 +80,28 @@ export function isEntityConflict(error: unknown): boolean {
 }
 
 export function isRunNotFound(error: unknown): boolean {
-  return anyCause(error, ["WorkflowRunNotFoundError"]);
+  return anyCause(error, ["WorkflowRunNotFoundError"]) || anyRunNotFoundResponse(error);
+}
+
+/**
+ * Vercel's World answering a read of a run it doesn't hold. `runs.get` throws
+ * `WorkflowRunNotFoundError`, but a run's events and streams answer with the HTTP error, a
+ * `WorkflowWorldError` whose code is `not-found` and whose message names the run. The local
+ * World reads such a run as empty instead.
+ */
+function anyRunNotFoundResponse(error: unknown): boolean {
+  for (const cause of walkCauseChain(error))
+    if (
+      typeof cause === "object" &&
+      cause !== null &&
+      (cause as { readonly name?: unknown }).name === "WorkflowWorldError" &&
+      (cause as { readonly code?: unknown }).code === "not-found" &&
+      /^workflow run \S+ not found/iu.test(
+        String((cause as { readonly message?: unknown }).message),
+      )
+    )
+      return true;
+  return false;
 }
 
 /** The run's data passed the World's retention; retrying can't bring it back. */
@@ -90,7 +111,10 @@ export function isRunExpired(error: unknown): boolean {
 
 /** The run doesn't exist, or its history has expired. */
 export function isRunMissing(error: unknown): boolean {
-  return anyCause(error, ["WorkflowRunNotFoundError", "RunExpiredError"]);
+  return (
+    anyCause(error, ["WorkflowRunNotFoundError", "RunExpiredError"]) ||
+    anyRunNotFoundResponse(error)
+  );
 }
 
 /** The run can't take commands: missing, expired, or held by another writer. */

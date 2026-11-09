@@ -21,8 +21,13 @@ export interface SessionSnapshot {
   readonly sessionId: string;
   /** Read through `migrateSessionCheckpoint` on restore, which refuses one it can't continue. */
   readonly checkpoint: SessionCheckpoint;
-  /** The session's stream, one stored line each, as written. */
+  /** The session's stream, one stored line each, as written: from `linesFrom` on. */
   readonly lines: readonly string[];
+  /**
+   * The position of `lines`' first line, when the snapshot holds only the stream's tail: a host
+   * whose readers read the stream from its World restores without the lines before. Default 0.
+   */
+  readonly linesFrom?: number;
   /**
    * The session was mid-turn: where the turn goes on, which restore continues it from. A step
    * that was running runs again, as Workflow retries one.
@@ -45,6 +50,11 @@ export interface SessionSnapshot {
   readonly deadline?: string;
   /** When the snapshot was taken. */
   readonly takenAt: string;
+}
+
+/** How many lines the session's stream holds, those before `linesFrom` included. */
+export function lineCount(snapshot: Pick<SessionSnapshot, "lines" | "linesFrom">): number {
+  return (snapshot.linesFrom ?? 0) + snapshot.lines.length;
 }
 
 /** The line position a checkpoint has recorded up to: lines past it are a step's in flight. */

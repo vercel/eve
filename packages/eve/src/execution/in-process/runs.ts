@@ -60,8 +60,8 @@ export interface InProcessRunsHost {
 /**
  * A run as a session's record keeps it; everything else follows from its input
  * (`runRecordOf`). A run doesn't survive the process: a restore with the store that kept the
- * sessions it opened runs a subagent's again (`InProcessRuns.resume`), and any other run reports
- * to the restored session once, as interrupted: it "may have partly run".
+ * sessions it opened runs a replayable one again (`InProcessRuns.resume`), and any other run
+ * reports to the restored session once, as interrupted: it "may have partly run".
  */
 export interface RunSnapshot {
   readonly runId: string;
@@ -87,6 +87,14 @@ export interface InProcessRunRecord {
   readonly taskId?: string;
   /** What it is to the session that started it. */
   readonly kind: "subagent" | "task" | "workflow-tool";
+  /**
+   * Its body is one of eve's own (`FRAMEWORK_WORKFLOW_BODIES`: the `agent` tool, `ask_question`),
+   * which does nothing between its hooks but open and message sessions: run again from the start
+   * with what its hooks received (`run-replay.ts`), it reaches where it was. So it goes on after
+   * a restore, and a host may stop while it waits. An authored workflow tool's body calls steps,
+   * which only Workflow records, so it doesn't.
+   */
+  readonly replayable: boolean;
   /** The run as its messages name it, which its outcome is sent as. */
   readonly ref: WorkflowToolRunRef;
 }
@@ -136,6 +144,12 @@ export interface InProcessRuns {
   finished(sessionId: string): Promise<readonly string[]>;
   /** Makes a workflow tool's body available to runs here, under its `workflowId`. */
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
+  /** The runs here whose bodies haven't returned, with what each is to its session. */
+  active(): readonly {
+    readonly runId: string;
+    readonly kind: InProcessRunRecord["kind"];
+    readonly replayable: boolean;
+  }[];
   /**
    * Runs once more, under its id, a subagent's run an earlier process left. Its session heard
    * `heard` messages from it already, which it doesn't send again.
@@ -307,8 +321,22 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
     registerWorkflow(workflowId, body) {
       bodies.set(workflowId, body);
     },
+
+    active: () =>
+      [...runs.values()]
+        .filter((run) => !run.ended)
+        .map(({ record }) => ({
+          kind: record.kind,
+          replayable: record.replayable,
+          runId: record.runId,
+        })),
   };
 }
+
+/** The workflows whose bodies a run replays to where it was; see `InProcessRunRecord.replayable`. */
+const REPLAYABLE_BODIES: ReadonlySet<string> = new Set(
+  FRAMEWORK_WORKFLOW_BODIES.map(({ workflowId }) => workflowId),
+);
 
 /** Everything about a run that its input and id determine. */
 export function runRecordOf({
@@ -326,6 +354,7 @@ export function runRecordOf({
           ? "workflow-tool"
           : "task",
     ownerInbox: input.owner.inbox,
+    replayable: REPLAYABLE_BODIES.has(input.workflowId),
     ref: {
       callId: input.callId,
       input: input.input,
