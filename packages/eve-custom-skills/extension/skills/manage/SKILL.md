@@ -22,10 +22,10 @@ The agent's own authored skills have no lifecycle versions.
     when relevant.
   - `deferred` for a rarely needed procedure. It stays out of the prompt
     until a skill search finds it.
-- An `on-demand` or `deferred` description is a routing condition and must
-  start with "Use when the user asks", "requests", "wants", or "needs". If
-  `create` or `set_mode` rejects it, save a new version with a routing
-  description.
+- An `on-demand` or `deferred` description is a routing condition that says
+  when to load the skill, such as "Use when the user asks for a deploy
+  checklist." If `create`, `publish`, or `set_mode` rejects a description or
+  instructions, save a new version that follows the error.
 - On-demand and deferred skills load through the skill loader under their
   advertised name, which carries the mount prefix and, for shared scopes such
   as `channel`, a scope prefix. `list` and `create` return that `loadName`.

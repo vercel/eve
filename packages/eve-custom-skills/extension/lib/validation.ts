@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { InvalidSkillNameError } from "./errors.ts";
-import type { SkillValidation } from "./types.ts";
+import { InvalidSkillContentError, InvalidSkillNameError } from "./errors.ts";
+import type { SkillValidation, SkillValidationInput, SkillValidator } from "./types.ts";
 
 /** Size limits for custom skills. Every field is per scope or per skill. */
 export interface SkillLimits {
@@ -108,12 +108,13 @@ export function normalizeSkillContent(input: SkillContent): SkillContent {
   };
 }
 
-/** Errors block a save; warnings save a first version as a draft for review. */
-export function validateSkillContent(input: SkillContent, limits: SkillLimits): SkillValidation {
+/**
+ * The checks no validator replaces: required fields, configured sizes, and
+ * control characters.
+ */
+export function checkSkillLimits(input: SkillContent, limits: SkillLimits): string[] {
   const { description, markdown } = input;
   const errors: string[] = [];
-  const warnings: string[] = [];
-
   if (!description) errors.push("A skill description is required.");
   if (description.length > limits.maxDescriptionLength) {
     errors.push(`Skill description must be ${limits.maxDescriptionLength} characters or fewer.`);
@@ -128,10 +129,43 @@ export function validateSkillContent(input: SkillContent, limits: SkillLimits): 
   ) {
     errors.push("Skill content contains unsupported control characters.");
   }
-  for (const [pattern, warning] of SUSPICIOUS_INSTRUCTION_PATTERNS) {
-    if (pattern.test(markdown)) warnings.push(warning);
-  }
-  return { valid: errors.length === 0, errors, warnings };
+  return errors;
+}
+
+/**
+ * The built-in content rules: an on-demand or deferred description must be a
+ * routing condition, and instructions that try to override higher-priority
+ * rules, bypass approval, or move secrets raise warnings. Warnings are only
+ * raised on save, where they hold a first version in draft.
+ */
+export const defaultSkillValidator: SkillValidator = (input) => {
+  const errors =
+    input.applicationMode !== "always" && !isRoutingDescription(input.description)
+      ? [ROUTING_DESCRIPTION_REQUIREMENT]
+      : [];
+  const warnings =
+    input.action === "save"
+      ? SUSPICIOUS_INSTRUCTION_PATTERNS.flatMap(([pattern, warning]) =>
+          pattern.test(input.instructions) ? [warning] : [],
+        )
+      : [];
+  return { errors, warnings };
+};
+
+/** Runs the fixed checks and `validator`, and rejects when either finds an error. */
+export async function validateSkill(
+  input: SkillValidationInput,
+  limits: SkillLimits,
+  validator: SkillValidator,
+): Promise<SkillValidation> {
+  const fixed = checkSkillLimits(
+    { description: input.description, markdown: input.instructions },
+    limits,
+  );
+  if (fixed.length > 0) throw new InvalidSkillContentError(fixed);
+  const result = await validator(input);
+  if (result.errors.length > 0) throw new InvalidSkillContentError(result.errors);
+  return { valid: true, errors: [], warnings: [...result.warnings] };
 }
 
 export function skillChecksum(name: string, description: string, markdown: string): string {

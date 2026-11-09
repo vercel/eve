@@ -6,7 +6,7 @@ It ships inside the `eve` package. This private `@eve/custom-skills` workspace p
 
 - **Immutable versions, one live version.** A clean first version goes live. Later saves are drafts that change nothing until `publish`, and `rollback` makes an exact earlier version live again. A version's status follows from the live version: `active`, `superseded` below it, `draft` above it.
 - **Three application modes, saved per version.** `always` injects the skill into the system prompt every turn. `on-demand` lists it for `eve__skill`. `deferred` keeps it out of the prompt until `eve__search` finds it. A version applies in the mode it was saved with; `set_mode` changes the live version's.
-- **Validation.** On-demand and deferred descriptions must be routing conditions ("Use when the user asks…"). Size and control-character limits block a save. Instructions that try to override or bypass higher-priority rules raise warnings, which hold a first version in draft.
+- **Validation you can replace.** By default, on-demand and deferred descriptions must be routing conditions ("Use when the user asks…"), and instructions that try to override or bypass higher-priority rules raise warnings, which hold a first version in draft. Size and control-character limits always apply.
 - **Approval you configure.** An approval rule decides, for each change, whether it runs, asks a person, or is refused. The approval card shows the content that would go live.
 
 ## Mount
@@ -31,6 +31,7 @@ The mount name prefixes everything. Mounted as `skills`, the agent gets `skills_
 | `repository` | none                                      | Your own `SkillRepository`, such as database tables. Replaces `storage`.                                       |
 | `scopes`     | `defaultScopes`                           | Returns the turn's `SkillScope`s in precedence order. The first is the default scope for the tools.            |
 | `approval`   | `defaultSkillApproval`, requester answers | `request` decides whether a change runs, asks, or is refused; `response` decides who may answer.               |
+| `validate`   | `defaultSkillValidator`                   | Checks descriptions and instructions on save, publish, and mode changes; errors reject, warnings hold a draft. |
 | `limits`     | See below                                 | Skill count, always-on count and size, and name, description, and instruction lengths.                         |
 | `onChange`   | none                                      | Runs after each change with the skill, what was live before, who asked, and who approved. Failures are logged. |
 
@@ -70,6 +71,26 @@ export default customSkills({
 The tool plans the change again when it runs. A change that now needs approval nobody gave is refused, and a first version waits as a draft instead of going live.
 
 `approval.response` is an eve `ApprovalResponsePolicy`. By default only the person who asked can answer; allow channel admins, for example, by checking `response.principal`.
+
+### Validation
+
+`validate` replaces the built-in content rules. It receives the `action` (`save`, `publish`, or `set_mode`), the scope, the name, description, instructions, and the mode the version would apply in, and returns `{ errors, warnings }`. Errors reject the change with a message the model sees; warnings on save hold a first version in draft and show on the approval card. Required fields, `limits`, and control characters are checked first and can't be replaced.
+
+Compose with `defaultSkillValidator` from `eve/extensions/custom-skills/policies`, for example to accept descriptions in another language or skip the routing rule for skills imported from another system:
+
+```ts
+import customSkills from "eve/extensions/custom-skills";
+import { defaultSkillValidator } from "eve/extensions/custom-skills/policies";
+
+export default customSkills({
+  validate: async (input) => {
+    if (input.description.startsWith("Úsalo cuando")) return { errors: [], warnings: [] };
+    return defaultSkillValidator(input);
+  },
+});
+```
+
+The validator also runs when a version is published or rolled back to, and when the live version's mode changes, so a version saved under older rules is checked against the current ones before it applies.
 
 ### Limits
 

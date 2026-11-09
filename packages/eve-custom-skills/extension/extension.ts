@@ -4,7 +4,12 @@ import type { ApprovalResponsePolicy } from "eve/tools/approval";
 import { z } from "zod";
 
 import type { SkillRepository } from "./lib/repository.ts";
-import type { SkillApprovalRule, SkillChangeEvent, SkillScopeResolver } from "./lib/types.ts";
+import type {
+  SkillApprovalRule,
+  SkillChangeEvent,
+  SkillScopeResolver,
+  SkillValidator,
+} from "./lib/types.ts";
 
 export type {
   SkillAction,
@@ -21,6 +26,9 @@ export type {
   SkillScopeContext,
   SkillScopeResolver,
   SkillValidation,
+  SkillValidationInput,
+  SkillValidationResult,
+  SkillValidator,
   SkillVersionStatus,
   StoredSkill,
 } from "./lib/types.ts";
@@ -70,6 +78,15 @@ export default defineExtension({
         response: fn<ApprovalResponsePolicy>().optional(),
       })
       .default({}),
+    /**
+     * Checks a skill's description and instructions on save, publish, and
+     * mode changes. Replaces the built-in rules (`defaultSkillValidator` from
+     * `eve/extensions/custom-skills/policies`): routing descriptions for
+     * on-demand and deferred skills, and warnings for instructions that try to
+     * override higher-priority rules. Required fields, `limits`, and control
+     * characters are always checked.
+     */
+    validate: fn<SkillValidator>().optional(),
     limits: z
       .object({
         maxSkills: limit(10_000),
