@@ -61,7 +61,7 @@ agent/
 - **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
   lets the agent run scripts, analyze attached files such as CSVs or logs, and
   read or write code in a sandbox.
-- **GitHub.** With `GITHUB_CONNECTOR` set, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
+- **GitHub.** With a GitHub connector, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
   adds a `git__gh` tool for reading repositories, issues, and pull requests the
   connector's GitHub App is installed on, and a `pr` skill for opening draft
   pull requests. See
@@ -158,26 +158,26 @@ scopes.
 
 ## Connect GitHub
 
-GitHub is optional. Without `GITHUB_CONNECTOR`, the agent still runs code in its
-sandbox but has no GitHub credentials, and it tells people who ask how to
-connect GitHub (`agent/instructions/github.ts`). To enable it, create a Vercel Connect
-GitHub connector:
+GitHub is optional. Without it, the agent still runs code in its sandbox but
+has no GitHub credentials, and it tells people who ask how to connect GitHub
+(`agent/instructions/github.ts`). The agent expects a Vercel Connect GitHub
+connector with the UID `github/company-brain`. Create it and attach it to the
+linked project:
 
 ```bash
 vercel connect create github --name company-brain
+vercel connect attach github/company-brain --yes
 ```
 
 Install its GitHub App on the repositories the agent may use, from the Connect
-dashboard. The agent can reach only those repositories. Then set these in
-`.env.local` and the Vercel project:
+dashboard. The agent can reach only those repositories. The agent notices the
+connector within a few minutes, without a redeploy. To limit access to
+repositories owned by one organization or user, for an app installed on more
+than one account, set `GITHUB_ORG` in `.env.local` and the Vercel project and
+redeploy.
 
-- `GITHUB_CONNECTOR`: the connector UID
-- `GITHUB_ORG` (optional): limits access to repositories owned by one
-  organization or user, for an app installed on more than one account
-
-Redeploy, then delete `agent/instructions/github.ts`. It only tells the agent
-how to point people to this setup, and says nothing once `GITHUB_CONNECTOR` is
-set.
+Once GitHub works, delete `agent/instructions/github.ts`. It only tells the
+agent how to point people to this setup.
 
 Each `gh` command gets a GitHub App token scoped to one repository. The sandbox
 only sees a placeholder; `lib/github.ts` swaps in the real token at the sandbox

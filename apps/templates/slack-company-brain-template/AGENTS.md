@@ -7,9 +7,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 
 - `agent/instructions.md`: the root prompt. Keep it about behavior that applies
   to every turn: grounding, source routing, and Slack style.
-- `agent/instructions/github.ts`: while `GITHUB_CONNECTOR` is unset, tells the agent
-  GitHub isn't connected and how an admin connects it. Delete it once GitHub is
-  connected.
+- `agent/instructions/github.ts`: until the `github/company-brain` connector is
+  attached, tells the agent GitHub isn't connected and how an admin connects
+  it. Delete it once GitHub is connected.
 - `agent/channels/slack.ts`: who can reach the agent and what context each
   message carries.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
@@ -17,7 +17,7 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   from the Slack session in `preparePayload`, never from the model.
 - `agent/extensions/code.ts` and `agent/extensions/git.ts`: eve's code and git
   extensions, for running code in the Vercel Sandbox (`agent/sandbox.ts`) and,
-  with `GITHUB_CONNECTOR` set, GitHub access through `git__gh`. The `authorize`
+  with the `github/company-brain` connector, GitHub access through `git__gh`. The `authorize`
   callback in `git.ts` is the only access check on GitHub commands.
 - `agent/memory/`: two file memory slots. `personal` is per person and only
   on in private conversations; `channel` is per Slack channel. Scopes come from
