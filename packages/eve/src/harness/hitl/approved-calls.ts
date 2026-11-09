@@ -55,6 +55,10 @@ export async function runApprovedCalls(input: {
   /**
    * The sign-ins a call waited on end with the call, once `completeAuthorization` has run in it:
    * accepted if it returned, failed with the reason it didn't. Reported before the call's result.
+   * A call that fails before its tool runs (its tool changed or went away, its stored input no
+   * longer validates, or the policy now refuses it) never reached `completeAuthorization`, so its
+   * failure isn't the sign-in's: the person finished signing in, and the call's own result tells
+   * the model why it didn't run.
    */
   const reportSignIns = async (call: ApprovedCall, failure?: Error | string): Promise<void> => {
     if ((call.signIns?.length ?? 0) === 0) return;
@@ -80,7 +84,7 @@ export async function runApprovedCalls(input: {
       if (changedSinceOffered(call, definition)) {
         const message = changedToolMessage(toolName);
         const failed = failedCall({ callId, message, toolName });
-        await reportSignIns(approval, message);
+        await reportSignIns(approval);
         await input.publish(settleCall(failed.result));
         return { settled: [{ part: failed.part }], toolResults: [] };
       }
@@ -92,7 +96,8 @@ export async function runApprovedCalls(input: {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
-            beforeResult: (failure) => reportSignIns(approval, failure),
+            beforeResult: ({ failure, invoked }) =>
+              reportSignIns(approval, invoked ? failure : undefined),
           },
           "recheck",
         );
@@ -101,7 +106,7 @@ export async function runApprovedCalls(input: {
       const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
       const message = unavailableToolMessage(toolName, searchable);
       const failed = failedCall({ callId, message, toolName });
-      await reportSignIns(approval, message);
+      await reportSignIns(approval);
       await input.publish(settleCall(failed.result));
       return { settled: [{ part: failed.part }], toolResults: [] };
     }),
