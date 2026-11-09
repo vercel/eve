@@ -18,7 +18,8 @@ export async function forwardAgentSessionRequest(input: {
   readonly request: AgentSessionRequest;
   readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
 }): Promise<void> {
-  const { from, remote, request } = input;
+  const { from, remote } = input;
+  const request = remote === undefined ? input.request : remoteRequest(input.request);
   const route =
     request.route === undefined
       ? undefined
@@ -36,4 +37,26 @@ export async function forwardAgentSessionRequest(input: {
     replyTo: input.replyTo,
     request: { event: route === undefined ? request : { ...request, route }, kind: "relay" },
   });
+}
+
+/**
+ * A remote child's request as this session can trust it. A remote session describes its sign-ins
+ * itself, so their grant, principal, callback and the card they wait on are its claims, as is the
+ * call it names. A sign-in shares a card only through `grant` and `waitsOn`, so without them a
+ * remote's sign-in keeps its own card, and its answer never settles another sign-in here. A
+ * remote's genuine sign-in names its own deployment's callback, so it never shared one anyway.
+ */
+function remoteRequest(request: AgentSessionRequest): AgentSessionRequest {
+  return {
+    ...request,
+    events: request.events.map((event) => {
+      const signIn = event.type === "interaction.opened" ? event.data.request.signIn : undefined;
+      if (event.type !== "interaction.opened" || signIn === undefined) return event;
+      const { grant: _grant, waitsOn: _waitsOn, ...claimed } = signIn;
+      return {
+        ...event,
+        data: { ...event.data, request: { ...event.data.request, signIn: claimed } },
+      };
+    }),
+  };
 }
