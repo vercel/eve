@@ -7,7 +7,7 @@ import { currentView, enterSessionProjection } from "#harness/session-machine/cu
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { foldingHandler, withOpenTurn } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { ToolReplyDefinition } from "#tools/definition.js";
+import type { ToolReplyPartDefinition } from "#tools/definition.js";
 
 const usage = {
   inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 },
@@ -17,7 +17,10 @@ const usage = {
 const spec = { root: "summary" };
 
 /** Alice asks for her week's numbers; the model draws a card, then answers in one sentence. */
-async function runCardTurn(part: ToolReplyDefinition["part"]) {
+async function runCardTurn(
+  build: ToolReplyPartDefinition["build"],
+  options: { readonly endsTurn?: boolean } = {},
+) {
   const events: SessionEvent[] = [];
   const doStream = vi
     .fn<MockLanguageModelV4["doStream"]>()
@@ -52,7 +55,13 @@ async function runCardTurn(part: ToolReplyDefinition["part"]) {
           execute: async () => ({ shown: true }),
           inputSchema: jsonSchema({ type: "object" }),
           name: "card",
-          reply: { kind: "card", mediaType: "application/vnd.test+json", part, streamInput: true },
+          ...(options.endsTurn === true && { endsTurn: true }),
+          replyPart: {
+            build,
+            kind: "card",
+            mediaType: "application/vnd.test+json",
+            streamInput: true,
+          },
         },
       ],
     ]),
@@ -113,6 +122,19 @@ describe("tool reply parts", () => {
     expect(view.parts["card-1.reply"]).toMatchObject({ turnId: "reply-turn" });
     expect(view.parts["card-1.reply"]?.runId).toBeUndefined();
     expect(view.turns["reply-turn"]?.reply).toEqual(["card-1.reply", expect.any(String)]);
+  });
+
+  it("ends the turn on the card alone when the tool ends the turn", async () => {
+    const { doStream, events, view } = await runCardTurn(
+      (input) => ({ fallbackText: "Weekly summary card.", value: input }),
+      { endsTurn: true },
+    );
+
+    expect(doStream).toHaveBeenCalledOnce();
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
+    expect(view.turns["reply-turn"]?.reply).toEqual(["card-1.reply"]);
   });
 
   it("fails the call when its reply part throws, so the model reads why", async () => {

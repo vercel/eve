@@ -82,7 +82,7 @@ it("previews a reply tool's input as its reply part", async () => {
             inputSchema: jsonSchema({ type: "object" }),
             label: false,
             name: "card",
-            reply: { kind: "card", part: () => null, streamInput: true },
+            replyPart: { build: () => null, kind: "card", streamInput: true },
           },
         ],
       ]),

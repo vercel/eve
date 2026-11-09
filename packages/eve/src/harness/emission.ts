@@ -398,7 +398,7 @@ async function consumeStreamContent(
           break;
         }
         case "tool-input-start": {
-          const reply = options?.tools.get(part.toolName)?.reply;
+          const reply = options?.tools.get(part.toolName)?.replyPart;
           if (
             options === undefined ||
             part.providerExecuted === true ||

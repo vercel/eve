@@ -132,7 +132,7 @@ type LabelCallbacks = Exclude<NonNullable<ResolvedToolDefinition["label"]>, fals
 
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "endsTurn" | "reply" | "toModelOutput"
+    K in "label" | "approval" | "endsTurn" | "replyPart" | "toModelOutput"
   ]?: ResolvedToolDefinition[K];
 };
 
@@ -200,19 +200,19 @@ function extractOptionalHooks(
     ) as ResolvedToolDefinition["toModelOutput"];
   }
 
-  if (record.reply !== undefined) {
+  if (record.replyPart !== undefined) {
     const reply = expectObjectRecord(
-      record.reply,
-      describe(definition, "to provide a valid reply"),
+      record.replyPart,
+      describe(definition, "to provide a valid replyPart"),
     );
-    optional.reply = {
+    optional.replyPart = {
       kind: String(reply.kind),
       ...(typeof reply.mediaType === "string" && { mediaType: reply.mediaType }),
       ...(reply.streamInput === true && { streamInput: true }),
-      part: expectFunction(
-        reply.part,
-        describe(definition, "to provide a reply part function"),
-      ) as NonNullable<ResolvedToolDefinition["reply"]>["part"],
+      build: expectFunction(
+        reply.build,
+        describe(definition, "to provide a replyPart build function"),
+      ) as NonNullable<ResolvedToolDefinition["replyPart"]>["build"],
     };
   }
 

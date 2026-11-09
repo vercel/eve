@@ -75,7 +75,7 @@ export interface InternalToolLabelDefinition {
 export interface InternalToolDefinition extends ToolDefinitionBase {
   readonly endsTurn?: ToolDefinition["endsTurn"];
   label?: InternalToolLabelDefinition | false;
-  readonly reply?: ToolReplyDefinition<any, any>;
+  readonly replyPart?: ToolReplyPartDefinition<any, any>;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
@@ -90,7 +90,7 @@ export type PublicToolOutputSchema<TOutput = unknown> =
   | StandardJSONSchemaV1<unknown, TOutput>
   | JsonObject;
 
-/** A part a call adds to its turn's reply, as {@link ToolReplyDefinition.part} returns it. */
+/** A part a call adds to its turn's reply, as {@link ToolReplyPartDefinition.build} returns it. */
 export interface ToolReplyPart {
   /** The part's value, such as a card spec. Renderers for the tool's `mediaType` read it. */
   readonly value: JsonValue;
@@ -103,7 +103,7 @@ export interface ToolReplyPart {
  * model's text. The part joins the reply of the call's turn and stays there as later steps
  * reply, and channels that can't render it show its `fallbackText`.
  */
-export interface ToolReplyDefinition<TInput = unknown, TOutput = unknown> {
+export interface ToolReplyPartDefinition<TInput = unknown, TOutput = unknown> {
   /** The part's content kind, such as `"card"`. Not `"text"`, `"reasoning"`, `"result"`, or `"file"`. */
   readonly kind: string;
   /** The media type of the part's value, which content renderers match, such as `"application/vnd.json-render+json"`. */
@@ -116,9 +116,10 @@ export interface ToolReplyDefinition<TInput = unknown, TOutput = unknown> {
   readonly streamInput?: boolean;
   /**
    * Returns the part for a successful call, or `null` for none. Runs after `execute`; if it
-   * throws, the call fails with that error and the model reads it.
+   * throws, the call fails with that error and the model reads it, and may call the tool again.
+   * Keep a tool with a reply part free of side effects, so a retry repeats nothing.
    */
-  part(
+  build(
     input: Readonly<TInput>,
     output: TOutput,
   ): ToolReplyPart | null | Promise<ToolReplyPart | null>;
@@ -137,8 +138,8 @@ export interface PublicToolDefinition<
    * status for them, and a call doesn't end a quiet turn's silence.
    */
   label?: ToolLabelDefinition<TInput, TOutput> | false;
-  /** Adds a part to the turn's reply when a call succeeds; see {@link ToolReplyDefinition}. */
-  reply?: ToolReplyDefinition<TInput, TOutput>;
+  /** Adds a part to the turn's reply when a call succeeds; see {@link ToolReplyPartDefinition}. */
+  replyPart?: ToolReplyPartDefinition<TInput, TOutput>;
   inputSchema: PublicToolInputSchema<TInput>;
   /**
    * Optional schema describing the value returned by the tool executor.
@@ -392,10 +393,10 @@ export function defineTool<
     StandardSchemaV1.InferOutput<TInputSchema>,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
-  reply?: ToolDefinition<
+  replyPart?: ToolDefinition<
     StandardSchemaV1.InferOutput<TInputSchema>,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
-  >["reply"];
+  >["replyPart"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
@@ -419,10 +420,10 @@ export function defineTool<
     StandardSchemaV1.InferOutput<TSchema>,
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
-  reply?: ToolDefinition<
+  replyPart?: ToolDefinition<
     StandardSchemaV1.InferOutput<TSchema>,
     ToolOutputFromExecuteReturn<TReturn>
-  >["reply"];
+  >["replyPart"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
@@ -446,10 +447,10 @@ export function defineTool<
     Record<string, unknown>,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
-  reply?: ToolDefinition<
+  replyPart?: ToolDefinition<
     Record<string, unknown>,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
-  >["reply"];
+  >["replyPart"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
@@ -467,7 +468,10 @@ export function defineTool<TReturn>(definition: {
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
-  reply?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["reply"];
+  replyPart?: ToolDefinition<
+    Record<string, unknown>,
+    ToolOutputFromExecuteReturn<TReturn>
+  >["replyPart"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<

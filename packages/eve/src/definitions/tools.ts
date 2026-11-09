@@ -231,7 +231,9 @@ function liveTool(
     inputSchema: toInputSchema(entry.inputSchema as ToolSchemaSource),
     label: definition.label as HarnessToolDefinition["label"],
     name,
-    ...(entry.reply !== undefined && { reply: entry.reply as HarnessToolDefinition["reply"] }),
+    ...(entry.replyPart !== undefined && {
+      replyPart: entry.replyPart as HarnessToolDefinition["replyPart"],
+    }),
     outputSchema:
       entry.outputSchema === undefined
         ? undefined

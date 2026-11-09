@@ -243,7 +243,7 @@ function createRegisteredHarnessToolDefinition(input: {
     name: def.name,
     approval: def.approval,
     outputSchema: def.outputSchema,
-    ...(def.reply !== undefined && { reply: def.reply }),
+    ...(def.replyPart !== undefined && { replyPart: def.replyPart }),
     rootOnly: input.rootOnly,
     toModelOutput: def.toModelOutput,
   };

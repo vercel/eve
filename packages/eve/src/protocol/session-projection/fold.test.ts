@@ -450,6 +450,83 @@ describe("the shared fold", () => {
     expect(reply(failed, "turn_0").map((part) => part.partId)).toEqual(["p_after"]);
   });
 
+  it("keeps a call's part through a held turn's later steps and beside a structured result", () => {
+    const [opening, request] = turnLines(0, { opensSession: true });
+    const run = (runId: string) => ({ runId, turnId: "turn_0" });
+    const card: StoredLine = {
+      at,
+      facts: [
+        {
+          data: {
+            callId: "c_card",
+            capability: { kind: "tool", name: "card" },
+            input: {},
+            owner: { runId: "run_0" },
+          },
+          scope: run("run_0"),
+          type: "call.requested",
+        },
+        {
+          data: { outcome: "completed", runId: "run_0" },
+          scope: run("run_0"),
+          type: "model.settled",
+        },
+        {
+          data: {
+            callId: "c_card",
+            fallbackText: "A card.",
+            kind: "card",
+            partId: "c_card.reply",
+            phase: "reply",
+            value: {},
+          },
+          scope: { turnId: "turn_0" },
+          type: "content.completed",
+        },
+        {
+          data: { callId: "c_card", outcome: "completed" },
+          scope: run("run_0"),
+          type: "call.settled",
+        },
+      ],
+    };
+    const step = (
+      runId: string,
+      part: { kind: string; partId: string; value: unknown },
+    ): StoredLine => ({
+      at,
+      facts: [
+        {
+          data: { owner: { turnId: "turn_0" }, runId },
+          scope: run(runId),
+          type: "model.requested",
+        },
+        { data: { ...part, phase: "reply", runId }, scope: run(runId), type: "content.completed" },
+        { data: { outcome: "completed", runId }, scope: run(runId), type: "model.settled" },
+      ],
+    });
+
+    // A held turn replies while its tasks work, then again when they finish: the card stays, and
+    // the last step's text replaces the interim text.
+    const held = folded([
+      opening!,
+      request!,
+      card,
+      step("run_1", { kind: "text", partId: "p_interim", value: "Working on it." }),
+      step("run_2", { kind: "text", partId: "p_final", value: "Done." }),
+    ]);
+    expect(reply(held, "turn_0").map((part) => part.partId)).toEqual(["c_card.reply", "p_final"]);
+
+    // A turn that asks for structured output keeps its result readable beside the card.
+    const structured = folded([
+      opening!,
+      request!,
+      card,
+      step("run_1", { kind: "result", partId: "run_1.result", value: { ok: true } }),
+    ]);
+    expect(reply(structured, "turn_0").map((part) => part.kind)).toEqual(["card", "result"]);
+  });
+
   it("records a run's current attempt, each retry's start moving it on", () => {
     const lines = turnLines(0, { opensSession: true });
     const scope = { runId: "run_0", turnId: "turn_0" };

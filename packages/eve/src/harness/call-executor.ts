@@ -265,9 +265,9 @@ export async function executeToolCall(
       };
     }
     let reply: Awaited<ReturnType<typeof replyPartOf>>;
-    if (!failed && definition.reply !== undefined) {
+    if (!failed && definition.replyPart !== undefined) {
       try {
-        reply = await replyPartOf(definition.reply, callId, args, output);
+        reply = await replyPartOf(definition.replyPart, callId, args, output);
       } catch (error) {
         logError(log, "tool reply part failed", error, { toolName, toolCallId: callId });
         failed = true;
