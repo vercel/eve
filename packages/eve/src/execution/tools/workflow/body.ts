@@ -1,6 +1,6 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
 import { toolStubOutput } from "#tool-stubs/output.js";
-import { callToolStubStep } from "#execution/tool-stubs/steps.js";
+import { callToolStub } from "#execution/tool-stub-host.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -179,7 +179,7 @@ async function executeCallBody(
   try {
     const target = findStubTarget(input.agentContext.toolStubs, input.toolName);
     if (target !== undefined) {
-      const result = await callToolStubStep(target.scope, {
+      const result = await callToolStub(input.host.toolStubs, target.scope, {
         callId: stubCallId(input.session.id, input.session.turn.id, input.callId),
         tool: target.tool,
         input: input.input,

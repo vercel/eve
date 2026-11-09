@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { bootInitialOwner } from "#execution/session/entry.js";
+import { workflowOwnerPorts } from "#execution/session/entry.js";
+import { bootInitialOwner } from "#execution/session/owner-boot.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { startSessionTimeoutStep } from "#execution/session/timeout-steps.js";
@@ -115,6 +116,7 @@ describe("bootInitialOwner", () => {
         serializedContext: { "eve.auth": auth, "eve.bundle": { source: { kind: "bundled" } } },
       }),
       "session-1",
+      workflowOwnerPorts("session-1"),
     );
     expect(boot?.session.start.kind).toBe("turn");
     expect(
@@ -128,7 +130,11 @@ describe("bootInitialOwner", () => {
     vi.mocked(createSessionStep).mockReturnValue(sessionCreation.promise);
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
 
-    const bootPromise = bootInitialOwner(initialInput(), "session-1");
+    const bootPromise = bootInitialOwner(
+      initialInput(),
+      "session-1",
+      workflowOwnerPorts("session-1"),
+    );
 
     await vi.waitFor(() => expect(inbox.claimSessionHook).toHaveBeenCalledOnce());
     expect(inbox.claimSessionHook).toHaveBeenCalledWith("eve:session:session-1:inbox", {
@@ -163,6 +169,7 @@ describe("bootInitialOwner", () => {
         },
       }),
       "session-1",
+      workflowOwnerPorts("session-1"),
     ).then((boot) => {
       booted = true;
       return boot;
@@ -194,6 +201,7 @@ describe("bootInitialOwner", () => {
           },
         }),
         "session-1",
+        workflowOwnerPorts("session-1"),
       ),
     ).resolves.toBeUndefined();
 
@@ -222,7 +230,9 @@ describe("bootInitialOwner", () => {
     const failure = new Error("boot failed");
     fail(failure);
 
-    await expect(bootInitialOwner(initialInput(), "session-1")).rejects.toBe(failure);
+    await expect(
+      bootInitialOwner(initialInput(), "session-1", workflowOwnerPorts("session-1")),
+    ).rejects.toBe(failure);
     expect(mocks.failSession).toHaveBeenCalledOnce();
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
@@ -231,7 +241,11 @@ describe("bootInitialOwner", () => {
     const inbox = createInbox();
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
 
-    const boot = await bootInitialOwner(initialInput({ sessionTimeoutMs: false }), "session-1");
+    const boot = await bootInitialOwner(
+      initialInput({ sessionTimeoutMs: false }),
+      "session-1",
+      workflowOwnerPorts("session-1"),
+    );
 
     expect(boot?.session.initialTurnControl).toBeDefined();
     expect(boot?.session.sessionTimeoutControl).toBeUndefined();

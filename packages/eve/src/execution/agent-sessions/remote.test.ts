@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
@@ -403,7 +403,7 @@ describe("startRemoteAgentSession", () => {
         remote: createRemoteAgent(),
         session: { continuationToken: "eve:parent-token" },
       }),
-    ).rejects.toBeInstanceOf(FatalError);
+    ).rejects.toBeInstanceOf(NonRetryableError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -588,7 +588,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow("may have completed");
     await expect(result).rejects.toThrow("Do not retry automatically");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -614,7 +614,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow("may have completed");
     await expect(result).rejects.toThrow("Remote session: remote-session");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -639,7 +639,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: { continuationToken: "eve:parent-token" },
     });
-    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toBeInstanceOf(NonRetryableError);
     await expect(result).rejects.toThrow(`protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION + 1)}`);
     await expect(result).rejects.not.toThrow("may have completed");
   });

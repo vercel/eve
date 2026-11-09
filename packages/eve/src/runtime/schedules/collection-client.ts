@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
+import { installedDurableHost } from "#execution/hosts.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
@@ -107,12 +108,23 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       target: {
         key: callContext.application,
         deliver: async ({ payload, occurrence }) => {
+          const context = loadContext();
+          const bundle = requireCompiledBundle(context);
+          const host = installedDurableHost();
+          if (host === undefined) {
+            throw new Error(
+              "This host keeps no scheduled runs: run a schedule's occurrence from a deployed agent.",
+            );
+          }
           await dispatchScheduledOccurrence({
-            bundle: requireCompiledBundle(loadContext()),
+            bundle,
             collection: callContext.collection,
             definition,
             occurrence: { ...occurrence, collection: callContext.collection },
             payload: payload as ScheduleCollectionPayload<unknown>,
+            runtime: host.createRuntime({
+              compiledArtifactsSource: bundle.compiledArtifactsSource,
+            }),
           });
         },
       },

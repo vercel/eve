@@ -211,14 +211,21 @@
  *             never reach a Node builtin through their value imports. One
  *             import of a server module from a shared one breaks every client
  *             bundle that loads the entry.
- *   rule 66 — The session loop doesn't reach Workflow: the loop
- *             (`execution/session/{program,turn,active-turn,state-cursor,
- *             input-queue,next-input}.ts`) and the inbox
- *             (`execution/session-inbox/inbox.ts`) import none of rule 61's
- *             specifiers, nor `#execution/workflow-runtime.js`. Workflow
- *             reaches them through their host ports (`SessionHost`,
- *             `SessionInboxTransport`, `SessionLineStore`, `SessionStepHost`).
- *             Only direct imports are checked.
+ *   rule 66 — The host-neutral core doesn't import Workflow: the session
+ *             loop (`execution/session/{program,turn,active-turn,state-cursor,
+ *             input-queue,next-input}.ts`), the turn step, owner boot,
+ *             checkpoint and step entry (`execution/session/{turn-step,
+ *             owner-boot,checkpoint,step-state-delta}.ts`), the inbox
+ *             (`execution/session-inbox/inbox.ts`), the host registry and tool
+ *             stub port (`execution/{hosts,tool-stub-host}.ts`), and every
+ *             file under `execution/in-process/`, `embed/` and `platform/`
+ *             import none of rule 61's specifiers, nor
+ *             `#execution/workflow-runtime.js`, nor Workflow's side of a port
+ *             (`#execution/workflow-host/*`). That covers lazy `import()`s,
+ *             including ones split across lines. Workflow reaches these modules
+ *             through their host ports and the host registry. Only direct
+ *             imports are checked; `scripts/browser-reach.mjs --check` proves
+ *             the transitive reach from the in-process and embed entries.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -1205,35 +1212,48 @@ function checkRule63(posix, lines, violations) {
   }
 }
 
-// ---------- Rule 66: the session loop doesn't reach Workflow ----------
+// ---------- Rule 66: the host-neutral core doesn't import Workflow ----------
 
-const HOST_NEUTRAL_SESSION_FILES = new Set([
+const HOST_NEUTRAL_FILES = new Set([
+  "packages/eve/src/execution/hosts.ts",
+  "packages/eve/src/execution/tool-stub-host.ts",
   "packages/eve/src/execution/session/program.ts",
   "packages/eve/src/execution/session/turn.ts",
   "packages/eve/src/execution/session/active-turn.ts",
   "packages/eve/src/execution/session/state-cursor.ts",
   "packages/eve/src/execution/session/input-queue.ts",
   "packages/eve/src/execution/session/next-input.ts",
+  "packages/eve/src/execution/session/turn-step.ts",
+  "packages/eve/src/execution/session/owner-boot.ts",
+  "packages/eve/src/execution/session/checkpoint.ts",
+  "packages/eve/src/execution/session/step-state-delta.ts",
   "packages/eve/src/execution/session-inbox/inbox.ts",
 ]);
+const HOST_NEUTRAL_DIRS = ["packages/eve/src/platform/"];
+/** Each import's specifier and line, static or lazy, wherever its quotes fall. */
+const RULE66_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule66(posix, lines, violations) {
-  if (!HOST_NEUTRAL_SESSION_FILES.has(posix)) return;
-  for (const [index, line] of lines.entries()) {
-    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
-    if (specifier === undefined) continue;
+  if (posix.endsWith(".test.ts")) return;
+  if (!HOST_NEUTRAL_FILES.has(posix) && !HOST_NEUTRAL_DIRS.some((dir) => posix.startsWith(dir))) {
+    return;
+  }
+  const text = lines.join("\n");
+  for (const match of text.matchAll(RULE66_IMPORT_RE)) {
+    const specifier = match[1];
     if (
       !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier) &&
-      specifier !== "#execution/workflow-runtime.js"
+      specifier !== "#execution/workflow-runtime.js" &&
+      !specifier.startsWith("#execution/workflow-host/")
     )
       continue;
     violations.push({
       rule: 66,
       file: posix,
-      line: index + 1,
+      line: text.slice(0, match.index).split("\n").length,
       message:
-        "imports Workflow into the host-neutral session loop. Reach Workflow through a host port (`SessionHost`, `SessionInboxTransport`, `SessionLineStore`, or `SessionStepHost`), and implement Workflow's side in its own module.",
+        "imports Workflow into the host-neutral core. Reach Workflow through a host port or the host registry (`execution/hosts.ts`), and implement Workflow's side under `execution/workflow-host/`.",
     });
   }
 }

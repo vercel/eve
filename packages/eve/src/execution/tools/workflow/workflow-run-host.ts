@@ -14,6 +14,7 @@ import {
 import { disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type { RunHook, RunHost } from "#execution/run-host.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 
 // A workflow tool run on Workflow: the run is a durable workflow, its hooks are Workflow hooks on
 // that run, its sleeps are durable, and it opens agent sessions in steps.
@@ -31,6 +32,7 @@ export const workflowRunHost: RunHost = {
     send: sendAgentSessionMessageStep,
     stopLate: stopLateAgentSessionStep,
   },
+  toolStubs: workflowToolStubs,
 };
 
 /** A Workflow hook as a run's hook: it claims its token by asking Workflow for a conflict. */

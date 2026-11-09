@@ -17,7 +17,7 @@ import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
-import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import { withDevelopmentWorkflowGeneration } from "#runtime/development-generation.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
   createDiskRuntimeCompiledArtifactsSource,

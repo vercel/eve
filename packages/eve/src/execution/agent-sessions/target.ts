@@ -1,6 +1,6 @@
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 
 import type { DurableDynamicSubagentSelection } from "#context/keys.js";
 import { createLogger } from "#internal/logging.js";
@@ -54,7 +54,9 @@ export function resolveAgentAction(input: {
 }): RuntimeAgentDispatchRequest {
   const definition = findAgentDefinition(input.bundle, input.dynamicSelections, input.input.target);
   if (definition === undefined) {
-    throw new FatalError(`Agent target "${input.input.target}" is not available to this agent.`);
+    throw new NonRetryableError(
+      `Agent target "${input.input.target}" is not available to this agent.`,
+    );
   }
   const actionInput: JsonObject = {
     message: normalizeAgentMessage(input.input.message),
@@ -121,7 +123,7 @@ export function resolveAgentStartTarget(input: {
       nodeId: action.nodeId,
       subagentName: action.name,
     });
-    throw new FatalError(
+    throw new NonRetryableError(
       `Subagent "${action.name}" is not available in the current session context.`,
     );
   }
@@ -131,7 +133,7 @@ export function resolveAgentStartTarget(input: {
       nodeId: action.nodeId,
       subagentName: action.subagentName,
     });
-    throw new FatalError('The built-in "agent" tool is only available to the root session.');
+    throw new NonRetryableError('The built-in "agent" tool is only available to the root session.');
   }
   if (action.kind === "remote-agent-call") {
     return {

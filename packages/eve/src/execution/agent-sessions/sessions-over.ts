@@ -1,4 +1,4 @@
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
 import {
@@ -63,7 +63,7 @@ export function agentSessionsOver(host: AgentSessionsHost): RunAgentSessions {
   const { local } = host;
   const remoteAccess = (name: string): RemoteAgentAccess => {
     if (host.remote !== undefined) return host.remote;
-    throw new FatalError(
+    throw new NonRetryableError(
       `Agent "${name}" is remote, and this host can't reach remote agents yet. Run the agent with \`eve dev\` or deploy it.`,
     );
   };

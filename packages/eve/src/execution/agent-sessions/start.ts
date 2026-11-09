@@ -1,5 +1,5 @@
 import type { MessageContent } from "#shared/message-content.js";
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { NonRetryableError } from "#shared/run-errors.js";
 import type { RunInput, SessionCommand } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -258,7 +258,7 @@ export async function resolveAgentSessionStart(
     isRootSession: context.parent.rootSessionId === context.parent.sessionId,
   });
   if (input.model !== undefined && target.kind === "remote") {
-    throw new FatalError(
+    throw new NonRetryableError(
       `ctx.agent("${input.name}", { model }) cannot override a remote agent's model. Configure the model on the receiving agent.`,
     );
   }
@@ -307,7 +307,7 @@ async function normalizeRuntimeOverrides({
     return { model: selection.reference };
   } catch (error) {
     if (error instanceof InvalidRuntimeModelSelectionError) {
-      throw new FatalError(
+      throw new NonRetryableError(
         `ctx.agent("${name}", { model }) could not resolve the model selection: ${toErrorMessage(error)}`,
       );
     }
@@ -354,7 +354,7 @@ async function resolveAgentToolModel(
 ): Promise<RuntimeModelReference> {
   const option = typeof model === "string" ? models.get(model) : undefined;
   if (option === undefined) {
-    throw new FatalError(
+    throw new NonRetryableError(
       `The "${definition.name}" tool has no model ${JSON.stringify(model)}. Use one of its agent({ models }) keys, or omit model to use the current model.`,
     );
   }
@@ -367,7 +367,7 @@ async function resolveAgentToolModel(
     }));
   } catch (error) {
     if (error instanceof InvalidRuntimeModelSelectionError) {
-      throw new FatalError(
+      throw new NonRetryableError(
         `The "${definition.name}" tool could not resolve its model "${option.key}": ${toErrorMessage(error)}`,
       );
     }

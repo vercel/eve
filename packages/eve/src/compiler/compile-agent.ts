@@ -7,11 +7,11 @@ import { resolveDiscoveryProject } from "#discover/project.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
-  type CompileMetadata,
   type CompilerArtifactLocations,
   type CompilerArtifactPaths,
   writeCompilerArtifacts,
 } from "#compiler/artifacts.js";
+import { type CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";

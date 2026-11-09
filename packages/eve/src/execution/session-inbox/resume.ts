@@ -14,10 +14,9 @@ import {
   UnsupportedLegacySessionError,
 } from "#execution/legacy-session/inbox.js";
 import {
-  isSessionInboxAddress,
   logicalSessionInboxToken,
+  logicalSessionToken,
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
-  sessionCommandHookToken,
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
@@ -162,12 +161,4 @@ function isMissingHook(error: unknown): boolean {
 function rethrowUnsupportedAsNotFound(error: unknown): never {
   if (error instanceof UnsupportedLegacySessionError) throw new HookNotFoundError(error.message);
   throw error;
-}
-
-/** Logical token behind an address: the address itself, or the session's stable command token. */
-export function logicalSessionToken(address: string | SessionInboxAddress): string {
-  if (typeof address === "string") return address;
-  if (!isSessionInboxAddress(address))
-    throw new Error("Session inbox target has an invalid address.");
-  return sessionCommandHookToken(address.sessionId);
 }
