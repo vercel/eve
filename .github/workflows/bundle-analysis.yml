@@ -41,6 +41,9 @@ concurrency:
   group: weather-agent-bundle-analysis-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.fork == false && (github.event.action != 'labeled' || github.event.label.name == 'acknowledge-bundle-warning')) }}
@@ -49,11 +52,11 @@ jobs:
       issues: write
       pull-requests: write
     runs-on: ubuntu-latest
+    environment:
+      name: eve-ci
+      deployment: false
     env:
       BUNDLE_WARNING_ACK_LABEL: acknowledge-bundle-warning
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1"
 
     steps:
@@ -211,6 +214,9 @@ jobs:
         working-directory: ${{ steps.baseline.outputs.root }}
         env:
           BASELINE_SANDBOX_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile-base.json
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           token_args=()
           if [ -n "${VERCEL_TOKEN:-}" ]; then
@@ -252,6 +258,10 @@ jobs:
 
       - name: Build sandbox benchmark in Vercel mode
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           token_args=()
           if [ -n "${VERCEL_TOKEN:-}" ]; then
