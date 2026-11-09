@@ -141,6 +141,7 @@ it("still fails a sign-in whose call throws once its tool runs", async () => {
   const lookup = tool("lookup", async () => {
     throw new Error("token exchange failed");
   });
+  const execute = vi.spyOn(lookup, "execute");
   const approved = { ...approval("call-lookup", "lookup"), signIns: [plainSignIn] };
 
   await runApprovedCalls({
@@ -152,6 +153,7 @@ it("still fails a sign-in whose call throws once its tool runs", async () => {
     tools: new Map([["lookup", lookup]]),
   });
 
+  expect(execute).toHaveBeenCalledOnce();
   expect(callSignInsSettled).toHaveBeenCalledOnce();
   expect(vi.mocked(callSignInsSettled).mock.calls[0]?.[2]).toEqual({
     reason: "token exchange failed",
