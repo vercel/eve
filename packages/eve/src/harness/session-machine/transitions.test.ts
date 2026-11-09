@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { requireSignIn, settleLimit } from "#harness/hitl/approvals.js";
 import { cascade } from "#harness/session-machine/cascade.js";
@@ -29,6 +29,11 @@ import {
 } from "#execution/agent-sessions/requests.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { relayedAnswers, signInsAnswered } from "#subagents/event-proxy-step.js";
+import { respondToRemoteAgentSession } from "#execution/agent-sessions/remote.js";
+import { remoteAnswers } from "#execution/proxied-deliver-step.js";
+import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol.js";
+import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import type { SuspendedStep } from "#harness/session-machine/state.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -1154,6 +1159,67 @@ describe("a remote agent's relayed sign-in", () => {
       relayedAnswers(viewOf(asked).projection.view, await sent(settled, replaced)),
     ).toMatchObject([{ interactionId: `${runId}:0/forged`, outcome: "declined" }]);
   });
+
+  it.each([undefined, V26_INPUT_REMOTE_AGENT_PROTOCOL])(
+    "answers a remote agent's requests under its own ids (earlier protocol %s)",
+    async (earlierProtocol) => {
+      const ask = (interactionId: string, request: InteractionRequest) => ({
+        type: "interaction.opened" as const,
+        data: { interactionId, request, subject: { turnId: "child-turn" } },
+      });
+      const approval: InteractionRequest = {
+        kind: "approval",
+        options: [{ id: "approve", label: "Approve", style: "primary" }],
+        prompt: "Deploy?",
+      };
+      const mirrored = await forwarded(
+        parentAsking(),
+        [ask("q-1", { kind: "question", prompt: "Which region?" }), ask("a-1", approval)],
+        REMOTE,
+      );
+      const tables = viewOf(withPublished(parentAsking(), mirrored)).projection.view;
+      // The person answers the mirrors this session named under its handle on the remote.
+      const answers = [
+        { interactionId: `${runId}:0/q-1`, text: "iad1" },
+        { interactionId: `${runId}:0/a-1`, optionId: "approve" },
+      ];
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+      vi.stubGlobal("fetch", fetchMock);
+      try {
+        await respondToRemoteAgentSession({
+          auth: null,
+          headers: {},
+          remote: { ...REMOTE, ...(earlierProtocol !== undefined && { earlierProtocol }) },
+          responses: remoteAnswers(tables, answers),
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(
+        earlierProtocol === undefined
+          ? {
+              answers: [
+                { interactionId: "q-1", text: "iad1" },
+                { interactionId: "a-1", optionId: "approve" },
+              ],
+            }
+          : {
+              inputResponses: [
+                { requestId: "q-1", text: "iad1" },
+                { optionId: "approve", requestId: "a-1" },
+              ],
+            },
+      );
+      // A protocol 2 remote never relays how its questions settle, so this session settles its
+      // own mirror of the question, and leaves the approval for the remote to report.
+      expect(
+        protocolTwoAnswersSettledOnForward({
+          answers,
+          kindOf: (interactionId) => tables.interactions[interactionId]?.request.kind,
+        }),
+      ).toEqual([answers[0]]);
+    },
+  );
 });
 
 /** A transition's facts as the session commits them: an owner's end closes what it holds. */
