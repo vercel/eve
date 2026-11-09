@@ -109,6 +109,39 @@ describe("session prewarmers", () => {
     });
   });
 
+  it("leaves a recorded sandbox alone during a turn that never uses it", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "prewarm-sandbox-unused" } });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: false,
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      const prewarmed = [`definition:${run.runId}`, `start:${run.runId}`];
+      try {
+        await waitForPrewarmStep(run.runId);
+        expect(runtime.sandboxEvents).toEqual(prewarmed);
+        await resumeHook(
+          token,
+          handoffFollowUp("dpl_inline", "Alice asks for a short greeting.", "unused-sandbox"),
+        );
+        await stream.nextTurn();
+        await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+        expect(runtime.sandboxEvents).toEqual([...prewarmed, `end:${run.runId}`]);
+      } finally {
+        stream.dispose();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+  });
+
   it("runs a first message sent while the sandbox starts without waiting, and cleans up after it", async () => {
     const started = Promise.withResolvers<void>();
     const runtime = await createTestRuntime({

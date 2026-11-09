@@ -4,14 +4,15 @@ import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
+import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
+import type { SandboxAccess } from "#sandbox/state.js";
 import {
   BundleKey,
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { ContextContainer } from "#context/container.js";
-import { sandboxProvider } from "#context/providers/sandbox.js";
+import { sandboxPrewarmer, sandboxProvider } from "#context/providers/sandbox.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 
 vi.mock("../../execution/sandbox/ensure.js", () => ({
@@ -126,6 +127,19 @@ describe("sandboxProvider", () => {
         sessionId: "session_1",
       }),
     );
+  });
+
+  it("opens the sandbox for a prewarmed session but leaves it alone when a turn starts", async () => {
+    const ctx = new ContextContainer();
+    const access = { prepare: vi.fn(), resumeRecorded: vi.fn() };
+    ctx.set(SandboxKey, access as unknown as SandboxAccess);
+
+    sandboxPrewarmer.start(ctx, "turn");
+    expect(access.prepare).not.toHaveBeenCalled();
+    expect(access.resumeRecorded).not.toHaveBeenCalled();
+
+    sandboxPrewarmer.start(ctx, "session");
+    expect(access.prepare).toHaveBeenCalledOnce();
   });
 
   it("closes the step's connection when the scope ends, without throwing", async () => {

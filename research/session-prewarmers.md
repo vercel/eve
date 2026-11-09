@@ -1,7 +1,7 @@
 ---
 issue: "Maintainer-requested implementation"
 status: in-progress
-last_updated: "2026-10-23"
+last_updated: "2026-11-09"
 ---
 
 # Session prewarmers
@@ -44,8 +44,8 @@ await access.open(); // the connection only, for attachment staging and hydratio
   rewrites it. The step commit waits for the queue but never fails on it, so a failed write
   never re-runs a model call or its tools.
 - In the `"session"` phase the sandbox prewarmer opens the sandbox. In the `"turn"` phase it
-  only resumes a sandbox the session recorded, and leaves a gone one to `get()`. Every agent
-  has a sandbox, so a turn never starts one speculatively; queued work starts one when needed.
+  does nothing. Every agent has a sandbox and resuming a stopped one can start billed compute,
+  so a turn neither starts nor resumes one speculatively; queued work opens it when needed.
 - Attachment staging and hydration use `open()`, so they never wait behind skill writes.
 
 A first message never waits for the prewarm step. The step runs beside the wait. Its recorded
@@ -62,7 +62,7 @@ flowchart LR
   Create["create without a message"] --> Prewarm["prewarm step: open in background"]
   Create --> Wait["wait for first message"]
   Prewarm -. "state applied only if still waiting" .-> Wait
-  Wait --> Turn["turn: resume in background, queue skill files"]
+  Wait --> Turn["turn: queue skill files"]
   Turn --> Model["model call starts immediately"]
   Turn --> Tool["tool: get() waits for the rest"]
 ```
