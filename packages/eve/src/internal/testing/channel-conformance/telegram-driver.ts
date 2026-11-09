@@ -169,6 +169,7 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
+    space: { id: `telegram:${CHAT.id}`, type: group ? "channel" : "direct" },
     personId: String(PERSON.id),
     capabilities: !group
       ? ["attachments", "buttons", "text-replies"]

@@ -24,6 +24,13 @@ describe("chat SDK space", () => {
     });
   });
 
+  it("reports a messaging app's shared chats as groups", () => {
+    expect(space({ adapterName: "linq", channelId: "linq:chat-1", isDM: false })).toEqual({
+      id: "linq:chat-1",
+      type: "group",
+    });
+  });
+
   it("reports none without a thread, or when a thread ID can't say whether it is a DM", () => {
     expect(space(null)).toBeUndefined();
     expect(

@@ -68,6 +68,14 @@ Built-in channels report:
 | Telegram | `telegram:<chat>`                                  | None              |
 | Chat SDK | `<adapter>:<channel>`                              | None              |
 
+Linq and Photon are built on the Chat SDK channel, so they report the same
+shape. Messaging-app adapters (iMessage, Linq, WhatsApp) report shared chats as
+`group`, since their members are fixed rather than joining.
+
+The channel conformance suite checks the space every first-party channel and
+client reports, in shared conversations and in DMs, and that another person
+in the same conversation sees the same one.
+
 Slack uses the installation team, which stays the same for every member of a
 Slack Connect channel. A Slack `app_mention` has no `channel_type`, so its type
 comes from the `conversations.info` lookup eve already makes for its audience.
@@ -82,7 +90,7 @@ not the thread its conversation ID names.
   space is still decided from `ctx.session.auth.current`.
 - The space isn't added to trace attributes. Trace policies receive it through
   `TraceCaptureContext`, which spreads `ConversationContext`.
-- Channels that have no natural place (HTTP, MCP, GitHub, Linear, SMS) report
+- Channels that have no natural place (HTTP, MCP, GitHub, Linear, Twilio) report
   none for now.
 
 ## Open questions

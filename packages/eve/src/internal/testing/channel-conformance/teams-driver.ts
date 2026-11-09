@@ -148,6 +148,12 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: personal ? "teams-dm" : "teams",
+    // A channel thread's space is the Teams channel, not the thread its conversation id names.
+    space: {
+      id: `teams:${TENANT}:${personal ? conversationId : "CHANNEL"}`,
+      type: personal ? "direct" : "channel",
+      workspaceId: `teams:${TENANT}`,
+    },
     personId: PERSON.id,
     capabilities: personal
       ? ["attachments", "buttons", "text-replies"]

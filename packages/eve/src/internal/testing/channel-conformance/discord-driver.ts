@@ -221,6 +221,14 @@ export function discordDriver(
 
   return {
     name: `discord${gateway ? `-${transport}` : ""}${dm ? "-dm" : ""}`,
+    // A thread reports itself, since Discord's thread payloads don't name the parent channel.
+    space: dm
+      ? { id: `discord:${channelId}`, type: "direct" }
+      : {
+          id: `discord:G_CONFORMANCE:${threads ? `T_CONFORMANCE_${channelId}` : channelId}`,
+          type: "channel",
+          workspaceId: "discord:G_CONFORMANCE",
+        },
     personId: PERSON.id,
     capabilities: [
       "attachments",

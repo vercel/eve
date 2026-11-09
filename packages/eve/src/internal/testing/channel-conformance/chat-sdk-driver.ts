@@ -207,6 +207,8 @@ function chatSdkDriverWith(input: {
   return {
     name: input.name,
     personId: PERSON.userId,
+    // The thread id already names the adapter, so the space doesn't repeat it.
+    space: { id: threadId, type: input.surface === "private" ? "direct" : "channel" },
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";
