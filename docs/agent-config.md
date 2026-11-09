@@ -213,7 +213,9 @@ export default defineAgent({
 ```
 
 Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on
-Gateway models; use `providerOptions.gateway.caching` instead.
+Gateway models; use `providerOptions.gateway.caching` instead. For Anthropic
+models on Gateway, eve also sets `providerOptions.gateway.cacheAnchorMessageIndex`
+to `0`, so sessions that share a system prompt share its cache.
 
 ## Compaction
 

@@ -76,7 +76,12 @@ describe("buildStepHooks", () => {
 
     await contextStorage.run(context, async () => {
       expect((await prepare("anthropic/claude-sonnet-4-5"))?.providerOptions).toEqual({
-        gateway: { caching: "auto", order: ["bedrock"], sessionId: "forwarded-conversation" },
+        gateway: {
+          cacheAnchorMessageIndex: 0,
+          caching: "auto",
+          order: ["bedrock"],
+          sessionId: "forwarded-conversation",
+        },
         openai: { store: false },
       });
       expect(
@@ -89,7 +94,12 @@ describe("buildStepHooks", () => {
           )
         )?.providerOptions,
       ).toEqual({
-        gateway: { caching: "auto", order: ["bedrock"], sessionId: "forwarded-conversation" },
+        gateway: {
+          cacheAnchorMessageIndex: 0,
+          caching: "auto",
+          order: ["bedrock"],
+          sessionId: "forwarded-conversation",
+        },
         openai: { store: false },
       });
       expect(
@@ -132,7 +142,7 @@ describe("buildStepHooks", () => {
       steps: [],
     });
     expect(prepared?.providerOptions).toEqual({
-      gateway: { caching: "auto", sessionId: "authored-session" },
+      gateway: { cacheAnchorMessageIndex: 0, caching: "auto", sessionId: "authored-session" },
     });
   });
 

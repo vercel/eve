@@ -168,9 +168,10 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       session,
     });
     if (profile.gateway) {
-      stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
-        typeof stepResult.providerOptions
-      >;
+      stepResult.providerOptions = mergeGatewayAutoCaching(
+        providerOptions,
+        profile.provider,
+      ) as NonNullable<typeof stepResult.providerOptions>;
     } else if (providerOptions !== undefined) {
       stepResult.providerOptions = providerOptions as NonNullable<
         typeof stepResult.providerOptions
