@@ -122,6 +122,8 @@ export interface PartRow extends Introduced {
   readonly interrupted?: true;
   readonly mediaType?: string;
   readonly fallbackText?: string;
+  /** The call that wrote it, when a tool did. */
+  readonly callId?: string;
 }
 
 export interface CallRow extends Introduced, Ended {
@@ -241,6 +243,8 @@ export interface SessionPreviews {
 export interface PartPreview {
   readonly partId: string;
   readonly runId?: string;
+  /** The call that writes it, when a tool does: the preview lives until that call settles. */
+  readonly callId?: string;
   readonly kind: string;
   readonly text: string;
 }

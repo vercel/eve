@@ -11,6 +11,7 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
 import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
+import { replyPartId } from "#harness/tool-reply.js";
 import { announcedKind } from "#harness/call-facts.js";
 import { requestCall, settleCall } from "#harness/session-machine/calls.js";
 import { completeParts } from "#harness/session-machine/content.js";
@@ -144,6 +145,8 @@ async function consumeStreamContent(
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
   const actionInputs = new Map<string, JsonObject>();
   const streamingActionInputs = new Map<string, { toolName: string; announced: boolean }>();
+  // Calls whose input previews the reply part they write, in place of the call's input preview.
+  const streamingReplyParts = new Map<string, { kind: string; announced: boolean }>();
 
   const completePart = async (
     partId: string,
@@ -187,6 +190,17 @@ async function consumeStreamContent(
           type: "call.input",
         };
     input.announced = true;
+    await emitFn(event);
+  };
+
+  const emitReplyPreview = async (callId: string, delta: string): Promise<void> => {
+    const part = streamingReplyParts.get(callId);
+    if (part === undefined) return;
+    const partId = replyPartId(callId);
+    const event: SessionEvent = part.announced
+      ? { data: { delta, partId }, type: "content.delta" }
+      : { data: { callId, delta, kind: part.kind, partId }, scope, type: "content.delta" };
+    part.announced = true;
     await emitFn(event);
   };
 
@@ -384,6 +398,7 @@ async function consumeStreamContent(
           break;
         }
         case "tool-input-start": {
+          const reply = options?.tools.get(part.toolName)?.reply;
           if (
             options === undefined ||
             part.providerExecuted === true ||
@@ -391,7 +406,7 @@ async function consumeStreamContent(
             options.tools.get(part.toolName)?.behavior?.handling?.kind === "provider-tool" ||
             options.excludedActionToolNames.has(part.toolName) ||
             // A preview would show a call its tool keeps out of activity before `hidden` arrives.
-            options.tools.get(part.toolName)?.label === false
+            (options.tools.get(part.toolName)?.label === false && reply?.streamInput !== true)
           ) {
             streamingActionInputs.delete(part.id);
             break;
@@ -402,10 +417,19 @@ async function consumeStreamContent(
               textPhaseBefore(part.toolName, options.finalReplyOnly === true),
             );
           }
-          streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
+          if (reply?.streamInput === true) {
+            streamingReplyParts.set(part.id, { announced: false, kind: reply.kind });
+          } else {
+            streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
+          }
           break;
         }
         case "tool-input-delta": {
+          if (streamingReplyParts.has(part.id)) {
+            await providerActionBatch.flush();
+            await emitReplyPreview(part.id, part.delta);
+            break;
+          }
           if (!streamingActionInputs.has(part.id)) {
             break;
           }
@@ -415,10 +439,12 @@ async function consumeStreamContent(
         }
         case "tool-input-end":
           streamingActionInputs.delete(part.id);
+          streamingReplyParts.delete(part.id);
           break;
         case "tool-call": {
           const toolCall = part as TypedToolCall<ToolSet>;
           streamingActionInputs.delete(toolCall.toolCallId);
+          streamingReplyParts.delete(toolCall.toolCallId);
           if (toolCall.providerExecuted === true) {
             await collectProviderToolCall(toolCall);
           } else {

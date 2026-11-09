@@ -72,6 +72,55 @@ describe("createStreamChecker", () => {
     expect(rulesOf(repliedTurn())).toEqual([]);
   });
 
+  it("accepts a reply part its call writes after the model's run settles", () => {
+    const [opening, consumed, requested, started] = repliedTurn();
+    const lines: StoredLine[] = [
+      opening!,
+      consumed!,
+      requested!,
+      started!,
+      {
+        at,
+        progress: {
+          data: { callId: "c_0", delta: "{}", kind: "card", partId: "c_0.reply" },
+          scope: run,
+          type: "content.delta",
+        },
+      },
+      ...commits(
+        [
+          {
+            data: {
+              callId: "c_0",
+              capability: { kind: "tool", name: "card" },
+              input: {},
+              owner: { runId: "run_0" },
+            },
+            scope: run,
+            type: "call.requested",
+          },
+          { data: { outcome: "completed", runId: "run_0" }, scope: run, type: "model.settled" },
+        ],
+        [
+          {
+            data: {
+              callId: "c_0",
+              fallbackText: "A card.",
+              kind: "card",
+              partId: "c_0.reply",
+              phase: "reply",
+              value: {},
+            },
+            scope: turn,
+            type: "content.completed",
+          },
+          { data: { callId: "c_0", outcome: "completed" }, scope: run, type: "call.settled" },
+        ],
+      ),
+    ];
+    expect(rulesOf(lines)).toEqual([]);
+  });
+
   it("refuses a fact that names what was never introduced", () => {
     const lines = repliedTurn();
     lines.splice(2, 1);

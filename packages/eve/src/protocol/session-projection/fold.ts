@@ -446,17 +446,26 @@ function foldSpecifics(
       if (previews !== undefined) dropRunPreviews(view, previews, fact.data.runId);
       return;
     case "call.requested":
-    case "call.settled":
       if (previews !== undefined) delete previews.calls[fact.data.callId];
       return;
+    case "call.settled":
+      if (previews !== undefined) {
+        delete previews.calls[fact.data.callId];
+        // A part the call never completed goes with it.
+        for (const [partId, preview] of Object.entries(previews.parts)) {
+          if (preview.callId === fact.data.callId) delete previews.parts[partId];
+        }
+      }
+      return;
     case "content.completed": {
-      const { partId, phase, runId } = fact.data;
+      const { callId, partId, phase, runId } = fact.data;
       if (previews !== undefined) delete previews.parts[partId];
       // A reply part joins its turn's reply as it completes. A later step's reply replaces an
       // earlier step's, such as a held turn's text while its tasks work: the turn's answer is the
       // reply its last replying step writes, and a step that writes none leaves it standing. Parts
       // the turn wrote without a run count as one step of their own. Only a run its turn made
-      // answers it: a context change's run, such as a compaction's summary, never does.
+      // answers it: a context change's run, such as a compaction's summary, never does. A part a
+      // call wrote, such as a card, stays in the reply: later steps add to it, not replace it.
       const runOwner = runId === undefined ? undefined : view.runs[runId]?.owner;
       const turnId =
         runId === undefined
@@ -469,11 +478,14 @@ function foldSpecifics(
         view.parts[partId] = { ...view.parts[partId]!, turnId };
       const turn = turnId === undefined ? undefined : view.turns[turnId];
       if (phase === "reply" && turn !== undefined && turn.status !== "settled") {
-        const sameStep = (turn.reply ?? []).filter((id) => {
+        const kept = (turn.reply ?? []).filter((id) => {
           const part = view.parts[id];
-          return part !== undefined && part.runId === runId;
+          return (
+            part !== undefined &&
+            (callId !== undefined || part.runId === runId || part.callId !== undefined)
+          );
         });
-        view.turns[turn.turnId] = { ...turn, reply: [...sameStep, partId] };
+        view.turns[turn.turnId] = { ...turn, reply: [...kept, partId] };
       }
       return;
     }
@@ -499,13 +511,14 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
   if (view.session.status === "ended") return;
   switch (progress.type) {
     case "content.delta": {
-      const { delta, kind, partId } = progress.data;
+      const { callId, delta, kind, partId } = progress.data;
       if (view.parts[partId] !== undefined || typeof delta !== "string") return;
       const preview: PartPreview | undefined = previews.parts[partId];
       if (preview !== undefined) {
         previews.parts[partId] = { ...preview, text: preview.text + delta };
       } else if (kind !== undefined) {
-        previews.parts[partId] = { kind, partId, runId: progress.scope?.runId, text: delta };
+        const announced: PartPreview = { kind, partId, runId: progress.scope?.runId, text: delta };
+        previews.parts[partId] = callId === undefined ? announced : { ...announced, callId };
       }
       return;
     }
@@ -539,10 +552,14 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
   }
 }
 
-/** A settled run leaves its unfinished previews behind: parts it never completed, calls never requested. */
+/**
+ * A settled run leaves its unfinished previews behind: parts it never completed, calls never
+ * requested. A part a requested call writes stays until the call settles.
+ */
 function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: string): void {
   for (const [partId, preview] of Object.entries(previews.parts)) {
-    if (preview.runId === runId) delete previews.parts[partId];
+    const writtenByCall = preview.callId !== undefined && view.calls[preview.callId] !== undefined;
+    if (preview.runId === runId && !writtenByCall) delete previews.parts[partId];
   }
   for (const [callId, preview] of Object.entries(previews.calls)) {
     if (preview.runId === runId && view.calls[callId] === undefined) delete previews.calls[callId];

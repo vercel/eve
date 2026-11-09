@@ -15,6 +15,8 @@ export interface ContentDeltaData {
   readonly partId: string;
   /** On the announcing record only. */
   readonly kind?: ContentKind;
+  /** On the announcing record only: the call that writes the part, when a tool writes it. */
+  readonly callId?: string;
   readonly delta: string;
 }
 
@@ -32,6 +34,11 @@ export interface ContentCompletedData {
   /** For kinds a reader doesn't know. */
   readonly mediaType?: string;
   readonly fallbackText?: string;
+  /**
+   * The call that wrote the part, when a tool wrote it. Its turn owns the part, which joins the
+   * turn's reply and is never replaced by a later step's.
+   */
+  readonly callId?: string;
 }
 
 export type ContentDelta = Envelope<"content.delta", ContentDeltaData>;
@@ -44,6 +51,7 @@ export const contentSchemas = {
     "content.completed",
     conforming<ContentCompletedData>()(
       z.object({
+        callId: id.optional(),
         fallbackText: z.string().optional(),
         interrupted: z.literal(true).optional(),
         kind: z.string(),
@@ -62,7 +70,12 @@ export const contentProgressSchemas = {
   "content.delta": envelopeOf(
     "content.delta",
     conforming<ContentDeltaData>()(
-      z.object({ delta: z.string(), kind: z.string().optional(), partId: id }),
+      z.object({
+        callId: id.optional(),
+        delta: z.string(),
+        kind: z.string().optional(),
+        partId: id,
+      }),
     ),
   ),
 };

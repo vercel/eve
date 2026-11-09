@@ -50,3 +50,52 @@ it.each([
   expect(requested?.data).toMatchObject({ inputError: { code: "INVALID_TOOL_INPUT" } });
   expect(requested?.type === "call.requested" && requested.data.capability.hidden).toBe(hidden);
 });
+
+// A tool whose input is its reply part previews the part, not the call, even with `label: false`.
+it("previews a reply tool's input as its reply part", async () => {
+  const events: SessionEvent[] = [];
+  async function* stream() {
+    yield* [
+      { id: "call-card", toolName: "card", type: "tool-input-start" },
+      { delta: '{"root":', id: "call-card", type: "tool-input-delta" },
+      { delta: '"c"}', id: "call-card", type: "tool-input-delta" },
+      { id: "call-card", type: "tool-input-end" },
+      { input: '{"root":"c"}', toolCallId: "call-card", toolName: "card", type: "tool-call" },
+      { finishReason: "tool-calls", type: "finish-step" },
+    ] as TextStreamPart<ToolSet>[];
+  }
+
+  await emitStreamContent(
+    eachEvent(async (event) => {
+      events.push(event);
+    }),
+    { runId: "run_0", sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
+    stream(),
+    {
+      excludedActionToolNames: new Set(),
+      sessionCall: () => undefined,
+      tools: new Map([
+        [
+          "card",
+          {
+            description: "Show Alice's weekly numbers as a card.",
+            inputSchema: jsonSchema({ type: "object" }),
+            label: false,
+            name: "card",
+            reply: { kind: "card", part: () => null, streamInput: true },
+          },
+        ],
+      ]),
+    },
+  );
+
+  expect(events.filter((event) => event.type === "call.input")).toHaveLength(0);
+  expect(events.filter((event) => event.type === "content.delta")).toEqual([
+    {
+      data: { callId: "call-card", delta: '{"root":', kind: "card", partId: "call-card.reply" },
+      scope: { runId: "run_0", turnId: "turn_0" },
+      type: "content.delta",
+    },
+    { data: { delta: '"c"}', partId: "call-card.reply" }, type: "content.delta" },
+  ]);
+});

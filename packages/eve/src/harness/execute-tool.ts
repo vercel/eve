@@ -36,6 +36,8 @@ export interface HarnessToolDefinition {
   readonly name: string;
   readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;
+  /** A part a successful call adds to its turn's reply; see `ToolDefinition.reply`. */
+  readonly reply?: InternalToolDefinition["reply"];
   /**
    * Advertise this tool only to the root session, hiding it from subagent
    * sessions. Set on the injected `agent` self-delegation tool so children

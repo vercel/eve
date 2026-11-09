@@ -68,6 +68,7 @@ export default defineTool({
 | `toModelOutput`        | full return        | [Changes what the model sees](#shape-what-the-model-sees-with-tomodeloutput). |
 | `label`                | readable tool name | [Sets activity text](#label-tool-activity), or `false` to hide calls.         |
 | `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).               |
+| `reply`                | none               | [Adds a part to the turn's reply](#add-a-part-to-the-reply).                  |
 | `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).    |
 | `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).  |
 
@@ -305,6 +306,47 @@ The turn ends only when every tool call in the step can end the turn, succeeds, 
 eve ignores `endsTurn` in delegated sessions, which must reply to their caller, and on turns that request structured output. There, the model doesn't see the sentence, and eve doesn't call the function.
 
 Dynamic tool entries accept both forms of `endsTurn`. `defineWorkflowTool` doesn't accept it. To end a turn without any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+
+### Add a part to the reply
+
+Set `reply` when a successful call should add something to the turn's answer beside the model's text, such as a card or a chart. `reply.part` runs after `execute` and returns the part's `value` and the `fallbackText` that readers show when they can't render it:
+
+```ts title="agent/tools/card.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+const cardSchema = z.object({
+  title: z.string(),
+  rows: z.array(z.object({ label: z.string(), value: z.string() })),
+});
+
+export default defineTool({
+  description: "Show a short set of numbers as a card.",
+  inputSchema: cardSchema,
+  reply: {
+    kind: "card",
+    mediaType: "application/vnd.acme.card+json",
+    streamInput: true,
+    part: (card) => ({
+      value: card,
+      fallbackText: [card.title, ...card.rows.map((row) => `${row.label}: ${row.value}`)].join(
+        "\n",
+      ),
+    }),
+  },
+  async execute() {
+    return { shown: true };
+  },
+});
+```
+
+The session stream records the part as a `content.completed` event with your `kind`, `mediaType`, `value`, and `fallbackText`, `phase: "reply"`, and the `callId` of the call that wrote it. The part joins the reply of the call's turn and stays there when the model replies again afterward. eve's built-in channels post text replies only, so render the part in your own client by reading it from the session stream.
+
+- `kind` names the part, such as `"card"`. eve rejects `"text"`, `"reasoning"`, `"result"`, and `"file"` at build time.
+- `streamInput: true` streams the call's input as `content.delta` events for the part while the model writes it, in place of the call's own input preview. A call that fails drops the preview.
+- Return `null` from `part` to add nothing for that call. If `part` throws, the call fails and the model reads the error, so `part` can reject input that `inputSchema` can't express.
+
+The model sees the call's ordinary result, which [`toModelOutput`](#shape-what-the-model-sees-with-tomodeloutput) can still shape.
 
 ### Keep a tool out of the tool list
 

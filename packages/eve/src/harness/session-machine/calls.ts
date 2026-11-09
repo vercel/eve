@@ -1,6 +1,8 @@
 import { callRequested, callSettledFrom, callStarted } from "#harness/call-facts.js";
 import type { Commit } from "#harness/types.js";
 import type { Clearance } from "#harness/clearance.js";
+import { fact } from "#harness/facts.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import { commitOf } from "./commit.js";
 
 // The call family's commits: a call the model asked for, that one started, and how
@@ -38,4 +40,15 @@ export function startCall(clearance: Clearance): Commit {
 /** A call settled from its runtime result. */
 export function settleCall(...settled: Settled): Commit {
   return commitOf([callSettledFrom(...settled)]);
+}
+
+/**
+ * A call settled with the part it adds to its turn's reply, in one commit: the part completes
+ * first, so it never reads as a call that settled without the reply it wrote.
+ */
+export function settleCallWithReply(
+  part: FactOf<"content.completed">["data"],
+  ...settled: Settled
+): Commit {
+  return commitOf([fact("content.completed", part), callSettledFrom(...settled)]);
 }

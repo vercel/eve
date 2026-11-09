@@ -148,6 +148,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "inputSchema",
       "approval",
       "outputSchema",
+      "reply",
       "toModelOutput",
       ...(workflow === undefined ? [] : [workflow.entryPoint]),
     ],
@@ -227,6 +228,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     expectFunction(record.toModelOutput, message);
   }
 
+  if (record.reply !== undefined) assertToolReply(record.reply, message);
+
   if (record.auth !== undefined) {
     const auth = expectObjectRecord(record.auth, message);
     expectFunction(auth.getToken, message);
@@ -283,4 +286,21 @@ function expectOneOf<const T extends string>(
     throw new Error(`${message} Expected "${field}" to be one of: ${allowed.join(", ")}.`);
   }
   return text as T;
+}
+
+// Kinds eve writes itself; a tool's part would read as one of them.
+const RESERVED_REPLY_KINDS = new Set(["text", "reasoning", "result", "file"]);
+
+function assertToolReply(value: unknown, message: string): void {
+  const reply = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(reply, ["kind", "mediaType", "part", "streamInput"], message);
+  const kind = expectString(reply.kind, message);
+  if (kind.length === 0 || RESERVED_REPLY_KINDS.has(kind)) {
+    throw new Error(
+      `${message} "reply.kind" must name a kind of its own, such as "card", not "${kind}".`,
+    );
+  }
+  if (reply.mediaType !== undefined) expectString(reply.mediaType, message);
+  if (reply.streamInput !== undefined) expectBoolean(reply.streamInput, message);
+  expectFunction(reply.part, message);
 }

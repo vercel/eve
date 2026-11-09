@@ -101,6 +101,11 @@ function stamped(view: SessionView, event: SessionEvent): SessionEvent {
   const data = event.data as Readonly<Record<string, unknown>>;
   const family = TREE_FAMILY[descriptor.family];
   const id = data[descriptor.idField];
+  // A part a call wrote belongs to the call's turn, not the run that made the call.
+  if (event.type === "content.completed" && typeof data.callId === "string") {
+    const { runId: _run, ...scope } = scopeOf(view, { family: "call", id: data.callId });
+    return Object.keys(scope).length === 0 ? event : ({ ...event, scope } as SessionEvent);
+  }
   const about =
     family !== undefined && typeof id === "string" && rowOf(view, family, id) !== undefined
       ? { family, id }

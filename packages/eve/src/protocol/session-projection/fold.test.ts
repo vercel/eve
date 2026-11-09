@@ -357,6 +357,99 @@ describe("the shared fold", () => {
     expect(reply(view, "turn_0").map((part) => part.value)).toEqual(["Mine."]);
   });
 
+  it("keeps a part a call wrote in its turn's reply, previewed until the call settles", () => {
+    const [opening, request] = turnLines(0, { opensSession: true });
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const spec = { root: "c" };
+    const lines = (outcome: "completed" | "failed"): StoredLine[] => [
+      opening!,
+      request!,
+      {
+        at,
+        progress: {
+          data: { callId: "c_card", delta: '{"root":"c"}', kind: "card", partId: "c_card.reply" },
+          scope,
+          type: "content.delta",
+        },
+      },
+      {
+        at,
+        facts: [
+          {
+            data: {
+              callId: "c_card",
+              capability: { kind: "tool", name: "card" },
+              input: spec,
+              owner: { runId: "run_0" },
+            },
+            scope,
+            type: "call.requested",
+          },
+          { data: { outcome: "completed", runId: "run_0" }, scope, type: "model.settled" },
+        ],
+      },
+      {
+        at,
+        facts: [
+          ...(outcome === "completed"
+            ? [
+                {
+                  data: {
+                    callId: "c_card",
+                    fallbackText: "A card.",
+                    kind: "card",
+                    partId: "c_card.reply",
+                    phase: "reply",
+                    value: spec,
+                  },
+                  scope: { turnId: "turn_0" },
+                  type: "content.completed",
+                },
+              ]
+            : []),
+          { data: { callId: "c_card", outcome }, scope, type: "call.settled" },
+        ],
+      },
+      {
+        at,
+        facts: [
+          {
+            data: { owner: { turnId: "turn_0" }, runId: "run_1" },
+            scope: { runId: "run_1", turnId: "turn_0" },
+            type: "model.requested",
+          },
+          {
+            data: {
+              kind: "text",
+              partId: "p_after",
+              phase: "reply",
+              runId: "run_1",
+              value: "Done.",
+            },
+            scope: { runId: "run_1", turnId: "turn_0" },
+            type: "content.completed",
+          },
+        ],
+      },
+    ];
+
+    // The model's run settles before its call does; the call's preview stays until then.
+    const previews = emptyPreviews();
+    const view = emptySessionView();
+    foldLines(view, lines("completed").slice(0, 4), 0, { previews });
+    expect(previews.parts["c_card.reply"]).toMatchObject({ callId: "c_card", kind: "card" });
+
+    const shown = folded(lines("completed"));
+    expect(reply(shown, "turn_0").map((part) => part.partId)).toEqual(["c_card.reply", "p_after"]);
+    expect(shown.parts["c_card.reply"]).toMatchObject({ callId: "c_card", turnId: "turn_0" });
+
+    const failedPreviews = emptyPreviews();
+    const failed = emptySessionView();
+    foldLines(failed, lines("failed"), 0, { previews: failedPreviews });
+    expect(failedPreviews.parts["c_card.reply"]).toBeUndefined();
+    expect(reply(failed, "turn_0").map((part) => part.partId)).toEqual(["p_after"]);
+  });
+
   it("records a run's current attempt, each retry's start moving it on", () => {
     const lines = turnLines(0, { opensSession: true });
     const scope = { runId: "run_0", turnId: "turn_0" };

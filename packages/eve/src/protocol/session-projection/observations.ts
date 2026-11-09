@@ -114,6 +114,8 @@ export interface ContentObservation extends ObservationTiming {
   readonly interrupted?: true;
   readonly mediaType?: string;
   readonly fallbackText?: string;
+  /** The call that wrote the part, when a tool did. */
+  readonly callId?: string;
 }
 
 /** A linked agent session, with its owning call resolved when the facts name one. */

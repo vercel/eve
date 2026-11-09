@@ -404,6 +404,21 @@ describe("normalizeToolDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("accepts a reply part of its own kind and rejects one that reads as eve's", () => {
+    const card = (kind: string) =>
+      defineTool({
+        description: "Show Alice's numbers as a card.",
+        inputSchema: z.object({ root: z.string() }),
+        reply: { kind, part: (input) => ({ fallbackText: "A card.", value: input }) },
+        execute: () => ({ shown: true }),
+      });
+
+    expect(normalizeToolDefinition(card("card"), FAILURE_MESSAGE).kind).toBe("tool");
+    expect(() => normalizeToolDefinition(card("text"), FAILURE_MESSAGE)).toThrow(
+      '"reply.kind" must name a kind of its own',
+    );
+  });
+
   it("returns a dynamic-tool entry for a defineDynamic(fn) export with a map", () => {
     const dynamicTools = defineDynamic(async () => ({
       echo: defineTool({

@@ -281,8 +281,18 @@ export function part(view: SessionView, partId: string): ContentObservation | un
   const tables = sessionTables(view);
   const row = tables.parts[partId];
   if (row === undefined) return undefined;
-  const { runId, kind, phase, value, valueRef, interrupted, mediaType, fallbackText, startedAt } =
-    row;
+  const {
+    runId,
+    kind,
+    phase,
+    value,
+    valueRef,
+    interrupted,
+    mediaType,
+    fallbackText,
+    callId,
+    startedAt,
+  } = row;
   const turnId = selectors.partTurn(tables, row);
   return frozen({
     partId,
@@ -295,6 +305,7 @@ export function part(view: SessionView, partId: string): ContentObservation | un
     interrupted,
     mediaType,
     fallbackText,
+    ...(callId !== undefined && { callId }),
     startedAt,
   });
 }

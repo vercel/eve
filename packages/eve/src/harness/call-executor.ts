@@ -30,7 +30,8 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { callProgress } from "#harness/call-facts.js";
-import { settleCall, startCall } from "#harness/session-machine/calls.js";
+import { settleCall, settleCallWithReply, startCall } from "#harness/session-machine/calls.js";
+import { replyPartOf } from "#harness/tool-reply.js";
 import { withUsageCall } from "#harness/usage-sink.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
@@ -263,6 +264,18 @@ export async function executeToolCall(
         toolResults,
       };
     }
+    let reply: Awaited<ReturnType<typeof replyPartOf>>;
+    if (!failed && definition.reply !== undefined) {
+      try {
+        reply = await replyPartOf(definition.reply, callId, args, output);
+      } catch (error) {
+        logError(log, "tool reply part failed", error, { toolName, toolCallId: callId });
+        failed = true;
+        thrown = toError(error);
+        output = thrown.message;
+        failure = modelFacingError(error);
+      }
+    }
     toolResults.push({
       input: args,
       output,
@@ -282,18 +295,19 @@ export async function executeToolCall(
     };
     settled.push(completed);
     await input.beforeResult?.(failed ? thrown : undefined);
+    const result = createRuntimeToolResultFromValue({
+      callId,
+      isError: failed,
+      output: thrown ?? output,
+      toolName,
+    });
+    const presentation = {
+      label: failed ? undefined : projectToolLabel(definition, "complete", args, output),
+    };
     await input.publish(
-      settleCall(
-        createRuntimeToolResultFromValue({
-          callId,
-          isError: failed,
-          output: thrown ?? output,
-          toolName,
-        }),
-        {
-          label: failed ? undefined : projectToolLabel(definition, "complete", args, output),
-        },
-      ),
+      reply === undefined
+        ? settleCall(result, presentation)
+        : settleCallWithReply(reply, result, presentation),
     );
     return { settled, toolResults };
   } catch (error) {

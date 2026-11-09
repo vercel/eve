@@ -15,6 +15,8 @@ export {
   type ToolContext,
   type ToolModelOutput,
   type ToolModelOutputPart,
+  type ToolReplyDefinition,
+  type ToolReplyPart,
 } from "#tools/definition.js";
 export { defineDynamic } from "#tools/dynamic.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
