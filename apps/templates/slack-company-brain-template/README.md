@@ -18,7 +18,6 @@ agent/
   instructions/notion.ts         # how to connect Notion; delete once connected
   instructions/linear.ts         # how to connect Linear; delete once connected
   instructions/pagerduty.ts      # how to connect PagerDuty; delete once connected
-  instructions/google-drive.ts   # how to connect Google Drive; delete once connected
   connections/notion.ts          # Notion wiki, on once its connector exists
   connections/linear.ts          # Linear issues and projects, on once its connector exists
   connections/pagerduty.ts       # on-call and incidents, on once its connector exists
@@ -32,7 +31,6 @@ agent/
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
   tools/search_slack.ts          # searches public Slack channels
   tools/read_slack_conversation.ts # reads a public channel or thread
-  tools/google_drive.ts          # searches and reads Google Drive, on once its connector exists
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
   lib/connect.ts                 # connector detection and setup notes
@@ -249,25 +247,17 @@ the new capability should answer, and check that it picks the right source.
 ### Connect a knowledge source
 
 Connections give the agent tools from an MCP server or an OpenAPI spec. The
-template ships four sources, each off until its Vercel Connect connector
+template ships three sources, each off until its Vercel Connect connector
 exists. Create the ones you use from the linked project:
 
 ```bash
 vercel connect create notion --connection-method mcp --name company-brain
 vercel connect create linear --connection-method mcp --name company-brain
-vercel connect create google-drive --connection-method google-child --name company-brain
 vercel connect create pagerduty --connection-method mcp --name company-brain --data @pagerduty.json
 ```
 
 - **Notion** (`agent/connections/notion.ts`): search and read pages.
 - **Linear** (`agent/connections/linear.ts`): issues, projects, and cycles.
-- **Google Drive** (`agent/tools/google_drive.ts`): Connect offers Google
-  through Vercel-managed OAuth rather than an MCP server, so the template calls
-  the Drive API with two tools. `search_google_drive` searches names and content
-  across My Drive and shared drives, and `read_google_drive_file` reads Docs and
-  Slides as text, Sheets as CSV, and text files. It can't read PDFs or images.
-  The connector asks for read-only Drive access. Vercel-managed Google OAuth is
-  still rolling out, so it may not be offered to your team yet.
 - **PagerDuty** (`agent/connections/pagerduty.ts`): on-call schedules,
   incidents, and services. Connect needs your own PagerDuty OAuth app: a
   PagerDuty admin registers one under **Integrations > Developer Tools > App
