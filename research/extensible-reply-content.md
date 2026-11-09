@@ -4,7 +4,7 @@ status: proposed
 last_updated: "2026-11-06"
 ---
 
-# Extensible reply content and interactions
+# Extensible reply content
 
 > **AI status:** Written entirely by AI; human review pending.
 
@@ -25,25 +25,23 @@ three with a tool, a Slack renderer that parses the tool's streaming input, and 
 
 `ask_question` shows the shape this should take. It's a thin tool over a core primitive
 (`ctx.ask()` and interactions) that every channel renders natively. This plan adds the
-matching primitives for output, and opens interactions enough that `ask_question`, and cards
-with buttons, could ship as extensions.
+matching primitives for output.
 
 ## Goals
 
 - Tools can add parts to the turn's reply, streamed while the model writes them.
 - Every channel and client shows a reply part it doesn't understand through its fallback text.
 - Extensions contribute renderers for a media type, and channels use them natively.
-- Extensions can ask richer questions, with a content body whose buttons are the answers.
 
 Card-specific code stays out of core. json-render ships as an extension.
 
 ## Primitives
 
-| Primitive                                   | Direction | Core owns                                                         | Extensions add                     |
-| ------------------------------------------- | --------- | ----------------------------------------------------------------- | ---------------------------------- |
-| Tool reply parts                            | Output    | Streaming, completion, reply semantics, fallback text for readers | Cards, charts, galleries           |
-| Content renderers                           | Output    | Discovery, precedence, channel delivery, edits while streaming    | Native rendering per media type    |
-| Interaction bodies and conversational tools | Input     | Asking, durable waits, answer routing and authorization           | `ask_question`, cards with buttons |
+| Primitive         | Core owns                                                         | Extensions add                  |
+| ----------------- | ----------------------------------------------------------------- | ------------------------------- |
+| Tool reply parts  | Streaming, completion, reply semantics, fallback text for readers | Cards, charts, galleries        |
+| Text fallback     | Showing any part through its fallback text in every reader        | Nothing; it's the floor         |
+| Content renderers | Discovery, precedence, channel delivery, edits while streaming    | Native rendering per media type |
 
 ### 1. Tool reply parts
 
@@ -160,34 +158,6 @@ export default defineContentRenderer({
 - Channel-specific overrides stay where they are: a Slack renderer's `content.completed`
   handler still sees every part first.
 
-### 4. Interaction bodies and conversational tools
-
-`ctx.ask()` accepts a content body, rendered with the same renderers, and a card's buttons can
-be the question's options:
-
-```ts
-const answer = await ctx.ask({
-  prompt: "Ship this release?",
-  body: { mediaType: "application/vnd.json-render+json", value: spec, fallbackText },
-  options: [
-    { id: "ship", label: "Ship" },
-    { id: "hold", label: "Hold" },
-  ],
-});
-```
-
-- `interaction.opened` carries the body on its request. Readers that can't render it show its
-  fallback text above the prompt, so older clients still work.
-- A renderer that draws the options inside the body (a card's Button elements) marks the body
-  as owning them, and the channel skips its own option buttons. A press routes through the
-  existing answer path, with its checks on who may answer.
-- `defineTool` gains `conversational: true` for tools that act only on the conversation: they
-  aren't gated by the agent's approval policy, so a person is never asked to approve being
-  asked. Built-in `ask_question`, `sleep`, and `no_reply` use the same mark today, privately.
-
-With these, `ask_question` is about 130 lines on public APIs, and an extension can provide it.
-`eve/tools/ask_question` stays as a stable export.
-
 ## json-render as an extension
 
 `@eve/json-render` contributes the `card` tool with `replyPart`, a renderer for
@@ -203,7 +173,10 @@ export { default } from "@eve/json-render";
 
 - Custom component catalogs. Channels render natively, so a card can only use components every
   channel understands. Web apps that need custom components can use json-render directly.
-- Interactive cards with state or forms. Buttons answer questions; nothing else round-trips.
+- Interactive cards. Nothing on a card round-trips to the agent, so a card's catalog offers link
+  buttons but not action buttons.
+- Questions with rich bodies, and a public mark for tools that act only on the conversation.
+  Those extend `ctx.ask()` and interactions, and belong in a plan of their own.
 - A web card component in core. The client exposes the part; a renderer for React belongs in the
   docs registry beside the web chat components.
 
@@ -214,8 +187,7 @@ Each primitive is additive and ships on its own:
 1. Tool reply parts: protocol fields, harness, and fold.
 2. Text fallback in channels, clients, and the TUI.
 3. Content renderers and `eve/cards`, with Slack and Chat SDK.
-4. Interaction bodies and `conversational`.
-5. `@eve/json-render`, replacing the example's manual wiring.
+4. `@eve/json-render`, replacing the example's manual wiring.
 
 ## Decisions
 
@@ -225,14 +197,11 @@ Each primitive is additive and ships on its own:
   the raw preview text.
 - A subagent's answer stays the text its model wrote, without its reply parts' fallback text.
 - Native Teams and Discord cards follow this plan; until then, both show fallback text.
-- The public mark for tools that act only on the conversation is `conversational: true`.
 
 ## Follow-ups
 
 - Native Teams cards (eve cards to Adaptive Cards) and Discord embeds.
 - Turning off a media type's renderer in favor of its fallback text, if agents need it.
-
-## Open questions
-
-- How a renderer says a card body owns its question's options: a returned flag, or eve matching
-  the card's Button ids to the option ids.
+- Interactions: a content body on `ctx.ask()` whose buttons answer the question, and a public
+  `conversational: true` mark so tools like `ask_question` aren't gated by the agent's approval
+  policy. With both, `ask_question` could ship as an extension.
