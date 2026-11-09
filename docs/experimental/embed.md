@@ -3,7 +3,7 @@ title: "Agents in Code"
 description: "Define an agent with defineAgent and run its sessions in your own process."
 ---
 
-`eve/experimental/embed` runs an agent defined in code inside your program: no `agent/` directory, no build, no server. A session has the same loop, approvals, history and event stream as a deployed agent. This API is experimental, and its names and shapes will change.
+`eve/experimental/embed` runs an agent defined in code inside your program: no `agent/` directory, no build, no server. A session has the same loop, approvals, history and event stream as a deployed agent. This API is experimental, and its names and shapes will change. [`eve/browser`](#in-a-browser) runs the same agents in a webpage.
 
 ## Define an agent and talk to it
 
@@ -28,7 +28,7 @@ const release = defineAgent({
 });
 
 // Who the session acts as: here the person at this machine. A server passes the caller it authenticated.
-const session = createSession(release, { identity: localUser() });
+const session = await createSession(release, { identity: localUser() });
 const delivery = await session.send("Ship it to staging.");
 for await (const event of delivery.stream()) {
   if (event.type === "content.delta") process.stdout.write(event.data.delta);
@@ -42,18 +42,27 @@ await session.close();
 
 `identity` has no default. `localUser()` is the user this process runs as, for a script or CLI on that user's machine. `null` is no one in particular.
 
-A session has:
+A session is a `SessionHandle` (from `eve/sessions`), the same handle `eve/client`'s `ClientSession` is, so code written against one works with the other:
 
-| Member                     | What it does                                                                                   |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `send(message)`            | Sends a message. The delivery streams the turn it starts or joins.                             |
-| `respond(answers)`         | Answers open requests, such as approvals.                                                      |
-| `cancel()`                 | Cancels the running turn.                                                                      |
-| `pending()`                | What the session waits on a person for.                                                        |
-| `events({ from, signal })` | The session's events from line `from`, as they're written.                                     |
-| `snapshot()`               | The session as JSON-safe data that `createSession(agent, { restore })` continues.              |
-| `suspend()`                | Stops the session here without ending it. Its World keeps it, with its sandbox files and runs. |
-| `close()`                  | Ends the session: its turn and subagents end, and its sandbox is released.                     |
+| Member                           | What it does                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| `id`                             | The session's id, from the start.                                               |
+| `send(message)`                  | Sends a message. The delivery streams the turn it starts or joins.              |
+| `respond(answers)`               | Answers open requests, such as approvals.                                       |
+| `cancel()`                       | Cancels the running turn.                                                       |
+| `clear()`                        | Cancels a running turn and its tasks, then removes the session's model history. |
+| `compact()`                      | Compacts the session's context without sending model input.                     |
+| `end()`                          | Ends the session for good.                                                      |
+| `stream({ startIndex, follow })` | The session's events from line `startIndex`, as they're written.                |
+
+An embedded session also has what only a session run in this process has:
+
+| Member         | What it does                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| `pending()`    | What the session waits on a person for.                                                            |
+| `checkpoint()` | The session as JSON-safe data that `createSession(agent, { restore })` continues.                  |
+| `suspend()`    | Stops the session here without ending it. Its World keeps it, with its sandbox files and runs.     |
+| `close()`      | Ends the session, then stops its runtime: its turn and subagents end, and its sandbox is released. |
 
 ## Default tools and sandboxes
 
@@ -87,10 +96,10 @@ import { createSession, listSessions, localUser, localWorld } from "eve/experime
 
 const world = localWorld({ dataDir: ".sessions" });
 const [latest] = await listSessions(world);
-const session = createSession(coder, { identity: localUser(), world, resume: latest?.id });
+const session = await createSession(coder, { identity: localUser(), world, resume: latest?.id });
 ```
 
-Resumed, a turn a crash cut off goes on from its last step, and the model reads which of its calls may have run. `suspend()` leaves a session to resume; `close()` ends it. `snapshot()` returns the session as data, which `createSession(agent, { restore })` continues on any World.
+Resumed, a turn a crash cut off goes on from its last step, and the model reads which of its calls may have run. `suspend()` leaves a session to resume; `close()` ends it. `checkpoint()` returns the session as data, which `createSession(agent, { restore })` continues on any World.
 
 ## Terminal UI
 
@@ -106,8 +115,58 @@ await runTerminal(coder, { name: "coder", world, resume: process.argv[2] });
 
 In the UI, `/info` lists the agent's tools, sandbox and definitions, and `/help` lists the commands. Setup commands such as `/model` and `/deploy` are for `eve dev`'s app and aren't offered.
 
+## In a browser
+
+`eve/browser` runs the same agents in a browser page or a Web Worker, with no server. Any bundler builds it with no configuration, Vite included: nothing it loads needs Node. It has the names `eve/experimental/embed` shares with every host (`defineAgent`, `createSession`, `defineContext`, `eve.defaults()`, `memorySandbox()`, `listSessions()` and `memoryWorld()`), plus what a page needs: `browserWorld()`, a World in the page's IndexedDB, and `defineTool` and `always`.
+
+```ts title="main.ts"
+import { createGateway } from "ai";
+import {
+  always,
+  browserWorld,
+  createSession,
+  defineAgent,
+  defineTool,
+  eve,
+  memorySandbox,
+} from "eve/browser";
+
+const gateway = createGateway({ apiKey: import.meta.env.VITE_AI_GATEWAY_API_KEY });
+
+const notify = defineTool({
+  description: "Show the user a notification.",
+  inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+  approval: always(),
+  execute: async ({ text }) => ({ shown: text }),
+});
+
+const chat = defineAgent({
+  name: "chat",
+  model: gateway("anthropic/claude-haiku-4.5"),
+  instructions: "You are a friendly assistant with a shell. Keep answers short.",
+  tools: { notify },
+  definitions: eve.defaults({ sandbox: memorySandbox() }),
+});
+
+// The session is kept in the page's IndexedDB as it runs, so a reload continues it.
+const world = browserWorld();
+const resume = localStorage.getItem("session") ?? undefined;
+const session = await createSession(chat, { identity: null, world, resume });
+
+const delivery = await session.send("Tell me when you've written notes.txt.");
+const { interactions } = await delivery.result();
+// An approval is an open interaction: answer it with one of its options.
+for (const interaction of interactions) {
+  await session.respond([{ interactionId: interaction.interactionId, optionId: "approve" }]);
+}
+```
+
+- A model id string takes its AI Gateway key from the environment, which a page doesn't have, so a page passes a model instance, such as the one `createGateway` makes. Its key is in the page, readable by anyone who loads it: run such a page on your own machine only, or call a model through your own proxy.
+- In a page, `memorySandbox()` keeps the shell's files in IndexedDB, per session, so they're there after a reload. `session.stream()` replays the conversation from its start.
+- A browser has no `AsyncLocalStorage`, so a step's tool calls run one at a time, and the agent's prompt says so.
+
 ## Limits
 
-- Sessions run in your process, one writer per session. Give them a World (`localWorld()`), or save a snapshot, to keep them. For durability across instances, build the agent from files and deploy it.
+- Sessions run in your process, one writer per session. Give them a World (`localWorld()` in Node, `browserWorld()` in a page), or save a snapshot, to keep them. For durability across instances, build the agent from files and deploy it.
 - Tasks, workflow tools and subagents run in this process. After a crash, a subagent's run goes on from the World that kept its session; any other run that was in flight is reported to its parent as interrupted.
 - Schedules, remote agents and the agent-wide `approval` aren't supported in code yet.

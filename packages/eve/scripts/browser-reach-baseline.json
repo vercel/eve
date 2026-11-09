@@ -1,4 +1,18 @@
 {
+  "src/public/browser/index.ts": {
+    "static.modules": 784,
+    "static.kib": 3711,
+    "static.builtinFiles": 0,
+    "static.globalFiles": 0,
+    "static.vendorGlobalFiles": 6,
+    "static.workflow": 0,
+    "total.modules": 819,
+    "total.kib": 7025,
+    "total.builtinFiles": 0,
+    "total.globalFiles": 0,
+    "total.vendorGlobalFiles": 7,
+    "total.workflow": 0
+  },
   "src/execution/session/program.ts": {
     "static.modules": 604,
     "static.kib": 1803,

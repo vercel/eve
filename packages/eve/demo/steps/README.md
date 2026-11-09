@@ -1,12 +1,12 @@
-# eve step by step
+# eve in three steps
 
-Small demos of one agent, each in its own folder: a script and a terminal UI. They share no code,
-and the agent is defined the same way in both:
+Three small demos of one agent, each in its own folder: a script, a terminal UI, and a webpage.
+They share no code, and the agent is defined the same way in all three:
 
 ```ts
 const chat = defineAgent({
   name: "chat",
-  model: "anthropic/claude-haiku-4.5",
+  model: "anthropic/claude-haiku-4.5", // in the page: gateway("anthropic/claude-haiku-4.5")
   instructions: "You are a friendly assistant with a shell. Keep answers short.",
   definitions: eve.defaults({ sandbox: memorySandbox() }),
 });
@@ -70,3 +70,24 @@ With `CODER_WORLD=vercel`, sessions are kept in a Vercel project's World instead
 the project `vercel link` linked the directory to, and your `vercel login`), so `-c` on another
 machine continues the same conversation. The agent still runs on the machine you're on, and its
 files are that machine's: only the session travels.
+
+## 3. A webpage
+
+```sh
+cd ../3-webpage
+npm install
+VITE_AI_GATEWAY_API_KEY=$AI_GATEWAY_API_KEY npm run dev
+```
+
+Open the URL Vite prints. `index.html` is the whole app: the same agent, imported from
+`eve/browser`, running in the page itself. There's no server code and no Vite config. The session
+and the shell's files are kept in the browser's IndexedDB.
+
+Things to try:
+
+- `Write a short poem to poem.txt and print it.`
+- Reload the page. The conversation is still there, and so is `poem.txt`: ask `cat poem.txt`.
+- Type `/clear` to start over: a new session with an empty workspace.
+
+The page gets the key through `import.meta.env.VITE_AI_GATEWAY_API_KEY`, so anyone who loads the
+page can read it. Run it on your own machine only.

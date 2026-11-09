@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  Step 3: the same agent in a webpage, served by stock Vite with no config:
+    VITE_AI_GATEWAY_API_KEY=$AI_GATEWAY_API_KEY npm run dev
+  The conversation and the shell's files persist across reloads (IndexedDB).
+-->
+<title>chat</title>
+<pre id="log"></pre>
+<form id="form"><input id="input" autofocus placeholder="Say something" /></form>
+
+<script type="module">
+  import { createGateway } from "ai";
+  import { browserWorld, createSession, defineAgent, eve, memorySandbox } from "eve/browser";
+
+  const gateway = createGateway({ apiKey: import.meta.env.VITE_AI_GATEWAY_API_KEY });
+
+  const chat = defineAgent({
+    name: "chat",
+    model: gateway("anthropic/claude-haiku-4.5"),
+    instructions: "You are a friendly assistant with a shell. Keep answers short.",
+    definitions: eve.defaults({ sandbox: memorySandbox() }),
+  });
+
+  // The session is kept in the page's IndexedDB as it runs: a reload resumes it by id.
+  const world = browserWorld();
+  const resume = localStorage.getItem("session") ?? undefined;
+  const session = await createSession(chat, { identity: null, world, resume });
+
+  // The session's stream from its start: after a reload it replays the conversation so far, then
+  // goes on with what's new.
+  const show = (e) => {
+    if (e.type === "delivery.consumed")
+      log.textContent += `\nyou: ${e.data.parts.map((part) => part.text ?? "").join("")}\nagent: `;
+    if (e.type === "content.delta") log.textContent += e.data.delta;
+    if (e.type === "call.requested")
+      log.textContent += `\n  [${e.data.capability.name}] ${JSON.stringify(e.data.input)}\n`;
+  };
+  let following;
+  const follow = () =>
+    (following ??= (async () => {
+      for await (const e of session.stream()) show(e);
+    })());
+  if (resume) follow();
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const text = input.value;
+    input.value = "";
+    // /clear starts over: forget this session, and the reload starts a new one, with an empty
+    // workspace (the shell's files are kept per session).
+    if (text.trim() === "/clear") {
+      localStorage.removeItem("session");
+      return location.reload();
+    }
+    await session.send(text);
+    localStorage.setItem("session", session.id);
+    follow();
+  };
+</script>
