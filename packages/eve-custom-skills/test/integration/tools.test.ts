@@ -108,7 +108,7 @@ test("a shared first version asks, shows its content, and goes live only once ap
 
   const approved = await run(create, input, { ...(ctx as object), approval: { responder: bob } });
   assert.equal(approved.status, "active");
-  assert.equal(approved.loadName, "channel-deploy");
+  assert.equal(approved.loadName, "channel_deploy");
   const [event] = events;
   assert.equal(event?.scope.name, "channel");
   assert.equal(event?.approvedBy?.principalId, bob.principalId);
@@ -138,13 +138,6 @@ test("a configured rule can refuse changes", async () => {
   });
   const refused = await run(create, input, ctx);
   assert.deepEqual(refused, { success: false, error: "Shared skills are managed by admins." });
-});
-
-test("a personal skill can't take a name another scope loads under", async () => {
-  mount();
-  const result = await run(create, { ...deploy, name: "channel-deploy" }, context());
-  assert.equal(result.success, false);
-  assert.match(String(result.error), /can't start with "channel-"/);
 });
 
 test("removal reports who removed what", async () => {

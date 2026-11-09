@@ -8,8 +8,9 @@ import type {
   AppendVersionRequest,
   AppendVersionResult,
   RemoveSkillsResult,
+  SkillCatalog,
   SkillHead,
-  SkillHeadPatch,
+  SkillHeadUpdate,
   SkillRepository,
   SkillVersionRecord,
   SkillVersionRef,
@@ -134,10 +135,23 @@ class DocumentSkillRepository implements SkillRepository {
     };
   }
 
-  /** Applies `change` to the latest catalog, retrying when another write lands first. */
-  async #updateCatalog<T>(scope: SkillScope, change: (catalog: Catalog) => T): Promise<T> {
+  /**
+   * Applies `change` to the latest catalog, retrying when another write lands
+   * first. With `expectedRevision`, any other write since that revision fails
+   * the change instead, so the caller can check its limits again.
+   */
+  async #updateCatalog<T>(
+    scope: SkillScope,
+    change: (catalog: Catalog) => T,
+    expectedRevision?: string | null,
+  ): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
       const { catalog, version } = await this.#readCatalog(scope);
+      if (expectedRevision !== undefined && version !== expectedRevision) {
+        throw new SkillConflictError(
+          "The skills in this scope changed while this change was checked. Try again.",
+        );
+      }
       const before = JSON.stringify(catalog);
       const result = change(catalog);
       if (JSON.stringify(catalog) === before) return result;
@@ -193,9 +207,12 @@ class DocumentSkillRepository implements SkillRepository {
     };
   }
 
-  async listHeads(scope: SkillScope): Promise<SkillHead[]> {
-    const { catalog } = await this.#readCatalog(scope);
-    return Object.entries(catalog.skills).map(([name, entry]) => toHead(name, entry));
+  async listHeads(scope: SkillScope): Promise<SkillCatalog> {
+    const { catalog, version } = await this.#readCatalog(scope);
+    return {
+      heads: Object.entries(catalog.skills).map(([name, entry]) => toHead(name, entry)),
+      revision: version,
+    };
   }
 
   async getHead(scope: SkillScope, name: string): Promise<SkillHead | null> {
@@ -269,35 +286,39 @@ class DocumentSkillRepository implements SkillRepository {
     });
 
     try {
-      const outcome = await this.#updateCatalog(scope, (latest) => {
-        const entry = latest.skills[name];
-        const replayed = entry?.versions.find(
-          (version) =>
-            request.idempotencyKey !== undefined &&
-            version.idempotencyKey === request.idempotencyKey,
-        );
-        if (entry && replayed) return { entry, version: replayed.version, replayed: true };
-        const latestVersion = entry ? (entry.versions.at(-1)?.version ?? 0) : null;
-        if (request.expectedLatest !== latestVersion) {
-          throw new SkillConflictError(
-            conflictMessage(name, latestVersion, request.expectedLatest),
+      const outcome = await this.#updateCatalog(
+        scope,
+        (latest) => {
+          const entry = latest.skills[name];
+          const replayed = entry?.versions.find(
+            (version) =>
+              request.idempotencyKey !== undefined &&
+              version.idempotencyKey === request.idempotencyKey,
           );
-        }
-        const version = (latestVersion ?? 0) + 1;
-        const saved: z.infer<typeof versionEntrySchema> = { version, key };
-        if (request.idempotencyKey !== undefined) saved.idempotencyKey = request.idempotencyKey;
-        const next: SkillEntry = {
-          liveVersion: request.activate ? version : (entry?.liveVersion ?? null),
-          applicationMode: request.activate
-            ? request.version.applicationMode
-            : (entry?.applicationMode ?? request.version.applicationMode),
-          createdAt: entry?.createdAt ?? createdAt,
-          updatedAt: createdAt,
-          versions: [...(entry?.versions ?? []), saved],
-        };
-        latest.skills[name] = next;
-        return { entry: next, version, replayed: false };
-      });
+          if (entry && replayed) return { entry, version: replayed.version, replayed: true };
+          const latestVersion = entry ? (entry.versions.at(-1)?.version ?? 0) : null;
+          if (request.expectedLatest !== latestVersion) {
+            throw new SkillConflictError(
+              conflictMessage(name, latestVersion, request.expectedLatest),
+            );
+          }
+          const version = (latestVersion ?? 0) + 1;
+          const saved: z.infer<typeof versionEntrySchema> = { version, key };
+          if (request.idempotencyKey !== undefined) saved.idempotencyKey = request.idempotencyKey;
+          const next: SkillEntry = {
+            liveVersion: request.activate ? version : (entry?.liveVersion ?? null),
+            applicationMode: request.activate
+              ? request.version.applicationMode
+              : (entry?.applicationMode ?? request.version.applicationMode),
+            createdAt: entry?.createdAt ?? createdAt,
+            updatedAt: createdAt,
+            versions: [...(entry?.versions ?? []), saved],
+          };
+          latest.skills[name] = next;
+          return { entry: next, version, replayed: false };
+        },
+        request.expectedRevision,
+      );
       if (outcome.replayed) {
         await this.#tombstone(key);
         const replay = await this.#replay(name, outcome.entry, request.idempotencyKey);
@@ -315,16 +336,21 @@ class DocumentSkillRepository implements SkillRepository {
     }
   }
 
-  async updateHead(scope: SkillScope, name: string, patch: SkillHeadPatch): Promise<SkillHead> {
-    const entry = await this.#updateCatalog(scope, (catalog) => {
-      const current = catalog.skills[name];
-      if (!current) throw new SkillNotFoundError(name);
-      const next: SkillEntry = { ...current, updatedAt: this.#now().toISOString() };
-      if (patch.liveVersion !== undefined) next.liveVersion = patch.liveVersion;
-      if (patch.applicationMode !== undefined) next.applicationMode = patch.applicationMode;
-      catalog.skills[name] = next;
-      return next;
-    });
+  async updateHead(scope: SkillScope, update: SkillHeadUpdate): Promise<SkillHead> {
+    const { name } = update;
+    const entry = await this.#updateCatalog(
+      scope,
+      (catalog) => {
+        const current = catalog.skills[name];
+        if (!current) throw new SkillNotFoundError(name);
+        const next: SkillEntry = { ...current, updatedAt: this.#now().toISOString() };
+        if (update.liveVersion !== undefined) next.liveVersion = update.liveVersion;
+        if (update.applicationMode !== undefined) next.applicationMode = update.applicationMode;
+        catalog.skills[name] = next;
+        return next;
+      },
+      update.expectedRevision,
+    );
     return toHead(name, entry);
   }
 

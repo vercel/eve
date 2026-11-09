@@ -5,7 +5,7 @@ import {
   SkillNotFoundError,
   SkillVersionNotFoundError,
 } from "./errors.ts";
-import type { SkillHead, SkillRepository, SkillVersionRecord } from "./repository.ts";
+import type { SkillCatalog, SkillHead, SkillRepository, SkillVersionRecord } from "./repository.ts";
 import type {
   SkillApplicationMode,
   SkillAuthor,
@@ -48,6 +48,15 @@ export interface SavePlan {
   /** Whether the version would go live: a clean first version does. */
   readonly activates: boolean;
   readonly live: SkillLiveState & { readonly instructions?: string };
+  /** The scope's revision the plan was made at. */
+  readonly revision: string | null;
+}
+
+/** A planned publish, rollback, or mode change, at the scope revision it was checked against. */
+export interface HeadPlan {
+  readonly head: SkillHead;
+  readonly version: SkillVersionRecord;
+  readonly revision: string | null;
 }
 
 export interface SaveSkillOptions {
@@ -118,6 +127,31 @@ export class SkillLifecycle {
     return head;
   }
 
+  /** The scope's skills and revision, with `name`'s head, which must exist. */
+  async #snapshot(
+    scope: SkillScope,
+    name: string,
+  ): Promise<{ catalog: SkillCatalog; head: SkillHead }> {
+    const catalog = await this.#repository.listHeads(scope);
+    const head = catalog.heads.find((candidate) => candidate.name === name);
+    if (!head) throw new SkillNotFoundError(name);
+    return { catalog, head };
+  }
+
+  /**
+   * Retries a planned write that lost a race to another change in the scope,
+   * planning it again against the newer state.
+   */
+  async #retrying<T>(write: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await write();
+      } catch (error) {
+        if (!(error instanceof SkillConflictError) || attempt >= SAVE_ATTEMPTS) throw error;
+      }
+    }
+  }
+
   async #requireVersion(
     scope: SkillScope,
     name: string,
@@ -128,8 +162,34 @@ export class SkillLifecycle {
     return record;
   }
 
-  async #assertAlwaysOnCapacity(scope: SkillScope, name: string, markdown: string): Promise<void> {
-    const others = (await this.listLive(scope)).filter(
+  async #liveSkills(scope: SkillScope, heads: readonly SkillHead[]): Promise<StoredSkill[]> {
+    const live = heads.filter(
+      (head): head is SkillHead & { liveVersion: number } => head.liveVersion !== null,
+    );
+    const versions = await this.#repository.getVersions(
+      scope,
+      live.map(({ name, liveVersion }) => ({ name, version: liveVersion })),
+    );
+    return live
+      .flatMap((head, index) => {
+        const version = versions[index];
+        if (version) return [materialize(head.name, version, head)];
+        console.warn("[custom-skills] live version is missing", {
+          name: head.name,
+          version: head.liveVersion,
+        });
+        return [];
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async #assertAlwaysOnCapacity(
+    scope: SkillScope,
+    catalog: SkillCatalog,
+    name: string,
+    markdown: string,
+  ): Promise<void> {
+    const others = (await this.#liveSkills(scope, catalog.heads)).filter(
       (skill) => skill.name !== name && skill.applicationMode === "always",
     );
     if (others.length >= this.limits.maxAlwaysOn) {
@@ -151,14 +211,14 @@ export class SkillLifecycle {
     const content = normalizeSkillContent(input);
     const validation = validateSkillContent(content, this.limits);
     if (!validation.valid) throw new InvalidSkillContentError(validation.errors);
-    const existing = await this.#repository.getHead(scope, name);
+    const catalog = await this.#repository.listHeads(scope);
+    const existing = catalog.heads.find((head) => head.name === name) ?? null;
     const applicationMode = input.applicationMode ?? existing?.applicationMode ?? "on-demand";
     if (applicationMode !== "always" && !isRoutingDescription(content.description)) {
       throw new InvalidSkillContentError([ROUTING_DESCRIPTION_REQUIREMENT]);
     }
     if (existing === null) {
-      const count = (await this.#repository.listHeads(scope)).length;
-      if (count >= this.limits.maxSkills) {
+      if (catalog.heads.length >= this.limits.maxSkills) {
         throw new InvalidSkillTransitionError(
           `This scope already has ${this.limits.maxSkills} skills, the most it can hold. Remove one first.`,
         );
@@ -166,7 +226,7 @@ export class SkillLifecycle {
     }
     const activates = existing === null && validation.warnings.length === 0;
     if (activates && applicationMode === "always") {
-      await this.#assertAlwaysOnCapacity(scope, name, content.markdown);
+      await this.#assertAlwaysOnCapacity(scope, catalog, name, content.markdown);
     }
     const live = liveState(existing);
     const liveRecord =
@@ -181,6 +241,7 @@ export class SkillLifecycle {
       version: (existing?.latestVersion ?? 0) + 1,
       activates,
       live: liveRecord ? { ...live, instructions: liveRecord.markdown } : live,
+      revision: catalog.revision,
     };
   }
 
@@ -200,6 +261,7 @@ export class SkillLifecycle {
         const result = await this.#repository.appendVersion(scope, {
           name: plan.name,
           expectedLatest,
+          expectedRevision: plan.revision,
           idempotencyKey: options.idempotencyKey,
           version: {
             description: plan.description,
@@ -224,29 +286,12 @@ export class SkillLifecycle {
 
   /** Every live skill in the scope, read in one batch. */
   async listLive(scope: SkillScope): Promise<StoredSkill[]> {
-    const heads = (await this.#repository.listHeads(scope)).filter(
-      (head): head is SkillHead & { liveVersion: number } => head.liveVersion !== null,
-    );
-    const versions = await this.#repository.getVersions(
-      scope,
-      heads.map(({ name, liveVersion }) => ({ name, version: liveVersion })),
-    );
-    return heads
-      .flatMap((head, index) => {
-        const version = versions[index];
-        if (version) return [materialize(head.name, version, head)];
-        console.warn("[custom-skills] live version is missing", {
-          name: head.name,
-          version: head.liveVersion,
-        });
-        return [];
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.#liveSkills(scope, (await this.#repository.listHeads(scope)).heads);
   }
 
   /** One summary per skill. Versions are numbered 1, 2, 3… with no gaps. */
   async listSummaries(scope: SkillScope): Promise<SkillSummary[]> {
-    const heads = await this.#repository.listHeads(scope);
+    const { heads } = await this.#repository.listHeads(scope);
     const shown = heads.map((head) => head.liveVersion ?? head.latestVersion);
     const [shownVersions, latestVersions] = await Promise.all([
       this.#repository.getVersions(
@@ -300,16 +345,9 @@ export class SkillLifecycle {
     return materialize(name, await this.#requireVersion(scope, name, target), head);
   }
 
-  /**
-   * Checks that `target` can go live and returns the mode it would apply in:
-   * the mode it was saved with.
-   */
-  async planPublish(
-    scope: SkillScope,
-    name: string,
-    target: number,
-  ): Promise<{ head: SkillHead; version: SkillVersionRecord }> {
-    const head = await this.#requireHead(scope, name);
+  /** Checks that `target` can go live, in the mode it was saved with. */
+  async planPublish(scope: SkillScope, name: string, target: number): Promise<HeadPlan> {
+    const { catalog, head } = await this.#snapshot(scope, name);
     if (head.liveVersion === target) {
       throw new InvalidSkillTransitionError(
         `Skill "${name}" version ${target} is already live. If it is not applying, check its application mode with \`set_mode\`.`,
@@ -322,25 +360,32 @@ export class SkillLifecycle {
       );
     }
     if (version.applicationMode === "always") {
-      await this.#assertAlwaysOnCapacity(scope, name, version.markdown);
+      await this.#assertAlwaysOnCapacity(scope, catalog, name, version.markdown);
     } else if (!isRoutingDescription(version.description)) {
       throw new InvalidSkillContentError([ROUTING_DESCRIPTION_REQUIREMENT]);
     }
-    return { head, version };
+    return { head, version, revision: catalog.revision };
+  }
+
+  async #applyPublish(scope: SkillScope, name: string, plan: HeadPlan): Promise<SkillChange> {
+    const updated = await this.#repository.updateHead(scope, {
+      name,
+      liveVersion: plan.version.version,
+      applicationMode: plan.version.applicationMode,
+      expectedRevision: plan.revision,
+    });
+    return { skill: materialize(name, plan.version, updated), previous: liveState(plan.head) };
   }
 
   /** Makes an exact version live, in the mode it was saved with. */
   async publish(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
-    const { head, version } = await this.planPublish(scope, name, target);
-    const updated = await this.#repository.updateHead(scope, name, {
-      liveVersion: target,
-      applicationMode: version.applicationMode,
-    });
-    return { skill: materialize(name, version, updated), previous: liveState(head) };
+    return this.#retrying(async () =>
+      this.#applyPublish(scope, name, await this.planPublish(scope, name, target)),
+    );
   }
 
-  /** Checks that `target` is an earlier version than the live one. */
-  async planRollback(scope: SkillScope, name: string, target: number) {
+  /** Checks that `target` is earlier than the live version and can go live. */
+  async planRollback(scope: SkillScope, name: string, target: number): Promise<HeadPlan> {
     const head = await this.#requireHead(scope, name);
     if (head.liveVersion === null) {
       throw new InvalidSkillTransitionError(`Skill "${name}" has no active version to roll back.`);
@@ -350,13 +395,18 @@ export class SkillLifecycle {
         `Skill "${name}" cannot roll back from version ${head.liveVersion} to version ${target}. Roll back only to an earlier version; publish a later one instead.`,
       );
     }
-    return this.planPublish(scope, name, target);
+    const plan = await this.planPublish(scope, name, target);
+    if (plan.head.liveVersion !== head.liveVersion) {
+      throw new SkillConflictError(`Skill "${name}" changed while rolling back.`);
+    }
+    return plan;
   }
 
   /** Makes an exact earlier version live again, in the mode it was saved with. */
   async rollback(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
-    await this.planRollback(scope, name, target);
-    return this.publish(scope, name, target);
+    return this.#retrying(async () =>
+      this.#applyPublish(scope, name, await this.planRollback(scope, name, target)),
+    );
   }
 
   /** Checks that the live version is `target` and can apply in `mode`. */
@@ -365,8 +415,8 @@ export class SkillLifecycle {
     name: string,
     target: number,
     mode: SkillApplicationMode,
-  ): Promise<{ head: SkillHead; version: SkillVersionRecord }> {
-    const head = await this.#requireHead(scope, name);
+  ): Promise<HeadPlan> {
+    const { catalog, head } = await this.#snapshot(scope, name);
     if (head.liveVersion === null) {
       throw new InvalidSkillTransitionError(
         `Skill "${name}" has no active version. Activate a version before changing its application mode.`,
@@ -380,27 +430,37 @@ export class SkillLifecycle {
     const version = await this.#requireVersion(scope, name, target);
     if (head.applicationMode !== mode) {
       if (mode === "always") {
-        await this.#assertAlwaysOnCapacity(scope, name, version.markdown);
+        await this.#assertAlwaysOnCapacity(scope, catalog, name, version.markdown);
       } else if (!isRoutingDescription(version.description)) {
         throw new InvalidSkillContentError([ROUTING_DESCRIPTION_REQUIREMENT]);
       }
     }
-    return { head, version };
+    return { head, version, revision: catalog.revision };
   }
 
-  /** Changes how the exact live version applies. */
+  /**
+   * Changes how the exact live version applies. The write fails if anything in
+   * the scope changed since the check, so a version published meanwhile is
+   * never changed in this one's place.
+   */
   async setMode(
     scope: SkillScope,
     name: string,
     target: number,
     mode: SkillApplicationMode,
   ): Promise<SkillChange> {
-    const { head, version } = await this.planSetMode(scope, name, target, mode);
-    const updated =
-      head.applicationMode === mode
-        ? head
-        : await this.#repository.updateHead(scope, name, { applicationMode: mode });
-    return { skill: materialize(name, version, updated), previous: liveState(head) };
+    return this.#retrying(async () => {
+      const { head, version, revision } = await this.planSetMode(scope, name, target, mode);
+      const updated =
+        head.applicationMode === mode
+          ? head
+          : await this.#repository.updateHead(scope, {
+              name,
+              applicationMode: mode,
+              expectedRevision: revision,
+            });
+      return { skill: materialize(name, version, updated), previous: liveState(head) };
+    });
   }
 
   /** The live state of each named skill, `null` for any that don't exist. */

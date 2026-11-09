@@ -20,7 +20,7 @@ export default customSkills({});
 
 With `BLOB_READ_WRITE_TOKEN` (or `BLOB_STORE_ID` plus Vercel OIDC) set, that is all. Without storage, no custom skills load and the tools say storage is missing. For local development, pass `storage: inMemory()` from `eve/memory/file`.
 
-The mount name prefixes everything. Mounted as `skills`, the agent gets `skills__create`, `skills__list`, `skills__read`, `skills__versions`, `skills__publish`, `skills__rollback`, `skills__set_mode`, `skills__remove`, the `skills__manage` lifecycle skill, and user skills that load as `skills__<name>` (personal) or `skills__channel-<name>` (shared). The prefix means a user's skill can never shadow one of the agent's own skills, and `create` refuses a name that starts with another scope's prefix. Keep `<mount>__<prefix><name>` within eve's 64-character skill name limit: with the default 40-character `maxNameLength`, keep the mount name to 14 characters or fewer.
+The mount name prefixes everything. Mounted as `skills`, the agent gets `skills__create`, `skills__list`, `skills__read`, `skills__versions`, `skills__publish`, `skills__rollback`, `skills__set_mode`, `skills__remove`, the `skills__manage` lifecycle skill, and user skills that load as `skills__<name>` (personal) or `skills__channel_<name>` (shared). The prefix means a user's skill can never shadow one of the agent's own skills, and because skill names never contain `_`, a shared skill can never collide with a personal one. The name `manage` is reserved for the lifecycle skill. Keep `<mount>__<prefix>_<name>` within eve's 64-character skill name limit: with the default 40-character `maxNameLength`, keep the mount name to 14 characters or fewer.
 
 ## Configure
 
@@ -55,7 +55,7 @@ export default customSkills({
         label: "everyone at the company",
         shared: true,
         readOnly: true,
-        loadPrefix: "company-",
+        loadPrefix: "company",
       });
     }
     return scopes;
@@ -86,9 +86,9 @@ Always-on limits apply per scope, so a turn with a personal and a channel scope 
 
 ## Storage
 
-The default store keeps one catalog document per scope, holding every skill's live version, mode, and version index, plus one document per version. Catalog writes are compare-and-swap, so concurrent saves get distinct version numbers. The scope key is hashed into the document path. Deleting a skill overwrites its version documents with an empty tombstone, because memory document backends have no delete; a backend that keeps object history still holds the old content.
+The default store keeps one catalog document per scope, holding every skill's live version, mode, and version index, plus one document per version. Catalog writes are compare-and-swap, and the catalog's version is the scope's revision, so concurrent saves get distinct version numbers and limit checks can't race. The scope key is hashed into the document path. Deleting a skill overwrites its version documents with an empty tombstone, because memory document backends have no delete; a backend that keeps object history still holds the old content.
 
-To keep skills elsewhere, implement `SkillRepository` from `eve/extensions/custom-skills/repository` (seven methods over skill heads and immutable versions, including a batch `getVersions`) and pass it as `repository`. Skills are addressed by name within a scope, and versions are numbered 1, 2, 3… with no gaps. Throw `SkillConflictError` from `appendVersion` when the latest version isn't the expected one, and `SkillNotFoundError` from `updateHead` for a missing skill.
+To keep skills elsewhere, implement `SkillRepository` from `eve/extensions/custom-skills/repository` (seven methods over skill heads and immutable versions, including a batch `getVersions`) and pass it as `repository`. Skills are addressed by name within a scope, and versions are numbered 1, 2, 3… with no gaps. `listHeads` returns the scope's `revision`, which changes on every write; reject a write whose `expectedRevision` is stale with `SkillConflictError`, and the lifecycle checks its limits again and retries. That keeps concurrent writers in a shared scope from exceeding the skill and always-on limits, or changing the mode of a version published in the meantime. Also throw `SkillConflictError` from `appendVersion` when the latest version isn't the expected one, and `SkillNotFoundError` from `updateHead` for a missing skill.
 
 ## Validate
 

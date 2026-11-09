@@ -53,7 +53,7 @@ export function spaceScope(ctx: SkillScopeContext): SkillScope | null {
     key: `space:${space.id}`,
     label: space.type === "group" ? "everyone in this conversation" : "everyone in this channel",
     shared: true,
-    loadPrefix: "channel-",
+    loadPrefix: "channel",
   };
 }
 

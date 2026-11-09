@@ -57,7 +57,7 @@ type Failure = { success: false; error: string };
 export const NEXT_TURN = "It takes effect from the next message, not in the current turn.";
 
 export function loadName(scope: SkillScope, name: string): string {
-  return `${scope.loadPrefix ?? ""}${name}`;
+  return scope.loadPrefix ? `${scope.loadPrefix}_${name}` : name;
 }
 
 async function scopesFor(ctx: SkillCallContext) {
