@@ -517,8 +517,13 @@ class DocumentSkillRepository implements SkillRepository {
       };
     } catch (error) {
       // A catalog write can land and still report failure, such as on a dropped connection.
-      // Clearing the version then would leave a skill whose name is taken but has no content.
-      const committed = await this.#committedVersion(scope, id, key).catch(() => undefined);
+      // Clearing the version then would leave a skill whose name is taken but has no content,
+      // so it's cleared only once a catalog read proves no write committed it. When that read
+      // fails too, the version stays: at worst an unreferenced document is left behind.
+      const committed = await this.#committedVersion(scope, id, key).catch(
+        () => "unknown" as const,
+      );
+      if (committed === "unknown") throw error;
       if (committed !== undefined) {
         return {
           head: toHead(id, committed.entry),

@@ -279,3 +279,36 @@ test("a catalog write that lands but reports failure doesn't leave a ghost skill
   const [live] = await skills.listLive(alice);
   assert.equal(live?.instructions, "Deploy.");
 });
+
+test("a version stays when the write's outcome can't be checked", async () => {
+  // The catalog write lands but reports failure, and the read that would check it fails too.
+  // Storage then recovers, so anything that clears the version afterwards would succeed.
+  const backend = inMemory();
+  let catalogWrites = 0;
+  let failedReads = 0;
+  const flaky: MemoryDocumentBackend = {
+    async read(input) {
+      if (failedReads > 0) {
+        failedReads -= 1;
+        throw new Error("storage unavailable");
+      }
+      return backend.read(input);
+    },
+    async write(input) {
+      const written = await backend.write(input);
+      if (input.key.endsWith("catalog.json") && catalogWrites++ === 0) {
+        failedReads = 1;
+        throw new Error("connection reset after the write");
+      }
+      return written;
+    },
+  };
+  const { skills } = setup(flaky);
+  await assert.rejects(
+    skills.save(alice, { name: "deploy", description: ROUTING, markdown: "Deploy." }, { savedBy }),
+    /connection reset/,
+  );
+
+  const [live] = await skills.listLive(alice);
+  assert.equal(live?.instructions, "Deploy.");
+});
