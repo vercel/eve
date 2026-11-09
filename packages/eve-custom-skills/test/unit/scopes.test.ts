@@ -29,9 +29,12 @@ function context(space?: { id: string; type: "direct" | "group" | "channel" }): 
   };
 }
 
-test("personal scopes key by authenticator and principal", () => {
+test("personal scopes key by eve's full principal identity", () => {
   const scope = personalScope(context());
-  assert.equal(scope?.key, `user:${JSON.stringify(["slack-webhook", "slack:T1:U1"])}`);
+  assert.equal(
+    scope?.key,
+    `user:${JSON.stringify(["slack-webhook", "", "user", "slack:T1:U1", ""])}`,
+  );
   assert.equal(scope?.shared, false);
   assert.equal(
     personalScope({ session: { id: "s1", auth: { current: null, initiator: null } } }),

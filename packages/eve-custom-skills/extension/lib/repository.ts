@@ -60,7 +60,10 @@ export interface AppendVersionRequest {
   /**
    * The skill's ID. For a new skill (`expectedLatest: null`) it is a fresh
    * UUID the repository should store; a repository that assigns its own IDs
-   * may use one instead and return it in `head.id`.
+   * may use one instead and return it in `head.id`. Never reuse an ID, even
+   * after the skill is removed: approvals are bound to a skill's ID and
+   * version, so a reused ID would let a recreated skill's content stand in
+   * for what a person approved.
    */
   readonly id: string;
   /** Unique within the scope. A new skill whose name is taken rejects with `SkillConflictError`. */

@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ConversationContext, SessionAuthContext } from "eve/context";
-import { inMemory } from "eve/memory/file";
+import { inMemory, type MemoryDocumentBackend } from "eve/memory/file";
 
 import extension from "../../extension/extension.ts";
+import { documentRepository } from "../../extension/lib/document-repository.ts";
+import { spaceScope } from "../../extension/lib/scopes.ts";
 import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
 import create from "../../extension/tools/create.ts";
+import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
+import read from "../../extension/tools/read.ts";
 import remove from "../../extension/tools/remove.ts";
 
 const ROUTING = "Use when the user asks for a deploy checklist.";
@@ -26,10 +30,10 @@ const inChannel: ConversationContext = {
   space: { id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" },
 };
 
-function mount(options: { rule?: SkillApprovalRule } = {}) {
+function mount(options: { rule?: SkillApprovalRule; storage?: MemoryDocumentBackend } = {}) {
   const events: SkillChangeEvent[] = [];
   extension({
-    storage: inMemory(),
+    storage: options.storage ?? inMemory(),
     approval: options.rule ? { request: options.rule } : {},
     onChange: (event: SkillChangeEvent) => void events.push(event),
   });
@@ -37,12 +41,15 @@ function mount(options: { rule?: SkillApprovalRule } = {}) {
 }
 
 let calls = 0;
-function context(input: { approvedBy?: SessionAuthContext; sessionId?: string } = {}) {
+function context(
+  input: { approvedBy?: SessionAuthContext; sessionId?: string; caller?: SessionAuthContext } = {},
+) {
   calls += 1;
+  const caller = input.caller ?? alice;
   return {
     session: {
       id: input.sessionId ?? "session-1",
-      auth: { current: alice, initiator: alice },
+      auth: { current: caller, initiator: caller },
       turn: { id: "turn-1", sequence: 0 },
     },
     conversation: inChannel,
@@ -215,4 +222,80 @@ test("an approval applies only to the skill it showed, not one recreated under i
   );
   assert.deepEqual([removal.deleted, removal.notFound], [[], ["deploy"]]);
   assert.notEqual(replacement.id, original.id);
+});
+
+/** Only an administrator may approve, and every live change in a shared scope asks. */
+const adminOnly: SkillApprovalRule = (change) =>
+  change.changesLive && change.scope.shared ? "ask" : "allow";
+
+test("a shared draft save stays a draft when the skill is deleted before it commits", async () => {
+  const backend = inMemory();
+  let deleteBeforeNextVersion: (() => Promise<void>) | undefined;
+  const racing: MemoryDocumentBackend = {
+    read: backend.read,
+    async write(input) {
+      // Just before the draft's version document lands, an administrator deletes the skill.
+      if (input.key.includes("/skills/") && deleteBeforeNextVersion) {
+        const removal = deleteBeforeNextVersion;
+        deleteBeforeNextVersion = undefined;
+        await removal();
+      }
+      return backend.write(input);
+    },
+  };
+  mount({ rule: adminOnly, storage: racing });
+  const input = { ...deploy, scope: "channel" };
+  const original = await run(create, input, context({ approvedBy: alice }));
+  assert.equal(original.status, "active");
+
+  const admin = documentRepository({ backend });
+  const channel = spaceScope({
+    session: { id: "s", auth: { current: alice, initiator: alice } },
+    conversation: inChannel,
+  })!;
+  deleteBeforeNextVersion = async () => void (await admin.remove(channel, [String(original.id)]));
+
+  // Bob's draft needed no approval, since it changes nothing live.
+  const draft = { ...input, instructions: "Bob's revision." };
+  assert.equal((await decide(create, draft, context({ caller: bob }))).status, "not-applicable");
+  const saved = await run(create, draft, context({ caller: bob }));
+  assert.equal(saved.success, false, `the racing save returned ${JSON.stringify(saved)}`);
+
+  // Retried without approval, the save is a new first version that needs one, so it waits as a draft.
+  const retried = await run(create, draft, context({ caller: bob }));
+  assert.equal(retried.status, "draft");
+  assert.deepEqual(
+    (await admin.listHeads(channel)).heads.map(({ liveVersion }) => liveVersion),
+    [null],
+  );
+});
+
+test("personal skills stay apart for principals that share an id across issuers or types", async () => {
+  mount();
+  const atAcme: SessionAuthContext = {
+    attributes: {},
+    authenticator: "oidc",
+    issuer: "https://acme.example",
+    principalId: "42",
+    principalType: "user",
+  };
+  const elsewhere = [
+    { ...atAcme, issuer: "https://other.example" },
+    { ...atAcme, principalType: "service" },
+    { ...atAcme, subject: "someone-else" },
+  ];
+  const secret = { ...deploy, name: "private-notes", instructions: "Acme's private steps." };
+  const saved = await run(create, secret, context({ caller: atAcme }));
+  assert.equal(saved.status, "active");
+
+  for (const caller of elsewhere) {
+    const listed = await run(list, {}, context({ caller }));
+    assert.deepEqual(listed.skills, [], `${JSON.stringify(caller)} listed Acme's skills`);
+    const readBack = await run(read, { name: "private-notes" }, context({ caller }));
+    assert.equal(readBack.success, false);
+  }
+  assert.equal(
+    (await run(read, { name: "private-notes" }, context({ caller: atAcme }))).instructions,
+    "Acme's private steps.",
+  );
 });

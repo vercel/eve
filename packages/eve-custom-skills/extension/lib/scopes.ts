@@ -29,12 +29,17 @@ export function skillAuthor(auth: SessionAuthContext | null): SkillAuthor {
  */
 export function personalScope(ctx: SkillScopeContext): SkillScope | null {
   const auth = ctx.session.auth.current;
-  const principalId = auth?.principalId?.trim();
-  if (!auth || !principalId || auth.principalType === "anonymous") return null;
+  if (!auth || !auth.principalId || auth.principalType === "anonymous") return null;
   return {
     name: "personal",
-    // The authenticator keeps two auth systems' principals with one id apart.
-    key: `user:${JSON.stringify([auth.authenticator ?? "", principalId])}`,
+    // eve's full principal identity, exact: two principals that differ in any field never share skills.
+    key: `user:${JSON.stringify([
+      auth.authenticator,
+      auth.issuer ?? "",
+      auth.principalType,
+      auth.principalId,
+      auth.subject ?? "",
+    ])}`,
     label: "you",
     shared: false,
   };
