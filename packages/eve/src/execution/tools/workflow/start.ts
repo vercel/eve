@@ -22,10 +22,19 @@ import {
 
 const log = createLogger("execution.workflow-tool-run");
 
-/** Starts a new run for each dispatch attempt. Call from a `"use step"` body. */
-export async function startWorkflowToolRun(
+/**
+ * Starts the durable run of one workflow tool call or task, and returns where it listens. A host
+ * without durable runs refuses, and the call fails with its error.
+ */
+export type StartWorkflowToolRun = (
   input: Omit<WorkflowToolRunInput, "hookToken">,
-): Promise<WorkflowToolRunAddress> {
+) => Promise<WorkflowToolRunAddress>;
+
+/**
+ * Starts a new Workflow run on the current deployment for each dispatch attempt. Call from a
+ * `"use step"` body.
+ */
+export const startWorkflowToolRun: StartWorkflowToolRun = async (input) => {
   const hookToken =
     input.entry.entryPoint === "execute"
       ? crypto.randomUUID()
@@ -34,7 +43,7 @@ export async function startWorkflowToolRun(
     { ...input, hookToken },
   ]);
   return { hookToken, runId: run.runId };
-}
+};
 
 /**
  * A task's run takes the session's commands, including later calls to a
@@ -64,6 +73,8 @@ export interface StartWorkflowTaskInput {
    */
   readonly prestarted?: PrestartedWorkflowToolRun;
   readonly session: HarnessSessionBase;
+  /** How the host starts the call's run. */
+  readonly startRun: StartWorkflowToolRun;
   readonly task: RuntimeWorkflowTaskRequest;
 }
 
@@ -86,7 +97,7 @@ export async function startWorkflowToolCallRun(
     return await prestarted.run;
   }
   const { task, batchEvent, session } = input;
-  return await startWorkflowToolRun({
+  return await input.startRun({
     agentContext: input.agentContext,
     callId: task.callId,
     entry,
