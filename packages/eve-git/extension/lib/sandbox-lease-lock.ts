@@ -75,10 +75,12 @@ function beginReleaseCommand(owner: string): string {
     `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
     `  sleep 0.1`,
     `done`,
-    `held=0`,
-    `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
+    // Age first: a lock found fresh can't be replaced before the ownership read, while one
+    // replaced after a stale age read only withholds cleanup.
     `fresh=0`,
     `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
+    `held=0`,
+    `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
     `printf '%s %s %s' "$guarded" "$held" "$fresh"`,
   ].join("\n");
 }
