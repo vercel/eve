@@ -42,17 +42,25 @@ describe("authored workflow scope", () => {
           "agent/tools/probe.ts":
             'import { defineWorkflowTool } from "eve/tools"; import { run } from "@/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
           "agent/channels/probe.ts": `import { defineChannel, GET } from "eve/channels";
-import { start, getRun, getReadable } from "eve/experimental/workflow/api";
+import { resumeHook } from "eve/workflow/api";
+import { start, getRun, getReadable, getHookRunId } from "eve/experimental/workflow/api";
 import { run } from "@/lib/run";
 export default defineChannel({ routes: [GET("/workflow-api", async () => {
   const started = await start(run);
+  let foundRunId: string | null = null;
+  for (let attempt = 0; foundRunId === null && attempt < 100; attempt++) {
+    foundRunId = await getHookRunId("workflow-api-gate");
+    if (foundRunId === null) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  const unknownToken = await getHookRunId("workflow-api-probe-unknown");
+  await resumeHook("workflow-api-gate", "open");
   const result = await getRun(started.runId).returnValue;
-  const reader = getReadable<string>(started.runId, { namespace: "probe.progress", startIndex: -1 }).getReader();
+  const reader = getReadable<string>(foundRunId ?? started.runId, { namespace: "probe.progress", startIndex: -1 }).getReader();
   const latest = (await reader.read()).value;
   await reader.cancel();
   let reservedRejected = false;
   try { getReadable(started.runId, { namespace: "eve.tool-stubs.matches" }); } catch { reservedRejected = true; }
-  return Response.json({ ...result, latest, reservedRejected });
+  return Response.json({ ...result, latest, reservedRejected, foundRun: foundRunId === started.runId, unknownToken });
 })] });`,
           "lib/run.ts": `import { createHook } from "eve/workflow";
 import { getWritable } from "eve/experimental/workflow";
@@ -61,10 +69,13 @@ import { deliver, publish } from "./step";
 export async function run() {
   "use workflow";
   using hook = createHook<string>({ token: "workflow-api-probe" });
+  using gate = createHook<string>({ token: "workflow-api-gate" });
   await publish(getWritable<string>({ namespace: "probe.progress" }), "planning");
   const returnedUndefined = await deliver();
   await publish(getWritable<string>({ namespace: "probe.progress" }), "delivered");
-  return { marker: describe(), returnedUndefined, payload: await hook };
+  const payload = await hook;
+  await gate;
+  return { marker: describe(), returnedUndefined, payload };
 }`,
           "lib/step.ts": `import { resumeHook } from "eve/workflow/api";
 export async function deliver() {
@@ -110,6 +121,8 @@ export async function publish(progress: WritableStream<string>, phase: string) {
             payload: "approved",
             latest: "delivered",
             reservedRejected: true,
+            foundRun: true,
+            unknownToken: null,
           });
         } finally {
           await server.close();

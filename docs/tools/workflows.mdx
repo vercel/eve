@@ -148,10 +148,13 @@ Starting and inspecting standalone workflow runs, and writing and reading run st
 | `start(workflow, args)`                             | `eve/experimental/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none. |
 | `getRun(runId)`                                     | `eve/experimental/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                    |
 | `getReadable<T>(runId, { namespace, startIndex? })` | `eve/experimental/workflow/api` | Reads a run's stream from `startIndex` (default `0`; `-1` is the latest chunk) and follows later chunks. Cancel it when you stop reading.           |
+| `getHookRunId(token)`                               | `eve/experimental/workflow/api` | Resolves the ID of the run holding the hook with that `token`, or `null`. Use it to find a run, not to decide whether to start one.                 |
 
-Call `start`, `getRun`, and `getReadable` from routes or steps, not in the body. Import `WorkflowMetadata` and `WorkflowWritableOptions` from `eve/experimental/workflow`, and `WorkflowRun`, `WorkflowRunStatus`, and `WorkflowReadableOptions` from `eve/experimental/workflow/api`. For background work inside a session, prefer a [`task`](#run-calls-as-tasks-task) or [`serve`](#resumable-tasks-serve) tool.
+Call `start`, `getRun`, `getReadable`, and `getHookRunId` from routes or steps, not in the body. Import `WorkflowMetadata` and `WorkflowWritableOptions` from `eve/experimental/workflow`, and `WorkflowRun`, `WorkflowRunStatus`, and `WorkflowReadableOptions` from `eve/experimental/workflow/api`. For background work inside a session, prefer a [`task`](#run-calls-as-tasks-task) or [`serve`](#resumable-tasks-serve) tool.
 
 A stream needs a `namespace`, because a run's default stream holds eve's own records. Namespaces starting with `eve.` or `eve:` are reserved, and both functions throw for them. Chunks persist with the run, so the run's [data retention](/docs/agent-config#run-data-retention) applies.
+
+To find a run from another tool or route, give it a hook with a token you can derive, such as one built from `ctx.session.id`, and resolve it with `getHookRunId`. The hook must be registered first, so await `hook.getConflict()` in the body. After the run ends or the hook is disposed, the lookup can resolve `null`. Don't use the lookup to decide whether to start a run, because another caller can start one between the lookup and `start`.
 
 Publish a long-running task's state from a step, and read the latest chunk from a step or route that knows the run ID:
 

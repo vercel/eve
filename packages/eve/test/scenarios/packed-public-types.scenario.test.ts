@@ -75,7 +75,8 @@ import { z } from "zod";
 import { createHook, sleep, createWebhook, FatalError, RetryableError } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
 import { getWorkflowMetadata, getWritable } from "eve/experimental/workflow";
-import { start, getRun, getReadable, type WorkflowRun } from "eve/experimental/workflow/api";
+import { start, getRun, getReadable, getHookRunId, type WorkflowRun } from "eve/experimental/workflow/api";
+const holder: Promise<string | null> = getHookRunId("coder:session");
 const progress: WritableStream<{ phase: string }> = getWritable({ namespace: "coder.progress" });
 const latest: ReadableStream<{ phase: string }> = getReadable("run", { namespace: "coder.progress", startIndex: -1 });
 // @ts-expect-error A run's default stream belongs to eve.

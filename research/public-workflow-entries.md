@@ -39,7 +39,14 @@ default stream holds eve's session records and eve's own streams use those
 prefixes. The check runs in the step and server entry and in a body-side shim
 the driver resolves the entry to, so bodies get the same rule. `getReadable` is
 a function rather than a `WorkflowRun` method so `start` and `getRun` keep
-returning the SDK's run handle unwrapped. `getHookByToken` stays removed.
+returning the SDK's run handle unwrapped.
+
+`getHookByToken` stays removed: it returned the World's hook storage record, and
+its lookup-then-`start` use raced (atomic `start` with a hook replaced it).
+`getHookRunId(token)` in `eve/experimental/workflow/api` covers the remaining
+need, finding the run that holds a known token so its streams can be read. It
+resolves only the run ID, or `null` when no hook holds the token, and is not a
+way to decide whether to start a run.
 
 Both API entries are unavailable inside replayed workflow bodies: call them
 from a route or a `"use step"` function instead.

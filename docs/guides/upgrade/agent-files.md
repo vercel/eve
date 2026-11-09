@@ -182,7 +182,7 @@ import { start, getRun } from "eve/experimental/workflow/api"; // [!code ++]
 
 `eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, and `RetryableError`. `eve/workflow/api` exports `resumeHook`. `getWorkflowMetadata` and `getWritable` are in `eve/experimental/workflow`, and `start`, `getRun`, and `getReadable(runId, options)` are in `eve/experimental/workflow/api`; experimental entries have no compatibility promise. Run streams need a `namespace` that doesn't start with `eve.` or `eve:`. Importing a moved export from its old entry fails the build with an error that names the new one. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
 
-- `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`.
+- `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`. To find the run that holds a token, use the experimental `getHookRunId(token)` from `eve/experimental/workflow/api`, which resolves the run ID or `null`.
 - `start(workflow, args?)` takes a `"use workflow"` function, not a source string. It takes no options such as `deploymentId` or `world`, because eve runs the workflow on the agent's own queue and deployment.
 - `start` and `getRun` return a `WorkflowRun` with only `runId`, `status`, `returnValue`, and `cancel()`.
 - `agent` and `ask` aren't exported. Use `defineWorkflowTool()` from `eve/tools`, and call `ctx.agent(name).send(message)` or `ctx.ask(request)` in its executor.

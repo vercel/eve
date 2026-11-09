@@ -1,1 +1,9 @@
-["WorkflowReadableOptions", "WorkflowRun", "WorkflowRunStatus", "getReadable", "getRun", "start"]
+[
+  "WorkflowReadableOptions",
+  "WorkflowRun",
+  "WorkflowRunStatus",
+  "getHookRunId",
+  "getReadable",
+  "getRun",
+  "start"
+]

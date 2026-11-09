@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import * as sdk from "#internal/workflow/index.js";
 import * as sdkRuntime from "#internal/workflow/runtime.js";
 
@@ -13,11 +14,13 @@ vi.mock("#internal/workflow/index.js", async (importOriginal) => ({
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof sdkRuntime>()),
   getRun: vi.fn(),
+  getHookByToken: vi.fn(),
 }));
 
 afterEach(() => {
   vi.mocked(sdk.getWritable).mockReset();
   vi.mocked(sdkRuntime.getRun).mockReset();
+  vi.mocked(sdkRuntime.getHookByToken).mockReset();
 });
 
 const invalidNamespaces = [
@@ -61,6 +64,31 @@ describe("eve/experimental/workflow/api", () => {
     expect(api.start).toBe(actual.start);
     expectTypeOf(actual.start).toExtend<typeof api.start>();
     expectTypeOf(actual.getRun).toExtend<typeof api.getRun>();
+  });
+
+  it("resolves a hook token to its run ID without exposing the hook record", async () => {
+    vi.mocked(sdkRuntime.getHookByToken).mockResolvedValueOnce({
+      runId: "run_1",
+      hookId: "hook",
+      token: "coder:session",
+      ownerId: "owner",
+      projectId: "project",
+      environment: "test",
+      createdAt: new Date(),
+      metadata: Promise.resolve(undefined),
+    });
+    await expect(api.getHookRunId("coder:session")).resolves.toBe("run_1");
+    expect(sdkRuntime.getHookByToken).toHaveBeenCalledWith("coder:session");
+    expectTypeOf(api.getHookRunId).returns.resolves.toEqualTypeOf<string | null>();
+  });
+
+  it("resolves null for an unknown token and rethrows other failures", async () => {
+    vi.mocked(sdkRuntime.getHookByToken).mockRejectedValueOnce(new HookNotFoundError("missing"));
+    await expect(api.getHookRunId("missing")).resolves.toBeNull();
+
+    const failure = new Error("World unavailable");
+    vi.mocked(sdkRuntime.getHookByToken).mockRejectedValueOnce(failure);
+    await expect(api.getHookRunId("coder:session")).rejects.toBe(failure);
   });
 
   it("reads the namespaced stream of a run from startIndex", () => {
