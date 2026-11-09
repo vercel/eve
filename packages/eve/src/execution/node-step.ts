@@ -71,11 +71,12 @@ interface CreateExecutionNodeStepInput {
   readonly typedAnswers?: KernelConfig["typedAnswers"];
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly setAttributes?: KernelConfig["setAttributes"];
-  readonly modelResolutionScope: RuntimeModelResolutionScope;
+  /** The compiled module scope a model reference resolves in; absent for a held agent. */
+  readonly modelResolutionScope?: RuntimeModelResolutionScope;
   /** Who runs the step, as its events name it. */
   readonly agent: RuntimeAgentIdentity;
-  /** The compiled node whose `agent/tools/` the step runs. */
-  readonly node: ResolvedRuntimeAgentNode;
+  /** The compiled node whose `agent/tools/` the step runs; absent for a held agent. */
+  readonly node?: ResolvedRuntimeAgentNode;
   readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
 }
 
@@ -85,7 +86,8 @@ interface CreateExecutionNodeStepInput {
  */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
-  const tools = createNodeHarnessTools({ node: input.node });
+  const tools: HarnessToolMap =
+    input.node === undefined ? new Map() : createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
   const step = createKernel({
@@ -153,7 +155,7 @@ export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdenti
 }
 
 function createRuntimeModelResolver(
-  scope: RuntimeModelResolutionScope,
+  scope: RuntimeModelResolutionScope | undefined,
 ): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<LanguageModel> {
   return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
 }
