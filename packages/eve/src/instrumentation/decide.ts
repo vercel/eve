@@ -13,7 +13,7 @@ import { getRegisteredTelemetryIntegrations } from "#instrumentation/ai-sdk-tele
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
@@ -38,7 +38,7 @@ export async function decideWithTracing<
     sessionId === undefined || turnId === undefined
       ? undefined
       : await runtime?.readTurnTraceContext?.(sessionId, turnId);
-  const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
+  const agentName = ctx.get(SessionAgentKey)?.name ?? "eve";
   const decision = resolveInstrumentationTraceDecision(
     settings,
     agentName,

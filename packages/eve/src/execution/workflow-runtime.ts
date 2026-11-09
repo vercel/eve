@@ -41,7 +41,7 @@ import {
 } from "#internal/workflow/runtime.js";
 import { assertStartClaims, pinRunId } from "#internal/workflow/start-claim.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import {
   assertSessionHistoryReadable,
@@ -165,7 +165,7 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
   ): Promise<RunHandle> => {
     const prepared = await prepareInitialEntry(config, input, predecessor);
     input = prepared.input;
-    const { bundle, serializedContext } = prepared;
+    const { agent, serializedContext } = prepared;
     const retention = prepared.entry.retention;
     const parentLineage = readParentLineage(serializedContext);
     const workflowInputBase: InitialWorkflowEntryInput = {
@@ -178,7 +178,7 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
             serializedContext,
           })
         : buildSubagentRootAttributes({
-            identity: { nodeId: bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID },
+            identity: { nodeId: runtimeNodeId(agent) },
             parentCallId: parentLineage.callId,
             parentSessionId: parentLineage.sessionId,
             parentTurnId: parentLineage.turnId,

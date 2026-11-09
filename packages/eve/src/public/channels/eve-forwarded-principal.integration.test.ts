@@ -28,6 +28,7 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { eveChannel, type EveChannelConfig } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -75,7 +76,7 @@ function createEmptySkillBundle(): CompiledBundle {
   };
 }
 
-const EMPTY_SKILL_BUNDLE = createEmptySkillBundle();
+const EMPTY_SKILL_AGENT = fromCompiledBundle(createEmptySkillBundle());
 
 function createEveCreateHandler(input: EveChannelConfig) {
   const channel = eveChannel(input);
@@ -160,7 +161,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       channelName: "eve",
       ...options,
     };
-    const ctx = buildRunContext({ bundle: EMPTY_SKILL_BUNDLE, run });
+    const ctx = buildRunContext({ agent: EMPTY_SKILL_AGENT, run });
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
@@ -271,7 +272,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         "adapter" | "channelName" | "requestId"
       >;
       const ctx = buildRunContext({
-        bundle: EMPTY_SKILL_BUNDLE,
+        agent: EMPTY_SKILL_AGENT,
         run: {
           adapter: { kind: "eve" },
           channelName: "eve",
@@ -365,7 +366,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       "adapter" | "channelName" | "requestId"
     >;
     const ctx = buildRunContext({
-      bundle: EMPTY_SKILL_BUNDLE,
+      agent: EMPTY_SKILL_AGENT,
       run: {
         adapter: { kind: "eve" },
         channelName: "eve",
@@ -400,7 +401,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       "adapter" | "channelName" | "requestId"
     >;
     const ctx = buildRunContext({
-      bundle: EMPTY_SKILL_BUNDLE,
+      agent: EMPTY_SKILL_AGENT,
       run: {
         adapter: { kind: "eve" },
         channelName: "eve",

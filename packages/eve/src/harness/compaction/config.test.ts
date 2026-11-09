@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { compactionConfig } from "#harness/compaction/config.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const step = (input: { readonly window?: number; readonly thresholdPercent?: number }) => ({
   ctx: agentContext(input.thresholdPercent),
@@ -35,9 +36,12 @@ describe("compactionConfig", () => {
 
 function agentContext(thresholdPercent: number | undefined): ContextContainer {
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, {
-    resolvedAgent: { config: { compaction: { thresholdPercent } } },
-    turnAgent: {},
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      resolvedAgent: { config: { compaction: { thresholdPercent } } },
+      turnAgent: {},
+    } as never),
+  );
   return ctx;
 }
