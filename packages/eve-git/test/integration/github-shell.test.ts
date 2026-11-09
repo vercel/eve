@@ -5,12 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { trace } from "@opentelemetry/api";
-import {
-  BasicTracerProvider,
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
 import type { ConnectTokenParams } from "@vercel/connect";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
 import type { ToolContext } from "eve/tools";
@@ -948,9 +942,14 @@ test("a stale lock's release that can't take the guard leaves the policy to the 
         cleaned = true;
       },
     });
-    // The waiter's successor replaces the policy, so clearing it here could clear theirs.
+    // The waiter's successor replaces the policy, so clearing it here could clear theirs, and the
+    // lock is the waiter's to break.
     assert.equal(cleaned, false);
-    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock.guard\n");
+    assert.equal(
+      execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }),
+      "lease.lock\nlease.lock.guard\n",
+    );
+    assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
   } finally {
     rmSync(lockRoot, { recursive: true, force: true });
   }
@@ -992,36 +991,6 @@ test("a release breaks a guard a stopped sandbox left behind", async () => {
     assert.equal(cleanedWhileHeld, "holder");
     assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
   } finally {
-    rmSync(lockRoot, { recursive: true, force: true });
-  }
-});
-
-test("a lease records how long it waited for another command", async () => {
-  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
-  const lockPath = join(lockRoot, "lease.lock");
-  const exporter = new InMemorySpanExporter();
-  trace.setGlobalTracerProvider(
-    new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }),
-  );
-  try {
-    execFileSync("mkdir", [lockPath]);
-    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
-    setTimeout(() => rmSync(lockPath, { recursive: true, force: true }), 600);
-    const sandboxFake: Pick<SandboxSession, "run"> = {
-      run: (input) => runLockCommand(input.command, lockPath),
-    };
-    await withSandboxLeaseLock(sandboxFake as SandboxSession, "waiter", async () => undefined);
-    const [span] = exporter
-      .getFinishedSpans()
-      .filter((finished) => finished.name === "agent.github.lease.wait");
-    assert.ok(span);
-    assert.equal(span.attributes["agent.github.lease.outcome"], "acquired");
-    assert.equal(span.attributes["agent.github.lease.waited"], true);
-    assert.ok(Number(span.attributes["agent.github.lease.attempts"]) > 1);
-    // The span lasts as long as the wait.
-    assert.ok(span.duration[0] * 1000 + span.duration[1] / 1e6 >= 500);
-  } finally {
-    trace.disable();
     rmSync(lockRoot, { recursive: true, force: true });
   }
 });

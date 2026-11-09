@@ -1,4 +1,3 @@
-import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
@@ -53,7 +52,8 @@ function acquireCommand(owner: string): string {
 
 /**
  * A lock younger than this can't be broken before its holder finishes cleaning up, since a waiter
- * breaks only a lock it finds stale under the guard.
+ * breaks only a lock it finds stale under the guard. It assumes the cleanup's policy write finishes
+ * within {@link GUARD_STALE_AFTER_SECONDS}; nothing bounds that write.
  */
 const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - GUARD_STALE_AFTER_SECONDS;
 
@@ -136,67 +136,30 @@ export async function withSandboxLeaseLock<T>(
   run: () => PromiseLike<T>,
   { cleanup, signal }: SandboxLeaseLockOptions = {},
 ): Promise<T> {
-  await acquire(sandbox, acquireCommand(owner), signal);
+  const deadline = Date.now() + LEASE_WAIT_MS;
+  const command = acquireCommand(owner);
+  for (;;) {
+    signal?.throwIfAborted();
+    const attempt = signal
+      ? await sandbox.run({ command, signal })
+      : await sandbox.run({ command });
+    if (attempt.exitCode === 0) break;
+    if (attempt.exitCode !== BUSY_EXIT_CODE) {
+      throw new Error(
+        `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
+      );
+    }
+    await waitForRetry(signal);
+  }
   try {
     return await run();
   } finally {
     await release(sandbox, owner, cleanup);
-  }
-}
-
-/**
- * How a wait for the lease ended, on the `agent.github.lease.wait` span. The span lasts as long as
- * the wait, so its duration is how long a command waited for another to release the lease.
- */
-type LeaseWaitOutcome = "acquired" | "timed_out" | "cancelled" | "failed";
-
-/** Polls for the lock from the host until it is acquired, the wait times out, or `signal` aborts. */
-async function acquire(
-  sandbox: SandboxSession,
-  command: string,
-  signal: AbortSignal | undefined,
-): Promise<void> {
-  const span = trace.getTracer("eve.git").startSpan("agent.github.lease.wait");
-  const deadline = Date.now() + LEASE_WAIT_MS;
-  let attempts = 0;
-  let outcome: LeaseWaitOutcome = "failed";
-  try {
-    for (;;) {
-      signal?.throwIfAborted();
-      attempts += 1;
-      const attempt = signal
-        ? await sandbox.run({ command, signal })
-        : await sandbox.run({ command });
-      if (attempt.exitCode === 0) {
-        outcome = "acquired";
-        return;
-      }
-      if (attempt.exitCode !== BUSY_EXIT_CODE) {
-        throw new Error(
-          `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
-        );
-      }
-      if (Date.now() >= deadline) {
-        outcome = "timed_out";
-        throw new Error(
-          "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
-        );
-      }
-      await waitForRetry(signal);
-    }
-  } catch (error) {
-    if (signal?.aborted) outcome = "cancelled";
-    throw error;
-  } finally {
-    span.setAttributes({
-      "agent.github.lease.attempts": attempts,
-      "agent.github.lease.outcome": outcome,
-      "agent.github.lease.waited": attempts > 1,
-    });
-    if (outcome === "timed_out" || outcome === "failed") {
-      span.setStatus({ code: SpanStatusCode.ERROR });
-    }
-    span.end();
   }
 }
 
@@ -217,12 +180,14 @@ async function release(
       fresh = young === "1";
     }
   } catch {}
+  // A stale lock released without the guard can be broken at any moment: clearing its credential
+  // could clear the successor's, and removing it could remove the successor's lock. It is left to
+  // the breaker, whose successor replaces the policy.
+  if (held !== undefined && !guarded && !fresh) return;
   try {
-    // A stale lock cleared without the guard could be broken mid-cleanup, clearing the credential
-    // of the successor the breaker lets in, which replaces the policy anyway. When the sandbox
-    // can't say who holds the lock, clean up anyway: leaving a credential leased is worse than
-    // clearing a successor's.
-    if (held === undefined || (held && (guarded || fresh))) await cleanup?.();
+    // When the sandbox can't say who holds the lock, clean up anyway: leaving a credential leased
+    // is worse than clearing a successor's.
+    if (held === undefined || held) await cleanup?.();
   } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
     await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(
