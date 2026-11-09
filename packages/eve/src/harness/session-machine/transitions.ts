@@ -48,7 +48,10 @@ import {
   openRunOf,
   type SessionProjection,
 } from "#protocol/session-projection.js";
-import type { SessionView as PublicView } from "#protocol/session-projection/tables.js";
+import type {
+  InteractionRow,
+  SessionView as PublicView,
+} from "#protocol/session-projection/tables.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -555,9 +558,7 @@ export function relay(
     if (event.type === "interaction.opened" && !serving) continue;
     if (
       event.type !== "interaction.opened" &&
-      (mirror?.origin === undefined ||
-        !("callId" in mirror.subject) ||
-        mirror.subject.callId !== payload.callId)
+      relayedMirror(tables, payload, interactionId) === undefined
     )
       continue;
     switch (event.type) {
@@ -608,6 +609,20 @@ export function relay(
   return Object.keys(upsert).length > 0
     ? { ...unchanged(view, events), relays: upsert }
     : unchanged(view, events);
+}
+
+/** The row this session mirrors for the asker that relayed `payload`, about the call it serves. */
+export function relayedMirror(
+  tables: PublicView,
+  payload: SubagentInteractionHookPayload,
+  interactionId: string,
+): InteractionRow | undefined {
+  const mirror = tables.interactions[interactionId];
+  return mirror?.origin !== undefined &&
+    "callId" in mirror.subject &&
+    mirror.subject.callId === payload.callId
+    ? mirror
+    : undefined;
 }
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */

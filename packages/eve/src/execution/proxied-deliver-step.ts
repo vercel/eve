@@ -37,6 +37,7 @@ import { readHitlState } from "#harness/hitl/index.js";
 import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
 import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import type { Answer } from "#shared/input.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 export type RoutedDeliverResult =
   | {
@@ -301,7 +302,7 @@ async function routeProxiedDeliver(
           auth: sourceDelivery.auth,
           // This delivery's answers for this child: a retried step repeats the same delivery.
           idempotencyKey: await answersIdempotencyKey(sourceDelivery, childKey),
-          responses,
+          responses: remoteAnswers(tables, responses),
         });
         // A protocol 2 child relays how its approvals settle, but never its questions or budget
         // prompts: this session settles those as the child takes their answers, as its own
@@ -347,6 +348,18 @@ async function routeProxiedDeliver(
           orderedParentPayloads.map(([index, payload]) => ({ index, payload })),
         );
   return { ...context, kind: "continue", remainder };
+}
+
+/**
+ * The answers a remote agent takes, under its own ids: this session names each mirrored request
+ * under its handle on the remote, and keeps the remote's id as the mirror's origin.
+ */
+export function remoteAnswers(tables: SessionView, responses: readonly Answer[]): Answer[] {
+  return responses.map((answer) => ({
+    ...answer,
+    interactionId:
+      tables.interactions[answer.interactionId]?.origin?.interactionId ?? answer.interactionId,
+  }));
 }
 
 /**
