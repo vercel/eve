@@ -1,6 +1,5 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
 import { toolStubOutput } from "#tool-stubs/output.js";
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { callToolStubStep } from "#execution/tool-stubs/steps.js";
 
 import type { SessionContext } from "#context/session-context.js";
@@ -22,6 +21,7 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import type { RunHost } from "#execution/run-host.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
@@ -48,7 +48,9 @@ export interface WorkflowBodyInput extends WorkflowBodyDefinition {
   /** The run's control hook, which the session answers the body's questions on. */
   readonly hookToken: string;
   readonly owner: WorkflowToolRunInbox;
-  readonly runId?: string;
+  readonly runId: string;
+  /** The host the run runs on, which the body's hooks and agent sessions use. */
+  readonly host: RunHost;
 }
 
 /**
@@ -151,6 +153,7 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
     auth: input.session.auth,
     control: input.hookToken,
     from,
+    host: input.host,
     owner: input.owner,
   };
   const usage = createRunUsageTally();
@@ -237,13 +240,13 @@ export function toFailedOutcome(error: unknown, runSignal: AbortSignal): Workflo
 
 export function createWorkflowBodyRef(
   input: WorkflowBodyDefinition & {
-    readonly runId?: string;
+    readonly runId: string;
   },
 ): WorkflowToolRunRef {
   const ref: WorkflowToolRunRef = {
     callId: input.callId,
     input: input.input,
-    runId: input.runId ?? getWorkflowMetadata().workflowRunId,
+    runId: input.runId,
     sequence: input.session.turn.sequence,
     stepIndex: input.stepIndex,
     toolName: input.toolName,
@@ -253,7 +256,8 @@ export function createWorkflowBodyRef(
 }
 
 export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput): TEntryPoint {
-  const entryPoint = readRegisteredWorkflow(input.workflowId);
+  const entryPoint =
+    input.host.resolveWorkflow?.(input.workflowId) ?? readRegisteredWorkflow(input.workflowId);
   if (typeof entryPoint !== "function") {
     throw new Error(
       `Tool "${input.toolName}" is not registered as a workflow in this deployment (${input.workflowId}). The tool was renamed or removed after this run started.`,

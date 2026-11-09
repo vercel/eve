@@ -1,5 +1,6 @@
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import type { RunHost } from "#execution/run-host.js";
 import type {
   WorkflowToolRunAskDecision,
   WorkflowToolRunRef,
@@ -33,6 +34,8 @@ export interface WorkflowToolRunContext {
    * from. A `serve` task's changes with each call, so read it when sending.
    */
   readonly from: WorkflowToolRunRef;
+  /** The host the run runs on. */
+  readonly host: RunHost;
   readonly owner: WorkflowToolRunInbox;
 }
 

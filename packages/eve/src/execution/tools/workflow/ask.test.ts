@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
@@ -46,6 +47,7 @@ function runContext(input: { readonly abortSignal?: AbortSignal; readonly reques
     asks,
     auth: { current: null, initiator: null },
     control: "control",
+    host: workflowRunHost,
     from: {
       callId: "call",
       input: {},
