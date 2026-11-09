@@ -5,7 +5,7 @@ import type {
 } from "#protocol/session-events/families/interaction.js";
 import { activeTurnIdOf, type SessionProjection } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
-import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { CallRow, InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 
 // Which sign-in attempts replace which. Pure: the session state that holds them is
 // `requests.ts`'s.
@@ -134,6 +134,30 @@ export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge)
     callbackOrigin(left.callbackUrl) !== undefined &&
     callbackOrigin(left.callbackUrl) === callbackOrigin(right.callbackUrl)
   );
+}
+
+/**
+ * A child's relayed sign-in as this session mirrors it. Only a sign-in this session's own subagent
+ * asked for itself keeps its grant and can share a card. A remote agent, or a session further down,
+ * describes its sign-in itself, so its grant, principal and callback are claims this session can't
+ * check, and its answer must never settle this session's own sign-ins or its children's. A remote
+ * agent's genuine sign-in names its own deployment's callback, so it never shared a card anyway.
+ */
+export function mirroredSignIn(
+  data: InteractionOpenedData,
+  call: Pick<CallRow, "capability"> | undefined,
+  childSessionId: string,
+): InteractionOpenedData {
+  const signIn = data.request.signIn;
+  if (
+    signIn?.grant === undefined ||
+    (call !== undefined &&
+      call.capability.remote !== true &&
+      data.origin?.sessionId === childSessionId)
+  )
+    return data;
+  const { grant: _grant, ...claimed } = signIn;
+  return { ...data, request: { ...data.request, signIn: claimed } };
 }
 
 /**

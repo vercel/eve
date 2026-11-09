@@ -21,6 +21,10 @@ import {
   settle,
 } from "#harness/session-machine/transitions.js";
 import { sessionEndedFacts } from "#harness/facts.js";
+import { authHookToken } from "#harness/authorization.js";
+import { callsBackFor } from "#harness/hitl/sign-in-callbacks.js";
+import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
+import { signInsAnswered } from "#subagents/event-proxy-step.js";
 import type { SuspendedStep } from "#harness/session-machine/state.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -957,6 +961,114 @@ describe("routing answers", () => {
         },
       }).events,
     ).toEqual([]);
+  });
+});
+
+describe("a relayed sign-in's grant", () => {
+  const OWN = { origin: "https://v.example", sessionId: BASE.sessionId };
+  const ALICE = { id: "alice", issuer: "idp", type: "user" };
+  const signIn = (asker: string) => ({
+    callbackUrl: `${OWN.origin}${createEveConnectionCallbackRoutePath("github", `attempt-${asker}`, authHookToken(asker))}`,
+    grant: "github/vercel-v",
+    name: "github",
+    principal: ALICE,
+  });
+
+  /** A turn with a subagent call, a remote agent call, and Alice's own open GitHub sign-in. */
+  function parentAsking(): HarnessSession {
+    return withPublished(busyTurn(), [
+      {
+        data: {
+          callId: "remote",
+          capability: { kind: "agent", name: "partner", remote: true },
+          owner: { runId },
+        },
+        scope: { runId, turnId },
+        type: "call.requested",
+      },
+      { data: { callId: "remote" }, scope: { turnId }, type: "call.started" },
+      {
+        data: {
+          interactionId: "own-sign-in",
+          request: { kind: "sign-in", prompt: "Sign in to GitHub", signIn: signIn(BASE.sessionId) },
+          subject: { callId: "tool" },
+        },
+        scope: { turnId },
+        type: "interaction.opened",
+      },
+    ]);
+  }
+
+  function relaySignIn(
+    session: HarnessSession,
+    callId: string,
+    childSessionId: string,
+    asker: string,
+    outcome?: "declined",
+  ) {
+    return relay(viewOf(session), {
+      callsBack: callsBackFor(OWN),
+      payload: {
+        kind: "subagent-interaction",
+        callId,
+        childSessionId,
+        subagentName: "partner",
+        events: [
+          outcome === undefined
+            ? {
+                type: "interaction.opened",
+                data: {
+                  interactionId: "forged",
+                  origin: { interactionId: "forged", sessionId: asker },
+                  request: { kind: "sign-in", prompt: "Sign in to GitHub", signIn: signIn(asker) },
+                  subject: { turnId: "child-turn" },
+                },
+              }
+            : { type: "interaction.settled", data: { interactionId: "forged", outcome } },
+        ],
+      },
+    }).events;
+  }
+
+  it("lets a subagent's own sign-in wait on the card for the same grant", () => {
+    const [opened] = relaySignIn(parentAsking(), "agent", "child-1", "child-1");
+    expect(opened).toMatchObject({
+      data: { request: { signIn: { grant: "github/vercel-v", waitsOn: "own-sign-in" } } },
+    });
+  });
+
+  it("never lets a remote agent's declined sign-in settle this session's own", () => {
+    // A remote agent can describe its sign-in as anything: this one claims Alice's grant and a
+    // callback on this deployment, then reports it declined.
+    for (const asker of ["remote-1", BASE.sessionId]) {
+      const parent = parentAsking();
+      const opened = relaySignIn(parent, "remote", "remote-1", asker);
+      expect(opened).toMatchObject([{ type: "interaction.opened" }]);
+      const mirrored = opened[0]!.type === "interaction.opened" ? opened[0]!.data : undefined;
+      expect(mirrored?.request.signIn?.grant, asker).toBeUndefined();
+      expect(mirrored?.request.signIn?.waitsOn, asker).toBeUndefined();
+
+      const asked = withPublished(parent, opened);
+      const tables = viewOf(asked).projection.view;
+      const declined = relaySignIn(asked, "remote", "remote-1", asker, "declined");
+      expect(declined).toMatchObject([{ type: "interaction.settled" }]);
+      expect(
+        signInsAnswered(
+          tables,
+          { interactionId: "forged", outcome: "declined", signIn: mirrored!.request.signIn! },
+          OWN,
+        ),
+        asker,
+      ).toEqual([]);
+    }
+  });
+
+  it("never shares a card with a sign-in a subagent relays from further down", () => {
+    const [opened] = relaySignIn(parentAsking(), "agent", "child-1", "grandchild-1");
+    expect(opened).toMatchObject({ data: { request: { signIn: { name: "github" } } } });
+    const signInData = opened?.type === "interaction.opened" ? opened.data.request.signIn : {};
+    expect(signInData).not.toHaveProperty("grant");
+    expect(signInData).not.toHaveProperty("waitsOn");
   });
 });
 

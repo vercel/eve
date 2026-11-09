@@ -56,6 +56,7 @@ import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
 import {
   SIGN_IN_DECLINED,
+  mirroredSignIn,
   signInAttemptKey,
   waitingSignIn,
   type CallsBack,
@@ -567,12 +568,16 @@ export function relay(
           // A sign-in the person already has a card for waits on that card's answer.
           data: waitingSignIn(
             tables,
-            {
-              ...event.data,
-              // Every relayed request names its asker; one relayed from further down names its own.
-              origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
-              subject: { callId: payload.callId },
-            },
+            mirroredSignIn(
+              {
+                ...event.data,
+                // Every relayed request names its asker; one relayed from further down names its own.
+                origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
+                subject: { callId: payload.callId },
+              },
+              served,
+              payload.childSessionId,
+            ),
             input.callsBack,
           ),
           type: "interaction.opened",
