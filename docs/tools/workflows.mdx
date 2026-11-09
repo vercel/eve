@@ -137,17 +137,46 @@ Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhoo
 
 Only these exports are public. A bare `workflow` or `workflow/*` import in an application module fails the build with an error that names these entries.
 
-#### Experimental run operations
+#### Experimental run operations and streams
 
-Starting and inspecting standalone workflow runs is experimental. These exports have [no compatibility promise](/docs/reference/typescript-api#stability-policy) and can change in a minor release:
+Starting and inspecting standalone workflow runs, and writing and reading run streams, are experimental. These exports have [no compatibility promise](/docs/reference/typescript-api#stability-policy) and can change in a minor release:
 
-| Export                  | Entry                           | What it does                                                                                                                                        |
-| ----------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `getWorkflowMetadata()` | `eve/experimental/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`. Call it in the body.                                             |
-| `start(workflow, args)` | `eve/experimental/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none. |
-| `getRun(runId)`         | `eve/experimental/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                    |
+| Export                                              | Entry                           | What it does                                                                                                                                        |
+| --------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getWorkflowMetadata()`                             | `eve/experimental/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`. Call it in the body.                                             |
+| `getWritable<T>({ namespace })`                     | `eve/experimental/workflow`     | Returns a durable `WritableStream<T>` on the current run. Call it in the body and pass it to a step, or call it in a step.                          |
+| `start(workflow, args)`                             | `eve/experimental/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none. |
+| `getRun(runId)`                                     | `eve/experimental/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                    |
+| `getReadable<T>(runId, { namespace, startIndex? })` | `eve/experimental/workflow/api` | Reads a run's stream from `startIndex` (default `0`; `-1` is the latest chunk) and follows later chunks. Cancel it when you stop reading.           |
 
-Call `start` and `getRun` from routes or steps, not in the body. Import `WorkflowMetadata` from `eve/experimental/workflow`, and `WorkflowRun` and `WorkflowRunStatus` from `eve/experimental/workflow/api`. For background work inside a session, prefer a [`task`](#run-calls-as-tasks-task) or [`serve`](#resumable-tasks-serve) tool.
+Call `start`, `getRun`, and `getReadable` from routes or steps, not in the body. Import `WorkflowMetadata` and `WorkflowWritableOptions` from `eve/experimental/workflow`, and `WorkflowRun`, `WorkflowRunStatus`, and `WorkflowReadableOptions` from `eve/experimental/workflow/api`. For background work inside a session, prefer a [`task`](#run-calls-as-tasks-task) or [`serve`](#resumable-tasks-serve) tool.
+
+A stream needs a `namespace`, because a run's default stream holds eve's own records. Namespaces starting with `eve.` or `eve:` are reserved, and both functions throw for them. Chunks persist with the run, so the run's [data retention](/docs/agent-config#run-data-retention) applies.
+
+Publish a long-running task's state from a step, and read the latest chunk from a step or route that knows the run ID:
+
+```ts
+import { getWritable } from "eve/experimental/workflow";
+import { getReadable } from "eve/experimental/workflow/api";
+
+async function publish(progress: WritableStream<{ phase: string }>, phase: string) {
+  "use step";
+  const writer = progress.getWriter();
+  await writer.write({ phase });
+  writer.releaseLock();
+}
+
+// In the workflow body:
+await publish(getWritable({ namespace: "coder.progress" }), "testing");
+
+// In a step or route:
+const reader = getReadable<{ phase: string }>(runId, {
+  namespace: "coder.progress",
+  startIndex: -1,
+}).getReader();
+const { value: latest } = await reader.read();
+await reader.cancel();
+```
 
 ## Wait for the result
 

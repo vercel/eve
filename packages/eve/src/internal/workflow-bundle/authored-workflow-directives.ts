@@ -22,7 +22,10 @@ const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 const MOVED_WORKFLOW_EXPORTS: Readonly<
   Record<string, { readonly entry: string; readonly names: ReadonlySet<string> }>
 > = {
-  "eve/workflow": { entry: "eve/experimental/workflow", names: new Set(["getWorkflowMetadata"]) },
+  "eve/workflow": {
+    entry: "eve/experimental/workflow",
+    names: new Set(["getWorkflowMetadata", "getWritable"]),
+  },
   "eve/workflow/api": {
     entry: "eve/experimental/workflow/api",
     names: new Set(["start", "getRun"]),

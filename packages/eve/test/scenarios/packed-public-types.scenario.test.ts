@@ -74,8 +74,12 @@ import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
 import { createHook, sleep, createWebhook, FatalError, RetryableError } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
-import { getWorkflowMetadata } from "eve/experimental/workflow";
-import { start, getRun, type WorkflowRun } from "eve/experimental/workflow/api";
+import { getWorkflowMetadata, getWritable } from "eve/experimental/workflow";
+import { start, getRun, getReadable, type WorkflowRun } from "eve/experimental/workflow/api";
+const progress: WritableStream<{ phase: string }> = getWritable({ namespace: "coder.progress" });
+const latest: ReadableStream<{ phase: string }> = getReadable("run", { namespace: "coder.progress", startIndex: -1 });
+// @ts-expect-error A run's default stream belongs to eve.
+getReadable("run", {});
 import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
 import { vercelOidc } from "eve/channels/auth";
 const stubAuth: EveAuthFn = eveVercelOidc({

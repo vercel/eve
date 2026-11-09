@@ -1,1 +1,1 @@
-["WorkflowMetadata", "getWorkflowMetadata"]
+["WorkflowMetadata", "WorkflowWritableOptions", "getWorkflowMetadata", "getWritable"]

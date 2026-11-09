@@ -180,7 +180,7 @@ import { resumeHook } from "eve/workflow/api"; // [!code ++]
 import { start, getRun } from "eve/experimental/workflow/api"; // [!code ++]
 ```
 
-`eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, and `RetryableError`. `eve/workflow/api` exports `resumeHook`. `getWorkflowMetadata` is in `eve/experimental/workflow`, and `start` and `getRun` are in `eve/experimental/workflow/api`; experimental entries have no compatibility promise. Importing a moved export from its old entry fails the build with an error that names the new one. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
+`eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, and `RetryableError`. `eve/workflow/api` exports `resumeHook`. `getWorkflowMetadata` and `getWritable` are in `eve/experimental/workflow`, and `start`, `getRun`, and `getReadable(runId, options)` are in `eve/experimental/workflow/api`; experimental entries have no compatibility promise. Run streams need a `namespace` that doesn't start with `eve.` or `eve:`. Importing a moved export from its old entry fails the build with an error that names the new one. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
 
 - `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`.
 - `start(workflow, args?)` takes a `"use workflow"` function, not a source string. It takes no options such as `deploymentId` or `world`, because eve runs the workflow on the agent's own queue and deployment.

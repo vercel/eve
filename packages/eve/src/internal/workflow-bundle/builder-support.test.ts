@@ -41,12 +41,15 @@ describe("createWorkflowDriverAliasPlugin", () => {
     return (plugin.resolveId as (s: string, i?: string) => unknown)(source, importer);
   }
 
-  it.each(["eve/workflow", "eve/experimental/workflow", "workflow"])(
-    "resolves %s to the body-side shim",
-    (source) => {
-      expect(resolve(source)).toEqual({ id: expect.stringMatching(/workflow-core-shim\.[jt]s$/u) });
-    },
-  );
+  it.each([
+    ["eve/workflow", "workflow-core-shim"],
+    ["workflow", "workflow-core-shim"],
+    ["eve/experimental/workflow", "experimental-workflow-shim"],
+  ])("resolves %s to the body-side %s", (source, shim) => {
+    expect(resolve(source)).toEqual({
+      id: expect.stringMatching(new RegExp(`/${shim}\\.[jt]s$`, "u")),
+    });
+  });
 
   it.each(["eve/workflow/api", "eve/experimental/workflow/api", "workflow/api"])(
     "rejects %s inside a workflow body",

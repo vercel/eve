@@ -5,6 +5,7 @@
  * eve-owned declarations keep the SDK's wider types out of eve's public API.
  */
 import * as runtime from "#internal/workflow/runtime.js";
+import { applicationStreamNamespace } from "#internal/workflow/stream-namespace.js";
 
 /** The lifecycle state of a workflow run. */
 export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -35,3 +36,25 @@ export const start: {
 
 /** Returns a handle to an existing run without reading it. */
 export const getRun: <T = unknown>(runId: string) => WorkflowRun<T> = runtime.getRun;
+
+/** Options for {@link getReadable}. */
+export interface WorkflowReadableOptions {
+  /** The stream's `namespace`, as passed to `getWritable` in the run. */
+  readonly namespace: string;
+  /** The first chunk to read. Negative values count back from the end; `-1` is the latest chunk. */
+  readonly startIndex?: number;
+}
+
+/**
+ * Reads a run's stream named by `namespace`, from `startIndex` (default `0`), following chunks the
+ * run writes later. Cancel the stream when you stop reading.
+ */
+export function getReadable<T = unknown>(
+  runId: string,
+  options: WorkflowReadableOptions,
+): ReadableStream<T> {
+  return runtime.getRun(runId).getReadable<T>({
+    namespace: applicationStreamNamespace(options?.namespace),
+    startIndex: options.startIndex,
+  });
+}

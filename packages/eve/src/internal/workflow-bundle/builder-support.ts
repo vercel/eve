@@ -187,7 +187,7 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
 }
 
 /**
- * `eve/workflow` and `eve/experimental/workflow` resolve to the body-side shim. An
+ * `eve/workflow` and `eve/experimental/workflow` resolve to body-side shims. An
  * `eve/workflow/api` or `eve/experimental/workflow/api` import still live after step bodies were
  * stubbed means a body calls the runtime API; fail the build here rather than the driver later.
  */
@@ -212,17 +212,19 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         );
       }
 
-      if (
-        source !== "eve/workflow" &&
-        source !== "eve/experimental/workflow" &&
-        source !== "workflow"
-      ) {
+      const shim =
+        source === "eve/experimental/workflow"
+          ? "experimental-workflow-shim"
+          : source === "eve/workflow" || source === "workflow"
+            ? "workflow-core-shim"
+            : undefined;
+      if (shim === undefined) {
         return undefined;
       }
 
       return resolveFirstExistingPath([
-        join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-        join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+        join(workingDir, "src", "internal", "workflow-bundle", `${shim}.ts`),
+        join(workingDir, "dist", "src", "internal", "workflow-bundle", `${shim}.js`),
       ]);
     },
   };

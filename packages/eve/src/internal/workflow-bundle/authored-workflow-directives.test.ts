@@ -180,6 +180,11 @@ return inner();
       "eve/experimental/workflow",
     ],
     [
+      'import { sleep, getWritable } from "eve/workflow";',
+      "getWritable",
+      "eve/experimental/workflow",
+    ],
+    [
       'import { start, resumeHook } from "eve/workflow/api";',
       "start",
       "eve/experimental/workflow/api",

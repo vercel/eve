@@ -30,6 +30,17 @@ Promoting them later is additive; moving them out of a stable entry would need
 a major. Importing a moved export from its old entry is a build error that
 names the new entry.
 
+Run streams are experimental too: `getWritable({ namespace })` in
+`eve/experimental/workflow` and `getReadable(runId, { namespace, startIndex })`
+in `eve/experimental/workflow/api`. They let one run publish state that a
+route, step, or another run reads, which no stable eve surface covers. Both
+require a namespace and reject `eve.` and `eve:` prefixes, because a run's
+default stream holds eve's session records and eve's own streams use those
+prefixes. The check runs in the step and server entry and in a body-side shim
+the driver resolves the entry to, so bodies get the same rule. `getReadable` is
+a function rather than a `WorkflowRun` method so `start` and `getRun` keep
+returning the SDK's run handle unwrapped. `getHookByToken` stays removed.
+
 Both API entries are unavailable inside replayed workflow bodies: call them
 from a route or a `"use step"` function instead.
 

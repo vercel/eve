@@ -42,25 +42,40 @@ describe("authored workflow scope", () => {
           "agent/tools/probe.ts":
             'import { defineWorkflowTool } from "eve/tools"; import { run } from "@/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
           "agent/channels/probe.ts": `import { defineChannel, GET } from "eve/channels";
-import { start, getRun } from "eve/experimental/workflow/api";
+import { start, getRun, getReadable } from "eve/experimental/workflow/api";
 import { run } from "@/lib/run";
 export default defineChannel({ routes: [GET("/workflow-api", async () => {
   const started = await start(run);
-  return Response.json(await getRun(started.runId).returnValue);
+  const result = await getRun(started.runId).returnValue;
+  const reader = getReadable<string>(started.runId, { namespace: "probe.progress", startIndex: -1 }).getReader();
+  const latest = (await reader.read()).value;
+  await reader.cancel();
+  let reservedRejected = false;
+  try { getReadable(started.runId, { namespace: "eve.tool-stubs.matches" }); } catch { reservedRejected = true; }
+  return Response.json({ ...result, latest, reservedRejected });
 })] });`,
           "lib/run.ts": `import { createHook } from "eve/workflow";
+import { getWritable } from "eve/experimental/workflow";
 import { describe } from "@/lib/describe";
-import { deliver } from "./step";
+import { deliver, publish } from "./step";
 export async function run() {
   "use workflow";
   using hook = createHook<string>({ token: "workflow-api-probe" });
+  await publish(getWritable<string>({ namespace: "probe.progress" }), "planning");
   const returnedUndefined = await deliver();
+  await publish(getWritable<string>({ namespace: "probe.progress" }), "delivered");
   return { marker: describe(), returnedUndefined, payload: await hook };
 }`,
           "lib/step.ts": `import { resumeHook } from "eve/workflow/api";
 export async function deliver() {
   "use step";
   return (await resumeHook("workflow-api-probe", "approved")) === undefined;
+}
+export async function publish(progress: WritableStream<string>, phase: string) {
+  "use step";
+  const writer = progress.getWriter();
+  await writer.write(phase);
+  writer.releaseLock();
 }`,
           "lib/describe.ts": `export function describe() { return ${JSON.stringify(ALIAS_MARKER)}; }`,
         },
@@ -93,6 +108,8 @@ export async function deliver() {
             marker: ALIAS_MARKER,
             returnedUndefined: true,
             payload: "approved",
+            latest: "delivered",
+            reservedRejected: true,
           });
         } finally {
           await server.close();

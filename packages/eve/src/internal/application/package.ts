@@ -12,7 +12,7 @@ const WORKFLOW_SOURCE_MODULE_ALIASES: Readonly<Record<string, string>> = {
   "eve/workflow": "src/internal/workflow/index.ts",
   workflow: "src/internal/workflow/index.ts",
   "eve/workflow/api": "src/public/workflow/api.ts",
-  "eve/experimental/workflow": "src/internal/workflow/index.ts",
+  "eve/experimental/workflow": "src/public/experimental/workflow/index.ts",
   "eve/experimental/workflow/api": "src/public/experimental/workflow/api.ts",
   "workflow/api": "src/internal/workflow/runtime.ts",
   "workflow/runtime": "src/internal/workflow/runtime.ts",
