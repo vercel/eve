@@ -13,6 +13,9 @@ import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
 import read from "../../extension/tools/read.ts";
 import remove from "../../extension/tools/remove.ts";
+import rollback from "../../extension/tools/rollback.ts";
+import setMode from "../../extension/tools/set_mode.ts";
+import versions from "../../extension/tools/versions.ts";
 
 const ROUTING = "Use when the user asks for a deploy checklist.";
 const alice: SessionAuthContext = {
@@ -297,5 +300,49 @@ test("personal skills stay apart for principals that share an id across issuers 
   assert.equal(
     (await run(read, { name: "private-notes" }, context({ caller: atAcme }))).instructions,
     "Acme's private steps.",
+  );
+});
+
+test("a person can inspect, publish, roll back, and change the mode of their own skill", async () => {
+  const events = mount();
+  const created = await run(create, { ...deploy }, context());
+  await run(create, { ...deploy, instructions: "Check the build and the logs." }, context());
+  const id = String(created.id);
+
+  const listed = await run(list, {}, context());
+  assert.deepEqual(
+    (listed.skills as Array<Record<string, unknown>>).map(
+      ({ id, name, liveVersion, draftVersions }) => [id, name, liveVersion, draftVersions],
+    ),
+    [[id, "deploy", 1, [2]]],
+  );
+  assert.deepEqual(
+    (
+      (await run(versions, { name: "deploy" }, context())).versions as Array<
+        Record<string, unknown>
+      >
+    ).map(({ version, status }) => [version, status]),
+    [
+      [2, "draft"],
+      [1, "active"],
+    ],
+  );
+  assert.equal(
+    (await run(read, { name: "deploy", version: 2 }, context())).instructions,
+    "Check the build and the logs.",
+  );
+
+  const approved = context({ approvedBy: alice });
+  assert.equal((await run(publish, { name: "deploy", id, version: 2 }, approved)).liveVersion, 2);
+  assert.equal((await run(rollback, { name: "deploy", id, version: 1 }, approved)).liveVersion, 1);
+  const deferred = await run(
+    setMode,
+    { name: "deploy", id, version: 1, mode: "deferred" },
+    context(),
+  );
+  assert.equal(deferred.applicationMode, "deferred");
+  assert.deepEqual(
+    events.map(({ kind }) => kind),
+    ["saved", "saved", "published", "published", "mode"],
   );
 });
