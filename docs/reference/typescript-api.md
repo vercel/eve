@@ -45,7 +45,7 @@ Install the packages for each integration entry you import. They are optional pe
 | Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
 | `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
 | `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
-| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.5.2 or later in v2                |
+| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.7.0 or later in v2                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
@@ -93,7 +93,7 @@ The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` and `d
 
 `eve` exports `AgentReasoningDefinition` for `defineAgent({ reasoning })`, `AgentLimitsDefinition` for `defineAgent({ limits })`, and `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` for `defineAgent({ experimental: { workflow } })`. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
 
-`webSearch({ provider })` selects `"exa"`, `"parallel"`, `"browserbase"`, or `"native"` for AI Gateway search with the Gateway model's credentials. `"native"` uses the model vendor's own search for OpenAI, Anthropic, and Gemini 3 and later models. Other Gateway models get no search unless you set `fallback` to `"exa"`, `"parallel"`, or `"browserbase"`. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
+`webSearch({ provider })` selects `"exa"`, `"parallel"`, `"browserbase"`, `"tako"`, or `"native"` for AI Gateway search with the Gateway model's credentials. `"native"` uses the model vendor's own search for OpenAI, Anthropic, and Gemini 3 and later models. Other Gateway models get no search unless you set `fallback` to `"exa"`, `"parallel"`, `"browserbase"`, or `"tako"`. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
 
 `defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omit `role` for `"system"`. Dynamic instructions use `defineDynamic(ctx => defineInstructions(...))` or return `null`.
 
@@ -155,7 +155,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types, `TokenUsage`                             |
 | `eve/tools`                                                                       | `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, tool types                                    |
-| `eve/tools/{bash,read_file,write_file,web_fetch,glob,grep}`                       | Individual reusable tool definitions                                                                              |
+| `eve/tools/{bash,read_file,write_file,edit_file,web_fetch,glob,grep}`             | Individual reusable tool definitions                                                                              |
 | `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |
 | `eve/tools/ask_question`                                                          | Opt-in `askQuestion` tool definition                                                                              |
 | `eve/tools/web_search`                                                            | Provider-managed `webSearch` configuration                                                                        |

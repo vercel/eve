@@ -1,3 +1,4 @@
+import { mintClearance } from "#harness/clearance.js";
 import { asSchema, type JSONSchema7, jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -72,14 +73,16 @@ async function resolveApproval(
   };
   const ctx = new ContextContainer();
   ctx.set(SessionKey, activeSession);
-  return contextStorage.run(ctx, () =>
-    decideApproval(definition, {
+  // The approval decision; the clearance a cleared call gets is the gate's, tested on its own.
+  return contextStorage.run(ctx, async () => {
+    const { clearance: _clearance, ...decision } = await decideApproval(definition, {
       abortSignal: options.abortSignal,
       approvalMemory: options.approvalMemory,
       callId: "call_1",
       input,
-    }),
-  );
+    });
+    return decision;
+  });
 }
 
 async function executeSdkTool(input: {
@@ -90,11 +93,13 @@ async function executeSdkTool(input: {
   readonly toolInput?: unknown;
 }): Promise<unknown> {
   if (!isRunnableTool(input.tool)) throw new TypeError("Missing runnable test tool.");
-  return await invokeTool(input.tool, input.toolInput ?? {}, {
-    abortSignal: input.abortSignal,
-    messages: input.messages ?? [],
-    toolCallId: input.toolCallId ?? "call_1",
-  });
+  const toolCallId = input.toolCallId ?? "call_1";
+  return await invokeTool(
+    input.tool,
+    input.toolInput ?? {},
+    { abortSignal: input.abortSignal, messages: input.messages ?? [], toolCallId },
+    mintClearance(toolCallId),
+  );
 }
 
 async function projectSdkToolOutput(input: {
@@ -200,7 +205,12 @@ describe("buildToolSet", () => {
     await contextStorage.run(ctx, async () => {
       const definition = tools.get("stream_progress");
       if (!isRunnableTool(definition)) throw new TypeError("Missing runnable test tool.");
-      const output = invokeTool(definition, {}, { messages: [], toolCallId: "call_stream" });
+      const output = invokeTool(
+        definition,
+        {},
+        { messages: [], toolCallId: "call_stream" },
+        mintClearance("call_stream"),
+      );
       expect(isAsyncIterable(output)).toBe(true);
 
       const values: unknown[] = [];
@@ -593,6 +603,49 @@ describe("buildToolSet", () => {
       tools,
     });
     expect(direct.web_search).toMatchObject({ id: "openai.web_search" });
+  });
+
+  it("injects Tako search with its Gateway schemas", async () => {
+    const tools: HarnessToolMap = new Map([
+      [
+        "web_search",
+        {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "tako" },
+          },
+          description: "Search.",
+          inputSchema: jsonSchema({}),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const result = await buildToolSetWithProviderTools({
+      profile: resolveModelProfile("openai/gpt-5.4"),
+      describe: describeTool,
+      tools,
+    });
+    const search = result.web_search!;
+    expect(search).toMatchObject({ type: "provider", id: "gateway.tako_search", args: {} });
+    expect(search.execute).toBeUndefined();
+    await expect(
+      asSchema(search.outputSchema!).validate?.({
+        request_id: "search-1",
+        cards: [
+          {
+            title: "Intel Revenue",
+            webpage_url: "https://tako.com/card/abc/",
+            content: {
+              content_format: "csv",
+              data: "date,revenue\n2025-12-31,13.7",
+              total_rows: 1,
+              truncated: false,
+            },
+          },
+        ],
+        web_results: [{ title: "Example Domain", url: "https://example.com" }],
+      }),
+    ).resolves.toMatchObject({ success: true });
   });
 
   it("omits provider-managed web_search when no provider backend is available", async () => {

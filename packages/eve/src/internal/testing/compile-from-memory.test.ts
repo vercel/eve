@@ -4,9 +4,9 @@ import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILED_AGENT_MANIFEST_KIND,
   COMPILED_AGENT_MANIFEST_VERSION,
-  compiledAgentManifestSchema,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 
 describe("compileFromMemory", () => {

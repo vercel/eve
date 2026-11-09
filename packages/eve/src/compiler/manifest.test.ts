@@ -7,9 +7,9 @@ import { compiledRemoteAgentNodeSchema } from "#compiler/remote-agent-node.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
-  compiledAgentManifestSchema,
   createCompiledAgentNodeManifest,
 } from "#compiler/manifest.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
 import {
   validateCompiledAgentManifest,
   validateCompiledModuleMap,

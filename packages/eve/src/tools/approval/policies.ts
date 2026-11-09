@@ -1,5 +1,6 @@
 import type { DecisionModel } from "#ai/decision-types.js";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import { decide } from "#ai/decide.js";
 import { approvalEvaluation } from "#approval/evaluation.js";
 import { parseJsonValue } from "#shared/json.js";
@@ -13,6 +14,8 @@ const DEFAULT_CAUTION_DESCRIPTION = "The action is dangerous or its important ef
 export interface AutoApprovalOptions {
   /** Decision model instance or ID. Defaults to TypeSafe Jev. */
   readonly model?: DecisionModel;
+  /** Provider options for the decision call. */
+  readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
   /** Instructions used to classify the exact tool call. */
   readonly instructions?: string;
   /** Descriptions of the fixed approval outcomes. */
@@ -54,6 +57,7 @@ async function autoApproval(
       },
       signal: abortSignal,
       maxRetries: 0,
+      providerOptions: options.modelOptions?.providerOptions,
     });
     return result.answers.permission.choice === "clear" ? "approved" : "user-approval";
   } catch {

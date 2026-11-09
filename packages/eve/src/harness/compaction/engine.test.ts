@@ -185,8 +185,6 @@ describe("getInputTokenCount", () => {
     const result = getInputTokenCount(messages, {
       lastKnownInputTokens: 43_895,
       lastKnownPromptMessageCount: prompt.length,
-      recentWindowSize: 2,
-      threshold: 200_000,
     });
 
     expect(result).toBeGreaterThan(43_895 + 2 * 1296);
@@ -403,7 +401,9 @@ function toolExchange(input: {
 }
 
 function toolResultExchange(
-  output: { type: "json"; value: { content: string } } | { type: "text"; value: string },
+  output:
+    | { type: "json"; value: { content: string } }
+    | { type: "text" | "error-text"; value: string },
 ): [ModelMessage, ModelMessage] {
   return [
     {
@@ -420,7 +420,7 @@ function toolResultExchange(
 function toolResultValue(message: ModelMessage | undefined): string {
   const part = Array.isArray(message?.content) ? message.content[0] : undefined;
   const output = part?.type === "tool-result" ? part.output : undefined;
-  return output?.type === "text" ? output.value : "";
+  return output?.type === "text" || output?.type === "error-text" ? output.value : "";
 }
 
 function isCheckpointHead(messages: readonly ModelMessage[]): boolean {
@@ -698,6 +698,24 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(value).toContain('"exitCode":1,"status":"completed"}');
   });
 
+  it("keeps a large failed bash result a plain-text failure when capping", async () => {
+    const value = `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts\n\n[exit code: 1]`;
+    const messages = [
+      user("run the tests"),
+      ...toolResultExchange({ type: "error-text", value }),
+      user("what failed?"),
+    ];
+
+    const { result } = await compact(messages, { recentWindowSize: 1 });
+
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    expect(output?.type).toBe("error-text");
+    const capped = toolResultValue(result[2]);
+    expect(capped.startsWith("[Truncated by eve")).toBe(true);
+    expect(capped.endsWith("FAIL src/auth.test.ts\n\n[exit code: 1]")).toBe(true);
+  });
+
   it.each([
     ["plain JSON", { type: "json" as const, value: { content: "x".repeat(4_000) } }],
     ["escape-heavy JSON", { type: "json" as const, value: { content: 'a"b\\c\n\t'.repeat(800) } }],
@@ -963,6 +981,33 @@ describe("compactMessages: forced summary", () => {
 
     expect(summarize).toHaveBeenCalledOnce();
     expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
+  });
+
+  it("replays nothing between turns, where every request already has its answer", async () => {
+    const messages = [
+      user("old notes ".repeat(400)),
+      assistant("Noted."),
+      user("Did QA pass?"),
+      assistant("QA passed."),
+    ];
+
+    const between = await compactMessages(
+      messages,
+      { recentWindowSize: 1, threshold: ROOMY },
+      summarizeWith("checkpoint"),
+      true,
+      undefined,
+      false,
+    );
+    const during = await compactMessages(
+      messages,
+      { recentWindowSize: 1, threshold: ROOMY },
+      summarizeWith("checkpoint"),
+      true,
+    );
+
+    expect(between.at(-1)).toEqual(assistant("QA passed."));
+    expect(during.at(-1)).toEqual(user("Did QA pass?"));
   });
 });
 

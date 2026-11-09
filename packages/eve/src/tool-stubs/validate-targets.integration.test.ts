@@ -5,6 +5,37 @@ import { defineDynamic } from "#dynamic/definition.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
+import { defineMemory, defineMemoryProvider } from "#public/memory/index.js";
+
+it("accepts provider tool stubs without evaluating a memory-only agent", async () => {
+  const tools = vi.fn(async () => ({}));
+  const runtime = await createTestRuntime({
+    modules: [
+      {
+        logicalPath: "memory/team.ts",
+        loadNamespace: async () => ({
+          default: defineMemory({
+            provider: defineMemoryProvider({
+              recall: { "turn.started": () => ({ messages: [] }) },
+              tools,
+            }),
+            scope: () => "team",
+          }),
+        }),
+      },
+    ],
+  });
+  await runtime.run(async () => {
+    const { graph } = await getCompiledRuntimeAgentBundle({
+      compiledArtifactsSource: { kind: "bundled" },
+    });
+    const check = (tool: string) =>
+      validateToolStubTargets([{ id: "rule", tool, outcome: { response: [] } }], graph);
+    expect(() => check("team__search")).not.toThrow();
+    expect(() => check("absent__search")).toThrow(/unknown or unsupported tool path/);
+    expect(tools).not.toHaveBeenCalled();
+  });
+});
 
 it.each([false, true])(
   "checks paths without resolving dynamic tools (dynamic: %s)",

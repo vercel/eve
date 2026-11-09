@@ -182,6 +182,12 @@ function moves(v: SessionView, ids: () => string): Move[] {
         ],
         name: "ask.approval",
       });
+    }
+    // A call a person was asked about starts only through their acceptance.
+    const asked = Object.values(v.interactions).some(
+      (i) => i.origin === undefined && "callId" in i.subject && i.subject.callId === c.callId,
+    );
+    if (c.status === "requested" && !asked) {
       out.push({ facts: () => [f("call.started", { callId: c.callId })], name: "call.start" });
       out.push({
         facts: () => {

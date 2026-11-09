@@ -375,6 +375,37 @@ async function requestSignIn(conversation: ChannelConversation, message: string)
 
 const SIGN_IN_OPENERS = /^(?:authori[sz]e|sign in)$/iu;
 
+/**
+ * Fails when a person can still see the calendar sign-in: its link, its code,
+ * or a Cancel that would act on it.
+ */
+async function expectSignInPromptGone(conversation: ChannelConversation, after: string) {
+  const left = (await conversation.visible()).filter(
+    ({ options, text }) =>
+      text.includes(CALENDAR.url) ||
+      text.includes(CALENDAR.userCode) ||
+      options.some((option) => option.label === SIGN_IN_CANCEL_LABEL),
+  );
+  expect(
+    left.map(({ text }) => text),
+    `the sign-in prompt is still shown ${after}`,
+  ).toEqual([]);
+}
+
+const SIGN_IN_CANCEL_LABEL = "Cancel";
+
+/**
+ * Presses the Cancel the calendar sign-in's prompt shows. The press settles once the channel's
+ * background work for it does, so whatever it shows the person has been shown.
+ */
+async function pressSignInCancel(conversation: ChannelConversation) {
+  const cancel = (await conversation.visible())
+    .flatMap(({ options }) => options)
+    .find((option) => option.label === SIGN_IN_CANCEL_LABEL);
+  expect(cancel, "a Cancel on the sign-in prompt to press").toBeDefined();
+  await conversation.press(cancel!);
+}
+
 /** Starts a calendar sign-in, then moves on with a new message before finishing it. */
 async function abandonSignIn(conversation: ChannelConversation) {
   await conversation.say(READ_CALENDAR);
@@ -1006,6 +1037,50 @@ const signInRules = [
       await conversation.waitForSignIn();
       await conversation.completeSignIn();
       await conversation.waitForShown(/\b(?:authorized|complete|connected)\b/iu);
+    },
+  },
+  {
+    rule: "completing a sign-in stops showing its link and code",
+    source: "#5995",
+    requires: [],
+    variesByConversation: true,
+    // A public surface never shows the link or code, so there is nothing to take away.
+    surfaces: ["shared", "private"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      await conversation.waitForShown(CALENDAR.url);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after signing in");
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      await pressSignInCancel(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran after Cancel").toBe(0);
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in after the session's run ended removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      // An ended run never withdraws its sign-in, so Cancel finds no turn left to cancel.
+      await conversation.cancelRunsInWorld();
+      await pressSignInCancel(conversation);
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
     },
   },
   {

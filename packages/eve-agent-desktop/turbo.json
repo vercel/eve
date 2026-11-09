@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test:integration": {
+      "dependsOn": ["build"]
+    },
+    "test:scenario": {
+      "dependsOn": ["$TURBO_EXTENDS$", "build"]
+    }
+  }
+}

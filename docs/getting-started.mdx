@@ -6,56 +6,51 @@ contentType: "How-to"
 
 ## Prerequisites
 
-You need:
-
-- Node.js 24 or newer
-- npm, which Node.js includes
-- A credential for the model your agent uses
-
-Connect a ChatGPT subscription, a Vercel account, or an AI Gateway, OpenAI, or Anthropic API key in the terminal UI. You do not need a Vercel project to start chatting.
+- Node.js 24 or newer, which includes npm
+- Access to an AI model: a ChatGPT subscription, a Vercel account, or an [AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok), OpenAI, or Anthropic API key. You don't need a Vercel project to start chatting.
 
 Choose a model, provider, and channel that meet your data-processing and compliance requirements.
 
 ## Create a project
 
-Run `eve init` with a project name to create a project with one agent in `agent/`:
+<TabsWithChildren groupId="project-type" ariaLabel="Project type" tabs={["New project", "Existing project"]}>
+<TabContent order={1}>
+
+Run `eve init` with a project name to create a project with an agent in `agent/`:
 
 ```bash
 npx eve@latest init my-agent
 ```
 
-The command creates the project, installs dependencies, initializes Git, and opens the terminal UI. eve reuses an available model connection or opens `/login`. Once connected, type your first message. Channel and integration setup is optional; use `/add` when you need it.
+The command creates the project, installs dependencies, initializes Git, and opens the terminal UI.
 
-In `/add`, search by name or by what an item does, such as `iMessage` or `SMS`. Select an item to install it and complete its setup.
+</TabContent>
+<TabContent order={2}>
 
-During startup, the status line shows what eve is waiting for. If you choose a Vercel account, finish signing in in your browser and select a team when prompted. eve checks that team's AI Gateway access before returning to the composer. Changing the account, team, or key needs no rebuild or restart.
-
-To add eve to a project that already has a `package.json`, run this command from its root before you create any `agent/` files:
+From the root of a project that has a `package.json` and no `agent/` directory, run:
 
 ```bash
 npx eve@latest init .
 ```
 
-eve adds the missing `eve`, `ai`, and `zod` dependencies without changing files the project already owns.
+The command adds an agent in `agent/`, installs dependencies, and opens the terminal UI.
 
-### Customize initialization
+</TabContent>
+</TabsWithChildren>
 
-To initialize the agent with a different AI Gateway model or reasoning effort, pass `--model` or `--reasoning`:
+eve connects with credentials you already have, or opens `/login` to set one up.
 
-```bash
-npx eve@latest init my-agent --model openai/gpt-6-luna --reasoning high
-```
+Once connected, you can start chatting with your agent. Use `/model` to switch models or reasoning effort.
 
 ## Run the agent
 
-The [terminal UI](/docs/guides/dev-tui) opens after interactive initialization. To return later, enter the project and run:
+The [terminal UI](/docs/guides/dev-tui) opens after interactive initialization. To return later, run this from the project root:
 
 ```bash
-cd my-agent
-npm run dev
+npx eve dev
 ```
 
-This starts an interactive session where you can send messages to your agent. Edit `agent/instructions.md` to change its behavior and `agent/agent.ts` to configure its model. eve reloads your changes as you work. You can also ask the agent to update its own instructions, tools, or skills; see [Self-Modification](./guides/self-modification).
+eve reloads your changes as you work.
 
 <span id="project-layout" />
 <span id="agent-directory-layout" />
@@ -84,17 +79,22 @@ Declare Node.js 24 in `package.json`, then create `agent/instructions.md` and, w
 
 The installed package's `node_modules/eve/CHANGELOG.md` contains that version's release notes and a link to the full changelog through that version. For an upgrade across multiple releases, review each version between the installed and target versions in the target version's changelog at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
 
-## Upgrade an existing project
-
-To move a project from eve 0.83 or earlier, follow [Upgrade to 1.0](./guides/upgrade). It covers the deploy order, the v27 session stream, renamed APIs, and saved history.
-
 ## Next steps
 
-Continue with the task you need:
+Try these from the eve terminal UI:
+
+1. **Change your agent's behavior.** Edit `agent/instructions.md`, or ask the agent to update its own instructions. See [Self-Modification](/docs/guides/self-modification).
+2. **Give your agent a new capability.** Ask the agent to build one, such as "Add a tool that looks up the weather for a city" or "Connect to Linear."
+3. **Let your agent communicate on another channel.** Run `/add` and choose a platform such as Slack or iMessage.
+4. **Deploy it.** Run `/deploy` to ship the agent to Vercel, or see [Self-Hosting](/docs/guides/deployment/self-hosting).
+
+For examples of what to build, see [Use Cases](/docs/use-cases). Then continue with the task you need:
 
 | Goal                                                               | Read                                                                                                 |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | Give the model some code it can run                                | [Tools](/docs/tools)                                                                                 |
+| Teach the agent a reusable procedure                               | [Skills](/docs/skills)                                                                               |
+| Require human approval before a tool runs                          | [Human-in-the-Loop](/docs/human-in-the-loop)                                                         |
 | Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                     |
 | Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels)                                                                           |
 | Build a browser interface                                          | [Frontend Frameworks](/docs/guides/frontend)                                                         |

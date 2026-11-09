@@ -18,6 +18,20 @@ describe("what a call invokes", () => {
     );
   });
 
+  it("marks a hidden call, which carries no label", () => {
+    const action = { callId: "c", input: {}, kind: "tool-call", toolName: "react" } as const;
+    expect(capabilityOf(action, undefined, true)).toEqual({
+      hidden: true,
+      kind: "tool",
+      name: "react",
+    });
+    expect(capabilityOf(action, "React", false)).toEqual({
+      kind: "tool",
+      label: "React",
+      name: "react",
+    });
+  });
+
   it("marks an agent another deployment serves as remote", () => {
     const common = {
       callId: "c",

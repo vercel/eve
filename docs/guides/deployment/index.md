@@ -12,7 +12,7 @@ Deploy eve to Vercel or run it as a Node service on your own infrastructure. Bot
 | [Vercel](/docs/guides/deployment/vercel)             | `.vercel/output`       | You want Vercel to operate the runtime services                 |
 | [Self-hosting](/docs/guides/deployment/self-hosting) | `.output/` Node server | You run Node services on your own servers or container platform |
 
-You can also deploy eve beside a Next.js, Nuxt, SvelteKit, or TanStack Start application that routes browser requests to the agent. See [Frontend integrations](/docs/guides/frontend).
+You can also deploy eve beside a Next.js, Nuxt, SvelteKit, TanStack Start, or other Vite application that routes browser requests to the agent. See [Frontend integrations](/docs/guides/frontend).
 
 ## Backends
 
@@ -21,7 +21,7 @@ The eve server hands storage, isolation, model access, scheduling, and tracing t
 | Backend          | What it does                                                        | On Vercel                                    | Self-hosted                                                                          |
 | ---------------- | ------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------ |
 | Workflow world   | Stores sessions, queues their work, and resumes them after restarts | Vercel Workflow                              | [Local, Postgres, or another world package](/docs/guides/deployment/workflow-worlds) |
-| Sandbox provider | Runs the `bash`, `read_file`, and `write_file` tools                | Vercel Sandbox                               | Docker by default, or another [provider](/docs/sandbox)                              |
+| Sandbox provider | Runs the `bash`, `read_file`, `write_file`, and `edit_file` tools   | Vercel Sandbox                               | Docker by default, or another [provider](/docs/sandbox)                              |
 | Model access     | Sends model calls                                                   | AI Gateway via OIDC                          | AI Gateway API key or an AI SDK provider package                                     |
 | Schedules        | Runs authored [schedules](/docs/schedules)                          | Vercel Cron                                  | The schedule runner in `eve start`                                                   |
 | Observability    | Records traces of sessions, turns, and tool calls                   | [Agent Runs](/docs/observability/agent-runs) | [OpenTelemetry](/docs/observability/otel)                                            |
@@ -36,10 +36,23 @@ Every production deployment needs these steps:
 2. Provide a model credential and any secrets required by tools, connections, and route authentication.
 3. Replace `placeholderAuth()` with a production route policy before accepting browser traffic.
 4. Verify the health route and complete a real agent turn.
+5. Check that the bundle stays small. See [Keep the bundle small](#keep-the-bundle-small).
 
 `eve build` always writes compiler artifacts under `.eve/`. A Vercel build also writes `.vercel/output`. A build for another host writes the eve server under `.output/`.
 
 Files in a `public/` directory at the app root are copied into the build output, and eve's host serves them as static files.
+
+## Keep the bundle small
+
+Each file under `agent/`, and everything it imports, ships in the deployed function. That code also runs when an instance starts, even when the invocation does not use it.
+
+- **Import heavy SDKs where you use them.** Load database, auth, cache, and cloud SDK clients with `await import()` in the tool, hook, or helper that calls them, not at the top of the file.
+- **Keep shared modules light.** A module that many tools, hooks, or instrumentation files import adds its imports to all of them.
+- **Use one version of each dependency.** Two versions of the same package ship and load twice. Align versions across your app's packages, and check with `pnpm why <package>`.
+- **Keep instrumentation lean.** eve loads instrumentation files first and bundles each one separately, so keep their imports small. Enable only the OpenTelemetry instrumentations you use, and import exporters that only development or evals use with `await import()`.
+- **Do no work at module scope.** Create clients, formatters, and other objects on first use, not when the module loads.
+
+Loading on first use moves the cost to the first call that needs it. It helps most for code that only some invocations reach.
 
 ## Configure credentials
 
@@ -69,4 +82,4 @@ Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses 
 
 - [Deploy to Vercel](/docs/guides/deployment/vercel): use Vercel Build Output, Workflow, Sandbox, Cron, and observability
 - [Self-host eve](/docs/guides/deployment/self-hosting): run the eve server on Node with backends you choose
-- [Frontend integrations](/docs/guides/frontend): mount eve alongside Next.js, Nuxt, SvelteKit, or TanStack Start
+- [Frontend integrations](/docs/guides/frontend): mount eve alongside Next.js, Nuxt, SvelteKit, TanStack Start, or another Vite app

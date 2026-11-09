@@ -43,8 +43,9 @@ type HostRoute =
       readonly path: string;
       readonly cors?: NormalizedChannelCorsOptions;
       /**
-       * Set on a GET route whose path has no HEAD route: every method declared
-       * for the path. The route answers HEAD with 405 and this `Allow` set.
+       * Set on the GET handler of a path with no HEAD route (an HTTP GET
+       * route, else a WebSocket route): every method declared for the path.
+       * The handler answers HEAD with 405 and this `Allow` set.
        */
       readonly allow?: readonly string[];
     }
@@ -167,7 +168,9 @@ function hasDirectWorkflowQueue(input: HostRouteTableInput): boolean {
 }
 
 function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRoute {
-  if (route.kind !== "channel" || route.method !== "GET") return route;
+  if (route.kind !== "channel" || (route.method !== "GET" && route.method !== "WEBSOCKET")) {
+    return route;
+  }
   // Match as the router does: parameter names don't distinguish paths.
   const pattern = normalizeRoutePattern(route.path);
   const methods = routes
@@ -175,6 +178,11 @@ function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRout
     .map((candidate) => candidate.method)
     .filter((method) => method !== "WEBSOCKET" && method !== "ALL");
   if (methods.includes("HEAD")) return route;
+  if (route.method === "WEBSOCKET") {
+    // An HTTP GET route on the path owns the guard; otherwise the upgrade's
+    // GET handler is the one HEAD reaches.
+    return methods.includes("GET") ? route : { ...route, allow: [...new Set(["GET", ...methods])] };
+  }
   return { ...route, allow: [...new Set(methods)] };
 }
 
@@ -259,7 +267,7 @@ export async function renderHostRoutes(
         const pattern = normalizeRoutePattern(route.path);
         if (route.method === "WEBSOCKET") {
           if (!httpGetPatterns.has(pattern)) {
-            addVirtualHandler(id, renderChannelWebSocketHandler({ routeKey }), {
+            addVirtualHandler(id, renderChannelWebSocketHandler({ allow: route.allow, routeKey }), {
               method: "GET",
               route: route.path,
             });
@@ -278,11 +286,6 @@ export async function renderHostRoutes(
           }),
           { method: route.method, route: route.path },
         );
-        // The beta router sends HEAD only to HEAD handlers, so the guard needs
-        // its own registration. Redundant once Nitro serves HEAD from GET routes.
-        if (route.allow !== undefined) {
-          handlers.push({ handler: id, method: "HEAD", route: route.path });
-        }
         break;
       }
       case "channel-preflight":

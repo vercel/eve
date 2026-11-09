@@ -32,8 +32,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { withOpenTurn, withPublished, withQueuedInput } from "#internal/testing/session-machine.js";
 
 const BASE: HarnessSession = {
-  agent: { modelReference: { id: "test" }, system: "", tools: [] },
-  compaction: { recentWindowSize: 10, threshold: 0.8 },
+  compaction: {},
   continuationToken: "test",
   history: [],
   sessionId: "session-1",
@@ -77,6 +76,7 @@ describe("the budget prompt", () => {
     ]);
     // The answer stands, admitted, as any answer to the prompt does.
     const answered = withPublished(asked, [
+      { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
       {
         data: { deliveryId: "d_1", interactionId, responseId: "r_1", value: { optionId: "maybe" } },
         type: "response.submitted",
@@ -552,7 +552,8 @@ describe("settle", () => {
       },
     };
 
-    const { commit, events } = settle(view, { results });
+    const { events, history } = settle(view, { results });
+    const commit = history !== undefined && "append" in history ? history.append : [];
 
     // Both results reach the model; only the recorded call settles and owns what it spent.
     expect(commit.at(-1)?.content).toHaveLength(2);
@@ -636,7 +637,7 @@ describe("calls a sign-in stopped", () => {
       "turn.settled:turn_0": "cancelled",
     });
     expect(transition.turn.suspended).toEqual([]);
-    expect(JSON.stringify(transition.commit)).toContain(CANCELLED_CALL_RESULT);
+    expect(JSON.stringify(transition.history)).toContain(CANCELLED_CALL_RESULT);
   });
 });
 
@@ -679,6 +680,186 @@ describe("routing answers", () => {
       });
       expect(ending.events).toEqual([]);
     }
+  });
+
+  it("mirrors a child's request only about a call this session still runs", () => {
+    const parent = runningCall();
+    const asks = (callId: string) =>
+      relay(viewOf(parent), {
+        payload: {
+          kind: "subagent-interaction",
+          callId,
+          childSessionId: "child-1",
+          subagentName: "deployer",
+          events: [
+            {
+              type: "interaction.opened",
+              data: {
+                interactionId: "remote",
+                request: { kind: "question", prompt: "Continue?" },
+                subject: { turnId: "child-turn" },
+              },
+            },
+          ],
+        },
+      }).events;
+    expect(asks("probe")).toMatchObject([
+      {
+        data: {
+          origin: { interactionId: "remote", sessionId: "child-1" },
+          subject: { callId: "probe" },
+        },
+        type: "interaction.opened",
+      },
+    ]);
+    expect(asks("never-made")).toEqual([]);
+  });
+
+  it("keeps mirroring a settled call while its serving task is running", () => {
+    const replied = withPublished(busyTurn(), [
+      { type: "call.settled", data: { callId: "agent", outcome: "completed", output: {} } },
+    ]);
+    const asks = (session: HarnessSession) =>
+      relay(viewOf(session), {
+        payload: {
+          kind: "subagent-interaction",
+          callId: "agent",
+          childSessionId: "child-1",
+          subagentName: "helper",
+          events: [
+            {
+              type: "interaction.opened",
+              data: {
+                interactionId: "remote",
+                request: { kind: "question", prompt: "Continue?" },
+                subject: { turnId: "child-turn" },
+              },
+            },
+          ],
+        },
+      }).events;
+
+    expect(asks(replied)).toMatchObject([
+      { type: "interaction.opened", data: { subject: { callId: "agent" } } },
+    ]);
+    const ended = withPublished(replied, [
+      { type: "task.ended", data: { taskId: "task-1", outcome: "completed" } },
+    ]);
+    expect(asks(ended)).toEqual([]);
+  });
+
+  it("keeps mirroring a later call a running task took, after that call settles", () => {
+    const later = withPublished(busyTurn(), [
+      { type: "call.settled", data: { callId: "agent", outcome: "completed", output: {} } },
+      {
+        data: {
+          callId: "agent-2",
+          capability: { kind: "agent", name: "helper" },
+          owner: { runId },
+        },
+        scope: { runId, turnId },
+        type: "call.requested",
+      },
+      { data: { callId: "agent-2", taskId: "task-1" }, scope: { turnId }, type: "call.started" },
+      { type: "call.settled", data: { callId: "agent-2", outcome: "completed", output: {} } },
+    ]);
+    const { events } = relay(viewOf(later), {
+      payload: {
+        kind: "subagent-interaction",
+        callId: "agent-2",
+        childSessionId: "child-2",
+        subagentName: "helper",
+        events: [
+          {
+            type: "interaction.opened",
+            data: {
+              interactionId: "remote",
+              request: { kind: "question", prompt: "Continue?" },
+              subject: { turnId: "child-turn" },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(events).toMatchObject([
+      { type: "interaction.opened", data: { subject: { callId: "agent-2" } } },
+    ]);
+  });
+
+  it("keeps mirroring a running task's questions after later turns prune the call that started it", () => {
+    const endTurn = (session: HarnessSession, sequence: number) => {
+      const turn = `turn_${sequence}`;
+      const run = `test_${turn}_0`;
+      return withPublished(session, [
+        {
+          data: { outcome: "completed", runId: run },
+          scope: { runId: run, turnId: turn },
+          type: "model.settled",
+        },
+        {
+          data: { outcome: "completed", turnId: turn },
+          scope: { turnId: turn },
+          type: "turn.settled",
+        },
+      ]);
+    };
+    const run = "test_turn_0_0";
+    let session = withPublished(
+      withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId: "turn_0" }),
+      [
+        {
+          data: {
+            callId: "agent",
+            capability: { kind: "agent", name: "helper" },
+            owner: { runId: run },
+          },
+          scope: { runId: run, turnId: "turn_0" },
+          type: "call.requested",
+        },
+        {
+          data: { kind: "agent", name: "helper", startedBy: { callId: "agent" }, taskId: "task-1" },
+          scope: { turnId: "turn_0" },
+          type: "task.started",
+        },
+        {
+          data: { callId: "agent", taskId: "task-1" },
+          scope: { turnId: "turn_0" },
+          type: "call.started",
+        },
+        { data: { callId: "agent", outcome: "completed", output: {} }, type: "call.settled" },
+      ],
+    );
+    session = endTurn(session, 0);
+    for (const sequence of [1, 2]) {
+      session = endTurn(
+        withOpenTurn(session, { sequence, stepIndex: 0, turnId: `turn_${sequence}` }),
+        sequence,
+      );
+    }
+    expect(viewOf(session).projection.view.calls.agent).toBeUndefined();
+
+    const { events } = relay(viewOf(session), {
+      payload: {
+        kind: "subagent-interaction",
+        callId: "agent",
+        childSessionId: "child-1",
+        subagentName: "helper",
+        events: [
+          {
+            type: "interaction.opened",
+            data: {
+              interactionId: "remote",
+              request: { kind: "question", prompt: "Continue?" },
+              subject: { turnId: "child-turn" },
+            },
+          },
+        ],
+      },
+    });
+    expect(events).toMatchObject([
+      { type: "interaction.opened", data: { subject: { callId: "agent" } } },
+    ]);
   });
 
   it("submits a forwarded answer only for an open request and a delivery it knows", () => {

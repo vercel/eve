@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { createLogger } from "#internal/logging.js";
 import { classifyModelCallError } from "#harness/model-call/errors.js";
-import { decide, type Policy, type Restriction } from "#reactions/policy.js";
+import { decide, type Policy, type Restriction } from "#shared/restriction.js";
 
 const log = createLogger("harness.tool-loop");
 /**

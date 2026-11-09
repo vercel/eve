@@ -62,11 +62,14 @@ export function buildAuthCompletedText(input: {
   if (input.outcome === "accepted") {
     return `:white_check_mark: ${input.displayName} connected`;
   }
-  if (input.outcome === "declined") {
+  const ending = signInEnding(input.outcome);
+  // A cancellation's reason is the runtime's (`turn-cancelled`, `asker-ended`), not the person's:
+  // a red cross and a raw code read as an error they caused.
+  if (input.outcome === "declined" || ending === "cancelled") {
     return `${input.displayName} sign-in cancelled`;
   }
   const tail = input.reason !== undefined ? ` (${input.reason})` : "";
-  return `:x: ${input.displayName} authorization ${signInEnding(input.outcome)}${tail}`;
+  return `:x: ${input.displayName} authorization ${ending}${tail}`;
 }
 
 /** The private sign-in prompt: a link to open, instructions to follow, or both. */
@@ -91,8 +94,8 @@ export function buildAuthEphemeralBlocks(
 ): unknown[] {
   const intro =
     input.cancel === undefined
-      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`
-      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel. Only you can see this message.`;
+      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.`
+      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel.`;
   const blocks: unknown[] = [
     {
       type: "section",

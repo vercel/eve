@@ -1,12 +1,12 @@
 import { posix, relative, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
+import { createAuthoredPlugins } from "#internal/bundler/authored-plugins.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
@@ -15,14 +15,10 @@ import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
-import { createNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
-import type { NitroConfig } from "nitro/types";
+import type { NitroBuildPlugin } from "nitro/types";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-
-/** Rolldown plugins as Nitro's config accepts them. */
-type HostBuildPlugins = NonNullable<NonNullable<NitroConfig["rolldownConfig"]>["plugins"]>;
 
 export interface HostPluginsInput {
   readonly appRoot: string;
@@ -31,19 +27,23 @@ export interface HostPluginsInput {
   readonly externals: ExternalsPolicy;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
-  readonly instrumentationEntryPlugin?: HostBuildPlugins;
+  readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
+  /** Installed packages that generated modules left for the host; see `createAuthoredPlugins`. */
+  readonly hostBundledPackageRoots?: readonly string[];
+  /** Generated modules eve's runtime plugin imports only for their side effects. */
+  readonly runtimeModules: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
 }
 
 /**
- * eve's host build plugins in the order they must run, ahead of Nitro's own.
- * Step transforms and side-effect resolution come first so extension-mount
- * resolution never claims a workflow module.
+ * eve's host build plugins in the order they must run, all ahead of Nitro's
+ * own. Step transforms and side-effect resolution come first so
+ * extension-mount resolution never claims a workflow module.
  */
-export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
+export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
-  return [
+  const plugins: (NitroBuildPlugin | null)[] = [
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
@@ -51,8 +51,8 @@ export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
       workflowsPath,
       workflowHandlerPath(input.workflowArtifacts),
       ...(input.instrumentationSourcePaths ?? []),
+      ...input.runtimeModules,
     ]),
-    createNitroRoutingImportSpecifierPlugin(),
     input.instrumentationEntryPlugin ?? null,
     createNodeEsmCompatBannerPlugin(),
     // Before Nitro's externals and tracing, so a pseudo-package never reaches
@@ -67,11 +67,15 @@ export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
       })),
     ),
     // Workflow step modules reach Nitro as authored source, not prebundled.
-    createAuthoredAssetImportPlugin({
+    ...createAuthoredPlugins({
       authoredSourceOnly: true,
+      hostBundledPackageRoots: input.hostBundledPackageRoots,
       packageRoot: input.authoredPackageRoot,
     }),
-  ].filter((plugin) => plugin !== null);
+  ];
+  return plugins
+    .filter((plugin) => plugin !== null)
+    .map((plugin) => ({ ...plugin, enforce: "pre" as const }));
 }
 
 function normalizePath(path: string): string {

@@ -166,7 +166,7 @@ describe("normalizeToolModelOutput", () => {
 
   it("rejects unknown output types", () => {
     expect(() => normalize({ type: "markdown", value: "# nope" })).toThrow(
-      /Invalid discriminator value. Expected 'text' \| 'json' \| 'content' at "type"/u,
+      /Invalid discriminator value. Expected 'text' \| 'error-text' \| 'json' \| 'content' at "type"/u,
     );
   });
 });

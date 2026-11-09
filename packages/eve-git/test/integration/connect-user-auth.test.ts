@@ -89,6 +89,23 @@ test("requests the caller's token and sign-in without repository details", async
 });
 
 test("maps Connect errors to eve authorization errors", async () => {
+  const noChallenge = connectUserAuthorization(
+    "github/acme-bot",
+    client({
+      async startAuthorization() {
+        return { request: "r", verifier: "v", url: "" };
+      },
+    }).value,
+  );
+  await assert.rejects(
+    noChallenge.startAuthorization({
+      principal: USER,
+      connection: CONNECTION,
+      callbackUrl: "https://agent.example/callback",
+    }),
+    { name: "ConnectionAuthorizationFailedError", reason: "missing_challenge", retryable: false },
+  );
+
   const missingGrant = connectUserAuthorization(
     "github/acme-bot",
     client({
@@ -107,7 +124,8 @@ test("maps Connect errors to eve authorization errors", async () => {
       callbackUrl: "https://agent.example/callback",
       callback: { params: {}, method: "GET" },
     }),
-    { name: "ConnectionAuthorizationFailedError" },
+    // The sign-in card shows this message, so it tells the person what to do next.
+    { name: "ConnectionAuthorizationFailedError", message: /Ask again for a new sign-in link/ },
   );
 
   const notInstalled = connectUserAuthorization(

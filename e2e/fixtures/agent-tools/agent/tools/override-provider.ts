@@ -2,9 +2,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 
 export const OVERRIDE_TOKEN = "dynamic-override-ok-K2P7";
 
-// The bare map key `override-target` collides with the authored tool of the
-// same name. A dynamic tool wins on conflict, so calls to `override-target`
-// must execute this version.
+// This collision must leave the static override-target.ts tool in place.
 export default defineDynamic(() => {
   return {
     "override-target": defineTool({

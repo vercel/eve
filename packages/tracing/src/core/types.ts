@@ -22,6 +22,7 @@ export type SpanType =
   | "tool"
   | "approval"
   | "memory"
+  | "decision"
   | "channelRequest"
   | "mcp";
 export type SpanKind = "INTERNAL" | "CLIENT" | "SERVER" | "PRODUCER" | "CONSUMER";
@@ -85,6 +86,11 @@ export interface AgentTelemetry {
   ): SpanWriter;
   /** Returns the operation active in the current execution context. */
   active(): ActiveOperation | undefined;
+  /**
+   * Returns the span active in `context`, or the current execution context, including spans
+   * the host started itself. Lets a decision nest under the host's span inside an operation.
+   */
+  activeSpan?(context?: ExecutionContext): TraceReference | undefined;
   /** Runs `execute` with `operation` as the active trace context. */
   run<T>(operation: ActiveOperation, execute: () => T, context?: ExecutionContext): T;
   /** Runs `execute` without creating spans. */
@@ -196,26 +202,37 @@ export interface ModelOptions {
   readonly tools?: unknown;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
 }
+export interface DecisionOptions {
+  readonly provider?: string;
+  readonly modelId: string;
+}
 export interface ToolOptions {
   readonly callId: string;
   readonly name: string;
   readonly kind?: ToolKind;
   readonly arguments?: unknown;
 }
+/**
+ * A wait on a person. Under a tool call it names that call; under a turn it has no call, such
+ * as a budget prompt or a sign-in the turn needs before it can run.
+ */
+export interface ApprovalOptions {
+  readonly requestId: string;
+  readonly request?: unknown;
+  /** What the person is asked, recorded as `agent.approval.kind`. Defaults to `tool-approval`. */
+  readonly kind?: string;
+  /** The connection a sign-in is for, recorded as `agent.connection.name`. */
+  readonly connectionName?: string;
+  readonly callId?: string;
+  readonly toolName?: string;
+}
 export type ScopeData =
   | { readonly type: "activation"; readonly options: TurnMetadata }
   | { readonly type: "step"; readonly options: StepOptions }
   | { readonly type: "model"; readonly options: ModelOptions }
   | { readonly type: "tool"; readonly options: ToolOptions }
-  | {
-      readonly type: "approval";
-      readonly options: {
-        requestId: string;
-        request?: unknown;
-        callId: string;
-        toolName: string;
-      };
-    }
+  | { readonly type: "approval"; readonly options: ApprovalOptions }
+  | { readonly type: "decision"; readonly options: DecisionOptions }
   | {
       readonly type: "memory";
       readonly options: {

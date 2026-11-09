@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { compiledOf } from "#compiler/manifest.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,9 +58,9 @@ function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
 }
 
 describe("compiler artifacts", () => {
-  it("loads the selected memory and derived wrapper from a generated map in a fresh process", async () => {
+  it("loads a selected memory from a generated map in a fresh process", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
-      "eve-compiler-memory-wrapper-",
+      "eve-compiler-memory-tools-",
       APP_ROOT_OPTIONS,
     );
     await mkdir(join(agentRoot, "memory"), { recursive: true });
@@ -90,39 +91,29 @@ describe("compiler artifacts", () => {
     );
 
     const compiled = await compileAgent({ startPath: appRoot });
-    const memory = compiled.manifest.memories[0]!;
-    const wrapper = compiled.manifest.dynamicTools.find((entry) => entry.slug === "profile")!;
+    const memory = compiledOf(compiled.manifest, "memory")[0]!;
+    expect(compiledOf(compiled.manifest, "tool")).toEqual([]);
     const script = [
       "const loaded = await import(process.argv[1]);",
-      "const { dynamicEvaluate, isDynamicSentinel } = await import(process.argv[4]);",
       "const modules = loaded.default.nodes.__root__.modules;",
       "const memory = modules[process.argv[2]];",
-      "const wrapper = modules[process.argv[3]];",
       "const memoryDefinition = await memory.default();",
       "console.log(JSON.stringify({",
       '  memory: typeof memoryDefinition.provider?.recall?.["turn.started"] === "function",',
       "  memoryFactoryCalls: globalThis.__memoryFactoryCalls,",
-      '  wrapper: isDynamicSentinel(wrapper.default) && typeof dynamicEvaluate(wrapper.default) === "function",',
+      '  tools: typeof memoryDefinition.provider?.tools === "function",',
       "}));",
     ].join("\n");
     const loaded = await runFile(
       process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        script,
-        compiled.paths.moduleMapPath,
-        memory.sourceId,
-        wrapper.sourceId,
-        fileURLToPath(new URL("../../dist/src/dynamic/definition.js", import.meta.url)),
-      ],
+      ["--input-type=module", "--eval", script, compiled.paths.moduleMapPath, memory.sourceId],
       { cwd: appRoot },
     );
 
     expect(JSON.parse(loaded.stdout)).toEqual({
       memory: true,
       memoryFactoryCalls: 1,
-      wrapper: true,
+      tools: true,
     });
   });
 
@@ -233,11 +224,6 @@ describe("compiler artifacts", () => {
       agentId: "test-agent",
       agentRoot,
       appRoot,
-      channels: [
-        createModuleSourceRef({
-          logicalPath: "channels/support.mjs",
-        }),
-      ],
       configModule: createModuleSourceRef({
         logicalPath: "agent.mjs",
       }),
@@ -248,7 +234,10 @@ describe("compiler artifacts", () => {
           sourcePath: join(agentRoot, "drafts"),
         }),
       ],
-      instructions: [
+      sources: [
+        createModuleSourceRef({
+          logicalPath: "channels/support.mjs",
+        }),
         {
           definition: defineInstructions({
             content: "You are a precise assistant.",
@@ -298,15 +287,13 @@ describe("compiler artifacts", () => {
         errors: 0,
         warnings: 1,
       },
-      channels: [
+      kind: "eve-agent-discovery-manifest",
+      sources: [
         {
           logicalPath: "channels/support.mjs",
           sourceId: "channels/support.mjs",
           sourceKind: "module",
         },
-      ],
-      kind: "eve-agent-discovery-manifest",
-      instructions: [
         {
           definition: {
             content: "You are a precise assistant.",
@@ -316,7 +303,7 @@ describe("compiler artifacts", () => {
           sourceId: "instructions.md",
         },
       ],
-      version: 15,
+      version: 16,
     });
     const compiledArtifact = normalizeArtifactValue(
       JSON.parse(compiledManifestText) as CompiledAgentManifest,
@@ -493,12 +480,10 @@ describe("compiler artifacts", () => {
     const reviewerManifest = createAgentSourceManifest({
       agentRoot: reviewerRoot,
       appRoot,
-      instructions: [
+      sources: [
         createModuleSourceRef({
           logicalPath: "instructions.mjs",
         }),
-      ],
-      tools: [
         createModuleSourceRef({
           logicalPath: "tools/review.mjs",
         }),
@@ -513,22 +498,16 @@ describe("compiler artifacts", () => {
       configModule: createModuleSourceRef({
         logicalPath: "agent.mjs",
       }),
-      instructions: [
+      sources: [
         createModuleSourceRef({
           logicalPath: "instructions.mjs",
         }),
-      ],
-      schedules: [
         createModuleSourceRef({
           logicalPath: "schedules/daily-digest.mjs",
         }),
-      ],
-      skills: [
         createModuleSourceRef({
           logicalPath: "skills/route.mjs",
         }),
-      ],
-      tools: [
         createModuleSourceRef({
           logicalPath: "tools/get_weather.mjs",
         }),

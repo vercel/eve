@@ -1,10 +1,10 @@
-// `rolldown/filter`'s helpers, which eve cannot import while Rolldown is only
-// Nitro's dependency. Rolldown tests RegExp id filters against ids with `/`
-// separators on every platform.
+// Id filter helpers in the shape of `rolldown/filter`'s, kept here so plugin
+// modules never load Rolldown. Rolldown tests RegExp id filters against ids
+// with `/` separators on every platform.
 
 const ESCAPE_REGEX_RE = /[-/\\^$*+?.()|[\]{}]/g;
 
-function escapeRegex(value: string): string {
+export function escapeRegex(value: string): string {
   return value.replace(ESCAPE_REGEX_RE, "\\$&");
 }
 

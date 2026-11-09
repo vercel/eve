@@ -100,16 +100,21 @@ function toCallToolResult(
   switch (result.outcome) {
     case "completed": {
       const output = result.output as JsonValue;
+      const { modelOutput } = result;
+      const isError = modelOutput.type === "error-text";
       const text =
-        result.modelOutput.type === "text"
-          ? result.modelOutput.value
-          : JSON.stringify(output ?? null);
+        modelOutput.type === "text" || isError ? modelOutput.value : JSON.stringify(output ?? null);
+      const content = [{ text, type: "text" as const }];
       // A declared outputSchema obliges structured content of any JSON type: the
       // SDK rejects a result without it and wraps non-objects as `{ result }` on
       // 2025 connections. Without a schema, only objects are structured.
-      return hasOutputSchema || isJsonObjectValue(output)
-        ? { content: [{ text, type: "text" }], structuredContent: output ?? null }
-        : { content: [{ text, type: "text" }] };
+      const structured =
+        hasOutputSchema || isJsonObjectValue(output)
+          ? { content, structuredContent: output ?? null }
+          : { content };
+      // A tool that reports failure to the model, like `bash` on a non-zero
+      // exit, reports it to MCP clients too.
+      return isError ? { ...structured, isError: true } : structured;
     }
     case "rejected":
       if (result.cause !== undefined) throw new McpToolOperationError("denied", result.reason);

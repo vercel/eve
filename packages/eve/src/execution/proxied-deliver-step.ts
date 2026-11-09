@@ -35,7 +35,7 @@ import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
-import { fact } from "#harness/facts.js";
+import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import type { Answer } from "#shared/input.js";
 
 export type RoutedDeliverResult =
@@ -258,18 +258,17 @@ async function routeProxiedDeliver(
     if (ignored.length === 0) return { ...admitted, kind: "cancel-turn" };
     const settled = await publishSessionEvents(
       { ...admitted, sessionWritable: input.sessionWritable },
-      ignored.flatMap(({ channelKind, deliveryId }) => [
-        ...(view.deliveries[deliveryId] === undefined
-          ? [
-              fact("delivery.admitted", {
-                deliveryId,
-                principal: principalOf(sourceDelivery.auth),
-                source: channelKind === undefined ? undefined : { channel: channelKind },
-              }),
-            ]
-          : []),
-        fact("delivery.settled", { deliveryId, outcome: "ignored" }),
-      ]),
+      [
+        admitDeliveries(
+          ignored.map(({ channelKind, deliveryId }) => ({
+            deliveryId,
+            ignored: {},
+            principal: principalOf(sourceDelivery.auth),
+            recorded: view.deliveries[deliveryId] !== undefined,
+            source: channelKind === undefined ? undefined : { channel: channelKind },
+          })),
+        ),
+      ],
     );
     return {
       kind: "cancel-turn",

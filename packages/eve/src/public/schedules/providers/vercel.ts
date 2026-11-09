@@ -198,11 +198,6 @@ function isNotFoundError(error: unknown): boolean {
 function assertSupportedVercelEnvironment(): void {
   if (isVercelSchedulesDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
-    throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
-  }
-  if (process.env.VERCEL_ENV !== "production") {
-    throw new Error(
-      "Vercel Schedules currently supports production deployments only. Deploy with `vercel --prod`.",
-    );
+    throw new Error("vercelScheduleProvider() requires a Vercel deployment or eve dev.");
   }
 }

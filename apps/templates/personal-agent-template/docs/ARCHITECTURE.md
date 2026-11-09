@@ -157,4 +157,4 @@ Global middleware: [`apps/web/app/middleware/auth.global.ts`](../apps/web/app/mi
 
 ## Eve docs
 
-For channels, tools, connections, and deployment details, read Eve guides in `node_modules/eve/dist/docs/public/`.
+For channels, tools, connections, and deployment details, read eve guides in `node_modules/eve/docs/`.

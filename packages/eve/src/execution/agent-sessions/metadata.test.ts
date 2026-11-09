@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { ParentSessionKey } from "#context/keys.js";
-import { ReactionsStateKey } from "#reactions/state.js";
+import { DefinitionsStateKey } from "#definitions/state.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -52,7 +52,7 @@ describe("resolveWorkflowAgentMetadata", () => {
 
   it("uses the descriptions dynamic subagent slots hold without adding self-delegation", () => {
     const ctx = context({ nodeId: "subagents/coordinator", subagentsByName: new Map() });
-    ctx.set(ReactionsStateKey, {
+    ctx.set(DefinitionsStateKey, {
       latest: {},
       slots: {
         "subagent:subagents/reviewer": {

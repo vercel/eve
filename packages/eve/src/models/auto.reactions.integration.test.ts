@@ -191,7 +191,7 @@ describe("auto() as the agent's model", () => {
 
   it("rebuilds the chosen model in a fresh process without deciding again", async () => {
     // Every step forgets the code it built, as a process that didn't build it would.
-    vi.stubEnv("EVE_REACTIONS_COLD", "1");
+    vi.stubEnv("EVE_DEFINITIONS_COLD", "1");
     const { decisions, log } = await runTwoTurns();
 
     expect(decisions).toHaveLength(2);
@@ -199,7 +199,7 @@ describe("auto() as the agent's model", () => {
   }, 60_000);
 
   it("uses the model a fresh process's evaluation chooses when it differs from the session's", async () => {
-    vi.stubEnv("EVE_REACTIONS_COLD", "1");
+    vi.stubEnv("EVE_DEFINITIONS_COLD", "1");
     const log: string[] = [];
     let builds = 0;
     const small = scriptedModel("small", "gpt-5.5-mini", log);

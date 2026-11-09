@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import type { ImportKind, Plugin, PluginContext } from "rolldown";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
@@ -9,6 +11,12 @@ import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { matchesHostTracedDependency } from "#internal/host-traced-dependencies.js";
+import {
+  type InstalledPackage,
+  installedDependencyClosure,
+  installedPackageRoot,
+} from "#internal/installed-packages.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export const RESOLVE_EXTENSIONS = [
@@ -23,21 +31,20 @@ export const RESOLVE_EXTENSIONS = [
   ".json",
 ] as const;
 
-type RolldownResolveResult = {
-  readonly id: string;
-};
-
-export type RolldownResolveContext = {
-  resolve(
-    source: string,
-    importer: string | undefined,
-    options: { kind: string; skipSelf: boolean },
-  ): Promise<RolldownResolveResult | null>;
-};
-
 interface ResolvedAuthoredExternalModule {
   readonly packageName: string;
   readonly resolvedId: string;
+}
+
+/** How the host treats a generated bundle it bundles again. */
+export interface GenerationHostBundle {
+  /** The host's traced dependencies; see `collectHostTracedDependencies`. */
+  readonly tracedDependencies: readonly string[];
+  /**
+   * Collects the roots of the installed packages left external, so the host can give them the
+   * authored transforms this bundle would have applied, such as asset imports.
+   */
+  readonly externalPackageRoots: Set<string>;
 }
 
 export function createGenerationPackageBoundaryPlugin(input: {
@@ -45,15 +52,16 @@ export function createGenerationPackageBoundaryPlugin(input: {
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
   readonly resolveExternalPaths?: boolean;
-}): Record<string, unknown> {
+  /**
+   * Set when the host bundles this output again. Node loads other generations directly, and
+   * leaving a CommonJS package external there would lose the bundler's interop for its imports.
+   */
+  readonly hostBundle?: GenerationHostBundle;
+}): Plugin {
+  const dependencyClosures = new Map<string, readonly InstalledPackage[]>();
   return {
     name: "eve-generation-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source, importer, options) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -83,16 +91,54 @@ export function createGenerationPackageBoundaryPlugin(input: {
         packageRoot: input.packageRoot,
         source,
       });
-      if (externalModule === undefined) {
-        return undefined;
+      if (externalModule !== undefined) {
+        return {
+          external: true,
+          id: input.resolveExternalPaths
+            ? toExternalModuleId(
+                normalizeEsmImportSpecifier(externalModule.resolvedId),
+                options.kind,
+              )
+            : source,
+        };
       }
 
-      return {
-        external: true,
-        id: input.resolveExternalPaths
-          ? toExternalModuleId(normalizeEsmImportSpecifier(externalModule.resolvedId), options.kind)
-          : source,
-      };
+      // Each generated bundle (the module map and every instrumentation slot) is built on its own
+      // and then bundled again by the host. Inlining installed packages here gives each generated
+      // bundle a private copy that the host can't recognize, so a package that several bundles
+      // import ships, parses, and evaluates once per bundle. Leaving them external lets the host
+      // include each package once. The resolved path, not the bare specifier, keeps the import
+      // resolvable from the generated file, which may sit outside the importer's package scope.
+      // eve's own modules that reach here, such as the self-modification mounts, stay bundled.
+      // So does any package that reaches a host-traced dependency: the host externalizes those by
+      // name wherever it sees them, so handing it such a package would trace a second copy, such
+      // as an extension-owned dependency beside the version another package resolves.
+      if (input.hostBundle === undefined) return undefined;
+      const resolved = await this.resolve(source, importer, {
+        kind: options.kind,
+        skipSelf: true,
+      });
+      if (
+        resolved !== null &&
+        typeof resolved.id === "string" &&
+        !resolved.id.startsWith("\0") &&
+        isNodeModulesPath(resolved.id) &&
+        !isFrameworkPackagePath(resolved.id) &&
+        canHostBundleInstalledPackage(
+          resolved.id,
+          input.hostBundle.tracedDependencies,
+          dependencyClosures,
+        )
+      ) {
+        const packageRoot = installedPackageRoot(resolved.id);
+        if (packageRoot !== undefined) input.hostBundle.externalPackageRoots.add(packageRoot);
+        return {
+          external: true,
+          id: toExternalModuleId(normalizeEsmImportSpecifier(resolved.id), options.kind),
+        };
+      }
+
+      return undefined;
     },
   };
 }
@@ -101,17 +147,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
-}): Record<string, unknown> {
+}): Plugin {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 
   return {
     name: "eve-runtime-loader-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source, importer, options) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -213,17 +254,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
 export function createDistributionPackageBoundaryPlugin(input: {
   readonly runtimeDependencies: readonly string[];
   readonly packageRoot: string;
-}): Record<string, unknown> {
+}): Plugin {
   const declaredDependencies = new Set(input.runtimeDependencies);
 
   return {
     name: "eve-extension-distribution-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source, importer, options) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -283,11 +319,11 @@ export function createDistributionPackageBoundaryPlugin(input: {
 }
 
 async function resolveConfiguredExternalModule(
-  this: RolldownResolveContext,
+  this: PluginContext,
   input: {
     readonly externalDependencies: readonly string[];
     readonly importer: string | undefined;
-    readonly kind: string;
+    readonly kind: ImportKind;
     readonly packageRoot: string;
     readonly source: string;
   },
@@ -352,6 +388,26 @@ function nearestPackageName(filePath: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function canHostBundleInstalledPackage(
+  resolvedId: string,
+  tracedDependencies: readonly string[],
+  dependencyClosures: Map<string, readonly InstalledPackage[]>,
+): boolean {
+  const packageRoot = installedPackageRoot(resolvedId);
+  if (packageRoot === undefined) return false;
+  if (tracedDependencies.length === 0) return true;
+  let closure = dependencyClosures.get(packageRoot);
+  if (closure === undefined) {
+    closure = installedDependencyClosure([packageRoot]);
+    dependencyClosures.set(packageRoot, closure);
+  }
+  return closure.every(
+    (installed) =>
+      installed.name === undefined ||
+      !matchesHostTracedDependency(installed.name, tracedDependencies),
+  );
 }
 
 function nearestPackageRoot(filePath: string): string | undefined {
@@ -483,6 +539,11 @@ function resolveRuntimeLoaderFrameworkImport(source: string): string {
 
 export function isNodeModulesPath(path: string): boolean {
   return path.replaceAll("\\", "/").includes("/node_modules/");
+}
+
+/** Authored source and workspace packages bundled from source, never installed dependencies. */
+export function isAuthoredSourcePath(path: string): boolean {
+  return isAbsolute(path) && !isNodeModulesPath(path);
 }
 
 export function resolveAuthoredPackageRoot(modulePath: string): string {

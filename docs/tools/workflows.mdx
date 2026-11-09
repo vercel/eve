@@ -93,8 +93,10 @@ continues, deploys, and returns one tool result.
   handler fails the build. To start a session from a channel or schedule, use the
   [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
   [schedule handler](/docs/schedules#handler-form-run) APIs.
-- Workflow imports resolve `paths` aliases from `tsconfig.json` or `jsconfig.json`, including in a
-  workspace package. An [agent workspace](/docs/concepts/project-structure#several-root-agents)
+- Workflow imports resolve `paths` aliases from your package's own `tsconfig.json` or
+  `jsconfig.json`, including configs it extends. Source in a workspace package uses that package's
+  own config. eve doesn't search parent directories for a config. An
+  [agent workspace](/docs/concepts/project-structure#several-root-agents)
   member can import workflow and step modules from the shared root package, such as `lib/`. An
   unresolved workflow import fails the build and names the missing import.
 
@@ -132,7 +134,7 @@ import { resumeHook } from "eve/workflow/api";
 | `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
 | `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
 
-A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
+A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to `{ runId }` for the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
 
 Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
 
@@ -978,7 +980,11 @@ for it. A task doesn't hold the turn. See [Stop early for a new message](#stop-e
 for `steer` messages.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
-not. An error that escapes the body fails the tool call.
+not. Errors crossing from a step preserve their class, so workflow code can use
+`instanceof FatalError` or `instanceof RetryableError`. When retries are exhausted, the SDK throws a `FatalError`
+with the original error in `cause`. `RetryableError` accepts `{ retryAfter }` as a duration
+string, a number of milliseconds, or a `Date`; its `retryAfter` property is the resolved retry date.
+The default delay is one second. An error that escapes the body fails the tool call.
 
 An interrupted dispatch can start a second run for the same call, and both runs may execute. Use an
 application idempotency key for side effects that must happen only once.

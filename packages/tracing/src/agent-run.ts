@@ -5,7 +5,13 @@ import { createScopes, type LiveOperation } from "./core/scopes.js";
 import { currentAgentHandoff } from "./core/delegation.js";
 import { intersectCapture } from "./core/activation.js";
 import { traceSnapshot } from "./core/snapshot.js";
-import { operationHandle, wrappedOperation, type TurnOperation } from "./operations.js";
+import {
+  operationHandle,
+  wrappedOperation,
+  type DecisionOperation,
+  type TurnOperation,
+  type WrappedOperation,
+} from "./operations.js";
 import type {
   AgentTelemetry,
   Attributes,
@@ -87,11 +93,29 @@ interface MemoryInput<T> {
   };
 }
 
+/** One call to a decision model, such as choosing a model for a turn or reviewing an action. */
+export interface DecisionInput {
+  readonly modelId: string;
+  readonly provider?: string;
+  /** Omit for a decision made outside any run. */
+  readonly identity?: RunIdentity;
+  readonly agentName?: string;
+  /** Defaults to the active operation's capture, or metadata only. */
+  readonly capture?: CaptureDecision;
+  /**
+   * Parent used when no operation is active, such as a turn's reserved span while its model is
+   * chosen. The active span is the parent instead when it belongs to the same trace.
+   */
+  readonly parent?: TraceReference;
+  readonly context?: ExecutionContext;
+}
+
 export interface AgentRun {
-  turn: import("./operations.js").WrappedOperation<TurnInput, TurnOperation>;
+  turn: WrappedOperation<TurnInput, TurnOperation>;
   /** Returns a saved durable turn, without starting one. */
   resume(input: ResumeInput): Promise<TurnOperation | undefined>;
   memory: AgentMemoryTracing;
+  decision: WrappedOperation<DecisionInput, DecisionOperation>;
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -101,14 +125,26 @@ export interface AgentMemoryTracing {
 }
 
 const METADATA_ONLY: CaptureDecision = { emit: true, recordInputs: false, recordOutputs: false };
+const NOT_SAMPLED: CaptureDecision = { emit: false, recordInputs: false, recordOutputs: false };
 const LIVE_TURNS = 1000;
 
 interface LiveTurn {
   readonly root: LiveOperation;
   /** Token of the last checkpoint this process wrote. */
   revision: string | undefined;
+  /**
+   * Every checkpoint token this tree wrote. A checkpoint store scoped to an
+   * execution context (eve keeps it in the serialized workflow context) can
+   * hand a concurrent hook an older checkpoint of this same tree; that is not
+   * another process's write and must not fork the tree.
+   */
+  readonly revisions: Set<string>;
+  /** Replaced by another process's checkpoint: the tree still records spans but no longer persists. */
+  retired: boolean;
   writes: number;
 }
+
+const REVISIONS_PER_TURN = 10000;
 
 export function createAgentRun(input: AgentRunOptions): AgentRun {
   const telemetry = input.telemetry ?? otelTelemetry();
@@ -142,7 +178,7 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     let queue = Promise.resolve();
     return () => {
       const turn = entry();
-      if (checkpointer === undefined || turn === undefined) return queue;
+      if (checkpointer === undefined || turn === undefined || turn.retired) return queue;
       turn.writes++;
       queue = queue.then(async () => {
         try {
@@ -153,6 +189,7 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
             const revision = randomUUID();
             await checkpointer.set(key, traceSnapshot({ ...turn.root.record(), revision }));
             turn.revision = revision;
+            if (turn.revisions.size < REVISIONS_PER_TURN) turn.revisions.add(revision);
           }
         } catch (error) {
           report(error, { phase: "checkpoint", operation: "activation" });
@@ -183,22 +220,35 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     const ceiling = currentAgentHandoff()?.capture;
     capture = capture === undefined ? ceiling : intersectCapture(capture, ceiling);
     const saved = checkpointer === undefined ? undefined : await loadCheckpoint(key);
+    const savedRevision = (saved as ScopeRecord | undefined)?.revision;
     if (
       cached !== undefined &&
-      (cached.writes > 0 || (saved as ScopeRecord | undefined)?.revision === cached.revision)
+      (cached.writes > 0 ||
+        savedRevision === cached.revision ||
+        (savedRevision !== undefined && cached.revisions.has(savedRevision)))
     ) {
       if (context !== undefined) cached.root.useContext(context);
       // A re-entry may decline content the cached turn was allowed to record.
       if (capture !== undefined) cached.root.narrow(capture);
       return cached;
     }
+    // Another process wrote this checkpoint, so it replaces the cached tree.
+    // Callers may still hold the cached tree's operations; keep them from
+    // persisting their older view over the newer checkpoint.
+    if (cached !== undefined) cached.retired = true;
     let entry: LiveTurn | undefined;
     const onChange = persistence(key, () => entry);
     const restored =
       saved === undefined ? undefined : await scopes.restore(saved, { capture, context, onChange });
     const root = restored ?? (await open?.(onChange));
     if (root === undefined) return undefined;
-    entry = { root, revision: (saved as ScopeRecord | undefined)?.revision, writes: 0 };
+    entry = {
+      root,
+      revision: savedRevision,
+      revisions: new Set(savedRevision === undefined ? [] : [savedRevision]),
+      retired: false,
+      writes: 0,
+    };
     if (restored === undefined) await onChange();
     return entry;
   }
@@ -328,8 +378,35 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return value;
   }
 
+  /**
+   * The active operation owns the decision. A span the host started inside it, in the same
+   * trace, nests the decision further; a span from another trace, such as a workflow step,
+   * does not.
+   */
+  async function decision(data: DecisionInput): Promise<DecisionOperation> {
+    const active = telemetry.active();
+    const owner = active?.reference ?? data.parent;
+    const span = telemetry.activeSpan?.(data.context);
+    const parent = owner === undefined || span?.traceId === owner.traceId ? span : owner;
+    // A decision joins its parent's sampling decision whatever sampler the provider uses.
+    const sampled = parent === undefined || (parent.traceFlags & 1) !== 0;
+    const live = await scopes.start({
+      identity: {
+        ...(data.identity ?? { conversationId: "", runId: "", turnId: "" }),
+        agentName: data.agentName,
+      },
+      key: `decision:${randomUUID()}`,
+      capture: sampled ? (data.capture ?? active?.capture ?? METADATA_ONLY) : NOT_SAMPLED,
+      parent,
+      context: data.context,
+      data: { type: "decision", options: { modelId: data.modelId, provider: data.provider } },
+    });
+    return operationHandle(live, live.record().data, input.onError);
+  }
+
   return {
     turn: wrappedOperation(turnOperation, undefined, input.onError),
+    decision: wrappedOperation(decision, undefined, input.onError),
     resume,
     memory: {
       search: (data, execute) => memory("search_memory", data, execute),

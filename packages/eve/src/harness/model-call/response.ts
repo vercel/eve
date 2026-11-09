@@ -4,7 +4,9 @@ import {
 } from "#harness/tool-call-input-errors.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolResult } from "ai";
 
+import { isWorkflowTool } from "#execution/tasks/model-step.js";
 import { historyCallNames } from "#harness/execute-call.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InlineCallResults } from "#harness/call-executor.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { isRunnableTool } from "#harness/tools.js";
@@ -144,7 +146,14 @@ export function extractToolResultCallIds(messages: readonly ModelMessage[]): Rea
   return callIds;
 }
 
-/** Answers the local calls of a response that ended early: eve doesn't run them. */
+function isLocalOrWorkflowTool(definition: HarnessToolDefinition | undefined): boolean {
+  return isRunnableTool(definition) || isWorkflowTool(definition);
+}
+
+/**
+ * Answers the calls of a response that ended early: eve runs none of them. That includes workflow
+ * calls, which would otherwise dispatch after the step without their approval ever being decided.
+ */
 export function answerSkippedToolCalls(
   step: HarnessStepResult,
   tools: HarnessToolLookup,
@@ -156,7 +165,7 @@ export function answerSkippedToolCalls(
   return ((step.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter(
       (toolCall) =>
-        isRunnableTool(tools.get(toolCall.toolName)) &&
+        isLocalOrWorkflowTool(tools.get(toolCall.toolName)) &&
         toolCall.providerExecuted !== true &&
         !isInvalidToolCall(toolCall) &&
         getInvalidToolCallInputError({ toolCall }) === undefined &&

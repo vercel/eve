@@ -3,14 +3,15 @@ import { join } from "node:path";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import type { GeneratedCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
-import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
+import { resolveAuthoredTsConfigPath } from "#internal/bundler/authored-plugins.js";
 import {
   createExternalsPolicy,
   type ExternalsPolicy,
 } from "#internal/nitro/host/externals-policy.js";
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
@@ -33,16 +34,12 @@ export interface HostDirectories {
   readonly outputDir: string;
 }
 
-/** Nitro runtime plugins eve installs, in load order. */
+/** Nitro runtime plugins eve installs after its own runtime plugin, in load order. */
 export type HostRuntimePlugin =
-  | "compiled-artifacts"
   | "instrumentation"
   | "local-schedules"
-  | "local-tracing"
   | "sandbox-shutdown"
-  | "skill-files"
-  | "workflow-sandbox"
-  | "workflow-world";
+  | "skill-files";
 
 /** Everything eve's Nitro host serves and bundles, derived from the compiled agent. */
 export interface HostSpec {
@@ -58,6 +55,8 @@ export interface HostSpec {
   readonly instrumented: boolean;
   readonly preset: "vercel" | undefined;
   readonly routes: HostRouteTable;
+  /** What eve's generated runtime plugin installs. */
+  readonly runtime: HostRuntime;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
   /** Skills a production build embeds; dev reads the compile directory. */
   readonly skills: readonly string[];
@@ -72,7 +71,7 @@ export interface HostSpec {
 interface HostAuthoredSources {
   /** Package root authored asset imports may not escape. */
   readonly packageRoot: string;
-  /** The app's tsconfig or jsconfig, which resolves authored import aliases. */
+  /** The authored package's tsconfig or jsconfig, which resolves authored import aliases. */
   readonly tsconfig: string | false;
 }
 
@@ -92,6 +91,8 @@ export function createHostSpec(
 ): HostSpec {
   const { appRoot, compiledArtifacts } = preparedHost;
   const { manifest, paths } = preparedHost.compileResult;
+  // A workspace member without its own package.json shares the enclosing package.
+  const packageRoot = findAuthoredPackageRoot(appRoot) ?? appRoot;
   const development = mode.kind === "development";
   const preset = mode.kind === "production" ? mode.preset : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
@@ -103,11 +104,7 @@ export function createHostSpec(
     vercel: preset === "vercel",
   });
   const runtimePlugins: HostRuntimePlugin[] = [
-    ...(development && !instrumented ? (["local-tracing"] as const) : []),
-    "compiled-artifacts",
     ...(development ? [] : (["skill-files"] as const)),
-    "workflow-world",
-    ...(hasWorkflowProgram(manifest) ? (["workflow-sandbox"] as const) : []),
     ...(instrumented ? (["instrumentation"] as const) : []),
     ...(development && usesLocalVercelSchedules(manifest) ? (["local-schedules"] as const) : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
@@ -115,11 +112,7 @@ export function createHostSpec(
 
   return {
     agentName: manifest.config.name,
-    authored: {
-      // A workspace member without its own package.json shares the enclosing package.
-      packageRoot: findAuthoredPackageRoot(appRoot) ?? appRoot,
-      tsconfig: resolveAuthoredTsConfigPath(appRoot),
-    },
+    authored: { packageRoot, tsconfig: resolveAuthoredTsConfigPath(packageRoot) },
     development,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
@@ -139,6 +132,10 @@ export function createHostSpec(
     },
     preset,
     routes,
+    runtime: {
+      localTracing: development && !instrumented,
+      workflowSandbox: hasWorkflowProgram(manifest),
+    },
     runtimePlugins,
     skills: development ? [] : manifest.skills.map((skill) => skill.name),
     vercel: createEveVercelOptions({

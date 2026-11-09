@@ -213,29 +213,6 @@ export function createVercelSandbox(
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
-      // Template-less sessions run base setup with open egress, so the policy
-      // from open() or else the environment applies only once it finishes.
-      const networkPolicy = sessionCreateOptions.networkPolicy;
-      if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
-        try {
-          await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
-        } catch (error) {
-          try {
-            await deleteNamedVercelSandbox({
-              createOptions: sessionCreateOptions,
-              sandboxModule,
-              sandboxName: session.sandbox.name,
-            });
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              `Failed to apply network policy and discard Vercel sandbox session "${context.session.id}".`,
-              { cause: error },
-            );
-          }
-          throw error;
-        }
-      }
       return session.sandbox;
     } catch (error) {
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
@@ -531,11 +508,12 @@ function createSessionCreateParams(
   const createOptions: VercelCreateOptions = { ...input.createOptions };
   if (input.mounts !== undefined) createOptions.mounts = input.mounts;
   if (input.snapshotId === undefined) {
-    return withBaseSetupNetworkPolicy({
+    // Base setup only checks local runtime paths; it needs no open egress.
+    return {
       ...createOptions,
       name: sandboxName,
       persistent: true,
-    });
+    };
   }
 
   /*

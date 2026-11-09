@@ -6,7 +6,7 @@ const DYNAMIC_REFERENCE = "Dynamic policy reference fixture.";
  * A dynamic skill's supporting files aren't stored with the session: eve renders them where a
  * sandbox needs them. The first turn renders the skill without touching the sandbox, so the
  * second turn's read creates it, and in a process that rendered nothing (as under
- * EVE_REACTIONS_COLD=1), eve renders the skill again from its record to write the file.
+ * EVE_DEFINITIONS_COLD=1), eve renders the skill again from its record to write the file.
  */
 export default defineEval({
   description:

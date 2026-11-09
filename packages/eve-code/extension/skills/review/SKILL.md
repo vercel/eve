@@ -5,7 +5,7 @@ description: Comprehensive security and correctness audit. Use for review, deep 
 
 # Deep review
 
-Give the worker subagent a self-contained audit instruction naming the repository and target ref or worktree. The worker inspects the shared checkout directly. The root agent evaluates findings and owns the final verdict.
+When you can start a fresh-context agent, give it a self-contained audit brief that names the repository, the ref or diff, and an instruction not to edit. Otherwise, audit in this session. Either way, you evaluate the findings and own the final verdict.
 
 Audit changed code and its necessary surrounding context for bugs, broken functionality, security vulnerabilities, developer-experience regressions, and feature-gate leaks. Cite repository evidence for every finding. Report only issues introduced or exposed by code added or modified in the reviewed change.
 
@@ -18,4 +18,4 @@ Audit changed code and its necessary surrounding context for bugs, broken functi
 - Distinguish intended, well-contained breakage from accidental consequences.
 - Calibrate priority carefully; do not inflate speculative or low-impact concerns.
 
-Never present a finding with unfinished evidence. Name the exact missing file or ref instead. Run the independent audit before reading PR discussion so existing comments do not anchor it. Afterward, the root agent may compare findings with discussion, verify each against the workspace, and report only actionable defects.
+Never present a finding with unfinished evidence. Name the exact missing file or ref instead. Run the independent audit before reading PR discussion so existing comments do not anchor it. Afterward, you may compare findings with discussion, verify each against the workspace, and report only actionable defects.

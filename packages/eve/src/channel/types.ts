@@ -234,11 +234,7 @@ export type SessionSendCommandResult =
       readonly deliveryId?: string;
       readonly inbox?: string;
     }
-  | {
-      readonly status: "session_not_active";
-      /** The workflow exists but its inbox is not yet available; no delivery was accepted. */
-      readonly retryable?: boolean;
-    };
+  | { readonly status: "session_not_active" };
 
 /** Result of ending a session. The `"reset"` status is kept for wire compatibility. */
 export type EndSessionResult =
@@ -610,6 +606,12 @@ export interface RunHandle {
    * key on it: workflow-backed runs expose the workflow run id.
    */
   readonly sessionId: string;
+  /**
+   * For a start with a continuation token: `true` when this start's run took
+   * the address, `false` when a session already held it and `sessionId` names
+   * that session. Absent for a start without one.
+   */
+  readonly claimedContinuation?: boolean;
 }
 
 /**
