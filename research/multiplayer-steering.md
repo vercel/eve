@@ -50,8 +50,10 @@ ones, and enforces it where credentials are resolved.
 
 **A person's access acts only on that person's direction.** eve resolves a
 user-scoped credential without asking only when its owner directed the step
-that uses it. Otherwise eve asks that person first. A tool author can relax
-the rule only by writing an explicit policy. The default is the safe path.
+that uses it. Otherwise eve asks that person first. There is no read
+exception, because reads are where a person's data reaches a shared thread. A
+tool author can relax the rule only by writing an explicit policy. The default
+is the safe path.
 
 Directing the agent is necessary but not sufficient. Destructive actions
 still need approval policies, because a model can misread even an explicit
@@ -60,29 +62,39 @@ request.
 ## Why before 1.0
 
 `ctx.session.auth.current` is a stable API, and the docs promise that "the
-caller stays the same for the whole turn." The consent rule also adds prompts
-to turns that run silently today. Both changes alter stable behavior, so they
-must land before 1.0 or wait for 2.0. Multiplayer steering itself can follow
-as an opt-in (see [Rollout](#rollout)).
+caller stays the same for the whole turn" and that another person's message
+"waits for the turn to end." The consent rule adds prompts to turns that run
+silently today. All three change stable behavior, so everything in this plan
+ships in 1.0, including steering by any principal as the default. After 1.0,
+the same changes would need 2.0.
 
 ## Addressed messages
 
 Every human message gets a channel-neutral `addressed` flag: `true` when the
 sender is talking to the agent, `false` when the agent just overhears it.
 
-| Channel                     | Addressed                                         | Ambient                                                                      |
-| --------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Slack                       | A mention, a DM, or any message in a code channel | A reply without a mention in a followed thread, or a watched-channel message |
-| `eveChannel`, `source.send` | Default `true`: the caller sent it on purpose     | When the sender passes `addressed: false`                                    |
-| Other platform channels     | A mention or DM, in each channel's terms          | Everything else they deliver                                                 |
+| Channel                     | Addressed                                                                                                                                   | Ambient                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Slack                       | A mention, a DM, a code-channel message, or a reply from the person the agent's latest message answered, when nobody else has written since | Other replies in a followed thread, and watched-channel messages |
+| `eveChannel`, `source.send` | Default `true`: the caller sent it on purpose                                                                                               | When the sender passes `addressed: false`                        |
+| Other platform channels     | A mention or DM, in each channel's terms                                                                                                    | Everything else they deliver                                     |
+
+The Slack reply rule follows conversational turn-taking. Alice can answer the
+agent without mentioning it. Once someone else writes in between, she mentions
+it again, as people already do in busy threads. Only the channel knows the
+thread's order, so each channel implements this rule itself. Code channels
+count every message as addressed, because people join them to work with the
+agent.
 
 Slack already knows the difference (`isBotMentioned()`, the
 `app_mention`/`direct_message`/`channel_message` kinds) and puts `mentioned:`
-into the model's context. This makes it a delivery fact that credential
+into the model's context. This plan makes it a delivery fact that credential
 resolution can read. An inbound hook can lower `addressed` to `false` but can
 never raise it. Raising it would let a hook manufacture consent.
 
 ## Identities in a turn
+
+All identities live on `ctx.session.auth`:
 
 | Field               | Meaning                                                                                          | Incident value |
 | ------------------- | ------------------------------------------------------------------------------------------------ | -------------- |
@@ -95,8 +107,13 @@ never raise it. Raising it would let a hook manufacture consent.
 `auth.current` follows the speaker, so existing readers fail safe: per-user
 connections, per-user dynamic definitions, memory recall, and
 `message.received` hooks all act for the person whose words the step answers.
-With steering limited to the owner, as today, `owner`, `contributors`, and
-`current` collapse to one person. `directedBy` is new information even then.
+The `SessionAuth` type comment already describes `current` as "the caller of
+the most recent request." Only the auth guide's per-turn promise changes.
+
+`owner` never changes within a turn, so it stays a trustworthy fact for
+attribution and for requests that only the owner may answer. Nobody can take
+over a turn. A person who wants work done under their own name directs it, and
+the tool acts as `current` (see [Choosing the identity per call](#choosing-the-identity-per-call)).
 
 Each model call records its speaker and `directedBy` in durable state, so
 replay binds the same credentials. A tool call keeps the values of the step
@@ -108,24 +125,36 @@ When a user-scoped credential resolves, eve compares its subject (the person
 whose token it is) with `directedBy`:
 
 ```text
-subject === directedBy         → resolve, as today
-subject !== directedBy         → consent request to the subject, then resolve or fail
-access: "read"                 → resolve without consent (see open questions)
-principalType: "app"           → not a person's access; approval policies apply
+subject === directedBy                → resolve, as today
+approval policy returned "approved"  → resolve
+turn grant from the subject exists    → resolve
+otherwise                             → consent request to the subject
+principalType: "app"                  → not a person's access; approval policies apply
 ```
 
 A consent request reuses the held sign-in (`research/held-sign-in-and-approval.md`):
 the turn holds, and only the subject can answer. The card says what the agent
 wants to do and for whom. For example: "The agent wants to push a branch and
-open a pull request in `acme/web` as you, continuing a request from Alice.
-Allow or Decline." Allowing it counts as an addressed act by the subject.
-Declining fails the call with an error the model can act on:
+open a pull request in `acme/web` as you, continuing a request from Alice."
+
+The card offers three answers:
+
+- **Allow once** resolves this call only.
+- **Allow for this turn** creates a turn grant for one subject and one
+  connection. The grant ends with the turn. It is revoked when a new
+  contributor joins, because Alice agreeing while Bob directs isn't agreement
+  for Dave. A grant never covers an approval that a policy requires on its
+  own.
+- **Decline** fails the call with an error the model can act on:
 
 ```text
 ConnectionAuthorizationFailedError reason: "consent_declined"
 "Carol declined to let the agent act as them on GitHub. Ask the person who
 requested this to confirm it in the thread."
 ```
+
+Allowing doesn't make the subject `directedBy`. Consent covers what the card
+showed, and nothing more.
 
 The gate sits where eve resolves user principals. Tool credentials
 (`ctx.getToken`, `ctx.requireAuth`, and connection tools) go through
@@ -141,37 +170,45 @@ follows the rule as usual.
 
 ## Authoring API
 
-### Credential binding and access
+### Credential binding
 
 ```ts
-// The defaults, written out
-auth: connect({ connector: "acme/snowflake", principalType: "user", actAs: "speaker" });
+// The default, written out
+auth: connect({ connector: "acme/snowflake", principalType: "user", actAs: "current" });
 
-// One call: read with the owner's access, without a consent prompt
-await ctx.getToken(connect("acme/github"), {
-  actAs: "owner",
-  access: "read",
-  purpose: "Read the PR diff",
-});
+// One call, with the sentence shown on a consent card
+await ctx.getToken(connect("acme/github"), { actAs: "owner", purpose: "Open the pull request" });
 ```
 
-- `actAs: "speaker" | "owner"` chooses the subject. `"speaker"` is the default
-  and today's behavior.
-- `access: "read" | "write"` defaults to `"write"`. Only `"read"` skips
-  consent. MCP connection tools default to `"read"` when the server declares
-  `readOnlyHint`.
+- `actAs: "current" | "owner"` resolves `auth.current` or `auth.owner`.
+  `"current"` is the default and today's behavior. `actAs` is a type error on
+  `principalType: "app"` connections.
 - `purpose` is the sentence on the consent card, in the same form as the git
   extension's `signInReason`.
+
+### Choosing the identity per call
+
+A tool may let the model choose `actAs` for each call, with its configured
+value as the default. This is safe because every choice still passes the
+consent rule. A wrong choice costs a prompt to the right person, never someone
+else's access. When Bob says "open it under me," the model picks `"current"`.
+Bob directed the step, so the call runs as Bob.
 
 ### Approval policies can pre-approve
 
 The call's approval policy (`ApprovalPolicy`, which already extends
 `SessionContext`) sees `owner`, `contributors`, and `directedBy`. Returning
-`"approved"` for a call that needs consent skips the prompt. This is the
-escape hatch, and it has to be written as code. To check other people,
-the policy context gets a public form of the internal `getResponderToken`
-(`runtime/authorization-context.ts`), which reads a stored token without
-starting a sign-in.
+`"approved"` for a call that needs consent skips the prompt. This is the only
+escape hatch, and it has to be written as code. An author who wants ambient
+reads without prompts writes it explicitly:
+
+```ts
+approval: ({ toolAnnotations }) => (toolAnnotations?.readOnlyHint ? "approved" : undefined),
+```
+
+To check other people, the policy context gets a public form of the internal
+`getResponderToken` (`runtime/authorization-context.ts`), which reads a stored
+token without starting a sign-in.
 
 ### Owner-targeted questions
 
@@ -194,24 +231,30 @@ export default git({
 });
 ```
 
-The extension classifies its own commands. `gh pr view` and `git fetch` are
-`access: "read"`. Pushes, `gh-signed-commit`, `gh pr create`, and changing
-`gh api` calls are `"write"`, and unknown commands default to `"write"`.
-`attribution` may return several co-authors, so a PR that Bob shaped
-credits him.
+The `gh` tool accepts an optional `actAs` input that defaults to this config,
+so the model can choose per call. `authorize` gains `owner`, `contributors`,
+and `directedBy`. `attribution` may return several co-authors, so a PR that
+Bob shaped credits him. The extension doesn't pre-approve any command. An
+author who wants ambient `gh pr view` without prompts writes that policy.
 
 ## Steering
 
-With multiplayer steering on, any principal's message steers, and the consent
-rule decides what that step may do with whose access:
+Any principal's message steers the running turn. The consent rule decides
+what each step may do with whose access.
 
-| Input during a turn                               | Result                                                                                       |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Message from the owner                            | Steers, as today.                                                                            |
-| Message from another principal                    | Steers. They join `contributors` and become the speaker from the next step on.               |
-| Another principal's message during a held sign-in | Steers and withdraws the held sign-in as `declined` (#6148). Pending approvals stay pending. |
-| Answer to an open request                         | Settles it as its responder without changing the speaker, as today.                          |
-| Delegated caller mismatch (`callerCallId`)        | Queues, as today. This is routing, not identity.                                             |
+| Input during a turn                               | Result                                                                                                                 |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Message from the owner                            | Steers, as today.                                                                                                      |
+| Message from another principal                    | Steers. They become the speaker from the next step on. A new contributor joins `contributors` and revokes turn grants. |
+| Another principal's message during a held sign-in | Steers and withdraws the held sign-in as `declined` (#6148). Pending approvals stay pending.                           |
+| Answer to an open request                         | Settles it as its responder without changing the speaker, as today.                                                    |
+| Cancel, `reset`, or `clear`                       | Accepted from anyone admitted to the session. Withdraws the turn's pending consent requests.                           |
+| Delegated caller mismatch (`callerCallId`)        | Queues, as today. This is routing, not identity.                                                                       |
+
+Controls use nobody's access, so the consent rule doesn't cover them. eve
+keeps no per-session access list, and Slack requires agents to honor a
+code-channel stop. Each control records its sender (`ControlOrigin.auth`), so
+a channel or hook can refuse a `reset` or `clear` as app policy.
 
 Tasks and subagents bind the speaker and `directedBy` of the step that starts
 them. Input a later step sends them carries that step's values. Each steering
@@ -224,22 +267,26 @@ sender and `addressed`.
 | ---------------------------------------------------------------------------- | ------- | ------------ | ---------------------------------------------------------------------------------------- |
 | Incident: Carol's ambient "flaky :(" leads to a push and a PR                | Carol   | `null`       | Carol is asked. She declines, and the model asks Alice to confirm in the thread.         |
 | Someone remarks in passing, and an earlier request would run on their access | Them    | `null`       | They are asked before their access is used.                                              |
+| Carol's ambient question needs a read of her Notion                          | Carol   | `null`       | Carol is asked, unless the author's policy pre-approves reads.                           |
+| Alice replies to the agent's answer without mentioning it                    | Alice   | Alice        | No prompt.                                                                               |
 | Bob steers and asks for a Snowflake table he can't access                    | Bob     | Bob          | The query runs as Bob, and Snowflake denies it.                                          |
 | Alice asks for a feature, Bob clarifies, PR with `actAs: "owner"`            | Alice   | Bob          | Alice is asked, unless the policy approves because every contributor can write the repo. |
-| Alice mentions the agent alone                                               | Alice   | Alice        | No prompt. This is today's behavior.                                                     |
+| Bob says "open it under me"                                                  | Bob     | Bob          | The model picks `actAs: "current"`, and the PR opens as Bob.                             |
+| Alice allows a push for this turn, then Dave joins                           | Alice   | Dave         | The grant is revoked, and Alice is asked again.                                          |
 | Writes with an app credential                                                | Agent   | any          | Consent doesn't apply. Approval policies do.                                             |
 
-## Rollout
+## Delivery
 
-1. **Before 1.0: identity and consent.** Add `addressed` to deliveries, add
-   `owner`, `contributors`, and `directedBy`, and redefine `auth.current`. Add
-   `actAs`, `access`, and `purpose`, consent requests with `consent_declined`,
-   owner-targeted requests, and the git extension fields. With today's
-   queueing, only ambient turns see new prompts.
-2. **Opt-in steering:** `defineAgent({ experimental: { multiplayerSteering: true } })`,
-   first in code channels.
-3. **Default steering.** Remove the queue path for other principals. Decide
-   before 1.0 whether this ships in 1.0 or waits for a major release.
+Everything ships in 1.0, in this order:
+
+1. Identity and consent: `addressed` on deliveries; `owner`, `contributors`,
+   and `directedBy`; the redefined `auth.current`; `actAs` and `purpose`;
+   consent requests with turn grants and `consent_declined`; owner-targeted
+   requests; and the git extension fields.
+2. Steering by any principal as the default, which removes the queue path for
+   other principals.
+
+The first part is safe on its own. The second depends on it.
 
 ## Alternatives considered
 
@@ -257,35 +304,52 @@ sender and `addressed`.
   steered. It also stalls threads (#6148).
 - **Intersect permissions.** Credentials are opaque tokens, so eve can't
   compute an intersection.
+- **Exempt reads from consent.** Ambient reads would carry a person's private
+  data into a shared thread they never asked about.
+- **Treat anyone who once addressed the agent as addressed.** That reopens the
+  passing-remark case for every earlier participant.
+- **Explicit ownership handoff.** It adds a request kind and a changing
+  `owner` to solve what per-call `actAs` behind the consent rule already
+  solves.
+- **Owner-only controls.** It would add eve's first per-session access list
+  and conflict with Slack's required code-channel stop.
+- **Per-turn consent by default.** One tap would cover calls the card never
+  showed.
+- **Experimental opt-in, or a pinned default that flips in 1.x.** Both keep a
+  queue mode with no security reason for it.
 
 ## Testing
 
-E2E evals, written as ordinary Alice, Bob, and Carol narratives:
+E2E evals, written as ordinary Alice, Bob, Carol, and Dave narratives:
 
-- An ambient message that resumes earlier work raises consent before a write,
-  and declining it reaches the model as `consent_declined`.
-- A read-only call in an ambient turn runs without a prompt.
+- An ambient message that resumes earlier work asks for consent before a
+  write, and declining reaches the model as `consent_declined`.
+- An ambient read asks for consent, and a policy that pre-approves
+  `readOnlyHint` tools runs it without a prompt.
+- Alice's unmentioned reply right after the agent answers her runs without a
+  prompt. The same reply after Bob writes in between asks her.
 - Bob's addressed steer resolves his own token for a user-scoped connection.
 - An owner-bound write after Bob steers asks Alice, and Bob can't answer it.
+- "Allow for this turn" covers later calls on that connection, and Dave
+  joining revokes it.
 - An approval policy that checks contributors approves the write without a
   prompt.
 - An inbound hook can't mark a message as addressed.
-- With steering limited to the owner, other principals' messages queue as
-  today, and consent still applies.
+- Cancelling a turn withdraws its pending consent requests.
 
-## Open questions
+## Decisions
 
-- **Ambient reads.** Should reads also need consent in ambient turns? They
-  can post the subject's private data into a shared thread.
-- **Unmentioned follow-ups.** Should the person who addressed the agent stay
-  addressed for their follow-ups in the same thread? That's less friction, but
-  it reopens the passing-remark case for people who once addressed the agent.
-- **Naming.** `auth.owner` and `auth.directedBy`, or turn-level fields under
-  `ctx.session.turn`? Is `actAs` clear next to `principalType`?
-- **Transferring ownership.** Should Bob be able to take over a turn, given
-  that his text alone shouldn't escalate?
-- **Control messages.** Should `reset`, `clear`, and cancel from another
-  principal need the owner? Session admission (`execution/session/admission.ts`)
-  doesn't check the principal; channels may.
-- **Consent scope.** Is consent per call, or per turn and connection? Per
-  call is safest. A turn with several pushes would prompt repeatedly.
+Resolved during review:
+
+1. Reads need consent. Authors opt out per tool with an approval policy, and
+   there is no `access` option.
+2. Unmentioned Slack replies are addressed by turn-taking, and code channels
+   are always addressed.
+3. Identities live on `ctx.session.auth` as `owner`, `contributors`, and
+   `directedBy`, and `actAs` takes `"current" | "owner"`.
+4. Ownership never transfers. Tools may let the model choose `actAs` per call.
+5. Anyone admitted to the session may send controls. Refusing `reset` or
+   `clear` is app policy.
+6. Consent is "Allow once" or "Allow for this turn". Grants cover one subject
+   and one connection, and a new contributor revokes them.
+7. Steering by any principal is the default in 1.0.
