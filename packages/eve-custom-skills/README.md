@@ -2,7 +2,7 @@
 
 `eve/extensions/custom-skills` lets the people talking to an agent save their own skills: personal skills that follow a user everywhere, and shared skills for everyone in a channel or group chat.
 
-It ships inside the `eve` package. This private `@eve/custom-skills` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/custom-skills/extension` and publishes it as `eve/extensions/custom-skills`, with helpers at `eve/extensions/custom-skills/policies` and `eve/extensions/custom-skills/repository`.
+User-facing docs live in [`docs/extensions/custom-skills.md`](../../docs/extensions/custom-skills.md); the design is in [`research/custom-skills.md`](../../research/custom-skills.md). It ships inside the `eve` package. This private `@eve/custom-skills` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/custom-skills/extension` and publishes it as `eve/extensions/custom-skills`, with helpers at `eve/extensions/custom-skills/policies` and `eve/extensions/custom-skills/repository`.
 
 - **Immutable versions, one live version.** A clean first version goes live. Later saves are drafts that change nothing until `publish`, and `rollback` makes an exact earlier version live again. A version's status follows from the live version: `active`, `superseded` below it, `draft` above it.
 - **Three application modes, saved per version.** `always` injects the skill into the system prompt every turn. `on-demand` lists it for `eve__skill`. `deferred` keeps it out of the prompt until `eve__search` finds it. A version applies in the mode it was saved with; `set_mode` changes the live version's.
