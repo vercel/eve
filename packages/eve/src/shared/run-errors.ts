@@ -20,6 +20,17 @@ export class HookNotFoundError extends Error {
   }
 }
 
+/** No host holds the run `runId`: Workflow's `WorkflowRunNotFoundError`, by its name. */
+export class RunNotFoundError extends Error {
+  override readonly name = "WorkflowRunNotFoundError";
+  readonly runId: string;
+
+  constructor(runId: string) {
+    super(`Run "${runId}" not found`);
+    this.runId = runId;
+  }
+}
+
 /**
  * A step error no durable host retries. Workflow's `FatalError.is(error)` accepts it by its
  * name and its `fatal` marker, so a step that throws it fails without retries on Workflow, as one
@@ -62,6 +73,11 @@ export function isHookConflict(error: unknown): boolean {
 }
 
 /** The run doesn't exist (yet: one `start()` accepted may not be readable). */
+/** A World refused to create what it already holds, such as a second `run_created` for one run. */
+export function isEntityConflict(error: unknown): boolean {
+  return anyCause(error, ["EntityConflictError"]);
+}
+
 export function isRunNotFound(error: unknown): boolean {
   return anyCause(error, ["WorkflowRunNotFoundError"]);
 }
