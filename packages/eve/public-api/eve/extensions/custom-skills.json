@@ -9,6 +9,7 @@
   "SkillChangeEvent",
   "SkillLimits",
   "SkillLiveState",
+  "SkillRef",
   "SkillScope",
   "SkillScopeContext",
   "SkillScopeResolver",

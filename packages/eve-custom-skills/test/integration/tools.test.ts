@@ -142,7 +142,7 @@ test("a configured rule can refuse changes", async () => {
 
 test("removal reports who removed what", async () => {
   const events = mount();
-  await run(create, { ...deploy }, context());
+  const created = await run(create, { ...deploy }, context());
   const ctx = context({ approvedBy: alice });
   const { status, prompt } = await decide(remove, { names: ["deploy", "missing"] }, ctx);
   assert.equal(status, "user-approval");
@@ -151,7 +151,7 @@ test("removal reports who removed what", async () => {
   assert.deepEqual([result.deleted, result.notFound], [["deploy"], ["missing"]]);
   assert.deepEqual(events.at(-1), {
     kind: "removed",
-    names: ["deploy"],
+    skills: [{ id: created.id, name: "deploy" }],
     scope: events.at(-1)?.scope,
     actor: alice,
     approvedBy: alice,

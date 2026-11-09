@@ -20,18 +20,28 @@ const { approval, execute } = skillChange({
   async plan(input, { skills, scope }) {
     const names = [...new Set(input.names.map((name) => skills.normalizeName(name)))];
     const live = await skills.liveStates(scope, names);
-    const targets = names.flatMap((name, index) => {
+    const found = names.flatMap((name, index) => {
       const state = live[index];
-      return state ? [{ name, warnings: [], live: state }] : [];
+      return state ? [{ name, state }] : [];
     });
-    return { plan: { names }, changesLive: targets.length > 0, targets };
-  },
-  async run({ names }, { skills, scope, approved }) {
-    requireApproval(approved);
-    const { removed, notFound } = await skills.remove(scope, names);
     return {
-      output: { deleted: removed, notFound },
-      ...(removed.length > 0 && { change: { kind: "removed" as const, names: removed } }),
+      plan: {
+        skills: found.map(({ name, state }) => ({ id: state.id, name })),
+        missing: names.filter((_, index) => !live[index]),
+      },
+      changesLive: found.length > 0,
+      targets: found.map(({ name, state }) => ({ id: state.id, name, warnings: [], live: state })),
+    };
+  },
+  async run(plan, { skills, scope, approved }) {
+    requireApproval(approved);
+    const { removed, notFound } = await skills.remove(scope, plan.skills);
+    return {
+      output: {
+        deleted: removed.map(({ name }) => name),
+        notFound: [...plan.missing, ...notFound.map(({ name }) => name)],
+      },
+      ...(removed.length > 0 && { change: { kind: "removed" as const, skills: removed } }),
     };
   },
 });

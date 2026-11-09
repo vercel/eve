@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   InvalidSkillContentError,
   InvalidSkillTransitionError,
@@ -9,6 +11,7 @@ import type { SkillCatalog, SkillHead, SkillRepository, SkillVersionRecord } fro
 import type {
   SkillApplicationMode,
   SkillAuthor,
+  SkillRef,
   SkillLiveState,
   SkillScope,
   SkillSummary,
@@ -38,6 +41,8 @@ export interface SaveSkillInput {
 
 /** What a save would do, computed before it runs so an approval rule can judge it. */
 export interface SavePlan {
+  /** The existing skill's ID, or `null` for a new skill. */
+  readonly id: string | null;
   readonly name: string;
   readonly description: string;
   readonly markdown: string;
@@ -85,10 +90,11 @@ function liveState(head: SkillHead | null): SkillLiveState {
     : { version: head.liveVersion, applicationMode: head.applicationMode };
 }
 
-function materialize(name: string, version: SkillVersionRecord, head: SkillHead): StoredSkill {
+function materialize(version: SkillVersionRecord, head: SkillHead): StoredSkill {
   const live = version.version === head.liveVersion;
   return {
-    name,
+    id: head.id,
+    name: head.name,
     version: version.version,
     status: versionStatus(version.version, head.liveVersion),
     liveVersion: head.liveVersion,
@@ -154,11 +160,11 @@ export class SkillLifecycle {
 
   async #requireVersion(
     scope: SkillScope,
-    name: string,
+    head: SkillHead,
     version: number,
   ): Promise<SkillVersionRecord> {
-    const [record] = await this.#repository.getVersions(scope, [{ name, version }]);
-    if (!record) throw new SkillVersionNotFoundError(name, version);
+    const [record] = await this.#repository.getVersions(scope, [{ id: head.id, version }]);
+    if (!record) throw new SkillVersionNotFoundError(head.name, version);
     return record;
   }
 
@@ -168,12 +174,12 @@ export class SkillLifecycle {
     );
     const versions = await this.#repository.getVersions(
       scope,
-      live.map(({ name, liveVersion }) => ({ name, version: liveVersion })),
+      live.map(({ id, liveVersion }) => ({ id, version: liveVersion })),
     );
     return live
       .flatMap((head, index) => {
         const version = versions[index];
-        if (version) return [materialize(head.name, version, head)];
+        if (version) return [materialize(version, head)];
         console.warn("[custom-skills] live version is missing", {
           name: head.name,
           version: head.liveVersion,
@@ -232,8 +238,9 @@ export class SkillLifecycle {
     const liveRecord =
       existing?.liveVersion == null
         ? null
-        : await this.#requireVersion(scope, name, existing.liveVersion);
+        : await this.#requireVersion(scope, existing, existing.liveVersion);
     return {
+      id: existing?.id ?? null,
       name,
       ...content,
       applicationMode,
@@ -259,6 +266,7 @@ export class SkillLifecycle {
       const expectedLatest = plan.version === 1 ? null : plan.version - 1;
       try {
         const result = await this.#repository.appendVersion(scope, {
+          id: plan.id ?? randomUUID(),
           name: plan.name,
           expectedLatest,
           expectedRevision: plan.revision,
@@ -274,7 +282,7 @@ export class SkillLifecycle {
           activate: plan.activates && options.draft !== true,
         });
         return {
-          skill: materialize(plan.name, result.version, result.head),
+          skill: materialize(result.version, result.head),
           previous: { version: plan.live.version, applicationMode: plan.live.applicationMode },
           replayed: result.replayed,
         };
@@ -296,11 +304,11 @@ export class SkillLifecycle {
     const [shownVersions, latestVersions] = await Promise.all([
       this.#repository.getVersions(
         scope,
-        heads.map((head, index) => ({ name: head.name, version: shown[index]! })),
+        heads.map((head, index) => ({ id: head.id, version: shown[index]! })),
       ),
       this.#repository.getVersions(
         scope,
-        heads.map(({ name, latestVersion }) => ({ name, version: latestVersion })),
+        heads.map(({ id, latestVersion }) => ({ id, version: latestVersion })),
       ),
     ]);
     return heads
@@ -310,6 +318,7 @@ export class SkillLifecycle {
         const firstDraft = (head.liveVersion ?? 0) + 1;
         return [
           {
+            id: head.id,
             name: head.name,
             description: shownVersion.description,
             status: head.liveVersion === null ? "draft" : "active",
@@ -332,9 +341,9 @@ export class SkillLifecycle {
   /** Every version, newest first. */
   async listVersions(scope: SkillScope, name: string): Promise<StoredSkill[]> {
     const head = await this.#requireHead(scope, name);
-    const versions = await this.#repository.listVersions(scope, name);
+    const versions = await this.#repository.listVersions(scope, head.id);
     return versions
-      .map((version) => materialize(name, version, head))
+      .map((version) => materialize(version, head))
       .sort((a, b) => b.version - a.version);
   }
 
@@ -342,7 +351,7 @@ export class SkillLifecycle {
   async getVersion(scope: SkillScope, name: string, version?: number): Promise<StoredSkill> {
     const head = await this.#requireHead(scope, name);
     const target = version ?? head.latestVersion;
-    return materialize(name, await this.#requireVersion(scope, name, target), head);
+    return materialize(await this.#requireVersion(scope, head, target), head);
   }
 
   /** Checks that `target` can go live, in the mode it was saved with. */
@@ -353,7 +362,7 @@ export class SkillLifecycle {
         `Skill "${name}" version ${target} is already live. If it is not applying, check its application mode with \`set_mode\`.`,
       );
     }
-    const version = await this.#requireVersion(scope, name, target);
+    const version = await this.#requireVersion(scope, head, target);
     if (!version.validation.valid) {
       throw new InvalidSkillTransitionError(
         `Skill "${name}" version ${target} failed validation: ${version.validation.errors.join(" ")}`,
@@ -367,20 +376,20 @@ export class SkillLifecycle {
     return { head, version, revision: catalog.revision };
   }
 
-  async #applyPublish(scope: SkillScope, name: string, plan: HeadPlan): Promise<SkillChange> {
+  async #applyPublish(scope: SkillScope, plan: HeadPlan): Promise<SkillChange> {
     const updated = await this.#repository.updateHead(scope, {
-      name,
+      id: plan.head.id,
       liveVersion: plan.version.version,
       applicationMode: plan.version.applicationMode,
       expectedRevision: plan.revision,
     });
-    return { skill: materialize(name, plan.version, updated), previous: liveState(plan.head) };
+    return { skill: materialize(plan.version, updated), previous: liveState(plan.head) };
   }
 
   /** Makes an exact version live, in the mode it was saved with. */
   async publish(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
     return this.#retrying(async () =>
-      this.#applyPublish(scope, name, await this.planPublish(scope, name, target)),
+      this.#applyPublish(scope, await this.planPublish(scope, name, target)),
     );
   }
 
@@ -405,7 +414,7 @@ export class SkillLifecycle {
   /** Makes an exact earlier version live again, in the mode it was saved with. */
   async rollback(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
     return this.#retrying(async () =>
-      this.#applyPublish(scope, name, await this.planRollback(scope, name, target)),
+      this.#applyPublish(scope, await this.planRollback(scope, name, target)),
     );
   }
 
@@ -427,7 +436,7 @@ export class SkillLifecycle {
         `Skill "${name}" version ${target} is not active. The current active version is ${head.liveVersion}; review it before changing how it is applied.`,
       );
     }
-    const version = await this.#requireVersion(scope, name, target);
+    const version = await this.#requireVersion(scope, head, target);
     if (head.applicationMode !== mode) {
       if (mode === "always") {
         await this.#assertAlwaysOnCapacity(scope, catalog, name, version.markdown);
@@ -455,34 +464,49 @@ export class SkillLifecycle {
         head.applicationMode === mode
           ? head
           : await this.#repository.updateHead(scope, {
-              name,
+              id: head.id,
               applicationMode: mode,
               expectedRevision: revision,
             });
-      return { skill: materialize(name, version, updated), previous: liveState(head) };
+      return { skill: materialize(version, updated), previous: liveState(head) };
     });
   }
 
-  /** The live state of each named skill, `null` for any that don't exist. */
+  /** Each named skill's ID and live state, `null` for any that don't exist. */
   async liveStates(
     scope: SkillScope,
     names: readonly string[],
-  ): Promise<Array<(SkillLiveState & { readonly instructions?: string }) | null>> {
-    const heads = await Promise.all(names.map((name) => this.#repository.getHead(scope, name)));
+  ): Promise<
+    Array<(SkillLiveState & { readonly id: string; readonly instructions?: string }) | null>
+  > {
+    const { heads: all } = await this.#repository.listHeads(scope);
+    const heads = names.map((name) => all.find((head) => head.name === name) ?? null);
     const live = heads.flatMap((head) =>
-      head?.liveVersion == null ? [] : [{ name: head.name, version: head.liveVersion }],
+      head?.liveVersion == null ? [] : [{ id: head.id, version: head.liveVersion }],
     );
     const records = await this.#repository.getVersions(scope, live);
-    const instructions = new Map(live.map((ref, index) => [ref.name, records[index]?.markdown]));
+    const instructions = new Map(live.map((ref, index) => [ref.id, records[index]?.markdown]));
     return heads.map((head) =>
       head === null
         ? null
-        : { ...liveState(head), instructions: instructions.get(head.name) ?? undefined },
+        : { id: head.id, ...liveState(head), instructions: instructions.get(head.id) ?? undefined },
     );
   }
 
-  /** Deletes skills and their whole version history. */
-  async remove(scope: SkillScope, names: readonly string[]) {
-    return this.#repository.remove(scope, [...new Set(names)]);
+  /**
+   * Deletes skills and their whole version history. Skills are removed by ID,
+   * so a skill recreated under the same name after a removal was planned is
+   * left alone.
+   */
+  async remove(
+    scope: SkillScope,
+    skills: readonly SkillRef[],
+  ): Promise<{ removed: SkillRef[]; notFound: SkillRef[] }> {
+    const result = await this.#repository.remove(scope, [...new Set(skills.map(({ id }) => id))]);
+    const removed = new Set(result.removed);
+    return {
+      removed: skills.filter(({ id }) => removed.has(id)),
+      notFound: skills.filter(({ id }) => !removed.has(id)),
+    };
   }
 }

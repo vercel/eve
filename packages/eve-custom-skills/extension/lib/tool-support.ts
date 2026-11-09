@@ -19,6 +19,7 @@ import {
   type SkillApprovalTarget,
   type SkillChangeEvent,
   type SkillLiveState,
+  type SkillRef,
   type SkillScope,
   type StoredSkill,
 } from "./types.ts";
@@ -110,7 +111,7 @@ type Change =
       readonly skill: StoredSkill;
       readonly previous: SkillLiveState;
     }
-  | { readonly kind: "removed"; readonly names: readonly string[] };
+  | { readonly kind: "removed"; readonly skills: readonly SkillRef[] };
 
 /** What running a change returns: the tool output and the change to report. */
 export interface ChangeResult<T> {
@@ -245,6 +246,7 @@ export function publishTarget(
   { head, version }: { readonly head: SkillHead; readonly version: SkillVersionRecord },
 ): SkillApprovalTarget {
   return {
+    id: head.id,
     name,
     version: version.version,
     description: version.description,

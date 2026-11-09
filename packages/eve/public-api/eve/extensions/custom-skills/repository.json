@@ -9,6 +9,7 @@
   "SkillHeadUpdate",
   "SkillLifecycleError",
   "SkillNotFoundError",
+  "SkillRef",
   "SkillRepository",
   "SkillVersionRecord",
   "SkillVersionRef",

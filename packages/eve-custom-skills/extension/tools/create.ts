@@ -50,6 +50,7 @@ const { approval, execute } = skillChange<z.infer<typeof inputSchema>, SavePlan,
       changesLive: plan.activates,
       targets: [
         {
+          ...(plan.id !== null && { id: plan.id }),
           name: plan.name,
           version: plan.version,
           description: plan.description,
@@ -75,6 +76,7 @@ const { approval, execute } = skillChange<z.infer<typeof inputSchema>, SavePlan,
         : `Version ${skill.liveVersion} stays live.`;
     return {
       output: {
+        id: skill.id,
         name: skill.name,
         version: skill.version,
         status: skill.status,
