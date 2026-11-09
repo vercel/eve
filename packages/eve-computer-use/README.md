@@ -42,6 +42,8 @@ export default defineSandbox(async () => {
 });
 ```
 
+Include `COMPUTER_USE_REVALIDATION_KEY` in the environment options, for example `env: { COMPUTER_USE_REVALIDATION_KEY }`, so the prepared template rebuilds when computer use changes. Firefox tracks the ESR line Mozilla currently serves, so a template picks up a new ESR line when it rebuilds.
+
 Mounting the extension exposes `computer_use` but does not install or start its driver. The prepared artifact captures files, not running processes; the `defineSandbox()` selector starts the driver once for each new durable sandbox. If the driver exits or the provider resumes only filesystem state, call `startComputerUse` again before using the tool; resuming a sandbox does not rerun the selector. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
 
 ## Develop in this workspace
