@@ -131,6 +131,8 @@ export class SessionStateCursor {
       const next = applySessionStateDelta(base, result.stateDelta);
       const nextTokens = sessionHookTokens(next);
       await this.inbox.claimSessionHooks(nextTokens);
+      // Released only after the claims, so a session never answers at fewer addresses than
+      // either state names, even while it moves to a new one.
       const kept = new Set(nextTokens);
       const dropped = sessionHookTokens(base).filter((token) => !kept.has(token));
       if (dropped.length > 0) await this.inbox.releaseSessionHooks(dropped);
