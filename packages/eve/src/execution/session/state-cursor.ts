@@ -15,14 +15,14 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 /**
  * The one set of session values owned by the workflow executing a session.
  * Steps run against it and return deltas; the cursor applies each to the
- * values its step was given and claims any continuation address the step
- * introduced, so every hook the session answers to is registered before the
- * next step runs.
+ * values its step was given, claims any continuation address the step
+ * introduced, and releases any the step dropped, so the hooks the session
+ * answers to match its state before the next step runs.
  */
 export class SessionStateCursor {
   readonly sessionWritable: WritableStream<Uint8Array>;
 
-  private readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
+  private readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks" | "releaseSessionHooks">;
   private values: SessionStateValues;
   /** Session steps adopted so far, and those still running. */
   private adopted = 0;
@@ -30,7 +30,7 @@ export class SessionStateCursor {
 
   constructor(
     input: SessionStateValues & {
-      readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
+      readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks" | "releaseSessionHooks">;
       readonly sessionWritable: WritableStream<Uint8Array>;
     },
   ) {
@@ -83,7 +83,7 @@ export class SessionStateCursor {
   /**
    * Runs a step beside the session's own steps, which do not wait for it.
    * Its delta applies only while `wanted()` holds, no other step ran or is
-   * running meanwhile, and it adds no session address; otherwise it is
+   * running meanwhile, and it adds or releases no session address; otherwise it is
    * dropped and this returns `false`. A step run this way must leave nothing
    * that dropping its delta would lose for good.
    */
@@ -104,9 +104,8 @@ export class SessionStateCursor {
     }
     const next = applySessionStateDelta(base, result.stateDelta);
     // Applied synchronously, so no session step can start between the checks and the change;
-    // claiming a new address would need an await.
-    const tokens = new Set(sessionHookTokens(base));
-    if (sessionHookTokens(next).some((token) => !tokens.has(token))) return false;
+    // claiming or releasing an address would need an await.
+    if (addressesChanged(base, next)) return false;
     this.values = next;
     this.adopted++;
     return true;
@@ -130,7 +129,11 @@ export class SessionStateCursor {
         throw new Error("A session step that was not given the history cannot change it.");
       }
       const next = applySessionStateDelta(base, result.stateDelta);
-      await this.inbox.claimSessionHooks(sessionHookTokens(next));
+      const nextTokens = sessionHookTokens(next);
+      await this.inbox.claimSessionHooks(nextTokens);
+      const kept = new Set(nextTokens);
+      const dropped = sessionHookTokens(base).filter((token) => !kept.has(token));
+      if (dropped.length > 0) await this.inbox.releaseSessionHooks(dropped);
       if (this.values !== base) {
         throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
       }
@@ -141,4 +144,10 @@ export class SessionStateCursor {
       this.running--;
     }
   }
+}
+
+function addressesChanged(base: SessionStateValues, next: SessionStateValues): boolean {
+  const before = new Set(sessionHookTokens(base));
+  const after = sessionHookTokens(next);
+  return after.length !== before.size || after.some((token) => !before.has(token));
 }

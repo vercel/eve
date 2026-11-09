@@ -151,6 +151,11 @@ export interface SessionInboxOwnership {
     tokens: readonly string[],
     options?: SessionHookBatchClaimOptions,
   ): Promise<void>;
+  /**
+   * Disposes the hooks for these tokens so another session can claim them.
+   * Payloads they already accepted stay queued. Unknown tokens are ignored.
+   */
+  releaseSessionHooks(tokens: readonly string[]): Promise<void>;
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
@@ -435,6 +440,17 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         [...new Set(tokens)].map((token) => claimSessionHook(token, options)),
       );
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+    },
+    async releaseSessionHooks(tokens) {
+      const releasing = new Set(tokens);
+      const released = sources.filter((source) => releasing.has(source.token));
+      if (released.length === 0) return;
+      for (const source of released) {
+        source.stopping = true;
+        sources.splice(sources.indexOf(source), 1);
+      }
+      notify();
+      await Promise.all(released.map(({ hook }) => disposeHook(hook)));
     },
     async whenTakenOver(signal) {
       // Wakes the loop now rather than at the next arrival, so no waiter lingers.

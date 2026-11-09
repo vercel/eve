@@ -312,6 +312,24 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
           });
           accessor.set(ContinuationTokenKey, token);
         },
+        release(rawToken: string): void {
+          if (rawToken.length === 0)
+            throw new Error("Releasing an address requires a nonempty token.");
+          // Read live: an `alias` through this same handle may have moved the current address.
+          const current = accessor.get(ContinuationTokenKey) ?? currentToken;
+          const token = namespaceContinuationToken(current, rawToken);
+          if (token === current) {
+            throw new Error(
+              "A session can't release its current address. Alias its new address first.",
+            );
+          }
+          const claimed = accessor.get(ContinuationHookTokensKey) ?? [current];
+          if (!claimed.includes(token)) return;
+          accessor.set(
+            ContinuationHookTokensKey,
+            claimed.filter((claimedToken) => claimedToken !== token),
+          );
+        },
       };
     },
   };
