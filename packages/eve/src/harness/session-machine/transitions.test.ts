@@ -1005,15 +1005,11 @@ describe("a remote agent's relayed sign-in", () => {
   }
 
   /**
-   * Relays `events` as the agent session serving a child forwards them to this session: `remote`
+   * The payload the agent session serving a child forwards to this session for `events`: `remote`
    * is that session's own record of where the child runs, never the child's claim.
    */
-  async function forwarded(
-    session: HarnessSession,
-    events: AgentSessionRequest["events"],
-    remote?: typeof REMOTE,
-  ) {
-    const sent: AgentSessionRequest[] = [];
+  async function sent(events: AgentSessionRequest["events"], remote?: typeof REMOTE) {
+    const payloads: AgentSessionRequest[] = [];
     await forwardAgentSessionRequest({
       from: {
         callId: "remote",
@@ -1028,7 +1024,7 @@ describe("a remote agent's relayed sign-in", () => {
         sent: 0,
         send: async (message) => {
           if (message.kind === "request" && message.request.kind === "relay")
-            sent.push(message.request.event);
+            payloads.push(message.request.event);
         },
       },
       replyTo: "agent-session-hook",
@@ -1040,9 +1036,19 @@ describe("a remote agent's relayed sign-in", () => {
         subagentName: "helper",
         events,
       },
+      sessionKey: `${runId}:0`,
       ...(remote !== undefined && { remote }),
     });
-    return relay(viewOf(session), { callsBack: callsBackFor(OWN), payload: sent[0]! }).events;
+    return payloads[0]!;
+  }
+
+  async function forwarded(
+    session: HarnessSession,
+    events: AgentSessionRequest["events"],
+    remote?: typeof REMOTE,
+  ) {
+    const payload = await sent(events, remote);
+    return relay(viewOf(session), { callsBack: callsBackFor(OWN), payload }).events;
   }
 
   const opened = (waitsOn?: string): AgentSessionRequest["events"][number] => ({
@@ -1096,42 +1102,57 @@ describe("a remote agent's relayed sign-in", () => {
   });
 
   it("never lets a remote agent settle a subagent's mirrored sign-in", async () => {
-    // The subagent's sign-in waits on Alice's card; the remote then reports it declined, and
-    // withdrawn, claiming the subagent's call and session.
-    const mirrored = await forwarded(parentAsking(), [opened()]);
-    const asked = withPublished(parentAsking(), mirrored);
+    // The subagent's sign-in waits on Alice's card. The remote then reports it declined, and
+    // withdrawn, under the subagent's call, session and interaction ids, including when the remote
+    // names the subagent's session as its own.
+    const asked = withPublished(parentAsking(), await forwarded(parentAsking(), [opened()]));
     const tables = viewOf(asked).projection.view;
-    for (const outcome of ["declined", "withdrawn"] as const) {
-      const settled = {
-        type: "interaction.settled" as const,
-        data: { interactionId: "forged", outcome },
-      };
-      expect(await forwarded(asked, [settled], REMOTE)).toEqual([]);
-      expect(
-        relayedAnswers(tables, {
-          kind: "subagent-interaction",
-          callId: "agent",
-          childSessionId: REMOTE.sessionId,
-          subagentName: "helper",
-          events: [settled],
-        }),
-      ).toEqual([]);
-    }
+    for (const remote of [REMOTE, { ...REMOTE, sessionId: "child-1" }])
+      for (const outcome of ["declined", "withdrawn"] as const) {
+        const settled = [
+          { type: "interaction.settled" as const, data: { interactionId: "forged", outcome } },
+        ];
+        expect(await forwarded(asked, settled, remote)).toEqual([]);
+        expect(relayedAnswers(tables, await sent(settled, remote))).toEqual([]);
+      }
     // The subagent's own decline settles it.
-    const declined = {
-      type: "interaction.settled" as const,
-      data: { interactionId: "forged", outcome: "declined" as const },
-    };
-    expect(await forwarded(asked, [declined])).toMatchObject([{ type: "interaction.settled" }]);
+    const declined = [
+      {
+        type: "interaction.settled" as const,
+        data: { interactionId: "forged", outcome: "declined" as const },
+      },
+    ];
+    expect(await forwarded(asked, declined)).toMatchObject([{ type: "interaction.settled" }]);
+    expect(relayedAnswers(tables, await sent(declined))).toMatchObject([
+      { interactionId: "forged", outcome: "declined" },
+    ]);
+  });
+
+  it("settles a remote agent's own request after its session is replaced", async () => {
+    // The remote opens a sign-in, its session is replaced, and the new session settles it.
+    const mirrored = await forwarded(parentAsking(), [opened()], REMOTE);
+    expect(mirrored).toMatchObject([
+      {
+        data: {
+          interactionId: `${runId}:0/forged`,
+          origin: { interactionId: "forged", sessionId: "child-1" },
+        },
+      },
+    ]);
+    const asked = withPublished(parentAsking(), mirrored);
+    const settled = [
+      {
+        type: "interaction.settled" as const,
+        data: { interactionId: "forged", outcome: "declined" as const },
+      },
+    ];
+    const replaced = { ...REMOTE, sessionId: "remote-2" };
+    expect(await forwarded(asked, settled, replaced)).toMatchObject([
+      { type: "interaction.settled", data: { interactionId: `${runId}:0/forged` } },
+    ]);
     expect(
-      relayedAnswers(tables, {
-        kind: "subagent-interaction",
-        callId: "agent",
-        childSessionId: "child-1",
-        subagentName: "helper",
-        events: [declined],
-      }),
-    ).toMatchObject([{ interactionId: "forged", outcome: "declined" }]);
+      relayedAnswers(viewOf(asked).projection.view, await sent(settled, replaced)),
+    ).toMatchObject([{ interactionId: `${runId}:0/forged`, outcome: "declined" }]);
   });
 });
 

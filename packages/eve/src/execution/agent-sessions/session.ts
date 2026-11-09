@@ -179,6 +179,7 @@ class RunAgentSession implements AgentSession {
             owner: this.#run.owner,
             replyTo: hook.token,
             request: reply,
+            sessionKey: this.#key,
             remote:
               this.#opened === undefined
                 ? undefined
