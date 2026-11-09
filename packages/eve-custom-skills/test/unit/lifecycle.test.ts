@@ -175,16 +175,17 @@ test("scopes keep their skills apart", async () => {
     { name: "deploy", description: ROUTING, markdown: "Mine." },
     { savedBy },
   );
-  await skills.save(
+  const ours = await skills.save(
     channel,
     { name: "deploy", description: ROUTING, markdown: "Ours." },
     { savedBy },
   );
   assert.equal((await skills.listLive(alice))[0]?.instructions, "Mine.");
   assert.equal((await skills.listLive(channel))[0]?.instructions, "Ours.");
-  assert.deepEqual(await skills.remove(channel, ["deploy", "missing"]), {
-    removed: ["deploy"],
-    notFound: ["missing"],
+  const missing = { id: "skill-missing", name: "missing" };
+  assert.deepEqual(await skills.remove(channel, [{ id: ours.skill.id, name: "deploy" }, missing]), {
+    removed: [{ id: ours.skill.id, name: "deploy" }],
+    notFound: [missing],
   });
   assert.equal((await skills.listLive(alice)).length, 1);
 });
@@ -231,4 +232,29 @@ test("the extension's own skill name is reserved", async () => {
     lifecycle().planSave(alice, { name: "Manage", description: ROUTING, markdown: "x" }),
     /extension's own skill/,
   );
+});
+
+test("skills keep a stable ID across versions, assigned by the repository", async () => {
+  const skills = lifecycle();
+  const input = { name: "deploy", description: ROUTING, markdown: "v1" };
+  const first = await skills.save(alice, input, { savedBy });
+  const second = await skills.save(alice, { ...input, markdown: "v2" }, { savedBy });
+  assert.equal(first.skill.id, "skill-1");
+  assert.equal(second.skill.id, first.skill.id);
+  assert.equal((await skills.publish(alice, "deploy", 2)).skill.id, first.skill.id);
+  assert.deepEqual(
+    (await skills.listSummaries(alice)).map(({ id, name }) => [id, name]),
+    [["skill-1", "deploy"]],
+  );
+});
+
+test("removing by ID leaves a skill recreated under the same name", async () => {
+  const skills = lifecycle();
+  const input = { name: "deploy", description: ROUTING, markdown: "v1" };
+  const old = await skills.save(alice, input, { savedBy });
+  await skills.remove(alice, [{ id: old.skill.id, name: "deploy" }]);
+  const recreated = await skills.save(alice, input, { savedBy });
+  const result = await skills.remove(alice, [{ id: old.skill.id, name: "deploy" }]);
+  assert.deepEqual(result.removed, []);
+  assert.equal((await skills.listLive(alice))[0]?.id, recreated.skill.id);
 });

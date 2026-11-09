@@ -19,6 +19,7 @@ export default defineTool({
     return withSkillScope(ctx, input.scope, "Failed to read the skill.", async (skills, scope) => {
       const skill = await skills.getVersion(scope, skills.normalizeName(input.name), input.version);
       return {
+        id: skill.id,
         name: skill.name,
         version: skill.version,
         status: skill.status,

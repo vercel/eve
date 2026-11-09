@@ -16,6 +16,7 @@ export type {
   SkillAuthor,
   SkillChangeEvent,
   SkillLiveState,
+  SkillRef,
   SkillScope,
   SkillScopeContext,
   SkillScopeResolver,

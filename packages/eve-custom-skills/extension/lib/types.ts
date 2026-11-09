@@ -78,8 +78,16 @@ export type SkillScopeResolver = (
   ctx: SkillScopeContext,
 ) => readonly SkillScope[] | Promise<readonly SkillScope[]>;
 
+/** A skill's stable ID and its name in the scope. */
+export interface SkillRef {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** One saved version of a skill, with its status relative to the live version. */
 export interface StoredSkill {
+  /** The skill's stable ID, the same across every version. */
+  readonly id: string;
   readonly name: string;
   readonly version: number;
   readonly status: SkillVersionStatus;
@@ -96,6 +104,7 @@ export interface StoredSkill {
 }
 
 export interface SkillSummary {
+  readonly id: string;
   readonly name: string;
   readonly description: string;
   readonly status: "active" | "draft";
@@ -135,7 +144,7 @@ export type SkillChangeEvent =
     })
   | (SkillChangeBase & {
       readonly kind: "removed";
-      readonly names: readonly string[];
+      readonly skills: readonly SkillRef[];
     });
 
 /** The lifecycle tools that change skills. */
@@ -143,6 +152,8 @@ export type SkillAction = "create" | "publish" | "rollback" | "set_mode" | "remo
 
 /** One skill a change affects, as the approval rule and card see it. */
 export interface SkillApprovalTarget {
+  /** The skill's ID. Absent when the change creates the skill. */
+  readonly id?: string;
   readonly name: string;
   /** The version the change saves or makes live. Absent for `remove`. */
   readonly version?: number;

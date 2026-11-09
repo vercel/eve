@@ -15,3 +15,4 @@ export type {
   SkillVersionRecord,
   SkillVersionRef,
 } from "../repository.ts";
+export type { SkillRef } from "../types.ts";

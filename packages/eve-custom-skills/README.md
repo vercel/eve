@@ -86,9 +86,38 @@ Always-on limits apply per scope, so a turn with a personal and a channel scope 
 
 ## Storage
 
-The default store keeps one catalog document per scope, holding every skill's live version, mode, and version index, plus one document per version. Catalog writes are compare-and-swap, and the catalog's version is the scope's revision, so concurrent saves get distinct version numbers and limit checks can't race. The scope key is hashed into the document path. Deleting a skill overwrites its version documents with an empty tombstone, because memory document backends have no delete; a backend that keeps object history still holds the old content.
+Every skill has a stable `id`, the same across its versions and in every `onChange` event, and a `name` that is unique within its scope. People and the model use names; use the ID to link a skill to records elsewhere. The tools remove skills by the ID they planned with, so a skill recreated under the same name isn't removed by an earlier approval.
 
-To keep skills elsewhere, implement `SkillRepository` from `eve/extensions/custom-skills/repository` (seven methods over skill heads and immutable versions, including a batch `getVersions`) and pass it as `repository`. Skills are addressed by name within a scope, and versions are numbered 1, 2, 3… with no gaps. `listHeads` returns the scope's `revision`, which changes on every write; reject a write whose `expectedRevision` is stale with `SkillConflictError`, and the lifecycle checks its limits again and retries. That keeps concurrent writers in a shared scope from exceeding the skill and always-on limits, or changing the mode of a version published in the meantime. Also throw `SkillConflictError` from `appendVersion` when the latest version isn't the expected one, and `SkillNotFoundError` from `updateHead` for a missing skill.
+The default store writes a documented, versioned layout under `namespace`:
+
+```text
+<namespace>/v1/index.json                                  every scope that has held skills, with its descriptor
+<namespace>/v1/scopes/<scope key>/catalog.json             the scope's skills by ID: name, live version, mode, version index
+<namespace>/v1/scopes/<scope key>/skills/<id>/<uuid>.json  one immutable version
+```
+
+Scope keys and IDs are path segments encoded with `encodePathSegment`: letters, digits, `-`, and `_` stay, and every other byte becomes `~` and two hex digits, so `space:slack:T1:C1` is stored as `space~3aslack~3aT1~3aC1`. The `v1` segment is the layout version; a later layout gets its own prefix and a migration, instead of reinterpreting these documents.
+
+Memory document backends can't list keys, so the index is what makes the store scannable. `listScopes()` returns every scope that has held skills, which an admin view or library can combine with `listHeads` and `getVersions`:
+
+```ts
+import { vercelBlob } from "eve/memory/file/vercel";
+import { documentRepository } from "eve/extensions/custom-skills/repository";
+
+const skills = documentRepository({ backend: vercelBlob(), namespace: "support-agent" });
+for (const scope of (await skills.listScopes?.()) ?? []) {
+  const { heads } = await skills.listHeads(scope);
+  console.log(
+    scope.name,
+    scope.label,
+    heads.map(({ id, name, liveVersion }) => ({ id, name, liveVersion })),
+  );
+}
+```
+
+Catalog writes are compare-and-swap, and the catalog's version is the scope's revision, so concurrent saves get distinct version numbers and limit checks can't race. Deleting a skill overwrites its version documents with an empty tombstone, because memory document backends have no delete; a backend that keeps object history still holds the old content.
+
+To keep skills elsewhere, implement `SkillRepository` from `eve/extensions/custom-skills/repository` and pass it as `repository`. Heads carry an `id`; `appendVersion` passes a fresh UUID for a new skill, which a repository may store or replace with its own ID returned in `head.id`. Names are unique per scope: reject a new skill whose name is taken with `SkillConflictError`. Versions are numbered 1, 2, 3… with no gaps. `listHeads` returns the scope's `revision`, which changes on every write; reject a write whose `expectedRevision` is stale with `SkillConflictError`, and the lifecycle checks its limits again and retries. That keeps concurrent writers in a shared scope from exceeding the skill and always-on limits, or changing the mode of a version published in the meantime. Also throw `SkillConflictError` from `appendVersion` when the latest version isn't the expected one, and `SkillNotFoundError` from `updateHead` for a missing skill. Implement the optional `listScopes` to make the store scannable.
 
 ## Validate
 

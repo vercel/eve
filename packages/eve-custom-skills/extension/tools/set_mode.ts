@@ -31,6 +31,7 @@ const { approval, execute } = skillChange({
       changesLive: head.applicationMode !== input.mode,
       targets: [
         {
+          id: head.id,
           name,
           version: version.version,
           instructions: version.markdown,

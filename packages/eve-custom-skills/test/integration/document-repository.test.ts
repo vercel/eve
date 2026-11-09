@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { inMemory, type MemoryDocumentBackend } from "eve/memory/file";
 
-import { documentRepository } from "../../extension/lib/document-repository.ts";
+import { documentRepository, encodePathSegment } from "../../extension/lib/document-repository.ts";
 import { SkillLifecycle } from "../../extension/lib/lifecycle.ts";
 import type { SkillScope } from "../../extension/lib/types.ts";
 
@@ -112,11 +112,12 @@ test("deleting a skill clears its version documents", async () => {
   );
   const versionKey = writes.find(({ content }) => content.includes('"markdown"'))?.key;
   assert.ok(versionKey);
-  assert.ok(!versionKey.includes("alice"), "scope keys are hashed into paths");
+  const [deploy] = await skills.listLive(alice);
+  assert.ok(deploy);
 
-  assert.deepEqual(await skills.remove(alice, ["deploy", "missing"]), {
-    removed: ["deploy"],
-    notFound: ["missing"],
+  assert.deepEqual(await skills.remove(alice, [{ id: deploy.id, name: "deploy" }]), {
+    removed: [{ id: deploy.id, name: "deploy" }],
+    notFound: [],
   });
   const cleared = await backend.read({ key: versionKey, signal: new AbortController().signal });
   assert.equal(cleared?.content, "");
@@ -136,4 +137,71 @@ test("concurrent writers can't exceed a scope's always-on limit", async () => {
   );
   assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
   assert.equal((await skills.listLive(channel)).length, 1);
+});
+
+test("the layout is readable and listable across scopes", async () => {
+  const backend = inMemory();
+  const writes: string[] = [];
+  const recording: MemoryDocumentBackend = {
+    read: backend.read,
+    async write(input) {
+      writes.push(input.key);
+      return backend.write(input);
+    },
+  };
+  const repository = documentRepository({ backend: recording, namespace: "support" });
+  const skills = new SkillLifecycle({ repository });
+  const first = await skills.save(
+    alice,
+    { name: "deploy", description: ROUTING, markdown: "Deploy." },
+    { savedBy },
+  );
+  await skills.save(
+    channel,
+    { name: "triage", description: ROUTING, markdown: "Triage." },
+    { savedBy },
+  );
+
+  assert.ok(writes.includes("support/v1/scopes/space~3aslack~3aT1~3aC1/catalog.json"));
+  assert.ok(
+    writes.some((key) =>
+      key.startsWith(`support/v1/scopes/user~3aalice/skills/${encodePathSegment(first.skill.id)}/`),
+    ),
+  );
+
+  // An admin view scans every scope without knowing the keys up front.
+  const scopes = await repository.listScopes?.();
+  assert.deepEqual(scopes?.map(({ key }) => key).sort(), [channel.key, alice.key].sort());
+  const library = await Promise.all(
+    (scopes ?? []).map(async (scope) => ({
+      scope: scope.name,
+      skills: (await repository.listHeads(scope)).heads.map(({ name }) => name),
+    })),
+  );
+  assert.deepEqual(
+    library.sort((a, b) => a.scope.localeCompare(b.scope)),
+    [
+      { scope: "channel", skills: ["triage"] },
+      { scope: "personal", skills: ["deploy"] },
+    ],
+  );
+});
+
+test("a new skill can't take a name another skill in the scope holds", async () => {
+  const repository = documentRepository({ backend: inMemory() });
+  const request = {
+    name: "deploy",
+    expectedLatest: null,
+    version: {
+      description: ROUTING,
+      markdown: "x",
+      applicationMode: "on-demand",
+      checksum: "c",
+      validation: { valid: true, errors: [], warnings: [] },
+      savedBy,
+    },
+    activate: true,
+  } as const;
+  await repository.appendVersion(alice, { ...request, id: "a" });
+  await assert.rejects(repository.appendVersion(alice, { ...request, id: "b" }), /already exists/);
 });
