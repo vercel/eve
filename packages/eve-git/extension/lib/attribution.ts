@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import type { SandboxSession } from "eve/sandbox";
 
-import { GitHubCommandInputError } from "./github-command-input-error.ts";
+import { GitHubCommandInputError } from "./github-shell-schema.ts";
 
 /** The person a commit or pull request is created for. */
 export interface GitHubCoAuthor {

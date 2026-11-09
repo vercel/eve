@@ -1,6 +1,6 @@
 import type { SandboxSession } from "eve/sandbox";
 
-import { GitHubCommandInputError } from "./github-command-input-error.ts";
+import { GitHubCommandInputError } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 
 type RootSandbox = Pick<SandboxSession, "resolvePath" | "run">;

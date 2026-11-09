@@ -10,11 +10,10 @@ import {
   isAttributable,
   type GitHubCoAuthor,
 } from "./attribution.ts";
-import { GitHubCommandInputError } from "./github-command-input-error.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
-import { GITHUB_TARGET } from "./github-shell-schema.ts";
+import { GITHUB_TARGET, GitHubCommandInputError } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
