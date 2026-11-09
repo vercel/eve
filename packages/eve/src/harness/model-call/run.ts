@@ -67,7 +67,7 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+  const failed = await prepareModelCall(step, await previewPrompt(step, input.turn));
   if (failed !== undefined) return failed;
   const prompt = await commitTurnInput(step, input.turn);
   // Over budget, the model doesn't run: the step's messages park with the prompt.

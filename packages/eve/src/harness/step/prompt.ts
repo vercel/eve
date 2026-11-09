@@ -33,6 +33,7 @@ export interface Prompt {
 
 export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
   const built = await settleHistory(step, turn);
+  step.session = built.session;
   return {
     clientContext: getTurnClientContextState(step.session.state, turn.turnId),
     messages: built.messages,
@@ -40,36 +41,41 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
 }
 
 /**
- * History repaired and with the task results the step delivers, and the turn as the repair left
- * its client context's position.
+ * History repaired and with the task results the step delivers, the session that records the
+ * delivery, and the turn as the repair left its client context's position. The step's session is
+ * left as it was, so a preview can read the same prompt without delivering anything.
  */
 async function settleHistory(
   step: Step,
   turn: TurnInput,
-): Promise<{ readonly messages: HarnessModelMessage[]; readonly turn: TurnInput }> {
+): Promise<{
+  readonly messages: HarnessModelMessage[];
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
+}> {
   const repaired = repairToolHistory({
     endsRequest: turn.messages.length === 0,
     messages: step.session.history,
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });
-  step.session = changeHistory(step.session, { repaired: repaired.messages });
+  let session = changeHistory(step.session, { repaired: repaired.messages });
   // Its own copy: task results join it below.
-  const messages = [...step.session.history];
+  const messages = [...session.history];
   if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
     const storedClientContext = {
       ...turn.storedClientContext,
       insertionIndex: repaired.insertionIndex,
     };
     turn = { ...turn, storedClientContext };
-    step.session = setTurnClientContextState(step.session, storedClientContext);
+    session = setTurnClientContextState(session, storedClientContext);
   }
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
-      session: step.session,
+      session,
       tools: await stepCatalog(step),
     });
-    step.session = taskContext.session;
+    session = taskContext.session;
     // A turn a task's result starts brings no input of its own: what eve adds for the turn
     // sits ahead of the results instead.
     messages.push(
@@ -78,7 +84,7 @@ async function settleHistory(
       ),
     );
   }
-  return { messages, turn };
+  return { messages, session, turn };
 }
 
 /**
@@ -87,6 +93,7 @@ async function settleHistory(
  */
 export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prompt> {
   const settled = await settleHistory(step, turn);
+  step.session = settled.session;
   const messages = placeTurnInput(step, settled.messages, settled.turn);
   step.session = changeHistory(step.session, { extend: messages });
   return {
@@ -96,14 +103,15 @@ export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prom
 }
 
 /**
- * The prompt the session's dynamic values are evaluated with: history and the turn's input,
- * without the task results and the client context's position a prompt settles.
+ * The prompt the session's dynamic values are evaluated with: the one the model call reads, with
+ * the task results it delivers, without committing the turn's input or the delivery.
  */
-export function previewPrompt(step: Step, turn: TurnInput): Prompt {
-  const messages = validateHarnessModelMessages([...step.session.history]);
+export async function previewPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
+  const settled = await settleHistory(step, turn);
+  const messages = validateHarnessModelMessages(settled.messages);
   return {
-    clientContext: turnClientContext(messages, turn),
-    messages: withTurnInput(messages, turn),
+    clientContext: turnClientContext(messages, settled.turn),
+    messages: withTurnInput(messages, settled.turn),
   };
 }
 
