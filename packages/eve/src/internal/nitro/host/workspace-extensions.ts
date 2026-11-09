@@ -58,21 +58,19 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
       : await Promise.all(input.changedPaths.map(async (path) => await toCanonicalPath(path)));
   const force = input.previousExtensions === undefined || changedPaths?.length === 0;
 
-  await Promise.all(
-    extensions.map(async (extension) => {
-      const previous = previousByPackageRoot.get(extension.packageRoot);
-      if (
-        force === true ||
-        previous === undefined ||
-        !sameBuildInputs(previous, extension) ||
-        changedPaths?.some((path) => affectsExtensionBuild(path, extension)) === true
-      ) {
-        await withExtensionBuildLock(extension.packageRoot, async () => {
-          await buildExtensionPackage(extension.packageRoot, extension.config);
-        });
-      }
-    }),
-  );
+  await buildInDependencyOrder(extensions, async (extension) => {
+    const previous = previousByPackageRoot.get(extension.packageRoot);
+    if (
+      force === true ||
+      previous === undefined ||
+      !sameBuildInputs(previous, extension) ||
+      changedPaths?.some((path) => affectsExtensionBuild(path, extension)) === true
+    ) {
+      await withExtensionBuildLock(extension.packageRoot, async () => {
+        await buildExtensionPackage(extension.packageRoot, extension.config);
+      });
+    }
+  });
 
   return extensions;
 }
@@ -88,22 +86,55 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
  */
 export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
   const extensions = await discoverWorkspaceExtensions(appRoot);
-  await Promise.all(
-    extensions.map(async (extension) => {
-      if (await isExtensionDistributionCurrent(extension)) return;
-      try {
-        await withExtensionBuildLock(extension.packageRoot, async () => {
-          if (await isExtensionDistributionCurrent(extension)) return;
-          await buildExtensionPackage(extension.packageRoot, extension.config);
-        });
-      } catch (error) {
-        // The message embeds the build error; a cause would print it twice.
-        throw new Error(
-          `Failed to build workspace extension "${extension.config.packageName}" at ${extension.packageRoot}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\n${toErrorMessage(error)}`,
-        );
-      }
-    }),
+  await buildInDependencyOrder(extensions, async (extension) => {
+    if (await isExtensionDistributionCurrent(extension)) return;
+    try {
+      await withExtensionBuildLock(extension.packageRoot, async () => {
+        if (await isExtensionDistributionCurrent(extension)) return;
+        await buildExtensionPackage(extension.packageRoot, extension.config);
+      });
+    } catch (error) {
+      // The message embeds the build error; a cause would print it twice.
+      throw new Error(
+        `Failed to build workspace extension "${extension.config.packageName}" at ${extension.packageRoot}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\n${toErrorMessage(error)}`,
+      );
+    }
+  });
+}
+
+/**
+ * Runs `build` for each extension once the builds of the workspace extensions
+ * it declares as dependencies settle, since building an extension reads the
+ * distributions of the extensions it mounts. Independent extensions build in
+ * parallel.
+ */
+async function buildInDependencyOrder(
+  extensions: readonly WorkspaceExtension[],
+  build: (extension: WorkspaceExtension) => Promise<void>,
+): Promise<void> {
+  const byPackageName = new Map(
+    extensions.map((extension) => [extension.config.packageName, extension]),
   );
+  const builds = new Map<WorkspaceExtension, Promise<void>>();
+  const visiting = new Set<WorkspaceExtension>();
+
+  const schedule = (extension: WorkspaceExtension): Promise<void> => {
+    let pending = builds.get(extension);
+    if (pending !== undefined) return pending;
+    // A dependency cycle has no valid order; break it where it closes.
+    if (visiting.has(extension)) return Promise.resolve();
+    visiting.add(extension);
+    const dependencies = extension.config.runtimeDependencies
+      .map((name) => byPackageName.get(name))
+      .filter((dependency) => dependency !== undefined)
+      .map(schedule);
+    visiting.delete(extension);
+    pending = Promise.all(dependencies).then(async () => await build(extension));
+    builds.set(extension, pending);
+    return pending;
+  };
+
+  await Promise.all(extensions.map(schedule));
 }
 
 async function discoverWorkspaceExtensions(
