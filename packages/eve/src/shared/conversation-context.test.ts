@@ -280,6 +280,21 @@ describe("ConversationContextKey", () => {
     ).toEqual(UNKNOWN_CONVERSATION_CONTEXT);
   });
 
+  it("keeps a space's visibility and drops one it doesn't know", () => {
+    const context = {
+      ...buildConversationContext(run({ auth }), "production"),
+      space: { id: "slack:T1:C1", type: "channel", visibility: "private" },
+    } as const;
+
+    expect(ConversationContextKey.codec?.deserialize(context, new Map() as never)).toEqual(context);
+    expect(
+      ConversationContextKey.codec?.deserialize(
+        { ...context, space: { ...context.space, visibility: "secret" } },
+        new Map() as never,
+      ),
+    ).toMatchObject({ space: { id: "slack:T1:C1", type: "channel" } });
+  });
+
   it("round-trips a space and drops a malformed one", () => {
     const context = {
       ...buildConversationContext(run({ auth }), "production"),

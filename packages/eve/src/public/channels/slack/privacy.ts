@@ -1,6 +1,9 @@
 import type { SlackApiResponse } from "#public/channels/slack/api.js";
 import { readSlackSpaceType } from "#public/channels/slack/space.js";
-import type { ConversationSpaceType } from "#shared/conversation-context.js";
+import type {
+  ConversationSpaceType,
+  ConversationSpaceVisibility,
+} from "#shared/conversation-context.js";
 
 type SlackConversationPrivacy = "private" | "public" | "unknown";
 
@@ -21,8 +24,11 @@ export function readSlackConversationPrivacy(
 
 /** What eve knows about a Slack conversation: whether it is private, and what kind of space it is. */
 export interface SlackConversationKind {
+  /** Whether to treat it as private, failing closed. */
   readonly isPrivate: boolean;
   readonly spaceType?: ConversationSpaceType;
+  /** Its visibility, only when Slack said. */
+  readonly visibility?: ConversationSpaceVisibility;
 }
 
 /**
@@ -38,7 +44,11 @@ export async function readSlackConversationKind(input: {
   const eventPrivacy = readSlackConversationPrivacy(input.raw);
   if (eventPrivacy !== "unknown") {
     const spaceType = readSlackSpaceType(input.raw);
-    return { isPrivate: eventPrivacy === "private", ...(spaceType && { spaceType }) };
+    return {
+      isPrivate: eventPrivacy === "private",
+      ...(spaceType && { spaceType }),
+      visibility: eventPrivacy,
+    };
   }
 
   try {
@@ -48,6 +58,7 @@ export async function readSlackConversationKind(input: {
     return {
       isPrivate: privacy === "unknown" || privacy === "private",
       ...(spaceType && { spaceType }),
+      ...(privacy !== "unknown" && { visibility: privacy }),
     };
   } catch {
     return { isPrivate: true };

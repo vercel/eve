@@ -70,6 +70,7 @@ export type {
   ConversationSpace,
   ConversationSpaceContext,
   ConversationSpaceType,
+  ConversationSpaceVisibility,
 } from "#shared/conversation-context.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
 export type {

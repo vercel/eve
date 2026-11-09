@@ -28,13 +28,20 @@ export function discordConversationSpace(
 ): ConversationSpace | undefined {
   if (!state.channelId) return undefined;
   if (state.guildId) {
+    // Only a private thread (type 12) says it is private; a server channel's
+    // visibility lives in permission overwrites the channel never reads.
     return {
       id: `discord:${state.guildId}:${state.channelId}`,
       type: "channel",
+      ...(state.channelType === 12 && { visibility: "private" as const }),
       workspaceId: `discord:${state.guildId}`,
     };
   }
-  if (state.channelType === 1) return { id: `discord:${state.channelId}`, type: "direct" };
-  if (state.channelType === 3) return { id: `discord:${state.channelId}`, type: "group" };
+  if (state.channelType === 1) {
+    return { id: `discord:${state.channelId}`, type: "direct", visibility: "private" };
+  }
+  if (state.channelType === 3) {
+    return { id: `discord:${state.channelId}`, type: "group", visibility: "private" };
+  }
   return undefined;
 }

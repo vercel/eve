@@ -24,4 +24,5 @@ export type {
   ConversationContext,
   ConversationSpace,
   ConversationSpaceType,
+  ConversationSpaceVisibility,
 } from "#shared/conversation-context.js";

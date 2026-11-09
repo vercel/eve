@@ -23,10 +23,10 @@ describe("teamsConversationSpace", () => {
   it("reports personal and group chats by conversation", () => {
     expect(
       teamsConversationSpace({ ...base, conversationId: "a:1", conversationType: "personal" }),
-    ).toMatchObject({ id: "teams:t1:a:1", type: "direct" });
+    ).toMatchObject({ id: "teams:t1:a:1", type: "direct", visibility: "private" });
     expect(
       teamsConversationSpace({ ...base, conversationId: "19:g", conversationType: "groupChat" }),
-    ).toMatchObject({ id: "teams:t1:19:g", type: "group" });
+    ).toMatchObject({ id: "teams:t1:19:g", type: "group", visibility: "private" });
   });
 
   it("reports none without a tenant", () => {

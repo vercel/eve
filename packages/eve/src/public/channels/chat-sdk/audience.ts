@@ -41,8 +41,18 @@ function chatSdkSpace(thread: SerializedThread | null): ConversationSpace | unde
   if (!thread?.channelId) return undefined;
   const prefix = `${thread.adapterName}:`;
   const id = thread.channelId.startsWith(prefix) ? thread.channelId : prefix + thread.channelId;
-  if (thread.isDM) return { id, type: "direct" };
-  return { id, type: GROUP_CHAT_ADAPTERS.has(thread.adapterName) ? "group" : "channel" };
+  if (thread.isDM) return { id, type: "direct", visibility: "private" };
+  const visibility =
+    thread.channelVisibility === "workspace"
+      ? "public"
+      : thread.channelVisibility === "private" || thread.channelVisibility === "external"
+        ? "private"
+        : undefined;
+  return {
+    id,
+    type: GROUP_CHAT_ADAPTERS.has(thread.adapterName) ? "group" : "channel",
+    ...(visibility !== undefined && { visibility }),
+  };
 }
 
 export const chatSdkInstrumentation = {

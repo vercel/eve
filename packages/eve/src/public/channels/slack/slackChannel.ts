@@ -141,7 +141,10 @@ import {
 } from "#public/channels/undelivered-reply.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
-import type { ConversationSpaceType } from "#shared/conversation-context.js";
+import type {
+  ConversationSpaceType,
+  ConversationSpaceVisibility,
+} from "#shared/conversation-context.js";
 import { slackConversationSpace } from "#public/channels/slack/space.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { markEventHandled } from "./utils.js";
@@ -266,6 +269,8 @@ export interface SlackChannelState extends UndeliveredReplyState {
   channelId: string | null;
   /** The conversation's space type, read from the inbound event's `channel_type`. */
   spaceType?: ConversationSpaceType;
+  /** Whether the conversation is public or private, when Slack said. */
+  spaceVisibility?: ConversationSpaceVisibility;
   /** Slack thread root ts; `null` in a code channel, which is one session across its threads. */
   threadTs: string | null;
   /** Whether this session serves a Slack code channel. */
@@ -1966,10 +1971,15 @@ async function dispatchSlackMessage(input: {
     await acknowledgeMessage(input.received, input.message, { slack, thread });
   }
 
-  const { isPrivate: isPrivateConversation, spaceType } = await readConversationKind();
+  const {
+    isPrivate: isPrivateConversation,
+    spaceType,
+    visibility: spaceVisibility,
+  } = await readConversationKind();
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
   if (spaceType !== undefined) channelState.spaceType = spaceType;
+  if (spaceVisibility !== undefined) channelState.spaceVisibility = spaceVisibility;
   await deliverSlackMessage({
     botUserId: input.receivingBotUserId,
     credentials: input.credentials,

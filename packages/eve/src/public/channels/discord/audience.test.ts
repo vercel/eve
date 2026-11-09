@@ -20,8 +20,18 @@ describe("discordConversationSpace", () => {
     expect(discordConversationSpace(state({ channelType: 1 }))).toEqual({
       id: "discord:c1",
       type: "direct",
+      visibility: "private",
     });
     expect(discordConversationSpace(state({ channelType: 3 }))?.type).toBe("group");
+  });
+
+  it("reports a private thread as private and leaves other server channels unknown", () => {
+    expect(discordConversationSpace(state({ guildId: "g1", channelType: 12 }))?.visibility).toBe(
+      "private",
+    );
+    expect(discordConversationSpace(state({ guildId: "g1", channelType: 0 }))).not.toHaveProperty(
+      "visibility",
+    );
   });
 
   it("reports none before a channel is known, or for a proactive send to an unknown channel", () => {

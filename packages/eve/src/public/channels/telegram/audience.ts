@@ -26,9 +26,10 @@ function telegramSpace(state: TelegramChannelState): ConversationSpace | undefin
   if (!state.chatId) return undefined;
   switch (state.chatType) {
     case "private":
-      return { id: `telegram:${state.chatId}`, type: "direct" };
+      return { id: `telegram:${state.chatId}`, type: "direct", visibility: "private" };
     case "group":
-      return { id: `telegram:${state.chatId}`, type: "group" };
+      // A basic group has no public link; a supergroup or channel may.
+      return { id: `telegram:${state.chatId}`, type: "group", visibility: "private" };
     case "supergroup":
     case "channel":
       return { id: `telegram:${state.chatId}`, type: "channel" };

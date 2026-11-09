@@ -21,7 +21,17 @@ describe("chat SDK space", () => {
     expect(space({ adapterName: "whatsapp", channelId: "123", isDM: true })).toEqual({
       id: "whatsapp:123",
       type: "direct",
+      visibility: "private",
     });
+  });
+
+  it("reads visibility from the channel's visibility, when the adapter reports it", () => {
+    const thread = { adapterName: "slack", channelId: "slack:C1", isDM: false };
+    expect(space({ ...thread, channelVisibility: "workspace" } as never)?.visibility).toBe(
+      "public",
+    );
+    expect(space({ ...thread, channelVisibility: "private" } as never)?.visibility).toBe("private");
+    expect(space(thread)).not.toHaveProperty("visibility");
   });
 
   it("reports a messaging app's shared chats as groups", () => {

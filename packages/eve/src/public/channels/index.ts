@@ -21,6 +21,7 @@ export {
   type ConversationSpace,
   type ConversationSpaceContext,
   type ConversationSpaceType,
+  type ConversationSpaceVisibility,
   type ChannelFrom,
   type ChannelReceiveContext,
   type ChannelResolveSession,

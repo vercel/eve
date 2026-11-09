@@ -43,6 +43,8 @@ interface ConversationSpace {
   /** Stable, namespaced by platform and workspace: `slack:T0123:C0456`. */
   readonly id: string;
   readonly type: "direct" | "group" | "channel";
+  /** Absent when the platform doesn't say. */
+  readonly visibility?: "public" | "private";
   /** `slack:T0123`; absent when the platform has no workspace. */
   readonly workspaceId?: string;
 }
@@ -50,6 +52,10 @@ interface ConversationSpace {
 
 - `direct`: one person and the agent. `group`: a private conversation among a
   fixed set of people. `channel`: a named place that members join.
+- `visibility` is who can find and join the space. It differs from `audience`
+  on purpose: the audience fails closed to `private` for trace capture, while
+  `visibility` is absent unless the platform said, so code can tell a public
+  channel from one eve couldn't classify.
 - A channel reports it with a synchronous `space({ state })` hook, next to
   `audience({ state, caller })`. A missing, throwing, asynchronous, or
   malformed result reports no space.

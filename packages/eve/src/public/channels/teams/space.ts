@@ -15,6 +15,8 @@ export function teamsConversationSpace(
   const scoped = (id: string, type: ConversationSpaceType): ConversationSpace => ({
     id: `${workspaceId}:${id}`,
     type,
+    // Chats have fixed members; a Teams channel's visibility isn't in the activity.
+    ...(type !== "channel" && { visibility: "private" as const }),
     workspaceId,
   });
   if (state.conversationType === "channel") {

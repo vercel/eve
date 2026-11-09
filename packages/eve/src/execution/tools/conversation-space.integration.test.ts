@@ -26,19 +26,34 @@ describe("ctx.conversation in tools", () => {
     {
       // Slack's app_mention events carry no channel_type, so eve reads conversations.info.
       conversation: { id: "C_TEAM", is_channel: true, is_private: false },
-      expected: { id: "slack:T01:C_TEAM", type: "channel", workspaceId: "slack:T01" },
+      expected: {
+        id: "slack:T01:C_TEAM",
+        type: "channel",
+        visibility: "public",
+        workspaceId: "slack:T01",
+      },
       event: { channel: "C_TEAM", type: "app_mention" },
       label: "a Slack channel mention",
     },
     {
       conversation: { id: "G_GROUP", is_mpim: true, is_private: true },
-      expected: { id: "slack:T01:G_GROUP", type: "group", workspaceId: "slack:T01" },
+      expected: {
+        id: "slack:T01:G_GROUP",
+        type: "group",
+        visibility: "private",
+        workspaceId: "slack:T01",
+      },
       event: { channel: "G_GROUP", type: "app_mention" },
       label: "a Slack group DM mention",
     },
     {
       conversation: null,
-      expected: { id: "slack:T01:D_ALICE", type: "direct", workspaceId: "slack:T01" },
+      expected: {
+        id: "slack:T01:D_ALICE",
+        type: "direct",
+        visibility: "private",
+        workspaceId: "slack:T01",
+      },
       event: { channel: "D_ALICE", channel_type: "im", type: "message" },
       label: "a Slack DM",
     },

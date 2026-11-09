@@ -18,6 +18,13 @@ export type ConversationSpaceType = "direct" | "group" | "channel";
 export const CONVERSATION_SPACE_TYPES = ["direct", "group", "channel"] as const;
 
 /**
+ * Who can find and join a {@link ConversationSpace}. `public` is open to anyone
+ * in its workspace, such as a public Slack channel. `private` is limited to its
+ * members, such as a DM, a group DM, or a private channel.
+ */
+export type ConversationSpaceVisibility = "public" | "private";
+
+/**
  * The place on a chat platform where a conversation happens, such as a Slack
  * channel, a Discord channel, or a Teams chat. Every session in that place
  * reports the same space, so code can share data per place instead of per
@@ -30,6 +37,13 @@ export interface ConversationSpace {
    */
   readonly id: string;
   readonly type: ConversationSpaceType;
+  /**
+   * Who can find and join the space. Absent when the channel can't tell, so
+   * code that needs it must treat a missing value as unknown, not as public.
+   * Unlike `audience`, which classifies the conversation for trace capture and
+   * reads `private` when unsure, this reports only what the platform says.
+   */
+  readonly visibility?: ConversationSpaceVisibility;
   /**
    * Stable ID of the workspace, server, or tenant that contains the space,
    * such as `slack:T0123`. Absent when the platform has none.
@@ -94,7 +108,12 @@ function readSpaceId(value: unknown): string | undefined {
 /** Validates a space a channel or a stored context reports; anything malformed reads as none. */
 export function normalizeConversationSpace(value: unknown): ConversationSpace | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const candidate = value as { id?: unknown; type?: unknown; workspaceId?: unknown };
+  const candidate = value as {
+    id?: unknown;
+    type?: unknown;
+    visibility?: unknown;
+    workspaceId?: unknown;
+  };
   const id = readSpaceId(candidate.id);
   const type = candidate.type;
   if (
@@ -105,9 +124,14 @@ export function normalizeConversationSpace(value: unknown): ConversationSpace | 
     return undefined;
   }
   const workspaceId = readSpaceId(candidate.workspaceId);
+  const visibility =
+    candidate.visibility === "public" || candidate.visibility === "private"
+      ? candidate.visibility
+      : undefined;
   return {
     id,
     type: type as ConversationSpaceType,
+    ...(visibility !== undefined && { visibility }),
     ...(workspaceId !== undefined && { workspaceId }),
   };
 }

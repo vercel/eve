@@ -169,7 +169,10 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
-    space: { id: `telegram:${CHAT.id}`, type: group ? "channel" : "direct" },
+    // A supergroup may have a public link, which its chat type doesn't say.
+    space: group
+      ? { id: `telegram:${CHAT.id}`, type: "channel" }
+      : { id: `telegram:${CHAT.id}`, type: "direct", visibility: "private" },
     personId: String(PERSON.id),
     capabilities: !group
       ? ["attachments", "buttons", "text-replies"]

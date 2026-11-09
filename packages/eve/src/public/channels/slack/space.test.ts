@@ -16,7 +16,10 @@ describe("slackConversationSpace", () => {
   });
 
   it("reads the type from the event, else from the conversation ID", () => {
-    expect(slackConversationSpace({ channelId: "D1", teamId: "T1" })?.type).toBe("direct");
+    expect(slackConversationSpace({ channelId: "D1", teamId: "T1" })).toMatchObject({
+      type: "direct",
+      visibility: "private",
+    });
     expect(
       slackConversationSpace({ channelId: "G1", teamId: "T1", spaceType: "group" })?.type,
     ).toBe("group");
@@ -24,6 +27,15 @@ describe("slackConversationSpace", () => {
     expect(readSlackSpaceType({ channel_type: "mpim" })).toBe("group");
     expect(readSlackSpaceType({ channel_type: "group" })).toBe("channel");
     expect(readSlackSpaceType({})).toBeUndefined();
+  });
+
+  it("reports visibility only when Slack said", () => {
+    expect(
+      slackConversationSpace({ channelId: "C1", teamId: "T1", spaceVisibility: "public" }),
+    ).toMatchObject({ visibility: "public" });
+    expect(slackConversationSpace({ channelId: "C1", teamId: "T1" })).not.toHaveProperty(
+      "visibility",
+    );
   });
 
   it("reports none before a channel is known", () => {
