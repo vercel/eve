@@ -99,18 +99,19 @@ const FIREFOX_USER_CHROME = `
   overflow: hidden !important;
 }
 
-/* ESR 153 renders the address-bar background as an HTML element, which the XUL
-   default namespace above would otherwise exclude. */
+/* The address bar's HTML elements need *|* to escape the XUL default namespace
+   above. ESR 140 draws the background with a XUL #urlbar-background; ESR 153
+   uses an HTML .urlbar-background inside an HTML #urlbar. */
 #urlbar-background,
-#urlbar > *|*.urlbar-background {
+*|*#urlbar > *|*.urlbar-background {
   background: #1a1a1a !important;
   border: 1px solid #333 !important;
   border-radius: 6px !important;
   box-shadow: none !important;
 }
 
-#urlbar-input,
-#urlbar-scheme {
+*|*#urlbar-input,
+*|*#urlbar-scheme {
   color: #ededed !important;
 }
 
