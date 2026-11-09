@@ -1,9 +1,36 @@
+import { getConnectorMetadata } from "@vercel/connect";
 import type { GitHubLeaseBroker } from "eve/extensions/git";
 import type { SandboxNetworkPolicy } from "eve/sandbox";
 import type { VercelSandboxSession } from "eve/sandbox/vercel";
 
-/** Vercel Connect GitHub connector that mints tokens for the `git__gh` tool. Unset disables GitHub access. */
-export const GITHUB_CONNECTOR = process.env.GITHUB_CONNECTOR?.trim() || undefined;
+/**
+ * Vercel Connect GitHub connector that mints tokens for the `git__gh` tool, as
+ * created by `vercel connect create github --name company-brain`.
+ */
+export const GITHUB_CONNECTOR = "github/company-brain";
+
+const CONNECTION_CHECK_TTL_MS = 5 * 60_000;
+let connectionCheck: { readonly connected: Promise<boolean>; readonly atMs: number } | undefined;
+
+/**
+ * Whether the GitHub connector is attached to this project. Cached for a few
+ * minutes, so attaching one takes effect without a redeploy.
+ */
+export function isGitHubConnected(): Promise<boolean> {
+  if (
+    connectionCheck === undefined ||
+    Date.now() - connectionCheck.atMs > CONNECTION_CHECK_TTL_MS
+  ) {
+    connectionCheck = {
+      atMs: Date.now(),
+      connected: getConnectorMetadata(GITHUB_CONNECTOR).then(
+        () => true,
+        () => false,
+      ),
+    };
+  }
+  return connectionCheck.connected;
+}
 
 /** Optional. Limits GitHub access to repositories owned by this organization or user. */
 export const GITHUB_ORG = process.env.GITHUB_ORG?.trim().toLowerCase() || undefined;
