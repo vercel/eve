@@ -16,8 +16,8 @@ import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js"
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
-import { digestOf } from "#reactions/state.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
+import { digestOf } from "#definitions/state.js";
 
 // The parent's stream, which a restore folds its view from: here, nothing yet.
 vi.mock("#execution/session-event-stream.js", async (importOriginal) => ({

@@ -52,6 +52,17 @@ export interface TurnOperation extends Operation {
   /** Replaces the turn's links before its deferred span is exported. */
   links(links: readonly TraceLink[]): void;
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
+  /** A wait on a person that no tool call owns, such as a budget prompt or a sign-in. */
+  approval: WrappedOperation<ApprovalInput, ApprovalOperation>;
+  /** Returns an open turn-level approval without starting one. Durable turns only. */
+  findApproval(requestId: string): ApprovalOperation | undefined;
+}
+/** What a person is asked. `kind` defaults to `tool-approval`. */
+export interface ApprovalInput {
+  readonly requestId: string;
+  readonly request?: unknown;
+  readonly kind?: string;
+  readonly connectionName?: string;
 }
 /**
  * One tool call. In a durable turn, calling `tool` again with the same `callId`
@@ -77,7 +88,7 @@ export interface AttemptOperation extends Operation {
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
 }
 export interface ToolOperation extends Operation {
-  approval: WrappedOperation<{ requestId: string; request?: unknown }, ApprovalOperation>;
+  approval: WrappedOperation<ApprovalInput, ApprovalOperation>;
   /** Returns an open approval without starting one. Durable turns only. */
   findApproval(requestId: string): ApprovalOperation | undefined;
   /** A tool call made while this tool runs, such as a connector's nested call. */
@@ -87,6 +98,7 @@ export interface ToolOperation extends Operation {
 export type ModelOperation = Operation;
 export type ApprovalOperation = Operation;
 export type MemoryOperation = Operation;
+export type DecisionOperation = Operation;
 export interface ModelCallReturn<T> extends ModelResult {
   readonly result: T;
 }
@@ -200,10 +212,20 @@ export function operationHandle(
     undefined,
     onError,
   );
+  const approvals = (call?: { callId: string; toolName: string }) => ({
+    findApproval: (requestId: string) =>
+      found<ApprovalOperation>(runtime.find({ type: "approval", options: { requestId, ...call } })),
+    approval: wrappedOperation(
+      async (input: ApprovalInput) => child({ type: "approval", options: { ...input, ...call } }),
+      { outcome: "ignored" },
+      onError,
+    ),
+  });
   if (data.type === "activation")
     return live({
       ...common,
       memory,
+      ...approvals(),
       links: (links: readonly TraceLink[]) => runtime.update({ links }),
       findAttempt: (input: { stepIndex: number; attempt: number }) =>
         found<AttemptOperation>(
@@ -309,22 +331,7 @@ export function operationHandle(
       ...common,
       memory,
       tool,
-      findApproval: (requestId: string) =>
-        found<ApprovalOperation>(
-          runtime.find({
-            type: "approval",
-            options: { requestId, callId: data.options.callId, toolName: data.options.name },
-          }),
-        ),
-      approval: wrappedOperation(
-        async (input: { requestId: string; request?: unknown }) =>
-          child({
-            type: "approval",
-            options: { ...input, callId: data.options.callId, toolName: data.options.name },
-          }),
-        { outcome: "ignored" },
-        onError,
-      ),
+      ...approvals({ callId: data.options.callId, toolName: data.options.name }),
     } as ToolOperation);
   return common;
 }

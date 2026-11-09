@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 
@@ -29,35 +30,6 @@ function stripAnsi(text: string): string {
       return segment.replace(/^[0-9;]*m/, "");
     })
     .join("");
-}
-
-function removeRolldownPluginTimingWarningBlock(stderr: string): string {
-  const lines = stripAnsi(stderr).split(/\r?\n/);
-  const retainedLines: string[] = [];
-  let inWarningBlock = false;
-
-  for (const line of lines) {
-    // The diagnostic is timing-dependent (it fires when plugins consume
-    // a large share of build time, e.g. on slow CI runners) and its
-    // first line varies between rolldown versions ("[PLUGIN_TIMINGS]
-    // Warning: ..." vs "[PLUGIN_TIMINGS] Your build spent ..."), so the
-    // trigger matches only the stable code prefix.
-    if (!inWarningBlock && line.includes("[PLUGIN_TIMINGS]")) {
-      inWarningBlock = true;
-      continue;
-    }
-
-    if (inWarningBlock) {
-      if (line.includes("https://rolldown.rs/options/checks#plugintimings")) {
-        inWarningBlock = false;
-      }
-      continue;
-    }
-
-    retainedLines.push(line);
-  }
-
-  return retainedLines.join("\n").trim();
 }
 
 async function createTemporaryAppRoot(input: {
@@ -109,61 +81,17 @@ async function readDirectorySources(root: string): Promise<string> {
   return sources.join("\n");
 }
 
-function decodeEmbeddedWorkflowCode(source: string): string {
-  const prefix = "Buffer.from(";
-  const suffix = '.join(""), "base64")';
-  const decoded: string[] = [];
-  let offset = 0;
-
-  while (true) {
-    const expressionStart = source.indexOf(prefix, offset);
-    if (expressionStart === -1) break;
-
-    const arrayStart = expressionStart + prefix.length;
-    const arrayEnd = findJsonArrayEnd(source, arrayStart);
-    if (arrayEnd !== undefined && source.startsWith(suffix, arrayEnd + 1)) {
-      const chunks = JSON.parse(source.slice(arrayStart, arrayEnd + 1)) as string[];
-      decoded.push(Buffer.from(chunks.join(""), "base64").toString("utf8"));
-      offset = arrayEnd + suffix.length + 1;
-      continue;
-    }
-
-    offset = arrayStart;
-  }
-
-  return decoded.join("\n");
-}
-
-function findJsonArrayEnd(source: string, start: number): number | undefined {
-  if (source[start] !== "[") return undefined;
-
-  let depth = 0;
-  let escaped = false;
-  let inString = false;
-
-  for (let index = start; index < source.length; index++) {
-    const character = source[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === "\\") {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-    } else if (character === "[") {
-      depth++;
-    } else if (character === "]" && --depth === 0) {
-      return index;
-    }
-  }
-
-  return undefined;
+/**
+ * The workflow driver code the host bundled. It reaches the server output as a plain string
+ * literal, from the entrypoint's `text:` import.
+ */
+function readEmbeddedWorkflowCode(source: string): string {
+  const start = source.indexOf('"globalThis.__private_workflows');
+  if (start === -1) return "";
+  let end = start + 1;
+  while (end < source.length && source[end] !== '"') end += source[end] === "\\" ? 2 : 1;
+  // A JavaScript string literal, which may hold characters JSON rejects, such as raw tabs.
+  return runInNewContext(source.slice(start, end + 1)) as string;
 }
 
 async function runEveBuild(appRoot: string): Promise<ProcessResult> {
@@ -241,7 +169,7 @@ describe("eve build process output", () => {
 
     expect(result.code).toBe(0);
     expect(result.signal).toBeNull();
-    expect(removeRolldownPluginTimingWarningBlock(result.stderr)).toBe("");
+    expect(stripAnsi(result.stderr).trim()).toBe("");
     expect(result.stdout).toContain("[BUILD] built output at");
     expect(result.stdout).toContain(".output");
   }, 120_000);
@@ -298,9 +226,9 @@ describe("eve build process output", () => {
     const serverSources = await readDirectorySources(output);
     expect(serverSources).toContain('"step//./agent/lib/plan//hashPlan"');
     expect(serverSources).toContain('"workflow//./agent/tools/deploy_service//execute"');
-    // The driver body is base64-embedded; decode and check it registers the
-    // authored workflow and proxies the authored step without its Node import.
-    const driverCode = decodeEmbeddedWorkflowCode(serverSources);
+    // The driver body is embedded as a string; check it registers the authored workflow and
+    // proxies the authored step without its Node import.
+    const driverCode = readEmbeddedWorkflowCode(serverSources);
     expect(driverCode).toContain(
       '__private_workflows.set("workflow//./agent/tools/deploy_service//execute"',
     );

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/5462
 status: implemented
-last_updated: "2026-10-27"
+last_updated: "2026-11-06"
 ---
 
 # Slack interaction cards
@@ -124,8 +124,9 @@ Renderers compose like `taskCard`: the first one is outermost, and the chain end
 default. `next` accepts a changed card, for example a shorter `interaction.request.prompt` for
 eve's default to render. eve's default renders an open request with controls as
 `renderInteractionPostParts` does today. For an answered or settled request, it renders a single
-block that names the answer and, when known, who gave it. The card and a direct-message request's
-thread note name the outcome the same way.
+block that names the answer and, when known, who gave it. A direct-message request's thread note
+names an approval's decision, but for any other request only who answered, so the answer stays in
+the DM.
 
 `details` is open to every kind. Before, only an approval with tool input had a details message,
 and other requests kept everything beside their controls. eve's default still posts details only

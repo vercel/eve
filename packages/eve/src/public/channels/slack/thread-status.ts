@@ -26,7 +26,7 @@ export interface SlackThreadStatus {
 
 /**
  * Sets the thread status, unless the same text is already showing or the turn
- * is quiet because an edit started it. `force` writes it anyway, for moments
+ * is quiet because an edit or a deferred message started it. `force` writes it anyway, for moments
  * Slack may have cleared it, and so a long turn keeps it from timing out.
  */
 export async function showStatus(

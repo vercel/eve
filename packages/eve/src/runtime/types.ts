@@ -44,6 +44,7 @@ import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type { SandboxEnvironmentIdentity, SandboxSelector } from "#shared/sandbox-environment.js";
 import type { ToolSchema } from "#tools/schema.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
+import type { DynamicSchedulesDefinition } from "#public/schedules/subscription.js";
 import type { MemoryDefinition } from "#public/memory/index.js";
 
 /**
@@ -181,7 +182,7 @@ export type ResolvedToolDefinition = Readonly<
     /** Framework-owned input projected before a workflow tool executor starts. */
     readonly executeInput?: (input: unknown) => JsonValue;
     /** Presentation projected from tool lifecycle values. */
-    readonly label?: import("#tools/definition.js").InternalToolLabelDefinition;
+    readonly label?: import("#tools/definition.js").InternalToolLabelDefinition | false;
     /**
      * Optional validated runtime output schema.
      */
@@ -223,13 +224,11 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
   readonly events: Readonly<Record<string, StreamEventHook<SessionEvent>>>;
 }
 
-/** A `defineDynamic()` function, loaded from its module. eve's own receive its context. */
+/** A `defineDynamic()` function, loaded from its module. */
 export type DynamicEvaluateFn = (ctx: never) => unknown;
 
 /** A `defineDynamic()` export reattached from its compiled module. */
-export interface ResolvedReactionSource extends Readonly<ModuleSourceRef> {
-  /** eve generated it: its function receives eve's own evaluation context. */
-  readonly framework?: true;
+export interface ResolvedDynamicSource extends Readonly<ModuleSourceRef> {
   readonly evaluate: DynamicEvaluateFn;
 }
 
@@ -330,7 +329,7 @@ export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
 
-export type ResolvedDynamicSubagentDefinition = ResolvedReactionSource;
+export type ResolvedDynamicSubagentDefinition = ResolvedDynamicSource;
 
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
@@ -367,53 +366,52 @@ interface ResolvedAgentMetadata {
   readonly diagnosticsSummary: DiscoverDiagnosticsSummary;
 }
 
-/**
- * Runtime resolver for dynamic tools declared via `defineDynamic(fn)`.
- */
-export interface ResolvedDynamicToolResolver extends ResolvedReactionSource {
-  readonly slug: string;
-  /**
-   * Mount namespace when this resolver comes from an extension. Names of tools
-   * the resolver produces are prefixed with `${extensionNamespace}__`.
-   */
-  readonly extensionNamespace?: string;
-}
-
-/** Runtime resolver for dynamic connections declared in `agent/connections/`. */
-export interface ResolvedDynamicConnectionResolver extends ResolvedReactionSource {
-  readonly slug: string;
-  /** Map results from extensions receive this mount namespace. */
-  readonly extensionNamespace?: string;
-}
-
 export type ResolvedMemoryDefinition = Readonly<
   MemoryDefinition &
     ModuleSourceRef & {
       readonly slot: string;
+      /** It offers its provider's tools: no `tools/<slot>.ts` replaces or disables them. */
+      readonly offersTools?: true;
     }
 >;
 
-/**
- * Runtime resolver for dynamic skills declared via `defineDynamic()`
- * in `agent/skills/`. Carries the live event handler functions loaded from the
- * compiled module.
- */
-export interface ResolvedDynamicSkillResolver extends ResolvedReactionSource {
+/** An `agent/schedules/` collection, with its definition reattached and stamped. */
+export interface ResolvedScheduleCollection extends Readonly<ModuleSourceRef> {
+  readonly name: string;
+  readonly definition: DynamicSchedulesDefinition<unknown>;
+  /** It offers the model its tools: `tool` isn't `false`, and no tool file replaces them. */
+  readonly offersTools?: true;
+}
+
+/** The `defineDynamic()` file kinds: each returns what it defines when eve asks. */
+export type DynamicDefinitionKind = "connection" | "instructions" | "skill" | "tool";
+
+/** A `defineDynamic()` file the agent declares, with its function reattached. */
+export interface ResolvedDynamicDefinition<
+  K extends DynamicDefinitionKind = DynamicDefinitionKind,
+> extends ResolvedDynamicSource {
+  readonly kind: K;
   readonly slug: string;
-  /**
-   * Mount namespace when this resolver comes from an extension. Names of skills
-   * a map resolver produces are prefixed with `${extensionNamespace}__`.
-   */
+  /** An extension's namespace, which the names of what a map returns take. */
   readonly extensionNamespace?: string;
 }
 
-/**
- * Runtime resolver for dynamic instructions declared via
- * `defineDynamic()` in `agent/instructions/`. Carries the live
- * event handler functions loaded from the compiled module.
- */
-export interface ResolvedDynamicInstructionsResolver extends ResolvedReactionSource {
-  readonly slug: string;
+/** A file the agent declares that eve asks at runtime, with its code reattached. */
+export type ResolvedDefinition =
+  | { [K in DynamicDefinitionKind]: ResolvedDynamicDefinition<K> }[DynamicDefinitionKind]
+  | (ResolvedHookDefinition & { readonly kind: "hook" })
+  | (ResolvedMemoryDefinition & { readonly kind: "memory" })
+  | (ResolvedScheduleCollection & { readonly kind: "schedules" });
+
+/** The agent's definitions of one kind, in the order it declares them. */
+export function declared<K extends ResolvedDefinition["kind"]>(
+  agent: Pick<ResolvedAgent, "definitions">,
+  kind: K,
+): readonly Extract<ResolvedDefinition, { readonly kind: K }>[] {
+  return agent.definitions.filter(
+    (definition): definition is Extract<ResolvedDefinition, { readonly kind: K }> =>
+      definition.kind === kind,
+  );
 }
 
 /**
@@ -423,11 +421,8 @@ export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
-  readonly dynamicConnectionResolvers?: readonly ResolvedDynamicConnectionResolver[];
-  /** AI Gateway provider selected for the framework `web_search` tool. */
-  readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
-  readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
-  readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];
+  /** The files eve asks at runtime, in the order the agent declares them. */
+  readonly definitions: readonly ResolvedDefinition[];
   readonly metadata: ResolvedAgentMetadata;
   /**
    * Authored instructions prompt resolved from `instructions.md` or
@@ -443,8 +438,6 @@ export interface ResolvedAgent {
    * source and writes the contents into the sandbox template snapshot.
    */
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
-  readonly hooks: readonly ResolvedHookDefinition[];
-  readonly memories: readonly ResolvedMemoryDefinition[];
   readonly skills: readonly ResolvedSkillDefinition[];
   readonly tools: readonly ResolvedToolDefinition[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;

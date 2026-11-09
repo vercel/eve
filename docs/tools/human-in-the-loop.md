@@ -71,6 +71,14 @@ approval: auto({
 
 A dynamic tool rebuilds its policy each time eve evaluates the tool. To keep external data that configures a policy, save it with [`ctx.memo()`](/docs/guides/dynamic-capabilities).
 
+Pass `modelOptions.providerOptions` to configure the decision call, for example to keep it on Gateway providers with zero data retention:
+
+```ts
+approval: auto({
+  modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+});
+```
+
 ### Customize the approval prompt
 
 Use the object form of `approval` to replace the default `Approve <tool label>?` text. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
@@ -395,6 +403,8 @@ For approvals, a follow-up message that matches no option steers the turn, even 
 ### Request kinds
 
 On the stream, each request's `request.kind` is `approval`, `question`, `budget`, or `sign-in`. Its `subject` names the call, task, or turn that the request is about. Clients read the same `request.kind` on an `Interaction` to choose behavior and display. Keep a default branch, because a later release can add a kind.
+
+Traces record each request as an `agent.approval` span that lasts until the request settles, with `agent.approval.kind` set to `tool-approval`, `question`, `budget`, or `sign-in`, and `gen_ai.agent.name` set to the agent that asked. A sign-in span also names its connection in `eve.connection.name`. See [OpenTelemetry trace topology](/docs/observability/otel#trace-topology).
 
 `interactionId` identifies the request to answer, and `call.callId`, when present, identifies its call. Neither ID encodes what the request means.
 

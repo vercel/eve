@@ -108,16 +108,17 @@ export function photonDriver(): ChannelDriver {
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel(record) {
-      async function recordSend(method: string, builder: ContentBuilder) {
+      /** Records a send as a new message, or an edit as the message `edited` it rewrites. */
+      async function recordSend(method: string, builder: ContentBuilder, edited?: string) {
         sequence += 1;
-        const id = `photon-posted-${sequence}`;
+        const id = edited ?? `photon-posted-${sequence}`;
         record({ body: await builder.build(), method, response: { id } });
         return message(id);
       }
       function message(id: string) {
         return {
           id,
-          edit: (builder: ContentBuilder) => recordSend("edit", builder),
+          edit: (builder: ContentBuilder) => recordSend("edit", builder, id),
           read: async () => {},
         };
       }
@@ -183,6 +184,16 @@ export function photonDriver(): ChannelDriver {
       throw new Error("iMessage has no pressable HITL controls.");
     },
     postedText,
+    shownMessage(call) {
+      const text = postedText(call);
+      if (text === undefined) return undefined;
+      return {
+        id: (call.response as { readonly id: string }).id,
+        onlyPerson: false,
+        options: [],
+        text,
+      };
+    },
   };
 }
 

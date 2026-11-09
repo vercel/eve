@@ -37,10 +37,10 @@ import {
 } from "#public/channels/slack/reply-delivery.js";
 import {
   compactDefault,
-  endingOf,
   type RenderedRequestCard,
   renderRequestCard,
   sameJson,
+  threadNoteEndingOf,
 } from "#public/channels/slack/request-card-render.js";
 import type {
   SlackApprovalChannel,
@@ -289,7 +289,7 @@ export async function settleRequestCard(
       const by = card.answeredBy === undefined ? "" : ` by <@${card.answeredBy}>`;
       await callSlack(channel, "chat.update", id, {
         channel: channel.state.channelId,
-        text: `${endingOf(card.interaction).text}${by}.`,
+        text: `${threadNoteEndingOf(card.interaction)}${by}.`,
         ts: current.announcementTs,
       });
     }

@@ -4,7 +4,7 @@ import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { recordRemoteChildBinding } from "#execution/child-binding.js";
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
 
 vi.mock("#execution/child-binding.js", () => ({ recordRemoteChildBinding: vi.fn() }));
 vi.mock("#execution/publish-session-events.js", async (importOriginal) => ({

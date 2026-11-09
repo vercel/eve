@@ -129,6 +129,103 @@ describe("durable agent tracing", () => {
     expect(entries.size).toBe(0);
   });
 
+  it("records a wait no tool call owns under its turn, across workers", async () => {
+    const { checkpointer, entries } = memoryCheckpointer();
+    const exporter = new InMemorySpanExporter();
+    const first = worker(checkpointer, exporter);
+    const turn = await first.turn({ agentName: "support", identity, sequence: 0 });
+    await turn.approval({ requestId: "sign-in", kind: "sign-in", connectionName: "calendar" });
+    await turn.complete();
+    expect(entries.size).toBe(1);
+
+    // Alice signs in after the turn has parked and its worker is gone.
+    const second = worker(checkpointer, exporter);
+    const resumed = (await second.resume({ identity }))!;
+    expect(resumed.findApproval("missing")).toBeUndefined();
+    await resumed.findApproval("sign-in")!.complete({ outcome: "approved" });
+    expect(resumed.findApproval("sign-in")).toBeUndefined();
+    await second.forceFlush();
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((span) => span.name)).toEqual(["invoke_agent support", "agent.approval"]);
+    const approval = spans[1];
+    expect(approval!.parentSpanContext?.spanId).toBe(turn.reference.spanId);
+    expect(approval!.attributes["agent.approval.kind"]).toBe("sign-in");
+    expect(approval!.attributes["agent.approval.outcome"]).toBe("approved");
+    expect(approval!.attributes["agent.connection.name"]).toBe("calendar");
+    // Queries scoped to one agent find its sign-ins.
+    expect(approval!.attributes["gen_ai.agent.name"]).toBe("support");
+    expect(approval!.attributes["gen_ai.tool.call.id"]).toBeUndefined();
+    expect(approval!.attributes["agent.turn.id"]).toBe("turn");
+    expect(approval!.attributes["agent.step.index"]).toBeUndefined();
+    expect(entries.size).toBe(0);
+  });
+
+  it("keeps one tree when a resume reads a checkpoint this process wrote earlier", async () => {
+    // Eve stores checkpoints in the current context, so a parallel tool call's
+    // context can still hold an older checkpoint this same process wrote.
+    const { checkpointer, entries } = memoryCheckpointer();
+    let stale: string | undefined;
+    let staleReads = 0;
+    const viewing: TraceCheckpointer = {
+      ...checkpointer,
+      get: (key) => {
+        if (staleReads > 0 && stale !== undefined) {
+          staleReads--;
+          return JSON.parse(stale);
+        }
+        return checkpointer.get(key);
+      },
+    };
+    const exporter = new InMemorySpanExporter();
+    const tracing = worker(viewing, exporter);
+    const turn = await tracing.turn({ agentName: "support", identity, sequence: 0 });
+    const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+    await attempt.tool({ callId: "weather", name: "weather" });
+    stale = entries.values().next().value;
+    await attempt.tool({ callId: "note", name: "note" });
+
+    staleReads = 1;
+    const resumed = (await tracing.resume({ identity }))!;
+    await resumed.findTool("weather")!.complete({ outcome: "completed" });
+    await resumed.findTool("note")!.complete({ outcome: "completed" });
+    await attempt.complete();
+    await turn.complete();
+    await tracing.forceFlush();
+
+    expect(entries.size).toBe(0);
+    const names = exporter.getFinishedSpans().map((span) => span.name);
+    expect(names.filter((name) => name.startsWith("execute_tool")).sort()).toEqual([
+      "execute_tool note",
+      "execute_tool weather",
+    ]);
+    expect(names.filter((name) => name === "agent.step")).toHaveLength(1);
+    expect(names.filter((name) => name === "invoke_agent support")).toHaveLength(1);
+  });
+
+  it("stops a replaced tree from writing after another process's checkpoint wins", async () => {
+    const { checkpointer, entries } = memoryCheckpointer();
+    const exporter = new InMemorySpanExporter();
+    const first = worker(checkpointer, exporter);
+    const turn = await first.turn({ agentName: "support", identity, sequence: 0 });
+    const attempt = await first
+      .resume({ identity })
+      .then(() => turn.attempt({ stepIndex: 0, attempt: 0 }));
+    await attempt.tool({ callId: "lookup", name: "lookup" });
+    // Another process writes the checkpoint: its revision is unknown here.
+    const other = worker(checkpointer, exporter);
+    const elsewhere = (await other.resume({ identity }))!;
+    await elsewhere.findTool("lookup")!.complete({ outcome: "completed" });
+    const written = entries.values().next().value;
+
+    const replaced = (await first.resume({ identity }))!;
+    expect(replaced.findTool("lookup")).toBeUndefined();
+    // The replaced tree's later changes are not persisted over the newer checkpoint.
+    attempt.attributes({ "test.stale": true });
+    await first.forceFlush();
+    expect(entries.values().next().value).toBe(written);
+  });
+
   it("merges a tool call reported twice into one span", async () => {
     const { checkpointer } = memoryCheckpointer();
     const exporter = new InMemorySpanExporter();
@@ -511,5 +608,52 @@ describe("turn content", () => {
     expect(JSON.stringify(exporter.getFinishedSpans().map((span) => span.attributes))).not.toMatch(
       /Alice|Bob/,
     );
+  });
+
+  it("stores the turn's copy of the model input once and keeps it across a restore", async () => {
+    const { checkpointer, entries } = memoryCheckpointer();
+    const exporter = new InMemorySpanExporter();
+    const all = { emit: true, recordInputs: true, recordOutputs: true };
+    const prompt = "Alice's long email thread. ".repeat(3000);
+
+    const first = worker(checkpointer, exporter);
+    const turn = await first.turn({ agentName: "support", identity, sequence: 0, capture: all });
+    const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+    await attempt.modelCall(
+      { provider: "test", modelId: "model", messages: [{ role: "user", content: prompt }] },
+      () => ({
+        result: "call lookup",
+        finishReason: "tool-calls",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+    );
+    await attempt.tool({ callId: "lookup", name: "lookup" });
+    // The turn's copy of the model input lives in its attributes only, so it
+    // does not double the checkpoint or push it into the oversized fallback.
+    const saved = JSON.parse([...entries.values()][0]!);
+    expect(saved.attributes["gen_ai.input.messages"]).toContain("Alice's long email thread.");
+    expect(saved.data.options.attributes?.["gen_ai.input.messages"]).toBeUndefined();
+
+    // Another worker finishes the turn from the checkpoint.
+    const second = worker(checkpointer, exporter);
+    const resumedTurn = await second.turn({
+      agentName: "support",
+      identity,
+      sequence: 0,
+      capture: all,
+    });
+    const resumedAttempt = await resumedTurn.attempt({ stepIndex: 0, attempt: 0 });
+    const tool = await resumedAttempt.tool({ callId: "lookup", name: "lookup" });
+    await tool.complete({ outcome: "completed", output: "found" });
+    await resumedAttempt.complete();
+    await resumedTurn.complete();
+    await second.forceFlush();
+
+    const invocation = exporter
+      .getFinishedSpans()
+      .find((span) => span.name === "invoke_agent support")!;
+    expect(invocation.attributes["agent.trace.content.input"]).toBe(true);
+    expect(invocation.attributes["agent.trace.content.output"]).toBe(true);
+    expect(invocation.attributes["gen_ai.input.messages"]).toContain("Alice's long email thread.");
   });
 });

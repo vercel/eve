@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import { join, relative, resolve, sep } from "node:path";
 
+import type { Plugin } from "rolldown";
+
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
-import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
   createAuthoredModuleBuildOptions,
   evaluatedBundleSourcemap,
-  resolveAuthoredTsConfigPath,
 } from "#internal/authored-module-build-options.js";
 import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
@@ -16,11 +16,12 @@ import {
   createExtensionMountPlugin,
   EXTENSION_CHUNK_DIRECTORY,
 } from "#internal/bundler/extension-mount-plugin.js";
-import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
-import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
-import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
+import {
+  createAuthoredPlugins,
+  resolveAuthoredTsConfigPath,
+} from "#internal/bundler/authored-plugins.js";
 import {
   createExtensionScopePlugin,
   createFixedMountScopePlugin,
@@ -29,6 +30,7 @@ import {
   RESOLVE_EXTENSIONS,
   createDistributionPackageBoundaryPlugin,
   createGenerationPackageBoundaryPlugin,
+  type GenerationHostBundle,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
   normalizeExternalDependencies,
@@ -37,10 +39,7 @@ import {
 import { expectObjectRecord, interopAuthoredModuleNamespace } from "#internal/authored-module.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import {
-  buildSingleRolldownChunk,
-  buildWithNitroRolldown,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk, buildWithRolldown } from "#internal/bundler/rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
@@ -224,12 +223,13 @@ export async function bundleAuthoredModuleCode(
  */
 export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
-  options: AuthoredModuleLoadOptions = {},
+  options: AuthoredModuleLoadOptions & { readonly hostBundle?: GenerationHostBundle } = {},
 ): Promise<string> {
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
+      hostBundle: options.hostBundle,
     }),
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
@@ -259,12 +259,7 @@ export async function bundleExtensionDistributionGraph(input: {
 }> {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
-    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin({ packageRoot: input.packageRoot }),
-    createAuthoredPackageTsConfigPathsPlugin({
-      appPackageRoot: input.packageRoot,
-      extensions: RESOLVE_EXTENSIONS,
-    }),
+    ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
     createNodeEsmCompatBannerPlugin({ includeRequire: true }),
     createDistributionPackageBoundaryPlugin({
       packageRoot: input.packageRoot,
@@ -273,7 +268,7 @@ export async function bundleExtensionDistributionGraph(input: {
   ];
 
   try {
-    const result = await buildWithNitroRolldown({
+    const result = await buildWithRolldown({
       cwd: input.packageRoot,
       input: Object.fromEntries(input.entries.map((entry) => [entry.name, entry.path])),
       platform: "node",
@@ -326,6 +321,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
   readonly resolveExternalPaths?: boolean;
+  readonly hostBundle?: GenerationHostBundle;
 }): Promise<AuthoredModuleMapBundle> {
   // The package root owns dependency resolution, while the selected app root
   // owns authored workflow IDs and must match the workflow driver.
@@ -362,42 +358,34 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     ),
   );
   const workflowSources = new AuthoredWorkflowSourceRecorder(input.appRoot);
-  const plugins = [
-    createVirtualGenerationModuleMapPlugin({
-      id: input.moduleMapPath,
-      source: moduleMapSource,
-    }),
-    createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
-    createAuthoredWorkflowDirectivePlugin({ appRoot: input.appRoot, recorder: workflowSources }),
-    workflowSources.graphPlugin(),
-    createExtensionMountPlugin(extensionMounts, extensionOverridePaths(input.manifest)),
-    extensionScopePlugin,
-    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin({ packageRoot }),
-    createAuthoredPackageTsConfigPathsPlugin({
-      appPackageRoot: packageRoot,
-      extensions: RESOLVE_EXTENSIONS,
-    }),
-    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
-    createGenerationPackageBoundaryPlugin({
-      externalDependencies,
-      packageRoot,
-      extensionSpecifiers: new Set(extensionMounts.map((mount) => mount.specifier)),
-      resolveExternalPaths: input.resolveExternalPaths,
-    }),
-  ].filter((plugin) => plugin !== null);
 
   try {
     const chunk = await buildSingleRolldownChunk("authored module map", {
-      cwd: packageRoot,
+      ...createAuthoredModuleBuildOptions({
+        packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
+          externalDependencies,
+          packageRoot,
+          extensionSpecifiers: new Set(extensionMounts.map((mount) => mount.specifier)),
+          resolveExternalPaths: input.resolveExternalPaths,
+          hostBundle: input.hostBundle,
+        }),
+        packageRoot,
+        plugins: [
+          createVirtualGenerationModuleMapPlugin({
+            id: input.moduleMapPath,
+            source: moduleMapSource,
+          }),
+          createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
+          createAuthoredWorkflowDirectivePlugin({
+            appRoot: input.appRoot,
+            recorder: workflowSources,
+          }),
+          workflowSources.graphPlugin(),
+          createExtensionMountPlugin(extensionMounts, extensionOverridePaths(input.manifest)),
+          extensionScopePlugin,
+        ],
+      }),
       input: input.moduleMapPath,
-      platform: "node",
-      plugins,
-      resolve: {
-        conditionNames: authoredModuleConditions(),
-        extensions: [...RESOLVE_EXTENSIONS],
-      },
-      tsconfig: resolveAuthoredTsConfigPath(packageRoot),
       output: {
         comments: false,
         format: "esm",
@@ -425,7 +413,7 @@ function usesDevelopmentExtensionModules(manifest: CompiledAgentManifest): boole
   );
 }
 
-function createExternalRuntimeImportPlugin(importSpecifier: string): Record<string, unknown> {
+function createExternalRuntimeImportPlugin(importSpecifier: string): Plugin {
   const normalizedImportSpecifier = normalizeEsmImportSpecifier(importSpecifier);
   return {
     name: "eve-external-runtime-import",
@@ -461,11 +449,11 @@ class AuthoredWorkflowSourceRecorder {
     return [...this.#sources.keys()].sort();
   }
 
-  graphPlugin(): Record<string, unknown> {
+  graphPlugin(): Plugin {
     const imports = this.#imports;
     return {
       name: "eve-authored-module-graph",
-      buildEnd(this: RolldownModuleGraphContext) {
+      buildEnd() {
         for (const id of this.getModuleIds()) {
           const info = this.getModuleInfo(id);
           if (info === null) continue;
@@ -505,18 +493,10 @@ class AuthoredWorkflowSourceRecorder {
   }
 }
 
-interface RolldownModuleGraphContext {
-  getModuleIds(): Iterable<string>;
-  getModuleInfo(id: string): {
-    readonly dynamicallyImportedIds: readonly string[];
-    readonly importedIds: readonly string[];
-  } | null;
-}
-
 function createVirtualGenerationModuleMapPlugin(input: {
   readonly id: string;
   readonly source: string;
-}): Record<string, unknown> {
+}): Plugin {
   return {
     name: "eve-generation-module-map",
     resolveId(id: string) {
@@ -532,8 +512,8 @@ async function buildAuthoredModuleBundle(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
   configuration: {
-    readonly packageBoundaryPlugin: Record<string, unknown>;
-    readonly plugins: readonly Record<string, unknown>[];
+    readonly packageBoundaryPlugin: Plugin;
+    readonly plugins: readonly Plugin[];
     readonly sourcemap: false | "inline";
   },
 ): Promise<string> {
@@ -563,7 +543,7 @@ async function buildAuthoredModuleBundle(
   }
 }
 
-function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
+function createAuthoredDirectiveGuardPlugin(): Plugin {
   return {
     name: "eve-authored-directive-guard",
     async transform(source: string, id: string) {
@@ -588,7 +568,7 @@ function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
 export function createAuthoredWorkflowDirectivePlugin(input: {
   readonly appRoot: string;
   readonly recorder?: AuthoredWorkflowSourceRecorder;
-}): Record<string, unknown> {
+}): Plugin {
   return {
     name: "eve-authored-workflow-directives",
     async transform(source: string, id: string) {

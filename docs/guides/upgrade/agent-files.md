@@ -77,6 +77,7 @@ Expect the sandbox template to rebuild once after the upgrade. See [Docker sandb
 | `MessageResponse`, `MessageResult`                                                       | `Delivery`, `DeliveryResult` from `eve/sessions`                          |
 | `StreamOptions`, `GetEventStreamOptions`                                                 | `SessionStreamOptions` from `eve/sessions`                                |
 | `SpanProcessor`, `SpanExporter`, `SpanProcessorOrName` from OpenTelemetry                | `eve/instrumentation/otel`                                                |
+| `grep` from `eve/extensions/code/tools`                                                  | `grep` from `eve/tools/grep`                                              |
 | `eve/self-modification/config`, `eve/setup`, `eve/setup/scaffold`                        | No public replacement                                                     |
 
 The `agents/<name>/` workspace layout and `withEve` from `eve/vercel` are stable. `JustBashSandbox`, `autoInstall`, and `prepare` stay on `eve/sandbox/just-bash`, but `customCommands` and `filesystem` move under `experimental`:
@@ -139,6 +140,31 @@ export default git({
 ```
 
 See [Control access with `authorize`](/docs/code-extension#control-access-with-authorize).
+
+## Remove the code extension's `worker` option
+
+The code extension adds no `code__worker` subagent, and `code()` rejects a `worker` option. Remove `worker` from your code extension mount. To hand a slice of work to a child agent, use the built-in `agent` tool. If an `agent/tools/agent.ts` override disables that tool so delegation goes to `code__worker`, delete the override.
+
+```ts title="agent/extensions/code.ts"
+import code from "eve/extensions/code";
+
+export default code({
+  vercel: { connector: "vercel/acme-bot" },
+  worker: { model: "openai/gpt-5.6-terra-fast", reasoning: "high" }, // [!code --]
+});
+```
+
+## Replace the code extension's `apply_patch` tool
+
+The code extension no longer adds `code__apply_patch`. Every agent gets the default [`edit_file`](/docs/concepts/built-in-tools#edit_file) tool, which takes `path` and a list of `{ oldText, newText }` edits instead of a patch. Move an override of the old tool, whether `agent/tools/code__apply_patch.ts` or `agent/extensions/code/tools/apply_patch.ts`, to `agent/tools/edit_file.ts` and spread `editFile` from `eve/tools/edit_file`. A wrapper that reads `input.patch` needs to read `input.path` and `input.edits` instead. A mount with another file name, such as `agent/extensions/coding.ts`, used the `coding__apply_patch` name; move it the same way.
+
+An override that only disables the old tool fails `eve build` with `disables a slot with no lower-precedence source`. To keep the agent from editing files, disable `edit_file` instead:
+
+```ts title="agent/tools/edit_file.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
 
 ## Workflow imports
 

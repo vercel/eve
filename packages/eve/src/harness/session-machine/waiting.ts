@@ -1,3 +1,5 @@
+import type { Commit } from "#harness/types.js";
+import { commitOf } from "./commit.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { activeTurn, openWork, waiting } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -15,7 +17,11 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
  * nothing the session runs announces a pause itself, and the announcement materializes
  * `waiting(view, turnId)` for readers that follow the stream from a cursor without folding.
  */
-export function announceWaiting(before: SessionView, after: SessionView): SessionEvent[] {
+export function announceWaiting(before: SessionView, after: SessionView): Commit {
+  return commitOf(waitingAnnouncements(before, after));
+}
+
+function waitingAnnouncements(before: SessionView, after: SessionView): SessionEvent[] {
   const turnId = activeTurn(after)?.turnId;
   if (turnId === undefined) return [];
   const now = waiting(after, turnId);

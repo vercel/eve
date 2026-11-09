@@ -35,7 +35,7 @@ const connection: ResolvedConnectionDefinition = {
 function stepContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(BundleKey, {
-    graph: { root: { agent: { connections: [connection], dynamicConnectionResolvers: [] } } },
+    graph: { root: { agent: { connections: [connection], definitions: [] } } },
   } as never);
   return ctx;
 }

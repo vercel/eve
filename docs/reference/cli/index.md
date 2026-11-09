@@ -304,7 +304,7 @@ Local dev records traces under `.eve/traces/`, bounded by age, size, and a keep-
 
 With the built-in local Workflow World, a new `eve dev` server leaves runs from previous invocations dormant. Their timers and hooks don't fire. A message or control request to a dormant conversation fails instead of being accepted without a response; the HTTP channel reports its usual request failure. Start a new conversation, or restart with `eve dev --resume`. Already-open event streams are unaffected, and rebuilds and worker restarts within one server keep current runs eligible.
 
-`eve dev --resume` attempts to recover unfinished runs from previous invocations that have a retained snapshot with readable metadata. Framework or workflow source changes don't block the attempt, but replay can fail and leave the run terminally failed after executing some work.
+`eve dev --resume` attempts to recover unfinished runs from previous invocations that have a retained snapshot with readable metadata. A step that was running when the previous server stopped runs again right away. Framework or workflow source changes don't block the attempt, but replay can fail and leave the run terminally failed after executing some work.
 
 Runs with malformed snapshot metadata stay stored and dormant for that server invocation, and their later timers and hooks don't fire. `--resume` reports why it skipped them without blocking other runs. Restore the metadata from a backup or start a new session.
 

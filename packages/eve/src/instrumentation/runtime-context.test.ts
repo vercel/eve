@@ -14,12 +14,7 @@ import type { InstrumentationModelStartedInput } from "#public/instrumentation/i
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const session: HarnessSession = {
-  agent: {
-    modelReference: { id: "test-model" },
-    system: "You are a test assistant.",
-    tools: [],
-  },
-  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  compaction: {},
   continuationToken: "http:test-session",
   history: [],
   sessionId: "test-session",

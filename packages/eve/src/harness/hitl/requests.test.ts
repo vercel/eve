@@ -1,3 +1,4 @@
+import { transition } from "#harness/session-machine/commit.js";
 import { describe, expect, it } from "vitest";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -82,7 +83,7 @@ describe("holdsHitlRequests", () => {
     expect(holdsHitlRequests(state)).toBe(true);
     const saved = saveTransition(
       { state },
-      { events: [], turn: { remembered: {}, suspended: [] } },
+      transition({ events: [], turn: { remembered: {}, suspended: [] } }),
     );
     const cleaned = writeHitlState(saved, {}, emptySessionView());
     expect(holdsHitlRequests(cleaned.state)).toBe(true);

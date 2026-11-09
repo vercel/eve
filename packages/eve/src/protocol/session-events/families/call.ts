@@ -35,6 +35,11 @@ export interface Capability {
   readonly label?: string;
   /** An `agent` another deployment serves: a remote agent, not a subagent of this one. */
   readonly remote?: true;
+  /**
+   * Its tool set `label: false`: readers showing activity leave the call out, as they do `control`
+   * calls.
+   */
+  readonly hidden?: true;
 }
 
 /** A preview of a call's input as the model writes it. The first record announces the call. */
@@ -119,6 +124,7 @@ export const callSchemas = {
           name: z.string(),
           remote: z.literal(true).optional(),
           label: z.string().optional(),
+          hidden: z.literal(true).optional(),
         }),
         input: jsonValue.optional(),
         inputError: errorInfo.optional(),

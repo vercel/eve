@@ -132,6 +132,28 @@ describe("createRuntimeActionRequestFromToolCall", () => {
     });
   });
 
+  it("marks a call hidden when its tool sets label: false", () => {
+    const action = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall: { input: {}, toolCallId: "call-react", toolName: "react", type: "tool-call" },
+      tools: new Map([
+        [
+          "react",
+          {
+            label: false,
+            description: "React.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "react",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      action: { callId: "call-react", input: {}, kind: "tool-call", toolName: "react" },
+      hidden: true,
+    });
+  });
+
   it("does not let the label start callback callback mutate the action input", () => {
     const result = createPresentedRuntimeActionRequestFromToolCall({
       toolCall: {
@@ -246,8 +268,7 @@ describe("createCoordinationRequestFromToolCall", () => {
 
 function createParkedSession(): HarnessSession {
   const base: HarnessSession = {
-    agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:test-session",
     history: [{ content: "delegate this", kind: "user", role: "user" }],
     sessionId: "test-session",

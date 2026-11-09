@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { type SlackChannelConfig, slackChannel } from "#public/channels/slack/index.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
+import { SIGN_IN_CANCEL_ACTION_ID } from "#public/channels/slack/sign-in-cancel.js";
 import {
   type ChannelDriver,
   type Person,
@@ -24,6 +25,8 @@ const PEOPLE = {
 } as const;
 let nextChannel = 0;
 const TEAM = "T01";
+/** Where Slack takes a pressed message's `response_url` posts; its path names the message. */
+const RESPONSE_URL_HOST = "hooks.slack.com";
 
 interface SlackText {
   readonly text: string;
@@ -49,6 +52,12 @@ interface PressHandle {
   /** The pressed message's blocks, which Slack echoes in every `block_actions` payload. */
   readonly blocks: readonly unknown[];
   readonly messageTs: string;
+}
+
+/** A post to a pressed message's `response_url`, with the message it names. */
+interface ResponseUrlBody {
+  readonly delete_original?: boolean;
+  readonly message_ts: string;
 }
 
 interface SlackMessageBody {
@@ -79,6 +88,7 @@ export function slackDriver(
   // Every message is a reply in the thread the first one starts.
   const threadTs = "1700000000.000001";
   let threadStarted = false;
+  let restoreFetch: (() => void) | undefined;
 
   function nextTs(): string {
     sequence += 1;
@@ -168,16 +178,41 @@ export function slackDriver(
     name: dm ? "slack-dm" : codeChannel ? "slack-code-channel" : "slack",
     personId: PERSON,
     capabilities: dm
-      ? ["attachments", "buttons", "text-replies"]
-      : ["attachments", "another-person", "buttons", "text-replies"],
+      ? ["attachments", "buttons", "sign-in-cancel", "text-replies"]
+      : ["attachments", "another-person", "buttons", "sign-in-cancel", "text-replies"],
     surface,
-    createChannel: (record) =>
-      slackChannel({
+    createChannel(record) {
+      // A press's `response_url` is a bare URL the channel posts to with the global `fetch`,
+      // not its Web API client, so route only that host and preserve other fetches.
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (url.hostname !== RESPONSE_URL_HOST) return await previousFetch(input, init);
+        record({
+          body: {
+            ...((await request.json()) as Record<string, unknown>),
+            message_ts: url.pathname.split("/").at(-2),
+          },
+          method: "response_url",
+          response: { ok: true },
+        });
+        return new Response("ok");
+      };
+      restoreFetch = () => {
+        globalThis.fetch = previousFetch;
+        restoreFetch = undefined;
+      };
+      return slackChannel({
         ...config,
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
         ...(codeChannel && { codeChannels: true }),
-      }),
+      });
+    },
+    dispose() {
+      restoreFetch?.();
+    },
     message: (text, person, files = []) => {
       const ts = threadStarted ? nextTs() : threadTs;
       const thread = threadStarted && !codeChannel ? { thread_ts: threadTs } : {};
@@ -233,6 +268,10 @@ export function slackDriver(
       return card.length > 0 ? card : hitlOptions(body.blocks, messageTs);
     },
     shownMessage(call) {
+      const responded = call.body as ResponseUrlBody;
+      if (call.method === "response_url" && responded.delete_original === true) {
+        return { id: responded.message_ts, options: [], removed: true, text: "" };
+      }
       if (!isMessageWrite(call)) return undefined;
       const body = call.body as SlackMessageBody;
       const id = messageTsOf(call);
@@ -252,6 +291,9 @@ export function slackDriver(
         actions: [action],
         channel: { id: CHANNEL },
         message: { blocks, ...(!codeChannel && { thread_ts: threadTs }), ts: messageTs },
+        // Slack hands every press a URL that edits or deletes the pressed message, the only
+        // way to take an ephemeral one away. The path names the message so a post finds it.
+        response_url: `https://${RESPONSE_URL_HOST}/actions/${TEAM}/${messageTs}/conformance`,
         team: { id: TEAM },
         type: "block_actions",
         user: { id, name, team_id: TEAM, username: name },
@@ -302,12 +344,13 @@ function hitlOptions(
   );
 }
 
-/** HITL widgets wherever a block nests them, as a renderer can. */
+/** HITL widgets, and a sign-in prompt's Cancel, wherever a block nests them, as a renderer can. */
 function hitlElements(value: unknown): SlackElement[] {
   if (Array.isArray(value)) return value.flatMap(hitlElements);
   if (typeof value !== "object" || value === null) return [];
   const element = value as SlackElement;
   if (element.action_id?.startsWith(ANSWER_ACTION_PREFIX) === true) return [element];
+  if (element.action_id === SIGN_IN_CANCEL_ACTION_ID) return [element];
   return Object.values(value).flatMap(hitlElements);
 }
 

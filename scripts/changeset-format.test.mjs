@@ -175,10 +175,12 @@ async function createReleaseFixture(t) {
       name: "release-fixture",
       private: true,
       type: "module",
-      packageManager: "pnpm@12.14.0",
+      packageManager: "pnpm@12.17.0",
     }),
   );
-  await write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+  // The fixture borrows the repository's node_modules through a symlink. Without
+  // this, pnpm's pre-run install in the fixture prunes that shared tree.
+  await write("pnpm-workspace.yaml", "verifyDepsBeforeRun: false\npackages:\n  - packages/*\n");
   await write("packages/eve/package.json", JSON.stringify({ name: "eve", version: "1.0.0" }));
   await write("packages/eve/CHANGELOG.md", "# eve\n\n## 1.0.0\n\nOld release.\n");
   await write(
@@ -373,6 +375,70 @@ test("version-packages assembles changesets across bump types and preserves old 
     /· \[View commits\]\(https:\/\/github\.com\/vercel\/eve\/commits\/%40vercel%2Fagent-runs%401\.0\.1\)/u,
   );
 });
+
+for (const mode of ["stable", "rc"]) {
+  test(`version-packages releases desktop independently without eve compatibility noise (${mode})`, async (t) => {
+    const { root, write, git } = await createReleaseFixture(t);
+    const desktop = JSON.parse(await readFile("packages/eve-agent-desktop/package.json", "utf8"));
+    // Pin the unreleased version: release PRs bump the real manifest and would shift the expected result.
+    const desktopManifest = JSON.stringify({
+      name: desktop.name,
+      version: "0.0.0",
+      peerDependencies: desktop.peerDependencies,
+      devDependencies: { eve: desktop.devDependencies.eve },
+    });
+    // Inline, not read from .changeset/: a release consumes and deletes the pending file.
+    const pending =
+      '---\n"@eve/agent-desktop": minor\n---\n\nAdd the experimental `@eve/agent-desktop` extension.\n';
+    await mkdir(join(root, "packages/desktop"));
+    await write("packages/desktop/package.json", desktopManifest);
+    await write(".changeset/desktop.md", pending);
+    if (mode === "rc") {
+      await write(".changeset/pre.json", '{ "mode": "pre", "tag": "rc" }\n');
+      await write(
+        "packages/eve/package.json",
+        JSON.stringify({ name: "eve", version: "1.0.0-rc.1" }),
+      );
+      git("tag", "eve@1.0.0-rc.1");
+    }
+    git("add", ".");
+    git("commit", "-qm", "feat: Add desktop tools");
+    const desktopCommit = git("rev-parse", "HEAD");
+    const release = async (numbers) =>
+      execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
+        cwd: root,
+        stdio: "pipe",
+        env: await mockGitHubPulls(root, numbers),
+      });
+    await release({ [desktopCommit]: 10 });
+    const releasedManifest = await readFile(join(root, "packages/desktop/package.json"), "utf8");
+    const releasedNotes = await readFile(join(root, "packages/desktop/CHANGELOG.md"), "utf8");
+    assert.equal(JSON.parse(releasedManifest).version, mode === "stable" ? "0.1.0" : "0.1.0-rc.0");
+    assert.match(releasedNotes, /Add the experimental `@eve\/agent-desktop` extension/u);
+    git("add", ".");
+    git("commit", "-qm", "chore: Version packages");
+    git("tag", `@eve/agent-desktop@${JSON.parse(releasedManifest).version}`);
+
+    await write(".changeset/eve-only.md", '---\n"eve": patch\n---\n\nRepair the main package.\n');
+    git("add", ".changeset/eve-only.md");
+    git("commit", "-qm", "fix: Repair the main package");
+    const eveCommit = git("rev-parse", "HEAD");
+    await release({ [desktopCommit]: 10, [eveCommit]: 11 });
+    const eve = JSON.parse(await readFile(join(root, "packages/eve/package.json"), "utf8"));
+    assert.equal(eve.version, mode === "stable" ? "1.0.1" : "1.0.0-rc.2");
+    assert.equal(
+      await readFile(join(root, "packages/desktop/package.json"), "utf8"),
+      releasedManifest,
+    );
+    assert.equal(
+      await readFile(join(root, "packages/desktop/CHANGELOG.md"), "utf8"),
+      releasedNotes,
+    );
+    const notes = await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8");
+    assert.match(notes, /### Bug Fixes\n\n- Repair the main package\. \(\[#11\]/u);
+    assert.doesNotMatch(notes, /### Dependencies|@eve\/agent-desktop|^\s*[-*]\s*$/mu);
+  });
+}
 
 test("version-packages releases candidates and collects them into the stable release", async (t) => {
   const { root, write, git } = await createReleaseFixture(t);

@@ -104,7 +104,7 @@
       "title": "agent-browser",
       "description": "Add browser automation tools backed by agent-browser to an eve agent.",
       "dependencies": [
-        "@agent-browser/eve"
+        "@eve/agent-browser"
       ],
       "files": [
         {
@@ -505,6 +505,19 @@
           "path": "registry/tools/write_file.ts",
           "type": "registry:file",
           "target": "agent/tools/write_file.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/edit_file",
+      "type": "registry:item",
+      "title": "Edit File",
+      "description": "Edit sandbox files by exact text replacement.",
+      "files": [
+        {
+          "path": "registry/tools/edit_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/edit_file.ts"
         }
       ]
     },

@@ -16,11 +16,10 @@ import { logicalSessionToken, requireSessionId } from "#execution/session-inbox/
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
-import { cascade } from "#harness/session-machine/cascade.js";
+import { createLineCommitter } from "#harness/session-machine/lines.js";
 import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { SessionEvent } from "#protocol/session-event.js";
-import { encodeLine } from "#protocol/session-events/envelope.js";
+import { endSession } from "#harness/session-machine/deliveries.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
@@ -129,38 +128,22 @@ async function publishTerminalEvent(
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   const publication = (async () => {
     // A replacement reading this history skips it when a reset ended the session.
-    const ended: SessionEvent = {
-      data: {
-        cause:
+    // A stream that never recorded its start, as an older deployment's, starts as it ends.
+    const facts = endSession(
+      { view },
+      {
+        cause: control === undefined ? { policy: strandedEndPolicy(trigger) } : undefined,
+        control:
           control === undefined
-            ? { policy: strandedEndPolicy(trigger) }
-            : { deliveryId: control.deliveryId },
+            ? undefined
+            : { deliveryId: control.deliveryId, principal: principalOf(control.auth) },
         error: { code: "session_stranded", message: "This session is no longer available." },
         outcome: "failed",
       },
-      type: "session.ended",
-    };
-    const facts: SessionEvent[] = [];
-    if (control !== undefined) {
-      const principal = principalOf(control.auth);
-      facts.push(
-        {
-          type: "delivery.admitted",
-          data: {
-            deliveryId: control.deliveryId,
-            source: { control: "reset" },
-            ...(principal !== undefined && { principal }),
-          },
-        },
-        { type: "delivery.settled", data: { deliveryId: control.deliveryId, outcome: "applied" } },
-      );
-    }
-    facts.push(ended);
-    await writer.write(
-      new TextEncoder().encode(
-        encodeLine({ at: new Date().toISOString(), facts: cascade(view, facts) }),
-      ),
     );
+    // The same commit a session's own writer makes: closed by cascade, and checked.
+    const lines = (await createLineCommitter()).commit(view, facts, view.position);
+    for (const { bytes } of lines) await writer.write(bytes);
     await writer.close();
     return true;
   })();
@@ -174,8 +157,8 @@ async function publishTerminalEvent(
     if (!(await Promise.race([publication, timeout]))) {
       log.warn("Timed out finishing the stranded session stream", { sessionId });
     }
-  } catch {
-    log.warn("Could not finish the stranded session stream", { sessionId });
+  } catch (error) {
+    log.warn("Could not finish the stranded session stream", { error, sessionId });
   } finally {
     clearTimeout(timer);
     writer.releaseLock();
@@ -243,7 +226,9 @@ async function cancelRuns(
  * their encrypted hook metadata. Guessing would cancel the wrong anchor, so an
  * unknown session fails.
  */
-async function resolveStrandedSessionId(stranded: StrandedSessionOwnerError): Promise<string> {
+export async function resolveStrandedSessionId(
+  stranded: StrandedSessionOwnerError,
+): Promise<string> {
   const { attributes, runId } = stranded.ownerRun;
   const recorded = attributes[EVE_SESSION_ATTRIBUTE];
   if (recorded !== undefined) return recorded;

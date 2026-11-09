@@ -160,6 +160,16 @@ export function chatSdkTextDriver(): ChannelDriver {
     press() {
       throw new Error("A text-only Chat SDK adapter has nothing to press.");
     },
+    // The plain-text rendering has nothing to press, but an edit still rewrites the message it names.
+    shownMessage(call) {
+      if (!isPost(call)) return undefined;
+      return {
+        id: messageIdOf(call),
+        onlyPerson: isPersonDirectMessage(call),
+        options: [],
+        text: driver.postedText(call) ?? "",
+      };
+    },
   };
 }
 

@@ -30,10 +30,6 @@ function hookTokens(inbox: SessionInboxHandle): readonly string[] {
 
 const createHookMock = vi.fn();
 
-vi.mock("#execution/session-inbox/release-step.js", () => ({
-  releaseSessionHooksStep: vi.fn(async () => {}),
-}));
-
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: (...args: unknown[]) => createHookMock(...args),
@@ -141,7 +137,8 @@ describe("createSessionInbox", () => {
     await expect(readResult(inbox)).resolves.toEqual(resolved(send("hello")));
     expect(inbox.drain()).toEqual([]);
     expect(createHookMock).toHaveBeenCalledOnce();
-    expect(await inbox.release()).toEqual([]);
+    expect(inbox.drain()).toEqual([]);
+    await inbox.dispose();
   });
 
   it("reads a run's relayed messages separately, and takes them a batch's budget at a time", async () => {
@@ -207,7 +204,7 @@ describe("createSessionInbox", () => {
     input.resolve(resolved({ deliveryId: "cancel-delivery", kind: "cancel" }));
     await expect(interrupt).resolves.toEqual({ deliveryId: "cancel-delivery", kind: "cancel" });
     expect(inbox.drain()).toEqual([{ deliveryId: "cancel-delivery", kind: "cancel" }]);
-    expect(await inbox.release()).toEqual([]);
+    await inbox.dispose();
   });
 
   it("pushes a clear to interrupt handlers, so it stops the running turn", async () => {
@@ -219,7 +216,7 @@ describe("createSessionInbox", () => {
     input.resolve(resolved({ deliveryId: "clear-delivery", kind: "clear" }));
     await expect(interrupt).resolves.toEqual({ deliveryId: "clear-delivery", kind: "clear" });
     expect(inbox.drain()).toEqual([{ deliveryId: "clear-delivery", kind: "clear" }]);
-    expect(await inbox.release()).toEqual([]);
+    await inbox.dispose();
   });
 
   it("stops notifying an unsubscribed interrupt handler", async () => {
@@ -266,7 +263,7 @@ describe("createSessionInbox", () => {
     await third.promise;
     expect(inbox.drain()).toEqual([send("first"), send("second"), send("third")]);
     expect(inbox.drain()).toEqual([]);
-    expect(await inbox.release()).toEqual([]);
+    await inbox.dispose();
   });
 
   it("keeps pumping so a cancel behind a burst of unread messages still interrupts", async () => {
@@ -302,40 +299,22 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
-  it("accounts for an accepted unread command before releasing ownership", async () => {
+  it("restores handed-back payloads ahead of commands accepted since", async () => {
     installHooks(
       createMockHook({
-        reads: [Promise.resolve(resolved(send("during release")))],
+        reads: [Promise.resolve(resolved(send("after hand-back")))],
         token: "stable",
       }),
     );
     const inbox = createSessionInbox("session-1");
-    await inbox.claimSessionHook("stable");
-
-    await expect(inbox.release()).resolves.toEqual([send("during release")]);
-  });
-
-  it("restores released payloads ahead of commands accepted after reclaiming", async () => {
-    installHooks(
-      createMockHook({ reads: [Promise.resolve(resolved(send("released")))], token: "stable" }),
-      createMockHook({
-        reads: [Promise.resolve(resolved(send("after reclaim")))],
-        token: "stable",
-      }),
-    );
-    const inbox = createSessionInbox("session-1");
-    await inbox.claimSessionHook("stable");
-    const released = await inbox.release();
-    expect(released).toEqual([send("released")]);
-
     await inbox.claimSessionHook("stable");
     await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
-    inbox.restore([...released, send("second released")]);
+    inbox.restore([send("handed back"), send("second handed back")]);
 
     expect(inbox.drain()).toEqual([
-      send("released"),
-      send("second released"),
-      send("after reclaim"),
+      send("handed back"),
+      send("second handed back"),
+      send("after hand-back"),
     ]);
     await inbox.dispose();
   });
@@ -532,7 +511,7 @@ describe("createSessionInbox", () => {
       await vi.waitFor(() => expect(inbox.claimedTokens).toEqual(["channel"]));
       expect(inbox.takenOver).toBe(false);
       await inbox.dispose();
-      await expect(settled).resolves.toBe("The session inbox was released before a takeover.");
+      await expect(settled).resolves.toBe("The session inbox was disposed before a takeover.");
       return;
     }
     await expect(settled).resolves.toBe(takenOver === "rejected" ? "reader failed" : takenOver);

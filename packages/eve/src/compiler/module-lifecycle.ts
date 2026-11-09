@@ -105,28 +105,10 @@ function collectRuntimeEntryClosure(
   bindings: Readonly<Record<string, AgentModuleBinding>>,
   roots: ReadonlySet<string>,
 ): Set<string> {
-  const runtimeEntries = new Set<string>();
-  const visiting = new Set<string>();
-
-  const visit = (sourceId: string): void => {
-    if (runtimeEntries.has(sourceId)) return;
-    if (visiting.has(sourceId)) {
-      throw new Error(`Compiled module dependency cycle includes "${sourceId}".`);
-    }
-    const binding = bindings[sourceId];
-    if (binding === undefined) {
+  for (const sourceId of roots) {
+    if (bindings[sourceId] === undefined) {
       throw new Error(`Runtime module entry "${sourceId}" has no selected binding.`);
     }
-    visiting.add(sourceId);
-    if (binding.backing.kind === "programmatic") {
-      for (const dependencySourceId of Object.values(binding.backing.dependencies ?? {})) {
-        visit(dependencySourceId);
-      }
-    }
-    visiting.delete(sourceId);
-    runtimeEntries.add(sourceId);
-  };
-
-  for (const sourceId of roots) visit(sourceId);
-  return runtimeEntries;
+  }
+  return new Set(roots);
 }

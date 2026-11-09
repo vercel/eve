@@ -13,6 +13,7 @@ import {
   type FakeConnection,
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 interface SearchOutput {
   readonly remaining: number;
@@ -22,14 +23,14 @@ interface SearchOutput {
 }
 
 /** The step's `search` tool, run inside its session. */
-function searchFor(
+async function searchFor(
   tools: readonly HarnessToolDefinition[],
   options: {
     readonly connections?: readonly FakeConnection[];
     readonly skills?: readonly CatalogSkillSource[];
   } = {},
 ) {
-  const { catalog, run } = catalogContext({ ...options, tools });
+  const { catalog, run } = await catalogContext({ ...options, tools });
   const search = catalog.advertised.get(SEARCH_TOOL_NAME)!;
   return (input: Record<string, unknown>) =>
     run(async () => (await search.execute!(input, OPTIONS)) as SearchOutput);
@@ -64,7 +65,7 @@ describe("search", () => {
   ];
 
   it("ranks tools and skills together by name before description", async () => {
-    const output = await searchFor(tools, { skills })({ query: "refund" });
+    const output = await (await searchFor(tools, { skills }))({ query: "refund" });
 
     // Equal matches sort by name, compared by code unit: `-` before `_`.
     expect(names(output)).toEqual([
@@ -86,9 +87,9 @@ describe("search", () => {
   });
 
   it("labels a search with its query, then with how much it found", async () => {
-    const { catalog, run } = catalogContext({ skills, tools });
+    const { catalog, run } = await catalogContext({ skills, tools });
     const search = catalog.advertised.get(SEARCH_TOOL_NAME)!;
-    const label = search.label!;
+    const label = labelCallbacks(search.label)!;
     const found = await run(() => search.execute!({ query: "refund" }, OPTIONS));
 
     expect(label.start!({ query: "refund" })).toBe("Search tools for “refund”");
@@ -114,7 +115,7 @@ describe("search", () => {
   });
 
   it("finds only deferred entries; direct tools and listed skills are already in context", async () => {
-    const search = searchFor(tools, { skills });
+    const search = await searchFor(tools, { skills });
 
     // Four deferred tools and agents, and one deferred skill.
     expect(await search({ query: "add" })).toEqual({ remaining: 0, results: [], searched: 5 });
@@ -122,8 +123,8 @@ describe("search", () => {
   });
 
   it("requires a query with at least one word", async () => {
-    const search = searchFor(tools, { skills });
-    const schema = catalogContext({ tools }).catalog.advertised.get(SEARCH_TOOL_NAME)!
+    const search = await searchFor(tools, { skills });
+    const schema = (await catalogContext({ tools })).catalog.advertised.get(SEARCH_TOOL_NAME)!
       .inputSchema as StandardSchemaV1;
     const needsWords =
       'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").';
@@ -144,7 +145,7 @@ describe("search", () => {
       ),
       inlineTool("export_ledger", { deferred: true, description: "Export the ledger." }),
     ];
-    const search = searchFor(many);
+    const search = await searchFor(many);
 
     const top = await search({ limit: 50, query: "report" });
     // `searched` counts every entry, matching or not; `remaining` counts only matches.
@@ -157,7 +158,7 @@ describe("search", () => {
     expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 10));
 
     // The model's calls are checked against the schema, which caps limit at 50 and has no offset.
-    const schema = catalogContext({ tools: many }).catalog.advertised.get(SEARCH_TOOL_NAME)!
+    const schema = (await catalogContext({ tools: many })).catalog.advertised.get(SEARCH_TOOL_NAME)!
       .inputSchema as StandardSchemaV1;
     expect(await schema["~standard"].validate({ limit: 51, query: "report" })).toEqual({
       issues: [expect.objectContaining({ path: ["limit"] })],
@@ -183,7 +184,9 @@ describe("search", () => {
       });
 
     it("ranks connection tools with local entries under their full names", async () => {
-      const output = await searchFor(tools, { connections: [linear()] })({ query: "issues" });
+      const output = await (
+        await searchFor(tools, { connections: [linear()] })
+      )({ query: "issues" });
 
       // The connection's description matches too, but weighs less than a tool's own name.
       expect(output.results).toEqual([
@@ -212,7 +215,9 @@ describe("search", () => {
           }),
         ],
       });
-      const output = await searchFor(tools, { connections: [billing] })({ query: "customer" });
+      const output = await (
+        await searchFor(tools, { connections: [billing] })
+      )({ query: "customer" });
 
       expect(output.results.map((result) => result.tool)).toEqual(["billing__create"]);
     });
@@ -225,7 +230,7 @@ describe("search", () => {
         signIn: true,
         tools: [connectionTool("search_pages")],
       });
-      const search = searchFor(tools, { connections: [linear(), notion] });
+      const search = await searchFor(tools, { connections: [linear(), notion] });
 
       const signIn = {
         description: "Sign in to use the Notion tools: Notion pages and databases",
@@ -256,7 +261,9 @@ describe("search", () => {
         tools: [],
       });
 
-      const output = await searchFor(tools, { connections: [linear(), vault, crm] })({
+      const output = await (
+        await searchFor(tools, { connections: [linear(), vault, crm] })
+      )({
         query: "issues",
       });
 
@@ -287,7 +294,9 @@ describe("search", () => {
           }),
         );
         let settled = false;
-        const pending = searchFor(tools, { connections: [linear(), crm] })({ query: "issues" });
+        const pending = (await searchFor(tools, { connections: [linear(), crm] }))({
+          query: "issues",
+        });
         void pending.then(() => (settled = true));
 
         await vi.advanceTimersByTimeAsync(9_999);
@@ -351,7 +360,7 @@ describe("search", () => {
         skills: [{ deferred: true, description: "Fill PDF forms.", name: "pdf-forms" }],
       },
     );
-    const ranked = async (query: string) => names(await search({ limit: 50, query }));
+    const ranked = async (query: string) => names(await (await search)({ limit: 50, query }));
 
     it("ranks an exact name first, above an entry that mentions it in more places", async () => {
       expect((await ranked("pdf")).slice(0, 2)).toEqual(["pdf", "pdf_fill"]);
@@ -377,7 +386,7 @@ describe("search", () => {
     });
 
     it("lists a connection's tools first only for its whole name, not a partial one", async () => {
-      const search = searchFor([inlineTool("git_status", { deferred: true })], {
+      const search = await searchFor([inlineTool("git_status", { deferred: true })], {
         connections: [
           fakeConnection({
             name: "github",
@@ -411,7 +420,7 @@ describe("search", () => {
     });
 
     it("matches the name after any namespace, not only a connection's, as exact or prefix", async () => {
-      const search = searchFor([
+      const search = await searchFor([
         inlineTool("sre__status_page_incidents_list", {
           deferred: true,
           description: "List open incidents.",
@@ -430,7 +439,7 @@ describe("search", () => {
     });
 
     it("keeps a name without a namespace whole for exact and prefix matches", async () => {
-      const search = searchFor([
+      const search = await searchFor([
         inlineTool("xrefund", { deferred: true, description: "Refund a charge." }),
         inlineTool("refund_policy", { deferred: true, description: "Read the policy." }),
       ]);
@@ -442,7 +451,7 @@ describe("search", () => {
     });
 
     it("leaves one-letter and filler words out of scoring unless the query has nothing else", async () => {
-      const search = searchFor([
+      const search = await searchFor([
         inlineTool("support__case_assign", {
           deferred: true,
           description: "Assign a support case to a teammate.",
@@ -481,7 +490,7 @@ describe("search", () => {
   });
 
   describe("namespace queries", () => {
-    function namespaced() {
+    async function namespaced() {
       const crmApi = fakeConnection({
         description: "CRM customers and deals",
         name: "crm__api",
@@ -514,7 +523,7 @@ describe("search", () => {
       const outside = [linear, broken].map((connection) =>
         vi.spyOn(connection.client, "getToolMetadata"),
       );
-      const search = searchFor(
+      const search = await searchFor(
         [
           // An extension mounted as `crm` adds a tool and a connection under its name.
           inlineTool("crm__export", { deferred: true, description: "Export CRM accounts." }),
@@ -529,7 +538,7 @@ describe("search", () => {
     }
 
     it("keeps only the namespace, including a connection mounted under it, and never lists other connections", async () => {
-      const { outside, search } = namespaced();
+      const { outside, search } = await namespaced();
 
       const output = await search({ query: "crm__" });
 
@@ -546,7 +555,7 @@ describe("search", () => {
     });
 
     it("ranks the namespace by the whole query, best match first", async () => {
-      const { search } = namespaced();
+      const { search } = await namespaced();
 
       const found = names(await search({ query: "crm__api__list deals" }));
 
@@ -555,7 +564,7 @@ describe("search", () => {
     });
 
     it("ranks a tool whose own name contains __ first for its exact full name", async () => {
-      const { search } = namespaced();
+      const { search } = await namespaced();
 
       expect(names(await search({ query: "linear__issue__create" }))[0]).toBe(
         "linear__issue__create",
@@ -563,7 +572,7 @@ describe("search", () => {
     });
 
     it("keeps a connection's sign-in entry, alone or with words after the namespace, without prompting", async () => {
-      const { notion, search } = namespaced();
+      const { notion, search } = await namespaced();
 
       expect(names(await search({ query: "notion__" }))).toEqual(["notion"]);
       expect(names(await search({ query: "notion__search pages" }))).toEqual(["notion"]);
@@ -571,7 +580,7 @@ describe("search", () => {
     });
 
     it("ignores a leading ^ and trailing underscores", async () => {
-      const { search } = namespaced();
+      const { search } = await namespaced();
       const linear = await search({ query: "linear__" });
 
       expect(await search({ query: "^linear__" })).toEqual(linear);
@@ -586,7 +595,7 @@ describe("search", () => {
       ],
       ["archive__", 'Connection "archive" has no tools.'],
     ])("fails for %s, a namespace with no entries", async (query, message) => {
-      const { outside, search } = namespaced();
+      const { outside, search } = await namespaced();
 
       await expect(search({ query })).rejects.toThrow(message);
       if (query === "nope__x") {

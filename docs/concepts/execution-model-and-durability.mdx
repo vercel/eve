@@ -21,7 +21,7 @@ In local development and a self-deployed `eve start` process, eve uses the SDK's
 
 Nitro hosts eve's HTTP routes and workflow entrypoints, but not the workflow store or the sandbox runtime. Workflow state lives in the active world, and the sandbox comes from `agent/sandbox` or the default sandbox. To choose a world for a self-hosted deployment, see [Workflow worlds](../guides/deployment/workflow-worlds) and [agent.ts](../agent-config#workflow-world).
 
-When a Vercel production deployment changes, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. Static user-role instructions stay in the session history and aren't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
+When a Vercel production deployment changes, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. A static user-role instruction the new deployment changed joins the history again; an unchanged one isn't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
 
 A session whose checkpoint the target deployment can't read stays on its current deployment. An older release can't read a newer checkpoint. After a rollback, a session that already moved to the newer deployment stays there. The target drops state it doesn't define, such as a removed `defineState` key, and its runtime logs name the unknown key. eve doesn't otherwise validate authored session state.
 
@@ -52,12 +52,12 @@ A session is stranded when a different eve version built the workflow run that h
 
 eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session there never runs again:
 
-| World                        | When a session is stranded                                                                                                                                                            |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                 |
-| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                       |
-| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                          |
-| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery). |
+| World                        | When a session is stranded                                                                                                                                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments. See [Sessions on a deleted Vercel deployment](#sessions-on-a-deleted-vercel-deployment). |
+| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                                                                |
+| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                                                                   |
+| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery).                                          |
 
 eve ends a stranded session without running any of its code. When it ends depends on the kind of run:
 
@@ -148,6 +148,18 @@ Ending a root session doesn't immediately cancel its subagent sessions and workf
 
 Runs that recorded no eve version are treated as stranded.
 
+#### Sessions on a deleted Vercel deployment
+
+On Vercel Workflow, a session's run executes only on the deployment that started it. If that deployment is deleted, for example by a deployment retention policy, the run can't execute again. eve detects this when a channel address reaches the session:
+
+- A channel message, such as a new message in a Slack thread, ends the session and starts a fresh one at the same address. The message becomes its first turn, and the fresh session names the session it replaced.
+- `end()` on the address ends the session, and `create()` throws `SessionStrandedError`.
+- The replaced session's recorded history can be unreadable, because its encryption key belonged to the deleted deployment. An instruction that reads the predecessor's stream should handle that error.
+
+eve doesn't detect a deleted deployment on other paths. A send by session ID can be accepted and never processed. The session timeout doesn't end the session, because its timer ran on the deleted deployment too.
+
+A session that handed off to a newer deployment still records its events on the deployment that started it. If only that first deployment is deleted, the session's current run is still live, so eve doesn't replace it, and its turns fail when they record events. To avoid both cases, keep deployments longer than the session timeout.
+
 #### Sessions from session-driver releases
 
 Some eve releases ran each session as a session driver with separate turn workflows. When such a driver sends its next turn to the current deployment, eve imports the session. The session keeps its ID, history, authored state, usage, limits, and event stream, and later turns use the new deployment's instructions, model, and tools.
@@ -165,7 +177,7 @@ An eve agent spans two execution environments with different responsibilities:
 
 The agent loop runs as a workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
 
-App-side code reaches the sandbox through `ctx.getSandbox()`. The default `bash`, `read_file`, and `write_file` tools use it, as do opt-in framework tools such as `glob` and `grep`. Authored tools can use it when they need isolated filesystem or process access.
+App-side code reaches the sandbox through `ctx.getSandbox()`. The default `bash`, `read_file`, `write_file`, and `edit_file` tools use it, as do opt-in framework tools such as `glob` and `grep`. Authored tools can use it when they need isolated filesystem or process access.
 
 The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have separate lifetimes. The workflow can park or restart without holding sandbox compute, and the app runtime opens sandbox compute only when code needs it.
 
@@ -239,7 +251,7 @@ A turn can hand work off to a [subagent](../subagents). Each subagent gets its o
 
 ## How eve orders session history
 
-Conversation history within a session is append-only. Static user-role instructions start a new session's history. Dynamic user-role instructions are added before a model call when their content changes. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too.
+Conversation history within a session is append-only. User-role instructions, static and dynamic, are added before a model call when their content changes, and again after a compaction or clear that removes them. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too.
 
 ## What to read next
 

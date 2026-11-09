@@ -122,19 +122,6 @@ export function withExtensionNamespace<T extends { readonly extensionNamespace?:
     : definition;
 }
 
-export function assertUniqueBy<T>(
-  values: readonly T[],
-  identity: (value: T) => string,
-  label: string,
-): void {
-  const seen = new Set<string>();
-  for (const value of values) {
-    const key = identity(value);
-    if (seen.has(key)) throw new Error(`Compiled ${label} "${key}" is declared more than once.`);
-    seen.add(key);
-  }
-}
-
 export function withDiagnosticsSummary(
   subagents: readonly CompiledSubagentNode[],
   diagnosticsSummary: import("#discover/diagnostics.js").DiscoverDiagnosticsSummary,

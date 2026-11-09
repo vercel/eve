@@ -30,8 +30,6 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
-import type { TaskCallStart } from "#harness/session-machine/transitions.js";
-import type { FactOf } from "#protocol/session-events/facts.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -39,10 +37,9 @@ import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { readDynamicSubagentSelections } from "#reactions/kinds/subagent.js";
+import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
@@ -59,18 +56,11 @@ export interface CoordinationDispatchResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
-  readonly pending: PendingDispatchFacts;
+  readonly pending: PendingDispatch;
 }
 
-/** The calls a dispatch started or refused, recorded on the session but not yet published. */
-export interface PendingDispatchFacts {
-  /** Calls the turn waits on, each running from now in a run of its own. */
-  readonly executing: readonly FactOf<"call.started">[];
-  /** Tasks the dispatch started or sent a call to. */
-  readonly started: readonly TaskCallStart[];
-  /** Calls a dispatch admission refused before any run started. */
-  readonly refused: readonly FactOf<"call.settled">[];
-}
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
+export type { PendingDispatch };
 
 /** Everything preflight produces before either step's dispatch loop runs. */
 export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskRequest> {
@@ -156,14 +146,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   const ctx = input.ctx;
   enterSessionProjection(ctx, durableSession.state);
   const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
+  const session = hydrateDurableSession(durableSession);
   const adapter = ctx.require(ChannelKey);
 
   const plan = input.plan({

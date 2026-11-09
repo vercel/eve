@@ -20,7 +20,7 @@ pnpm dev
 
 You can start editing the agent by modifying `agent/agent.ts`. Its behavior is defined in `agent/instructions.md`, and tools live in `agent/tools/`. The agent auto-updates as you edit the files.
 
-This project uses the Eve framework's bundled guides — see `node_modules/eve/dist/docs/public/` after installing dependencies.
+This project uses the eve framework's bundled guides — see `node_modules/eve/docs/` after installing dependencies.
 
 ## Learn More
 

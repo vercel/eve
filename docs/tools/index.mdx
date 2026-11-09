@@ -41,6 +41,7 @@ export default defineTool({
 - Tool outputs must be JSON-serializable. Convert `Date`, `Map`, `Set`, `NaN`, and cyclic values before you return them.
 - Add an `outputSchema` for structured output. With Zod or Standard Schema, it also types the `execute` return.
 - Schemas can come from helper modules and be composed with Zod.
+- Import SDK clients inside `execute`, not at the top of the file. See [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 
 ### The `ctx` parameter
 
@@ -65,7 +66,7 @@ export default defineTool({
 | `outputSchema`         | none               | Describes and types the return value.                                         |
 | `approval`             | `never()`          | [Asks a person to approve calls](#gate-a-tool-on-human-approval).             |
 | `toModelOutput`        | full return        | [Changes what the model sees](#shape-what-the-model-sees-with-tomodeloutput). |
-| `label`                | readable tool name | [Sets activity text](#label-tool-activity).                                   |
+| `label`                | readable tool name | [Sets activity text](#label-tool-activity), or `false` to hide calls.         |
 | `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).               |
 | `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).    |
 | `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).  |
@@ -119,7 +120,7 @@ toModelOutput(output) {
 
 `toModelOutput` receives the typed `execute` return and changes only what the model sees. Channel handlers and hooks still get the full output on `call.settled`, so a channel can render Slack Block Kit the model never sees.
 
-Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object.
+Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object. Return `{ type: "error-text", value }`, or `toolOutput.errorText(value)`, to show the model a failure, such as a command that exited non-zero. Providers mark it as an error result, and so does the MCP channel (`isError`). The call still completes, so channels and hooks get the full output.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before you return them.
 
@@ -197,7 +198,22 @@ export default defineTool({
 
 The label changes only what users see, not the tool name, input, or behavior. eve records it on the call's public action event, so channels show `Deploy storefront to production` and stream consumers can read it. If the callback throws or returns an empty label, activity shows the tool name in readable form, such as `Sync accounts` for `sync_accounts`.
 
-The provided `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
+Set `label: false` for housekeeping calls that aren't worth showing, such as adding an emoji reaction:
+
+```ts title="agent/tools/react.ts"
+export default defineTool({
+  description: "React to the message with an emoji.",
+  inputSchema: z.object({ emoji: z.string() }),
+  label: false,
+  async execute({ emoji }) {
+    return react(emoji);
+  },
+});
+```
+
+The call's `capability` carries `hidden: true` and no label. Channels show no status for it, the same way they treat `eve__task_wait` and `eve__task_cancel`, and the call doesn't end a quiet turn's silence, such as a Slack message delivered with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. It accepts a call, its `capability`, or a message part from `eve/react`, `eve/vue`, or `eve/svelte`, which also carries `hidden: true`. The call stays in the session's events and history. If the tool needs [approval](#gate-a-tool-on-human-approval), people are still asked, and the default prompt names the tool in readable form, such as `Approve React?`.
+
+The provided `bash`, `edit_file`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
 
 - An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5`.
 - A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`.

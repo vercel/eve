@@ -85,10 +85,7 @@ function createResourceRoot(
   return {
     contentHash,
     logicalPath: normalizeLogicalPath(join(RESOURCES_DIRECTORY, resourceDirectoryName(nodeId))),
-    rootEntries: deriveResourceRootEntries({
-      sandboxWorkspaces: manifest.sandboxWorkspaces,
-      skills: manifest.skills,
-    }),
+    rootEntries: deriveResourceRootEntries(manifest.sandboxWorkspaces),
   };
 }
 

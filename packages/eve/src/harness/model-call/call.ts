@@ -1,4 +1,4 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
   isStepCount,
@@ -33,7 +33,8 @@ import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.j
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { fact, usageOf } from "#harness/facts.js";
+import { usageOf } from "#harness/facts.js";
+import { retryRun } from "#harness/session-machine/runs.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
@@ -51,11 +52,12 @@ import {
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { requireSessionModelReference, type StepResult } from "#harness/types.js";
+import type { StepResult } from "#harness/types.js";
+import { stepReference } from "#harness/step/context.js";
+import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { compactedTurnInput, maybeCompact } from "#harness/compaction/step.js";
-import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
+import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
@@ -63,12 +65,8 @@ import {
   recoverModelCall,
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
-import {
-  modelInstructions,
-  requestMessages,
-  type RequestMessages,
-  withTrailingUserNote,
-} from "./request.js";
+import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
+import { modelInstructions, type RequestMessages, withTrailingUserNote } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 import { withUniqueCallIds } from "./unique-call-ids.js";
@@ -108,7 +106,6 @@ interface ModelCallerInput {
   readonly generation: GenerationSteering;
   readonly turnMessages: readonly HarnessModelMessage[];
   readonly approvalMemory: ApprovalMemory;
-  readonly pendingApprovalsNote: string | undefined;
   /** The prompt as the step started it, projected for the model. */
   readonly projectedMessages: HarnessModelMessage[];
   /** Requests a run to replace one an attempt gave up. */
@@ -134,6 +131,8 @@ export class ModelCaller {
   /** The messages the latest attempt sent, after attachments were hydrated. */
   modelMessages: ModelMessage[] = [];
   requestEnvelopeTokens = 0;
+  /** The step's system prompt, from its harness's plan. */
+  private system: string | readonly string[] = "";
   /** Usage of a call steering interrupted, which the steered step still counts. */
   private interruptedUsage: TokenUsageDelta | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
@@ -153,17 +152,18 @@ export class ModelCaller {
     this.prompt = prompt;
     this.input = input;
 
-    this.profile = resolveModelProfile(
-      input.model,
-      requireSessionModelReference(step.session).promptCache,
-    );
+    this.profile = resolveModelProfile(input.model, stepReference(step).promptCache);
     this.attributionHeaders = buildGatewayAttributionHeaders(
       this.profile,
       step.config.runtimeIdentity,
     );
     this.projectedMessages = input.projectedMessages;
     this.turnMessages = input.turnMessages;
-    this.request = this.buildRequest();
+    this.request = {
+      history: prompt.messages,
+      historyState: step.ctx.get(HistoryStateKey) ?? {},
+      nonSystemMessages: input.projectedMessages,
+    };
   }
 
   /** Calls the model, retrying transient failures. */
@@ -213,7 +213,7 @@ export class ModelCaller {
       return;
     }
     if (attempt === undefined) return;
-    await step.apply([fact("model.retried", { attempt, error: modelCallErrorInfo(error), runId })]);
+    await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId }));
   }
 
   /**
@@ -239,7 +239,7 @@ export class ModelCaller {
     this.input.generation.end();
     // The cut response never reaches history, so the calls it announced never run, even once its
     // response ended and only their approvals were being decided.
-    step.ctx?.set(HistoryStateKey, this.request.historyState);
+    step.ctx.set(HistoryStateKey, this.request.historyState);
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
@@ -252,7 +252,7 @@ export class ModelCaller {
     }
     return {
       next: step.runStep,
-      session: { ...step.session, history: [...this.request.history] },
+      session: changeHistory(step.session, { extend: this.request.history }),
       steered: true,
     };
   }
@@ -262,14 +262,25 @@ export class ModelCaller {
     this.interruptedUsage = undefined;
   }
 
-  private buildRequest(): RequestMessages {
-    return requestMessages(this.step, {
-      catalog: this.input.catalog,
-      messages: this.prompt.messages,
-      pendingApprovalsNote: this.input.pendingApprovalsNote,
-      projectedMessages: this.projectedMessages,
-      turnMessages: this.turnMessages,
+  /** The call's system prompt and messages, from the step's harness. */
+  private async buildRequest(): Promise<void> {
+    const { prompt, step } = this;
+    const call = {
+      currentInput: new Set(this.turnMessages),
+      historyState: step.ctx.get(HistoryStateKey) ?? {},
+      record: prompt.messages,
+    };
+    const draft = await stepDraft(step, call);
+    this.system = await stepSystem(step, draft);
+    const messages = await stepMessages(draft, {
+      call,
+      project: (record) => projectPrompt({ ...prompt, messages: [...record] }),
     });
+    this.request = {
+      history: messages.record,
+      historyState: messages.historyState,
+      nonSystemMessages: messages.view,
+    };
   }
 
   /**
@@ -288,8 +299,7 @@ export class ModelCaller {
       instructions: modelInstructions({
         anthropicCache: this.profile.anthropicCache,
         extraSystemNote,
-        session: this.step.session,
-        systemMessages: this.request.systemMessages,
+        instructions: this.system,
       }),
       messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
     };
@@ -301,7 +311,7 @@ export class ModelCaller {
       disabledProviderTools: options.disabledProviderTools,
       profile: this.profile,
     });
-    this.request = this.buildRequest();
+    await this.buildRequest();
     this.requestEnvelopeTokens = await estimateRequestEnvelope({
       history: this.projectedMessages,
       ...this.framing(options, this.request.nonSystemMessages),
@@ -310,60 +320,29 @@ export class ModelCaller {
     return tools;
   }
 
-  /** Compacts the prompt when it's over the threshold, then rebuilds what depends on it. */
+  /** Asks for the history this call reads, then rebuilds what depends on it. */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
-    const { config } = step;
-    let compaction: Awaited<ReturnType<typeof maybeCompact>>;
+    let compacted: HarnessModelMessage[] | undefined;
     try {
-      const { projection } = step.view();
-      compaction = await maybeCompact({
-        abortSignal: config.abortSignal,
-        auth: step.ctx?.get(AuthKey) ?? null,
-        change: {
-          changeId: nextChangeId(projection),
-          summaryRunId: nextRunId(projection),
-          turnId: step.position().turnId,
-        },
-        ctx: step.ctx,
-        emissionState: step.position(),
-        // A hook's compact intent compacts before this call, once.
-        messages: [...prompt.messages],
+      compacted = await historyBeforeCall(step, {
+        messages: prompt.messages,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
-        publish: step.publish,
-        view: () => step.view().projection.view,
         requestEnvelopeTokens: this.requestEnvelopeTokens,
-        resolveModel: config.resolveModel,
-        runtimeIdentity: config.runtimeIdentity,
-        session: step.session,
-        prepareTelemetry: (runId) =>
-          step.instrumentation?.prepareAttempt({
-            runId,
-            attempt: 0,
-            turnId: activeTurnId(step.position()),
-          }).telemetry,
-        traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
-      step.session = compaction.session;
-      if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
-    if (!compaction.compacted) return tools;
-    compactPrompt(step, prompt, compaction.messages);
-    // Compaction cleared what earlier requests announced, so this request announces it again. A
-    // step that continues from tool results has no input of its own, so the announcement goes
-    // before the turn's input, not after those results where the model reads it as the newest
-    // message.
+    if (compacted === undefined) return tools;
+    compactPrompt(step, prompt, compacted);
+    // This request announces again what the compaction dropped. A step that continues from tool
+    // results has no input of its own, so the announcement goes before the turn's input, not after
+    // those results where the model reads it as the newest message.
     const turnInput = compactedTurnInput(prompt.messages);
     this.turnMessages =
       turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
-    step.session = {
-      ...step.session,
-      compaction: withoutPromptMeasurement(step.session.compaction),
-    };
     this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
   }
@@ -411,7 +390,8 @@ export class ModelCaller {
     });
 
     const hooks = buildStepHooks({
-      auth: step.ctx?.get(AuthKey) ?? null,
+      auth: step.ctx.get(AuthKey) ?? null,
+      model: stepReference(step),
       profile: this.profile,
       session: step.session,
     });
@@ -447,7 +427,7 @@ export class ModelCaller {
       onStepEnd: hooks.onStepEnd,
       onStepStart: hooks.onStepStart,
       prepareStep: hooks.prepareStep,
-      reasoning: step.session.agent.modelReference?.reasoning ?? step.session.agent.reasoning,
+      reasoning: stepReference(step).reasoning ?? agentSettings(step).reasoning,
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: attempt?.telemetry,
@@ -529,8 +509,8 @@ export class ModelCaller {
   }
 
   /**
-   * Runs the response's local calls, unless it ended early: then they don't run, and
-   * `answerSkippedToolCalls` tells the model so.
+   * Runs the response's local calls, unless it ended early: then neither they nor its workflow
+   * calls run, and `answerSkippedToolCalls` tells the model so.
    */
   private async runInlineCalls(
     stepResult: HarnessStepResult,

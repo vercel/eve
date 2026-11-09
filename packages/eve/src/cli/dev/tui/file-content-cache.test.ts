@@ -20,6 +20,16 @@ describe("FileContentCache", () => {
     expect(cache.observeWrite({ path: "/w/a.txt", content: "two", callId: "c2" })).toBe("one");
   });
 
+  it("diffs no write against content an edit_file call changed", () => {
+    const cache = new FileContentCache();
+    cache.observeWrite({ path: "/w/a.txt", content: "one", callId: "c1" });
+    cache.forget("/w/a.txt");
+
+    // The earlier write keeps its own diff when it re-renders.
+    expect(cache.observeWrite({ path: "/w/a.txt", content: "one", callId: "c1" })).toBeUndefined();
+    expect(cache.observeWrite({ path: "/w/a.txt", content: "two", callId: "c2" })).toBeUndefined();
+  });
+
   it("reconstructs a full read result into exact file content", () => {
     const cache = new FileContentCache();
     cache.observeRead({

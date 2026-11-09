@@ -3,25 +3,33 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { RolldownOutputChunk } from "#internal/bundler/nitro-rolldown.js";
-import { checkExternalDependencyOutput } from "#internal/nitro/host/external-dependency-output-check.js";
+import {
+  type CheckedBundle,
+  checkExternalDependencyOutput,
+} from "#internal/nitro/host/external-dependency-output-check.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 const APP_ROOT = "/workspace/apps/agent";
 const CHUNK = "server/chunks/tool.mjs";
 
-function chunk(imports: { readonly static?: string[]; readonly dynamic?: string[] }) {
-  const output: RolldownOutputChunk = {
-    code: "",
-    dynamicImports: imports.dynamic ?? [],
-    fileName: CHUNK,
-    imports: imports.static ?? [],
-    isEntry: false,
-    name: "tool",
-    type: "chunk",
+interface ChunkImports {
+  readonly static?: string[];
+  readonly dynamic?: string[];
+  /** Rendered chunk code; Nitro rewrites traced placeholders only here. */
+  readonly code?: string;
+}
+
+function chunk(imports: ChunkImports): CheckedBundle {
+  return {
+    [CHUNK]: {
+      code: imports.code ?? "",
+      dynamicImports: imports.dynamic ?? [],
+      fileName: CHUNK,
+      imports: imports.static ?? [],
+      type: "chunk",
+    },
   };
-  return { [CHUNK]: output };
 }
 
 /** An output directory whose chunk directory exists, as after Nitro writes it. */
@@ -45,10 +53,7 @@ async function writePackage(
   }
 }
 
-async function check(
-  outputDir: string,
-  imports: { readonly static?: string[]; readonly dynamic?: string[] },
-): Promise<void> {
+async function check(outputDir: string, imports: ChunkImports): Promise<void> {
   await checkExternalDependencyOutput({
     appRoot: APP_ROOT,
     bundle: chunk(imports),
@@ -126,6 +131,29 @@ describe("checkExternalDependencyOutput", () => {
     await symlink(workspacePackage, join(outputDir, "server", "node_modules", "ext"), "dir");
 
     await expect(check(outputDir, { static: ["ext"] })).rejects.toThrow(missingExternal("ext"));
+  });
+
+  it("checks a traced external that Nitro rendered as a bare import", async () => {
+    const outputDir = await createOutput();
+
+    await expect(
+      check(outputDir, {
+        code: 'import { value } from "ext";\n',
+        static: ["nitro:traced/0/ext"],
+      }),
+    ).rejects.toThrow(missingExternal("ext"));
+  });
+
+  it("skips a traced external that Nitro rendered as a path to its copy", async () => {
+    const outputDir = await createOutput();
+
+    await expect(
+      check(outputDir, {
+        // A config value naming the package is not an import of it.
+        code: 'import { value } from "../node_modules/.nitro/ext@1.0.0/index.js";\nconst engine = "ext";\n',
+        static: ["nitro:traced/0/ext"],
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("ignores imports that are not configured externals", async () => {

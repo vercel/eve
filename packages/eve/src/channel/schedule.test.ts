@@ -79,7 +79,7 @@ describe("ScheduleDispatcher", () => {
       scheduleId: "sch-1",
       scheduledAt: "2026-09-29T19:00:00Z",
     };
-    function setup(auth: typeof creator | null = creator) {
+    function setup(auth: typeof creator | null = creator, idempotencyKey?: string) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
       const channel = defineChannel<undefined, void, { channelId: string }>({
@@ -88,7 +88,7 @@ describe("ScheduleDispatcher", () => {
           targets.push(input.target.channelId);
           return await context
             .from(input.target.channelId)
-            .send(input.message, { auth: input.auth });
+            .send(input.message, { auth: input.auth, idempotencyKey: input.idempotencyKey });
         },
       });
       const run = vi.fn(
@@ -100,7 +100,9 @@ describe("ScheduleDispatcher", () => {
         }) => {
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
-          args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
+          args.waitUntil(
+            args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
+          );
         },
       );
       const definition = defineDynamicSchedules({
@@ -162,6 +164,21 @@ describe("ScheduleDispatcher", () => {
       expect(started[0]!.continuationToken).not.toBe(started[1]!.continuationToken);
       expect(started[0]!.continuationConflictCommand).toBeUndefined();
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    });
+
+    it("starts a keyed send without looking up an earlier session", async () => {
+      const { dispatcher, input, runtime } = setup(creator, "exec-1:digest");
+      await dispatcher.triggerCollection(input);
+      await dispatcher.triggerCollection(input);
+      expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+      const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
+      expect(started).toHaveLength(2);
+      // A retried callback claims the same address, so its start reaches the first session.
+      expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
+      expect(started[1]).toMatchObject({
+        idempotencyKey: "exec-1:digest",
+        continuationConflictCommand: { idempotencyKey: "exec-1:digest", kind: "send" },
+      });
     });
 
     it.each([null, { ...creator, principalId: "bob" }])(
@@ -354,6 +371,45 @@ describe("ScheduleDispatcher", () => {
       } finally {
         vi.unstubAllEnvs();
       }
+    });
+    // the turn a scheduled send starts in a conversation must know a schedule sent it.
+    it("marks to() sends into an existing conversation with the schedule", async () => {
+      const runtime = createMockRuntime();
+      runtime.dispatchContinuation = vi
+        .fn()
+        .mockResolvedValue({ sessionId: "existing-session", status: "accepted" });
+      const thread: CompiledChannel = {
+        __kind: CHANNEL_SENTINEL,
+        routes: [],
+        adapter: { kind: "channel:thread" },
+        receive: async ({ auth, message, target }, { from }) =>
+          await from(String(target.address)).send(message, { auth }),
+      };
+      const resolved: ResolvedChannelDefinition = {
+        name: "thread",
+        method: "POST",
+        urlPath: "/thread",
+        logicalPath: "channels/thread.ts",
+        sourceId: "channel-thread",
+        sourceKind: "module",
+        adapter: thread.adapter,
+        definition: thread,
+        receive: thread.receive,
+        fetch: async () => new Response("ok"),
+      };
+      await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
+        scheduleId: "daily",
+        async run({ to }) {
+          await to(thread, { address: "C1:1761400000.000100" }).send("daily check", {
+            auth: null,
+          });
+        },
+      });
+      expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: expect.objectContaining({ schedule: { definition: "daily" } }),
+        }),
+      );
     });
     it("rejects unregistered channels", async () => {
       const stranger = {

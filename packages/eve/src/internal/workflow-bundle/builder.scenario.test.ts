@@ -1,10 +1,11 @@
-import { Buffer } from "node:buffer";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { createContext, runInContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
+import { FatalError, RetryableError } from "#compiled/@workflow/errors/index.js";
+import { dehydrateStepError, hydrateStepError } from "#compiled/@workflow/core/serialization.js";
 import {
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
@@ -13,7 +14,7 @@ import {
 } from "#internal/application/package.js";
 
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
-import { createWorkflowEntrypointSource } from "#internal/workflow-bundle/builder-support.js";
+import { bundleFinalWorkflowOutput } from "#internal/workflow-bundle/builder-support.js";
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
 
 const REQUIRE_EXPORT_MARKER = "eve-workflow-conditional-require-export";
@@ -234,28 +235,28 @@ describe("WorkflowBundleBuilder", () => {
         ),
       ]);
 
-      const builder = new FixtureWorkflowBundleBuilder(
-        {
-          agentName: "test-agent",
-          appRoot: tempRoot,
-          compiledArtifactsBootstrapPath,
-          outDir,
-          rootDir: tempRoot,
-        },
-        [flowFilePath],
-      );
+      const build = (inlineSourcemap?: boolean) =>
+        new FixtureWorkflowBundleBuilder(
+          {
+            agentName: "test-agent",
+            appRoot: tempRoot,
+            compiledArtifactsBootstrapPath,
+            inlineSourcemap,
+            outDir,
+            rootDir: tempRoot,
+          },
+          [flowFilePath],
+        ).build();
+      const readWorkflowCode = () => readFile(join(outDir, "workflows.code.txt"), "utf8");
 
-      await builder.build();
-
+      await build();
       const workflowSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
       expect(workflowSource).toContain('from "./steps.mjs";');
-      const encodedChunksMatch = workflowSource.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-      );
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
-      expect(workflowCode).toContain("sourceMappingURL=data:application/json");
-      expect(workflowCode).toContain(";base64,");
+      expect(workflowSource).toContain("workflows.code.txt");
+      expect(await readWorkflowCode()).toContain("sourceMappingURL=data:application/json");
+
+      await build(false);
+      expect(await readWorkflowCode()).not.toContain("sourceMappingURL");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -297,12 +298,7 @@ describe("WorkflowBundleBuilder", () => {
 
       await builder.build();
 
-      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
-      const encodedChunksMatch = workflowsSource.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-      );
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      const workflowSource = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      const workflowSource = await readFile(join(outDir, "workflows.code.txt"), "utf8");
       expect(workflowSource).toContain(REQUIRE_EXPORT_MARKER);
       expect(workflowSource).not.toContain(IMPORT_EXPORT_MARKER);
     } finally {
@@ -310,7 +306,7 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("writes generated workflow code as parser-safe base64 chunks", async () => {
+  it("keeps generated workflow code out of the entrypoint source", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-code-literal-"));
     const outDir = join(tempRoot, "workflow-build");
     const stepFilePath = join(tempRoot, "steps", "ping.ts");
@@ -327,14 +323,12 @@ describe("WorkflowBundleBuilder", () => {
           "//# sourceMappingURL=data:application/json;base64,ZmFrZQ==",
         ].join("\n");
 
-        await writeFile(
+        await bundleFinalWorkflowOutput({
+          code: workflowBundleCode,
           outfile,
-          createWorkflowEntrypointSource({
-            code: workflowBundleCode,
-            queueNamespace: "eve746573742d6167656e74",
-            stepRegistrationsImport: "./steps.mjs",
-          }),
-        );
+          queueNamespace: "eve746573742d6167656e74",
+          stepRegistrationsPath: join(outDir, "steps.mjs"),
+        });
 
         return { manifest: {} };
       }
@@ -375,27 +369,16 @@ describe("WorkflowBundleBuilder", () => {
       await builder.build();
 
       const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const workflowCode = await readFile(join(outDir, "workflows.code.txt"), "utf8");
 
-      const encodedChunksMatch = workflowsSource.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      expect(workflowsSource).toContain(
+        `import workflowCode from ${JSON.stringify(`text:${join(outDir, "workflows.code.txt").replaceAll("\\", "/")}`)};`,
       );
-      expect(encodedChunksMatch).not.toBeNull();
-
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
-
-      expect(workflowsSource).toContain("const workflowCode = Buffer.from([");
-      expect(workflowsSource).not.toContain("const workflowCode = `");
       expect(workflowsSource).not.toContain('template ${"literal"}');
-      expect(decodedWorkflowCode).toContain('template ${"literal"}');
-      expect(decodedWorkflowCode).toContain(
-        "sourceMappingURL=data:application/json;base64,ZmFrZQ==",
-      );
+      expect(workflowsSource).not.toContain('"workflow/runtime";');
+      expect(workflowCode).toContain('template ${"literal"}');
+      expect(workflowCode).toContain("sourceMappingURL=data:application/json;base64,ZmFrZQ==");
       expect(workflowsSource).toContain(resolveWorkflowModulePath("workflow/runtime"));
-
-      const workflowsModule = await import(pathToFileURL(join(outDir, "workflows.mjs")).href);
-
-      expect(typeof workflowsModule.POST).toBe("function");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -565,18 +548,96 @@ describe("WorkflowBundleBuilder", () => {
 
       await builder.build();
 
-      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
-      const encodedChunksMatch = workflowsSource.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-      );
-      expect(encodedChunksMatch).not.toBeNull();
-
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      const decodedWorkflowCode = await readFile(join(outDir, "workflows.code.txt"), "utf8");
 
       expect(decodedWorkflowCode).toContain("getConflict");
       expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
       expect(decodedWorkflowCode).not.toContain("runtime/run.js");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves step error identity in authored workflows across driver layers", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-error-identity-"));
+    const appRoot = join(tempRoot, "app");
+    const outDir = join(tempRoot, "workflow-build");
+    const frameworkPath = join(tempRoot, "framework.ts");
+    const appPath = join(appRoot, "errors.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+
+    try {
+      await mkdir(appRoot, { recursive: true });
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          join(appRoot, "package.json"),
+          JSON.stringify({ name: "authored-errors", version: "0.0.0", dependencies: { eve: "*" } }),
+        ),
+        writeFile(
+          frameworkPath,
+          [
+            'import { FatalError } from "eve/workflow";',
+            'export async function framework() { "use workflow"; throw new FatalError("stop"); }',
+          ].join("\n"),
+        ),
+        writeFile(
+          appPath,
+          [
+            'import { FatalError, RetryableError } from "eve/workflow";',
+            "export async function classifyError(error: unknown) {",
+            '  "use workflow";',
+            "  return {",
+            "    fatal: error instanceof FatalError,",
+            "    retryable: error instanceof RetryableError,",
+            "    retryAfter: error instanceof RetryableError ? error.retryAfter.toISOString() : null,",
+            "  };",
+            "}",
+          ].join("\n"),
+        ),
+      ]);
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          authoredWorkflowModules: { directiveModules: [appPath], workflowModules: [appPath] },
+          agentName: "test-agent",
+          appRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+        },
+        [frameworkPath],
+      );
+      await builder.build();
+
+      const workflowCodeText = await readFile(join(outDir, "workflows.code.txt"), "utf8");
+      const context = createContext();
+      runInContext(workflowCodeText, context);
+      const workflowGlobal = runInContext("globalThis", context);
+      const classifyError = workflowGlobal.__private_workflows.get(
+        "workflow//./errors//classifyError",
+      );
+      expect(classifyError).toBeTypeOf("function");
+
+      for (const [kind, error] of [
+        ["fatal", new FatalError("stop")],
+        [
+          "retryable",
+          new RetryableError("later", { retryAfter: new Date("2026-01-01T00:00:00Z") }),
+        ],
+      ] as const) {
+        const serialized = await dehydrateStepError(error, "wrun_error_identity", undefined);
+        const hydrated = await hydrateStepError(
+          serialized,
+          "wrun_error_identity",
+          undefined,
+          workflowGlobal,
+        );
+        await expect(classifyError(hydrated)).resolves.toEqual({
+          fatal: kind === "fatal",
+          retryable: kind === "retryable",
+          retryAfter: kind === "retryable" ? "2026-01-01T00:00:00.000Z" : null,
+        });
+      }
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -613,14 +674,7 @@ describe("WorkflowBundleBuilder", () => {
 
       await builder.build();
 
-      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
-      const encodedChunksMatch = workflowsSource.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-      );
-      expect(encodedChunksMatch).not.toBeNull();
-
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      const decodedWorkflowCode = await readFile(join(outDir, "workflows.code.txt"), "utf8");
 
       expect(decodedWorkflowCode).toContain(marker);
       expect(decodedWorkflowCode).not.toContain("compiled/zod");
@@ -785,12 +839,7 @@ describe("WorkflowBundleBuilder", () => {
       expect(stepsSource).toContain("agent/lib/run.ts");
       expect(stepsSource).not.toContain("vendored");
 
-      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
-      const encodedChunksMatch = workflowsSource.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-      );
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      const workflowCode = await readFile(join(outDir, "workflows.code.txt"), "utf8");
       expect(workflowCode).toContain('"workflow//./agent/tools/deploy//execute"');
       expect(workflowCode).toContain('"workflow//./agent/lib/run//run"');
       expect(workflowCode).toContain('"step//./agent/lib/steps//hashPlan"');
