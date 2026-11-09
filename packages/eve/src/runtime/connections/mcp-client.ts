@@ -2,15 +2,14 @@ import { ConnectionEventActions, isEventAction } from "#runtime/connections/even
 import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
-import { buildCallbackContext } from "#context/build-callback-context.js";
 import {
   ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
-import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
+import { buildConnectionCallbackContext } from "#runtime/connections/approval-scope.js";
 import { isObject } from "#shared/guards.js";
 import { readTurnPrincipals } from "#context/turn-principals.js";
 import {
@@ -28,6 +27,7 @@ import {
 } from "#runtime/connections/mcp-tracing.js";
 import type {
   AuthorizationDefinition,
+  ConnectionCallbackContext,
   ConnectionClient,
   ConnectionToolExecuteOptions,
   ConnectionToolMetadata,
@@ -530,19 +530,22 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
 }
 
 /**
- * Returns `true` when a tool name passes the configured filter.
+ * Returns `true` when a tool passes the configured filter. A tool may be known
+ * by more than one name, such as an OpenAPI tool's name and the `operationId`
+ * it was derived from; `allow` admits it when any name is listed, and `block`
+ * hides it when any name is listed.
  */
 export function passesToolFilter(
-  toolName: string,
+  names: readonly string[],
   filter: Readonly<ToolFilterDefinition> | undefined,
 ): boolean {
   if (filter === undefined) {
     return true;
   }
   if ("allow" in filter) {
-    return filter.allow.includes(toolName);
+    return names.some((name) => filter.allow.includes(name));
   }
-  return !filter.block.includes(toolName);
+  return !names.some((name) => filter.block.includes(name));
 }
 
 /**
@@ -550,7 +553,7 @@ export function passesToolFilter(
  * flat `Record<string, string>` for the transport layer.
  *
  * Resolves dynamic `auth` and `headers` callbacks with the active
- * {@link SessionContext}, then resolves the {@link ConnectionPrincipal}
+ * session context, then resolves the {@link ConnectionPrincipal}
  * and invokes `authorization.getToken({ principal })` to produce the bearer.
  * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
  * callers catch it and it propagates as-is from here.
@@ -582,13 +585,7 @@ async function resolveConnectionHeaders(
 ): Promise<ResolvedConnectionHeaders> {
   const merged: Record<string, string> = {};
   let anonymous = false;
-  let callbackContext: SessionContext | undefined;
-  const getCallbackContext = (): SessionContext => (callbackContext ??= buildCallbackContext());
-
-  const authorization = await resolveConnectionAuthorization(
-    connection,
-    typeof connection.authorization === "function" ? getCallbackContext() : undefined,
-  );
+  const authorization = await resolveConnectionAuthorization(connection);
 
   if (authorization !== undefined) {
     try {
@@ -606,7 +603,11 @@ async function resolveConnectionHeaders(
   }
 
   if (connection.headers !== undefined) {
-    const resolved = await resolveHeadersDefinition(connection.headers, getCallbackContext);
+    let context: ConnectionCallbackContext | undefined;
+    const resolved = await resolveHeadersDefinition(
+      connection.headers,
+      () => (context ??= buildConnectionCallbackContext()),
+    );
     for (const [key, value] of Object.entries(resolved)) {
       if (authorization !== undefined && key.toLowerCase() === "authorization") {
         throw new Error(
@@ -639,7 +640,7 @@ async function resolveToken(
 
 async function resolveHeadersDefinition(
   headers: Readonly<HeadersDefinition>,
-  getContext: () => SessionContext,
+  getContext: () => ConnectionCallbackContext,
 ): Promise<Record<string, string>> {
   if (typeof headers === "function") {
     return { ...(await headers(getContext())) };
@@ -657,7 +658,7 @@ async function resolveHeadersDefinition(
 
 async function resolveHeaderValue(
   value: HeaderValue,
-  getContext: () => SessionContext,
+  getContext: () => ConnectionCallbackContext,
 ): Promise<string> {
   if (typeof value === "function") {
     return await value(getContext());

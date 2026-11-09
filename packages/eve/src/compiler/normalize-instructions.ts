@@ -1,21 +1,13 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { InstructionsSourceRef } from "#discover/manifest.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
-import type {
-  CompiledDynamicInstructionsDefinition,
-  CompiledInstructionsDefinition,
-} from "#compiler/manifest.js";
+import type { CompiledDefinition, CompiledInstructionsDefinition } from "#compiler/manifest.js";
 import {
+  dynamicDefinition,
   loadModuleBackedDefinition,
   requireModuleBackedDefinitionLoadOptions,
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import {
-  assertResolverOnlyDynamicSentinel,
-  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`
@@ -26,10 +18,7 @@ import {
  */
 type CompiledInstructionsEntry =
   | { readonly kind: "instructions"; readonly definition: CompiledInstructionsDefinition }
-  | {
-      readonly kind: "dynamic-instructions";
-      readonly definition: CompiledDynamicInstructionsDefinition;
-    };
+  | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
 /**
  * Compiles one authored instructions prompt source (markdown or
@@ -76,33 +65,9 @@ export async function compileInstructionsEntry(
     source,
   });
 
-  if (isDynamicSentinel(exportValue)) {
-    assertResolverOnlyDynamicSentinel(
-      exportValue,
-      `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-    );
-    const eventNames = Object.keys(exportValue.events);
-    const unsupportedEvent = eventNames.find(
-      (eventName) => !ALLOWED_DYNAMIC_INSTRUCTION_EVENTS.has(eventName),
-    );
-    if (unsupportedEvent !== undefined) {
-      throw new Error(
-        `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started" or "turn.started" events. Unsupported event: "${unsupportedEvent}".`,
-      );
-    }
-    const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
-    return {
-      kind: "dynamic-instructions",
-      definition: {
-        eventNames: eventNames as DynamicToolEventName[],
-        exportName: source.exportName,
-        logicalPath: source.logicalPath,
-        slug,
-        sourceId: source.sourceId,
-        sourceKind: "module",
-      },
-    };
-  }
+  const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
+  const dynamic = dynamicDefinition("instructions", source, exportValue, slug);
+  if (dynamic !== undefined) return { definition: dynamic, kind: "dynamic" };
 
   const definition = normalizeInstructionsDefinition(
     exportValue,

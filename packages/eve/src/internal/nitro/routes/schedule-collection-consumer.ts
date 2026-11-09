@@ -18,7 +18,10 @@ import type {
   DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
 } from "#public/schedules/subscription.js";
-import { readVercelScheduleClientOptions } from "#public/schedules/providers/vercel.js";
+import {
+  readVercelScheduleClientOptions,
+  VERCEL_SCHEDULES_CLIENT_HEADERS,
+} from "#public/schedules/providers/vercel.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import {
@@ -136,9 +139,10 @@ async function getSchedule(
   queue: VerifiedScheduleMessage,
 ) {
   try {
-    return await new SchedulesClient(
-      readVercelScheduleClientOptions(definition.provider) ?? {},
-    ).get({ name: queue.name, namespace: queue.namespace });
+    return await new SchedulesClient({
+      ...readVercelScheduleClientOptions(definition.provider),
+      headers: VERCEL_SCHEDULES_CLIENT_HEADERS,
+    }).get({ name: queue.name, namespace: queue.namespace });
   } catch (error) {
     if (error instanceof SchedulesApiError && error.status === 404)
       throw new PermanentScheduleMessageError("Schedule delivery does not match this agent.");

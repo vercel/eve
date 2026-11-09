@@ -7,8 +7,8 @@ export default defineEval({
 
     turn.expectOk();
     turn.messageIncludes("DISABLED-ROOT-AGENT-TOOL-HIDDEN");
-    turn.calledSubagent("agent", { count: 0 });
+    turn.calledAgent("agent", { count: 0 });
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

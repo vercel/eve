@@ -6,7 +6,7 @@ import type { Runtime } from "#channel/types.js";
 import { dispatchChannelRequest } from "#internal/nitro/routes/channel-dispatch.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { slackChannel } from "#public/channels/slack/index.js";
-import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
+import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { teamsChannel } from "#public/channels/teams/index.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { H3Event } from "nitro";
@@ -47,6 +47,7 @@ function runtimeWithNoActiveSession(acknowledged: Promise<void>): Runtime {
     }) as Runtime["dispatchContinuation"],
     dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveContinuation: vi.fn(),
   };
@@ -180,7 +181,7 @@ describe("an inactive press through the production dispatcher", () => {
       payload: JSON.stringify({
         actions: [
           {
-            action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+            action_id: `${ANSWER_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
             text: { text: "Approve", type: "plain_text" },
             value: "approve",
           },

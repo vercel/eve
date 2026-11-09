@@ -23,8 +23,9 @@ export type RemoteConnectionState =
   // `info` is best-effort: a connection is ready once auth is satisfied and the
   // deployment is reachable. Inspection data is absent when the deployment's
   // `/eve/v1/info` is missing or returns an unrecognized shape (e.g. version
-  // skew); the conversation transport does not depend on it.
-  | { readonly state: "ready"; readonly info?: AgentInfoResult }
+  // skew); the conversation transport does not depend on it. `warning` says why
+  // inspection is absent when the operator can fix it.
+  | { readonly state: "ready"; readonly info?: AgentInfoResult; readonly warning?: string }
   | {
       readonly state: "auth-required";
       readonly challenge: RemoteAuthChallenge;

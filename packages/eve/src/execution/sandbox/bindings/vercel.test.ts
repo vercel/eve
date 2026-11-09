@@ -1555,7 +1555,12 @@ describe("createVercelSandbox", () => {
     const abortSignal = new AbortController().signal;
 
     await expect(
-      provider.endSession({ ...session, abortSignal, reason: "deleted", state: handle.state }),
+      provider.endSession({
+        ...session,
+        signal: abortSignal,
+        reason: "deleted",
+        state: handle.state,
+      }),
     ).resolves.toBeUndefined();
 
     expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
@@ -1607,7 +1612,7 @@ describe("createVercelSandbox", () => {
   it.each([
     ["open()", {}, { networkPolicy: "deny-all" as const }],
     ["the environment", { networkPolicy: "deny-all" as const }, {}],
-  ])("applies the policy from %s after template-less base setup", async (_, environment, open) => {
+  ])("creates a template-less sandbox with the policy from %s", async (_, environment, open) => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi.fn().mockResolvedValue(sessionSandbox);
     const provider = vercelHarness(
@@ -1626,16 +1631,15 @@ describe("createVercelSandbox", () => {
 
     await provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" });
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ networkPolicy: "allow-all" }));
-    expect(sessionSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
-    expect(sessionSandbox.runCommand.mock.invocationCallOrder[0]).toBeLessThan(
-      sessionSandbox.update.mock.invocationCallOrder[0]!,
-    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ networkPolicy: "deny-all" }));
+    expect(sessionSandbox.update).not.toHaveBeenCalled();
   });
 
-  it("discards a fresh template-less session when applying its policy fails", async () => {
+  it("keeps a template-less sandbox restricted when base setup fails and is retried", async () => {
     const sessionSandbox = createMockSandbox({ name: "session" });
-    sessionSandbox.update.mockRejectedValueOnce(new Error("policy rejected"));
+    const failedSetup = { ...createMockCommandResult(), exitCode: 1 };
+    // The first open's base setup fails, once directly and once through sudo.
+    sessionSandbox.runCommand.mockResolvedValueOnce(failedSetup).mockResolvedValueOnce(failedSetup);
     const fake = createFakeVercelProvider(sessionSandbox);
     const provider = vercelHarness(
       {
@@ -1646,13 +1650,61 @@ describe("createVercelSandbox", () => {
       { networkPolicy: "deny-all" },
       { preparedArtifact: () => ({}) },
     );
+    const open = () =>
+      provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" });
+    await expect(open()).rejects.toThrow("Failed to initialize Vercel sandbox base runtime.");
+    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({ networkPolicy: "deny-all" }),
+    );
+    expect(fake.sandboxes.get(sessionSandbox.name)).toBe(sessionSandbox);
 
-    await expect(
-      provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" }),
-    ).rejects.toThrow("policy rejected");
-    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
-    expect(sessionSandbox.delete).toHaveBeenCalledTimes(1);
-    expect(fake.sandboxes.size).toBe(0);
+    await open();
+
+    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(
+      sessionSandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update),
+    ).toEqual([]);
+  });
+
+  it("preserves a template-less keyed session's live policy across parallel opens with changed options", async () => {
+    const fake = createFakeVercelProvider();
+    const provider = vercelHarness(
+      {
+        createSandbox: async ({ createOptions, sandboxModule }) =>
+          await sandboxModule.Sandbox.create(createOptions),
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      },
+      { networkPolicy: "deny-all" },
+      { preparedArtifact: () => ({}) },
+    );
+    const open = (options?: VercelSandboxRuntimeOptions) =>
+      provider.start({ appRoot: "/tmp/test-app-root", options, sandboxName: "tool_session_abc" });
+    const first = await open();
+    const sessionSandbox = [...fake.sandboxes.values()][0]!;
+    await first.sandbox.setNetworkPolicy({ allow: ["github.com"] });
+    sessionSandbox.update.mockClear();
+
+    const reopened = await Promise.all([
+      open(),
+      open({ networkPolicy: "allow-all" }),
+      open({ networkPolicy: "deny-all" }),
+    ]);
+
+    expect(reopened.map(({ state }) => state)).toEqual([first.state, first.state, first.state]);
+    expect(sessionSandbox.update).not.toHaveBeenCalled();
+
+    await first.sandbox.setNetworkPolicy("allow-all");
+    sessionSandbox.update.mockClear();
+    const resumed = await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      existing: first.state,
+      sandboxName: "tool_session_abc",
+    });
+
+    expect(resumed.sandbox.name).toBe(first.sandbox.name);
+    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.update).not.toHaveBeenCalled();
+    expect(sessionSandbox.delete).not.toHaveBeenCalled();
   });
 
   it("brokers credentials through the session's setNetworkPolicy to sandbox.update", async () => {
@@ -1712,6 +1764,49 @@ describe("createVercelSandbox", () => {
       "/tmp",
       "/workspace",
     ]);
+  });
+
+  // https://github.com/vercel/eve/issues/5301
+  it("kills a running command when its signal fires", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    // Like the SDK's detached Command, the `runCommand` signal only covers the
+    // start request: `wait` and `logs` honor their own signal, and only
+    // `kill()` ends the process.
+    const exited = Promise.withResolvers<void>();
+    const untilExitOrAbort = (signal: AbortSignal | undefined) =>
+      new Promise<void>((resolve, reject) => {
+        void exited.promise.then(resolve);
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    const command = {
+      kill: vi.fn(async () => exited.resolve()),
+      // The SDK aborts its log request without the caller's reason.
+      async *logs(params?: { signal?: AbortSignal }) {
+        yield { data: "started\n", stream: "stdout" } as const;
+        await untilExitOrAbort(params?.signal).catch(() => {
+          throw new DOMException("This operation was aborted", "AbortError");
+        });
+      },
+      wait: vi.fn(async (params?: { signal?: AbortSignal }) => {
+        await untilExitOrAbort(params?.signal);
+        return { exitCode: 143 };
+      }),
+    };
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce(command as never);
+    const controller = new AbortController();
+    const stop = new Error("stop");
+
+    const running = handle.sandbox.run({ signal: controller.signal, command: "sleep 60" });
+    // Settle `run()` now so its rejection is handled while `kill()` is awaited.
+    const settled = running.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(command.wait).toHaveBeenCalled());
+    controller.abort(stop);
+
+    await vi.waitFor(() => expect(command.kill).toHaveBeenCalledOnce());
+    expect(await settled).toBe(stop);
   });
 
   it("converts Vercel Node file streams to the public Web stream contract", async () => {
@@ -1881,9 +1976,8 @@ describe("createVercelSandbox", () => {
     expect(created.mounts).toEqual({
       "/workspace/data": { drive: "initial-drive", mode: "read-write" },
     });
-    expect(sandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update)).toEqual([
-      [{ networkPolicy: "deny-all" }],
-    ]);
+    expect(created).toMatchObject({ networkPolicy: "deny-all" });
+    expect(sandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update)).toEqual([]);
   });
 
   it("prepares the base runtime in the template rather than its fresh snapshot-backed session", async () => {

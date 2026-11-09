@@ -26,11 +26,12 @@ export default defineEval({
     const output = shown.requireToolCall(TOOL_NAME).output as { readonly imageBase64: string };
     const session = shown.session;
 
-    const liveCompaction = t.target.watchTurn(session.sessionId, {
-      startIndex: session.events.length,
-    });
+    // A compaction between turns runs no turn, so the read ends when the compaction settles.
+    const liveCompaction = t.target
+      .attach(session.id, { startIndex: session.state!.streamIndex })
+      .watch({ until: (event) => event.type === "context.settled" });
     const response = await t.target.fetch(
-      `/eve/v1/session/${encodeURIComponent(session.sessionId)}/compact`,
+      `/eve/v1/session/${encodeURIComponent(session.id)}/compact`,
       { body: "{}", headers: { "content-type": "application/json" }, method: "POST" },
     );
     if (!response.ok) {
@@ -39,8 +40,11 @@ export default defineEval({
       );
     }
     const compacted = await liveCompaction.result();
-    compacted.event("compaction.completed", { count: 1 });
-    compacted.notEvent("session.failed");
+    compacted.event("context.settled", {
+      count: 1,
+      data: { kind: "compaction", outcome: "completed" },
+    });
+    compacted.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const reopened = await session.send(
       `Earlier context was compacted. The \`${TOOL_NAME}\` image is saved at ` +
@@ -49,7 +53,7 @@ export default defineEval({
         "left to right, comma-separated.",
     );
     reopened.expectOk();
-    reopened.noFailedActions();
+    reopened.noFailedCalls();
     reopened.calledTool("read_file", { count: 1 });
     reopened.notCalledTool(TOOL_NAME);
     t.eventsSatisfy("the reopened image answers the follow-up", (events) => {

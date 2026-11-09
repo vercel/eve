@@ -1,5 +1,5 @@
 export interface SandboxDeleteOptions {
-  readonly abortSignal?: AbortSignal;
+  readonly signal?: AbortSignal;
 }
 
 export interface SandboxProviderResourceFile {

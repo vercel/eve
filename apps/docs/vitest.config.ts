@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: [
+      { find: /^@\/(.+)$/, replacement: new URL("./$1", import.meta.url).pathname },
       {
         find: /^eve\/(connections|tools\/approval)$/,
         replacement: new URL("../../packages/eve/src/public/$1/index.ts", import.meta.url).pathname,

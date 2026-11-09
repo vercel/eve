@@ -32,7 +32,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     channel: { __kind: "eve:channel", adapter: { kind: "channel:photon" }, routes: [] },
     send,
   }),
-  messageToUserContent: (message: Message) => message.text,
+  messageContentOf: (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),

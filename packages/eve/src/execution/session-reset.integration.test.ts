@@ -37,7 +37,7 @@ describe("session reset integration", () => {
 
       await expect(
         runtime.dispatchContinuation({
-          command: { kind: "reset", reason: "User requested /new" },
+          command: { deliveryId: "reset-delivery", kind: "reset", reason: "User requested /new" },
           continuationToken,
         }),
       ).resolves.toEqual({ previousSessionId: first.runId, status: "reset" });

@@ -1,57 +1,68 @@
 <script setup lang="ts">
-import type { EveDynamicToolPart } from "eve/vue";
+import type { EveToolPart } from "eve/vue";
 
 const props = defineProps<{
-  part: EveDynamicToolPart;
+  part: EveToolPart;
   canRespond: boolean;
 }>();
 
 const emit = defineEmits<{
-  inputResponses: [
+  answers: [
     responses: readonly {
       readonly optionId?: string;
-      readonly requestId: string;
+      readonly interactionId: string;
       readonly text?: string;
     }[],
   ];
 }>();
 
-const isOpen = ref(
-  props.part.state === "approval-requested" || props.part.state === "approval-responded",
+const interaction = computed(() => props.part.interaction?.request);
+const answer = computed(() => props.part.interaction?.answer);
+const awaitingApproval = computed(
+  () => interaction.value?.kind === "approval" && props.part.interaction?.status !== "settled",
+);
+const errorText = computed(() =>
+  props.part.state === "failed" ||
+  props.part.state === "rejected" ||
+  props.part.state === "cancelled"
+    ? (props.part.error?.message ?? props.part.state)
+    : undefined,
 );
 
-const title = computed(
-  () =>
-    props.part.toolMetadata?.eve?.label ??
-    props.part.toolMetadata?.eve?.name ??
-    props.part.toolName,
-);
+const isOpen = ref(props.part.interaction !== undefined);
+
+const title = computed(() => props.part.label);
 
 const stateLabel = computed(() => {
+  if (props.part.state === "streaming") return "Pending";
+  if (awaitingApproval.value) return "Awaiting Approval";
+
   const labels: Record<string, string> = {
-    "input-streaming": "Pending",
-    "input-available": "Running",
-    "approval-requested": "Awaiting Approval",
-    "approval-responded": "Responded",
-    "output-available": "Completed",
-    "output-error": "Error",
-    "output-denied": "Denied",
+    requested: "Pending",
+    running: "Running",
+    approval: "Awaiting Approval",
+    blocked: "Awaiting Input",
+    completed: "Completed",
+    failed: "Error",
+    rejected: "Denied",
+    cancelled: "Cancelled",
   };
   return labels[props.part.state] ?? props.part.state;
 });
 
 const stateColor = computed(() => {
-  if (props.part.state === "output-error" || props.part.state === "output-denied")
+  if (props.part.state === "completed") return "text-emerald-600";
+  if (
+    props.part.state === "failed" ||
+    props.part.state === "rejected" ||
+    props.part.state === "cancelled"
+  )
     return "text-destructive";
-  if (props.part.state === "output-available") return "text-emerald-600";
-  if (props.part.state === "approval-requested") return "text-yellow-600";
+  if (awaitingApproval.value) return "text-yellow-600";
   return "text-muted-foreground";
 });
-
-const inputRequest = computed(() => props.part.toolMetadata?.eve?.inputRequest);
-const inputResponse = computed(() => props.part.toolMetadata?.eve?.inputResponse);
 const selectedOption = computed(() =>
-  inputRequest.value?.options?.find((option) => option.id === inputResponse.value?.optionId),
+  interaction.value?.options?.find((option) => option.id === answer.value?.optionId),
 );
 
 const formattedInput = computed(() => JSON.stringify(props.part.input, null, 2));
@@ -106,19 +117,19 @@ const formattedOutput = computed(() => {
       </div>
 
       <div
-        v-if="inputRequest"
+        v-if="interaction"
         class="space-y-3 rounded-md border-y border-yellow-500/30 bg-yellow-500/5 p-3"
       >
         <p class="text-sm text-muted-foreground">
-          {{ inputRequest.prompt }}
+          {{ interaction.prompt }}
         </p>
-        <p v-if="inputResponse" class="text-sm font-medium">
+        <p v-if="answer" class="text-sm font-medium">
           Responded:
-          {{ selectedOption?.label ?? inputResponse.text ?? inputResponse.optionId }}
+          {{ selectedOption?.label ?? answer.text ?? answer.optionId }}
         </p>
         <div v-else class="flex flex-wrap gap-2">
           <button
-            v-for="option in inputRequest.options"
+            v-for="option in interaction.options"
             :key="option.id"
             :disabled="!canRespond"
             type="button"
@@ -129,7 +140,9 @@ const formattedOutput = computed(() => {
                 : 'bg-primary text-primary-foreground hover:bg-primary/90'
             "
             @click="
-              emit('inputResponses', [{ optionId: option.id, requestId: inputRequest!.requestId }])
+              emit('answers', [
+                { optionId: option.id, interactionId: part.interaction!.interactionId },
+              ])
             "
           >
             {{ option.label }}
@@ -137,15 +150,12 @@ const formattedOutput = computed(() => {
         </div>
       </div>
 
-      <div v-if="part.output || part.errorText" class="space-y-2 p-4">
+      <div v-if="part.output || errorText" class="space-y-2 p-4">
         <h4 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {{ part.errorText ? "Error" : "Result" }}
+          {{ errorText ? "Error" : "Result" }}
         </h4>
-        <div
-          v-if="part.errorText"
-          class="rounded-md bg-destructive/10 p-3 text-xs text-destructive"
-        >
-          {{ part.errorText }}
+        <div v-if="errorText" class="rounded-md bg-destructive/10 p-3 text-xs text-destructive">
+          {{ errorText }}
         </div>
         <pre v-else class="overflow-x-auto rounded-md bg-muted/50 p-3 text-xs">{{
           formattedOutput

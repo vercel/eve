@@ -7,6 +7,7 @@ export const SESSION_INBOX_SESSION_ID_METADATA_KEY = "sessionId";
 /** Stable inbox coordinates. The owner and deployment are intentionally absent. */
 export interface SessionInboxAddress {
   readonly sessionId: string;
+  readonly inbox?: string;
 }
 
 export function isSessionInboxAddress(value: unknown): value is SessionInboxAddress {
@@ -51,12 +52,4 @@ export function logicalSessionInboxToken(token: string): string | undefined {
   return isSessionInboxHookToken(token)
     ? token.slice(SESSION_INBOX_HOOK_TOKEN_PREFIX.length)
     : undefined;
-}
-
-/**
- * Marker an owner older than handoff version 3 leaves while it releases its
- * hooks, so ingress can tell "handoff in progress" from "no session".
- */
-export function sessionHandoffMarkerToken(token: string): string {
-  return `eve:inbox:handoff:${token}`;
 }

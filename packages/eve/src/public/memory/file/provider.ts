@@ -52,7 +52,6 @@ export function fileMemory(options: FileMemoryOptions = {}): MemoryProvider {
   return defineMemoryProvider({
     recall: {
       "turn.started": recall,
-      "compaction.completed": recall,
     },
     async tools(context) {
       return createFileMemoryTools({

@@ -273,7 +273,14 @@ describe("initializeSessionInstrumentation", () => {
         },
         async (scope) =>
           scope.resolveRuntimeContext({
-            emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
+            attempt: 0,
+            emissionState: {
+              runId: "run_0",
+              sessionStarted: true,
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
             environment: "test",
             modelInput: {
               instructions: "private",
@@ -421,12 +428,12 @@ describe("bindInstrumentationRuntime", () => {
         },
         async (step) => {
           const attempt = step.prepareAttempt({
-            attemptIndex: 0,
+            runId: "run_0",
+            attempt: 0,
             stepIndex: 0,
             turnId: "turn_0",
           });
           expect(attempt.scope.traceSessionId).toBe(boundSession.sessionId);
-          await attempt.complete();
         },
       );
     });
@@ -636,7 +643,8 @@ describe("bindInstrumentationRuntime", () => {
         });
         expect(
           scope.prepareAttempt({
-            attemptIndex: 0,
+            runId: "run_0",
+            attempt: 0,
             stepIndex: 0,
             turnId: "turn-1",
           })?.scope.channelAudience,
@@ -669,7 +677,8 @@ describe("bindInstrumentationRuntime", () => {
         },
         async (scope) => ({
           integrations: scope.prepareAttempt({
-            attemptIndex: 0,
+            runId: "run_0",
+            attempt: 0,
             stepIndex: 0,
             turnId: "turn-1",
           }).telemetry?.integrations,
@@ -777,11 +786,12 @@ describe("bindInstrumentationRuntime", () => {
         type: "memory.operation.started",
       }),
       expect.objectContaining({
+        outcome: "completed",
         recordCount: 1,
         rootSessionId: "conversation-root",
         traceSessionId: expected,
         sessionId: "session-1",
-        type: "memory.operation.completed",
+        type: "memory.operation.settled",
       }),
     ]);
   });
@@ -809,7 +819,14 @@ describe("bindInstrumentationRuntime", () => {
     };
     const readScopedState = (scope: InstrumentationStepScope<{ sessionId: string }>) => ({
       messageCount: scope.resolveRuntimeContext({
-        emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
+        attempt: 0,
+        emissionState: {
+          runId: "run_0",
+          sessionStarted: true,
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn-1",
+        },
         environment: "test",
         modelInput: { instructions: undefined, messages: [{ content: "secret", role: "user" }] },
         session: { sessionId: "session-1" } as never,

@@ -1,4 +1,4 @@
 import { disableTool } from "eve/tools";
 
-// Edits go through `code__apply_patch`, which writes small reviewable hunks.
+// Edits go through the code extension's editing tool, which makes small reviewable changes.
 export default disableTool();

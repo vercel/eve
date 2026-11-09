@@ -14,13 +14,11 @@ const input = `# eve
 
 describe("transformAgentsMarkdown", () => {
   it("describes canonical HTML and route-specific Markdown accurately", () => {
-    const output = transformAgentsMarkdown(input, { origin: "https://eve.dev", templates: [] });
+    const output = transformAgentsMarkdown(input, { origin: "https://eve.dev" });
 
-    expect(output).toContain(
-      "Canonical HTML pages use `/docs/...`, `/integrations/...`, and `/templates/...`",
-    );
+    expect(output).toContain("Canonical HTML pages use `/docs/...` and `/integrations/...`");
     expect(output).toContain("Docs and integration pages expose alternate Markdown");
-    expect(output).toContain("Template pages are HTML discovery pages");
+    expect(output).not.toContain("Template pages are HTML discovery pages");
     expect(output).toContain("/docs/getting-started.md (or via /llms.txt)");
     expect(output).not.toContain("/llms.mdx/getting-started");
     expect(output).not.toContain("append .md or .mdx to a documentation URL");
@@ -35,22 +33,19 @@ describe("transformAgentsMarkdown", () => {
     );
   });
 
-  it("adds concise canonical template discovery entries", () => {
+  it("directs template discovery to Vercel rather than retired local pages", () => {
     const output = transformAgentsMarkdown(input, {
       origin: "https://eve.dev",
-      templates: [
-        { slug: "chat", title: "Chat agent template", description: "A persisted chat agent." },
-      ],
     });
 
     expect(output).toContain(
-      "- [Chat agent template](https://eve.dev/templates/chat): A persisted chat agent.",
+      "- [eve templates](https://vercel.com/templates/eve): Browse example projects on Vercel.",
     );
   });
 
   it("fails loudly if the upstream generic guidance changes", () => {
-    expect(() =>
-      transformAgentsMarkdown("# eve", { origin: "https://eve.dev", templates: [] }),
-    ).toThrow("Geistdocs agents.md Markdown guidance changed");
+    expect(() => transformAgentsMarkdown("# eve", { origin: "https://eve.dev" })).toThrow(
+      "Geistdocs agents.md Markdown guidance changed",
+    );
   });
 });

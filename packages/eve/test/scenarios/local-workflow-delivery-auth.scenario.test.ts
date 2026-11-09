@@ -43,7 +43,7 @@ export default eveChannel({ auth: httpBasic({ username: "alice", password: "fixt
     }
 
     const client = new Client({
-      host: server.url,
+      baseUrl: server.url,
       auth: { basic: { username: "alice", password: "fixture" } },
     });
     const { session } = await client.sessions.create();
@@ -52,7 +52,7 @@ export default eveChannel({ auth: httpBasic({ username: "alice", password: "fixt
         signal: AbortSignal.timeout(30_000),
       })
     ).result();
-    expect(result.message, server.stderr()).toBe("Noted, Alice.");
+    expect(result.reply, server.stderr()).toBe("Noted, Alice.");
   } finally {
     await server.stop();
   }

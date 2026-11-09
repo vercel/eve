@@ -72,7 +72,7 @@ const RELEASE = 'release "v2.4"';
 const DEPLOY = `Use ${GATED_TOOL} to ship ${RELEASE}.`;
 // Channels word the two approval choices differently; the TUI asks Yes or No.
 const APPROVE_LABELS = ["Approve", "Yes"];
-const CANCEL_LABELS = ["Cancel", "No"];
+const DENY_LABELS = ["Deny", "No"];
 const APPROVAL_PROMPT = deployPrompt("v2.4");
 
 async function askToDeploy(conversation: ChannelConversation) {
@@ -228,7 +228,7 @@ async function expectButtonsKept(conversation: ChannelConversation, prompt: stri
     message,
   ).toBe(true);
   expect(
-    labels.some((label) => CANCEL_LABELS.includes(label)),
+    labels.some((label) => DENY_LABELS.includes(label)),
     message,
   ).toBe(true);
 }
@@ -375,6 +375,37 @@ async function requestSignIn(conversation: ChannelConversation, message: string)
 
 const SIGN_IN_OPENERS = /^(?:authori[sz]e|sign in)$/iu;
 
+/**
+ * Fails when a person can still see the calendar sign-in: its link, its code,
+ * or a Cancel that would act on it.
+ */
+async function expectSignInPromptGone(conversation: ChannelConversation, after: string) {
+  const left = (await conversation.visible()).filter(
+    ({ options, text }) =>
+      text.includes(CALENDAR.url) ||
+      text.includes(CALENDAR.userCode) ||
+      options.some((option) => option.label === SIGN_IN_CANCEL_LABEL),
+  );
+  expect(
+    left.map(({ text }) => text),
+    `the sign-in prompt is still shown ${after}`,
+  ).toEqual([]);
+}
+
+const SIGN_IN_CANCEL_LABEL = "Cancel";
+
+/**
+ * Presses the Cancel the calendar sign-in's prompt shows. The press settles once the channel's
+ * background work for it does, so whatever it shows the person has been shown.
+ */
+async function pressSignInCancel(conversation: ChannelConversation) {
+  const cancel = (await conversation.visible())
+    .flatMap(({ options }) => options)
+    .find((option) => option.label === SIGN_IN_CANCEL_LABEL);
+  expect(cancel, "a Cancel on the sign-in prompt to press").toBeDefined();
+  await conversation.press(cancel!);
+}
+
 /** Starts a calendar sign-in, then moves on with a new message before finishing it. */
 async function abandonSignIn(conversation: ChannelConversation) {
   await conversation.say(READ_CALENDAR);
@@ -511,7 +542,7 @@ const questionRules = [
 
 const approvalRules = [
   {
-    rule: "a tool approval shows the tool's prompt with a choice to approve and one to cancel",
+    rule: "a tool approval shows the tool's prompt with a choice to approve and one to deny",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: [],
     async run(conversation) {
@@ -524,7 +555,7 @@ const approvalRules = [
         message,
       ).toHaveLength(1);
       expect(
-        labels.filter((label) => CANCEL_LABELS.includes(label)),
+        labels.filter((label) => DENY_LABELS.includes(label)),
         message,
       ).toHaveLength(1);
     },
@@ -543,14 +574,14 @@ const approvalRules = [
     },
   },
   {
-    rule: "pressing Cancel stops the gated tool without running it",
+    rule: "pressing Deny stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: ["buttons"],
     async run(conversation) {
       const options = await askToDeploy(conversation);
-      const cancel = options.find((option) => CANCEL_LABELS.includes(option.label));
-      expect(cancel, "a Cancel option to press").toBeDefined();
-      await conversation.press(cancel!);
+      const deny = options.find((option) => DENY_LABELS.includes(option.label));
+      expect(deny, "a Deny option to press").toBeDefined();
+      await conversation.press(deny!);
       await expectNotDeployed(conversation);
     },
   },
@@ -566,13 +597,13 @@ const approvalRules = [
     },
   },
   {
-    rule: "a text reply of cancel stops the gated tool without running it",
+    rule: "a text reply of deny stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
       await askToDeploy(conversation);
-      await conversation.say("cancel");
+      await conversation.say("deny");
       await expectNotDeployed(conversation);
     },
   },
@@ -599,7 +630,7 @@ const approvalRules = [
       await conversation.say(DEPLOY_AND_PUBLISH);
       await answerEach(conversation, {
         [APPROVAL_PROMPT]: APPROVE_LABELS,
-        [PUBLISH_PROMPT]: CANCEL_LABELS,
+        [PUBLISH_PROMPT]: DENY_LABELS,
       });
       // Results reach the model in the order they settle, so the reply names the approved call.
       await expectDeployed(conversation);
@@ -613,7 +644,7 @@ const approvalRules = [
     variesByConversation: true,
     async run(conversation) {
       await conversation.say(DEPLOY_AND_PUBLISH);
-      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "cancel" });
+      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "deny" });
       await expectDeployed(conversation);
       expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
     },
@@ -906,7 +937,7 @@ const budgetRules = [
 const signInRules = [
   {
     rule: "a sign-in names the service and shows its sign-in link",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     // A public surface has nowhere private to show a link.
@@ -921,7 +952,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in shows its confirmation code",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     surfaces: ["shared", "private"],
@@ -933,7 +964,7 @@ const signInRules = [
   {
     rule: "only the person signing in sees the sign-in link and code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: [],
     variesByConversation: true,
     surfaces: ["public", "shared"],
@@ -952,7 +983,7 @@ const signInRules = [
   {
     rule: "someone else pressing a sign-in isn't shown its link or code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: ["another-person", "buttons"],
     variesByConversation: true,
     surfaces: ["shared"],
@@ -976,7 +1007,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in without a link shows its instructions",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -986,7 +1017,7 @@ const signInRules = [
   },
   {
     rule: "after signing in, the agent carries on with the request",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     async run(conversation) {
       await conversation.say(READ_CALENDAR);
@@ -998,7 +1029,7 @@ const signInRules = [
   },
   {
     rule: "completing a sign-in tells the person it succeeded",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -1009,8 +1040,52 @@ const signInRules = [
     },
   },
   {
+    rule: "completing a sign-in stops showing its link and code",
+    source: "#5995",
+    requires: [],
+    variesByConversation: true,
+    // A public surface never shows the link or code, so there is nothing to take away.
+    surfaces: ["shared", "private"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      await conversation.waitForShown(CALENDAR.url);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after signing in");
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      await pressSignInCancel(conversation);
+      await conversation.waitForRest();
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran after Cancel").toBe(0);
+    },
+  },
+  {
+    rule: "pressing Cancel on a sign-in after the session's run ended removes its prompt",
+    source: "#5995",
+    requires: ["buttons", "sign-in-cancel"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      // An ended run never withdraws its sign-in, so Cancel finds no turn left to cancel.
+      await conversation.cancelRunsInWorld();
+      await pressSignInCancel(conversation);
+      await expectSignInPromptGone(conversation, "after pressing Cancel");
+    },
+  },
+  {
     rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -1027,7 +1102,7 @@ const signInRules = [
   },
   {
     rule: "message after ignored sign-in tells user it was cancelled",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -1049,32 +1124,32 @@ const approvalPermissionRules = [
     },
   },
   {
-    rule: "another person pressing Cancel or Approve on a requester-only approval leaves it pending",
+    rule: "another person pressing Deny or Approve on a requester-only approval leaves it pending",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
     async run(conversation) {
       const options = await askToReleaseHotfix(conversation);
       const approve = option(options, APPROVE_LABELS);
-      await conversation.press(option(options, CANCEL_LABELS), "bob");
+      await conversation.press(option(options, DENY_LABELS), "bob");
       await conversation.press(approve, "bob");
       await expectStillPending(conversation);
-      // A cancel that got through would settle the call as denied before this approval.
+      // A denial that got through would settle the call as denied before this approval.
       await conversation.press(approve);
       await expectReleased(conversation);
     },
   },
   {
-    rule: "another person typing cancel or approve doesn't settle a requester-only approval",
+    rule: "another person typing deny or approve doesn't settle a requester-only approval",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
       // Today another person's message waits for the turn to end, so it never reaches the
       // response policy; the approval stays pending either way.
-      await conversation.say("cancel", "bob");
+      await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A cancel taken as Alice's would settle the call as denied before this approval.
+      // A denial taken as Alice's would settle the call as denied before this approval.
       await conversation.say("approve");
       await expectReleased(conversation);
     },
@@ -1105,7 +1180,7 @@ const approvalPermissionRules = [
 const callerRules = [
   {
     rule: "a tool sees the person who sent the message as its caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: [],
     // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
     variesByConversation: true,
@@ -1122,7 +1197,7 @@ const callerRules = [
   },
   {
     rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: ["another-person"],
     async run(conversation) {
       const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
@@ -1136,7 +1211,7 @@ const callerRules = [
 const attachmentRules = [
   {
     rule: "an image a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     variesByConversation: true,
     async run(conversation) {
@@ -1145,7 +1220,7 @@ const attachmentRules = [
   },
   {
     rule: "a PDF a person sends reaches the agent with its bytes and type",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       await expectFileReachesAgent(conversation, REPORT);
@@ -1168,7 +1243,7 @@ const attachmentRules = [
   },
   {
     rule: "a file sent earlier in the conversation is still there on a later message",
-    source: "docs/channels/overview.mdx",
+    source: "docs/channels/index.mdx",
     requires: ["attachments"],
     async run(conversation) {
       const text = `Alice attached ${DIAGRAM.name}.`;

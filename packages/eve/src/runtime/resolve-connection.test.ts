@@ -6,10 +6,10 @@ import {
 } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { ConnectionAuthResolver, HeadersDefinition } from "#shared/connection-types.js";
 
 describe("resolveConnectionDefinition", () => {
@@ -54,6 +54,42 @@ describe("resolveConnectionDefinition", () => {
     expect(resolved.headers).toBe(headers);
     expect(resolved.toolCall).toBe(toolCall);
   });
+
+  // #5630
+  it("keeps an object-form approval with its response policy", async () => {
+    const approval = {
+      request: () => "user-approval" as const,
+      response: () => ({ status: "allowed" as const }),
+    };
+    const definition: CompiledConnectionDefinition = {
+      connectionName: "crm",
+      description: "CRM",
+      logicalPath: "connections/crm.ts",
+      protocol: "mcp",
+      sourceId: "connections/crm",
+      sourceKind: "module",
+      url: "https://crm.example.com/mcp",
+    };
+    const moduleMap: CompiledModuleMap = {
+      nodes: {
+        [ROOT_COMPILED_AGENT_NODE_ID]: {
+          modules: {
+            [definition.sourceId]: {
+              default: defineMcpClientConnection({
+                approval,
+                description: definition.description,
+                url: definition.url,
+              }),
+            },
+          },
+        },
+      },
+    };
+
+    const resolved = await resolveConnectionDefinition(definition, moduleMap, undefined);
+
+    expect(resolved.approval).toEqual(approval);
+  });
 });
 
 describe("toolResultFrom identity for connections sharing a host (#202)", () => {
@@ -92,12 +128,14 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
     // A hook bundled separately imports its own instance of each connection module.
     const jira = defineJira();
     const confluence = defineConfluence();
-    const result = (toolName: string): RuntimeActionResult => ({
-      callId: "call_1",
-      kind: "tool-result",
-      output: {},
-      toolName,
-    });
+    const result = (name: string) =>
+      ({
+        callId: "call_1",
+        kind: "tool",
+        name,
+        state: "completed",
+        output: {},
+      }) as const;
 
     expect(warn).not.toHaveBeenCalled();
     expect(toolResultFrom(result("jira__getIssue"), jira)?.connectionToolName).toBe("getIssue");
@@ -133,7 +171,13 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
     );
 
     const match = toolResultFrom(
-      { callId: "call_1", kind: "tool-result", output: {}, toolName: "spec_only__list" },
+      {
+        callId: "call_1",
+        kind: "tool",
+        name: "spec_only__list",
+        state: "completed",
+        output: {},
+      },
       define(),
     );
     expect(match?.connectionToolName).toBe("list");

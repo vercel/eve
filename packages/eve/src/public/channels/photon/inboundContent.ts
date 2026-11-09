@@ -1,12 +1,12 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { Message } from "#compiled/chat/index.js";
-import { messageToUserContent } from "#public/channels/chat-sdk/index.js";
+import { messageContentOf } from "#public/channels/chat-sdk/index.js";
 import type { QuotedMessage } from "#public/channels/chat-sdk/reply-context.js";
 
 /** Returns model-visible Photon content, or `undefined` for non-message events. */
-export function photonInboundContent(message: Message): string | UserContent | undefined {
-  const content = messageToUserContent(message);
+export function photonInboundContent(message: Message): MessageContent | undefined {
+  const content = messageContentOf(message);
   if (typeof content === "string") {
     return content.trim().length > 0 ? content : undefined;
   }

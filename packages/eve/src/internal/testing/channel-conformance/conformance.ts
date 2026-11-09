@@ -59,24 +59,6 @@ const answeredPromptRules = {
 
 type AnsweredPrompt = keyof typeof answeredPromptRules;
 
-/** Answered prompts in `groups` are never edited, so they keep their buttons and never say who answered. */
-function staleAnsweredPrompts(
-  reason: string,
-  groups: readonly AnsweredPrompt[],
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    groups
-      .flatMap((group) => Object.values(answeredPromptRules[group]))
-      .map((rule) => [
-        rule,
-        {
-          reason,
-          symptom: /the answered prompt (still offers \[".+\]|never names who answered)/,
-        },
-      ]),
-  );
-}
-
 /** Answered prompts in `groups` lose their buttons, but the edit doesn't say who answered. */
 function unnamedAnsweredPrompts(
   reason: string,
@@ -104,17 +86,22 @@ interface ConformanceChannel {
 
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
-/** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
-function noSignInRenderer(
+/**
+ * Rules a group declines: its sign-in shows a link-free status, since the challenge is a credential only its person
+ * may read, and the channel has no private place to send it without the person acting first.
+ */
+function signInKeptPrivate(
+  reason: string,
   ...rules: ContractRuleName[]
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason: "the channel has no default sign-in renderer", symptom: SIGN_IN_NOT_SHOWN },
-    ]),
-  );
+): Partial<Record<ContractRuleName, string>> {
+  return Object.fromEntries(rules.map((rule) => [rule, reason]));
 }
+
+const SIGN_IN_SHOWN_RULES = [
+  "a sign-in names the service and shows its sign-in link",
+  "a sign-in shows its confirmation code",
+  "a sign-in without a link shows its instructions",
+] as const satisfies readonly ContractRuleName[];
 
 /**
  * Linq's group sign-in can't reach the person privately: its `openDM` needs a phone
@@ -125,6 +112,7 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
     "a sign-in without a link shows its instructions",
+    "completing a sign-in stops showing its link and code",
   ].map((rule) => [
     rule,
     {
@@ -134,6 +122,27 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
     },
   ]),
 ) satisfies Partial<Record<ContractRuleName, BrokenCell>>;
+
+const SIGN_IN_COMPLETED_RULE = "completing a sign-in stops showing its link and code";
+
+/** The challenge a person was shown stays on screen after they finish signing in. */
+function signInLingers(reason: string): Partial<Record<ContractRuleName, BrokenCell>> {
+  return {
+    [SIGN_IN_COMPLETED_RULE]: {
+      reason,
+      symptom: /the sign-in prompt is still shown after signing in/u,
+    },
+  };
+}
+
+const SIGN_IN_LINGERS = signInLingers(
+  "the challenge message stays as it was sent after the sign-in completes",
+);
+
+/** Slack's sign-in prompt is ephemeral, which only a press's `response_url` can delete. */
+const SLACK_SIGN_IN_LINGERS = signInLingers(
+  "the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can",
+);
 
 const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
@@ -164,8 +173,6 @@ const DISCORD_GATEWAY_BROKEN = {
 };
 
 const SIGN_IN_PRESS_RULE = "someone else pressing a sign-in isn't shown its link or code";
-
-/** The challenge goes privately to the person signing in, so the thread has no sign-in to press. */
 const SIGN_IN_SENT_PRIVATELY = {
   [SIGN_IN_PRESS_RULE]:
     "the sign-in goes privately to the person signing in, so the thread shows nothing to press",
@@ -176,11 +183,12 @@ const DISCORD_UNSUPPORTED = {
     "each slash command starts its own session, so no later message shares one with the file",
 } satisfies Partial<Record<ContractRuleName, string>>;
 
+const DISCORD_SERVER_SIGN_IN = signInKeptPrivate(
+  "a server channel gets a link-free status whose button reveals the challenge to its person alone; the driver does not press it to show the initial challenge",
+  ...SIGN_IN_SHOWN_RULES,
+);
+
 const SLACK_BROKEN = {
-  ...staleAnsweredPrompts(
-    "only the button interaction handler edits a question; a typed answer leaves it",
-    ["questionText"],
-  ),
   "text replies answer two pending approvals one at a time, in the order shown": {
     reason:
       "one card shows every approval a step raises, so a typed reply can't say which it answers",
@@ -223,19 +231,29 @@ const WEB_CHAT_SINGLE_PERSON =
  */
 const channelConformance = {
   "chat-sdk": [
-    { driver: chatSdkDriver, broken: CHAT_SDK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY },
+    {
+      driver: chatSdkDriver,
+      broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
     { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [
-    { driver: () => discordDriver(), broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED },
+    {
+      driver: () => discordDriver(),
+      broken: { ...DISCORD_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: { ...DISCORD_UNSUPPORTED, ...DISCORD_SERVER_SIGN_IN },
+    },
     {
       driver: () => discordDriver("shared", "gateway"),
-      broken: DISCORD_GATEWAY_BROKEN,
+      broken: { ...DISCORD_GATEWAY_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: DISCORD_SERVER_SIGN_IN,
     },
     {
       driver: () => discordDriver("shared", "gateway-threads"),
-      broken: DISCORD_GATEWAY_BROKEN,
+      broken: { ...DISCORD_GATEWAY_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: DISCORD_SERVER_SIGN_IN,
     },
   ],
   "discord-dm": [
@@ -254,13 +272,10 @@ const channelConformance = {
   github: [
     {
       driver: githubDriver,
-      broken: {
-        ...noSignInRenderer(
-          "a sign-in without a link shows its instructions",
-          "completing a sign-in tells the person it succeeded",
-          "message after ignored sign-in tells user it was cancelled",
-        ),
-      },
+      unsupported: signInKeptPrivate(
+        "a public thread gets a status naming who must sign in, since nothing on GitHub is private to them",
+        "a sign-in without a link shows its instructions",
+      ),
     },
   ],
   linear: [
@@ -272,17 +287,56 @@ const channelConformance = {
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
           symptom: /a message everyone sees carried the sign-in (link|code)/u,
         },
+        ...SIGN_IN_LINGERS,
       },
     },
   ],
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
-  slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
-  "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
-  teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
+  slack: [
+    {
+      driver: slackDriver,
+      broken: { ...SLACK_BROKEN, ...SLACK_SIGN_IN_LINGERS },
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
+  ],
+  "slack-dm": [
+    {
+      dm: true,
+      driver: () => slackDriver("private"),
+      broken: { ...SLACK_BROKEN, ...SLACK_SIGN_IN_LINGERS },
+    },
+  ],
+  "slack-code-channel": [
+    {
+      driver: () => slackDriver("code-channel"),
+      broken: { ...SLACK_BROKEN, ...SLACK_SIGN_IN_LINGERS },
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
+  ],
+  teams: [
+    {
+      driver: teamsDriver,
+      broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: signInKeptPrivate(
+        "a group gets a link-free card whose button reveals the challenge to its person alone; the driver does not press it to show the initial challenge",
+        ...SIGN_IN_SHOWN_RULES,
+      ),
+    },
+  ],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
-  telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],
+  telegram: [
+    {
+      driver: telegramDriver,
+      broken: { ...TELEGRAM_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: signInKeptPrivate(
+        "a group's status sends the challenge privately once the person presses Authorize, which the driver doesn't press",
+        ...SIGN_IN_SHOWN_RULES,
+        "only the person signing in sees the sign-in link and code",
+      ),
+    },
+  ],
   "telegram-dm": [{ dm: true, driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
   tui: [
     {
@@ -291,7 +345,7 @@ const channelConformance = {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question's drawer closes, so nothing is left to press",
         "a text reply of approve runs the gated tool": TUI_TYPED_APPROVAL,
-        "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,
+        "a text reply of deny stops the gated tool without running it": TUI_TYPED_APPROVAL,
         "approving by text clears the approval's buttons": TUI_TYPED_APPROVAL,
         "approving by text names who approved on the approval": TUI_TYPED_APPROVAL,
         "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply":
@@ -311,7 +365,12 @@ const channelConformance = {
       },
     },
   ],
-  twilio: [{ driver: twilioDriver }],
+  twilio: [
+    {
+      driver: twilioDriver,
+      unsupported: { [SIGN_IN_COMPLETED_RULE]: "a sent SMS can't be edited or taken back" },
+    },
+  ],
   "web-chat": [
     {
       driver: webChatDriver,
@@ -348,6 +407,7 @@ const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
   attachments: "files a person can send",
   "another-person": "second person who can act",
   buttons: "buttons a person can press",
+  "sign-in-cancel": "Cancel on its sign-in prompt",
   "text-replies": "plain-text replies",
 };
 

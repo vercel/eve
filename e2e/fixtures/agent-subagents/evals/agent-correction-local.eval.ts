@@ -8,6 +8,6 @@ export default defineEval({
   timeoutMs: 120_000,
   async test(t) {
     await correctKeeperWhileItWorks(t, "notebook-keeper");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -11,7 +11,7 @@ function createTestSkill(
   return {
     description: "A test skill",
     logicalPath: `skills/${name}/SKILL.md`,
-    markdown: "# Test\nDo the thing.",
+    content: "# Test\nDo the thing.",
     name,
     sourceId: "test-skill-source",
     sourceKind: "markdown",
@@ -66,7 +66,7 @@ describe("formatAvailableSkillsSection", () => {
   });
 
   it("never includes active skill markdown content", () => {
-    const skill = createTestSkill({ markdown: "# Full Instructions\nStep 1: Do this." });
+    const skill = createTestSkill({ content: "# Full Instructions\nStep 1: Do this." });
 
     const result = formatAvailableSkillsSection([skill]);
 

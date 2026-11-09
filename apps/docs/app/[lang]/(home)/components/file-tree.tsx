@@ -2,154 +2,154 @@ import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
 import { cacheLife } from "next/cache";
-import type { ComponentProps, JSX } from "react";
-import {
-  IconAgents,
-  IconClock,
-  IconFileText,
-  IconFolderOpen,
-  IconLinked,
-  IconMessage,
-  IconSandbox,
-  IconSparkles,
-  IconWorkflow,
-  IconWrench,
-} from "@vercel/geistdocs/assets/icons";
+import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
-import { FileTreeView } from "./file-tree-view";
+import { FileTreeView, type PlanResults } from "./file-tree-view";
 
 interface Snippet {
-  /** Category name shown in the left "Configure your agent" column. */
-  label: string;
-  /** File/folder name shown in the IDE file tree. */
+  /** File or folder name shown in the file tree. */
   name: string;
   /** Full path shown in the code panel header. */
   fileName: string;
   lang: string;
-  /** Category icon for the left column. */
-  NavIcon: (props: { size?: number; className?: string }) => JSX.Element;
   /** Short, what-this-file-does line shown above the code. */
   description: string;
   code: string;
+  /** A dynamic file: what it gives each plan, with null where the plan doesn't get it. */
+  results?: PlanResults;
+  /** A dynamic file: the 1-based lines of each plan's branch. */
+  planLines?: { enterprise: number[]; pro: number[] };
 }
 
+// One support agent, authored as a folder. Most files are static and the same for every
+// customer; the defineDynamic ones resolve per customer, so enterprise customers get a
+// one-hour SLA, a larger model, second-level support, and on-call paging.
 const snippets: Snippet[] = [
   {
-    label: "Instructions",
     name: "instructions.md",
     fileName: "instructions.md",
     lang: "markdown",
-    NavIcon: IconFileText,
     description:
       "An instructions.md file is a complete agent. Describe its role in Markdown, then run eve.",
     code: `# Identity
 
-You are an expert weather assistant.
-You can fetch the weather for any
-city in the world.`,
+You are a support agent.
+Answer customer questions, look up
+their orders, and escalate anything
+you can't resolve.`,
   },
   {
-    label: "Agent",
+    name: "instructions/sla.ts",
+    fileName: "instructions/sla.ts",
+    lang: "typescript",
+    description:
+      "Add instructions that depend on the customer. Enterprise customers get a one-hour SLA, and Pro customers get a reply within a business day.",
+    code: `import { defineDynamic, defineInstructions }
+  from "eve/instructions";
+
+export default defineDynamic((ctx) => {
+  const plan =
+    ctx.session.auth.current?.attributes.plan;
+  return defineInstructions({
+    content: plan === "enterprise"
+      ? "Reply within the 1-hour SLA. Escalate anything you can't resolve."
+      : "Reply within one business day.",
+  });
+});`,
+    results: { enterprise: "1-hour SLA, escalate when stuck", pro: "Reply within a business day" },
+    planLines: { enterprise: [9], pro: [10] },
+  },
+  {
     name: "agent.ts",
     fileName: "agent.ts",
     lang: "typescript",
-    NavIcon: IconSparkles,
-    description:
-      "eve uses a default model. Add agent.ts when you want to choose a model or configure the runtime.",
-    code: `import { defineAgent } from "eve";
+    description: "Choose the model per customer: a larger model for enterprise conversations.",
+    code: `import { defineAgent, defineDynamic } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-6-luna-fast",
-  reasoning: "high",
+  model: defineDynamic((ctx) =>
+    ctx.session.auth.current?.attributes
+      .plan === "enterprise"
+      ? "openai/gpt-6-luna-fast"
+      : "zai/glm-5.2",
+  ),
 });`,
+    results: { enterprise: "Larger model", pro: "Default model" },
+    planLines: { enterprise: [7], pro: [8] },
   },
   {
-    label: "Skills",
     name: "skills/",
-    fileName: "skills/research.md",
+    fileName: "skills/refunds.md",
     lang: "markdown",
-    NavIcon: IconWrench,
     description:
       "Skills are Markdown playbooks loaded only when relevant, so the agent gets focused guidance without carrying it in every prompt.",
     code: `---
-name: research
-description: Research unfamiliar topics
+name: refunds
+description: Handle refund requests
 ---
 
-When the task is novel or ambiguous,
-gather evidence first, then answer.`,
+Check the order date first. Refund
+within 30 days. After that, offer
+store credit.`,
   },
   {
-    label: "Tools",
     name: "tools/",
-    fileName: "tools/get_weather.ts",
+    fileName: "tools/lookup_order.ts",
     lang: "typescript",
-    NavIcon: IconWorkflow,
     description:
-      "Drop a TypeScript file in tools/ and the model can call it — the filename becomes the tool name, no registration required.",
+      "Drop a TypeScript file in tools/ and the model can call it. The filename becomes the tool name, no registration required.",
     code: `import { defineTool } from "eve/tools";
 import z from "zod";
 
 export default defineTool({
-  description: "Get the weather for a city",
-  inputSchema: z.object({
-    cityName: z.string(),
-  }),
+  description: "Look up an order by ID",
+  inputSchema: z.object({ orderId: z.string() }),
   async execute(input) {
     const res = await fetch(
-      \`\${process.env.WEATHER_API_URL}/current?city=\${input.cityName}\`
+      \`\${process.env.ORDERS_API_URL}/orders/\${input.orderId}\`
     );
-    const data = await res.json();
-    return data.current_condition[0];
+    return res.json();
   },
 });`,
   },
   {
-    label: "Sandbox",
-    name: "sandbox/",
-    fileName: "sandbox/sandbox.ts",
+    name: "tools/page_on_call.ts",
+    fileName: "tools/page_on_call.ts",
     lang: "typescript",
-    NavIcon: IconSandbox,
-    description:
-      "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
-    code: `import { DefaultSandbox,
-  defineSandbox } from "eve/sandbox";
+    description: "Let the agent page the on-call engineer, but only for enterprise customers.",
+    code: `import { defineDynamic, defineTool }
+  from "eve/tools";
+import { z } from "zod";
+import { pageOnCall } from "../lib/pager";
 
-export const environment =
-  DefaultSandbox.environment({
-    prepare: async (sandbox) => {
-      await sandbox.run({
-        command: "git clone repo /workspace"
-      });
-    }
-  });
-
-export default defineSandbox(() =>
-  environment.open()
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes.plan === "enterprise"
+    ? defineTool({
+        description: "Page the on-call engineer.",
+        inputSchema: z.object({ summary: z.string() }),
+        execute: ({ summary }) => pageOnCall(summary),
+      })
+    : null,
 );`,
+    results: { enterprise: "Can page on-call", pro: null },
+    planLines: { enterprise: [8, 9, 10, 11, 12], pro: [13] },
   },
   {
-    label: "Channels",
     name: "channels/",
     fileName: "channels/slack.ts",
     lang: "typescript",
-    NavIcon: IconMessage,
-    description: "Add channel files to use the same agent in Slack, Discord, Teams, or the web.",
-    code: `import { slackChannel } from
-  "eve/channels/slack";
+    description:
+      "Add channel files to answer customers in Slack, Discord, Teams, or the web with the same agent.",
+    code: `import { slackChannel } from "eve/channels/slack";
 
-export default slackChannel({
-  botName: "my-agent",
-});`,
+export default slackChannel();`,
   },
   {
-    label: "Connections",
     name: "connections/",
     fileName: "connections/linear.ts",
     lang: "typescript",
-    NavIcon: IconLinked,
     description:
-      "Connections handle auth for services like GitHub, Stripe, and Linear, so tools can call them without managing tokens.",
+      "Connections handle auth for services like Linear, GitHub, and Stripe, so the agent can file a bug for a support issue without managing tokens.",
     code: `import { defineMcpClientConnection }
   from "eve/connections";
 
@@ -158,55 +158,51 @@ export default defineMcpClientConnection({
 });`,
   },
   {
-    label: "Sub Agents",
     name: "subagents/",
-    fileName: "subagents/researcher/agent.ts",
+    fileName: "subagents/billing/agent.ts",
     lang: "typescript",
-    NavIcon: IconAgents,
     description:
-      "Add subagents for specialized work. The main agent delegates tasks and combines the results.",
-    code: `import { defineAgent } from
-  "eve";
+      "Add subagents for specialized work. The support agent hands billing questions to a billing specialist and uses its answer.",
+    code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  description: "Investigate questions",
+  description: "Answer billing questions",
   model: "openai/gpt-6-luna-fast",
   reasoning: "high",
 });`,
   },
   {
-    label: "Schedules",
-    name: "schedules/",
-    fileName: "schedules/daily-report.md",
-    lang: "markdown",
-    NavIcon: IconClock,
+    name: "subagents/escalation/",
+    fileName: "subagents/escalation/agent.ts",
+    lang: "typescript",
     description:
-      "Schedules run agents automatically for jobs like daily reports and weekly digests, continuing durably without an active session.",
+      "Give enterprise customers second-level support: a specialist the agent hands hard cases to.",
+    code: `import { defineAgent, defineDynamic } from "eve";
+
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes
+    .plan === "enterprise"
+    ? defineAgent({
+        description: "Second-level support engineer.",
+        model: ctx.model.id,
+      })
+    : null,
+);`,
+    results: { enterprise: "Second-level support engineer", pro: null },
+    planLines: { enterprise: [6, 7, 8, 9], pro: [10] },
+  },
+  {
+    name: "schedules/",
+    fileName: "schedules/daily-digest.md",
+    lang: "markdown",
+    description:
+      "Schedules run agents automatically for jobs like daily digests, continuing durably without an active session.",
     code: `---
 cron: "0 8 * * *"
 ---
 
-Send the user a daily weather
-digest for their saved cities.`,
-  },
-  {
-    label: "Evals",
-    name: "evals/",
-    fileName: "evals/weather/brooklyn-forecast.eval.ts",
-    lang: "typescript",
-    NavIcon: IconFileText,
-    description:
-      "Evals run the agent through real sessions and score the result, so you can catch regressions as it evolves.",
-    code: `import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
-
-export default defineEval({
-  async test(t) {
-    const turn = await t.send("What is the weather in Brooklyn?");
-    t.succeeded();
-    t.check(turn.message, includes("Sunny"));
-  },
-});`,
+Post a summary of yesterday's open
+tickets to the support channel.`,
   },
 ];
 
@@ -219,6 +215,16 @@ export async function FileTree() {
       highlight(snippet.code, {
         lang: snippet.lang,
         theme: geistShikiTheme,
+        // Tag each plan's branch so the view can highlight the customer it shows.
+        transformers: [
+          {
+            line(node, line) {
+              const { enterprise = [], pro = [] } = snippet.planLines ?? {};
+              if (enterprise.includes(line)) node.properties["data-plan"] = "enterprise";
+              else if (pro.includes(line)) node.properties["data-plan"] = "pro";
+            },
+          },
+        ],
         components: {
           pre: ({ children, ...props }: ComponentProps<"pre">) => (
             <CodeBlock
@@ -232,7 +238,7 @@ export async function FileTree() {
                 "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
                 // Wrap long lines instead of scrolling horizontally (keep the
                 // line-number grid, just constrain its column so lines wrap).
-                "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
+                "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:w-full! [&_.line]:h-auto! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
               )}
             >
               {children}
@@ -244,38 +250,12 @@ export async function FileTree() {
   );
 
   const items = snippets.map((snippet, i) => ({
-    label: snippet.label,
     name: snippet.name,
     fileName: snippet.fileName,
     description: snippet.description,
-    navIcon: <snippet.NavIcon className="shrink-0" size={16} />,
     code: rendered[i],
+    results: snippet.results,
   }));
 
-  return (
-    <section className="pb-24 pt-8 font-sans px-4">
-      <FileTreeView
-        items={items}
-        heading={
-          <div className="mx-auto max-w-5xl">
-            <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40">
-              Your{" "}
-              <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.24em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
-                <IconFolderOpen
-                  aria-hidden
-                  className="size-[0.58em] translate-y-[0.06em] text-gray-900"
-                />
-                agent/
-              </span>{" "}
-              is a directory
-            </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-              An instructions.md file is all you need to run an agent. Skills, tools, channels, and
-              the rest are optional building blocks you add as it grows.
-            </p>
-          </div>
-        }
-      />
-    </section>
-  );
+  return <FileTreeView items={items} />;
 }

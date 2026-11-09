@@ -1,6 +1,7 @@
 import type { SessionContext } from "#context/session-context.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { AgentSessionBundle } from "#execution/agent-sessions/context.js";
-import type { AuthorizationResult, AuthorizationSignal } from "#harness/authorization.js";
+import type { AuthorizationChallenge, AuthorizationResult } from "#harness/authorization.js";
 import type { SandboxState } from "#sandbox/state.js";
 
 export type WorkflowStepAuthorizationResult = AuthorizationResult & {
@@ -17,6 +18,10 @@ export interface WorkflowStepContext {
   readonly token: string;
   readonly authorizationResults: readonly WorkflowStepAuthorizationResult[];
   readonly sandbox: WorkflowStepSandbox;
+  /** Whether a parent, local or remote, delegated the calling session, which `ctx.to()` refuses. */
+  readonly delegated: boolean;
+  /** The calling session's channel, which `ctx.channel` holds. */
+  readonly channel: InstrumentationChannel;
 }
 
 /** Where `ctx.getSandbox()` finds the calling session's sandbox: its agent and sandbox key. */
@@ -30,7 +35,10 @@ export interface WorkflowStepSandbox {
 
 export type WorkflowStepResult = { readonly authorized: readonly string[] } & (
   | { readonly kind: "result"; readonly output: unknown }
-  | { readonly kind: "authorization-required"; readonly signal: AuthorizationSignal }
+  | {
+      readonly kind: "authorization-required";
+      readonly challenges: readonly AuthorizationChallenge[];
+    }
 );
 
 /** Compiler-owned envelope; contextIndexes marks arguments replaced with step-local context. */

@@ -54,6 +54,13 @@ The username is `company-brain`. Anyone with this password can query all exposed
 models in development. Keep it private and do not deploy it. For Slack-only
 development, skip generating the password; HTTP session routes remain disabled.
 
+The HTTP Basic operator can query models but cannot use the bundled local
+self-modification editor. That editor accepts only `localDev()` or linked-project
+Vercel development identities, not this template's `http-basic` principal. Edit
+`agent/` files directly; `eve dev` reloads your changes. Keep the template's HTTP
+Basic authentication rather than adding `localDev()` as a fallback, which could
+admit callers forwarded by a local tunnel without the operator password.
+
 Try these questions in the authenticated terminal UI:
 
 - “What is included in our payment totals?”

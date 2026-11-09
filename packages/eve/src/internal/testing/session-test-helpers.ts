@@ -17,19 +17,21 @@ export async function waitForParkedTurnStep(runId: string, count = 1): Promise<v
     async () => {
       const world = await getWorld();
       const steps = await world.steps.list({ runId, resolveData: "all" });
-      let parked = 0;
+      let parkedSteps = 0;
       for (const step of steps.data) {
         if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
         const result: TurnStepResult = await hydrateStepReturnValue(step.output, runId, undefined);
-        if (result.action !== "park") continue;
+        const parked =
+          result.action === "parked" || (result.action === "paused" && result.on === "calls");
+        if (!parked) continue;
         const events = await world.events.listByCorrelationId({
           correlationId: step.stepId,
           resolveData: "none",
           runId,
         });
-        if (events.data.some((event) => event.eventType === "step_completed")) parked++;
+        if (events.data.some((event) => event.eventType === "step_completed")) parkedSteps++;
       }
-      expect(parked).toBeGreaterThanOrEqual(count);
+      expect(parkedSteps).toBeGreaterThanOrEqual(count);
     },
     { timeout: 10_000 },
   );
@@ -42,7 +44,11 @@ export async function waitForParkedTurnStep(runId: string, count = 1): Promise<v
  */
 export async function readTurnStepStates(runId: string): Promise<SessionStateValues[]> {
   const world = await getWorld();
-  const steps = await world.steps.list({ runId, resolveData: "all", pagination: { limit: 1000 } });
+  const steps = await world.steps.list({
+    runId,
+    resolveData: "all",
+    pagination: { limit: 1000, sortOrder: "asc" },
+  });
   const states: SessionStateValues[] = [];
   for (const step of steps.data) {
     if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
@@ -53,4 +59,31 @@ export async function readTurnStepStates(runId: string): Promise<SessionStateVal
     states.push(applySessionStateDelta(args[0], result.stateDelta));
   }
   return states;
+}
+
+/** The state a run's last turn step stored, once every turn step it started has completed. */
+export async function readStoredTurnState(runId: string): Promise<SessionStateValues> {
+  return await vi.waitFor(
+    async () => {
+      const world = await getWorld();
+      const steps = await world.steps.list({
+        runId,
+        resolveData: "none",
+        pagination: { limit: 1000, sortOrder: "asc" },
+      });
+      const turnSteps = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
+      const last = turnSteps.at(-1);
+      expect(last).toBeDefined();
+      for (const step of turnSteps) {
+        const events = await world.events.listByCorrelationId({
+          correlationId: step.stepId,
+          resolveData: "none",
+          runId,
+        });
+        expect(events.data.some((event) => event.eventType === "step_completed")).toBe(true);
+      }
+      return (await readTurnStepStates(runId)).at(-1)!;
+    },
+    { timeout: 10_000 },
+  );
 }

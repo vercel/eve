@@ -12,17 +12,17 @@ import type { TokenUsage } from "#shared/token-usage.js";
 /** The agent's side of the task: the messages it read and the turns it owes a reply. */
 const agent = vi.hoisted(() => ({
   delivered: [] as WorkflowToolRunMessage[],
-  models: [] as Array<string | undefined>,
+  models: [] as unknown[],
   read: [] as string[],
   turns: [] as Array<(payload: RuntimeActionResultHookPayload) => void>,
 }));
 
 vi.mock("#execution/workflow-registry.js", async () => {
-  const { agentToolServeWorkflow, agentWithModelServeWorkflow } =
+  const { agentToolServeWorkflow, agentModelsServeWorkflow } =
     await import("#runtime/subagents/workflow.js");
   return {
     readRegisteredWorkflow: (workflowId: string) =>
-      workflowId.includes("agentWithModel") ? agentWithModelServeWorkflow : agentToolServeWorkflow,
+      workflowId.includes("agentModels") ? agentModelsServeWorkflow : agentToolServeWorkflow,
   };
 });
 vi.mock("#execution/agent-sessions/steps.js", () => ({
@@ -33,14 +33,23 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
     model,
   }: {
     readonly message: string;
-    readonly model?: string;
+    readonly model?: unknown;
   }) => {
     agent.models.push(model);
     agent.read.push(message);
-    return { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId: "reviewer-session" };
+    return {
+      address: {
+        kind: "local",
+        name: "reviewer",
+        nodeId: "reviewer",
+        sessionId: "reviewer-session",
+      },
+      deliveryId: `delivery-${String(agent.read.length)}`,
+    };
   },
   sendAgentSessionMessageStep: async ({ message }: { readonly message: string }) => {
     agent.read.push(message);
+    return { deliveryId: `delivery-${String(agent.read.length)}`, sessionId: "reviewer-session" };
   },
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -143,15 +152,19 @@ async function startReview(): Promise<ReturnType<typeof startServeBody>> {
   return started;
 }
 
-async function startModelReview(model: string): Promise<ReturnType<typeof startServeBody>> {
+async function startModelReview(model?: string): Promise<ReturnType<typeof startServeBody>> {
   agent.delivered.length = 0;
   agent.models.length = 0;
   agent.read.length = 0;
   agent.turns.length = 0;
   return startServeBody({
     ...input,
-    input: { message: "Review the release plan.", model },
-    workflowId: "workflow//eve//agentWithModelServeWorkflow",
+    input:
+      model === undefined
+        ? { message: "Review the release plan." }
+        : { message: "Review the release plan.", model },
+    toolName: "agent",
+    workflowId: "workflow//eve//agentModelsServeWorkflow",
   });
 }
 
@@ -201,27 +214,52 @@ async function sendAsTheTurnEnds(offset: number, { cancelled }: { readonly cance
   return { read: [...agent.read], repliedFirst, replies: replies() };
 }
 
-it("opens the custom agent tool's root copy with its model input", async () => {
-  const started = await startModelReview("anthropic/claude-opus-5.5");
+it("opens the root copy with the key of the chosen model", async () => {
+  const started = await startModelReview("haiku");
   await settle();
 
-  expect(agent.models).toEqual(["anthropic/claude-opus-5.5"]);
+  expect(agent.models).toEqual(["haiku"]);
 
   started.control.apply({ kind: "end", reason: "The session ended." });
   await started.outcome;
 });
 
-it("rejects a different model when continuing the custom agent task", async () => {
-  const started = await startModelReview("anthropic/claude-opus-5.5");
+it("opens the root copy on the current model when the call names no model", async () => {
+  const started = await startModelReview();
+  await settle();
+
+  expect(agent.models).toEqual([undefined]);
+
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+});
+
+it("lets a continuation omit the model and keeps the task's model", async () => {
+  const started = await startModelReview("haiku");
+  await settle();
+  agent.turns[0]?.(turnEnded({ kind: "succeeded", output: "The plan looks ready." }));
+  await settle();
+  started.control.apply(fridayCheck);
+  await settle();
+
+  expect(agent.read).toEqual(["Review the release plan.", "Check it against the Friday freeze."]);
+  expect(agent.models).toEqual(["haiku"]);
+
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+});
+
+it.each([
+  ["a different model", "haiku", "openai/gpt-6-sol"],
+  ["a model for a task on the current model", undefined, "haiku"],
+])("rejects %s when continuing the task", async (_case, startedWith, continuedWith) => {
+  const started = await startModelReview(startedWith);
   await settle();
   started.control.apply({
     ...fridayCheck,
     call: {
       ...fridayCheck.call,
-      input: {
-        message: fridayCheck.call.input.message,
-        model: "anthropic/claude-sonnet-5",
-      },
+      input: { message: fridayCheck.call.input.message, model: continuedWith },
     },
   });
 

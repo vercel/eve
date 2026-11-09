@@ -4,6 +4,7 @@
   "pages": [
     "dynamic-scheduling",
     "durable-cross-channel-notifications",
+    "fork-conversations-into-new-threads",
     "multi-tenant-auth",
     "multi-tenant-approvals",
     "voice-notes",

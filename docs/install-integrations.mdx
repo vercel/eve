@@ -4,11 +4,11 @@ description: "Discover and install extensions and other integrations from eve an
 contentType: "How-to"
 ---
 
-Install integrations from eve's official catalog, a third-party source, or an integration URL. Integrations are distributed using the [shadcn registry format](https://ui.shadcn.com/docs/registry).
+An integration is a set of project files and dependencies, such as an extension, channel, or memory provider. `eve add` installs integrations from eve's official catalog, a third-party source, or a URL. Integrations use the [shadcn registry format](https://ui.shadcn.com/docs/registry).
 
 ## Install an integration
 
-Run `eve add` from an eve agent project. This installs the integration's dependencies and writes its declared files into your project.
+Run `eve add` from an eve agent project to install the integration's dependencies and write its files into your project.
 
 ```bash
 eve add extension/agent-browser
@@ -17,19 +17,27 @@ eve add instrumentation/braintrust
 eve add memory/file
 ```
 
-If an item is not found, `eve add` searches the available catalogs and prints close matches without installing anything.
+If an item isn't found, `eve add` prints close matches from the available catalogs without installing anything.
 
-Web Chat installs a shared Next.js or TanStack Start application at `apps/web` for either a standalone agent or a selected member of an agent workspace. The installer asks which framework to use (`web-framework`), then how to deploy it; non-interactive runs use Next.js unless you answer `web-framework="tanstack"`. Choose **Vercel services** (recommended) to deploy Web Chat and agents as separate services, or the framework (**Next.js** or **TanStack Start**) to serve Web Chat and route agent requests through one app. Vercel services run locally without a linked Vercel project; link one when you are ready to deploy. Existing authored Next.js or Vercel configuration is preserved, and eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure) for browser-app placement, and [Next.js](./guides/frontend/nextjs) or [TanStack Start](./guides/frontend/tanstack) for framework-owned integration.
+Web Chat installs a Next.js or TanStack Start application at `apps/web` for a standalone agent or a selected workspace member. The installer asks for the framework (`web-framework`), then the deployment. Non-interactive runs use Next.js unless you answer `web-framework="tanstack"`.
 
-If you do not know an item name yet, run `eve add` without an argument. Its help output shows how to search the registry with `eve registry search <query>`.
+For the deployment, choose **Vercel services** (recommended) to deploy Web Chat and agents as separate services. Choose the framework (**Next.js** or **TanStack Start**) to serve Web Chat and route agent requests through one app. Vercel services run locally without a linked Vercel project. If you already have Next.js or Vercel configuration, eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure) for browser-app placement, and [Next.js](./guides/frontend/nextjs) or [TanStack Start](./guides/frontend/tanstack) for framework-owned integration.
 
-Extensions may create a mount under `agent/extensions/`. For example, `eve add eve/self-modification` creates an authored self-modification mount. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation integrations write one destination file under `agent/instrumentation/`, so you can install and configure multiple exporters independently. Configure generated files and required environment variables before running your agent.
+Run `eve add` without an argument to see how to search the registry with `eve registry search <query>`.
 
-When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the item's declared flows from the beginning.
+Each kind of integration writes files in its own directory:
 
-For example, `eve add memory/file` can provision its required storage through the same setup flow. After **Install and set up**, eve creates or reuses a dedicated private Vercel Blob store, connects production, preview, and development with namespaced credentials, pulls the environment, and offers to deploy. The review and setup transcript show the project, store, primary function region, environments, and possible Blob usage charges before provisioning.
+- Extensions may create a mount under `agent/extensions/`, as `eve add eve/self-modification` does.
+- Connections write a definition under `agent/connections/` and install `@vercel/connect` when required.
+- Instrumentation integrations write one destination file under `agent/instrumentation/`, so you can configure several exporters independently.
 
-An official item may identify optional pnpm dependencies that have build scripts. Before installation, eve asks whether to skip those optional packages, allow their build scripts, or abort. Your choice updates `ignoredOptionalDependencies` or `allowBuilds` in the pnpm workspace that owns the project. Allow build scripts only when you trust the packages named in the prompt.
+Configure generated files and required environment variables before running your agent.
+
+When an official item has interactive setup steps, eve asks whether to run them after installation. To resume a skipped or cancelled setup, run the printed `eve add <item> --skip-install` command, which reruns the setup from the beginning.
+
+For example, setup for `eve add memory/file` creates or reuses a private Vercel Blob store, connects it to production, preview, and development, and offers to deploy. Before provisioning, it shows the project, store, region, environments, and possible Blob usage charges. See [File memory](./memory/file).
+
+An official item may name optional pnpm dependencies that have build scripts. Before installation, eve asks whether to skip those packages, allow their build scripts, or abort. It records your choice in `ignoredOptionalDependencies` or `allowBuilds` in the owning pnpm workspace. Allow build scripts only when you trust the packages named in the prompt.
 
 ## Automate setup
 
@@ -41,7 +49,7 @@ Use `eve add <item> --non-interactive` when a script or coding agent cannot answ
 | `1`       | Installation or setup failed.                   |
 | `2`       | Setup needs an answer or an unmet prerequisite. |
 
-On exit code `2`, read the final event and run its `next.command`. For a non-secret question, replace its `<JSON value>` placeholder with the answer you collected. Never pass a secret in `--answer`; use the environment variable or secret store the integration documents. Add `--yes` to accept recommended values; explicit answers take precedence.
+On exit code `2`, read the final event and run its `next.command`. For a non-secret question, replace its `<JSON value>` placeholder with the answer you collected. Never pass a secret in `--answer`. Use the environment variable or secret store the integration documents instead. Add `--yes` to accept recommended values; explicit answers take precedence.
 
 A setup may report `eve link` as a prerequisite. Run it, then retry the continuation. See [Deployment](./guides/deployment/vercel.mdx) for the non-interactive `eve link` and `eve deploy` forms.
 
@@ -55,7 +63,7 @@ List every official integration and configured third-party source:
 eve registry list
 ```
 
-Search the catalog when you know what capability you need. Search returns up to 10 matches by default; use `--limit` to request between 1 and 100:
+Search the catalog by what an integration does. Omit `--limit` to return up to 10 matches, or set it between 1 and 100:
 
 ```bash
 eve registry search browser --limit 5
@@ -110,13 +118,11 @@ eve add https://registry.acme.com/r/analytics.json
 
 ## Contribute an official integration
 
-Community contributions to the official registry are welcome. Open an issue and get maintainer agreement before submitting a pull request, then follow the [registry contribution guide](https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry) for the required source files, metadata, validation, and extension requirements.
+Open an issue and get maintainer agreement before you submit a pull request to the official registry. Then follow the [registry contribution guide](https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry) for the required source files, metadata, validation, and extension requirements.
 
 ## Host your own registry
 
-Hosting your own registry is the publishing side of the [third-party source workflow](#add-a-third-party-source). Once it is deployed, other eve projects can give it a namespace and pull integrations from it.
-
-An eve registry is a standard [shadcn registry](https://ui.shadcn.com/docs/registry), so it can be hosted by any service that serves JSON over HTTP. It needs two kinds of endpoint:
+A hosted registry is what other eve projects add as a [third-party source](#add-a-third-party-source). It is a standard [shadcn registry](https://ui.shadcn.com/docs/registry), so any service that serves JSON over HTTP can host it. It needs two kinds of endpoint:
 
 - A catalog such as `https://registry.acme.com/r/registry.json` for `eve registry list` and `eve registry search`
 - One JSON document per integration, such as `https://registry.acme.com/r/analytics.json`, for `eve registry view` and `eve add`
@@ -156,7 +162,7 @@ registry/
 }
 ```
 
-`files[].path` is relative to `registry.json`. `files[].target` is relative to the root of the eve project that installs the item. Use `registry:item` with explicit `registry:file` targets for eve integrations so installation does not depend on a UI framework or shadcn project aliases.
+`files[].path` is relative to `registry.json`, and `files[].target` to the root of the installing eve project. Use `registry:item` with explicit `registry:file` targets so installation doesn't depend on a UI framework or shadcn project aliases.
 
 Validate the source registry, then build its static JSON:
 
@@ -165,7 +171,7 @@ pnpm dlx shadcn@latest registry validate
 pnpm dlx shadcn@latest build
 ```
 
-By default, the build writes the catalog to `public/r/registry.json` and each item to `public/r/<name>.json`. Deploy the `public` directory to a static host, or use the shadcn registry APIs to serve the same payloads from dynamic routes.
+The build writes the catalog to `public/r/registry.json` and each item to `public/r/<name>.json`. Deploy the `public` directory to a static host, or use the shadcn registry APIs to serve the same payloads from dynamic routes.
 
 Before sharing the registry, test its deployed catalog and item endpoints from an eve project:
 
@@ -174,7 +180,7 @@ eve registry list --registry https://registry.acme.com/r/registry.json
 eve registry view https://registry.acme.com/r/analytics.json
 ```
 
-Share the item URL template with consumers. From another eve project, they can add the hosted registry as a third-party source and pull the integration through its namespace:
+Share the item URL template with consumers, who add it as a third-party source:
 
 ```bash
 eve registry add @acme=https://registry.acme.com/r/{name}.json
@@ -183,17 +189,13 @@ eve add @acme/analytics
 
 ## Configure generated files
 
-Integrations add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
-
-For an extension, this usually means setting environment variables and editing the file under `agent/extensions/`. See [Extensions](./extensions) for mount configuration, namespacing, and overrides.
+Read the generated files before you run the agent. For an extension, this usually means setting environment variables and editing the mount under `agent/extensions/`. See [Extensions](./extensions) for mount configuration, namespacing, and overrides.
 
 Provider-specific setup lives in the [Integrations directory](/integrations). Follow that guidance for credentials, approval policies, and service-specific options.
 
 ## Update an installed integration
 
-Treat generated files as project code. Commit or review local changes before you install the integration again.
-
-Run the same command when the registry publisher provides an updated scaffold:
+Generated files are project code, so commit or review local changes before you install again. Run the same command to get the publisher's updated scaffold:
 
 ```bash
 eve add extension/agent-browser

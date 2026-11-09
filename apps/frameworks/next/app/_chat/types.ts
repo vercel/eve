@@ -1,12 +1,12 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 
-export type TranscriptStreamEvent = MessageStreamEvent;
+export type TranscriptStreamEvent = SessionStreamEvent;
 
 /**
  * Derived status for one trace step in the local trace viewer.
  *
- * `aborted` means the turn or session failed before the step emitted a
- * terminal `step.completed` or `step.failed` event.
+ * `aborted` means the model run was interrupted or abandoned, or its turn ended before the run
+ * settled.
  */
 export type TraceStepStatus = "aborted" | "completed" | "failed" | "running";
 
@@ -28,10 +28,9 @@ export type TraceActionKind = "load-skill" | "subagent-call" | "tool-call" | "un
 /**
  * Derived status for one runtime action in the local trace viewer.
  *
- * `running` means the runtime started the action batch and no matching
- * `action.result` has arrived yet. `requested` is reserved for approval-gated
- * actions that are waiting on human input. `aborted` means the surrounding turn
- * or session failed before the action produced a terminal result.
+ * `running` means the call started and hasn't settled. `requested` means the model made the call
+ * and it hasn't started, as while it waits for approval. `aborted` means the call was
+ * interrupted or abandoned, or its turn ended before it settled.
  */
 export type TraceActionStatus = "aborted" | "completed" | "failed" | "requested" | "running";
 
@@ -94,6 +93,8 @@ export interface TraceTurn {
   readonly durationMs?: number;
   readonly endTime?: string;
   readonly events: readonly TranscriptStreamEvent[];
+  /** Why the turn or its session failed. */
+  readonly failureMessage?: string;
   readonly sequence?: number;
   readonly startTime?: string;
   readonly steps: readonly TraceStep[];

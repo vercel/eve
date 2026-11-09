@@ -1,29 +1,74 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   Actions,
   Button,
   Card,
+  CardLink,
   CardText,
   Divider,
   Fields,
   LinkButton,
+  RadioSelect,
   Select,
+  SelectOption,
   Section,
   Table,
   Field,
   Image,
-  TextInput,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";
+import type * as Owned from "#public/channels/slack/cards.js";
+import type * as Sdk from "#compiled/chat/index.js";
 
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 
 describe("cardToBlocks", () => {
-  it("renders a text input as its label, like the Slack adapter", () => {
-    const blocks = cardToBlocks(
-      Card({ children: [Section([TextInput({ id: "reason", label: "Reason" })])] }),
-    );
-    expect(blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text: "Reason" } }]);
+  it("keeps owned card data aligned with the SDK boundary", () => {
+    expectTypeOf<Owned.ActionsElement>().toEqualTypeOf<Sdk.ActionsElement>();
+    expectTypeOf<Owned.ButtonElement>().toEqualTypeOf<Sdk.ButtonElement>();
+    expectTypeOf<Owned.ButtonOptions>().toEqualTypeOf<Sdk.ButtonOptions>();
+    expectTypeOf<Owned.ButtonStyle>().toEqualTypeOf<Sdk.ButtonStyle>();
+    expectTypeOf<Owned.CardChild>().toExtend<Sdk.CardChild>();
+    expectTypeOf<Owned.CardElement>().toExtend<Sdk.CardElement>();
+    expectTypeOf<Owned.CardOptions>().toExtend<Sdk.CardOptions>();
+    expectTypeOf<Owned.DividerElement>().toEqualTypeOf<Sdk.DividerElement>();
+    expectTypeOf<Owned.FieldElement>().toEqualTypeOf<Sdk.FieldElement>();
+    expectTypeOf<Owned.FieldsElement>().toEqualTypeOf<Sdk.FieldsElement>();
+    expectTypeOf<Owned.ImageElement>().toEqualTypeOf<Sdk.ImageElement>();
+    expectTypeOf<Owned.LinkButtonElement>().toEqualTypeOf<Sdk.LinkButtonElement>();
+    expectTypeOf<Owned.LinkButtonOptions>().toEqualTypeOf<Sdk.LinkButtonOptions>();
+    expectTypeOf<Owned.LinkElement>().toEqualTypeOf<Sdk.LinkElement>();
+    expectTypeOf<Owned.RadioSelectElement>().toEqualTypeOf<Sdk.RadioSelectElement>();
+    expectTypeOf<Owned.RadioSelectOptions>().toEqualTypeOf<Sdk.RadioSelectOptions>();
+    expectTypeOf<Owned.SectionElement>().toExtend<Sdk.SectionElement>();
+    expectTypeOf<Owned.SelectElement>().toEqualTypeOf<Sdk.SelectElement>();
+    expectTypeOf<Owned.SelectOptionElement>().toEqualTypeOf<Sdk.SelectOptionElement>();
+    expectTypeOf<Owned.SelectOptions>().toEqualTypeOf<Sdk.SelectOptions>();
+    expectTypeOf<Owned.TableAlignment>().toEqualTypeOf<Sdk.TableAlignment>();
+    expectTypeOf<Owned.TableElement>().toEqualTypeOf<Sdk.TableElement>();
+    expectTypeOf<Owned.TableOptions>().toEqualTypeOf<Sdk.TableOptions>();
+    expectTypeOf<Owned.TextElement>().toEqualTypeOf<Sdk.TextElement>();
+    expectTypeOf<Owned.TextStyle>().toEqualTypeOf<Sdk.TextStyle>();
+  });
+
+  it("types each builder with only its data form", () => {
+    // Overloaded builders resolve `returns` to the last signature, so a leftover JSX-props
+    // overload would surface here as the SDK's untyped element union.
+    expectTypeOf(Actions).returns.toEqualTypeOf<Owned.ActionsElement>();
+    expectTypeOf(Button).returns.toEqualTypeOf<Owned.ButtonElement>();
+    expectTypeOf(Card).returns.toEqualTypeOf<Owned.CardElement>();
+    expectTypeOf(CardLink).returns.toEqualTypeOf<Owned.LinkElement>();
+    expectTypeOf(CardText).returns.toEqualTypeOf<Owned.TextElement>();
+    expectTypeOf(Divider).returns.toEqualTypeOf<Owned.DividerElement>();
+    expectTypeOf(Field).returns.toEqualTypeOf<Owned.FieldElement>();
+    expectTypeOf(Fields).returns.toEqualTypeOf<Owned.FieldsElement>();
+    expectTypeOf(Image).returns.toEqualTypeOf<Owned.ImageElement>();
+    expectTypeOf(LinkButton).returns.toEqualTypeOf<Owned.LinkButtonElement>();
+    expectTypeOf(RadioSelect).returns.toEqualTypeOf<Owned.RadioSelectElement>();
+    expectTypeOf(Section).returns.toEqualTypeOf<Owned.SectionElement>();
+    expectTypeOf(Select).returns.toEqualTypeOf<Owned.SelectElement>();
+    expectTypeOf(SelectOption).returns.toEqualTypeOf<Owned.SelectOptionElement>();
+    expectTypeOf(Table).returns.toEqualTypeOf<Owned.TableElement>();
   });
 
   it("renders title and subtitle as header + context blocks", () => {

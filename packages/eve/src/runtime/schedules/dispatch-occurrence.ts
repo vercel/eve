@@ -40,7 +40,7 @@ export async function dispatchScheduledOccurrence(input: {
     occurrence,
     scheduledAt: input.occurrence.scheduledAt,
     scheduleId: input.occurrence.scheduleId,
-    sessionIds: result.sessions.map((session) => session.id),
+    sessionIds: result.sessions.map((session) => session.sessionId),
     schedule: input.payload.envelope,
     type: "occurrence.dispatched",
   });

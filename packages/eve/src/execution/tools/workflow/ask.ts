@@ -5,12 +5,7 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
-import type {
-  ToolContext,
-  ToolInputRequest,
-  ToolInputRequestOptions,
-  ToolInputResponse,
-} from "#tools/definition.js";
+import type { ToolContext, ToolQuestion, ToolAskOptions, ToolAnswer } from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
 // `Symbol.for`, not a module-local WeakMap: workflow helpers and body setup may
@@ -72,11 +67,11 @@ export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunConte
     : undefined;
 }
 
-const CANCELLED: ToolInputResponse = { status: "cancelled" };
-const UNAVAILABLE: ToolInputResponse = { status: "unavailable" };
+const CANCELLED: ToolAnswer = { status: "cancelled" };
+const UNAVAILABLE: ToolAnswer = { status: "unavailable" };
 
 interface PendingAsk {
-  readonly resolve: (response: ToolInputResponse) => void;
+  readonly resolve: (response: ToolAnswer) => void;
   /** Sends the session the request to withdraw the question; unset once sent. */
   withdraw: (() => Promise<void>) | undefined;
 }
@@ -102,13 +97,13 @@ export class WorkflowToolRunAsks {
    * the run. `send` sends the request and returns how to send its withdrawal.
    */
   open(send: (requestId: string) => () => Promise<void>): {
-    readonly answer: Promise<ToolInputResponse>;
+    readonly answer: Promise<ToolAnswer>;
     readonly requestId: string;
   } {
     this.opened += 1;
     const requestId = `${this.runId}-ask-${String(this.opened)}`;
     let entry!: PendingAsk;
-    const answer = new Promise<ToolInputResponse>((resolve) => {
+    const answer = new Promise<ToolAnswer>((resolve) => {
       entry = { resolve, withdraw: undefined };
     });
     this.pending.set(requestId, entry);
@@ -172,9 +167,9 @@ export class WorkflowToolRunAsks {
  */
 export function ask(
   ctx: Pick<ToolContext, "abortSignal">,
-  request: ToolInputRequest,
-  options: ToolInputRequestOptions = {},
-): Promise<ToolInputResponse> {
+  request: ToolQuestion,
+  options: ToolAskOptions = {},
+): Promise<ToolAnswer> {
   const context = readWorkflowToolRunContext(ctx, "ask");
   // A caller that can't reach a person resolves `ctx.ask()` as `unavailable`.
   if (context.agentContext.capabilities?.requestInput !== true) {

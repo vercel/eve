@@ -1,5 +1,5 @@
 {
   "title": "Deployment",
   "defaultOpen": false,
-  "pages": ["overview", "vercel", "self-hosting"]
+  "pages": ["vercel", "self-hosting", "workflow-worlds"]
 }

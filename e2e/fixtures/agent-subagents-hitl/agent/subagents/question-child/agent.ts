@@ -1,8 +1,8 @@
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 /** Asks which environment a release goes to, then reports the answer it got. */
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   description: "Ask which environment the release should go to, then report the choice.",
   model: mockModel(({ toolResults }) => {
     const answer = toolResults.find((entry) => entry.name === "ask_question");
@@ -24,3 +24,5 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 1_000_000,
 });
+
+export default agent;

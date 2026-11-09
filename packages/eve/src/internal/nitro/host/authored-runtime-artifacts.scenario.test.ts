@@ -28,7 +28,8 @@ describe("authored runtime artifacts", () => {
       files: {
         "assets/runtime.bin": "BINARY",
         "assets/runtime.txt": "runtime text\n",
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
         "agent/instructions.ts": [
           'import { appendFileSync } from "node:fs";',
           'import prompt from "../prompts/cse.md?raw";',
@@ -124,7 +125,12 @@ describe("authored runtime artifacts", () => {
   it("prepares provider-directory instrumentation identically for development and production", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.ts": ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
+        "agent/agent.ts": [
+          "import { defineAgent } from 'eve';\nexport default defineAgent({",
+          '  model: "openai/gpt-5.4",',
+          "});",
+          "",
+        ].join("\n"),
         "agent/instrumentation/otel.ts": [
           'import marker from "../../assets/provider.txt?raw";',
           "export default { marker };",

@@ -21,8 +21,6 @@ import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js
 import {
   createiMessageAdapter,
   type iMessageAdapter,
-  type iMessageCredentialProvider,
-  type iMessageWebhookVerifier,
 } from "#compiled/@photon-ai/chat-adapter-imessage/index.js";
 import {
   addPhotonAttachmentDownloads,
@@ -34,8 +32,23 @@ import {
   photonQuotedMessage,
 } from "#public/channels/photon/inboundContent.js";
 
-/** Photon project credentials used by {@link photonIMessageChannel}. */
-export type PhotonIMessageChannelCredentials = iMessageCredentialProvider;
+/** Lazily resolves the Photon project credentials used by {@link photonIMessageChannel}. */
+export type PhotonIMessageChannelCredentials = () =>
+  | PhotonProjectCredentials
+  | Promise<PhotonProjectCredentials>;
+
+/** A Photon project's ID and secret. */
+export interface PhotonProjectCredentials {
+  readonly projectId: string;
+  readonly projectSecret: string;
+}
+
+/**
+ * Verifies a webhook forwarded by a trusted provider such as Vercel Connect, given the request
+ * and its raw body. Return a falsy value or throw to reject the request; return a string to
+ * replace the body eve parses.
+ */
+export type PhotonIMessageWebhookVerifier = (request: Request, rawBody: string) => unknown;
 
 /** Context passed to {@link PhotonIMessageChannelConfig.onMessage}. */
 export interface PhotonInboundMessageContext {
@@ -54,7 +67,6 @@ export type PhotonInboundResult = {
 } | null;
 
 /** Sync or async {@link PhotonInboundResult}. */
-export type PhotonInboundResultOrPromise = PhotonInboundResult | Promise<PhotonInboundResult>;
 
 /** Configuration for {@link photonIMessageChannel}. */
 export interface PhotonIMessageChannelConfig {
@@ -66,7 +78,7 @@ export interface PhotonIMessageChannelConfig {
   readonly onMessage?: (
     ctx: PhotonInboundMessageContext,
     message: Message,
-  ) => PhotonInboundResultOrPromise;
+  ) => PhotonInboundResult | Promise<PhotonInboundResult>;
   /**
    * Inbound tapback policy. Tapbacks are ignored by default. Return a result to
    * send the tapback to the agent as a message such as `Tapback: Loved “See you at 7”`,
@@ -85,7 +97,7 @@ export interface PhotonIMessageChannelConfig {
   /** Photon webhook signing secret. Falls back to `IMESSAGE_WEBHOOK_SECRET`. */
   readonly webhookSecret?: string;
   /** Trusted webhook verifier. Takes precedence over `webhookSecret`. */
-  readonly webhookVerifier?: iMessageWebhookVerifier;
+  readonly webhookVerifier?: PhotonIMessageWebhookVerifier;
 }
 
 /** First-class eve channel backed by Photon iMessage. */

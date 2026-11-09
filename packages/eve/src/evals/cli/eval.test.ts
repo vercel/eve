@@ -15,9 +15,29 @@ vi.mock("#evals/runner/discover.js", () => ({
   findMisplacedEvalDirs: vi.fn(async () => []),
 }));
 
+vi.mock("#internal/nitro/host.js", () => ({
+  createDevelopmentServer: vi.fn(() => ({
+    close: vi.fn(async () => {}),
+    start: vi.fn(async () => ({ url: "http://127.0.0.1:4000" })),
+  })),
+}));
+vi.mock("#evals/cli/eval-client.js", () => ({ createEvalClient: vi.fn(async () => ({})) }));
+vi.mock("#evals/target.js", () => ({ resolveEvalTargetHandle: vi.fn(async () => ({})) }));
+vi.mock("#evals/runner/run-evals.js", () => ({
+  runEvals: vi.fn(async () => ({ failed: 0, scored: 0 })),
+}));
+vi.mock("#evals/cli/eval-state-directory.js", () => ({
+  createEvalStateDirectory: vi.fn(async () => "/app/.eve/eval-servers/run_1"),
+  removeEvalStateDirectory: vi.fn(async () => {}),
+}));
+vi.mock("#execution/sandbox/active-connections.js", () => ({
+  shutdownActiveSandboxConnections: vi.fn(async () => {}),
+}));
+
 const { discoverAndImportEvals } = vi.mocked(await import("#evals/runner/discover.js"), {
   partial: true,
 });
+const { removeEvalStateDirectory } = vi.mocked(await import("#evals/cli/eval-state-directory.js"));
 
 function createEval(id: string, tags?: readonly string[]): EveEval {
   return { _tag: "EveEval", id, tags, test: async () => {} };
@@ -83,5 +103,51 @@ describe("runEvalCommand list mode", () => {
 
     expect(process.exitCode).toBe(2);
     expect(logger.error).toHaveBeenCalledWith("No evals matched the provided tags (nonexistent).");
+  });
+});
+
+describe("runEvalCommand local server state", () => {
+  const env = { ...process.env };
+
+  beforeEach(() => {
+    process.exitCode = undefined;
+    vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    discoverAndImportEvals.mockResolvedValueOnce([createEval("weather")]);
+  });
+
+  afterEach(() => {
+    process.env = { ...env };
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it("removes the eval server's state when the run ends", async () => {
+    await runEvalCommand([], {}, createLogger(), "/app");
+
+    expect(removeEvalStateDirectory).toHaveBeenCalledWith("/app/.eve/eval-servers/run_1");
+  });
+
+  it("keeps the eval server's state with --keep-state and says where", async () => {
+    const logger = createLogger();
+
+    await runEvalCommand([], { keepState: true }, logger, "/app");
+
+    expect(removeEvalStateDirectory).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      "Kept the eval server's state in .eve/eval-servers/run_1.",
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("warns that --keep-state does nothing against a remote server", async () => {
+    const logger = createLogger();
+
+    await runEvalCommand([], { keepState: true, url: "https://agent.example" }, logger, "/app");
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "--keep-state has no effect with --url: the remote server keeps its own state.",
+    );
+    expect(removeEvalStateDirectory).not.toHaveBeenCalled();
   });
 });

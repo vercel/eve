@@ -1,8 +1,6 @@
-import {
-  isCurrentTurnBoundaryEvent,
-  type AgentStartedStreamEvent,
-  type MessageStreamEvent,
-} from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import { endsTurn, type SessionStreamEvent } from "eve/client";
+type ChildOpened = Extract<SessionStreamEvent, { type: "child.opened" }>;
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -25,33 +23,27 @@ export default defineEval({
     turn.eventsSatisfy("remote agent calls preserve dispatch kind", (events) =>
       events.some(
         (event) =>
-          event.type === "actions.requested" &&
-          event.data.actions.some(
-            (action) => action.kind === "remote-agent-call" && action.name === "remote-loopback",
-          ),
+          event.type === "call.requested" &&
+          event.data.capability.kind === "agent" &&
+          event.data.capability.name === "remote-loopback",
       ),
     );
     const started = await requireRemoteSession(t, turn);
 
-    const childEvents: MessageStreamEvent[] = [];
+    const childEvents: SessionStreamEvent[] = [];
     for await (const event of turn.session.agent(started).stream()) {
       childEvents.push(event);
-      if (isCurrentTurnBoundaryEvent(event)) break;
+      if (endsTurn(event)) break;
     }
 
     await t.require(
       childEvents,
-      satisfies(
-        (events: readonly MessageStreamEvent[]) =>
-          events.some(
-            (event) =>
-              event.type === "action.result" &&
-              event.data.status === "completed" &&
-              event.data.result.kind === "tool-result" &&
-              event.data.result.toolName === "read-workspace-label",
-          ),
-        "the proxied child stream carries the child's completed workspace lookup",
-      ),
+      satisfies((events: readonly SessionStreamEvent[]) => {
+        const view = foldEvents(emptySessionView(), events);
+        return calls(view).some(
+          (call) => call.name === "read-workspace-label" && call.outcome === "completed",
+        );
+      }, "the proxied child stream carries the child's completed workspace lookup"),
     );
     const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
     const childTrace = childEvents.find((event) => event.type === "turn.started")?.data.trace;
@@ -68,14 +60,12 @@ export default defineEval({
 });
 
 /** The parent may finish its turn before recording the session; wait for it on the stream if so. */
-async function requireRemoteSession(
-  t: EveEvalContext,
-  turn: EveEvalTurn,
-): Promise<AgentStartedStreamEvent> {
+async function requireRemoteSession(t: EveEvalContext, turn: EveEvalTurn): Promise<ChildOpened> {
   for (const event of turn.events) {
-    if (event.type === "agent.started" && event.data.name === "remote-loopback") return event;
+    if (event.type === "child.opened" && event.data.name === "remote-loopback") return event;
   }
   return await t.target
-    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .waitForEvent("agent.started", { data: { name: "remote-loopback" } });
+    .attach(turn.sessionId, { startIndex: turn.session.state.streamIndex })
+    .watch()
+    .waitForEvent("child.opened", { data: { name: "remote-loopback" } });
 }

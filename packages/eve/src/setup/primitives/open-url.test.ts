@@ -35,6 +35,22 @@ describe("openUrl", () => {
     expect(args).toContain("https://slack.com/app_redirect?app=A0&team=T0&tab=messages");
   });
 
+  it("opens a URL on Windows without passing it through cmd", () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      mockedSpawn.mockClear();
+      openUrl("https://example.com/?a=1&calc|whoami");
+      expect(mockedSpawn).toHaveBeenCalledWith(
+        "rundll32",
+        ["url.dll,FileProtocolHandler", "https://example.com/?a=1&calc|whoami"],
+        expect.anything(),
+      );
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
   it("refuses any non-web scheme rather than handing it to the opener", () => {
     mockedSpawn.mockClear();
     openUrl("javascript:alert(1)");

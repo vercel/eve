@@ -8,7 +8,7 @@ import type {
 
 export interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
+  showConnectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;
   defaultExtensions?: boolean;
   header?: DevelopmentRequestHeaders;
@@ -19,10 +19,10 @@ export interface DevelopmentCliOptions {
   logs?: LogDisplayMode;
   name?: string;
   port?: number;
-  reasoning?: TerminalPartDisplayMode;
+  showReasoning?: TerminalPartDisplayMode;
   resume?: boolean;
-  subagents?: SubagentDisplayMode;
-  tools?: TerminalPartDisplayMode;
+  showSubagents?: SubagentDisplayMode;
+  showTools?: TerminalPartDisplayMode;
   ui?: boolean;
   url?: string;
 }

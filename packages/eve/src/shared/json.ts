@@ -1,24 +1,10 @@
-/**
- * JSON-serializable primitive values that can safely cross workflow and step boundaries.
- */
-export type JsonPrimitive = boolean | number | string | null;
-
-/**
- * JSON-serializable array values that can safely cross workflow and step boundaries.
- */
-export type JsonArray = readonly JsonValue[];
-
-/**
- * JSON-serializable object values that can safely cross workflow and step boundaries.
- */
-export interface JsonObject {
-  readonly [key: string]: JsonValue;
-}
-
-/**
- * JSON-serializable values that can safely cross workflow and step boundaries.
- */
-export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+import type { JsonObject, JsonValue } from "#protocol/session-events/json.js";
+export type {
+  JsonArray,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+} from "#protocol/session-events/json.js";
 
 /** Compares two already-validated JSON structures by value. */
 export function jsonValuesEqual(left: unknown, right: unknown): boolean {

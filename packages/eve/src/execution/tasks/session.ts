@@ -1,4 +1,5 @@
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { renderTaskCancelResult, renderUnknownCancelTaskError } from "#execution/tasks/render.js";
 import { cancelTasksStep, type TaskRunMessage } from "#execution/tasks/steps.js";
@@ -9,7 +10,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import type { TaskCancelReason } from "#protocol/message.js";
+import type { TaskCancelReason } from "#execution/tasks/table.js";
 import { TASK_CANCEL_TOOL_NAME, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -35,15 +36,27 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 
 /**
  * Cancels every working task: `session.cancel()` stops them, and a turn that
- * ends anyway, such as by failing, cancels the tasks it held on.
+ * ends anyway, such as by failing, cancels the tasks it held on. With
+ * `turnCalls`, the workflow tool runs the turn waits on stop in the same step.
  */
 export async function cancelWorkingTasks(
   cursor: SessionStateCursor,
-  reason: Exclude<TaskCancelReason, "task_cancel">,
+  reason: Exclude<TaskCancelReason, "task-cancel">,
+  options: { readonly turnCalls?: boolean } = {},
 ): Promise<void> {
   const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
-  if (taskIds.length === 0) return;
-  await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds }));
+  const turnCalls = options.turnCalls === true && mayWaitOnWorkflowToolRuns(cursor);
+  if (taskIds.length === 0 && !turnCalls) return;
+  await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds, turnCalls }));
+}
+
+/** An unreadable run registry counts as waiting, so the step runs and logs it. */
+function mayWaitOnWorkflowToolRuns(cursor: SessionStateCursor): boolean {
+  try {
+    return getBlockingWorkflowToolRuns(cursor.sessionState.snapshot?.session?.state).length > 0;
+  } catch {
+    return true;
+  }
 }
 
 export async function answerTaskCancel(
@@ -60,7 +73,7 @@ export async function answerTaskCancel(
   }
   if (result.status === "cancelled") {
     await cursor.advance((state) =>
-      cancelTasksStep({ ...state, reason: "task_cancel", taskIds: [call.taskId] }),
+      cancelTasksStep({ ...state, reason: "task-cancel", taskIds: [call.taskId] }),
     );
   }
   return taskToolResult(

@@ -1,9 +1,6 @@
-import {
-  isCurrentTurnBoundaryEvent,
-  type AgentStartedStreamEvent,
-  type MessageStreamEvent,
-} from "eve/client";
-import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
+import { endsTurn, type SessionStreamEvent } from "eve/client";
+type ChildOpened = Extract<SessionStreamEvent, { type: "child.opened" }>;
+import { defineEval, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 import { MODEL_AGENT_SELECTED_MODEL } from "../constants";
@@ -27,37 +24,42 @@ export default defineEval({
       },
     });
 
-    const started = await requireSelectedChild(t, turn);
-    const childEvents: MessageStreamEvent[] = [];
-    for await (const event of turn.session.agent(started).stream()) {
+    const opened = requireSelectedChild(turn);
+    const childEvents: SessionStreamEvent[] = [];
+    for await (const event of turn.session.agent(opened).stream()) {
       childEvents.push(event);
-      if (isCurrentTurnBoundaryEvent(event)) break;
+      if (endsTurn(event)) break;
     }
 
     await t.require(
       childEvents,
       satisfies(
-        (events: readonly MessageStreamEvent[]) =>
+        (events: readonly SessionStreamEvent[]) =>
           events.some(
             (event) =>
-              event.type === "step.started" && event.data.modelId === MODEL_AGENT_SELECTED_MODEL,
+              event.type === "model.started" && event.data.modelId === MODEL_AGENT_SELECTED_MODEL,
           ),
         `the custom agent tool starts its child with ${MODEL_AGENT_SELECTED_MODEL}`,
       ),
     );
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });
 
-async function requireSelectedChild(
-  t: EveEvalContext,
-  turn: EveEvalTurn,
-): Promise<AgentStartedStreamEvent> {
-  for (const event of turn.events) {
-    if (event.type === "agent.started" && event.data.callId === "model-agent-call") return event;
-  }
-  return await t.target
-    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .waitForEvent("agent.started", { data: { callId: "model-agent-call" } });
+// The child that the custom agent call opened: a task-backed call still owns its child by call id.
+function requireSelectedChild(turn: EveEvalTurn): ChildOpened {
+  const call = turn.events.find(
+    (event) => event.type === "call.requested" && event.data.capability.name === "model_agent",
+  );
+  if (call?.type !== "call.requested") throw new Error("The custom agent call was not requested.");
+  const opened = turn.events.find(
+    (event) =>
+      event.type === "child.opened" &&
+      "callId" in event.data.owner &&
+      event.data.owner.callId === call.data.callId,
+  );
+  if (opened?.type !== "child.opened")
+    throw new Error(`The custom agent call ${call.data.callId} opened no child in its turn.`);
+  return opened;
 }

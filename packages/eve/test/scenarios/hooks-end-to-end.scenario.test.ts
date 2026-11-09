@@ -1,4 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { compiledOf } from "#compiler/manifest.js";
+import { declared } from "#runtime/types.js";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -18,11 +20,11 @@ const APP_ROOT_OPTIONS = { packageName: "hooks-scenario-agent" } as const;
  * and arrive on the runtime hook registry with live handlers attached.
  */
 
-const AGENT_SOURCE = `export default { model: "openai/gpt-5.4" };\n`;
+const AGENT_SOURCE = `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n`;
 
 const AUDIT_HOOK_SOURCE = `export default {
   events: {
-    async "turn.completed"() {},
+    async "turn.settled"() {},
     async "session.started"() {},
   },
 };
@@ -52,18 +54,21 @@ describe("authored hooks end-to-end", () => {
       loadCompiledModuleMap({ compiledArtifactsSource }),
     ]);
 
-    expect(manifest.hooks.map((entry) => entry.slug).sort()).toEqual(["audit", "metrics"]);
+    expect(
+      compiledOf(manifest, "hook")
+        .map((entry) => entry.slug)
+        .sort(),
+    ).toEqual(["audit", "metrics"]);
 
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
-    const registry = graph.root.hookRegistry;
+    const hooks = Object.fromEntries(
+      declared(graph.root.agent, "hook").map((hook) => [
+        hook.slug,
+        Object.keys(hook.events).sort(),
+      ]),
+    );
 
-    expect(registry.streamEventsByType.get("turn.completed")?.map((e) => e.slug)).toEqual([
-      "audit",
-    ]);
-    expect(registry.streamEventsByType.get("session.started")?.map((e) => e.slug)).toEqual([
-      "audit",
-    ]);
-    expect(registry.streamEventsWildcard.map((e) => e.slug)).toEqual(["metrics"]);
+    expect(hooks).toEqual({ audit: ["session.started", "turn.settled"], metrics: ["*"] });
   });
 
   it("rejects authored hook filenames that violate the hook charset at compile time", async () => {
@@ -92,10 +97,10 @@ describe("authored hooks end-to-end", () => {
     await writeFile(join(agentRoot, "hooks", "audit.mjs"), AUDIT_HOOK_SOURCE);
     await writeFile(
       join(agentRoot, "subagents", "researcher", "agent.mjs"),
-      `export default {
+      `import { defineAgent } from "eve";\nexport default defineAgent({
   model: "openai/gpt-5.4",
   description: "Investigate one task in depth.",
-};
+});
 `,
     );
     await writeFile(
@@ -115,8 +120,8 @@ describe("authored hooks end-to-end", () => {
       loadCompiledModuleMap({ compiledArtifactsSource }),
     ]);
 
-    expect(manifest.hooks.map((entry) => entry.slug)).toEqual(["audit"]);
-    expect(manifest.subagents[0]?.agent.hooks.map((entry) => entry.slug)).toEqual([
+    expect(compiledOf(manifest, "hook").map((entry) => entry.slug)).toEqual(["audit"]);
+    expect(compiledOf(manifest.subagents[0]!.agent, "hook").map((entry) => entry.slug)).toEqual([
       "subagent-only",
     ]);
 
@@ -124,12 +129,9 @@ describe("authored hooks end-to-end", () => {
     const subagentNode = graph.nodesByNodeId.get("subagents/researcher");
     if (subagentNode === undefined) throw new Error("expected the researcher node");
 
+    expect(declared(graph.root.agent, "hook").map((hook) => hook.slug)).toEqual(["audit"]);
     expect(
-      graph.root.hookRegistry.streamEventsByType.get("turn.completed")?.map((e) => e.slug),
-    ).toEqual(["audit"]);
-    expect(subagentNode.hookRegistry.streamEventsByType.size).toBe(0);
-    expect(subagentNode.hookRegistry.streamEventsWildcard.map((e) => e.slug)).toEqual([
-      "subagent-only",
-    ]);
+      declared(subagentNode.agent, "hook").map((hook) => [hook.slug, Object.keys(hook.events)]),
+    ).toEqual([["subagent-only", ["*"]]]);
   });
 });

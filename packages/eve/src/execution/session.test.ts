@@ -1,295 +1,55 @@
 import { describe, expect, it } from "vitest";
 
-import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import {
-  createCompactionConfig,
   createSession,
   hydrateDurableSession,
   mintSubagentContinuationToken,
   projectToDurableSession,
-  refreshSessionFromTurnAgent,
 } from "#execution/session.js";
 
-type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
-
-function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
-  return {
-    id: "test-agent",
-    instructions: ["You are a helpful assistant.", "Be concise."],
-    compactionModel: {
-      id: "summary-model",
-    },
-    model: { id: "test-model" },
-    tools: [
-      {
-        description: "Adds two numbers",
-        inputSchema: {
-          properties: { a: { type: "number" }, b: { type: "number" } },
-          type: "object",
-        },
-        kind: "authored-tool",
-        logicalPath: "tools/add",
-        name: "add",
-        owner: { kind: "application" },
-        sourceId: "src-add",
-      },
-    ],
-    workspaceSpec: { rootEntries: [] },
-    ...overrides,
-  };
-}
-
-describe("createCompactionConfig", () => {
-  it("derives the threshold from the model context window", () => {
-    expect(
-      createCompactionConfig({
-        contextWindowTokens: 200_000,
-      }),
-    ).toEqual({
-      recentWindowSize: 10,
-      threshold: 180_000,
-      thresholdPercent: 0.9,
-    });
-  });
-
-  it("uses the authored threshold percent when provided", () => {
-    expect(
-      createCompactionConfig({
-        contextWindowTokens: 200_000,
-        thresholdPercent: 0.5,
-      }),
-    ).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
-    });
-  });
-
-  it("falls back to the static threshold when the model has no context window", () => {
-    expect(createCompactionConfig()).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.9,
-    });
-  });
-});
-
 describe("createSession", () => {
-  it("creates a session with correct agent configuration", () => {
-    const outputSchema = { properties: { title: { type: "string" } }, type: "object" } as const;
-    const session = createSession({
-      continuationToken: "root-token",
-      outputSchema,
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({ reasoning: "high" }),
-    });
-
-    expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
-    expect(session.agent.modelReference).toEqual({ id: "test-model" });
-    expect(session.agent.reasoning).toBe("high");
-    expect(session.outputSchema).toEqual(outputSchema);
-    expect(session.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
-    expect(session.agent.tools).toEqual([
-      {
-        description: "Adds two numbers",
-        inputSchema: {
-          properties: { a: { type: "number" }, b: { type: "number" } },
-          type: "object",
-        },
-        name: "add",
-      },
-    ]);
-  });
-
-  it("renders canonical symbolic paths for static skills", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        listedSkills: [{ description: "Research topics.", name: "research" }],
-      }),
-    });
-
-    expect(session.agent.system).toContain("`$HOME/.agents/skills/<skill>/`");
-    expect(session.agent.system).toContain(
-      "`skills/<skill>/` under the workspace root as the fallback",
-    );
-    expect(session.agent.system).toContain(
-      "- research: Research topics. (path: $HOME/.agents/skills/research/SKILL.md)",
-    );
-  });
-
   it("starts with empty history and stores the continuation token verbatim", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
+    const session = createSession({ continuationToken: "root-token", sessionId: "sess-root" });
 
     expect(session.history).toEqual([]);
     expect(session.continuationToken).toBe("root-token");
   });
+});
 
-  it("copies static user instructions only when creating a fresh session", () => {
-    const initialMessages = [
-      { content: "Pinned tenant policy.", kind: "user" as const, role: "user" as const },
-    ];
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({ initialMessages }),
-    });
-    initialMessages[0] = { content: "mutated", kind: "user" as const, role: "user" };
-
-    expect(session.history).toEqual([
-      { content: "Pinned tenant policy.", kind: "user", role: "user" },
-    ]);
-
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      turnAgent: createTestTurnAgent({
-        initialMessages: [{ content: "New deployment policy.", kind: "user", role: "user" }],
-      }),
-    });
-    expect(refreshed.history).toEqual([
-      { content: "Pinned tenant policy.", kind: "user", role: "user" },
-    ]);
-  });
-
-  it("defaults description and inputSchema when null", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        tools: [
-          {
-            description: "",
-            inputSchema: null,
-            kind: "authored-tool",
-            logicalPath: "tools/noop",
-            name: "noop",
-            owner: { kind: "application" },
-            sourceId: "src-noop",
-          },
-        ],
-      }),
-    });
-
-    expect(session.agent.tools[0]).toEqual({
-      description: "",
-      inputSchema: null,
-      name: "noop",
-    });
-  });
-
-  it("sets default compaction config when no overrides are provided", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.compaction).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.9,
-    });
-  });
-
-  it("honors compactionOverrides.thresholdPercent", () => {
-    const session = createSession({
-      compactionOverrides: { thresholdPercent: 0.5 },
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        model: { id: "test-model", contextWindowTokens: 200_000 },
-      }),
-    });
-
-    expect(session.compaction).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
-    });
-  });
-
-  it("copies the compaction model into the refreshed session", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      turnAgent: createTestTurnAgent({
-        compactionModel: {
-          id: "updated-summary-model",
-        },
-      }),
-    });
-
-    expect(refreshed.agent.compactionModelReference).toEqual({
-      id: "updated-summary-model",
-    });
-  });
-
-  it("persists run outputSchema through durable session projection and hydration", () => {
-    const runOutputSchema = {
+describe("durable sessions", () => {
+  it("keeps the run's outputSchema and the delegated root lineage", () => {
+    const outputSchema = {
       properties: { title: { type: "string" } },
       required: ["title"],
       type: "object",
     } as const;
     const session = createSession({
-      continuationToken: "root-token",
-      outputSchema: runOutputSchema,
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    const durable = projectToDurableSession(session);
-    const hydrated = hydrateDurableSession({
-      durable,
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(durable.outputSchema).toEqual(runOutputSchema);
-    expect(hydrated.outputSchema).toEqual(runOutputSchema);
-  });
-
-  it("persists delegated root lineage through durable session projection and hydration", () => {
-    const session = createSession({
       continuationToken: "subagent-token",
+      outputSchema,
       rootSessionId: "sess-root",
       sessionId: "sess-child",
-      turnAgent: createTestTurnAgent(),
     });
 
-    const durable = projectToDurableSession(session);
-    const hydrated = hydrateDurableSession({
-      durable,
-      turnAgent: createTestTurnAgent(),
-    });
+    const hydrated = hydrateDurableSession(structuredClone(projectToDurableSession(session)));
 
-    expect(durable.rootSessionId).toBe("sess-root");
+    expect(hydrated.outputSchema).toEqual(outputSchema);
     expect(hydrated.rootSessionId).toBe("sess-root");
   });
 
-  it("restores current reasoning configuration when hydrating a durable session", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({ reasoning: "low" }),
-    });
+  it("keeps what compaction last measured", () => {
+    const session = {
+      ...createSession({ continuationToken: "root-token", sessionId: "sess-root" }),
+      compaction: {
+        lastKnownInputTokens: 321,
+        lastKnownPromptMessageCount: 7,
+        requestEnvelopeTokens: 42,
+      },
+    };
 
     const durable = projectToDurableSession(session);
-    const hydrated = hydrateDurableSession({
-      durable,
-      turnAgent: createTestTurnAgent({ reasoning: "high" }),
-    });
 
-    expect(durable.agent).toEqual({ system: session.agent.system });
-    expect(hydrated.agent.reasoning).toBe("high");
+    expect(hydrateDurableSession(structuredClone(durable)).compaction).toEqual(session.compaction);
+    expect(projectToDurableSession(createSession(session))).not.toHaveProperty("compaction");
   });
 });
 
@@ -299,126 +59,6 @@ describe("mintSubagentContinuationToken", () => {
   });
 
   it("returns a unique token on each call", () => {
-    const a = mintSubagentContinuationToken();
-    const b = mintSubagentContinuationToken();
-    expect(a).not.toBe(b);
-  });
-});
-
-describe("refreshSessionFromTurnAgent", () => {
-  it("refreshes the current agent configuration while preserving history", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-    const refreshed = refreshSessionFromTurnAgent({
-      session: {
-        ...session,
-        history: [{ content: "previous message", kind: "user", role: "user" }],
-      },
-      turnAgent: createTestTurnAgent({
-        instructions: ["Completely different system prompt."],
-        model: { contextWindowTokens: 200_000, id: "updated-model" },
-        tools: [
-          {
-            description: "Echoes text",
-            inputSchema: {
-              properties: { text: { type: "string" } },
-              type: "object",
-            },
-            kind: "authored-tool",
-            logicalPath: "tools/echo",
-            name: "echo",
-            owner: { kind: "application" },
-            sourceId: "src-echo",
-          },
-        ],
-      }),
-    });
-
-    expect(refreshed.history).toEqual([
-      { content: "previous message", kind: "user", role: "user" },
-    ]);
-    expect(refreshed.agent.compactionModelReference).toEqual({
-      id: "summary-model",
-    });
-    expect(refreshed.agent.modelReference).toEqual({
-      contextWindowTokens: 200_000,
-      id: "updated-model",
-    });
-    expect(refreshed.agent.system).toBe("Completely different system prompt.");
-    expect(refreshed.agent.tools).toEqual([
-      {
-        description: "Echoes text",
-        inputSchema: {
-          properties: {
-            text: {
-              type: "string",
-            },
-          },
-          type: "object",
-        },
-        name: "echo",
-      },
-    ]);
-    expect(refreshed.compaction.threshold).toBe(180_000);
-  });
-
-  it("preserves last known compaction counters when refreshing compaction", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        model: { contextWindowTokens: 100_000, id: "initial-model" },
-      }),
-    });
-    const refreshed = refreshSessionFromTurnAgent({
-      compactionOverrides: {
-        thresholdPercent: 0.5,
-      },
-      session: {
-        ...session,
-        compaction: {
-          ...session.compaction,
-          lastKnownInputTokens: 321,
-          lastKnownPromptMessageCount: 7,
-        },
-      },
-      turnAgent: createTestTurnAgent({
-        model: { contextWindowTokens: 200_000, id: "updated-model" },
-      }),
-    });
-
-    expect(refreshed.compaction).toEqual({
-      lastKnownInputTokens: 321,
-      lastKnownPromptMessageCount: 7,
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
-    });
-  });
-
-  it("refreshes the system prompt when turnAgent instructions differ", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        instructions: ["Original session-start prompt."],
-      }),
-    });
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      turnAgent: createTestTurnAgent({
-        instructions: ["Updated prompt from the current deployment."],
-        model: { contextWindowTokens: 200_000, id: "updated-model" },
-      }),
-    });
-
-    expect(refreshed.agent.modelReference).toEqual({
-      contextWindowTokens: 200_000,
-      id: "updated-model",
-    });
-    expect(refreshed.agent.system).toBe("Updated prompt from the current deployment.");
+    expect(mintSubagentContinuationToken()).not.toBe(mintSubagentContinuationToken());
   });
 });

@@ -1,13 +1,18 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
+import { parseWithRolldownAst } from "../../src/internal/bundler/rolldown.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
+
+import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
+const createTemporaryRoot = useTemporaryAppRoots();
 
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const EVE_CATALOG_ROOT = join(EVE_PACKAGE_ROOT, "..", "eve-catalog");
@@ -19,6 +24,31 @@ const EVE_CATALOG_FINGERPRINT_FILES = [
   "tsconfig.json",
 ] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
+const DIST_SOURCE_ROOT = join(EVE_PACKAGE_ROOT, "dist", "src");
+// Package entry points that app bundlers compile for the browser.
+const BROWSER_ENTRY_FILES = [
+  "client/index.js",
+  "react/index.js",
+  "svelte/index.js",
+  "vue/index.js",
+] as const;
+
+/** The version of `name` that `from` resolves, for packages that do not export their manifest. */
+function installedVersion(name: string, from: string): string {
+  let directory = dirname(createRequire(from).resolve(name));
+  for (;;) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as {
+        name?: string;
+        version: string;
+      };
+      if (manifest.name === name) return manifest.version;
+    } catch {}
+    const parent = dirname(directory);
+    if (parent === directory) throw new Error(`Cannot find the manifest of ${name}.`);
+    directory = parent;
+  }
+}
 const execFileAsync = promisify(execFile);
 const createTemporaryDirectory = useTemporaryDirectories();
 const require = createRequire(import.meta.url);
@@ -32,6 +62,17 @@ function containsSourceMapComment(source: string): boolean {
   return /(?:^|\n)\s*\/\/# sourceMappingURL=/u.test(source);
 }
 
+// Resolves an import in the published dist tree the way the package `imports`
+// map does. Bare specifiers are app-provided peers (`react`, `vue`, ...).
+function resolveDistImport(importer: string, specifier: string): string | undefined {
+  if (specifier.startsWith("#compiled/")) {
+    return join(DIST_SOURCE_ROOT, "compiled", specifier.slice("#compiled/".length));
+  }
+  if (specifier.startsWith("#")) return join(DIST_SOURCE_ROOT, specifier.slice(1));
+  if (specifier.startsWith(".")) return resolve(dirname(importer), specifier);
+  return undefined;
+}
+
 function rewriteDeclarationImports(
   source: string,
   rewrites: Readonly<Record<string, string>>,
@@ -42,12 +83,76 @@ function rewriteDeclarationImports(
       .replaceAll(`from '${moduleName}'`, `from '${replacement}'`)
       .replaceAll(`from "${moduleName}"`, `from "${replacement}"`)
       .replaceAll(`import '${moduleName}'`, `import '${replacement}'`)
-      .replaceAll(`import "${moduleName}"`, `import "${replacement}"`);
+      .replaceAll(`import "${moduleName}"`, `import "${replacement}"`)
+      .replaceAll(`import('${moduleName}')`, `import('${replacement}')`)
+      .replaceAll(`import("${moduleName}")`, `import("${replacement}")`);
   }
   return rewritten;
 }
 
 describe("compiled vendor assets", () => {
+  it("copies and rewrites transitive declaration chunks for an isolated consumer", async () => {
+    const { appRoot: root } = await createTemporaryRoot("eve-vendor-declarations-");
+    const upstream = join(root, "upstream");
+    const destinationRoot = join(root, "consumer");
+    await mkdir(join(upstream, "dist", "nested"), { recursive: true });
+    await mkdir(destinationRoot);
+    await writeFile(
+      join(upstream, "dist", "index.d.ts"),
+      `/// <reference path="./ambient.d.ts" />
+export type { Item } from "./nested/chunk.js";
+type Note = 'request from "./not-an-import"';`,
+    );
+    await writeFile(
+      join(upstream, "dist", "nested", "chunk.d.ts"),
+      'export interface Item { value: import("external-types").Value; meta: VendorFixture.Metadata; next?: import("./cycle.js").Next }',
+    );
+    await writeFile(
+      join(upstream, "dist", "nested", "cycle.d.ts"),
+      'export type Next = import("../index.js").Item;',
+    );
+    await writeFile(
+      join(upstream, "dist", "ambient.d.ts"),
+      "declare namespace VendorFixture { interface Metadata { declaredByReference: true } }",
+    );
+    const { createDeclarationCopier } = await import(
+      pathToFileURL(join(EVE_PACKAGE_ROOT, "scripts", "vendor-compiled", "_shared.mjs")).href
+    );
+    await createDeclarationCopier({
+      rewrites: {
+        "external-types": {
+          kind: "stub",
+          stubBaseName: "_value",
+          build: () => "export type Value = string;",
+        },
+      },
+    })({
+      destinationRoot,
+      packageInfo: { packageRoot: upstream, packageJson: { name: "example" } },
+    });
+    await writeFile(
+      join(destinationRoot, "consumer.ts"),
+      'import type { Item } from "./index.js"; const item: Item = { value: "ok", meta: { declaredByReference: true } }; const value: string = item.value; const referenced: true = item.meta.declaredByReference;',
+    );
+    await execFileAsync(process.execPath, [
+      join(EVE_PACKAGE_ROOT, "..", "..", "node_modules", "typescript", "bin", "tsc"),
+      "--ignoreConfig",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "false",
+      "--types",
+      "node",
+      "--typeRoots",
+      join(EVE_PACKAGE_ROOT, "..", "..", "node_modules", "@types"),
+      "--module",
+      "NodeNext",
+      join(destinationRoot, "consumer.ts"),
+    ]).catch((error) => {
+      throw new Error(error.stdout || error.message, { cause: error });
+    });
+  });
+
   it("vendors a symlinked workspace package before its compiled export exists", async () => {
     const root = await createTemporaryDirectory("eve-vendor-workspace-");
     const packageRoot = join(root, "packages", "consumer");
@@ -110,16 +215,18 @@ describe("compiled vendor assets", () => {
     expect(schema._zod.bag.validator).toBeUndefined();
   });
 
-  it("stamps the compiler versions that drive vendored output", async () => {
+  it("stamps the tool and bundled server versions that drive vendored output", async () => {
     const stamp = JSON.parse(
       await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
-    ) as { toolVersions?: { rolldown?: string; typescript?: string } };
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
-    const typescriptPackage = require("typescript/package.json") as { version: string };
+    ) as { toolVersions?: Record<string, string> };
+    const envRunnerEntry = require.resolve("env-runner");
 
-    expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
-    expect(stamp.toolVersions?.typescript).toBe(typescriptPackage.version);
+    expect(stamp.toolVersions).toEqual({
+      "env-runner>crossws": installedVersion("crossws", envRunnerEntry),
+      "env-runner>srvx": installedVersion("srvx", envRunnerEntry),
+      rolldown: (require("rolldown/package.json") as { version: string }).version,
+      typescript: (require("typescript/package.json") as { version: string }).version,
+    });
   });
 
   it("copies generated catalog declarations and fingerprints their sources", async () => {
@@ -229,6 +336,45 @@ describe("compiled vendor assets", () => {
     expect(javaScriptSources.some(containsSourceMapComment)).toBe(false);
   });
 
+  it("keeps class expressions out of shared declarations in browser modules", async () => {
+    // webpack before 5.90 credits the declarators after `var a = class {}, b = f()`
+    // to the class. When the class is unused it drops the `f` import binding but
+    // keeps the call, so the bundle throws `f is not defined` (#5037).
+    // Walk every published module a browser entry reaches: eve's own code and
+    // the vendored chunks alike.
+    const visited = new Set<string>();
+    const pending = BROWSER_ENTRY_FILES.map((entry) => join(DIST_SOURCE_ROOT, entry));
+    const joinedClasses: string[] = [];
+    for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
+      const path = relative(DIST_SOURCE_ROOT, file);
+      if (visited.has(path)) continue;
+      visited.add(path);
+      const program = (await parseWithRolldownAst(file, await readFile(file, "utf8"))) as {
+        body: {
+          type: string;
+          source?: { value: string } | null;
+          declarations?: { id: { name?: string }; init: { type: string } | null }[];
+        }[];
+      };
+      for (const statement of program.body) {
+        if (statement.source) {
+          const target = resolveDistImport(file, statement.source.value);
+          if (target !== undefined) pending.push(target);
+        }
+        if (statement.type !== "VariableDeclaration") continue;
+        for (const declarator of statement.declarations!.slice(0, -1)) {
+          if (declarator.init?.type === "ClassExpression") {
+            joinedClasses.push(`${path}: ${declarator.id.name}`);
+          }
+        }
+      }
+    }
+
+    expect(visited).toContain("client/client-error.js");
+    expect([...visited].some((path) => path.startsWith("compiled/_chunks/client/"))).toBe(true);
+    expect(joinedClasses).toEqual([]);
+  });
+
   it("copies the complete @vercel/blob declaration tree", async () => {
     const upstreamDeclarations = (await readdir(VERCEL_BLOB_DIST_ROOT, { recursive: true }))
       .filter((entry) => entry.endsWith(".d.ts"))
@@ -264,7 +410,9 @@ describe("compiled vendor assets", () => {
     expect(indexDts).toContain("Core utilities intended for import by user");
     expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(createHookDts).toContain("Creates a {@link Hook}");
-    expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
+    expect(workflowDts).toBe(
+      `export * from "./workflow/index.js";\nexport type { PendingQueueDrain } from "./_workflow-vm.js";\n`,
+    );
     expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
   });

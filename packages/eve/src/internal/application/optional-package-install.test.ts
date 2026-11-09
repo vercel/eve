@@ -473,6 +473,21 @@ describe("installPackageIntoProject", () => {
     expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
   });
 
+  it("hides the optional package installer console on Windows", async () => {
+    const restorePlatform = mockProcessPlatform("win32");
+    try {
+      await installPackageIntoProject({ appRoot: "/repo/app", packageName: "just-bash" });
+    } finally {
+      restorePlatform();
+    }
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "npm",
+      ["install", "--save-dev", "just-bash"],
+      expect.objectContaining({ shell: true, windowsHide: true }),
+    );
+  });
+
   it("does not install if policy preparation fails", async () => {
     mockedExistsSync.mockImplementation((path) => path === "/repo/pnpm-lock.yaml");
     vi.mocked(ensurePnpmOptionalDependencyDefaults).mockRejectedValueOnce(

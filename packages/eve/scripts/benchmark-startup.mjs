@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
 // Run against two separately built package directories, sequentially, on the same machine.
-// Each process is fresh; subsequent runs retain the fixture's caches and build output.
+// Each process is fresh. Run 1 starts from an empty project (cold); later runs
+// retain its caches and build output (warm).
+// Per run: `eve dev` to /eve/v1/info, then a first turn through `eve/client`
+// (accepted, then completed), `eve build --profile`, then `eve start` on that
+// build to /eve/v1/health. One JSON result per line. The agent's model is a
+// mock, so the first turn makes no model calls.
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
 const toolCount = Number(process.argv[4] ?? 0);
@@ -22,9 +28,11 @@ await writeFile(
   JSON.stringify({ private: true, type: "module", dependencies: { eve: "*" } }),
 );
 await writeFile(join(root, "agent", "instructions.md"), "You are a helpful assistant.\n");
+// A mock model has no catalog context window, and older releases (0.61.0, for
+// one) refuse to compile an agent without it. Release backfills run this agent.
 await writeFile(
   join(root, "agent", "agent.ts"),
-  'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });\n',
+  'import { defineAgent } from "eve";\nimport { mockModel } from "eve/evals";\nexport default defineAgent({ model: mockModel("ready"), modelContextWindowTokens: 1_000_000 });\n',
 );
 await writeFile(
   join(root, "agent", "channels", "eve.ts"),
@@ -47,6 +55,10 @@ const env = {
 delete env.VERCEL;
 delete env.PORT;
 delete env.EVE_DEV;
+// The client of the package under test, through the project's own `eve` link.
+const { Client } = await import(
+  pathToFileURL(createRequire(join(root, "package.json")).resolve("eve/client")).href
+);
 const results = [];
 console.log(
   JSON.stringify({
@@ -59,14 +71,24 @@ console.log(
   }),
 );
 
+// Readiness probes overlap: a new one starts every interval without waiting
+// for the last. An early request can be accepted and never answered (the port
+// opens before the server serves), and waiting on it would be measured as
+// startup time. The deadline only bounds how many stay in flight.
+const PROBE_TIMEOUT_MS = 5000;
+const PROBE_INTERVAL_MS = 20;
+
 for (let run = 1; run <= runs; run++) {
-  for (const mode of ["dev", "build"]) {
+  // `start` serves the output `build` just wrote, so it runs after it.
+  for (const mode of ["dev", "build", "start"]) {
     const port = await availablePort();
     const profilePath = join(root, `build-${run}.json`);
     const args =
       mode === "dev"
         ? ["dev", "--no-ui", "--host", "127.0.0.1", "--port", String(port)]
-        : ["build", "--profile", profilePath];
+        : mode === "start"
+          ? ["start", "--host", "127.0.0.1", "--port", String(port)]
+          : ["build", "--profile", profilePath];
     let log = "";
     const start = performance.now();
     const child = spawn(process.execPath, [join(packageRoot, "bin", "eve.js"), ...args], {
@@ -87,41 +109,25 @@ for (let run = 1; run <= runs; run++) {
     const timeout = setTimeout(() => child.kill("SIGKILL"), 60000);
     try {
       if (mode === "dev") {
-        let ready = false;
-        while (performance.now() - start < 60000) {
-          if (child.exitCode !== null || child.signalCode !== null) throw new Error(log);
-          try {
-            const response = await fetch(`http://127.0.0.1:${port}/eve/v1/info`, {
-              signal: AbortSignal.timeout(5000),
-            });
-            const body = await response.text();
-            if (response.ok) {
-              JSON.parse(body);
-              ready = true;
-              break;
-            }
-          } catch {}
-          await delay(20);
-        }
-        if (!ready) throw new Error(`Readiness timeout: ${log}`);
+        const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
-        const accepted = await fetch(`http://127.0.0.1:${port}/eve/v1/session`, {
-          method: "POST",
-          signal: AbortSignal.timeout(10000),
-        });
-        const session = await accepted.json();
-        if (!accepted.ok || typeof session.sessionId !== "string") {
-          throw new Error(
-            `Session creation failed (${accepted.status}): ${JSON.stringify(session)}`,
-          );
-        }
-        results.push({
-          run,
-          mode,
-          wallMs,
-          sessionAcceptedMs: Math.round(performance.now() - start),
-          status: 200,
-        });
+        const baseUrl = `http://127.0.0.1:${port}`;
+        // eve 0.84.0 renamed the client's `host` to `baseUrl`, `response` to
+        // `delivery`, and the turn's `message` to `reply`. Release backfills
+        // run this script against older clients, so it accepts both shapes.
+        const client = new Client({ baseUrl, host: baseUrl });
+        const signal = AbortSignal.timeout(30000);
+        const created = await client.sessions.create({ message: "Hello", signal });
+        const sessionAcceptedMs = Math.round(performance.now() - start);
+        const turn = await (created.delivery ?? created.response).result();
+        const firstTurnMs = Math.round(performance.now() - start);
+        const reply = turn.reply ?? turn.message;
+        if (reply !== "ready")
+          throw new Error(`First turn ended without the mock reply: ${JSON.stringify(reply)}`);
+        results.push({ run, mode, wallMs, sessionAcceptedMs, firstTurnMs, probes });
+      } else if (mode === "start") {
+        const probes = await waitReady(child, port, "/eve/v1/health", start, () => log);
+        results.push({ run, mode, wallMs: Math.round(performance.now() - start), probes });
       } else {
         const { code } = await exited;
         if (code !== 0) throw new Error(log);
@@ -144,7 +150,7 @@ for (let run = 1; run <= runs; run++) {
   }
 }
 await writeFile(join(root, "results.json"), JSON.stringify(results, null, 2));
-for (const mode of ["dev", "build"]) {
+for (const mode of ["dev", "build", "start"]) {
   const times = results
     .filter((result) => result.mode === mode)
     .map((result) => result.wallMs)
@@ -157,6 +163,51 @@ for (const mode of ["dev", "build"]) {
       maxMs: times.at(-1),
     }),
   );
+}
+
+/**
+ * Resolves when any probe of `path` first answers 200 with JSON. Returns how
+ * the probes went: `attempts` requests in all, `timedOut` that hit the
+ * per-request deadline (accepted but unanswered), and `refused` that failed
+ * to connect.
+ */
+function waitReady(child, port, path, start, readLog) {
+  const probes = { attempts: 0, timedOut: 0, refused: 0 };
+  const outstanding = new AbortController();
+  return new Promise((resolveReady, reject) => {
+    let timer;
+    let done = false;
+    const finish = (settle) => {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      outstanding.abort();
+      settle();
+    };
+    const probe = async () => {
+      if (child.exitCode !== null || child.signalCode !== null)
+        return finish(() => reject(new Error(readLog())));
+      if (performance.now() - start >= 60000)
+        return finish(() => reject(new Error(`Readiness timeout: ${readLog()}`)));
+      probes.attempts += 1;
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+          signal: AbortSignal.any([outstanding.signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)]),
+        });
+        const body = await response.text();
+        if (response.ok) {
+          JSON.parse(body);
+          finish(() => resolveReady(probes));
+        }
+      } catch (error) {
+        if (done) return;
+        if (error?.name === "TimeoutError") probes.timedOut += 1;
+        else if (error?.cause?.code === "ECONNREFUSED") probes.refused += 1;
+      }
+    };
+    timer = setInterval(probe, PROBE_INTERVAL_MS);
+    void probe();
+  });
 }
 
 async function availablePort() {

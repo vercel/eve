@@ -6,7 +6,7 @@ const PROTECTED_TOOL = "public-catalog__list_orders";
 
 export default defineEval({
   description:
-    "After the user signs in for a protected MCP tool, the call that was waiting runs without asking the model again: no model call between authorization.completed and the call's result, and the call is not requested twice.",
+    "After the user signs in for a protected MCP tool, the call that was waiting runs without asking the model again: its sign-in settles with the call, no model call comes between them, and the call is not requested twice.",
   timeoutMs: 90_000,
 
   async test(t) {
@@ -18,37 +18,41 @@ export default defineEval({
     );
     const session = started.session;
     started.expectOk();
-    started.event("authorization.required", { count: 1 });
-    started.event("turn.waiting", { count: 1 });
+    started.event("interaction.opened", { count: 1, data: { request: { kind: "sign-in" } } });
+    started.event("turn.paused", { count: 1 });
 
-    const required = started.events.find((event) => event.type === "authorization.required");
-    if (required?.type !== "authorization.required") {
+    const required = started.events.find(
+      (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+    );
+    if (required?.type !== "interaction.opened") {
       throw new Error("The protected tool did not produce an authorization challenge.");
     }
-    if (session.sessionId === undefined || session.state === undefined) {
-      throw new Error("The turn did not create a session.");
-    }
-    const resumed = t.target.watchTurn(session.sessionId, {
-      startIndex: session.state.streamIndex,
-    });
-    const callback = fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url);
+    const resumed = t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
+    const callback = fixtureAuthorizationCallback(t.target.url, required.data.request.signIn?.url);
     const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
     if (!response.ok) throw new Error(`Authorization callback failed (${response.status}).`);
 
     const completed = await resumed.result();
     completed.expectOk();
-    completed.noFailedActions();
-    completed.event("authorization.completed", { count: 1, data: { outcome: "authorized" } });
+    completed.noFailedCalls();
+    completed.event("interaction.settled", {
+      count: 1,
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
+    });
     completed.calledTool(PROTECTED_TOOL, { count: 1 });
     completed.eventsSatisfy(
-      "no model call between authorization.completed and the tool call's action.result",
+      "no model call between the sign-in's settlement and the waiting call's",
       (events) => {
-        const signedIn = events.findIndex((event) => event.type === "authorization.completed");
-        const result = events.findIndex((event) => event.type === "action.result");
+        const signedIn = events.findIndex(
+          (event) =>
+            event.type === "interaction.settled" &&
+            event.data.interactionId === required.data.interactionId,
+        );
+        const result = events.findIndex((event) => event.type === "call.settled");
         return (
           signedIn >= 0 &&
           result > signedIn &&
-          !events.slice(signedIn, result).some((event) => event.type === "step.started")
+          !events.slice(signedIn, result).some((event) => event.type === "model.requested")
         );
       },
     );
@@ -57,13 +61,12 @@ export default defineEval({
       (events) =>
         !events.some(
           (event) =>
-            event.type === "actions.requested" &&
-            event.data.actions.some((action) => JSON.stringify(action).includes(PROTECTED_TOOL)),
+            event.type === "call.requested" && event.data.capability.name === PROTECTED_TOOL,
         ),
     );
     completed.eventsSatisfy(
       "one model call after sign-in, the one that reads the result",
-      (events) => events.filter((event) => event.type === "step.started").length === 1,
+      (events) => events.filter((event) => event.type === "model.requested").length === 1,
     );
   },
 });

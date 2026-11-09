@@ -102,14 +102,14 @@ describe("Docker sandbox deletion", () => {
     });
     const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
     const { state } = await provider.start(session);
-    const abortSignal = new AbortController().signal;
+    const signal = new AbortController().signal;
 
     vi.mocked(run).mockClear();
-    await provider.endSession({ ...session, abortSignal, reason: "deleted", state });
-    await provider.endSession({ ...session, abortSignal, reason: "deleted", state });
+    await provider.endSession({ ...session, signal, reason: "deleted", state });
+    await provider.endSession({ ...session, signal, reason: "deleted", state });
     expect(vi.mocked(run).mock.calls.filter(([args]) => args[0] === "rm")).toEqual([
-      [["rm", "-f", state.containerName], { signal: abortSignal }],
-      [["rm", "-f", state.containerName], { signal: abortSignal }],
+      [["rm", "-f", state.containerName], { signal }],
+      [["rm", "-f", state.containerName], { signal }],
     ]);
   });
 });

@@ -146,7 +146,7 @@ function renderObject(schema: Schema, context: RenderContext): string {
   const fields = Object.entries(properties).map(([key, value]) => {
     const name = IDENTIFIER.test(key) ? key : JSON.stringify(key);
     const optional = required.has(key) ? "" : "?";
-    const comment = isObject(value) ? propertyComment(value, context.descriptions) : "";
+    const comment = isObject(value) ? propertyComment(value, context) : "";
     return `${name}${optional}: ${renderType(value, next(context))}${comment}`;
   });
   const extra = schema.additionalProperties;
@@ -157,10 +157,11 @@ function renderObject(schema: Schema, context: RenderContext): string {
   return `{ ${fields.join("; ")} }`;
 }
 
-function propertyComment(schema: Schema, descriptions: boolean): string {
+function propertyComment(property: Schema, context: RenderContext): string {
+  const schema = describedSchema(property, context);
   const parts: string[] = [];
   const description =
-    descriptions && typeof schema.description === "string"
+    context.descriptions && typeof schema.description === "string"
       ? schema.description
           .replaceAll(/\s+/gu, " ")
           .replace(/[\s.;,:]+$/u, "")
@@ -172,6 +173,24 @@ function propertyComment(schema: Schema, descriptions: boolean): string {
   }
   if (parts.length === 0) return "";
   return ` /* ${parts.join("; ").replaceAll("*/", "* /")} */`;
+}
+
+/**
+ * A property merged with the `$ref` targets it chains through, since a
+ * referenced property is described by its target. Keywords nearer the
+ * property win.
+ */
+function describedSchema(property: Schema, context: RenderContext): Schema {
+  let schema = property;
+  const refs = new Set(context.refs);
+  for (let ref = schema.$ref; typeof ref === "string" && !refs.has(ref); ref = schema.$ref) {
+    refs.add(ref);
+    const target = resolveRef(ref, context);
+    if (!isObject(target)) break;
+    const { $ref: _, ...outer } = schema;
+    schema = { ...target, ...outer };
+  }
+  return schema;
 }
 
 function resolveRef(ref: string, context: RenderContext): unknown {

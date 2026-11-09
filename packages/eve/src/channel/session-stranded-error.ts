@@ -9,7 +9,7 @@ interface StrandedSessionOwner {
  * a session whose owner another eve version built, on a World that only runs
  * this build, so the owner can never execute again. Nothing is delivered and
  * nothing is mutated. Historical reads with `follow: false` still succeed.
- * Call `reset()` to end the session, then start a new one. Narrow with
+ * Call `end()` to retire the session, then start a new one. Narrow with
  * {@link SessionStrandedError.is}.
  */
 export class SessionStrandedError extends Error {

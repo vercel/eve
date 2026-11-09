@@ -1,13 +1,16 @@
+import { transition } from "#harness/session-machine/commit.js";
+import { changeHistory } from "#harness/session-machine/history.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
-import { fail, hold } from "#harness/session-machine/transitions.js";
-import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
-import type { StepCoordinates } from "#harness/session-machine/view.js";
+import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
+import { fail } from "#harness/session-machine/transitions.js";
+import { readTurnState } from "#harness/session-machine/state.js";
 import type { Step } from "#harness/step/context.js";
+import { park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -15,76 +18,60 @@ import type {
   StepResult,
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
-import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
+import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
 import {
-  grantedApprovalKeys,
-  hasRunnableQueue,
-  parkOnApprovals as parkOnApprovalsTransition,
+  askApprovals,
+  approvalMemory,
+  openLimit,
   requestLimit,
   requireSignIn,
 } from "./approvals.js";
+import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
-import { retireActiveCandidates } from "./candidates.js";
 import { isEmptyInput } from "./delivery.js";
-import { holdForInput } from "./intake.js";
 
-// The session's human-in-the-loop lifecycle, behind the few points where the rest of the harness
-// meets it: a delivery's answers and sign-in callbacks before its turn runs (`acceptHumanInput`),
-// the work they approved once its model step starts (`runApprovedLocalCalls`), a model step's gated calls and
-// sign-ins, the budget gate before each model call, and what the model reads about pending
-// approvals. Outside readers use only the read-only requests view exported here.
+// The session's human-in-the-loop rules, behind the few points where the rest of the harness
+// meets them: a delivery's answers and sign-in callbacks before its turn runs
+// (`admitHumanInput`, `settleHumanInput`), the work they decided once the turn has the delivery
+// (`applyHumanDecisions`), a model step's gated calls and sign-ins, the budget gate before each
+// model call, and what the model reads about pending approvals. Outside readers use only the
+// read-only requests view exported here. Nothing here pauses the turn; the step's `park` does.
 
 export {
-  acceptHumanInput,
-  admitApprovedWork,
-  dispatchApprovedWorkflows,
-  hasApprovedWork,
-  runApprovedLocalCalls,
-  type ApprovedWork,
+  admitHumanInput,
+  applyHumanDecisions,
+  settleHumanInput,
+  type HumanDecisions,
   type HumanInputIntake,
 } from "./intake.js";
-export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
-export { hasRunnableQueue } from "./approvals.js";
-export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
+export { openDeferredApprovals, queueInput } from "./approvals.js";
+export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
+export type { PendingResponder } from "./responders.js";
 
 /**
- * A model step made calls that need a person's approval: the step parks on them beside any
- * runtime calls it made. The turn holds for the answers, unless the runtime runs calls for it
- * meanwhile, or queued input can already run.
+ * A model step made calls that need a person's approval: the step's response waits on them
+ * beside any runtime calls it made, asked as the turn's requester.
  */
-export async function parkOnApprovals(
+export async function askStepApprovals(
   step: Step,
   input: {
     readonly event: StepCoordinates;
     readonly messages: readonly ModelMessage[];
-    readonly requests: readonly InputRequest[];
+    readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
-    /** Runtime calls run first, or the caller will report a sibling sign-in hold. */
-    readonly waitsOn: "runtime" | "sign-in" | undefined;
   },
-): Promise<StepResult> {
-  const transition = parkOnApprovalsTransition(step.view(), {
+): Promise<void> {
+  const transition = askApprovals(step.view(), {
     event: input.event,
     messages: input.messages,
     requests: input.requests,
-    tasks: input.tasks,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
+    tasks: input.tasks,
   });
-  await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
-  if (input.waitsOn !== undefined) {
-    if (
-      input.waitsOn === "runtime" &&
-      input.tasks.some((task) => task.entry.entryPoint === "execute")
-    )
-      await step.apply(hold(step.view(), { on: "tasks" }));
-    return { next: null, session: step.session };
-  }
-  if (hasRunnableQueue(step.view())) return { next: step.runStep, session: step.session };
-  return holdForInput(step);
+  await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 
 /**
@@ -95,14 +82,16 @@ export async function stopForToolSignIn(
   step: Step,
   interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
 ): Promise<StepResult> {
-  await step.apply(
+  await applyEndingSignIns(
+    step,
     requireSignIn(step.view(), {
       calls: interrupt.calls,
       challenges: interrupt.challenges,
+      callsBack: stepCallsBack(step),
     }),
     step.session.history,
   );
-  return { held: { kind: "request" }, next: null, session: step.session };
+  return park(step);
 }
 
 /**
@@ -119,44 +108,32 @@ export async function enforceBudget(
     limit: step.config.sessionUsageLimit ?? DEFAULT_SESSION_USAGE_LIMIT,
     session: step.session,
     turnSequence: step.position().sequence,
+    usage: step.view().projection.view.usage.total,
+    window: step.view().projection.usageWindow,
   });
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {
-    step.session = { ...step.session, history: validateHarnessModelMessages([...messages]) };
-    await step.apply(requestLimit(step.view(), { request: limit.request }), step.session.history);
-    return { next: null, session: step.session };
+    step.session = changeHistory(step.session, { extend: messages });
+    // The prompt is asked once; a gate that finds it open still waits on it.
+    if (openLimit(step.view())?.row.interactionId !== limit.ask.interactionId)
+      await step.apply(requestLimit(step.view(), limit.ask), step.session.history);
+    // The turn waits on the prompt; the answer resumes it or cancels it.
+    return park(step);
   }
   await step.apply(
     fail(step.view(), {
       code: limit.code,
       details: limit.details,
       message: limit.message,
-      terminal: { sessionId: step.session.sessionId },
+      terminal: true,
     }),
   );
   return { next: { done: true, output: "" }, session: step.session };
 }
 
-/**
- * What a model call needs from the approvals: the keys `once()` approvals of `tools` granted, and
- * a note on the calls still awaiting approval, which a message may revise.
- */
-export function humanInputContext(
-  step: Step,
-  tools: HarnessToolLookup,
-): {
-  readonly approvedTools: ReadonlySet<string>;
-  readonly pendingApprovalsNote?: string;
-} {
-  const view = step.view();
-  return {
-    approvedTools: grantedApprovalKeys(view, (request) =>
-      tools.get(request.action.toolName)?.approvalKey?.(request.action.input),
-    ),
-    pendingApprovalsNote: renderPendingApprovalsInstruction(
-      view.turn.suspended.flatMap((parked) => parked.requests),
-    ),
-  };
+/** What a model call needs from the approvals: what their policies remember. */
+export function humanInputContext(step: Step): { readonly approvalMemory: ApprovalMemory } {
+  return { approvalMemory: approvalMemory(step.view()) };
 }
 
 /**
@@ -165,29 +142,21 @@ export function humanInputContext(
  */
 function responsePolicyRequestIds(
   tools: HarnessToolLookup,
-  requests: readonly InputRequest[],
+  requests: readonly ApprovalAsk[],
 ): readonly string[] {
   return requests
-    .filter((request) => {
-      const approval = tools.get(request.action.toolName)?.approval;
+    .filter((ask) => {
+      const approval = tools.get(ask.call.toolName)?.approval;
       return (
         approval !== undefined && typeof approval !== "function" && approval.response !== undefined
       );
     })
-    .map((request) => request.requestId);
+    .map((ask) => ask.interactionId);
 }
 
 /** The caller whose turn parks a step. */
 function currentRequester(step: Step): SessionAuthContext | null {
-  return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
-}
-
-/** The cancelled turn's responders stop checking its approvals: their candidates stale. */
-export function retireCancelledCandidates<T extends HarnessSessionBase>(session: T): T {
-  return {
-    ...session,
-    state: retireActiveCandidates(session.state, { completedAt: Date.now(), reason: "Cancelled." }),
-  };
+  return step.ctx.get(AuthKey) ?? step.ctx.get(SessionKey)?.auth.current ?? null;
 }
 
 /**
@@ -202,9 +171,28 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
   const { message, ...rest } = queued;
   return {
     message,
-    session: writeTurnState(session, isEmptyInput(rest) ? turn : { ...turn, queued: rest }),
+    session: saveTransition(
+      session,
+      transition({
+        events: [],
+        turn: isEmptyInput(rest) ? turn : { ...turn, queued: rest },
+      }),
+    ),
   };
 }
 
 export { readHitlState } from "./requests.js";
+export {
+  callsBackFor,
+  localSignInCallback,
+  ownCallbacks,
+  ResumeSignInKey,
+  settleSignIns,
+  signInsEnded,
+  type AnsweredSignIn,
+  type OwnCallbacks,
+  type ResumeSignIn,
+  type SignInCallback,
+  type SignInEnding,
+} from "./sign-in-callbacks.js";
 export { holdsHitlRequests } from "./view.js";

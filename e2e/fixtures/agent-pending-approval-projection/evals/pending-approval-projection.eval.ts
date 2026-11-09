@@ -19,7 +19,7 @@ export default defineEval({
           [
             "[Pending approvals]",
             "The following tool calls are awaiting approval and have not executed:",
-            '{"requestId":"approval-1","toolName":"request-change-confirmation"}',
+            '{"interactionId":"approval-1","toolName":"request-change-confirmation"}',
           ].join("\n"),
         ],
       },

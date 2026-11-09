@@ -187,6 +187,7 @@ class DevelopmentBuildProcess {
     this.#child = fork(fileURLToPath(new URL("./dev-build-process.js", import.meta.url)), [], {
       serialization: "advanced",
       stdio: ["ignore", "inherit", "inherit", "ipc"],
+      windowsHide: true,
     });
     this.#child.on("message", (message: Partial<DevelopmentBuildResponse> | null) => {
       if (message?.kind !== DEVELOPMENT_BUILD_MESSAGE_KIND || message.id === undefined) return;

@@ -13,12 +13,12 @@ export default defineEval({
     );
     turn.expectOk();
     const started = turn.events.find(
-      (event) => event.type === "agent.started" && event.data.name === "custom-provider",
+      (event) => event.type === "child.opened" && event.data.name === "custom-provider",
     );
-    if (started?.type !== "agent.started") {
+    if (started?.type !== "child.opened") {
       throw new Error("The turn did not call the custom-provider subagent.");
     }
-    const child = (await t.target.watchTurn(started.data.sessionId).result()).expectOk();
+    const child = (await t.target.attach(started.data.sessionId).watch().result()).expectOk();
 
     t.succeeded();
     const left = child.requireToolCall("leave-note").output as { machine: string };

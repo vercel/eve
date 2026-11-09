@@ -1,3 +1,4 @@
+import type { ConversationEnvironment } from "#shared/conversation-context.js";
 /**
  * The provider contract authored under `agent/instrumentation/`.
  *
@@ -15,60 +16,13 @@ import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type { JsonValue } from "#shared/json.js";
 
 export type {
-  InstrumentationAttemptScope,
-  InstrumentationChannelDeliveryInput,
-  InstrumentationChannelDeliveryOutcome,
-  InstrumentationChannelDeliveryRef,
-  InstrumentationChannelDeliveryStartedEvent,
-  InstrumentationChannelDeliveryTerminalEvent,
-  InstrumentationContentPart,
+  InstrumentationScope,
   InstrumentationEvent,
-  InstrumentationInputKind,
-  InstrumentationInputOption,
-  InstrumentationInputOutcome,
-  InstrumentationInputRequest,
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
-  InstrumentationInputResponse,
-  InstrumentationModelCallCompletedEvent,
-  InstrumentationModelCallFailedEvent,
-  InstrumentationModelCallStartedEvent,
-  InstrumentationModelRef,
-  InstrumentationOperationRef,
+  InstrumentationModelInput,
   InstrumentationParentLineage,
-  InstrumentationSessionFailedEvent,
-  InstrumentationSessionSettledEvent,
-  InstrumentationSessionStartedEvent,
-  InstrumentationSessionTransitionEvent,
-  InstrumentationStepAttemptMetadataEvent,
-  InstrumentationStepAttemptCompletedEvent,
-  InstrumentationStepAttemptFailedEvent,
-  InstrumentationStepAttemptStartedEvent,
-  InstrumentationStepAttemptTerminalEvent,
-  InstrumentationToolCallCompletedEvent,
-  InstrumentationToolCallFailedEvent,
-  InstrumentationToolCallStartedEvent,
-  InstrumentationToolCallKind,
-  InstrumentationToolCallOutcome,
-  InstrumentationToolOutput,
-  InstrumentationTraceContext,
-  InstrumentationTurnFailedEvent,
-  InstrumentationTurnSettledEvent,
-  InstrumentationTurnStartedEvent,
-  InstrumentationTurnTerminalEvent,
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 
-export type {
-  InstrumentationMemoryOperation,
-  InstrumentationMemoryOperationCompletedEvent,
-  InstrumentationMemoryOperationEvent,
-  InstrumentationMemoryOperationFailedEvent,
-  InstrumentationMemoryOperationName,
-  InstrumentationMemoryOperationStartedEvent,
-  InstrumentationMemoryOperationTerminalEvent,
-  InstrumentationMemoryRecord,
-} from "#instrumentation/memory.js";
 export type {
   TraceCaptureContext,
   TraceCapturePolicy,
@@ -86,36 +40,29 @@ export const PROVIDER = Symbol.for("eve.instrumentation.provider");
 /** Marks a slot the author turned off rather than configured. */
 export const DISABLED = Symbol.for("eve.instrumentation.disabled");
 
-/** Where the agent is running when `setup` fires. */
-export type InstrumentationEnvironment = "development" | "preview" | "production";
-
-/** The local eval run this server was started to serve. */
-export interface EvaluationRef {
-  readonly runId: string;
-}
-
 /**
  * Passed to {@link InstrumentationProvider.setup} once at server startup,
  * before any event is published.
  */
-export interface ProviderSetupContext {
+export interface InstrumentationSetupContext {
   /** The agent name declared by `defineAgent`. */
   readonly agentName: string;
-  readonly environment: InstrumentationEnvironment;
+  /** Where the agent is running when setup fires. */
+  readonly environment: ConversationEnvironment;
   /** Present only when this server was started for a local `eve eval` run. */
-  readonly evaluation?: EvaluationRef;
+  readonly evaluation?: { readonly runId: string };
   /** The eve version running the agent. */
   readonly frameworkVersion: string;
 }
 
-export interface ProviderState {
+export interface InstrumentationState {
   get(): JsonValue | undefined;
   /** Stages a JSON value; `undefined` releases this operation's slot. */
   set(value: JsonValue | undefined): void;
 }
 
-export interface ProviderContext {
-  readonly state: ProviderState;
+export interface InstrumentationContext {
+  readonly state: InstrumentationState;
 }
 
 /**
@@ -124,13 +71,10 @@ export interface ProviderContext {
  * A handler can carry durable JSON state from a start to its terminal through
  * `ctx.state`. eve scopes and releases that state by provider and operation.
  */
-export type Handler<TEvent> = (event: TEvent, ctx: ProviderContext) => void | PromiseLike<void>;
-
-type EventForType<TEvent, TType> = TEvent extends { readonly type: infer TEventType }
-  ? TType extends TEventType
-    ? TEvent & { readonly type: TType }
-    : never
-  : never;
+export type InstrumentationHandler<K extends InstrumentationEvent["type"]> = (
+  event: InstrumentationEvent<K>,
+  ctx: InstrumentationContext,
+) => void | PromiseLike<void>;
 
 /**
  * The events a provider may handle, one optional handler per event type.
@@ -138,10 +82,8 @@ type EventForType<TEvent, TType> = TEvent extends { readonly type: infer TEventT
  * Derived from the event union rather than written out, so a new event reaches
  * providers the moment the bus can publish it.
  */
-export type ProviderEvents = {
-  readonly [TType in InstrumentationEvent["type"]]?: Handler<
-    EventForType<InstrumentationEvent, TType>
-  >;
+export type InstrumentationEvents = {
+  readonly [TType in InstrumentationEvent["type"]]?: InstrumentationHandler<TType>;
 };
 
 /**
@@ -151,7 +93,7 @@ export type ProviderEvents = {
  * concurrently and are failure-isolated. Do not coordinate providers through
  * completion order.
  */
-export interface ProviderDefinition {
+export interface InstrumentationDefinition {
   /**
    * Whether this provider receives events and which content directions they
    * include. Defaults to emitting every audience, with content only for public
@@ -161,9 +103,9 @@ export interface ProviderDefinition {
    * again across durable steps, so it must be deterministic.
    */
   readonly tracePolicy?: TraceCapturePolicy;
-  readonly events?: ProviderEvents;
+  readonly events?: InstrumentationEvents;
   /** Runs once at server startup, before any event is published. */
-  readonly setup?: (context: ProviderSetupContext) => void | PromiseLike<void>;
+  readonly setup?: (context: InstrumentationSetupContext) => void | PromiseLike<void>;
   /** Drains anything buffered. eve calls this before a session goes idle. */
   readonly flush?: () => void | PromiseLike<void>;
   /** Releases resources when the process is going away. */
@@ -171,12 +113,14 @@ export interface ProviderDefinition {
 }
 
 /** Declares one instrumentation provider. */
-export function defineInstrumentation(definition: ProviderDefinition): InstrumentationProvider {
+export function defineInstrumentation(
+  definition: InstrumentationDefinition,
+): InstrumentationProvider {
   return { ...definition, [PROVIDER]: true };
 }
 
-/** A {@link ProviderDefinition} that has been through `defineInstrumentation`. */
-export type InstrumentationProvider = ProviderDefinition & {
+/** A {@link InstrumentationDefinition} that has been through `defineInstrumentation`. */
+export type InstrumentationProvider = InstrumentationDefinition & {
   readonly [PROVIDER]: true;
 };
 

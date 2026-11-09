@@ -14,18 +14,19 @@ export default defineEval({
     const session = parked.session;
     parked.expectOk();
 
-    session.requireInputRequest({
+    session.requireInteraction({
       display: "confirmation",
-      optionIds: ["approve", "cancel"],
+      optionIds: ["approve", "deny"],
       toolName: INVENTORY_TOOL,
     });
     parked.calledTool(INVENTORY_TOOL, { count: 1, status: "pending" });
-    parked.notEvent("action.result", { data: { result: { toolName: INVENTORY_TOOL } } });
+    const inventoryCallId = parked.toolCalls.find((call) => call.name === INVENTORY_TOOL)?.callId;
+    parked.notEvent("call.settled", { data: (data) => data.callId === inventoryCallId });
 
     const approved = await session.respondAll("approve");
 
     approved.expectOk();
-    approved.noFailedActions();
+    approved.noFailedCalls();
     approved.calledTool(INVENTORY_TOOL, { count: 1, status: "completed" });
     t.messageIncludes("inventory received");
   },

@@ -12,7 +12,7 @@ export default defineEval({
     turn.expectOk();
 
     t.succeeded();
-    t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    t.check(turn.message, includes("blocked-egress"));
+    t.calledAgent("deny-all", { count: 1, status: "completed" });
+    t.check(turn.reply, includes("blocked-egress"));
   },
 });

@@ -24,7 +24,7 @@ describe("buildAgentHeader", () => {
 
     expect(plain).toHaveLength(1);
     expect(plain[titleIndex]).toMatch(
-      /^☰eve v\d+\.\d+\.\d+ · Weather Agent · Run \/help for commands$/u,
+      /^☰eve v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)? · Weather Agent · Run \/help for commands$/u,
     );
     expect(card).not.toContain("model");
     expect(card).not.toContain("instructions");
@@ -48,7 +48,7 @@ describe("buildAgentHeader", () => {
     const lines = buildAgentHeader({ info: INFO, theme, width: 120 });
 
     expect(stripAnsi(lines[0] ?? "")).toMatch(
-      /^eve v\d+\.\d+\.\d+ - Weather Agent - Run \/help for commands$/u,
+      /^eve v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)? - Weather Agent - Run \/help for commands$/u,
     );
     expect(lines[0]).toContain(theme.colors.dim("Weather Agent"));
     expect(lines[0]).toContain(theme.colors.dim("Run /help for commands"));

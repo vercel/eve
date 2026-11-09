@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1842
 status: implemented
-last_updated: "2026-10-20"
+last_updated: "2026-10-26"
 ---
 
 # Channel delivery idempotency
@@ -23,6 +23,15 @@ keys in admission order; retries do not extend retention. Aliases share this
 window. Reset, expiration, or replacement starts a new one. Reusing a retained
 key ignores the new input, even if its contents changed. Replicas must share
 the same durable Workflow World.
+
+The eve channel's follow-up and input-response routes accept `idempotencyKey`
+too, and name the delivery by it: the delivery ID is derived from the key, so a
+repeated request returns the original receipt rather than a new `ignored` one,
+and the duplicate settlement finds that delivery already admitted. Remote agent
+parents send it with each follow-up and set of answers to a protocol-3 child,
+named by their own durable step, so a step retried after a lost response is the
+same delivery. A key reused past the window would be admitted again under the
+same ID, so keys on this route must never be reused for new input.
 
 Initial input records its key in the workflow arguments. A losing creation
 candidate forwards its command to the winning session. Keyed creation waits up

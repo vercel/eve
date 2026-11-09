@@ -81,6 +81,14 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
    * leaves that connection behind.
    */
   release(): Promise<void>;
+  /**
+   * Resumes the sandbox the session recorded, in the background, so a turn
+   * that needs it waits only for the rest. Never starts one: does nothing
+   * when nothing is recorded, and leaves a gone sandbox for `get()`.
+   */
+  resumeRecorded(): void;
+  /** Waits for the work `prepare()` and `resumeRecorded()` queued; never throws. */
+  settle(): Promise<void>;
 }
 
 /** A connection this access opened, with the lifecycle eve maps onto it. */
@@ -133,7 +141,13 @@ export async function ensureSandboxAccess(
       async get() {
         return null;
       },
+      async open() {
+        return null;
+      },
+      prepare() {},
       async release() {},
+      resumeRecorded() {},
+      async settle() {},
       async stop() {},
     };
   }
@@ -261,7 +275,7 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  async function resolveOpened(): Promise<OpenedSandbox> {
+  async function resolveOpened(options: { readonly resumeOnly: boolean }): Promise<OpenedSandbox> {
     const definition = activeDefinition();
     const provider = getSandboxEnvironmentRuntime(definition.environment);
     const context = providerContext("sandbox-initialization");
@@ -276,11 +290,14 @@ export async function ensureSandboxAccess(
       });
     }
 
+    if (persisted === null && options.resumeOnly) {
+      throw new Error("This session has not recorded a sandbox to resume.");
+    }
     if (persisted !== null) {
       try {
         return await resumePersisted(context);
       } catch (error) {
-        if (!SandboxSessionGoneError.is(error)) throw error;
+        if (!SandboxSessionGoneError.is(error) || options.resumeOnly) throw error;
         log.warn("session sandbox is gone, starting a fresh one", {
           error,
           providerName: persisted.providerName,
@@ -346,13 +363,46 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  function requireOpened(): Promise<OpenedSandbox> {
+  function requireOpened(options = { resumeOnly: false }): Promise<OpenedSandbox> {
     if (requiring !== undefined) return requiring;
-    requiring = resolveOpened().catch((error: unknown) => {
+    requiring = resolveOpened(options).catch((error: unknown) => {
       requiring = undefined;
       throw error;
     });
     return requiring;
+  }
+
+  /** Opens the sandbox, starting a fresh one when a background resume found it gone. */
+  async function openSession(): Promise<RuntimeSandboxSession> {
+    try {
+      return (await requireOpened()).sandbox;
+    } catch (error) {
+      // Joined a resume-only open from `resumeRecorded()`; this one may start a sandbox.
+      if (!SandboxSessionGoneError.is(error)) throw error;
+      return (await requireOpened()).sandbox;
+    }
+  }
+
+  // Background work runs in order and shares one open. A failed job is retried
+  // once before later work runs, so work never lands out of order; a job that
+  // fails again is dropped. Its owner must leave a record that redoes it later.
+  let preparations: Promise<void> = Promise.resolve();
+
+  function enqueue(job: () => Promise<unknown>, options = { retry: true }): void {
+    const report = (error: unknown) => {
+      log.warn("background sandbox preparation failed; it runs again when it is needed", {
+        error,
+        sessionId: input.sessionId,
+      });
+    };
+    preparations = preparations.then(async () => {
+      try {
+        await job();
+      } catch (error) {
+        if (options.retry) await job().catch(report);
+        else report(error);
+      }
+    });
   }
 
   function track(current: OpenedSandbox) {
@@ -389,12 +439,14 @@ export async function ensureSandboxAccess(
     async delete(deleteOptions) {
       if (input.ownsSandbox === false)
         throw new Error("Only the owning session can delete this sandbox.");
+      await preparations;
       const current = await requireOpened();
       await current.delete(deleteOptions);
       forgetSandbox(current.providerName);
     },
     async end(reason: SandboxSessionEndReason) {
       if (input.ownsSandbox === false) return;
+      await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
       // A failed close of a process-local resource must not block deleting the sandbox.
       await opened?.close().catch((error: unknown) => {
@@ -428,9 +480,25 @@ export async function ensureSandboxAccess(
       forgetSandbox(provider.providerName);
     },
     async get() {
-      return (await requireOpened()).sandbox;
+      await preparations;
+      return await openSession();
+    },
+    open: openSession,
+    prepare(work) {
+      enqueue(work === undefined ? requireOpened : () => work(openSession));
+    },
+    resumeRecorded() {
+      // Not retried: a gone sandbox stays gone, and a retry would hand a
+      // consumer waiting on this open another resume-only attempt.
+      if (persisted !== null) {
+        enqueue(() => requireOpened({ resumeOnly: true }), { retry: false });
+      }
+    },
+    async settle() {
+      await preparations;
     },
     async release() {
+      await preparations;
       // A failed open left nothing to let go of.
       if (requiring !== undefined) await requiring.catch(() => undefined);
       const current = forgetOpened();
@@ -453,6 +521,7 @@ export async function ensureSandboxAccess(
       await current.close();
     },
     async stop() {
+      await preparations;
       const current = await requireOpened();
       await current.stop();
       forgetOpened();
@@ -499,7 +568,7 @@ export async function ensureSandboxAccess(
           await close();
         } finally {
           await provider.implementation.onSessionEnd(context, state, {
-            abortSignal: options?.abortSignal,
+            signal: options?.signal,
             reason: "deleted",
           });
         }

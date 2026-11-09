@@ -97,38 +97,42 @@ function toCallToolResult(
   result: InvokeToolResult,
   hasOutputSchema: boolean,
 ): McpCallToolResult<JsonValue> {
-  switch (result.status) {
+  switch (result.outcome) {
     case "completed": {
       const output = result.output as JsonValue;
+      const { modelOutput } = result;
+      const isError = modelOutput.type === "error-text";
       const text =
-        result.modelOutput.type === "text"
-          ? result.modelOutput.value
-          : JSON.stringify(output ?? null);
+        modelOutput.type === "text" || isError ? modelOutput.value : JSON.stringify(output ?? null);
+      const content = [{ text, type: "text" as const }];
       // A declared outputSchema obliges structured content of any JSON type: the
       // SDK rejects a result without it and wraps non-objects as `{ result }` on
       // 2025 connections. Without a schema, only objects are structured.
-      return hasOutputSchema || isJsonObjectValue(output)
-        ? { content: [{ text, type: "text" }], structuredContent: output ?? null }
-        : { content: [{ text, type: "text" }] };
+      const structured =
+        hasOutputSchema || isJsonObjectValue(output)
+          ? { content, structuredContent: output ?? null }
+          : { content };
+      // A tool that reports failure to the model, like `bash` on a non-zero
+      // exit, reports it to MCP clients too.
+      return isError ? { ...structured, isError: true } : structured;
     }
-    case "invalid-input":
-      throw new McpToolOperationError("invalid_input", result.message);
-    case "denied":
-      throw new McpToolOperationError(
-        "denied",
-        result.reason ?? `The tool "${name}" was denied by its approval policy.`,
-      );
-    case "approval-required":
-      throw new McpToolOperationError(
-        "approval_required",
-        `The tool "${name}" needs a person's approval, which this MCP channel cannot ask for. Call it from a conversation instead.`,
-      );
-    case "authorization-required":
-      throw new McpToolOperationError(
-        "authorization_required",
-        `The tool "${name}" needs a sign-in to ${result.connections.join(", ")}, which this MCP channel cannot ask for. Sign in from a conversation, then call it again.`,
-      );
+    case "rejected":
+      if (result.cause !== undefined) throw new McpToolOperationError("denied", result.reason);
+      if (result.reason === "approval-required")
+        throw new McpToolOperationError(
+          "approval_required",
+          `The tool "${name}" needs a person's approval, which this MCP channel cannot ask for. Call it from a conversation instead.`,
+        );
+      if (result.reason === "sign-in-required")
+        throw new McpToolOperationError(
+          "authorization_required",
+          `The tool "${name}" needs a sign-in to ${result.connections?.join(", ") ?? "its connections"}, which this MCP channel cannot ask for. Sign in from a conversation, then call it again.`,
+        );
+      throw new McpToolOperationError("denied", result.reason);
     case "failed":
-      throw new McpToolOperationError("internal", result.message);
+      throw new McpToolOperationError(
+        result.error.code === "INVALID_INPUT" ? "invalid_input" : "internal",
+        result.error.message,
+      );
   }
 }

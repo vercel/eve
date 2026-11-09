@@ -6,7 +6,8 @@ import {
   type CrossChannelTarget,
   type CrossChannelToFn,
 } from "#channel/cross-channel-receive.js";
-import type { Session } from "#channel/session.js";
+import type { SessionSendOptions } from "#channel/session.js";
+import { StreamDelivery } from "#client/delivery.js";
 import type { Runtime } from "#channel/types.js";
 import type { SlackChannel, SlackReceiveTarget } from "#public/channels/slack/slackChannel.js";
 
@@ -16,42 +17,18 @@ function makeRuntime(): Runtime {
     dispatchContinuation: vi.fn(),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
 }
 
-function makeSession(): Session {
-  return {
-    id: "sess_1",
-    async cancel() {
-      return { status: "no_active_turn" };
-    },
-    async getEventStream() {
-      return new ReadableStream();
-    },
-    async getStreamTailIndex() {
-      return -1;
-    },
-    async send() {
-      return { sessionId: "sess_1", status: "accepted" };
-    },
-    async respond() {
-      return { sessionId: "sess_1", status: "accepted" };
-    },
-    async prewarm() {
-      return { status: "ready" as const };
-    },
-    async compact() {
-      return { status: "no_active_session" };
-    },
-    async clear() {
-      return { status: "no_active_session" };
-    },
-    async reset() {
-      return { status: "no_active_session" };
-    },
-  };
+function makeSession() {
+  return new StreamDelivery({
+    sessionId: "sess_1",
+    deliveryId: "delivery_1",
+    createStream: async function* () {},
+  });
 }
 
 function makeChannel(name: string): {
@@ -109,7 +86,7 @@ describe("createCrossChannelToFn", () => {
       auth: { attributes: {}, authenticator: "app", principalId: "u", principalType: "user" },
     });
 
-    expect(session.id).toBe("sess_1");
+    expect(session.sessionId).toBe("sess_1");
     expect(slack.receive).toHaveBeenCalledTimes(1);
     const [input, ctx] = slack.receive.mock.calls[0]!;
     expect(input).toEqual({
@@ -188,6 +165,43 @@ describe("createCrossChannelToFn", () => {
     const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);
 
     await expect(fn(slack.definition, {}).send("x", { auth: null })).rejects.toThrow(/no adapter/);
+  });
+
+  it("passes every send option, and only those, to the target receive", async () => {
+    const slack = makeChannel("slack");
+    const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);
+    const options = {
+      auth: null,
+      context: ["Alice is on call this week."],
+      history: [{ role: "user" as const, text: "Alice asked for the rollout plan." }],
+      idempotencyKey: "github:delivery-42",
+      outputSchema: { type: "object" },
+      title: "Rollout plan",
+      turnPolicy: "queue" as const,
+    } satisfies Required<SessionSendOptions>;
+
+    const internal = { callback: { url: "https://example.com/hook" }, initiatorAuth: null };
+
+    await fn(slack.definition, { channelId: "C1" }).send("Continue.", { ...options, ...internal });
+
+    expect(slack.receive.mock.calls[0]![0]).toEqual({
+      ...options,
+      message: "Continue.",
+      target: { channelId: "C1" },
+    });
+  });
+
+  it("rejects an invalid idempotency key before calling receive()", async () => {
+    const slack = makeChannel("slack");
+    const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);
+
+    await expect(
+      fn(slack.definition, { channelId: "C1" }).send("Continue.", {
+        auth: null,
+        idempotencyKey: "",
+      }),
+    ).rejects.toThrow("idempotencyKey must be a nonempty string");
+    expect(slack.receive).not.toHaveBeenCalled();
   });
 
   it("forwards auth to the target receive verbatim", async () => {

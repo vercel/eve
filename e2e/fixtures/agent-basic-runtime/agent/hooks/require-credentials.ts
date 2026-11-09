@@ -12,7 +12,7 @@ export default defineHook({
           error: error instanceof Error ? error.message : String(error),
           sessionId: ctx.session.id,
         });
-        ctx.cancel();
+        ctx.cancel("Workspace credentials are unavailable.");
       }
     },
   },

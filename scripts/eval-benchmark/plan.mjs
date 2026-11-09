@@ -4,8 +4,19 @@
 //                the legs running together spread across models
 //   max_parallel, evals_per_leg
 //                the registry's concurrency caps, which bound gateway load
-//                and keep evals from sharing a runner
-//   mock_matrix  fixture × mock world legs, one attempt each
+//                and keep evals from sharing a runner; legs never exceed
+//                the selected models, so a narrowed run averages about one
+//                leg per model in flight, like the full registry (not a hard
+//                bound: when a model's leg finishes early, the next queued
+//                leg can start beside one of a slower model)
+//   mock_matrix  attempt × mock fixture × mock world legs (`mockAttempts` each:
+//                one sample is exact for durable-work counters, but too few
+//                for timing trends) on a local server
+//   hosted_matrix  the mock legs on a hosted world (a preview deployment
+//                each), run one at a time so they don't contend for the
+//                same deployment backend
+//   dev_startup  `eve dev` startup probe settings (runs and named agents) for
+//                the dev-startup job, or null when the registry has none
 //   plan.json    the resolved registry snapshot (models pinned to their AI
 //                Gateway release, fixture digests, expected eval ids) plus
 //                every leg,
@@ -13,23 +24,41 @@
 //
 // Dispatch inputs narrow the run through BENCHMARK_MODELS and
 // BENCHMARK_FIXTURES (comma-separated registry names) and BENCHMARK_ATTEMPTS.
+// BENCHMARK_RELEASE (e.g. 0.61.0) plans a release backfill (release.mjs):
+// the run is dated at the release's npm publish time, its manifest names the
+// release as its `source`, and it skips hosted worlds, whose platform the
+// release does not pin.
+//
+// The working directory is the code under test (main, or the release's tag),
+// which supplies the fixtures and e2e/matrix.json. The registry and the
+// startup probe are always this script's own checkout (the harness).
 //
 // Usage: node scripts/eval-benchmark/plan.mjs <plan.json> [sha]
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { discoverEvalIds } from "../../.github/scripts/discover-e2e-fixtures.mjs";
+import {
+  discoverEvalIds,
+  validateE2ePackageName,
+} from "../../.github/scripts/discover-e2e-fixtures.mjs";
 import { resolveModelReleases } from "./catalog.mjs";
 import { fixtureDigest } from "./digest.mjs";
+import { evalFlags, releasePublishedAt, releaseTag } from "./release.mjs";
 
 export const PLAN_SCHEMA_VERSION = 1;
+const HARNESS_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const FIXTURE_ROOTS = ["e2e/fixtures", "apps/fixtures"];
 const NAME = /^[a-z0-9-]+$/;
 const MAX_ATTEMPTS = 10;
 const MAX_PARALLEL_LEGS = 50;
 const MAX_EVALS_PER_LEG = 16;
+const MAX_STARTUP_RUNS = 10;
+// Agents packages/eve/scripts/benchmark-startup.mjs generates, by registry name.
+const STARTUP_SCRIPT = "packages/eve/scripts/benchmark-startup.mjs";
+const STARTUP_SUBJECTS = { minimal: { tools: 0 } };
 
 /**
  * Validate the registry and apply dispatch narrowing. Pure apart from the
@@ -40,11 +69,20 @@ const MAX_EVALS_PER_LEG = 16;
  *   matrix: any,
  *   findFixture: (name: string) => { dir: string, evalIds: string[], packageJson?: any } | undefined,
  *   narrow?: { models?: string, fixtures?: string, attempts?: string },
- * }} input
+ *   backfill?: boolean,
+ * }} input `backfill` plans a release backfill: registry fixtures the
+ *   release predates are left out (listed as `absentFixtures`), and so are
+ *   hosted worlds, whose platform the release does not pin.
  */
-export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) {
+export function selectBenchmark({ registry, matrix, findFixture, narrow = {}, backfill = false }) {
   const models = namedEntries(registry?.models, "models");
   const attempts = positiveInteger(registry?.attempts, 'e2e/benchmark.json: "attempts"');
+  const mockAttempts = positiveInteger(
+    registry?.mockAttempts,
+    'e2e/benchmark.json: "mockAttempts"',
+  );
+  const devStartup =
+    registry?.devStartup === undefined ? null : readDevStartup(registry.devStartup);
   const concurrency = {
     legs: boundedInteger(
       registry?.concurrency?.legs,
@@ -58,21 +96,24 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
     ),
   };
   const fixtureNames = names(registry?.fixtures, "fixtures");
-  const mockWorlds = names(registry?.mockWorlds ?? [], "mockWorlds", { allowEmpty: true });
-  const matrixWorlds = new Map((matrix?.worlds ?? []).map((world) => [world.name, world]));
-  for (const world of mockWorlds) {
-    // Mock legs boot a local server, so a non-local world must be a package
-    // the fixture can select (EVE_E2E_WORKFLOW_WORLD), not a deploy target.
-    if (world !== "local" && matrixWorlds.get(world)?.package === undefined) {
-      const packaged = [...matrixWorlds.values()].filter((w) => w.package).map((w) => w.name);
-      throw new Error(
-        `e2e/benchmark.json: mock world "${world}" must be "local" or a world with a package in e2e/matrix.json (${packaged.join(", ")}).`,
-      );
-    }
-  }
+  // A fixture whose evals all need a real model runs nothing on a mock leg;
+  // one scripted for the mock model (agent-workflow-stress) runs only there.
+  const mockFixtureNames =
+    registry?.mockFixtures === undefined
+      ? fixtureNames
+      : names(registry.mockFixtures, "mockFixtures", { allowEmpty: true });
+  const mockWorlds = readMockWorlds(registry?.mockWorlds ?? [], matrix, mockFixtureNames).filter(
+    (world) => !(backfill && world.hosted),
+  );
 
-  const fixtures = fixtureNames.map((name) => {
+  const plannedNames = [...new Set([...fixtureNames, ...mockFixtureNames])];
+  const absentFixtures = [];
+  const fixtures = plannedNames.flatMap((name) => {
     const found = findFixture(name);
+    if (found === undefined && backfill) {
+      absentFixtures.push(name);
+      return [];
+    }
     if (found === undefined) {
       throw new Error(
         `e2e/benchmark.json: fixture "${name}" was not found with an evals/ directory under ${FIXTURE_ROOTS.join(" or ")}.`,
@@ -80,11 +121,16 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
     }
     if (found.evalIds.length === 0)
       throw new Error(`e2e/benchmark.json: fixture "${name}" has no *.eval.ts files.`);
-    return { name, ...found };
+    const packageName = validateE2ePackageName(
+      found.packageJson?.name,
+      `${found.dir}/package.json`,
+    );
+    return [{ name, packageName, ...found }];
   });
 
   const selectedModels = narrowNames(models, narrow.models, "model");
   const selectedFixtures = narrowNames(fixtures, narrow.fixtures, "fixture");
+  const selectedNames = new Set(selectedFixtures.map(({ name }) => name));
   const selectedAttempts =
     narrow.attempts === undefined || narrow.attempts === ""
       ? attempts
@@ -92,15 +138,73 @@ export function selectBenchmark({ registry, matrix, findFixture, narrow = {} }) 
 
   return {
     attempts: selectedAttempts,
-    concurrency,
+    mockAttempts,
+    devStartup,
+    // Model-innermost leg order spreads the cap across models, so more legs
+    // than models would load each model harder than a full-registry run does
+    // and skew latency against it. GitHub cannot cap legs per model, so a
+    // model can still briefly run two legs when job durations differ.
+    concurrency: {
+      ...concurrency,
+      legs: Math.max(1, Math.min(concurrency.legs, selectedModels.length)),
+    },
     models: selectedModels,
-    fixtures: selectedFixtures,
-    mockWorlds: mockWorlds.map((name) => ({ name, package: matrixWorlds.get(name)?.package })),
+    fixtures: fixtures.filter(({ name }) => selectedNames.has(name) && fixtureNames.includes(name)),
+    mockFixtures: fixtures.filter(
+      ({ name }) => selectedNames.has(name) && mockFixtureNames.includes(name),
+    ),
+    mockWorlds,
+    absentFixtures,
   };
 }
 
+/**
+ * Mock worlds are `local`, a world package from e2e/matrix.json that a local
+ * production server selects (EVE_E2E_WORKFLOW_WORLD), or a matrix world with
+ * no package, which is a deploy target (`hosted`: `vercel`). An entry may be
+ * `{ name, fixtures }` to run only some mock fixtures there; each hosted leg
+ * is a deployment, so hosted worlds usually list a few.
+ */
+function readMockWorlds(entries, matrix, mockFixtureNames) {
+  if (!Array.isArray(entries))
+    throw new Error('e2e/benchmark.json: "mockWorlds" must be an array.');
+  const matrixWorlds = new Map((matrix?.worlds ?? []).map((world) => [world.name, world]));
+  const worlds = entries.map((entry) => {
+    const { name, fixtures } = typeof entry === "string" ? { name: entry } : (entry ?? {});
+    if (typeof name !== "string" || !NAME.test(name))
+      throw new Error(
+        'e2e/benchmark.json: every "mockWorlds" entry needs a lowercase-dashed name.',
+      );
+    if (name !== "local" && !matrixWorlds.has(name))
+      throw new Error(
+        `e2e/benchmark.json: mock world "${name}" must be "local" or a world in e2e/matrix.json (${[...matrixWorlds.keys()].join(", ")}).`,
+      );
+    if (fixtures !== undefined) {
+      const unknown = names(fixtures, `mockWorlds.${name}.fixtures`).filter(
+        (fixture) => !mockFixtureNames.includes(fixture),
+      );
+      if (unknown.length > 0)
+        throw new Error(
+          `e2e/benchmark.json: mock world "${name}" fixtures must be mock fixtures (${unknown.join(", ")}).`,
+        );
+    }
+    const pkg = matrixWorlds.get(name)?.package;
+    return { name, package: pkg, hosted: name !== "local" && pkg === undefined, fixtures };
+  });
+  if (new Set(worlds.map((world) => world.name)).size !== worlds.length)
+    throw new Error('e2e/benchmark.json: "mockWorlds" contains duplicates.');
+  return worlds;
+}
+
 /** Expand a selection into run legs. Leg ids are stable artifact-name suffixes. */
-export function planLegs({ models, fixtures, attempts, mockWorlds }) {
+export function planLegs({
+  models,
+  fixtures,
+  attempts,
+  mockAttempts = 1,
+  mockFixtures = fixtures,
+  mockWorlds,
+}) {
   // GitHub starts matrix legs in order and cannot cap concurrency per model,
   // so model-innermost order keeps each wave of legs spread across models and
   // each eval's attempts spread over time.
@@ -115,20 +219,23 @@ export function planLegs({ models, fixtures, attempts, mockWorlds }) {
     }
   }
   const mock = [];
-  for (const fixture of fixtures) {
-    const selectedWorlds = fixture.packageJson?.e2e?.worlds;
-    for (const world of mockWorlds) {
-      // `local` is the default world every fixture boots on; other worlds
-      // follow the fixture's own e2e.worlds selection.
-      if (
-        world.name !== "local" &&
-        Array.isArray(selectedWorlds) &&
-        !selectedWorlds.includes(world.name)
-      )
-        continue;
-      mock.push(
-        leg({ kind: "mock", fixture, model_name: "mock", model_id: "mock", world, attempt: 1 }),
-      );
+  for (let attempt = 1; attempt <= mockAttempts; attempt += 1) {
+    for (const fixture of mockFixtures) {
+      const selectedWorlds = fixture.packageJson?.e2e?.worlds;
+      for (const world of mockWorlds) {
+        if (world.fixtures !== undefined && !world.fixtures.includes(fixture.name)) continue;
+        // `local` is the default world every fixture boots on; other worlds
+        // follow the fixture's own e2e.worlds selection.
+        if (
+          world.name !== "local" &&
+          Array.isArray(selectedWorlds) &&
+          !selectedWorlds.includes(world.name)
+        )
+          continue;
+        mock.push(
+          leg({ kind: "mock", fixture, model_name: "mock", model_id: "mock", world, attempt }),
+        );
+      }
     }
   }
   return { live, mock };
@@ -140,13 +247,39 @@ function leg({ kind, fixture, model_name, model_id, world = { name: "local" }, a
     leg_id: [kind, fixture.name, model_name, world.name, attempt].join("__"),
     kind,
     fixture: fixture.name,
+    package: fixture.packageName,
     dir: fixture.dir,
     model_name,
     model_id,
     world: world.name,
     world_package: world.package ?? "",
+    hosted: world.hosted === true,
     attempt,
   };
+}
+
+/**
+ * Startup probe subjects are agents the startup script generates, by name.
+ * Run 1 of each starts from an empty project (cold); later runs reuse its
+ * caches (warm), so `runs` must leave at least one warm run.
+ */
+function readDevStartup(value) {
+  const runs = boundedInteger(
+    value?.runs,
+    MAX_STARTUP_RUNS,
+    'e2e/benchmark.json: "devStartup.runs"',
+  );
+  if (runs < 2)
+    throw new Error(
+      'e2e/benchmark.json: "devStartup.runs" must include a warm run after the cold one.',
+    );
+  const subjects = names(value?.subjects, "devStartup.subjects");
+  const unknown = subjects.filter((name) => !Object.hasOwn(STARTUP_SUBJECTS, name));
+  if (unknown.length > 0)
+    throw new Error(
+      `e2e/benchmark.json: unknown "devStartup.subjects" ${unknown.join(", ")}; choose from ${Object.keys(STARTUP_SUBJECTS).join(", ")}.`,
+    );
+  return { runs, subjects: subjects.map((name) => ({ name, ...STARTUP_SUBJECTS[name] })) };
 }
 
 function namedEntries(entries, key) {
@@ -207,6 +340,12 @@ function narrowNames(entries, input, label) {
   return requested.map((name) => known.get(name));
 }
 
+/** git's blob id for a file: `git rev-parse <commit>:<path>` for the committed file. */
+function gitBlobId(path) {
+  const body = readFileSync(path);
+  return createHash("sha1").update(`blob ${body.length}\0`).update(body).digest("hex");
+}
+
 function findFixtureOnDisk(name) {
   for (const root of FIXTURE_ROOTS) {
     const dir = join(root, name);
@@ -229,10 +368,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error("Usage: node scripts/eval-benchmark/plan.mjs <plan.json> [sha]");
     process.exit(1);
   }
-  const sha =
-    shaArgument ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const gitHead = (cwd) =>
+    execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  const sha = shaArgument ?? gitHead(".");
+  const release = process.env.BENCHMARK_RELEASE || undefined;
+  const eveVersion = JSON.parse(readFileSync("packages/eve/package.json", "utf8")).version;
+  if (release !== undefined && eveVersion !== release)
+    throw new Error(
+      `The checkout at ${sha} is eve ${eveVersion}, not ${releaseTag(release)}; check out the release's tag to backfill it.`,
+    );
   const selection = selectBenchmark({
-    registry: JSON.parse(readFileSync("e2e/benchmark.json", "utf8")),
+    registry: JSON.parse(readFileSync(join(HARNESS_ROOT, "e2e/benchmark.json"), "utf8")),
     matrix: JSON.parse(readFileSync("e2e/matrix.json", "utf8")),
     findFixture: findFixtureOnDisk,
     narrow: {
@@ -240,15 +386,51 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       fixtures: process.env.BENCHMARK_FIXTURES,
       attempts: process.env.BENCHMARK_ATTEMPTS,
     },
+    backfill: release !== undefined,
   });
+  if (selection.absentFixtures.length > 0)
+    console.error(
+      `eve ${eveVersion} predates registry fixtures ${selection.absentFixtures.join(", ")}; they are not planned.`,
+    );
   const models = await resolveModelReleases(selection.models);
   const { live, mock } = planLegs({ ...selection, models });
+  const plannedAt =
+    release === undefined ? new Date().toISOString() : await releasePublishedAt(release);
+  // main's eval runner has every flag the benchmark passes.
+  const flags = release === undefined ? { keepState: true } : evalFlags(release);
   const plan = {
     schema_version: PLAN_SCHEMA_VERSION,
     sha,
-    planned_at: new Date().toISOString(),
+    eve_version: eveVersion,
+    planned_at: plannedAt,
+    ...(release === undefined
+      ? {}
+      : {
+          source: {
+            kind: "release-backfill",
+            repository: process.env.GITHUB_REPOSITORY ?? null,
+            release,
+            tag: releaseTag(release),
+            published_at: plannedAt,
+            executed_at: new Date().toISOString(),
+            harness_sha: gitHead(HARNESS_ROOT),
+          },
+        }),
     registry: {
       attempts: selection.attempts,
+      mock_attempts: selection.mockAttempts,
+      // The startup script defines its agents, so its blob id is their digest.
+      // The harness runs it, so a backfill shares main's digest.
+      dev_startup:
+        selection.devStartup === null
+          ? null
+          : {
+              ...selection.devStartup,
+              subjects: selection.devStartup.subjects.map((subject) => ({
+                ...subject,
+                digest: gitBlobId(join(HARNESS_ROOT, STARTUP_SCRIPT)),
+              })),
+            },
       // Concurrency changes measured latency, so every manifest records it.
       concurrency: {
         legs: selection.concurrency.legs,
@@ -256,7 +438,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       },
       models,
       mock_worlds: selection.mockWorlds.map((world) => world.name),
-      fixtures: selection.fixtures.map(({ name, dir, evalIds }) => ({
+      mock_fixtures: selection.mockFixtures.map((fixture) => fixture.name),
+      // Live and mock fixtures alike; records read each one's digest here.
+      fixtures: [
+        ...new Map(
+          [...selection.fixtures, ...selection.mockFixtures].map((fixture) => [
+            fixture.name,
+            fixture,
+          ]),
+        ).values(),
+      ].map(({ name, dir, evalIds }) => ({
         name,
         dir,
         digest: fixtureDigest(sha, dir),
@@ -268,11 +459,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const lines = [
     `live_matrix=${JSON.stringify(live)}`,
-    `mock_matrix=${JSON.stringify(mock)}`,
+    `mock_matrix=${JSON.stringify(mock.filter((leg) => !leg.hosted))}`,
+    `hosted_matrix=${JSON.stringify(mock.filter((leg) => leg.hosted))}`,
+    `dev_startup=${JSON.stringify(selection.devStartup)}`,
     `max_parallel=${selection.concurrency.legs}`,
     `evals_per_leg=${selection.concurrency.evalsPerLeg}`,
+    `keep_state=${flags.keepState}`,
   ];
-  console.error(`Planned ${live.length} live and ${mock.length} mock legs at ${sha}.`);
+  console.error(
+    `Planned ${live.length} live and ${mock.length} mock legs at ${sha} (eve ${eveVersion}${release === undefined ? "" : `, dated ${plannedAt}`}).`,
+  );
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
   else process.stdout.write(`${lines.join("\n")}\n`);
 }

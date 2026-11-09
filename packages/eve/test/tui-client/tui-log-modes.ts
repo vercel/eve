@@ -23,7 +23,7 @@ const SANDBOX_MARK = "SANDBOX_LOG_MARK_6a2";
 process.env.EVE_TUI_UNICODE = "1";
 
 async function snapshotForMode(mode: "all" | "error" | "none"): Promise<string> {
-  const client = new Client({ host: UNREACHABLE_HOST });
+  const client = new Client({ baseUrl: UNREACHABLE_HOST });
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const renderer = new TerminalRenderer({

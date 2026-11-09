@@ -1,3 +1,4 @@
+import type { InstrumentationChannel } from "#public/channels/index.js";
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import type {
@@ -22,15 +23,15 @@ import {
 } from "#internal/instrumentation.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import type {
-  InstrumentationChannel,
   InstrumentationRuntimeContext,
-  InstrumentationStepStartedEventInput,
+  InstrumentationModelStartedInput,
 } from "#public/instrumentation/index.js";
 import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
 const log = createLogger("harness.instrumentation-runtime-context");
 
 export interface BuildTelemetryRuntimeContextInput {
+  readonly attempt: number;
   readonly capturesContent: boolean;
   readonly context?: InstrumentationRuntimeContextSnapshot;
   readonly emissionState: TurnPosition;
@@ -84,6 +85,10 @@ export function buildTelemetryRuntimeContext(
     return undefined;
   }
 
+  if (input.emissionState.runId === undefined) {
+    log.warn("cannot resolve instrumentation context without a model run");
+    return undefined;
+  }
   const providerRuntimeContext = resolveProviderRuntimeContext(input);
 
   return {
@@ -92,9 +97,9 @@ export function buildTelemetryRuntimeContext(
   };
 }
 
-function buildInstrumentationStepStartedInput(
+function buildInstrumentationModelStartedInput(
   input: Omit<BuildTelemetryRuntimeContextInput, "environment">,
-): InstrumentationStepStartedEventInput {
+): InstrumentationModelStartedInput {
   const context = input.context ?? snapshotInstrumentationRuntimeContext(contextStorage.getStore());
   const projection = context.channel;
 
@@ -114,13 +119,14 @@ function buildInstrumentationStepStartedInput(
       id: input.session.sessionId,
       parent: context.parent,
     },
-    step: {
-      index: input.emissionState.stepIndex,
-    },
-    turn: {
-      id: input.emissionState.turnId,
-      sequence: input.emissionState.sequence,
-    },
+    run: { id: input.emissionState.runId!, attempt: input.attempt },
+    turn:
+      input.emissionState.turnId === undefined
+        ? undefined
+        : {
+            id: input.emissionState.turnId,
+            sequence: input.emissionState.sequence,
+          },
   };
 }
 
@@ -165,7 +171,7 @@ function resolveProviderRuntimeContext(
   for (const resolver of resolvers) {
     const source = "provider.runtimeContext";
     const invoke = () => {
-      const stepStartedInput = buildInstrumentationStepStartedInput(input);
+      const stepStartedInput = buildInstrumentationModelStartedInput(input);
       return resolver(stepStartedInput);
     };
     const result = resolveInstrumentationProjection({

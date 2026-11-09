@@ -12,7 +12,7 @@ export default defineEval({
     const turn = await t.send("DEFERRED-LEDGER Alice asks for the west ledger and pet inventory.");
 
     turn.expectOk();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     t.toolOrder([SEARCH_TOOL, "ledger__us_west", "petstore__getInventory"]);
     turn.calledTool("ledger__us_west", {
       count: 1,

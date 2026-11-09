@@ -11,10 +11,11 @@ const {
   vercelOidc,
 } = vi.hoisted(() => ({
   createLinqAdapter: vi.fn(
-    (_config: {
-      credentials?: () => unknown | Promise<unknown>;
-      webhookVerifier?: (request: Request, rawBody: Uint8Array) => unknown;
-    }) => ({
+    (
+      _config: Parameters<
+        typeof import("#compiled/@linqapp/chat-sdk-adapter/index.js").createLinqAdapter
+      >[0],
+    ) => ({
       name: "linq",
     }),
   ),
@@ -38,7 +39,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     channel: { routes: [] },
     send,
   }),
-  messageToUserContent: (message: Message) => message.text,
+  messageContentOf: (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),

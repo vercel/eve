@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 
@@ -7,7 +7,7 @@ interface WebSearchEventOrder {
   readonly resultIndex: number;
 }
 
-export function narratedWebSearchOrder(events: readonly MessageStreamEvent[]): boolean {
+export function narratedWebSearchOrder(events: readonly SessionStreamEvent[]): boolean {
   const order = webSearchEventOrder(events);
   return (
     order !== undefined &&
@@ -16,7 +16,7 @@ export function narratedWebSearchOrder(events: readonly MessageStreamEvent[]): b
   );
 }
 
-export function unNarratedWebSearchOrder(events: readonly MessageStreamEvent[]): boolean {
+export function unNarratedWebSearchOrder(events: readonly SessionStreamEvent[]): boolean {
   const order = webSearchEventOrder(events);
   return (
     order !== undefined &&
@@ -26,21 +26,19 @@ export function unNarratedWebSearchOrder(events: readonly MessageStreamEvent[]):
 }
 
 function webSearchEventOrder(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
 ): WebSearchEventOrder | undefined {
-  const requests = events.flatMap((event, eventIndex) => {
-    if (event.type !== "actions.requested") return [];
-
-    return event.data.actions.flatMap((action) => {
-      if (action.kind !== "tool-call" || action.toolName !== WEB_SEARCH_TOOL_NAME) return [];
-      return [{ callId: action.callId, eventIndex }];
-    });
-  });
-  const results = events.flatMap((event, eventIndex) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== WEB_SEARCH_TOOL_NAME) return [];
-    return [{ callId: event.data.result.callId, eventIndex }];
-  });
+  const requests = events.flatMap((event, eventIndex) =>
+    event.type === "call.requested" && event.data.capability.name === WEB_SEARCH_TOOL_NAME
+      ? [{ callId: event.data.callId, eventIndex }]
+      : [],
+  );
+  const callIds = new Set(requests.map((request) => request.callId));
+  const results = events.flatMap((event, eventIndex) =>
+    event.type === "call.settled" && callIds.has(event.data.callId)
+      ? [{ callId: event.data.callId, eventIndex }]
+      : [],
+  );
 
   const [request] = requests;
   const [result] = results;
@@ -58,26 +56,24 @@ function webSearchEventOrder(
 }
 
 function preToolNarrationExists(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   requestIndex: number,
 ): boolean {
   return events
     .slice(0, requestIndex)
     .some(
       (event) =>
-        event.type === "message.completed" &&
-        event.data.finishReason === "tool-calls" &&
-        event.data.message.trim().length > 0,
+        event.type === "content.completed" &&
+        event.data.phase === "narration" &&
+        String(event.data.value ?? "").trim().length > 0,
     );
 }
 
 function finalMessageFollowsResult(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   resultIndex: number,
 ): boolean {
   return events
     .slice(resultIndex + 1)
-    .some(
-      (event) => event.type === "message.completed" && event.data.finishReason !== "tool-calls",
-    );
+    .some((event) => event.type === "content.completed" && event.data.phase === "reply");
 }

@@ -361,11 +361,12 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
       cwd: appRoot,
     });
   } catch (error) {
+    const stdout =
+      typeof error === "object" && error !== null && "stdout" in error ? String(error.stdout) : "";
     const stderr =
-      typeof error === "object" && error !== null && "stderr" in error
-        ? String(error.stderr)
-        : String(error);
-    throw new Error(`Portable consumer typecheck failed:\n${stderr}`, { cause: error });
+      typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
+    const diagnostics = [stdout, stderr].filter(Boolean).join("\n") || String(error);
+    throw new Error(`Portable consumer typecheck failed:\n${diagnostics}`, { cause: error });
   }
 }
 

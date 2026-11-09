@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -190,6 +190,8 @@ async function scaffoldProject(
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
+  // A fresh nested target such as `apps/my-agent` may name parents that do not exist yet.
+  await mkdir(parentPath, { recursive: true });
   const stagingDirectory =
     createInPlace && overwriteExisting ? undefined : await mkdtemp(join(parentPath, ".eve-init-"));
   const workspaceRootMutations: WorkspaceRootMutation[] = [];

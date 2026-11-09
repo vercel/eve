@@ -21,25 +21,6 @@ export function getContext<T>(key: ContextKey<T>): T | undefined {
 }
 
 /**
- * Returns the current value of a context key, throwing when unset.
- *
- * @throws When the key is not set or when called outside of a managed
- *   step execution.
- */
-export function requireContext<T>(key: ContextKey<T>): T {
-  return loadContext().require(key);
-}
-
-/**
- * Returns whether the key is currently set in the active context.
- *
- * @throws When called outside of a managed step execution.
- */
-export function hasContext<T>(key: ContextKey<T>): boolean {
-  return loadContext().has(key);
-}
-
-/**
  * Sets the durable value of a context key in the active context.
  *
  * Accepts either a direct value or an updater function that receives the

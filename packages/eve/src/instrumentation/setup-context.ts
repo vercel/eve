@@ -3,14 +3,14 @@ import {
   resolveEveEvaluationRunId,
 } from "#internal/application/dev-environment.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import type { ProviderSetupContext } from "#public/instrumentation/provider.js";
+import type { InstrumentationSetupContext } from "#public/instrumentation/provider.js";
 
 /**
  * Builds the context handed to an authored `setup` at server startup.
  *
  * @internal — not part of the public API.
  */
-export function createInstrumentationSetupContext(agentName: string): ProviderSetupContext {
+export function createInstrumentationSetupContext(agentName: string): InstrumentationSetupContext {
   const evaluationRunId = resolveEveEvaluationRunId();
   return {
     agentName,

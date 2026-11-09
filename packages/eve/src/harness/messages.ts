@@ -1,4 +1,6 @@
-import type { ModelMessage, TextPart, UserContent } from "ai";
+import type { ModelMessage, UserContent } from "ai";
+
+import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
 import type {
   ChannelDeliveryMetadataEntry,
@@ -6,8 +8,8 @@ import type {
   SessionAuthContext,
   TurnCaller,
 } from "#channel/types.js";
-import type { InputResponse } from "#shared/input.js";
-import type { StepInput } from "#harness/types.js";
+import type { Answer } from "#shared/input.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
@@ -83,6 +85,21 @@ export function createFrameworkUserMessage(
   return createUserMessage(kind, content, metadata);
 }
 
+/** The metadata key that marks the messages a turn's input brought into history. */
+const TURN_ANCHOR_KEY = "eve.turn";
+
+/** Marks a turn's input message, so what eve adds for that turn can sit just ahead of it. */
+export function anchorToTurn<T extends UserModelMessage>(message: T, turnId: string): T {
+  return { ...message, metadata: { ...message.metadata, [TURN_ANCHOR_KEY]: turnId } };
+}
+
+/** The turn whose input brought a message into history, when it's marked. */
+export function turnAnchorOf(message: HarnessModelMessage): string | undefined {
+  if (message.role !== "user") return undefined;
+  const turnId = message.metadata?.[TURN_ANCHOR_KEY];
+  return typeof turnId === "string" ? turnId : undefined;
+}
+
 /** True when a value is a recognized classification for a user-role message. */
 export function isUserMessageKind(value: unknown): value is UserMessageKind {
   return value === "user" || isFrameworkMessageKind(value);
@@ -130,35 +147,35 @@ export function isFrameworkMessageKind(value: unknown): value is FrameworkMessag
   );
 }
 
-type FrameworkStepInput = StepInput & {
+type FrameworkStepInput = HarnessStepInput & {
   readonly frameworkMessageKind?: FrameworkMessageKind;
 };
 
 /** Marks an execution-owned delivery so its model message retains provenance. */
-export function markFrameworkStepInput(input: StepInput, kind: FrameworkMessageKind): StepInput {
-  return { ...input, frameworkMessageKind: kind } as FrameworkStepInput;
+export function markFrameworkStepInput<T extends object>(input: T, kind: FrameworkMessageKind): T {
+  return { ...input, frameworkMessageKind: kind };
 }
 
 /** Returns the framework reason for an execution-owned user message, when present. */
 export function frameworkMessageKindForStepInput(
-  input: StepInput | undefined,
+  input: object | undefined,
 ): FrameworkMessageKind | undefined {
   if (input === undefined) return undefined;
   const { frameworkMessageKind } = input as FrameworkStepInput;
   return isFrameworkMessageKind(frameworkMessageKind) ? frameworkMessageKind : undefined;
 }
 
+/** A turn's input as a channel payload or the harness carries it. */
+type TurnInput = Omit<HarnessStepInput, "answers"> & { readonly answers?: readonly Answer[] };
+
 /**
- * Merges two {@link StepInput} values into one.
- *
- * Used by the harness to coalesce deferred step input with the current
- * turn's input, and by the execution layer after calling `onDeliver`
- * for each queued delivery payload.
+ * Merges two turn inputs into one: deferred step input with the current turn's, or the inputs
+ * `deliver` made of a delivery's payloads.
  */
-export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
-  const inputResponses = coalesceInputResponses({
-    a: a.inputResponses,
-    b: b.inputResponses,
+export function coalesceTurnInputs<T extends TurnInput>(a: T, b: T): T {
+  const answers = coalesceAnswers({
+    a: a.answers,
+    b: b.answers,
   });
   const message = coalesceMessage({
     a: a.message,
@@ -176,26 +193,18 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
-  const attributedInputResponses = [
-    ...(a.attributedInputResponses ?? []),
-    ...(b.attributedInputResponses ?? []),
-  ];
-
   const result: {
-    attributedInputResponses?: StepInput["attributedInputResponses"];
-    inputResponses?: readonly InputResponse[];
-    message?: string | UserContent;
+    history?: HarnessStepInput["history"];
+    deliveries?: HarnessStepInput["deliveries"];
+    answers?: readonly Answer[];
+    message?: MessageContent;
     context?: readonly string[];
-    history?: StepInput["history"];
-    outputSchema?: StepInput["outputSchema"];
+    outputSchema?: HarnessStepInput["outputSchema"];
   } = {};
-
-  if (inputResponses !== undefined) {
-    result.inputResponses = inputResponses;
-  }
-
-  if (attributedInputResponses.length > 0) {
-    result.attributedInputResponses = attributedInputResponses;
+  const deliveries = [...(a.deliveries ?? []), ...(b.deliveries ?? [])];
+  if (deliveries.length > 0) result.deliveries = deliveries;
+  if (answers !== undefined) {
+    result.answers = answers;
   }
 
   if (message !== undefined) {
@@ -216,9 +225,9 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   // Typed text describes one message, so it survives only when the other input has none.
   const inputText =
-    normalizeUserContent(a.message) === undefined
+    normalizeMessage(a.message) === undefined
       ? readInputText(b)
-      : normalizeUserContent(b.message) === undefined
+      : normalizeMessage(b.message) === undefined
         ? readInputText(a)
         : undefined;
   return attachClientContext(
@@ -227,7 +236,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
         ? result
         : markFrameworkStepInput(result, frameworkMessageKind),
       inputText,
-    ),
+    ) as T,
     ephemeralContext,
   );
 }
@@ -238,9 +247,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
  * Returns `undefined` when no parts remain, allowing callers to omit the user
  * turn entirely rather than create an empty model prompt block.
  */
-export function normalizeUserContent(
-  content: string | UserContent | undefined,
-): string | UserContent | undefined {
+export function normalizeMessage(content: MessageContent | undefined): MessageContent | undefined {
   if (content === undefined) {
     return undefined;
   }
@@ -267,21 +274,6 @@ export const TOOL_RESULT_BOUNDARY = "…";
 /** Whether a user message appended to `messages` would share a turn with tool results. */
 export function followsToolResults(messages: readonly ModelMessage[]): boolean {
   return messages.findLast((message) => message.role !== "user")?.role === "tool";
-}
-
-export function createTurnInputMessages(input: StepInput | undefined): UserModelMessage[] {
-  const messages = [...(readClientContext(input) ?? []), ...(input?.context ?? [])].map((content) =>
-    createFrameworkUserMessage("context.instruction", content),
-  );
-  const content = normalizeUserContent(input?.message);
-  if (content === undefined) return messages;
-  const kind = frameworkMessageKindForStepInput(input);
-  return [
-    ...messages,
-    kind === undefined
-      ? createUserMessage("user", content)
-      : createFrameworkUserMessage(kind, content),
-  ];
 }
 
 /** Removes blank text blocks that some providers reject from model-bound history. */
@@ -354,10 +346,10 @@ function extractMessageText(message: ModelMessage): string {
     .join("");
 }
 
-function coalesceInputResponses(input: {
-  readonly a?: readonly InputResponse[];
-  readonly b?: readonly InputResponse[];
-}): readonly InputResponse[] | undefined {
+function coalesceAnswers(input: {
+  readonly a?: readonly Answer[];
+  readonly b?: readonly Answer[];
+}): readonly Answer[] | undefined {
   const a = input.a ?? [];
   const b = input.b ?? [];
 
@@ -383,8 +375,8 @@ function coalesceContext(input: {
 }
 
 function coalesceFrameworkMessageKind(input: {
-  readonly a: StepInput;
-  readonly b: StepInput;
+  readonly a: TurnInput;
+  readonly b: TurnInput;
 }): FrameworkMessageKind | undefined {
   const a = frameworkMessageKindForStepInput(input.a);
   const b = frameworkMessageKindForStepInput(input.b);
@@ -397,11 +389,11 @@ function coalesceFrameworkMessageKind(input: {
  * Merges two optional turn messages into one after removing blank content.
  */
 function coalesceMessage(input: {
-  readonly a?: string | UserContent;
-  readonly b?: string | UserContent;
-}): string | UserContent | undefined {
-  const a = normalizeUserContent(input.a);
-  const b = normalizeUserContent(input.b);
+  readonly a?: MessageContent;
+  readonly b?: MessageContent;
+}): MessageContent | undefined {
+  const a = normalizeMessage(input.a);
+  const b = normalizeMessage(input.b);
 
   if (a === undefined) {
     return b;
@@ -411,37 +403,30 @@ function coalesceMessage(input: {
     return a;
   }
 
-  return appendUserContent({ appended: b, existing: a });
+  return appendMessage({ appended: b, existing: a });
 }
 
 /**
  * Appends user content while preserving structured attachment parts.
  */
-export function appendUserContent(input: {
-  readonly appended: string | UserContent;
-  readonly existing: string | UserContent;
-}): string | UserContent {
+export function appendMessage(input: {
+  readonly appended: MessageContent;
+  readonly existing: MessageContent;
+}): MessageContent {
   if (typeof input.existing === "string" && typeof input.appended === "string") {
     return `${input.existing}\n\n${input.appended}`;
   }
-
-  const merged: UserContentArray = [
-    ...toUserContentArray(input.existing),
-    ...toUserContentArray(input.appended),
-  ];
-  return merged;
+  return [...partsOf(input.existing), ...partsOf(input.appended)];
 }
 
-type UserContentArray = Exclude<UserContent, string>;
+function partsOf(value: MessageContent): readonly MessagePart[] {
+  if (typeof value !== "string") return value;
+  return value.length > 0 ? [{ text: value, type: "text" }] : [];
+}
 
-function toUserContentArray(value: string | UserContent): UserContentArray {
-  if (typeof value === "string") {
-    return value.length > 0 ? [{ type: "text", text: value } satisfies TextPart] : [];
-  }
-  if (Array.isArray(value)) {
-    return [...value];
-  }
-  return [];
+/** A person's message as the model reads it. */
+export function userContentOf(message: MessageContent): string | UserContent {
+  return typeof message === "string" ? message : [...message];
 }
 
 /**
@@ -506,5 +491,22 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     caller,
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
     payloads,
+  };
+}
+
+/** Selects or transforms payloads without separating them from their receipt and caller identities. */
+export function selectDeliveryPayloads<T extends DeliverLike>(
+  delivery: T,
+  selected: readonly { readonly index: number; readonly payload: DeliverPayload }[],
+): T {
+  const metadata = selected.flatMap(({ index }, payloadIndex) =>
+    (delivery.deliveryMetadata ?? [])
+      .filter((entry) => entry.payloadIndex === index)
+      .map((entry) => ({ ...entry, payloadIndex })),
+  );
+  return {
+    ...delivery,
+    payloads: selected.map(({ payload }) => payload),
+    deliveryMetadata: metadata.length === 0 ? undefined : metadata,
   };
 }

@@ -28,6 +28,7 @@ Large tool outputs are the main thing to compress: reduce each to the findings t
 // Fallback cap for conversational text, applied oldest-first only when the
 // rendered transcript exceeds the caller's token budget.
 const DEGRADED_TEXT_LIMIT = 2_000;
+const DEGRADE_SLACK_CHARS = 64;
 
 interface CompactionTranscriptEntry {
   readonly content: string;
@@ -108,7 +109,15 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    const degraded = renderCompactionMessageContent(message, DEGRADED_TEXT_LIMIT);
+    // Cut only what the budget still needs, never below the floor: a single large
+    // entry (the cut-out middle of an oversized message) keeps as much as fits. The
+    // slack absorbs the estimate's rounding so a sliver of excess does not
+    // reach into the next entry.
+    const limit = Math.max(
+      DEGRADED_TEXT_LIMIT,
+      entry.content.length - Math.ceil(excessTokens * 4) - DEGRADE_SLACK_CHARS,
+    );
+    const degraded = renderCompactionMessageContent(message, limit);
     if (degraded.length >= entry.content.length) {
       continue;
     }
@@ -225,14 +234,17 @@ function renderToolResultOutput(value: unknown, limit: number): string {
 
 /**
  * The text a tool-result output is measured and clipped by, in history
- * capping and in the summarizer transcript alike: a text output is its
- * value, any other output its JSON. Sharing it keeps a capped history
- * result whole when the summarizer renders it.
+ * capping and in the summarizer transcript alike: a text or error-text
+ * output is its value, any other output its JSON. Sharing it keeps a capped
+ * history result whole when the summarizer renders it.
  */
 export function serializeToolResultOutput(output: unknown): string {
   if (output !== null && typeof output === "object") {
     const candidate = output as { readonly type?: unknown; readonly value?: unknown };
-    if (candidate.type === "text" && typeof candidate.value === "string") {
+    if (
+      (candidate.type === "text" || candidate.type === "error-text") &&
+      typeof candidate.value === "string"
+    ) {
       return candidate.value;
     }
   }
@@ -353,7 +365,7 @@ export function sliceUtf16Safe(value: string, limit: number): string {
 /**
  * Keeps the head and tail of an oversized tool payload, never exceeding
  * `limit`. Tool output often ends with what matters most: the failing test,
- * the error, or the `exitCode` and `status` that `bash` serializes last.
+ * the error, or the exit code that `bash` reports last.
  */
 export function clipMiddleUtf16Safe(value: string, limit: number): string {
   if (value.length <= limit) {

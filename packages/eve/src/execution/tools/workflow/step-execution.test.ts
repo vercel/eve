@@ -138,6 +138,8 @@ function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext 
     baseUrl: "https://agent.example",
     token: `callback-${user}`,
     authorizationResults: [],
+    delegated: false,
+    channel: { kind: "unknown", metadata: {} },
     abortSignal: new AbortController().signal,
     session: {
       id: "session-1",
@@ -408,7 +410,9 @@ describe("workflow step authorization", () => {
     };
     const pending = await runStep(execute);
     if (pending.kind !== "authorization-required") throw new Error("Expected authorization");
-    const challenge = pending.signal.challenges[0]!;
+    // A step result is serialized across the step boundary.
+    expect(structuredClone(pending)).toEqual(pending);
+    const challenge = pending.challenges[0]!;
     if (challenge.attemptId === undefined) {
       throw new Error("Expected authorization attempt id");
     }

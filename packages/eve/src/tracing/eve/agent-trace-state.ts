@@ -24,15 +24,10 @@ export interface AgentSessionTraceState {
 
 export interface AgentTurnTraceState {
   readonly agentName?: string;
-  /** Recorded at the turn's terminal event; the span ends at the session transition. */
-  readonly terminal?: {
-    readonly outcome: "cancelled" | "completed" | "failed";
-    readonly errorName?: string;
-    readonly errorMessage?: string;
-  };
   readonly traceSessionId: string;
   readonly caller?: SpanContext;
   readonly channelDelivery?: AgentTurnChannelDeliveryTraceState;
+  readonly consumedDeliveryId?: string | null;
   readonly context: SpanContext;
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly initiatorPrincipal?: InstrumentationPrincipalSummary;

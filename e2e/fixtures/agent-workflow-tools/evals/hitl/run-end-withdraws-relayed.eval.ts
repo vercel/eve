@@ -10,18 +10,20 @@ export default defineEval({
   tags: ["hitl", "relayed"],
   async test(t) {
     const parked = await t.send("WORKFLOW-LAPSE-START Alice offers a quick deploy of the api.");
-    const request = parked.session.requireInputRequest({ toolName: "lapsing_offer" });
+    const request = parked.session.requireInteraction({ toolName: "lapsing_offer" });
     const startIndex = parked.session.state.streamIndex;
 
-    const lapsed = (await t.target.watchTurn(parked.sessionId, { startIndex }).result()).expectOk();
-    lapsed.event("input.resolved", {
+    const lapsed = (
+      await t.target.attach(parked.sessionId, { startIndex }).watch().result()
+    ).expectOk();
+    lapsed.event("interaction.settled", {
       count: 1,
-      data: { resolutions: [{ outcome: "cancelled", requestId: request.requestId }] },
+      data: { interactionId: request.interactionId, outcome: "withdrawn" },
     });
     lapsed.eventOrder([
-      { type: "input.resolved" },
-      { type: "action.result", data: { result: { toolName: "lapsing_offer" } } },
-      { type: "turn.completed" },
+      { type: "interaction.settled" },
+      { type: "call.settled", data: { callId: request.call?.callId } },
+      { data: { outcome: "completed" }, type: "turn.settled" },
     ]);
     lapsed.calledTool("lapsing_offer", { output: { offer: "lapsed" }, count: 1 });
     lapsed.messageIncludes('WORKFLOW-LAPSE-RESULT {"offer":"lapsed","service":"api"}');

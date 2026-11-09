@@ -7,7 +7,6 @@ import type { AudienceContext } from "#shared/conversation-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const audienceInput: AudienceContext<Record<string, unknown>> = {
-  auth: null,
   caller: { type: "anonymous" },
   channel: { kind: "channel:support", name: "support" },
   environment: "production",
@@ -66,7 +65,7 @@ describe("channel instrumentation", () => {
     });
   });
 
-  it("uses deprecated metadata audience as the v19 compatibility fallback", () => {
+  it("does not classify visibility from metadata without an audience hook", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const adapter: ChannelAdapter = {
       instrumentation: { metadata: () => ({ audience: "public", threadId: "thread-1" }) },
@@ -74,16 +73,14 @@ describe("channel instrumentation", () => {
       state: {},
     };
 
-    expect(resolveAudience(adapter, audienceInput)).toBe("public");
-    expect(warn).toHaveBeenCalledExactlyOnceWith(
-      "channel legacy-kind uses deprecated metadata audience; move it to the audience() hook",
-    );
+    expect(resolveAudience(adapter, audienceInput)).toBe("unknown");
+    expect(warn).not.toHaveBeenCalled();
     expect(buildChannelInstrumentationProjection({ adapter }).metadata).toEqual({
       threadId: "thread-1",
     });
   });
 
-  it("prefers the audience hook over deprecated metadata audience", () => {
+  it("classifies visibility only through the audience hook", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const adapter: ChannelAdapter = {
       instrumentation: {

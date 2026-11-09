@@ -15,7 +15,7 @@ export default defineEval({
     await t.send("Please use the dynamic multi alpha skill and follow its instructions exactly.");
 
     t.succeeded();
-    t.loadedSkill("alpha", {
+    t.calledSkill("alpha", {
       output: new RegExp(DYNAMIC_MULTI_ALPHA_TOKEN, "u"),
     });
     t.messageIncludes(DYNAMIC_MULTI_ALPHA_TOKEN);

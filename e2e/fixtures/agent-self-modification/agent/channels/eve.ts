@@ -1,12 +1,5 @@
+import { localDev } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 
-export default eveChannel({
-  auth: () => ({
-    attributes: { fixture: "self-modification" },
-    authenticator: "e2e-fixture",
-    issuer: "e2e",
-    principalId: "self-modification-e2e-user",
-    principalType: "user",
-    subject: "self-modification-e2e-user",
-  }),
-});
+// The local self-modification editor is offered only to the developer running `eve dev`.
+export default eveChannel({ auth: [localDev()] });

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
+import type { EveMessagePart, EveToolPart } from "eve/vue";
+import { activeTurn } from "eve/events";
 
-const { cancel, data, status, error, prewarm, respond, send } = useEveAgent();
+const { cancel, messages, status, error, prewarm, respond, send, view } = useEveAgent();
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
-const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isBusy = computed(() => status.value === "busy");
+const turnOpen = computed(() => activeTurn(view.value) !== undefined);
 const isResuming = computed(() => status.value === "resuming");
 const isInputDisabled = computed(() => isBusy.value || isResuming.value);
-const isEmpty = computed(() => data.value.messages.length === 0);
+const isEmpty = computed(() => messages.value.length === 0);
 const cancellationError = ref<string>();
 const errorMessage = computed(() => cancellationError.value ?? error.value?.message);
 
@@ -24,7 +26,7 @@ function onMessagesScroll() {
 }
 
 watch(
-  () => data.value.messages,
+  () => messages.value,
   () => {
     if (!isNearBottom.value) return;
     messagesEl.value?.scrollTo({
@@ -69,10 +71,10 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function handleInputResponses(
+function handleAnswers(
   responses: readonly {
     readonly optionId?: string;
-    readonly requestId: string;
+    readonly interactionId: string;
     readonly text?: string;
   }[],
 ) {
@@ -81,7 +83,7 @@ function handleInputResponses(
 }
 
 function partKey(part: EveMessagePart, index: number): string {
-  if (part.type === "dynamic-tool") return part.toolCallId;
+  if (part.type === "tool") return part.callId;
   return `${part.type}:${index}`;
 }
 
@@ -114,7 +116,7 @@ function formatBytes(size: number | undefined): string | undefined {
           <span class="text-muted-foreground">/</span>
           <span class="text-muted-foreground">agent</span>
         </div>
-        <StatusDot :status="status" />
+        <StatusDot :status="status" :error="!!errorMessage" />
       </div>
     </header>
 
@@ -149,7 +151,7 @@ function formatBytes(size: number | undefined): string | undefined {
       >
         <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6">
           <div
-            v-for="message in data.messages"
+            v-for="message in messages"
             :key="message.id"
             class="flex w-full gap-2"
             :class="message.role === 'user' ? 'ml-auto justify-end' : 'justify-start'"
@@ -248,10 +250,10 @@ function formatBytes(size: number | undefined): string | undefined {
                 </div>
 
                 <ToolBlock
-                  v-else-if="part.type === 'dynamic-tool'"
-                  :part="part as EveDynamicToolPart"
+                  v-else-if="part.type === 'tool'"
+                  :part="part as EveToolPart"
                   :can-respond="!isInputDisabled"
-                  @input-responses="handleInputResponses"
+                  @answers="handleAnswers"
                 />
               </template>
             </div>
@@ -273,7 +275,7 @@ function formatBytes(size: number | undefined): string | undefined {
             @keydown="onKeydown"
           />
           <button
-            v-if="isBusy"
+            v-if="turnOpen"
             type="button"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
             @click="requestCancellation"

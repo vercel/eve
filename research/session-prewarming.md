@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1476
 status: implemented
-last_updated: "2026-09-17"
+last_updated: "2026-10-23"
 ---
 
 # Session prewarming
@@ -33,8 +33,9 @@ session remains the primary ID in report metadata.
 ## Runtime boundary
 
 Prewarming starts Workflow, creates the initial durable snapshot, and claims the existing inbox.
-It parks before channel delivery, session hooks, dynamic definitions, sandbox setup, and tracing
-of the first turn. No initial `session.started` or `session.waiting` event is emitted.
+It parks before channel delivery, session hooks, dynamic definitions, and tracing of the first
+turn, while the [session prewarmers](./session-prewarmers.md) start the sandbox beside the wait.
+No initial `session.started` or `session.waiting` event is emitted.
 
 The first message runs `onMessage`, then resumes the inbox. The normal turn step initializes the
 session with that message's auth and context and starts `turn_0`. The initiator is established

@@ -13,10 +13,10 @@ export default defineEval({
       'Call the auth-probe tool exactly once with marker "nonblocking". Include its result.',
     );
     const session = held.session;
-    held.event("authorization.required", { count: 1 });
-    held.notEvent("authorization.completed");
-    held.event("turn.waiting", { count: 1 });
-    held.notEvent("session.waiting");
+    held.event("interaction.opened", { count: 1, data: { request: { kind: "sign-in" } } });
+    held.notEvent("interaction.settled");
+    held.event("turn.paused", { count: 1 });
+    held.notEvent("turn.settled");
 
     const steered = await session.send(
       "Never mind the probe. Do not call any tools. Reply with exactly AUTH-OPEN-MESSAGE-OK.",
@@ -25,10 +25,9 @@ export default defineEval({
     if (steered.sessionId !== held.sessionId) {
       throw new Error("Steering the held turn changed session identity.");
     }
-    steered.event("authorization.completed", { count: 1, data: { outcome: "declined" } });
+    steered.event("interaction.settled", { count: 1, data: { outcome: "withdrawn" } });
     steered.notEvent("turn.started");
-    steered.event("turn.completed", { count: 1 });
-    steered.event("session.waiting", { count: 1 });
+    steered.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     steered.messageIncludes("AUTH-OPEN-MESSAGE-OK");
   },
 });

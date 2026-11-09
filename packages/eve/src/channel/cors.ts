@@ -7,9 +7,9 @@
 export interface ChannelCorsOptions {
   /**
    * Allowed request origins. Omit or pass `"*"` for all origins, pass
-   * `"null"` for the literal `null` origin, or pass an array of exact origins.
+   * `"null"` for the literal `null` origin, or pass one exact origin or an array of exact origins.
    */
-  readonly origin?: "*" | "null" | readonly string[];
+  readonly origin?: string | readonly string[];
   /** Methods emitted on preflight responses. Omit or pass `"*"` for all methods. */
   readonly methods?: "*" | readonly string[];
   /**
@@ -58,6 +58,7 @@ export function normalizeChannelCors(
     throw new Error("Expected channel cors to be a boolean or a serializable CORS options object.");
   }
 
+  assertSupportedCorsKeys(cors);
   const normalized: MutableNormalizedChannelCorsOptions = {};
 
   if (cors.origin !== undefined) {
@@ -88,6 +89,35 @@ export function normalizeChannelCors(
   return normalized;
 }
 
+const SUPPORTED_CORS_KEYS: ReadonlySet<string> = new Set([
+  "origin",
+  "methods",
+  "allowHeaders",
+  "exposeHeaders",
+  "credentials",
+  "maxAge",
+  "preflight",
+] satisfies (keyof ChannelCorsOptions)[]);
+
+const RENAMED_CORS_KEYS: Readonly<Record<string, string>> = {
+  allowedHeaders: "allowHeaders",
+  exposedHeaders: "exposeHeaders",
+  preflightStatus: "preflight.statusCode",
+};
+
+// An ignored key would silently fall back to the defaults instead of the intended policy.
+function assertSupportedCorsKeys(cors: object): void {
+  for (const key of Object.keys(cors)) {
+    if (SUPPORTED_CORS_KEYS.has(key)) continue;
+    const renamed = Object.hasOwn(RENAMED_CORS_KEYS, key) ? RENAMED_CORS_KEYS[key] : undefined;
+    throw new Error(
+      renamed === undefined
+        ? `Unknown channel cors option "${key}". Supported options: ${[...SUPPORTED_CORS_KEYS].join(", ")}.`
+        : `The channel cors option "${key}" is no longer supported. Use "${renamed}".`,
+    );
+  }
+}
+
 type MutableNormalizedChannelCorsOptions = {
   -readonly [K in keyof NormalizedChannelCorsOptions]: NormalizedChannelCorsOptions[K];
 };
@@ -97,8 +127,11 @@ function normalizeOrigin(origin: ChannelCorsOptions["origin"]): "*" | "null" | r
     return origin;
   }
 
+  if (typeof origin === "string" && origin.length > 0) return [origin];
   if (!Array.isArray(origin)) {
-    throw new Error('Expected channel cors.origin to be "*", "null", or an array of origins.');
+    throw new Error(
+      "Expected channel cors.origin to be a non-empty origin string or an array of origins.",
+    );
   }
 
   return origin.map((entry) => {

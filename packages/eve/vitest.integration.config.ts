@@ -31,6 +31,9 @@ export default defineConfig({
     ],
   },
   test: {
+    // Every line a session publishes is checked against the event contract, so a test that
+    // drives a session also fails on a fact a reader couldn't fold.
+    env: { EVE_CHECK_SESSION_EVENTS: "1" },
     environment: "node",
     exclude: [
       "**/node_modules/**",

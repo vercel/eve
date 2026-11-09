@@ -1,5 +1,6 @@
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
+import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import {
   defineSandboxProvider,
   type SandboxProvider,
@@ -25,6 +26,7 @@ export const VercelSandbox: SandboxProvider<
   VercelSandboxSession
 > = defineSandboxProvider({
   name: "vercel",
+  // eve's create options mirror the SDK's; the cast drops only eve's `readonly` network policy.
   environment: (options: VercelSandboxCreateOptions) =>
-    createVercelSandbox({ createOptions: options }),
+    createVercelSandbox({ createOptions: options as VercelCreateOptions }),
 });

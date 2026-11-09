@@ -22,11 +22,14 @@ const headersGetter: TextMapGetter<Headers> = {
   keys: (headers) => [...headers.keys()],
 };
 
-/** The request lifetime ends at handler return, not response-body consumption. */
-export async function traceChannelRequest<T extends Response>(
+/**
+ * The request span ends when the response body finishes, errors, or is
+ * cancelled, not when the handler returns.
+ */
+export async function traceChannelRequest(
   input: { readonly request: Request; readonly routeKey: string },
-  handler: (operation: ChannelRequestTrace | undefined) => Promise<T>,
-): Promise<T> {
+  handler: (operation: ChannelRequestTrace | undefined) => Promise<Response>,
+): Promise<Response> {
   return traceRequest({ ...input, spanName: "agent.channel.request" }, (span) =>
     handler(
       span === undefined
@@ -62,10 +65,10 @@ export async function traceConnectionEventRequest(
   );
 }
 
-async function traceRequest<T extends Response>(
+async function traceRequest(
   input: { request: Request; routeKey: string; spanName: string },
-  handler: (span: Span | undefined) => Promise<T>,
-): Promise<T> {
+  handler: (span: Span | undefined) => Promise<Response>,
+): Promise<Response> {
   if (getInstrumentationRuntime()?.otelSettings?.traceChannelRequests !== true)
     return handler(undefined);
   const { request, routeKey } = input;
@@ -97,11 +100,20 @@ async function traceRequest<T extends Response>(
     );
     span.setAttribute("http.response.status_code", response.status);
     if (response.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
-    return response;
+    return endWithBody(response, () => span.end());
   } catch (error) {
     span.setStatus({ code: SpanStatusCode.ERROR });
-    throw error;
-  } finally {
     span.end();
+    throw error;
   }
+}
+
+function endWithBody(response: Response, end: () => void): Response {
+  if (response.body === null) {
+    end();
+    return response;
+  }
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  void response.body.pipeTo(writable).then(end, end);
+  return new Response(readable, response);
 }

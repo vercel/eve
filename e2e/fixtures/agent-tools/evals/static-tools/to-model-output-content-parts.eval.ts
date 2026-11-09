@@ -23,7 +23,7 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
     t.calledTool(TOOL_NAME, { count: 1, output: isRenderStripesOutput });
     t.eventsSatisfy("a reply names the rendered colors in order", (events) => {
       const answer = assistantAnswers(events)[0];

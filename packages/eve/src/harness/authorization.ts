@@ -45,8 +45,15 @@ import type { JsonValue } from "#shared/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
 
-const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
+
+/**
+ * Marks a signal the runtime minted. A symbol key can't come from JSON, so a tool result that
+ * carries data shaped like a signal (an MCP or OpenAPI response, a file, a fetched page) stays data
+ * instead of parking the turn and naming who it resumes as. Registered, because the runtime can
+ * load this module more than once in one process.
+ */
+const AUTHORIZATION_SIGNAL: unique symbol = Symbol.for("eve.authorizationSignal");
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -85,7 +92,7 @@ export interface AuthorizationChallenge {
 }
 
 export interface AuthorizationSignal {
-  readonly [AUTHORIZATION_BRAND]: true;
+  readonly [AUTHORIZATION_SIGNAL]: true;
   readonly challenges: readonly AuthorizationChallenge[];
 }
 
@@ -115,13 +122,13 @@ export interface AuthorizationResult {
  * Creates an authorization signal. Return this from a tool's execute
  * to suspend the session for OAuth or other external authorization.
  *
- * The harness emits `authorization.required` events for each challenge
+ * The harness emits sign-in `interaction.opened` events for each challenge
  * and parks the session. Channels render sign-in buttons.
  */
 export function requestAuthorization(
   challenges: readonly AuthorizationChallenge[],
 ): AuthorizationSignal {
-  return { [AUTHORIZATION_BRAND]: true, challenges };
+  return { [AUTHORIZATION_SIGNAL]: true, challenges };
 }
 
 /**
@@ -218,7 +225,7 @@ export function createAuthorizationAttempt(
 
 export function isAuthorizationSignal(value: unknown): value is AuthorizationSignal {
   if (typeof value !== "object" || value === null) return false;
-  return (value as Record<string, unknown>)[AUTHORIZATION_BRAND] === true;
+  return (value as { readonly [AUTHORIZATION_SIGNAL]?: unknown })[AUTHORIZATION_SIGNAL] === true;
 }
 
 export function isAuthorizationPendingModelOutput(
@@ -230,7 +237,7 @@ export function isAuthorizationPendingModelOutput(
 
 /**
  * JSON-safe pending authorization output for model-facing tool results and
- * wire surfaces (`action.result`, telemetry). Omits OAuth URLs and user
+ * wire surfaces (`call.settled`, telemetry). Omits OAuth URLs and user
  * codes — connection names only.
  */
 export function authorizationPendingAsJsonObject(input: {
@@ -265,10 +272,6 @@ export function authorizationPendingModelText(connections: readonly string[]): s
   return `Authorization required for ${connections.join(", ")}. Waiting for the user to sign in.`;
 }
 
-export function isPendingAuthorizationToolOutput(value: unknown): boolean {
-  return isAuthorizationPendingModelOutput(value) || isAuthorizationSignal(value);
-}
-
 /**
  * Physical hook token embedded in a session's authorization callback URLs.
  * The callback route resumes exactly this hook, so it is the stable inbox's
@@ -289,6 +292,15 @@ interface NamedAuthorizationResult extends AuthorizationResult {
 export const PendingAuthorizationResultKey = new ContextKey<readonly NamedAuthorizationResult[]>(
   "eve.pendingAuthorizationResult",
 );
+
+/** Reports a callback's sign-in once a call completes it: with why it failed, if it did. */
+export type SignInCompleted = (result: AuthorizationResult, failure?: Error) => Promise<void>;
+
+/**
+ * How the step reports a sign-in the moment a resumed call completes it, so the other askers for
+ * the same grant resume then rather than when the call returns.
+ */
+export const SignInCompletedKey = new ContextKey<SignInCompleted>("eve.signInCompleted");
 
 /**
  * Deployment base URL for building callback URLs. Set by the

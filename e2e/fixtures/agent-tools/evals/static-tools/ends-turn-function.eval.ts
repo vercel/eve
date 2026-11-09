@@ -14,7 +14,7 @@ export default (["react_to_note", "dynamic_react_to_note"] as const).map((tool) 
       posted.expectOk();
       posted.requireToolCall(tool);
       t.check(
-        posted.message,
+        posted.reply,
         satisfies((message) => message === undefined, "a posted reaction sends no reply"),
       );
 
@@ -24,7 +24,7 @@ export default (["react_to_note", "dynamic_react_to_note"] as const).map((tool) 
       refused.expectOk();
       refused.requireToolCall(tool);
       t.check(
-        refused.message,
+        refused.reply,
         satisfies(
           (message) => typeof message === "string" && message.trim().length > 0,
           "a reaction that doesn't post gets a reply",

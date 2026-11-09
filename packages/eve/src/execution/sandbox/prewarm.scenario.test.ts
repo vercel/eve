@@ -27,7 +27,10 @@ describe("prewarmAppSandboxes", () => {
       join(appRoot, "package.json"),
       JSON.stringify({ name: "dockerfile-prewarm-test", type: "module" }),
     );
-    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };');
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "Use the sandbox.");
     await writeFile(join(agentRoot, "sandbox", "Dockerfile"), "FROM alpine:3.21\n");
     await writeFile(
@@ -160,7 +163,10 @@ async function createScenarioAppRoot(): Promise<string> {
       2,
     ),
   );
-  await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+  await writeFile(
+    join(agentRoot, "agent.ts"),
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+  );
   await writeFile(join(agentRoot, "instructions.md"), "Root system prompt.\n");
   await writeFile(
     join(agentRoot, "skills", "route-weather.md"),
@@ -173,10 +179,11 @@ async function createScenarioAppRoot(): Promise<string> {
   await writeFile(
     join(subagentRoot, "agent.ts"),
     [
-      "export default {",
+      'import { defineAgent } from "eve";',
+      "export default defineAgent({",
       '  model: "openai/gpt-5.4",',
       '  description: "Research one topic.",',
-      "};",
+      "});",
       "",
     ].join("\n"),
   );

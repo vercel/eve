@@ -1,7 +1,53 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Message } from "#compiled/chat/index.js";
-import { linqQuotedMessage } from "#public/channels/linq/inboundContent.js";
+import {
+  linqQuotedMessage,
+  rehydrateLinqAttachment,
+} from "#public/channels/linq/inboundContent.js";
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("Linq attachment downloads", () => {
+  it.each(["http://files.example/photo.png", "https://localhost/photo.png"])(
+    "refuses a non-public-HTTPS destination without fetching: %s",
+    async (url) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      const attachment = rehydrateLinqAttachment({ type: "image", url });
+
+      await expect(attachment.fetchData!()).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves the upload-limit explanation for oversized downloads", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        headers: { "content-length": String(25 * 1024 * 1024 + 1) },
+      }),
+    );
+    const attachment = rehydrateLinqAttachment({
+      type: "image",
+      url: "https://files.example/photo.png",
+    });
+
+    await expect(attachment.fetchData!()).rejects.toMatchObject({
+      name: "EveAttachmentError",
+      message: "it is over the 25 MB upload limit.",
+    });
+  });
+
+  it("downloads public HTTPS attachments as bytes without credentials", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("photo"));
+    const attachment = rehydrateLinqAttachment({
+      type: "image",
+      url: "https://files.example/photo.png",
+    });
+
+    await expect(attachment.fetchData!()).resolves.toEqual(Buffer.from("photo"));
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).has("authorization")).toBe(false);
+  });
+});
 
 function message(raw: unknown, overrides: { isMe?: boolean; text?: string } = {}): Message {
   return new Message({

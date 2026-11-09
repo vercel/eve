@@ -1,5 +1,5 @@
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
-import type { Experimental_ConnectionEvent } from "#public/definitions/connections/events.js";
+import type { ConnectionEvent } from "#public/definitions/connections/events.js";
 
 // The bridge is structural so auth helpers do not need a runtime dependency on eve.
 export type EventJson = string | number | boolean | null | readonly EventJson[] | EventJsonObject;
@@ -39,7 +39,7 @@ export type ConnectionEventDelivery = {
   source: { type: "mcp"; connectorId: string };
   context: Record<string, unknown>;
 } & (
-  | { event: Experimental_ConnectionEvent }
+  | { event: ConnectionEvent }
   | { control: { type: "gap"; cursor: string | null; truncated?: true } }
   | { control: { type: "terminated"; error: { code: number; message: string; data?: unknown } } }
 );

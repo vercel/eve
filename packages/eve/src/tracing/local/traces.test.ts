@@ -118,11 +118,6 @@ describe("resolveLocalTracesExportPolicy", () => {
 describe("localTracePolicy", () => {
   it("records an authenticated development session classified as private", () => {
     const audience = defaultEveAudience({
-      auth: {
-        attributes: {},
-        authenticator: "vercel-oidc",
-        principalType: "user",
-      },
       caller: {
         type: "principal",
         principal: {

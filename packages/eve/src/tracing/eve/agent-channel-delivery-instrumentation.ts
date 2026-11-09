@@ -1,137 +1,46 @@
-import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
-
-import type {
-  InstrumentationChannelDeliveryStartedEvent,
-  InstrumentationChannelDeliveryTerminalEvent,
-  InstrumentationHandlerContext,
-  InstrumentationProviderDefinition,
-} from "#instrumentation/lifecycle.js";
-import { contextStorage } from "#context/container.js";
-import { ActiveChannelDeliveriesKey } from "#context/keys.js";
-import type { JsonValue } from "#shared/json.js";
+import type { InstrumentationProviderDefinition } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#compiled/@vercel/agent-runs/otel.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { isSampledTrace } from "#shared/trace-policy.js";
+import { enteredView } from "#harness/session-machine/current.js";
+import { contextStorage } from "#context/container.js";
 
-interface ChannelDeliveryState {
-  readonly inputAttribute?: string;
-  readonly requestTraceContext?: SpanContext;
-}
-
-/** Captures one-to-one channel delivery metadata on the activation that consumes it. */
+/** Attribute a turn only when exactly one message delivery was consumed, across workers. */
 export function createAgentChannelDeliveryInstrumentation(input: {
   readonly recordInputs: boolean;
   readonly stateStore: AgentTraceStateStore;
-}): Pick<
-  NonNullable<InstrumentationProviderDefinition["events"]>,
-  | "channel.delivery.cancelled"
-  | "channel.delivery.completed"
-  | "channel.delivery.failed"
-  | "channel.delivery.started"
-> {
-  const onStarted = async (
-    event: InstrumentationChannelDeliveryStartedEvent,
-    ctx: InstrumentationHandlerContext,
-  ): Promise<void> => {
-    const session = await input.stateStore.get("session", event.sessionId);
-    const turn =
-      event.turnId === undefined || event.sequence === undefined
-        ? undefined
-        : await input.stateStore.get("turn", JSON.stringify([event.sessionId, event.turnId]));
-    const traceContext = turn?.context ?? session?.context;
-    if (traceContext === undefined || !isSampledTrace(traceContext)) return;
-    const inputAttribute = input.recordInputs ? contentAttribute(event.input) : undefined;
-    const state: Record<string, JsonValue> = {};
-    if (inputAttribute !== undefined) state.inputAttribute = inputAttribute;
-    if (event.delivery.requestTraceContext !== undefined) {
-      state.requestTraceContext = {
-        spanId: event.delivery.requestTraceContext.spanId,
-        traceFlags: event.delivery.requestTraceContext.traceFlags,
-        traceId: event.delivery.requestTraceContext.traceId,
-      };
-    }
-    ctx.state.set(state);
-  };
-
-  const onTerminal = async (
-    event: InstrumentationChannelDeliveryTerminalEvent,
-    ctx: InstrumentationHandlerContext,
-  ): Promise<void> => {
-    const state = readState(ctx.state.get());
-    if (state === undefined || event.turnId === undefined) return;
-    const turn = await input.stateStore.get(
-      "turn",
-      JSON.stringify([event.sessionId, event.turnId]),
-    );
-    if (
-      turn === undefined ||
-      !isSampledTrace(turn.context) ||
-      !isOnlyActiveDelivery(event.sessionId, event.turnId, event.delivery.deliveryId)
-    ) {
-      return;
-    }
-    await input.stateStore.update(
-      "turn",
-      JSON.stringify([event.sessionId, event.turnId]),
-      (current) => ({
-        ...current,
-        channelDelivery: {
-          channelKind: event.delivery.channelKind,
-          channelName: event.delivery.channelName,
-          deliveryId: event.delivery.deliveryId,
-          ...(state.inputAttribute === undefined
-            ? undefined
-            : { inputAttribute: state.inputAttribute }),
-          ...(event.delivery.requestId === undefined
-            ? undefined
-            : { requestId: event.delivery.requestId }),
-          ...(state.requestTraceContext === undefined
-            ? undefined
-            : { requestTraceContext: state.requestTraceContext }),
+}): Pick<NonNullable<InstrumentationProviderDefinition["events"]>, "delivery.consumed"> {
+  return {
+    async "delivery.consumed"(event) {
+      if (event.turnId === undefined) return;
+      // Answer-only deliveries resume the original request; they do not replace its attribution.
+      const ctx = contextStorage.getStore();
+      if (ctx !== undefined && enteredView(ctx)?.deliveries[event.deliveryId]?.parts?.length === 0)
+        return;
+      await input.stateStore.update(
+        "turn",
+        JSON.stringify([event.sessionId, event.turnId]),
+        (turn) => {
+          if (!isSampledTrace(turn.context) || turn.consumedDeliveryId === null) return turn;
+          if (
+            turn.consumedDeliveryId !== undefined &&
+            turn.consumedDeliveryId !== event.deliveryId
+          ) {
+            return { ...turn, channelDelivery: undefined, consumedDeliveryId: null };
+          }
+          return {
+            ...turn,
+            consumedDeliveryId: event.deliveryId,
+            channelDelivery:
+              event.delivery === undefined
+                ? undefined
+                : {
+                    ...event.delivery,
+                    inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
+                  },
+          };
         },
-      }),
-    );
+      );
+    },
   };
-
-  return {
-    "channel.delivery.cancelled": onTerminal,
-    "channel.delivery.completed": onTerminal,
-    "channel.delivery.failed": onTerminal,
-    "channel.delivery.started": onStarted,
-  };
-}
-
-function isOnlyActiveDelivery(sessionId: string, turnId: string, deliveryId: string): boolean {
-  const active = contextStorage.getStore()?.get(ActiveChannelDeliveriesKey);
-  const delivery = active?.[0];
-  return (
-    active?.length === 1 &&
-    delivery?.sessionId === sessionId &&
-    delivery.turnId === turnId &&
-    delivery.delivery.deliveryId === deliveryId
-  );
-}
-
-function readState(value: unknown): ChannelDeliveryState | undefined {
-  if (!isRecord(value)) return undefined;
-  const requestTraceContext = isSpanContext(value.requestTraceContext)
-    ? value.requestTraceContext
-    : undefined;
-  return {
-    inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
-    requestTraceContext,
-  };
-}
-
-function isSpanContext(value: unknown): value is SpanContext {
-  return (
-    isRecord(value) &&
-    typeof value.spanId === "string" &&
-    typeof value.traceFlags === "number" &&
-    typeof value.traceId === "string"
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

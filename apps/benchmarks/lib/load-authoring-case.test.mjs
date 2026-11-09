@@ -10,6 +10,7 @@ const libRoot = dirname(fileURLToPath(import.meta.url));
 const evalsRoot = resolve(libRoot, "../evals");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { loadAuthoringCase } = await jiti.import(resolve(libRoot, "load-authoring-case.ts"));
+const { authoringCategories } = await jiti.import(resolve(libRoot, "authoring-case.ts"));
 
 for (const entry of await readdir(evalsRoot, { withFileTypes: true })) {
   if (!entry.isDirectory() || !(await hasCase(entry.name))) continue;
@@ -18,6 +19,10 @@ for (const entry of await readdir(evalsRoot, { withFileTypes: true })) {
     const authoringCase = await loadAuthoringCase(resolve(evalsRoot, entry.name));
     assert.equal(typeof authoringCase.interact, "function");
     assert.ok(authoringCase.startingPoint);
+    assert.ok(
+      authoringCategories.includes(authoringCase.category),
+      `category "${authoringCase.category}" is not one of authoringCategories`,
+    );
   });
 }
 

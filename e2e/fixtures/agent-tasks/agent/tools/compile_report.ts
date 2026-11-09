@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 import { z } from "zod";
 
 /** A task: compiling takes long enough that the conversation can move on meanwhile. */

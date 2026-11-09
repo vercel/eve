@@ -1,30 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientSession } from "#client/session.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { encodeTestLine, testTurnFacts } from "#internal/testing/events.js";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 function turn(sequence: number, message: string, deliveryId: string) {
-  const data = { sequence, turnId: `turn_${sequence}` };
-  return [
-    { type: "turn.started", data },
-    { type: "message.completed", data: { ...data, message, finishReason: "stop" } },
-    { type: "turn.completed", data },
-    { type: "session.waiting" },
-  ].map((event, index) => ({
-    ...event,
-    meta: {
-      id: `event_${sequence}_${index}`,
-      at: new Date().toISOString(),
-      deliveryIds: [deliveryId],
-    },
-  }));
+  return testTurnFacts(sequence, message, [deliveryId]);
 }
-function stream(events: readonly unknown[]) {
-  return new Response(events.map((event) => JSON.stringify(event)).join("\n") + "\n", {
+function stream(events: readonly SessionEvent[]) {
+  return new Response(events.map(encodeTestLine).join(""), {
     headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
   });
+}
+async function collect(events: AsyncIterable<SessionEvent>): Promise<SessionEvent[]> {
+  const result: SessionEvent[] = [];
+  for await (const event of events) result.push(event);
+  return result;
 }
 function accepted(deliveryId = "new") {
   return Response.json({ sessionId: "session_1", deliveryId }, { status: 202 });
@@ -33,35 +30,71 @@ function session(
   resolveHeaders = async (_headers?: Readonly<Record<string, string>>) => new Headers(),
 ) {
   return new ClientSession(
-    { host: "https://eve.test", resolveHeaders },
+    { baseUrl: "https://eve.test", resolveHeaders },
     { sessionId: "session_1", streamIndex: 0 },
   );
 }
 
 describe("delivery correlation across reconnects and concurrent sends", () => {
+  it("uses flat reconnect settings for opening a stream with capped backoff", async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    const attempts: number[] = [];
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      attempts.push(Date.now() - started);
+      if (attempts.length < 3) return new Response("Try again", { status: 418 });
+      const events = turn(0, "DONE", "done");
+      const response = stream(events);
+      response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+      return response;
+    });
+    const reading = collect(
+      session().stream({
+        follow: false,
+        reconnect: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 15, retryableStatuses: [418] },
+      }),
+    );
+    const result = reading.catch((error: unknown) => error);
+    await vi.runAllTimersAsync();
+    expect(attempts).toEqual([0, 10, 25]);
+    expect(await result).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "turn.settled" })]),
+    );
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops opening a stream at the configured attempt limit", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("Unavailable", { status: 503 }));
+    await expect(
+      collect(session().stream({ reconnect: { maxAttempts: 2, baseDelayMs: 0 } })),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it("reconnects past only old history with the same headers and advances all consumed events", async () => {
     const controller = new AbortController();
     const resolveHeaders = vi.fn(
       async (headers?: Readonly<Record<string, string>>) => new Headers(headers),
     );
+    const old = turn(0, "OLD", "old");
+    const current = turn(1, "NEW", "new");
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted())
-      .mockResolvedValueOnce(stream(turn(0, "OLD", "old")))
-      .mockResolvedValueOnce(stream(turn(1, "NEW", "new")));
+      .mockResolvedValueOnce(stream(old))
+      .mockResolvedValueOnce(stream(current));
     const resumed = session(resolveHeaders);
     const result = await (
       await resumed.send("new", {
         headers: { authorization: "Bearer fixture" },
         signal: controller.signal,
-        streamReconnectPolicy: {
-          streamIdleReconnectPolicy: { baseDelayMs: 1, maxDelayMs: 1, maxAttempts: 2 },
-        },
+        reconnect: {},
       })
     ).result();
-    expect(result.message).toBe("NEW");
-    expect(resumed.state.streamIndex).toBe(8);
-    expect(String(fetch.mock.calls[2]?.[0])).toContain("startIndex=4");
+    expect(result.reply).toBe("NEW");
+    expect(resumed.state.streamIndex).toBe(old.length + current.length);
+    expect(String(fetch.mock.calls[2]?.[0])).toContain(`startIndex=${old.length}`);
     expect(resolveHeaders).toHaveBeenCalledTimes(3);
     expect(
       resolveHeaders.mock.calls.every(([headers]) => headers?.authorization === "Bearer fixture"),
@@ -72,29 +105,25 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted())
       .mockResolvedValueOnce(stream(turn(0, "OLD", "old")));
-    const response = await session().send("new", { streamReconnectPolicy: { reconnect: false } });
+    const response = await session().send("new", { reconnect: false });
     await expect(response.result()).rejects.toThrow();
   });
 
-  it("does not ignore a session-wide failure after observing the accepted turn", async () => {
+  it("does not synthesize a delivery settlement from a session-wide failure", async () => {
     const current = turn(1, "PARTIAL", "new");
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted())
       .mockResolvedValueOnce(
         stream([
-          current[0],
-          current[1],
+          ...current.slice(0, 3),
           {
-            type: "session.failed",
-            data: { code: "FAILED", message: "Session ended" },
-            meta: { id: "failed", at: new Date().toISOString(), deliveryIds: ["other"] },
+            data: { error: { code: "FAILED", message: "Session ended" }, outcome: "failed" },
+            type: "session.ended",
           },
         ]),
       );
-    const response = await session().send("new", { streamReconnectPolicy: { reconnect: false } });
-    const result = await response.result();
-    expect(result.status).toBe("failed");
-    expect(result.events.at(-1)?.type).toBe("session.failed");
+    const response = await session().send("new", { reconnect: false });
+    await expect(response.result()).rejects.toThrow("before the accepted delivery settled");
   });
 
   it("does not regress the cursor when concurrent sends are consumed out of order", async () => {
@@ -107,9 +136,9 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
     const resumed = session();
     const first = await resumed.send("first");
     const second = await resumed.send("second");
-    expect((await second.result()).message).toBe("SECOND");
-    expect((await first.result()).message).toBe("FIRST");
-    expect(resumed.state.streamIndex).toBe(8);
+    expect((await second.result()).reply).toBe("SECOND");
+    expect((await first.result()).reply).toBe("FIRST");
+    expect(resumed.state.streamIndex).toBe(events.length);
   });
 
   it("preserves the saved cursor when posting the new request fails", async () => {

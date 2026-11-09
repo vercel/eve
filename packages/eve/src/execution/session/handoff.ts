@@ -39,10 +39,11 @@ import { isObject } from "#shared/guards.js";
  * build than the owner that produced it; bump when any field changes shape so
  * an older successor rejects the handoff instead of misreading state.
  *
- * A newer successor must always accept older checkpoints: every bump adds the
- * upgrade from the previous version in `checkpoint-migrations.ts`.
+ * A successor accepts checkpoints back to `MIN_SESSION_CHECKPOINT_VERSION` and
+ * refuses older ones; a bump that keeps its predecessor readable adds the upgrade
+ * in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 17;
+export const SESSION_CHECKPOINT_VERSION = 19;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
@@ -57,13 +58,10 @@ export interface SessionCheckpoint {
 }
 
 export type SessionOwnerActivation =
-  | { readonly kind: "active" }
   | {
-      // Owners running older eve builds read every non-`active` result as a
-      // failure, so this variant carries `payloads` in the same shape.
       readonly kind: "incompatible";
       readonly reason: "checkpoint-version";
-      /** Version 3: the successor run that gave this verdict. */
+      /** The successor run that gave this verdict. */
       readonly runId?: string;
       /** Commands accepted by partial successor claims before it rejected the checkpoint. */
       readonly payloads: readonly SessionInboxPayload[];
@@ -71,12 +69,12 @@ export type SessionOwnerActivation =
   | {
       readonly kind: "failed";
       /**
-       * Version 3: the successor took some of the session's hooks before it
-       * failed. The owner takes them back and waits for their handover.
+       * The successor took some of the session's hooks before it failed. The
+       * owner takes them back and waits for their handover.
        */
       readonly claimedHooks?: boolean;
       readonly error: unknown;
-      /** Version 3: the successor run that gave this verdict. */
+      /** The successor run that gave this verdict. */
       readonly runId?: string;
       /** Commands accepted by partial successor claims before startup failed. */
       readonly payloads: readonly SessionInboxPayload[];
@@ -91,6 +89,7 @@ interface SessionHandoffInput {
   readonly inbox: SessionInboxHandle;
   readonly isInitialOwner: boolean;
   readonly sessionId: string;
+  readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
 export function sessionAnchorToken(sessionId: string): string {
@@ -145,9 +144,7 @@ type AttemptFence =
 
 /** The successor run that gave a verdict, if the outcome is one. */
 function verdictRunId(settled: AttemptSettlement): string | undefined {
-  return settled.kind === "verdict" && settled.verdict.kind !== "active"
-    ? settled.verdict.runId
-    : undefined;
+  return settled.kind === "verdict" ? settled.verdict.runId : undefined;
 }
 
 /**
@@ -176,22 +173,28 @@ export async function sendSessionHandover(input: {
     (payload): payload is SessionHandoverPayload["payloads"][number] => payload.kind !== "handover",
   );
   for (const [index, payload] of payloads.entries()) {
-    const sent = await sendHandoverPart({ attemptKey, index, payloads: [payload] }, sessionId);
+    const sent = await sendHandoverPart(
+      { attemptKey, index, payloads: [payload] },
+      sessionId,
+      payloads.length,
+    );
     if (sent === "session-ended") return;
   }
   await sendHandoverPart(
     { attemptKey, final: true, index: payloads.length, payloads: [] },
     sessionId,
+    payloads.length,
   );
 }
 
 async function sendHandoverPart(
   part: Omit<SessionHandoverPayload, "kind">,
   sessionId: string,
+  bufferedPayloadCount: number,
 ): Promise<"delivered" | "session-ended"> {
   for (let failures = 1, delaySeconds = 1; ; failures++) {
     try {
-      return await sendSessionHandoverPartStep({ part, sessionId });
+      return await sendSessionHandoverPartStep({ bufferedPayloadCount, part, sessionId });
     } catch (error) {
       if (failures === HANDOVER_PART_FAILURES_BEFORE_REPORT) {
         await reportHandoverPartStuckStep({
@@ -321,6 +324,7 @@ export class SessionHandoff {
           attemptKey,
           checkpoint: { ...this.input.checkpoint, ...state, version: SESSION_CHECKPOINT_VERSION },
           hookTokens,
+          sessionWritable: this.input.sessionWritable,
           sourceRunId: ownerRunId,
           targetDeploymentId,
         });
@@ -477,13 +481,6 @@ export class SessionHandoff {
   ): Promise<RetainedAttempt> {
     const { inbox } = this.input;
     switch (verdict.kind) {
-      case "active":
-        // Only a successor that claims ordinarily signals `active`, and it
-        // cannot while this owner holds the hooks.
-        return {
-          error: new Error("Successor reported active without a takeover."),
-          reason: "activation-failed",
-        };
       case "incompatible":
         this.incompatibleTargetDeploymentIds.add(attempt.targetDeploymentId);
         if (verdict.payloads.length > 0) inbox.restore(verdict.payloads);
@@ -500,10 +497,6 @@ export class SessionHandoff {
             attemptKey: attempt.attemptKey,
             sourceRunId: verdict.runId ?? attempt.candidateRunId,
           });
-        } else if (isHookConflictError(verdict.error)) {
-          // A successor older than this protocol claims ordinarily and so can
-          // never take over from an owner that keeps its hooks.
-          this.incompatibleTargetDeploymentIds.add(attempt.targetDeploymentId);
         }
         if (verdict.payloads.length > 0) inbox.restore(verdict.payloads);
         return { error: verdict.error, reason: "activation-failed" };

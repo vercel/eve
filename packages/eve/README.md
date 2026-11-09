@@ -6,9 +6,11 @@ You author an agent as a directory on disk. The directory is the contract — ma
 
 The framework is called eve. The published npm package is `eve`. The CLI binary is `eve`.
 
-## Preview Terms and Safeguards
+## Release notes
 
-eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
+
+## Safeguards
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
@@ -69,11 +71,7 @@ Every authored directory has a typed helper. Import each from the matching subpa
 | `defineSchedule(...)`                                           | `eve/schedules`                       | `schedules/<name>.ts` (or `schedules/<name>.md`) |
 | `defineEval(...)`, `defineEvalConfig(...)`                      | `eve/evals`                           | `evals/<name>.eval.ts`, `evals/evals.config.ts`  |
 
-Runtime accessors live on the subpath that owns the concern:
-
-- `getSession()` — current session, turn, auth, parent lineage (`eve/context`)
-- `getSandbox()` — live sandbox handle for the current agent (`eve/sandbox`)
-- `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
+Tools, hooks, and other eve-invoked callbacks reach the runtime through `ctx`: `ctx.session` for the current session, turn, auth, and parent lineage, and `ctx.getSandbox()` for the agent's sandbox. Durable state is `defineState` (`eve/context`).
 
 The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api).
 
@@ -123,9 +121,8 @@ npx eve@latest init my-agent
 ```
 
 `eve init` writes a new agent with eve's default model. Pass `--model
-openai/gpt-5.5` to choose another AI Gateway model, `--reasoning high` to set a
-reasoning effort, or `--channel-web-nextjs` to add the Web Chat application. It
-installs dependencies, initializes Git, and opens the terminal UI in an interactive
+openai/gpt-5.5` to choose another AI Gateway model, or `--reasoning high` to set a
+reasoning effort. It installs dependencies, initializes Git, and opens the terminal UI in an interactive
 human terminal. Coding-agent invocations return setup instructions instead.
 Targeting an existing project directory (`eve init .`) adds the agent files and
 missing dependencies instead. Initialization does not create a Vercel project,
@@ -161,7 +158,7 @@ CLI commands:
 
 ## Deploying
 
-eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment/overview) for the deployment path, environment variables, and configuration.
+eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment) for the deployment path, environment variables, and configuration.
 
 ## Read Next
 
@@ -173,9 +170,9 @@ These files ship inside the installed package at `node_modules/eve/docs/`:
 - [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
 - [Automatic Model Selection](https://eve.dev/docs/guides/decide) — choose an agent model for each request
 - [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
-- [Vercel Deployment](https://eve.dev/docs/guides/deployment/overview) — deploy to production
+- [Vercel Deployment](https://eve.dev/docs/guides/deployment) — deploy to production
 
-By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels/overview) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals/overview)
+By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals)
 
 By runtime concern: [Sessions and Streaming](https://eve.dev/docs/concepts/sessions-runs-and-streaming) · [Session Context](https://eve.dev/docs/guides/session-context) · [Context Control](https://eve.dev/docs/concepts/context-control) · [Auth and Route Protection](https://eve.dev/docs/guides/auth-and-route-protection) · [CLI, Build, and Debugging](https://eve.dev/docs/reference/cli) · [Instrumentation](https://eve.dev/docs/guides/instrumentation)
 
@@ -195,4 +192,4 @@ and inspection. Channel-local addresses remain behind authored channel APIs.
 
 ## Changelog
 
-See [`./CHANGELOG.md`](./CHANGELOG.md) for the release history. The changelog ships inside the published package so agents can read it directly from `node_modules/eve/CHANGELOG.md` to evaluate upgrades.
+The repository's `CHANGELOG.md` contains the full release history. For the installed package, see [Release notes](#release-notes).

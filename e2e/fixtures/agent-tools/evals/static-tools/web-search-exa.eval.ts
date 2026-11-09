@@ -1,4 +1,5 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
@@ -14,19 +15,14 @@ const QUERIES = [
   "web search fanout probe 08",
 ] as const;
 
-function completedDistinctCalls(events: readonly HandleMessageStreamEvent[]): number {
-  const callIds = new Set<string>();
-  for (const event of events) {
-    if (
-      event.type === "action.result" &&
-      event.data.status === "completed" &&
-      event.data.result.kind === "tool-result" &&
-      event.data.result.toolName === TOOL_NAME
-    ) {
-      callIds.add(event.data.result.callId);
-    }
-  }
-  return callIds.size;
+function completedDistinctCalls(events: readonly SessionStreamEvent[]): number {
+  const view = foldEvents(emptySessionView(), events);
+
+  return new Set(
+    calls(view)
+      .filter((call) => call.name === TOOL_NAME && call.outcome === "completed")
+      .map((call) => call.callId),
+  ).size;
 }
 
 export default defineEval({
@@ -45,7 +41,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool(TOOL_NAME, { count: (count) => count >= SEARCH_COUNT });
-    t.noFailedActions();
+    t.noFailedCalls();
     turn.eventsSatisfy(
       "eight distinct web_search calls complete",
       (events) => completedDistinctCalls(events) >= SEARCH_COUNT,

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 /** A per-user credential: each person's token names them, so the result shows whose was used. */
 const releaseAuth: ToolAuthProvider = {
-  credentialOwner: "user",
+  principalType: "user",
   async getToken({ principal }) {
     return { token: `release-token:${principal.type === "user" ? principal.id : "app"}` };
   },

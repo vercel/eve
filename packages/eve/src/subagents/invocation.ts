@@ -1,5 +1,6 @@
+import type { MessageContent } from "#shared/message-content.js";
 import type { StepInput } from "#harness/types.js";
-import type { SessionParent, SessionTraceContext, SessionTraceRoot } from "#channel/types.js";
+import type { SessionParent, SessionTraceSeed, SessionTraceRoot } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
@@ -9,16 +10,15 @@ export interface SubagentParentContext {
   /** The caller's trace root, which a local child inherits. */
   readonly traceRoot?: SessionTraceRoot;
   readonly continuationToken?: string;
-  readonly traceContext?: SessionTraceContext;
+  readonly traceContext?: SessionTraceSeed;
   readonly originAudience?: ChannelAudience;
 }
 
 /**
- * Narrowed form of {@link StepInput} whose `message` is always a plain string.
- * Delegated child runs receive a synthesized text-only prompt.
+ * Delegated input keeps file parts beside the synthesized child instructions.
  */
 interface FormattedSubagentInvocation extends StepInput {
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
 }
 
 /**
@@ -36,21 +36,21 @@ export function normalizeRequestedOutputSchema(
 }
 
 type RuntimeSubagentInputFormatRequest = {
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly name: string;
   readonly type: "runtime";
 };
 
 type LocalSubagentInputFormatRequest = {
   readonly description: string;
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly name: string;
   readonly type: "local";
 };
 
 type RemoteSubagentInputFormatRequest = {
   readonly description: string;
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly name: string;
   readonly type: "remote";
 };
@@ -112,19 +112,23 @@ export function formatSubagentInput(
 
 function formatSubagentPrompt(input: {
   readonly descriptionLines: readonly string[];
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly name: string;
 }): FormattedSubagentInvocation {
+  const prompt = [
+    `You are the subagent "${input.name}".`,
+    ...input.descriptionLines,
+    "",
+    "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
+    "",
+    "Caller message:",
+    ...(typeof input.message === "string" ? [input.message] : []),
+  ].join("\n");
   return {
-    message: [
-      `You are the subagent "${input.name}".`,
-      ...input.descriptionLines,
-      "",
-      "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
-      "",
-      "Caller message:",
-      input.message,
-    ].join("\n"),
+    message:
+      typeof input.message === "string"
+        ? prompt
+        : [{ type: "text", text: prompt }, ...input.message],
   };
 }
 

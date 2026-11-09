@@ -3,18 +3,11 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
-  actionIdempotencyKey,
-  type InstrumentationAttemptScope,
-} from "#instrumentation/lifecycle.js";
-import {
   abandonInstrumentationState,
-  findInstrumentationActionScopeForCall,
   instrumentationStateSlot,
   isInstrumentationStateAbandoned,
-  rememberInstrumentationActionScope,
   releaseAllInstrumentationAttemptState,
   releaseAllInstrumentationState,
-  takeInstrumentationActionScopeForCall,
 } from "#instrumentation/state.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 
@@ -40,58 +33,6 @@ describe("instrumentation state", () => {
       expect(instrumentationStateSlot("a", "turn:1").get()).toBe("a-1");
       expect(instrumentationStateSlot("b", "turn:1").get()).toBe("b-1");
       expect(instrumentationStateSlot("a", "turn:2").get()).toBe("a-2");
-    });
-  });
-
-  it("correlates same-turn actions with their stored attempt scopes", () => {
-    const first: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const second: InstrumentationAttemptScope = {
-      ...first,
-      attemptId: "session-1:turn-1:1:0",
-      stepIndex: 1,
-    };
-    const firstKey = actionIdempotencyKey(first.sessionId, first.turnId, "call-1");
-    const secondKey = actionIdempotencyKey(second.sessionId, second.turnId, "call-2");
-
-    contextStorage.run(new ContextContainer(), () => {
-      rememberInstrumentationActionScope(firstKey, first);
-      rememberInstrumentationActionScope(secondKey, second);
-
-      expect(takeInstrumentationActionScopeForCall(second.sessionId, "call-2")).toEqual({
-        idempotencyKey: secondKey,
-        scope: second,
-      });
-      expect(takeInstrumentationActionScopeForCall(first.sessionId, "call-1")).toEqual({
-        idempotencyKey: firstKey,
-        scope: first,
-      });
-    });
-  });
-
-  it("deserializes the previous scope-only action state", async () => {
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
-    const restored = await deserializeContext({
-      "eve.harness.instrumentationActionScopes": { [actionKey]: scope },
-    });
-
-    contextStorage.run(restored, () => {
-      expect(findInstrumentationActionScopeForCall(scope.sessionId, "call-1")).toEqual({
-        idempotencyKey: actionKey,
-        scope,
-      });
     });
   });
 

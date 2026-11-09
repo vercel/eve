@@ -5,7 +5,7 @@ import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type { AssertionHandle, EveEvalTaskResult, JudgeContext } from "#evals/types.js";
 
 const decide = vi.hoisted(() => vi.fn());
-vi.mock("#ai/decide.js", () => ({ decide }));
+vi.mock("#ai/decision-adapter.js", () => ({ decideWithMetadata: decide }));
 afterEach(() => vi.resetAllMocks());
 
 function setup() {
@@ -30,10 +30,11 @@ function result(answers: Record<string, unknown>) {
 }
 function emptyTaskResult(): EveEvalTaskResult {
   return {
+    sessionEnded: false,
     derived: createEmptyDerivedFacts(),
     events: [],
-    finalMessage: null,
-    output: null,
+    reply: undefined,
+    data: null,
     status: "completed",
     traceContexts: [],
   };
@@ -48,7 +49,7 @@ describe("judge", () => {
     expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
         model: undefined,
-        abortSignal: controller.signal,
+        signal: controller.signal,
         state: { input: "Name the source.", output: "A sourced answer." },
         questions: { judgment: { type: "boolean", instructions: "cites a source" } },
       }),

@@ -1,15 +1,19 @@
-import type { TokenUsage } from "#shared/token-usage.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { PendingResponder } from "#harness/hitl/index.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
-import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   initialSessionProjection,
+  activeTurnIdOf,
+  openRunOf,
   turnCoordinates,
   type SessionProjection,
 } from "#protocol/session-projection.js";
+import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import { openRequests } from "#protocol/session-projection/reader.js";
 import {
   readTurnState,
   type StepCoordinates,
@@ -22,7 +26,13 @@ import {
 // publishes; execution comes from `TurnState`. Workflow bodies import this module, so it stays
 // free of runtime dependencies; a step reads the live projection through `current.ts`.
 
-export type { StepCoordinates, SuspendedStep, TurnState } from "./state.js";
+export type {
+  ApprovalAsk,
+  ApprovedCall,
+  StepCoordinates,
+  SuspendedStep,
+  TurnState,
+} from "./state.js";
 
 export const SESSION_PROJECTION_STATE_KEY = "eve.harness.sessionProjection";
 
@@ -32,18 +42,27 @@ export interface SessionView {
   readonly projection: SessionProjection;
   /** Requests this session relays for a child session or a workflow run, by `requestId`. */
   readonly relayedRequestIds: ReadonlySet<string>;
+  /** Who gave each answer a response policy still weighs, by response id. */
+  readonly responders: Readonly<Record<string, PendingResponder>>;
   /** The sign-in attempts the session waits on, with what completing them needs. */
   readonly signIns: readonly AuthorizationChallenge[];
-  /** The session's token usage so far, which its waiting and terminal events report. */
-  readonly usage: TokenUsage;
 }
 
 /** Reads the authoritative lifecycle facts saved alongside execution state. */
 export function storedProjection(state: SessionStateMap | undefined): SessionProjection {
-  return (
-    (state?.[SESSION_PROJECTION_STATE_KEY] as SessionProjection | undefined) ??
-    initialSessionProjection()
-  );
+  const stored = state?.[SESSION_PROJECTION_STATE_KEY] as Partial<SessionProjection> | undefined;
+  if (stored === undefined) return initialSessionProjection();
+  // A projection an earlier build stored may lack what this one keeps beside its view, and carry
+  // what this one no longer keeps.
+  const initial = initialSessionProjection();
+  const projection: SessionProjection = {
+    counters: stored.counters ?? initial.counters,
+    view: stored.view ?? initial.view,
+    usageWindow: stored.usageWindow,
+  };
+  return stored.outputStarted === undefined
+    ? projection
+    : { ...projection, outputStarted: stored.outputStarted };
 }
 
 /** Coordinates the next lifecycle event carries, and whether a turn is open. */
@@ -55,19 +74,23 @@ export interface TurnPosition {
   readonly turnId: string;
   /** The open turn streamed assistant output, so steering can no longer restart it. */
   readonly assistantOutputStarted?: boolean;
+  /** The open turn's latest open model run, which content and calls belong to. */
+  readonly runId?: string;
 }
 
 export function turnPosition(projection: SessionProjection): TurnPosition {
   const { sequence, stepIndex } = turnCoordinates(projection);
-  const turn =
-    projection.activeTurnId === undefined ? undefined : projection.turns[projection.activeTurnId];
+  const turnId = activeTurnIdOf(projection);
   const position: { -readonly [K in keyof TurnPosition]: TurnPosition[K] } = {
-    sessionStarted: projection.started === true,
+    sessionStarted: projection.view.session.status !== "new",
     sequence,
     stepIndex,
-    turnId: turn?.turnId ?? "",
+    turnId: turnId ?? "",
   };
-  if (turn?.outputStarted === true) position.assistantOutputStarted = true;
+  if (turnId === undefined) return position;
+  if (projection.outputStarted === turnId) position.assistantOutputStarted = true;
+  const runId = openRunOf(projection, turnId);
+  if (runId !== undefined) position.runId = runId;
   return position;
 }
 
@@ -77,18 +100,11 @@ export function activeTurnId(position: Pick<TurnPosition, "sequence" | "turnId">
 }
 
 export function isBetweenTurns(projection: SessionProjection): boolean {
-  return projection.activeTurnId === undefined;
-}
-
-/** The index the open turn's next `step.started` takes. */
-export function nextStepIndex(projection: SessionProjection): number {
-  const turn =
-    projection.activeTurnId === undefined ? undefined : projection.turns[projection.activeTurnId];
-  return turn?.stepIndex === undefined ? 0 : turn.stepIndex + 1;
+  return activeTurnIdOf(projection) === undefined;
 }
 
 /** Input the session holds until it can run. */
-export function queuedInput(state: SessionStateMap | undefined): StepInput | undefined {
+export function queuedInput(state: SessionStateMap | undefined): HarnessStepInput | undefined {
   return readTurnState(state).queued;
 }
 
@@ -140,4 +156,28 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
     taskToolCalls,
     tasks,
   };
+}
+
+/** The suspended step whose approval `interactionId` names. */
+export function stepForRequest(
+  view: SessionView,
+  interactionId: string,
+): SuspendedStep | undefined {
+  return view.turn.suspended.find((step) =>
+    step.requests.some((request) => request.interactionId === interactionId),
+  );
+}
+
+/** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */
+export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<string> {
+  return new Set(
+    openRequests(view.projection.view)
+      .filter(
+        (row) =>
+          row.origin === undefined &&
+          interactionOwner(view.projection.view, row).taskId === undefined &&
+          !view.relayedRequestIds.has(row.interactionId),
+      )
+      .map((row) => row.interactionId),
+  );
 }

@@ -33,13 +33,14 @@ function fixture(
     const { connection } = mockSandbox({ stop: stopSandbox });
     return options.closable === true ? { ...connection, close: closeSandbox } : connection;
   });
+  const resume = vi.fn(async () => await create());
   const start = vi.fn(async (context: SandboxSessionContext) => ({
     connection: await create(),
     state: { key: context.session.id },
   }));
   const provider = defineSandboxProvider({
     name: "test",
-    environment: () => ({ onSessionEnd, prepare: async () => null, start, resume: create }),
+    environment: () => ({ onSessionEnd, prepare: async () => null, start, resume }),
   });
   const environment = provider.environment();
   const selector = defineSandbox(async () => {
@@ -61,7 +62,7 @@ function fixture(
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { closeSandbox, create, onSessionEnd, registry, start, stopSandbox };
+  return { closeSandbox, create, onSessionEnd, registry, resume, start, stopSandbox };
 }
 /** A provider that honors the contract: `start` upserts on the session id, and cleanup deletes by it. */
 function upsertingFixture() {
@@ -158,6 +159,128 @@ describe("ensureSandboxAccess", () => {
       state: null,
     });
     expect(value.create).not.toHaveBeenCalled();
+  });
+
+  it("opens on prepare without waiting, and get waits for the work queued behind it", async () => {
+    const value = fixture();
+    let opened!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    const createNow = value.create.getMockImplementation()!;
+    value.create.mockImplementationOnce(async () => {
+      await gate;
+      return await createNow();
+    });
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    const order: string[] = [];
+
+    access.prepare();
+    access.prepare(async (openSandbox) => {
+      await openSandbox();
+      order.push("work");
+    });
+    const sandbox = access.get().then((result) => {
+      order.push("get");
+      return result;
+    });
+    await vi.waitFor(() => expect(value.create).toHaveBeenCalledOnce());
+    expect(order).toEqual([]);
+
+    opened();
+    await expect(sandbox).resolves.toBeTruthy();
+    expect(order).toEqual(["work", "get"]);
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
+  it("retries failed queued work once before later work, then drops it without failing", async () => {
+    const value = fixture();
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    const order: string[] = [];
+    const flaky = vi
+      .fn(async (_open: () => Promise<unknown>) => {
+        order.push("flaky");
+      })
+      .mockRejectedValueOnce(new Error("disk full"));
+    const broken = vi.fn(async (_open: () => Promise<unknown>) => {
+      order.push("broken");
+      throw new Error("disk still full");
+    });
+
+    access.prepare(flaky);
+    access.prepare(broken);
+    access.prepare(async () => void order.push("later"));
+
+    await expect(access.settle()).resolves.toBeUndefined();
+    await expect(access.get()).resolves.toBeTruthy();
+    expect(flaky).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(["flaky", "broken", "broken", "later"]);
+  });
+
+  it("resumes a recorded sandbox in the background but never starts one", async () => {
+    const value = fixture();
+    const recorded = { session: { providerName: "test", state: null, stateProtocolVersion: 1 } };
+    const build = (state: typeof recorded | null) =>
+      ensureSandboxAccess({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        nodeId: "__root__",
+        registry: value.registry,
+        sessionId: "session-1",
+        state,
+      });
+
+    const unrecorded = await build(null);
+    unrecorded.resumeRecorded();
+    await unrecorded.settle();
+    expect(value.create).not.toHaveBeenCalled();
+
+    value.resume.mockRejectedValue(new SandboxSessionGoneError("The sandbox is gone."));
+    const gone = await build(recorded);
+    gone.resumeRecorded();
+    await gone.settle();
+    expect(value.resume).toHaveBeenCalledOnce();
+    expect(value.start).not.toHaveBeenCalled();
+
+    // A consumer that needs the sandbox still gets a fresh one.
+    await expect(gone.get()).resolves.toBeTruthy();
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
+  it("starts a fresh sandbox for an opener that joined a background resume of a gone one", async () => {
+    const value = fixture();
+    const gone = Promise.withResolvers<void>();
+    value.resume.mockImplementation(async () => {
+      await gone.promise;
+      throw new SandboxSessionGoneError("The sandbox is gone.");
+    });
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state: { session: { providerName: "test", state: null, stateProtocolVersion: 1 } },
+    });
+
+    access.resumeRecorded();
+    await vi.waitFor(() => expect(value.resume).toHaveBeenCalledOnce());
+    // Attachment staging opens without waiting for the queue, joining that resume.
+    const opened = access.open();
+    gone.resolve();
+
+    await expect(opened).resolves.toBeTruthy();
+    expect(value.start).toHaveBeenCalledOnce();
   });
 
   it("keeps missing production artifacts fatal without starting a sandbox", async () => {
@@ -500,7 +623,7 @@ describe("ensureSandboxAccess", () => {
     expect(value.onSessionEnd).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
       { key: "session-1" },
-      { abortSignal: undefined, reason: "deleted" },
+      { signal: undefined, reason: "deleted" },
     );
     expect(value.create).toHaveBeenCalledTimes(2);
   });

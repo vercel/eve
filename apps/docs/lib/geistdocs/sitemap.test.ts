@@ -35,12 +35,10 @@ describe("createCanonicalSitemap", () => {
       "https://eve.dev/docs/getting-started",
       "https://eve.dev/integrations",
       "https://eve.dev/integrations/slack",
-      "https://eve.dev/templates",
-      "https://eve.dev/templates/eve-chat-template",
     ]);
   });
 
-  it("excludes redirects, queries, locale aliases, machine routes, and errors", () => {
+  it("excludes retired templates, redirects, queries, locale aliases, machine routes, and errors", () => {
     const urls = createCanonicalSitemap({
       excludedPathnames: ["/docs/channels"],
       origin: "https://eve.dev",
@@ -54,6 +52,8 @@ describe("createCanonicalSitemap", () => {
         expect.stringMatching(/\.(?:md|mdx|txt|xml)$/),
         "https://eve.dev/docs/channels",
         "https://eve.dev/api",
+        "https://eve.dev/templates",
+        "https://eve.dev/templates/eve-chat-template",
       ]),
     );
   });

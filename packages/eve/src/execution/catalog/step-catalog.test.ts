@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
@@ -9,6 +9,7 @@ import { ContextContainer } from "#context/container.js";
 import {
   catalogBundle,
   catalogContext,
+  nativeCatalog,
   connectionTool,
   fakeConnection,
   inlineTool,
@@ -18,10 +19,15 @@ import {
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
+import { writeDefinitionsState } from "#definitions/state.js";
+import { evaluateStepValues } from "#definitions/step.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
-import { buildStepCatalog, type StepCatalog } from "./step-catalog.js";
+import type { StepCatalog } from "./step-catalog.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 const CHILD = { rootSessionId: "root-session" };
 
@@ -57,8 +63,8 @@ const CALL_DESCRIPTION =
   "Call a tool that isn't in your tool list by its exact name from eve__search, with `input` matching its signature.";
 
 describe("buildStepCatalog", () => {
-  it("lists direct entries, then the catalog tools, and keeps deferred entries out of the tool list", () => {
-    const { catalog } = catalogContext({
+  it("lists direct entries, then the catalog tools, and keeps deferred entries out of the tool list", async () => {
+    const { catalog } = await catalogContext({
       tools: [inlineTool("add"), inlineTool("refund_invoice", { deferred: true })],
     });
 
@@ -67,24 +73,26 @@ describe("buildStepCatalog", () => {
   });
 
   describe("which catalog tools the agent gets", () => {
-    it("counts only the deferred tools the session sees, so a delegated session doesn't search for root-only ones", () => {
+    it("counts only the deferred tools the session sees, so a delegated session doesn't search for root-only ones", async () => {
       const tools = [inlineTool("archive", { availableInSubagents: false, deferred: true })];
 
-      expect(names(catalogContext({ tools }).catalog.advertised)).toEqual([
+      expect(names((await catalogContext({ tools })).catalog.advertised)).toEqual([
         SEARCH_TOOL_NAME,
         CALL_TOOL_NAME,
       ]);
-      expect(names(catalogContext({ session: CHILD, tools }).catalog.advertised)).toEqual([]);
+      expect(names((await catalogContext({ session: CHILD, tools })).catalog.advertised)).toEqual(
+        [],
+      );
     });
 
-    it("gives an agent with nothing to find, call, or load no catalog tools", () => {
-      const { catalog } = catalogContext({ tools: [inlineTool("add")] });
+    it("gives an agent with nothing to find, call, or load no catalog tools", async () => {
+      const { catalog } = await catalogContext({ tools: [inlineTool("add")] });
 
       expect(names(catalog.advertised)).toEqual(["add"]);
     });
 
     it("gives an agent with only listed skills eve__skill alone, which never mentions search", async () => {
-      const { catalog } = catalogContext({ skills: [{ name: "house-rules" }] });
+      const { catalog } = await catalogContext({ skills: [{ name: "house-rules" }] });
 
       expect(names(catalog.advertised)).toEqual([SKILL_TOOL_NAME]);
       expect(shape(catalog, SKILL_TOOL_NAME)).toEqual({
@@ -100,8 +108,8 @@ describe("buildStepCatalog", () => {
       expect(unknown).not.toContain(SEARCH_TOOL_NAME);
     });
 
-    it("gives an agent with deferred skills search and eve__skill, which mentions search", () => {
-      const { catalog } = catalogContext({ skills: [{ deferred: true, name: "pdf-forms" }] });
+    it("gives an agent with deferred skills search and eve__skill, which mentions search", async () => {
+      const { catalog } = await catalogContext({ skills: [{ deferred: true, name: "pdf-forms" }] });
 
       expect(names(catalog.advertised)).toEqual([SEARCH_TOOL_NAME, SKILL_TOOL_NAME]);
       expect(shape(catalog, SKILL_TOOL_NAME).description).toBe(
@@ -109,9 +117,11 @@ describe("buildStepCatalog", () => {
       );
     });
 
-    it("describes eve__tool with input optional, preferring connected services only with connections", () => {
-      const tools = catalogContext({ tools: [inlineTool("refund_invoice", { deferred: true })] });
-      const connected = catalogContext({
+    it("describes eve__tool with input optional, preferring connected services only with connections", async () => {
+      const tools = await catalogContext({
+        tools: [inlineTool("refund_invoice", { deferred: true })],
+      });
+      const connected = await catalogContext({
         connections: [fakeConnection({ name: "linear", tools: [] })],
         skills: [{ name: "house-rules" }],
       });
@@ -132,9 +142,9 @@ describe("buildStepCatalog", () => {
       expect(shape(connected.catalog, SKILL_TOOL_NAME).description).toBe(LISTED_SKILL_DESCRIPTION);
     });
 
-    it("tells search's results apart by the catalog tool that takes them, naming only tools the agent has", () => {
-      const searchText = (declared: Parameters<typeof catalogContext>[0]) =>
-        catalogContext(declared).catalog.advertised.get(SEARCH_TOOL_NAME)!.description;
+    it("tells search's results apart by the catalog tool that takes them, naming only tools the agent has", async () => {
+      const searchText = async (declared: Parameters<typeof catalogContext>[0]) =>
+        (await catalogContext(declared)).catalog.advertised.get(SEARCH_TOOL_NAME)!.description;
       const toolResults =
         "A result with `tool` has the exact name, description, and TypeScript signature: call it with eve__tool({ name, input }).";
       const skillResults =
@@ -142,17 +152,19 @@ describe("buildStepCatalog", () => {
       const signIn =
         "A connection that needs sign-in appears as a tool named after the connection: calling it with eve__tool({ name }) asks the user to sign in.";
 
-      const skillsOnly = searchText({ skills: [{ deferred: true, name: "pdf-forms" }] });
+      const skillsOnly = await searchText({ skills: [{ deferred: true, name: "pdf-forms" }] });
       expect(skillsOnly).toContain(skillResults);
       expect(skillsOnly).not.toContain(CALL_TOOL_NAME);
 
-      const toolsOnly = searchText({ tools: [inlineTool("refund_invoice", { deferred: true })] });
+      const toolsOnly = await searchText({
+        tools: [inlineTool("refund_invoice", { deferred: true })],
+      });
       expect(toolsOnly).toContain(toolResults);
       expect(toolsOnly).not.toContain(SKILL_TOOL_NAME);
       expect(toolsOnly).not.toContain(signIn);
 
       expect(
-        searchText({ connections: [fakeConnection({ name: "linear", tools: [] })] }),
+        await searchText({ connections: [fakeConnection({ name: "linear", tools: [] })] }),
       ).toContain(signIn);
     });
 
@@ -160,27 +172,25 @@ describe("buildStepCatalog", () => {
       ["a deferred tool", { tools: [inlineTool("refund_invoice", { deferred: true })] }],
       ["a deferred agent", { tools: [subagentTool("researcher", { deferred: true })] }],
       ["a connection", { connections: [fakeConnection({ name: "linear", tools: [] })] }],
-    ])("gives an agent with %s search and eve__tool", (_, declared) => {
+    ])("gives an agent with %s search and eve__tool", async (_, declared) => {
       // A subagent also brings the task tools; the catalog tools come last.
-      expect(names(catalogContext(declared).catalog.advertised).slice(-2)).toEqual([
+      expect(names((await catalogContext(declared)).catalog.advertised).slice(-2)).toEqual([
         SEARCH_TOOL_NAME,
         CALL_TOOL_NAME,
       ]);
     });
 
-    it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", () => {
+    it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", async () => {
       const bundle = catalogBundle({ dynamicSubagents: ["helper"] });
       const ctx = new ContextContainer();
       ctx.set(BundleKey, {
         ...bundle,
         resolvedAgent: {
           ...bundle.resolvedAgent,
-          dynamicConnectionResolvers: [{}],
-          dynamicSkillResolvers: [{}],
-          dynamicToolResolvers: [{}],
+          definitions: [{ kind: "connection" }, { kind: "skill" }, { kind: "tool" }],
         } as never,
       });
-      const catalog = buildStepCatalog({
+      const catalog = await nativeCatalog({
         agentTools: toolMap(inlineTool("add")),
         ctx,
         endsTurn: true,
@@ -195,16 +205,30 @@ describe("buildStepCatalog", () => {
       ]);
     });
 
-    it("keeps the catalog tools earlier steps offered, unchanged, once nothing reaches them", () => {
-      const reachingEverything = catalogContext({
+    it("keeps the catalog tools a model call offered, unchanged, once nothing reaches them", async () => {
+      const { catalog: reachingEverything, ctx } = await catalogContext({
         connections: [fakeConnection({ name: "linear", tools: [] })],
         skills: [{ deferred: true, name: "pdf-forms" }],
         tools: [inlineTool("refund_invoice", { deferred: true })],
-      }).catalog;
-      const later = catalogContext({
-        offered: reachingEverything.offered,
-        tools: [inlineTool("add")],
-      }).catalog;
+      });
+      enterSessionProjection(ctx, undefined);
+      await evaluateStepValues(
+        {
+          config: { tools: toolMap(inlineTool("refund_invoice", { deferred: true })) },
+          ctx,
+          finalReplyOnly: false,
+          session: {},
+        },
+        { conversation: [] },
+      );
+      ctx.set(BundleKey, catalogBundle({}));
+      ctx.delete(ConnectionRegistryKey);
+      const later = await nativeCatalog({
+        agentTools: toolMap(inlineTool("add")),
+        ctx,
+        endsTurn: true,
+        session: {},
+      });
       const catalogTools = (catalog: StepCatalog) =>
         [SEARCH_TOOL_NAME, CALL_TOOL_NAME, SKILL_TOOL_NAME].map((tool) => shape(catalog, tool));
 
@@ -229,7 +253,7 @@ describe("buildStepCatalog", () => {
       subagentTool("researcher", { deferred: true }),
     ];
 
-    const root = catalogContext({ tools }).catalog;
+    const root = (await catalogContext({ tools })).catalog;
     expect(names(root.advertised)).toEqual([
       "add",
       "notify_team",
@@ -243,7 +267,7 @@ describe("buildStepCatalog", () => {
     ]);
     expect(names(root.deferred)).toEqual(["archive", "researcher"]);
 
-    const child = catalogContext({ session: CHILD, tools }).catalog;
+    const child = (await catalogContext({ session: CHILD, tools })).catalog;
     expect(names(child.advertised)).toEqual([
       "add",
       "delegate",
@@ -262,49 +286,48 @@ describe("buildStepCatalog", () => {
   });
 
   describe("task tools", () => {
-    const offered = (catalog: StepCatalog) => ({
-      advertised:
-        catalog.advertised.has(TASK_WAIT_TOOL_NAME) &&
-        catalog.advertised.has(TASK_CANCEL_TOOL_NAME),
-      offersTasks: catalog.offersTasks,
-    });
-    const offeredFor = (...input: Parameters<typeof catalogContext>) =>
-      offered(catalogContext(...input).catalog);
-    const OFFERED = { advertised: true, offersTasks: true };
-    const NOT_OFFERED = { advertised: false, offersTasks: false };
+    const offered = (catalog: StepCatalog) =>
+      catalog.advertised.has(TASK_WAIT_TOOL_NAME) && catalog.advertised.has(TASK_CANCEL_TOOL_NAME);
+    const offeredFor = async (...input: Parameters<typeof catalogContext>) =>
+      offered((await catalogContext(...input)).catalog);
+    const OFFERED = true;
+    const NOT_OFFERED = false;
 
-    it("are offered while a tool the session sees starts tasks, deferred or not", () => {
-      expect(offeredFor({ tools: [inlineTool("add")] })).toEqual(NOT_OFFERED);
-      expect(offeredFor({ tools: [workflowTool("deploy_service")] })).toEqual(NOT_OFFERED);
-      expect(offeredFor({ tools: [workflowTool("research", "task", { deferred: true })] })).toEqual(
-        OFFERED,
-      );
-      expect(offeredFor({ tools: [subagentTool("delegate")] })).toEqual(OFFERED);
+    it("are offered while a tool the session sees starts tasks, deferred or not", async () => {
+      expect(await offeredFor({ tools: [inlineTool("add")] })).toEqual(NOT_OFFERED);
+      expect(await offeredFor({ tools: [workflowTool("deploy_service")] })).toEqual(NOT_OFFERED);
+      expect(
+        await offeredFor({ tools: [workflowTool("research", "task", { deferred: true })] }),
+      ).toEqual(OFFERED);
+      expect(await offeredFor({ tools: [subagentTool("delegate")] })).toEqual(OFFERED);
     });
 
-    it("are not offered to a leaf subagent session whose only task-starting tool is root-only", () => {
+    it("are not offered to a leaf subagent session whose only task-starting tool is root-only", async () => {
       const tools = [inlineTool("add"), subagentTool("agent", { rootOnly: true })];
 
-      expect(offeredFor({ tools })).toEqual(OFFERED);
-      expect(offeredFor({ session: CHILD, tools })).toEqual(NOT_OFFERED);
+      expect(await offeredFor({ tools })).toEqual(OFFERED);
+      expect(await offeredFor({ session: CHILD, tools })).toEqual(NOT_OFFERED);
     });
 
-    it("are offered when the agent resolves subagents at runtime", () => {
-      expect(offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] })).toEqual(
-        OFFERED,
-      );
+    it("are offered when the agent resolves subagents at runtime", async () => {
+      expect(
+        await offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] }),
+      ).toEqual(OFFERED);
     });
   });
 
   describe("resolve", () => {
     const refundInvoice = inlineTool("refund_invoice", { deferred: true });
     const add = inlineTool("add");
-    const { catalog } = catalogContext({
-      skills: [{ name: "pdf-forms", deferred: true, markdown: "# PDF forms" }],
-      tools: [add, refundInvoice, subagentTool("billing_specialist", { deferred: true })],
+    let catalog!: StepCatalog;
+    beforeAll(async () => {
+      ({ catalog } = await catalogContext({
+        skills: [{ name: "pdf-forms", deferred: true, markdown: "# PDF forms" }],
+        tools: [add, refundInvoice, subagentTool("billing_specialist", { deferred: true })],
+      }));
     });
 
-    it("resolves an eve__tool call to the entry it names, keeping the model's call id", () => {
+    it("resolves an eve__tool call to the entry it names, keeping the model's call id", async () => {
       const call = {
         input: { input: { invoiceId: "in_1" }, name: "refund_invoice" },
         toolCallId: "call-1",
@@ -324,7 +347,7 @@ describe("buildStepCatalog", () => {
       const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
 
       expect(resolved?.call).toEqual({ input: { name: "pdf-forms" }, toolName: "eve:load-skill" });
-      const label = resolved?.definition.label;
+      const label = labelCallbacks(resolved?.definition.label);
       expect(label?.start?.(resolved?.call.input)).toBe("Load skill pdf-forms");
       expect(label?.complete?.(resolved?.call.input, "# PDF forms")).toBe("Loaded skill pdf-forms");
       expect(
@@ -332,7 +355,7 @@ describe("buildStepCatalog", () => {
       ).toBe("# PDF forms");
     });
 
-    it("resolves a direct call only to a listed tool, and eve__tool to a listed tool too", () => {
+    it("resolves a direct call only to a listed tool, and eve__tool to a listed tool too", async () => {
       expect(catalog.resolve({ input: {}, toolName: "add" })?.definition).toBe(add);
       expect(catalog.resolve({ input: {}, toolName: "refund_invoice" })).toBeUndefined();
       expect(
@@ -345,36 +368,42 @@ describe("buildStepCatalog", () => {
   });
 
   describe("eve__tool and eve__skill validation", () => {
-    const { catalog } = catalogContext({
-      connections: [fakeConnection({ name: "linear", tools: [] })],
-      skills: [
-        { name: "release_notes", deferred: true },
-        { name: "release-checklist" },
-        { name: "refund_invoice", deferred: true },
-      ],
-      tools: [
-        inlineTool("add"),
-        inlineTool("refund_invoice", {
-          deferred: true,
-          schema: {
-            type: "object",
-            properties: { invoiceId: { type: "string" } },
-            required: ["invoiceId"],
-            additionalProperties: false,
+    let catalog!: StepCatalog;
+    beforeAll(async () => {
+      ({ catalog } = await catalogContext({
+        connections: [fakeConnection({ name: "linear", tools: [] })],
+        skills: [
+          { name: "release_notes", deferred: true },
+          { name: "release-checklist" },
+          { name: "refund_invoice", deferred: true },
+        ],
+        tools: [
+          inlineTool("add"),
+          inlineTool("refund_invoice", {
+            deferred: true,
+            schema: {
+              type: "object",
+              properties: { invoiceId: { type: "string" } },
+              required: ["invoiceId"],
+              additionalProperties: false,
+            },
+          }),
+          inlineTool("refund_payment", { deferred: true }),
+          inlineTool("stripe_list_disputes", { deferred: true }),
+          workflowTool("research", "task"),
+          // eve's built-in tools and static agents are marked as framework tools.
+          inlineTool("bash", { frameworkTool: true }),
+          subagentTool("billing_specialist", { frameworkTool: true }),
+          {
+            ...inlineTool("web_search"),
+            behavior: {
+              availability: [],
+              handling: { kind: "provider-tool", provider: "parallel" },
+            },
+            execute: undefined,
           },
-        }),
-        inlineTool("refund_payment", { deferred: true }),
-        inlineTool("stripe_list_disputes", { deferred: true }),
-        workflowTool("research", "task"),
-        // eve's built-in tools and static agents are marked as framework tools.
-        inlineTool("bash", { frameworkTool: true }),
-        subagentTool("billing_specialist", { frameworkTool: true }),
-        {
-          ...inlineTool("web_search"),
-          behavior: { availability: [], handling: { kind: "provider-tool", provider: "parallel" } },
-          execute: undefined,
-        },
-      ],
+        ],
+      }));
     });
 
     it.each([
@@ -458,7 +487,7 @@ describe("buildStepCatalog", () => {
     });
 
     it("doesn't point eve__skill at eve__search when search can't find skills", async () => {
-      const { catalog: toolSearch } = catalogContext({
+      const { catalog: toolSearch } = await catalogContext({
         skills: [{ name: "house-rules" }],
         tools: [inlineTool("refund_invoice", { deferred: true })],
       });
@@ -500,35 +529,69 @@ describe("buildStepCatalog", () => {
       additionalProperties: false,
     });
 
-    function linearCatalog(listing?: Parameters<typeof fakeConnection>[0]["listing"]) {
+    async function linearCatalog(listing?: Parameters<typeof fakeConnection>[0]["listing"]) {
       const linear = fakeConnection({
         listing,
         name: "linear",
         tools: [listIssues, connectionTool("list_projects")],
       });
-      return { linear, ...catalogContext({ connections: [linear], tools: [inlineTool("add")] }) };
+      return {
+        linear,
+        ...(await catalogContext({ connections: [linear], tools: [inlineTool("add")] })),
+      };
     }
 
-    it("resolves a name under a connection's prefix to that connection's tool, filling schema defaults", async () => {
-      const { catalog, linear, run } = linearCatalog();
-      const validated = { input: { limit: 20, team: "core" }, name: "linear__list_issues" };
+    it("resolves a name under a connection's prefix to that connection's tool, which fills schema defaults when it runs", async () => {
+      const { catalog, linear, run } = await linearCatalog();
+      const validated = { input: { team: "core" }, name: "linear__list_issues" };
 
       expect(
         await validateTool(catalog, { input: { team: "core" }, name: "linear__list_issues" }),
       ).toEqual({ value: validated });
       const resolved = catalog.resolve({ input: validated, toolName: CALL_TOOL_NAME });
       expect(resolved?.call.toolName).toBe("linear__list_issues");
-      expect(resolved?.definition.label?.start?.({})).toBe("Linear: List issues");
+      expect(labelCallbacks(resolved?.definition.label)?.start?.({})).toBe("Linear: List issues");
       await run(() =>
         resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
       );
       expect(linear.calls).toEqual([{ input: { limit: 20, team: "core" }, tool: "list_issues" }]);
     });
 
+    it("versions a dynamic connection's entries by its target and memo results", async () => {
+      const { ctx } = await linearCatalog();
+      const versionFor = async (tenant: string) => {
+        writeDefinitionsState(ctx, {
+          latest: {},
+          memos: { "connection::linear": { tenant } },
+          slots: {
+            "connection::linear": {
+              digest: "linear",
+              since: 0,
+              value: [{ name: "linear", protocol: "mcp", url: "https://linear.example" }],
+            },
+          },
+        });
+        const catalog = await nativeCatalog({
+          agentTools: new Map(),
+          ctx,
+          endsTurn: false,
+          session: {},
+        });
+        return [catalog.get("linear")?.version, catalog.get("linear__list_issues")?.version];
+      };
+
+      const [signIn, tool] = await versionFor("a");
+      expect(signIn).toBeDefined();
+      expect(tool).toBe(signIn);
+      expect(await versionFor("a")).toEqual([signIn, tool]);
+      expect((await versionFor("b"))[1]).not.toBe(tool);
+      expect((await linearCatalog()).catalog.get("linear__list_issues")?.version).toBeUndefined();
+    });
+
     it("fails a call whose connection doesn't list its tools within 10 seconds, when validating and when calling", async () => {
       vi.useFakeTimers();
       try {
-        const { catalog, linear, run } = linearCatalog();
+        const { catalog, linear, run } = await linearCatalog();
         const listing = vi.spyOn(linear.client, "getToolMetadata");
         const timedOut = '"linear" did not list its tools within 10s. Try again later.';
         const call = { input: { team: "core" }, name: "linear__list_issues" };
@@ -558,8 +621,65 @@ describe("buildStepCatalog", () => {
       }
     });
 
+    // #4977: a server that lists its tools but never answers a call held the turn.
+    it.each([
+      {
+        case: "fails and cancels a call the connection doesn't answer within 5 minutes",
+        cancelTurn: false,
+        error:
+          '"linear" did not answer list_issues within 5 minutes. It may still have run, so check before you retry.',
+      },
+      {
+        case: "keeps the turn's own error when the turn is cancelled before the deadline",
+        cancelTurn: true,
+        error: "Request was aborted",
+      },
+    ])("$case", async ({ cancelTurn, error }) => {
+      vi.useFakeTimers();
+      try {
+        const { catalog, linear, run } = await linearCatalog();
+        let request: AbortSignal | undefined;
+        // Like an MCP client: the request settles only when its signal aborts.
+        vi.spyOn(linear.client, "executeTool").mockImplementationOnce(
+          async (_tool, _args, { abortSignal }) =>
+            await new Promise((_, reject) => {
+              request = abortSignal;
+              abortSignal?.addEventListener("abort", () =>
+                reject(new Error("Request was aborted")),
+              );
+            }),
+        );
+        const call = { input: { team: "core" }, name: "linear__list_issues" };
+        const { value } = (await validateTool(catalog, call)) as { value: unknown };
+        const resolved = catalog.resolve({ input: value, toolName: CALL_TOOL_NAME });
+        const turn = new AbortController();
+        const calling = run(() =>
+          resolved?.definition.execute?.(resolved.call.input, {
+            abortSignal: turn.signal,
+            messages: [],
+            toolCallId: "call-1",
+          }),
+        );
+
+        // Observe the outcome before advancing: the call rejects while the timers run.
+        const outcome = Promise.resolve(calling).then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+        await vi.advanceTimersByTimeAsync(60_000);
+        // A cancelled turn settles the call at once, without waiting out the deadline.
+        if (cancelTurn) turn.abort();
+        await vi.advanceTimersByTimeAsync(cancelTurn ? 0 : 4 * 60_000);
+        // Racing a settled value reports a call that is still pending instead of hanging the test.
+        expect(await Promise.race([outcome, "still waiting"])).toBe(error);
+        expect(request?.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("validates input against the connection's schema before the call can run", async () => {
-      const { catalog, linear } = linearCatalog();
+      const { catalog, linear } = await linearCatalog();
 
       expect(
         await validateTool(catalog, { input: { team: 7 }, name: "linear__list_issues" }),
@@ -593,7 +713,7 @@ describe("buildStepCatalog", () => {
           }),
         ],
       });
-      const { catalog, run } = catalogContext({ connections: [nova] });
+      const { catalog, run } = await catalogContext({ connections: [nova] });
       const call = { input: { env: "staging", logql: '{app="api"}' }, name: "nova__loki_logs" };
 
       expect(await validateTool(catalog, call)).toEqual({
@@ -618,7 +738,7 @@ describe("buildStepCatalog", () => {
         'Failed to load tools for "linear": upstream returned 502',
       ],
     ])("rejects %s", async (_case, listing, message) => {
-      const { catalog } = linearCatalog(listing);
+      const { catalog } = await linearCatalog(listing);
       const tool = listing === undefined ? "linear__list_issue" : "linear__list_issues";
 
       expect(await validateTool(catalog, { name: tool })).toEqual({
@@ -627,7 +747,7 @@ describe("buildStepCatalog", () => {
     });
 
     it("accepts a call to a connection that needs sign-in, so the call can start it", async () => {
-      const { catalog } = linearCatalog("sign-in");
+      const { catalog } = await linearCatalog("sign-in");
 
       expect(
         await validateTool(catalog, { input: { team: 7 }, name: "linear__list_issues" }),
@@ -636,7 +756,7 @@ describe("buildStepCatalog", () => {
   });
 
   describe("connection sign-in", () => {
-    function notionCatalog(
+    async function notionCatalog(
       options: Pick<
         Parameters<typeof fakeConnection>[0],
         "listing" | "rejectsToken" | "signIn"
@@ -650,7 +770,7 @@ describe("buildStepCatalog", () => {
         ...options,
         tools: [connectionTool("search_pages")],
       });
-      const context = catalogContext({ connections: [notion] });
+      const context = await catalogContext({ connections: [notion] });
       const signIn = context.catalog.resolve({
         input: { name: "notion" },
         toolName: CALL_TOOL_NAME,
@@ -676,10 +796,10 @@ describe("buildStepCatalog", () => {
     }
 
     it("parks eve__tool({ name: <connection> }) for sign-in, then reports the sign-in and lists the tools", async () => {
-      const { catalog, connect, finishSignIn, notion, run, signIn } = notionCatalog();
+      const { catalog, connect, finishSignIn, notion, run, signIn } = await notionCatalog();
 
       expect(signIn.call.toolName).toBe("notion");
-      expect(signIn.definition.label?.start?.({})).toBe("Sign in to Notion");
+      expect(labelCallbacks(signIn.definition.label)?.start?.({})).toBe("Sign in to Notion");
       expect(signIn.definition.approval).toBeUndefined();
       const parked = await connect();
       expect(isAuthorizationSignal(parked)).toBe(true);
@@ -700,7 +820,7 @@ describe("buildStepCatalog", () => {
     });
 
     it("confirms a connection whose tools are already listable, without prompting", async () => {
-      const { connect, notion } = notionCatalog({ listing: "listed" });
+      const { connect, notion } = await notionCatalog({ listing: "listed" });
 
       expect(await connect()).toBe(
         'The Notion tools are available. Find them with eve__search({ query: "notion__" }).',
@@ -709,7 +829,7 @@ describe("buildStepCatalog", () => {
     });
 
     it("fails rather than asking again when the service rejects the token it just issued", async () => {
-      const { connect, finishSignIn, notion } = notionCatalog({ rejectsToken: true });
+      const { connect, finishSignIn, notion } = await notionCatalog({ rejectsToken: true });
 
       await connect();
       finishSignIn();
@@ -733,7 +853,7 @@ describe("buildStepCatalog", () => {
       ],
     ])("fails for %s", async (_case, options, message) => {
       captureLogRecords();
-      await expect(notionCatalog(options).connect()).rejects.toThrow(message);
+      await expect((await notionCatalog(options)).connect()).rejects.toThrow(message);
     });
   });
 });

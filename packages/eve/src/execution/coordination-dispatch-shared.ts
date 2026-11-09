@@ -22,6 +22,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { HarnessSessionBase } from "#harness/types.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { assertUniqueCoordinationCallIds } from "#harness/coordination.js";
 import {
   activeTurnId,
@@ -29,7 +30,6 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -37,10 +37,9 @@ import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { readDynamicSubagentSelections } from "#context/dynamic-subagent-lifecycle.js";
+import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
@@ -56,9 +55,12 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /** The tasks the dispatch started or sent to, for the step that publishes `task.started`. */
-  readonly started: readonly TaskStartedStreamEvent["data"][];
+  /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
+  readonly pending: PendingDispatch;
 }
+
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
+export type { PendingDispatch };
 
 /** Everything preflight produces before either step's dispatch loop runs. */
 export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskRequest> {
@@ -142,15 +144,9 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   assertUniqueCoordinationCallIds(batch.requests);
 
   const ctx = input.ctx;
+  enterSessionProjection(ctx, durableSession.state);
   const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
+  const session = hydrateDurableSession(durableSession);
   const adapter = ctx.require(ChannelKey);
 
   const plan = input.plan({

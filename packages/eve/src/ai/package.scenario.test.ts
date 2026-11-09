@@ -12,6 +12,7 @@ it("builds an agent and child with Gateway and provider decision models from pac
   const app = await scenarioApp({
     name: "ai-models",
     installDependencies: true,
+    dependencies: { ai: "7.0.128" },
     files: {
       "agent/instructions.md": "Help Alice review the export incident.",
       "agent/decision.ts": `import type { Experimental_DecisionModel } from "ai";
@@ -35,7 +36,7 @@ export default defineTool({
     const result = await decide({
       state: { incident: "Alice needs an export summary." },
       questions: { category: { type: "choice", instructions: "Choose a category.", criteria: { routine: "Routine work", investigation: "Investigation" } } },
-      abortSignal: ctx.abortSignal,
+      signal: ctx.abortSignal,
     });
     return result.answers.category.choice;
   },

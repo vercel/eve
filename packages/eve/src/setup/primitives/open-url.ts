@@ -6,7 +6,9 @@ function osOpenCommand(url: string): { command: string; args: string[] } {
     case "darwin":
       return { command: "open", args: [url] };
     case "win32":
-      return { command: "cmd", args: ["/c", "start", "", url] };
+      // `cmd /c start` re-parses the URL, so `&` or `|` in a query string
+      // would run as shell syntax. rundll32 takes it as one argument.
+      return { command: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
     default:
       return { command: "xdg-open", args: [url] };
   }
@@ -35,8 +37,9 @@ export function parseWebUrl(candidate: string): string | undefined {
 export function openUrl(url: string): void {
   // Only ever hand the OS opener a real web URL, never an arbitrary scheme or
   // a shell-significant argument.
-  if (parseWebUrl(url) === undefined) return;
-  const { command, args } = osOpenCommand(url);
+  const webUrl = parseWebUrl(url);
+  if (webUrl === undefined) return;
+  const { command, args } = osOpenCommand(webUrl);
   try {
     const child = spawn(command, args, { stdio: "ignore", detached: true });
     child.on("error", () => {});

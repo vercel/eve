@@ -30,7 +30,7 @@ describe("resolveEvalTargetHandle", () => {
       return Response.json({ error: "not found" }, { status: 404 });
     });
 
-    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const client = new Client({ baseUrl: "http://127.0.0.1:3000" });
     const target = await resolveEvalTargetHandle({
       client,
       expectedAgentName: "agent-basic-runtime",
@@ -74,7 +74,7 @@ describe("resolveEvalTargetHandle", () => {
 
     await expect(
       resolveEvalTargetHandle({
-        client: new Client({ host: "http://127.0.0.1:3000" }),
+        client: new Client({ baseUrl: "http://127.0.0.1:3000" }),
         expectedAgentName: "agent-basic-runtime",
         kind: "remote",
         url: "http://127.0.0.1:3000",
@@ -93,7 +93,7 @@ describe("resolveEvalTargetHandle", () => {
 
     await expect(
       resolveEvalTargetHandle({
-        client: new Client({ host: "http://127.0.0.1:4275" }),
+        client: new Client({ baseUrl: "http://127.0.0.1:4275" }),
         expectedAgentName: "@acme/agent",
         kind: "remote",
         url: "http://127.0.0.1:4275",
@@ -115,12 +115,35 @@ describe("resolveEvalTargetHandle", () => {
 
     await expect(
       resolveEvalTargetHandle({
-        client: new Client({ host: "http://127.0.0.1:4275" }),
+        client: new Client({ baseUrl: "http://127.0.0.1:4275" }),
         expectedAgentName: "@acme/agent",
         kind: "remote",
         url: "http://127.0.0.1:4275",
       }),
     ).rejects.toThrow(/@acme\/agent/);
+  });
+
+  it("names the operator credential to use when the info route refuses the caller", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = fetchUrl(request);
+      if (url.endsWith("/eve/v1/health")) {
+        return Response.json({ ok: true, status: "ready", workflowId: "wf" });
+      }
+      return Response.json(
+        { code: "info_forbidden", error: "Forbidden.", ok: false },
+        { status: 403 },
+      );
+    });
+
+    await expect(
+      resolveEvalTargetHandle({
+        client: new Client({ baseUrl: "https://agent.example.com" }),
+        kind: "remote",
+        url: "https://agent.example.com",
+      }),
+    ).rejects.toThrow(
+      /Eval target https:\/\/agent\.example\.com refused GET \/eve\/v1\/info.*principalType "service".*allowAgentInfo: true/,
+    );
   });
 });
 

@@ -10,10 +10,10 @@ import {
 import {
   createModuleSourceRef,
   createPathDerivedSourceId,
-  type SandboxSourceRef,
   type SandboxWorkspaceFolderSourceRef,
 } from "#discover/manifest.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { collectFlatSlotCandidates, collectNamedSlotCandidates } from "#discover/slots.js";
 
 /**
@@ -45,7 +45,7 @@ export const DISCOVER_SANDBOX_FOLDER_EMPTY = "discover/sandbox-folder-empty";
  */
 interface DiscoverSandboxSourceResult {
   diagnostics: DiscoverDiagnostic[];
-  sandbox: SandboxSourceRef | null;
+  sandbox: ModuleSourceRef | null;
   sandboxWorkspace: SandboxWorkspaceFolderSourceRef | null;
 }
 
@@ -89,6 +89,23 @@ export async function discoverSandboxSource(input: {
       sandbox: null,
       sandboxWorkspace: null,
     };
+  }
+
+  const rootCandidates = collectFlatSlotCandidates(input.rootEntries, {
+    moduleBaseName: SANDBOX_DEFINITION_BASE_NAME,
+  });
+  if (rootCandidates.moduleFileNames.length > 0) {
+    const rootFileNames = rootCandidates.moduleFileNames.map((name) => `"${name}"`).join(", ");
+    diagnostics.push(
+      createDiscoverErrorDiagnostic({
+        code: DISCOVER_MODULE_SLOT_COLLISION,
+        message:
+          `Found both ${rootFileNames} and "sandbox/". ` +
+          `Move ${rootFileNames} into "sandbox/sandbox.ts", or delete it if that file already exists.`,
+        sourcePath: directoryPath,
+      }),
+    );
+    return { diagnostics, sandbox: null, sandboxWorkspace: null };
   }
 
   const folderEntries = await readSortedDirectoryEntries(input.source, directoryPath);
@@ -139,7 +156,7 @@ export async function discoverSandboxSource(input: {
     };
   }
 
-  let sandbox: SandboxSourceRef | null = null;
+  let sandbox: ModuleSourceRef | null = null;
   if (hasModule) {
     sandbox = createModuleSourceRef({
       logicalPath: join(SANDBOX_DIRECTORY_NAME, moduleFileName),

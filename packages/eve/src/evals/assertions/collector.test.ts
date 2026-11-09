@@ -7,10 +7,11 @@ import type { EveEvalTaskResult } from "#evals/types.js";
 
 function taskResult(): EveEvalTaskResult {
   return {
+    sessionEnded: false,
     derived: createEmptyDerivedFacts(),
     events: [],
-    finalMessage: null,
-    output: null,
+    reply: undefined,
+    data: null,
     status: "completed",
     traceContexts: [],
   };

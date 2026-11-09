@@ -1,7 +1,7 @@
 import { createLiveblocksAdapter } from "@liveblocks/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -20,11 +20,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;

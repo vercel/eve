@@ -106,7 +106,7 @@ export function lowerScheduleMarkdown(source: string): ScheduleDefinition {
 
   const rawDefinition: Record<string, unknown> = {
     ...document.frontmatter,
-    markdown: document.markdown,
+    content: document.markdown,
   };
 
   return defineSchedule(
@@ -148,7 +148,7 @@ export function lowerSkillMarkdown(
 
   const rawDefinition: Record<string, unknown> = {
     description,
-    markdown: document.markdown,
+    content: document.markdown,
   };
 
   applyOptionalSkillFrontmatter(rawDefinition, frontmatter);

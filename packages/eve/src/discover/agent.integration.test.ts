@@ -1,17 +1,14 @@
+import { sourcesOf } from "#discover/manifest.js";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
-import {
-  EXTENSION_CAPABILITY_SUPPORT,
-  EXTENSION_CAPABILITY_VERSIONS,
-} from "#compiler/extension-compatibility.js";
 import { projectAgentSources } from "#compiler/project-sources.js";
 import { composeAgentModuleCandidates } from "#compiler/source-graph.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
-  DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+  DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
   DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
   DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
   DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
@@ -30,7 +27,7 @@ import {
   DISCOVER_TOOL_NAME_INVALID,
   DISCOVER_UNSUPPORTED_DIRECTORY,
 } from "#discover/grammar.js";
-import { DISCOVER_LIB_DIRECTORY_INVALID, DISCOVER_LIB_ENTRY_UNSUPPORTED } from "#discover/lib.js";
+import { DISCOVER_LIB_DIRECTORY_INVALID } from "#discover/lib.js";
 import { DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS } from "#discover/memory.js";
 import {
   DISCOVER_SCHEDULE_FILE_UNSUPPORTED,
@@ -39,9 +36,9 @@ import {
 
 const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
-  formatVersion: 1,
-  builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1 },
+  formatVersion: 3,
+  builtWithEve: "0.0.0",
+  contractMajor: 0,
 });
 
 /**
@@ -120,7 +117,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(flatResult.diagnostics).toEqual([]);
-    expect(flatResult.manifest.memories).toEqual([
+    expect(sourcesOf(flatResult.manifest, "memory")).toEqual([
       {
         logicalPath: "memory.ts",
         slot: "memory",
@@ -129,7 +126,7 @@ describe("discoverAgent (memory)", () => {
       },
     ]);
     expect(namedResult.diagnostics).toEqual([]);
-    expect(namedResult.manifest.memories).toEqual([
+    expect(sourcesOf(namedResult.manifest, "memory")).toEqual([
       {
         logicalPath: "memory/profile.ts",
         slot: "profile",
@@ -163,7 +160,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
       expect.arrayContaining([DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS]),
     );
-    expect(result.manifest.memories).toEqual([]);
+    expect(sourcesOf(result.manifest, "memory")).toEqual([]);
   });
 
   it("discovers single-file schedules in both module and markdown forms with recursive nesting", async () => {
@@ -200,7 +197,7 @@ describe("discoverAgent (memory)", () => {
       logicalPath: "agent.mjs",
       sourceId: "agent.mjs",
     });
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "You are a precise assistant.",
@@ -211,18 +208,18 @@ describe("discoverAgent (memory)", () => {
         sourceId: "instructions.md",
       },
     ]);
-    expect(result.manifest.channels).toEqual([
+    expect(sourcesOf(result.manifest, "channel")).toEqual([
       {
         sourceKind: "module",
         logicalPath: "channels/slack.mjs",
         sourceId: "channels/slack.mjs",
       },
     ]);
-    expect(result.manifest.schedules).toEqual([
+    expect(sourcesOf(result.manifest, "schedule")).toEqual([
       {
         definition: {
           cron: "*/15 * * * *",
-          markdown: "Retry dunning.",
+          content: "Retry dunning.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/billing/dunning/retry.md",
@@ -241,7 +238,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "0 9 * * *",
-          markdown: "Send a morning weather digest.",
+          content: "Send a morning weather digest.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/daily-digest.md",
@@ -255,12 +252,12 @@ describe("discoverAgent (memory)", () => {
         sourceId: "lib/weather/client.js",
       },
     ]);
-    expect(result.manifest.sandbox).toEqual({
+    expect(sourcesOf(result.manifest, "sandbox")[0]).toEqual({
       sourceKind: "module",
       logicalPath: "sandbox/sandbox.mjs",
       sourceId: "sandbox/sandbox.mjs",
     });
-    expect(result.manifest.tools).toEqual([
+    expect(sourcesOf(result.manifest, "tool")).toEqual([
       {
         sourceKind: "module",
         logicalPath: "tools/get_weather.mjs",
@@ -286,7 +283,7 @@ describe("discoverAgent (memory)", () => {
       DISCOVER_DEPRECATED_SYSTEM_SLOT,
     ]);
     expect(result.diagnostics[0]?.severity).toBe("warning");
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "You are a precise assistant.",
@@ -315,7 +312,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       DISCOVER_DEPRECATED_SYSTEM_SLOT,
     ]);
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         sourceKind: "module",
         logicalPath: "system.ts",
@@ -339,7 +336,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "Preferred instructions.",
@@ -366,7 +363,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "Uppercase instructions.",
@@ -395,7 +392,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       DISCOVER_REQUIRED_INSTRUCTIONS_MISSING,
     ]);
-    expect(result.manifest.instructions).toEqual([]);
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([]);
   });
 
   it("emits a slot collision when both .ts and .md schedules share a name", async () => {
@@ -416,7 +413,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_SLOT_COLLISION,
     );
-    expect(result.manifest.schedules).toEqual([]);
+    expect(sourcesOf(result.manifest, "schedule")).toEqual([]);
   });
 
   it("emits an unsupported-file diagnostic for non-module/non-markdown leaves under schedules/", async () => {
@@ -461,9 +458,9 @@ describe("discoverAgent (memory)", () => {
       DISCOVER_MODULE_SLOT_COLLISION,
       DISCOVER_MODULE_SLOT_COLLISION,
     ]);
-    expect(result.manifest.instructions).toEqual([]);
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([]);
     expect(result.manifest.configModule).toBeUndefined();
-    expect(result.manifest.tools).toEqual([]);
+    expect(sourcesOf(result.manifest, "tool")).toEqual([]);
   });
 
   it("accepts an empty connections/ directory without diagnostics", async () => {
@@ -481,7 +478,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.connections).toEqual([]);
+    expect(sourcesOf(result.manifest, "connection")).toEqual([]);
   });
 
   it("reports an invalid schedules root that is not a directory", async () => {
@@ -501,7 +498,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       DISCOVER_SCHEDULES_DIRECTORY_INVALID,
     ]);
-    expect(result.manifest.schedules).toEqual([]);
+    expect(sourcesOf(result.manifest, "schedule")).toEqual([]);
   });
 
   it("reports an invalid sandbox root that is not a directory", async () => {
@@ -521,7 +518,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_SANDBOX_DIRECTORY_INVALID,
     );
-    expect(result.manifest.sandbox).toBeNull();
+    expect(sourcesOf(result.manifest, "sandbox")).toEqual([]);
   });
 
   it("reports an invalid lib root that is not a directory", async () => {
@@ -544,11 +541,12 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.lib).toEqual([]);
   });
 
-  it("discovers module-only lib sources and reports unsupported lib entries", async () => {
+  it("discovers module-only lib sources and ignores non-module lib files", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
+        "lib/data/contract.json": '{"openapi":"3.1.0"}\n',
         "lib/generated.d.ts": "export declare const generated: true;\n",
-        "lib/notes.md": "unsupported",
+        "lib/notes.md": "incidental notes",
         "lib/weather/client.ts": "export const client = {};\n",
         "instructions.md": "You are a precise assistant.",
       },
@@ -560,9 +558,7 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_LIB_ENTRY_UNSUPPORTED,
-    ]);
+    expect(result.diagnostics).toEqual([]);
     expect(result.manifest.lib).toEqual([
       {
         sourceKind: "module",
@@ -590,7 +586,7 @@ describe("discoverAgent (memory)", () => {
       DISCOVER_UNSUPPORTED_DIRECTORY,
       DISCOVER_UNSUPPORTED_DIRECTORY,
     ]);
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "You are a precise assistant.",
@@ -618,7 +614,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "You are a precise assistant.",
@@ -670,7 +666,7 @@ describe("discoverAgent (memory)", () => {
       result.diagnostics.find((diagnostic) => diagnostic.code === DISCOVER_TOOL_NAME_INVALID)
         ?.message,
     ).toMatch(/"123_invalid"/);
-    expect(result.manifest.tools).toEqual([]);
+    expect(sourcesOf(result.manifest, "tool")).toEqual([]);
   });
 
   it("accepts authored tool filenames with kebab-case", async () => {
@@ -689,7 +685,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.tools).toEqual([
+    expect(sourcesOf(result.manifest, "tool")).toEqual([
       {
         sourceKind: "module",
         logicalPath: "tools/get-weather.ts",
@@ -714,7 +710,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.tools).toEqual([
+    expect(sourcesOf(result.manifest, "tool")).toEqual([
       {
         sourceKind: "module",
         logicalPath: "tools/lookup_customer.ts",
@@ -740,7 +736,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.hooks.map((entry) => entry.logicalPath)).toEqual([
+    expect(sourcesOf(result.manifest, "hook").map((entry) => entry.logicalPath)).toEqual([
       "hooks/auth/guard.ts",
       "hooks/auth/prepare.ts",
       "hooks/audit.ts",
@@ -764,7 +760,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_HOOK_NAME_INVALID,
     );
-    expect(result.manifest.hooks).toEqual([]);
+    expect(sourcesOf(result.manifest, "hook")).toEqual([]);
   });
 
   it("discovers extension mounts as flat module sources keyed by the mount namespace", async () => {
@@ -928,10 +924,10 @@ describe("discoverAgent (memory)", () => {
     expect(mount.namespace).toBe("crm");
     expect(mount.specifier).toBe("@acme/crm");
     expect(mount.packageName).toBe("@acme/crm");
-    expect(mount.manifest.tools).toEqual([
+    expect(sourcesOf(mount.manifest, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
-    expect(mount.manifest.instructions.map((entry) => entry.logicalPath)).toEqual([
+    expect(sourcesOf(mount.manifest, "instructions").map((entry) => entry.logicalPath)).toEqual([
       "instructions/policy.md",
     ]);
     expect(mount.manifest.resolvedExtensions).toEqual([]);
@@ -1046,7 +1042,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
     );
-    expect(result.manifest.resolvedExtensions[0]?.manifest.memories).toEqual([]);
+    expect(sourcesOf(result.manifest.resolvedExtensions[0]!.manifest, "memory")).toEqual([]);
   });
 
   it("reports an unresolved mount when the extension package is missing", async () => {
@@ -1104,14 +1100,14 @@ describe("discoverAgent (memory)", () => {
     const mount = result.manifest.resolvedExtensions[0]!;
     expect(mount.namespace).toBe("crm");
     expect(mount.specifier).toBe("@acme/crm");
-    expect(mount.manifest.tools).toEqual([
+    expect(sourcesOf(mount.manifest, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
     // A directory mount always carries an overrides manifest (the mount dir is
     // itself an agent-shaped source); with no override slots authored it is
     // empty and composes to nothing.
     expect(mount.overrides?.agentRoot).toBe(resolve(project.agentRoot, "extensions", "crm"));
-    expect(mount.overrides?.tools).toEqual([]);
+    expect(sourcesOf(mount.overrides!, "tool")).toEqual([]);
   });
 
   it("carries a directory-mount override slot that shadows the extension's contribution", async () => {
@@ -1142,12 +1138,12 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics).toEqual([]);
     const mount = result.manifest.resolvedExtensions[0]!;
     // The extension's own tree still carries its `search` tool from the package.
-    expect(mount.manifest.tools).toEqual([
+    expect(sourcesOf(mount.manifest, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
     // The consumer's override slot is discovered as an agent-shaped source so
     // the compiler can compose it under `crm__search` with consumer priority.
-    expect(mount.overrides?.tools).toEqual([
+    expect(sourcesOf(mount.overrides!, "tool")).toEqual([
       { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
     ]);
     // The override manifest is rooted at the mount directory — that root is
@@ -1241,7 +1237,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.tools).toContainEqual(
+    expect(sourcesOf(result.manifest, "tool")).toContainEqual(
       expect.objectContaining({ logicalPath: "tools/crm__search.ts" }),
     );
     expect(result.manifest.subagents).toContainEqual(
@@ -1286,24 +1282,19 @@ describe("discoverAgent (memory)", () => {
     );
   });
 
-  it("rejects a mounted extension that requires an unsupported capability version", async () => {
-    // One past the current epoch is unsupported by construction, so the
-    // fixture keeps rejecting after future capability bumps.
-    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
+  it("rejects an epoch-format extension before loading its contributions", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
           eve: { extension: { source: "source", dist: "extension" } },
-          peerDependencies: { eve: "*" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "9.0.0",
-          requires: { extension: 1, tool: unsupportedToolVersion },
+          formatVersion: 2,
+          builtWithEve: "0.82.0",
+          requires: { extension: 2 },
         }),
-        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -1311,23 +1302,62 @@ describe("discoverAgent (memory)", () => {
         "instructions.md": "You are a precise assistant.",
       },
     });
-
     const result = await discoverAgent({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
       source: project.source,
     });
-
-    const incompatible = result.diagnostics.find(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-    );
-    expect(incompatible).toBeDefined();
-    expect(incompatible?.message).toContain(`tool contract v${unsupportedToolVersion}`);
-    expect(incompatible?.message).toContain(
-      `versions: ${EXTENSION_CAPABILITY_SUPPORT.tool.map((version) => `v${version}`).join(", ")}`,
-    );
     expect(result.manifest.resolvedExtensions).toEqual([]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message: expect.stringMatching(
+            /old epoch-based distribution manifest.*Rebuild the extension/,
+          ),
+        }),
+      ]),
+    );
   });
+
+  it.each([
+    { builtWithEve: "0.82.0", rejected: false },
+    { builtWithEve: "999.0.0", rejected: true },
+  ])(
+    "checks a version-based extension build from eve $builtWithEve before mounting",
+    async ({ builtWithEve, rejected }) => {
+      const project = buildMemoryAgentProject({
+        appFiles: {
+          "node_modules/@acme/crm/package.json": JSON.stringify({
+            name: "@acme/crm",
+            eve: { extension: { source: "source", dist: "extension" } },
+          }),
+          "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+            kind: "eve-extension",
+            formatVersion: 3,
+            builtWithEve,
+            contractMajor: 0,
+          }),
+          "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        },
+        agentFiles: {
+          "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+          "instructions.md": "You are a precise assistant.",
+        },
+      });
+      const result = await discoverAgent({
+        agentRoot: project.agentRoot,
+        appRoot: project.appRoot,
+        source: project.source,
+      });
+      expect(result.manifest.resolvedExtensions).toHaveLength(rejected ? 0 : 1);
+      expect(
+        result.diagnostics.some(
+          (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+        ),
+      ).toBe(rejected);
+    },
+  );
 
   it("does not use the npm peer range as the runtime compatibility authority", async () => {
     const project = buildMemoryAgentProject({
@@ -1355,7 +1385,7 @@ describe("discoverAgent (memory)", () => {
 
     expect(
       result.diagnostics.some(
-        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
       ),
     ).toBe(false);
     expect(result.manifest.resolvedExtensions).toHaveLength(1);
@@ -1386,7 +1416,7 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.resolvedExtensions[0]?.manifest.schedules).toMatchObject([
+    expect(sourcesOf(result.manifest.resolvedExtensions[0]!.manifest, "schedule")).toMatchObject([
       {
         logicalPath: "schedules/sweep.md",
         sourceId: "schedules/sweep.md",

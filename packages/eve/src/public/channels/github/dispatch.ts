@@ -39,7 +39,6 @@ import type {
   GitHubChannelConfig,
   GitHubInboundContext,
   GitHubInboundResult,
-  GitHubInboundResultOrPromise,
 } from "#public/channels/github/githubChannel.js";
 
 const log = createLogger("github.dispatch");
@@ -194,7 +193,9 @@ async function dispatchCiEvent(input: {
   readonly ci: GitHubCiPayload;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCiWebhookEvent;
-  readonly handlerResult: (ctx: GitHubInboundContext) => GitHubInboundResultOrPromise;
+  readonly handlerResult: (
+    ctx: GitHubInboundContext,
+  ) => GitHubInboundResult | Promise<GitHubInboundResult>;
   readonly label: string;
   readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
@@ -229,7 +230,7 @@ async function dispatchWebhookEventTurn(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCiWebhookEvent | GitHubIssueWebhookEvent | GitHubPullRequestWebhookEvent;
-  readonly handlerResult: () => GitHubInboundResultOrPromise;
+  readonly handlerResult: () => GitHubInboundResult | Promise<GitHubInboundResult>;
   readonly message: string;
   readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
@@ -263,7 +264,7 @@ async function dispatchCommentTurn(input: {
   readonly commentUrl: string | undefined;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent | GitHubPullRequestReviewCommentEvent;
-  readonly handlerResult: () => GitHubInboundResultOrPromise;
+  readonly handlerResult: () => GitHubInboundResult | Promise<GitHubInboundResult>;
   readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
 }): Promise<void> {
@@ -299,7 +300,7 @@ async function dispatchCommentTurn(input: {
 
 async function runInboundHandler(input: {
   readonly event: GitHubTurnEvent;
-  readonly handlerResult: () => GitHubInboundResultOrPromise;
+  readonly handlerResult: () => GitHubInboundResult | Promise<GitHubInboundResult>;
 }): Promise<GitHubInboundResult | undefined> {
   try {
     return await input.handlerResult();

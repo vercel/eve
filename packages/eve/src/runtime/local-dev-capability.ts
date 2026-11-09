@@ -6,11 +6,11 @@ import {
 } from "#services/dev-client/runtime-artifacts.js";
 import {
   DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER,
+  isLocalMachineAddress,
   isTrustedDevelopmentClientAddress,
   readTrustedDevelopmentClientAddress,
 } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
-import { isLoopbackHostname } from "#shared/network-address.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 
 /**
@@ -31,9 +31,8 @@ export const LOCAL_DEV_INTERACTIVE_CLIENT_HEADER = "x-eve-dev-interactive-client
  * Host facilities available to authored code running on an `eve dev` server.
  *
  * Absence means this host has no authored tree to mutate or watcher to pause.
- * When present, the capability is available to every execution on that host;
- * callers admitted to the development server are trusted with enabled local
- * editing tools.
+ * Presence describes the host, not the caller: code that edits the authored
+ * tree on a caller's behalf must authorize that caller separately.
  */
 export interface LocalDevCapability {
   /**
@@ -78,8 +77,8 @@ export function installLocalDevCapabilityEnvironment(input: {
 }
 
 /**
- * Seeds the inherited dev-TUI hint only when the dev host signed a loopback
- * peer address. Client-supplied address headers cannot create that hint.
+ * Seeds the inherited dev-TUI hint only when the dev host signed a peer
+ * address on this machine. Client-supplied address headers cannot create that hint.
  */
 export async function withLocalDevRequestScope<T>(
   request: Request,
@@ -88,7 +87,7 @@ export async function withLocalDevRequestScope<T>(
   const secret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   const address = readTrustedDevelopmentClientAddress(request.headers, secret);
   const signature = request.headers.get(DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER);
-  if (address === undefined || signature === null || !isLoopbackHostname(address)) {
+  if (address === undefined || signature === null || !isLocalMachineAddress(address)) {
     return await contextStorage.run(new ContextContainer({ localDevRequest: undefined }), callback);
   }
 
@@ -130,7 +129,7 @@ export function getLocalDevCapability(
     typeof requestScope.address === "string" &&
     typeof requestScope.signature === "string" &&
     typeof requestScope.interactiveClient === "boolean" &&
-    isLoopbackHostname(requestScope.address) &&
+    isLocalMachineAddress(requestScope.address) &&
     isTrustedDevelopmentClientAddress(
       requestScope.address,
       requestScope.signature,

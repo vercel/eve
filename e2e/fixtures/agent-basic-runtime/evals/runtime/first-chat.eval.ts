@@ -11,17 +11,15 @@ export default defineEval({
     t.usedNoTools();
     t.messageIncludes("Ready to chat, Alice.");
     await t.require(
-      turn.events.some((event) => event.type === "message.appended"),
+      turn.events.some((event) => event.type === "content.delta"),
       equals(true),
     );
     await t.require(
-      turn.events.some((event) => event.type === "message.completed"),
+      turn.events.some((event) => event.type === "content.completed"),
       equals(true),
     );
     await t.require(
-      turn.events.some(
-        (event) => event.type === "authorization.required" || event.type === "input.requested",
-      ),
+      turn.events.some((event) => event.type === "interaction.opened"),
       equals(false),
     );
   },

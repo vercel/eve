@@ -264,7 +264,7 @@ export default teamsChannel({
     logo: "telegram",
     docsHref: "/docs/channels/telegram",
     keywords: ["chat", "messaging", "bot"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/telegram.ts\`:
+    install: `Add Telegram from eve's registry, then follow the guided Connect or portable credential setup:
 
 \`\`\`bash
 eve add channel/telegram
@@ -272,14 +272,15 @@ eve add channel/telegram
     quickStart: `Create \`agent/channels/telegram.ts\`:
 
 \`\`\`ts
-// agent/channels/telegram.ts
+import { connectTelegramCredentials } from "@vercel/connect/eve";
 import { telegramChannel } from "eve/channels/telegram";
 
 export default telegramChannel({
-  credentials: { botToken: () => process.env.TELEGRAM_BOT_TOKEN! },
+  botUsername: "my_bot",
+  credentials: connectTelegramCredentials("telegram/my-agent"),
 });
 \`\`\``,
-    configure: `Create a bot with [@BotFather](https://t.me/botfather), then register the webhook to point at eve's route (\`/eve/v1/telegram\`). Store the bot token in an environment variable. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
+    configure: `Create a bot by sending \`/newbot\` to [@BotFather](https://t.me/BotFather). Connect-backed setup stores the bot token in a Telegram connector, registers the bot's webhook, and routes verified updates to \`/eve/v1/telegram\`. With portable credentials, deploy first, then call \`setWebhook\` for that route with your secret token. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
   },
   twilio: {
     logo: "twilio",
@@ -438,9 +439,10 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
 - **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
+- **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
-On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
+On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
+    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -459,7 +461,7 @@ eve add channel/chat-sdk-gchat
 import { createGoogleChatAdapter } from "@chat-adapter/gchat";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -471,11 +473,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -501,7 +503,7 @@ eve add channel/chat-sdk-whatsapp
 import { createWhatsAppAdapter } from "@chat-adapter/whatsapp";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -515,11 +517,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -545,7 +547,7 @@ eve add channel/chat-sdk-x
 import { createXAdapter } from "@chat-adapter/x";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -559,15 +561,15 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onDirectMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -593,7 +595,7 @@ eve add channel/chat-sdk-messenger
 import { createMessengerAdapter } from "@chat-adapter/messenger";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -607,11 +609,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -648,7 +650,7 @@ eve add channel/chat-sdk-zernio
 import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -662,11 +664,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -701,7 +703,7 @@ eve add channel/chat-sdk-velt
 import { createVeltAdapter } from "@veltdev/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -720,11 +722,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -750,7 +752,7 @@ eve add channel/chat-sdk-sendblue
 import { createSendblueAdapter } from "chat-adapter-sendblue";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -765,11 +767,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -804,7 +806,7 @@ eve add channel/chat-sdk-novu
 import { createNovuAdapter } from "@novu/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -818,11 +820,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -856,7 +858,7 @@ eve add channel/chat-sdk-liveblocks
 import { createLiveblocksAdapter } from "@liveblocks/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -875,11 +877,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -927,7 +929,7 @@ eve add channel/chat-sdk-kapso
 import { createKapsoAdapter } from "@kapso/chat-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -947,11 +949,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -1000,7 +1002,7 @@ eve add channel/chat-sdk-dial
 import { createDialAdapter } from "@getdial/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1020,11 +1022,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -1050,7 +1052,7 @@ eve add channel/chat-sdk-agentphone
 import { createAgentPhoneAdapter } from "@agentphone/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1070,11 +1072,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -1100,7 +1102,7 @@ eve add channel/chat-sdk-lark
 import { createLarkAdapter } from "@larksuite/vercel-chat-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1114,11 +1116,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 await bot.initialize();
@@ -1146,7 +1148,7 @@ eve add channel/chat-sdk-beeper
 import { createMatrixAdapter } from "@beeper/chat-adapter-matrix";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1160,11 +1162,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 await bot.initialize();
@@ -1199,7 +1201,7 @@ eve add channel/chat-sdk-resend
 import { createResendAdapter } from "@resend/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1218,11 +1220,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 export default channel;
@@ -1256,7 +1258,7 @@ eve add channel/chat-sdk-gmail
 import { createGmailAdapter } from "@chat-adapter/gmail";
 import { createRedisState } from "@chat-adapter/state-redis";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageContentOf } from "eve/channels/chat-sdk";
 
 export const gmail = createGmailAdapter();
 
@@ -1272,11 +1274,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(messageToUserContent(message), { thread });
+  await send(messageContentOf(message), { thread });
 });
 
 await bot.initialize();
@@ -1965,8 +1967,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
   ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
-    docsHref:
-      "https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-browser",
     keywords: [
       "browser",
       "browser automation",
@@ -1989,16 +1990,16 @@ The extension installs agent-browser automatically on first use and runs it insi
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@agent-browser/eve";
+import browser from "@eve/agent-browser";
 
 export default browser({});
 \`\`\`
 
-The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__navigate\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
+The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__open\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
     configure: `Restrict browser access to the sites the agent needs with the extension's domain allow-list:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@agent-browser/eve";
+import browser from "@eve/agent-browser";
 
 export default browser({
   allowedDomains: ["example.com", "*.example.com"],
@@ -2009,7 +2010,7 @@ export default browser({
 
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
-The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel/eve/tree/main/packages/eve-agent-browser) for configuration, sandbox preparation, and tool overrides.`,
     relatedResources: [
       {
         title: "Give your eve agent a browser",
@@ -2621,6 +2622,21 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "postgres", "auth", "storage", "oauth", "connect"],
     authModes: ["user"],
+  },
+  tavily: {
+    logo: "tavily",
+    docsHref: "https://docs.tavily.com/documentation/mcp",
+    keywords: ["mcp", "web search", "extract", "crawl", "map", "research", "oauth", "connect"],
+    authModes: ["user"],
+    configure: `Link your project, register the MCP connector, and pull OIDC locally:
+
+\`\`\`bash
+vercel link
+vercel connect create tavily --name tavily --connection-method mcp
+vercel env pull
+\`\`\`
+
+The MCP method signs each user in to their own Tavily account. Tool calls use that account's API credits.`,
   },
   "ticket-tailor": {
     logo: "ticket-tailor",

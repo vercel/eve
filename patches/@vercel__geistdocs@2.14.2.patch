@@ -1,0 +1,18 @@
+diff --git a/dist/internal/sidebar-tree.js b/dist/internal/sidebar-tree.js
+index d5a07d9cf2dacbb7ce4fc86498f06edca9ac09a2..e2e90e0b39c869b0d7a8862d98d422c3c82b7a4f 100644
+--- a/dist/internal/sidebar-tree.js
++++ b/dist/internal/sidebar-tree.js
+@@ -109,9 +109,10 @@ export const getInitialOpenFolderIds = (nodes, activeUrl, openFirstLevel = false
+                 continue;
+             }
+             const path = [...parentPath, index];
+-            const isOpen = item.defaultOpen ??
+-                ((openFirstLevel && depth === 0) ||
+-                    (activeUrl ? nodeContainsUrl(item, activeUrl) : false));
++            // The active branch opens even when `defaultOpen` is false, so a
++            // direct link to a page in a collapsed section shows where it is.
++            const isOpen = (activeUrl ? nodeContainsUrl(item, activeUrl) : false) ||
++                (item.defaultOpen ?? (openFirstLevel && depth === 0));
+             if (isOpen) {
+                 opened.push(getSidebarNodeId(item, path, scope));
+             }

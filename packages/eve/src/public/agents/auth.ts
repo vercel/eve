@@ -5,7 +5,7 @@ import { type TokenValue, VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/t
 /**
  * Outbound request auth hook for remote agent dispatch. Runs once per
  * outbound request; returns the headers (e.g. `authorization`) to merge onto
- * that request. Use {@link vercelOidc}, {@link bearer}, or {@link basic} to
+ * that request. Use {@link vercelOidc}, {@link bearer}, or {@link httpBasic} to
  * construct one, or supply a custom function for other schemes.
  */
 export type OutboundAuthFn = () => Promise<{
@@ -67,7 +67,7 @@ export function bearer(token: TokenValue): OutboundAuthFn {
  * (static string or per-request resolver). Base64-encodes the credentials per
  * request.
  */
-export function basic(input: {
+export function httpBasic(input: {
   readonly password: TokenValue;
   readonly username: string;
 }): OutboundAuthFn {

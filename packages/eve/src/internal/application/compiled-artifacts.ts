@@ -2,19 +2,21 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
-import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
+import {
+  stringifyEsmImportSpecifier,
+  stringifyNitroDataImportSpecifier,
+} from "#internal/application/import-specifier.js";
+import { modelMetadataSchema } from "#internal/model-catalog.js";
+import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import {
   resolvePackageCompiledFilePath,
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
 import { buildPackageUserAgent } from "#internal/user-agent.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
-import {
-  sandboxPreparedArtifactsManifestSchema,
-  type SandboxPreparedArtifactsManifest,
-} from "#shared/sandbox-prepared-artifacts.js";
+import { sandboxPreparedArtifactsManifestSchema } from "#shared/sandbox-prepared-artifacts.js";
 import {
   prepareAuthoredRuntimeModules,
   type PreparedAuthoredRuntimeModules,
@@ -42,11 +44,11 @@ export interface GeneratedInstrumentationLayout {
 export interface GeneratedCompiledArtifactsFiles {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   /**
-   * Shared bundled-artifacts bootstrap installed by Nitro and vendored
-   * workflow handlers.
+   * Installs the bundled artifacts on import; eve's runtime plugin and the
+   * workflow step entry both import it.
    */
   bootstrapPath: string;
-  /** Nitro plugin that installs the selected vendored Workflow world. */
+  /** Installs the selected Workflow world on import, failing the import when it cannot. */
   workflowWorldPluginPath: string;
   /**
    * Optional Nitro plugin that imports prepared instrumentation runtime
@@ -60,15 +62,14 @@ export interface GeneratedCompiledArtifactsFiles {
    * each module's side effects during packaging.
    */
   instrumentationSourcePaths?: readonly string[];
+  /**
+   * Installed packages the generated modules import and leave for Nitro to bundle. They keep
+   * the authored transforms, such as asset imports, that inlining them would have applied.
+   */
+  hostBundledPackageRoots?: readonly string[];
 }
 
-/**
- * Writes the generated compiled-artifacts bootstrap module.
- *
- * The bootstrap self-installs bundled artifacts on import and exports a
- * default function so it can be used directly as a Nitro plugin — no
- * separate plugin wrapper file is needed.
- */
+/** Writes the generated compiled-artifacts modules, which install themselves on import. */
 export async function writeCompiledArtifactsFiles(input: {
   compileResult: CompileAgentResult;
   defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
@@ -76,27 +77,43 @@ export async function writeCompiledArtifactsFiles(input: {
 }): Promise<GeneratedCompiledArtifactsFiles> {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
   const moduleMapPath = join(input.outDir, "compiled-artifacts-module-map.mjs");
+  const dataPath = join(input.outDir, "compiled-artifacts-data.json");
   const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
   const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
   const sandboxPreparedArtifacts = sandboxPreparedArtifactsManifestSchema.parse(
     JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
   );
+  const modelMetadata = modelMetadataSchema.parse(
+    JSON.parse(await readFile(input.compileResult.paths.modelMetadataPath, "utf8")),
+  );
   const prepared = await prepareAuthoredRuntimeModules({
     appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
     moduleMapPath: input.compileResult.paths.moduleMapPath,
+    hostBundled: true,
   });
 
   await mkdir(input.outDir, { recursive: true });
   await writeFile(moduleMapPath, prepared.moduleMapCode);
+  // The data reaches the bundle through a `text:` import so Nitro's `replace`
+  // cannot rewrite tokens such as `import.meta.dev` inside authored text.
+  await writeFile(
+    dataPath,
+    JSON.stringify({
+      // Checked and defaulted here rather than at runtime: the runtime trusts a bundled manifest,
+      // since the same eve version wrote it.
+      manifest: compiledAgentManifestSchema.parse(input.compileResult.manifest),
+      metadata: input.compileResult.metadata,
+      modelMetadata,
+      sandboxPreparedArtifacts,
+    } satisfies Omit<BundledCompiledArtifacts, "moduleMap">),
+  );
   await writeFile(
     bootstrapPath,
     createCompiledArtifactsBootstrapSource({
-      compileResult: input.compileResult,
+      dataPath,
       installModulePath: resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts"),
-      metadata: input.compileResult.metadata,
       moduleMapImportPath: moduleMapPath,
-      sandboxPreparedArtifacts,
     }),
   );
   await writeFile(
@@ -111,6 +128,7 @@ export async function writeCompiledArtifactsFiles(input: {
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
     authoredWorkflowModules: prepared.authoredWorkflowModules,
     bootstrapPath,
+    hostBundledPackageRoots: prepared.hostBundledPackageRoots,
     workflowWorldPluginPath,
   };
 
@@ -251,52 +269,24 @@ function createDevelopmentCompiledArtifactsBootstrapSource(agentName: string): s
     "",
     `installEveWorkflowQueueNamespace(${JSON.stringify(agentName)});`,
     "",
-    "export default function installDevelopmentCompiledArtifactsPlugin() {}",
-    "",
   ].join("\n");
 }
 
-export function createCompiledArtifactsBootstrapSource(input: {
-  compileResult: CompileAgentResult;
+function createCompiledArtifactsBootstrapSource(input: {
+  dataPath: string;
   installModulePath: string;
-  metadata: CompileMetadata;
   moduleMapImportPath: string;
-  sandboxPreparedArtifacts: SandboxPreparedArtifactsManifest;
 }): string {
-  const agentName = input.compileResult.manifest.config.name;
-
   return [
     "// Generated by eve. Do not edit by hand.",
+    `import data from ${stringifyNitroDataImportSpecifier("text", input.dataPath)};`,
     `import moduleMap from ${stringifyEsmImportSpecifier(input.moduleMapImportPath)};`,
     `import { installBundledCompiledArtifacts } from ${stringifyEsmImportSpecifier(input.installModulePath)};`,
     `import { installEveWorkflowQueueNamespace } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/queue-namespace.ts"))};`,
     "",
-    `installEveWorkflowQueueNamespace(${JSON.stringify(agentName)});`,
-    "",
-    `const metadata = ${JSON.stringify(input.metadata, null, 2)};`,
-    "",
-    `const manifest = ${JSON.stringify(input.compileResult.manifest, null, 2)};`,
-    "",
-    `const sandboxPreparedArtifacts = ${JSON.stringify(input.sandboxPreparedArtifacts, null, 2)};`,
-    "",
-    "export { moduleMap };",
-    "",
-    "export function installCompiledArtifactsBootstrap() {",
-    "  installBundledCompiledArtifacts({",
-    "    manifest,",
-    "    metadata,",
-    "    moduleMap,",
-    "    sandboxPreparedArtifacts,",
-    "  });",
-    "}",
-    "",
-    "installCompiledArtifactsBootstrap();",
-    "",
-    "// Default export satisfies the Nitro plugin contract so this file",
-    "// can be used directly as a Nitro plugin without a separate wrapper.",
-    "export default function installCompiledArtifactsPlugin() {",
-    "  // Already installed on import above.",
-    "}",
+    "const artifacts = JSON.parse(data);",
+    "installEveWorkflowQueueNamespace(artifacts.manifest.config.name);",
+    "installBundledCompiledArtifacts({ ...artifacts, moduleMap });",
     "",
   ].join("\n");
 }
@@ -400,12 +390,12 @@ export function createWorkflowWorldPluginSource(input: {
     ...wiring.extraImportLines,
     `import { installWorkflowWorld } from ${stringifyEsmImportSpecifier(resolveInstallWorldImportSpecifier())};`,
     `import { installWorkflowDeploymentId } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/execution/install-workflow-deployment-id.ts"))};`,
+    `import { applyWorkflowSpecVersionDefault } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/spec-version-default.ts"))};`,
     "",
     `installWorkflowDeploymentId(${JSON.stringify(BUILD_DEPLOYMENT_ID_PLACEHOLDER)});`,
+    "applyWorkflowSpecVersionDefault();",
     wiring.createWorldSource,
     `await installWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
-    "",
-    "export default function installWorkflowWorldPlugin() {}",
     "",
   ].join("\n");
 }
@@ -439,8 +429,6 @@ export function createDevelopmentWorkflowWorldPluginSource(input: {
     `import { installWorkflowWorld } from ${stringifyEsmImportSpecifier(resolveInstallWorldImportSpecifier())};`,
     "",
     "await installWorkflowWorld({ world: createDevelopmentWorkflowWorld() });",
-    "",
-    "export default function installDevelopmentWorkflowWorldPlugin() {}",
     "",
   ].join("\n");
 }

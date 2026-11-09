@@ -15,8 +15,8 @@ async function execute(
   const response = await ctx
     .agent("agent", { model: CTX_AGENT_SELECTED_MODEL })
     .send("Review Alice's sample plan and reply when the review is complete.");
-  const { message } = await response.result();
-  return message ?? null;
+  const { reply } = await response.result();
+  return reply ?? null;
 }
 
 const tool: WorkflowToolDefinition<Record<string, unknown>, string | null> = defineWorkflowTool({

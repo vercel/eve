@@ -35,9 +35,11 @@ export interface SandboxConnection<Extensions extends object = {}> {
    * Runs `command` as a Bash login-shell script (`bash -lc`) in
    * `workingDirectory`, with the sandbox's environment plus `env`. `env`
    * holds only the per-call variables. Aborting kills the process tree.
+   * With `stdin`, return a process with a writable `stdin` or throw.
    */
   spawn(options: {
-    readonly abortSignal?: AbortSignal;
+    readonly signal?: AbortSignal;
+    readonly stdin?: boolean;
     readonly command: string;
     readonly env: Readonly<Record<string, string>>;
     readonly workingDirectory: string;
@@ -47,7 +49,7 @@ export interface SandboxConnection<Extensions extends object = {}> {
    * unreadable path rejects. Return bytes or a stream, whichever the backend has.
    */
   readFile(options: {
-    readonly abortSignal?: AbortSignal;
+    readonly signal?: AbortSignal;
     readonly path: string;
   }): Promise<Uint8Array | ReadableStream<Uint8Array> | null>;
   /** Creates missing parent directories and overwrites existing files. The only write primitive. */
@@ -125,7 +127,7 @@ export interface SandboxPrepareContext {
 }
 
 export interface SandboxSessionEndOptions {
-  readonly abortSignal?: AbortSignal;
+  readonly signal?: AbortSignal;
   readonly reason: "completed" | "expired" | "failed" | "deleted";
 }
 

@@ -33,7 +33,7 @@ export default defineEval({
     t.messageIncludes(/^Namespaces, .*: ledger$/mu);
     t.messageIncludes("\n- petstore: Pet store inventory API.");
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies(
         (message: string) => DEFERRED.every((name) => !message.includes(name)),
         "the listing names no deferred entry",

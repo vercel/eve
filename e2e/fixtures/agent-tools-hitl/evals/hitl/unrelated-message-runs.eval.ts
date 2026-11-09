@@ -14,9 +14,9 @@ export default defineEval({
     const held = await t.send('Call the guarded-echo tool with note "open-approval".');
     const session = held.session;
     held.calledTool("guarded-echo", { status: "pending", count: 1 });
-    held.event("turn.waiting", { count: 1 });
-    held.notEvent("session.waiting");
-    const request = session.requireInputRequest({
+    held.event("turn.paused", { count: 1 });
+    held.notEvent("turn.settled");
+    const request = session.requireInteraction({
       display: "confirmation",
       toolName: "guarded-echo",
     });
@@ -25,22 +25,14 @@ export default defineEval({
       "Never mind the echo. Do not call any tools. Reply with exactly OPEN-APPROVAL-MSG-OK.",
     );
     steered.expectOk();
-    steered.event("input.resolved", {
+    steered.event("interaction.settled", {
       count: 1,
-      data: {
-        resolutions: (resolutions) =>
-          resolutions.some(
-            (resolution) =>
-              resolution.requestId === request.requestId && resolution.outcome === "ignored",
-          ),
-      },
+      data: { interactionId: request.interactionId, outcome: "withdrawn" },
     });
     steered.notEvent("turn.started");
     steered.messageIncludes(/OPEN-APPROVAL-MSG-OK/i);
-    steered.notEvent("action.result", {
-      data: { result: { output: new RegExp(GUARDED_ECHO_TOKEN), toolName: "guarded-echo" } },
-    });
-    steered.event("session.waiting", { count: 1 });
+    steered.calledTool("guarded-echo", { output: new RegExp(GUARDED_ECHO_TOKEN), count: 0 });
+    steered.event("turn.settled", { count: 1, data: { outcome: "completed" } });
 
     t.succeeded();
   },

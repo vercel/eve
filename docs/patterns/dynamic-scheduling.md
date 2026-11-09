@@ -3,16 +3,16 @@ title: "Dynamic Scheduling"
 description: "Compose one minute-level eve schedule, proactive channel handoff, and CRUD tools into application-managed schedules."
 ---
 
-Use this pattern when your application needs to own schedule storage and dispatch, including on self-hosted infrastructure. For built-in creator-owned schedules, management tools, and Vercel-backed delivery, see [Experimental dynamic schedules](../experimental/dynamic-schedules).
+Dynamic scheduling lets the agent create schedules at runtime while your application stores and runs them. It also works on self-hosted infrastructure. For built-in schedules with management tools that run on Vercel, see [Experimental dynamic schedules](../experimental/dynamic-schedules).
 
-This pattern uses a static `defineSchedule` file discovered at build time. Put schedule rows in your application store and use that authored schedule as a dispatcher:
+Schedule rows live in your application's store. One static `defineSchedule` file runs them:
 
-1. CRUD tools let the agent create and manage rows for the current tenant;
-2. `defineSchedule({ cron: "* * * * *" })` wakes once a minute;
-3. the handler atomically claims due rows;
-4. `receive(...)` starts a normal durable agent session for each row.
+1. Create, list, update, and delete tools let the agent manage rows for the current tenant.
+2. `defineSchedule({ cron: "* * * * *" })` runs once a minute.
+3. The handler atomically claims rows that are due.
+4. `to(...).send(...)` starts a normal agent session for each row.
 
-PostgreSQL or a durable KV store can back the adapter. The important storage capability is an atomic lease, not a particular schema.
+PostgreSQL or a KV store can back the adapter. The adapter needs an atomic lease, not a particular schema.
 
 ```text
 agent/
@@ -28,7 +28,7 @@ agent/
 
 ## Dispatch due schedules every minute
 
-This is the only authored schedule. It looks up due application-managed rows and hands each one to Slack as a proactive session:
+This is the only schedule file. It claims rows that are due and starts a Slack session for each one:
 
 ```ts title="agent/schedules/dynamic.ts"
 import { defineSchedule } from "eve/schedules";
@@ -81,11 +81,9 @@ export default defineSchedule({
 });
 ```
 
-`waitUntil` keeps the cron invocation alive until claiming and handoff settle. `to(...).send(...)` starts the same durable runtime used by inbound channel messages.
+`waitUntil` keeps the cron invocation running until every claim and send finishes. `to(...).send(...)` starts a session the same way an inbound channel message does.
 
-This example uses Slack because it has a proactive target of `{ channelId }`. Any channel that implements `receive` can replace it.
-
-Configure Slack normally:
+Slack's target for agent-started messages is `{ channelId }`. Any channel that implements `receive` can replace Slack. The Slack channel needs no special configuration:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -98,7 +96,7 @@ export default slackChannel({
 
 ## Give the agent CRUD tools
 
-Tenant and owner identity come from `ctx.session`, never the model:
+Read the tenant and the user who owns each schedule from `ctx.session`, never from the model:
 
 ```ts title="agent/lib/tenant.ts"
 import type { SessionAuthContext, SessionContext } from "eve/context";
@@ -201,7 +199,7 @@ export default defineTool({
 
 ## Supply the schedule adapter
 
-The eve-facing implementation depends on this shape, not a database schema:
+The tools and the schedule file depend on this interface, not on a database schema:
 
 ```ts title="agent/lib/schedule-store.ts"
 import type { SessionAuthContext } from "eve/context";
@@ -238,15 +236,15 @@ export interface ScheduleStore {
 export { scheduleStore } from "../../lib/schedule-store";
 ```
 
-Implement that adapter with whichever durable store already belongs to your application. It must preserve a few semantics:
+Implement the adapter with a store that survives restarts. It must keep these rules:
 
-- user-facing CRUD is always tenant-scoped;
-- `claimDue` atomically leases rows so overlapping minute ticks do not claim the same work;
-- dispatch revalidates the owner and destination before returning a job;
-- `complete` disables one-time rows or computes the next recurring run;
-- expired leases are recoverable.
+- Create, list, update, and delete only touch the current tenant's rows.
+- `claimDue` atomically leases rows, so overlapping minute runs do not claim the same row.
+- `claimDue` checks the schedule's user and destination again before it returns a job.
+- `complete` disables one-time rows or computes the next run of a repeating row.
+- A row with an expired lease can be claimed again.
 
-Delivery is at least once. A crash after `receive` succeeds but before `complete` can dispatch again, so side-effecting tasks need application-level idempotency. When the destination should receive a provider message without another agent turn, use the outbox pattern in [Durable cross-channel notifications](./durable-cross-channel-notifications) instead of `to(...).send(...)`.
+Each row runs at least once. A crash after `send` succeeds but before `complete` can run the row again. Tasks with side effects need idempotency in your application. When the destination needs a channel message without another agent turn, use the outbox pattern in [Durable cross-channel notifications](./durable-cross-channel-notifications) instead of `to(...).send(...)`.
 
 ## Scheduling instructions
 
@@ -256,5 +254,3 @@ Convert the first run to ISO 8601 with an explicit offset. Use everyMinutes only
 for repeating work and null for a one-time run. List schedules before changing
 an ambiguous one.
 ```
-
-The eve-specific core is small: four tools, one one-minute `defineSchedule`, and proactive `receive`. Storage and recurrence policy stay behind the application's adapter.

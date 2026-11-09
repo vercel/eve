@@ -23,7 +23,9 @@ export function defineSelfModificationSandbox(
   options: SelfModificationSandboxOptions = {},
 ): SelfModificationSandbox {
   const environment = isLocalSelfModificationEnabled(resolveSelfModificationConfig(options.config))
-    ? JustBashSandbox.environment({ filesystem: createSelfModificationFilesystem })
+    ? JustBashSandbox.environment({
+        experimental: { filesystem: createSelfModificationFilesystem },
+      })
     : JustBashSandbox.environment();
   return bindSandboxEnvironment(
     defineSandbox(() => environment.open()),

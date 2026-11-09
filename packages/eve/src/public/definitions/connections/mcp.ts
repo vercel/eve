@@ -1,4 +1,4 @@
-import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
+import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
@@ -27,7 +27,7 @@ import {
  */
 export interface McpClientConnectionDefinition {
   /** Opt-in Connect webhook callbacks. Enabling this does not subscribe. */
-  readonly experimental_events?: Experimental_ConnectionEvents;
+  readonly experimental?: { readonly events?: ConnectionEvents };
   /**
    * The MCP server's HTTP endpoint URL.
    *
@@ -64,7 +64,7 @@ export interface McpClientConnectionDefinition {
    *
    * - `getToken`-only: covers static API keys, pre-provisioned
    *   JWTs, and out-of-band OAuth. Defaults to
-   *   `credentialOwner: "app"` when omitted.
+   *   `principalType: "app"` when omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into
    *   interactive OAuth authorization.

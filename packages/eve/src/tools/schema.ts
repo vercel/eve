@@ -172,6 +172,25 @@ export function refineJsonSchema(
   return refined;
 }
 
+/**
+ * A JSON Schema advertised exactly as written whose values `prepare` repairs
+ * before validation, for argument shapes models are known to send instead.
+ */
+export function prepareJsonSchema<T = unknown>(
+  schema: JsonObject,
+  prepare: (value: unknown) => unknown,
+): ToolSchema<T> {
+  const base = defineJsonSchema<T>(schema);
+  const prepared = {
+    "~standard": {
+      ...base["~standard"],
+      validate: (value: unknown) => base["~standard"].validate(prepare(value)),
+    },
+  } as ToolSchema<T>;
+  plainJsonSchemas.add(prepared);
+  return prepared;
+}
+
 /** An optional string property added to an input schema. */
 export interface OptionalStringProperty {
   readonly description: string;
@@ -448,7 +467,7 @@ function findDefault(root: JsonObject, schema: unknown): unknown {
 }
 
 /** Yields a subschema, then each local `$ref` target it chains through. */
-function* followRefs(root: JsonObject, schema: unknown): Generator<Record<string, unknown>> {
+export function* followRefs(root: JsonObject, schema: unknown): Generator<Record<string, unknown>> {
   const seen = new Set<object>();
   let node = schema;
   while (isObject(node) && !seen.has(node)) {

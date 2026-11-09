@@ -79,7 +79,7 @@ export function assertWithinLimit(bytes: Uint8Array, maxBytes: number, adapterKi
   if (bytes.byteLength > maxBytes) throw overLimit(maxBytes, adapterKind);
 }
 
-function overLimit(maxBytes: number, adapterKind: string): EveAttachmentError {
+export function overLimit(maxBytes: number, adapterKind: string): EveAttachmentError {
   return new EveAttachmentError({
     adapterKind,
     kind: "resolver-threw",

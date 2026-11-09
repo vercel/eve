@@ -46,10 +46,13 @@ Use support evidence to identify the reader's problem, not to establish product 
 - Link to related pages with descriptive text. Include the critical fact locally because retrieved sections may be read without their links.
 - Leave no page orphaned. Every page needs at least one descriptive inbound body link from a related hub or overview page; a `meta.json` sidebar entry or a routing-table cell alone is not enough. When adding a page, add the inbound link from the page that owns the topic in the same change, and keep every page reachable by following body links from `getting-started`.
 - Do not document proposed behavior as shipped. Describe unsupported boundaries directly when they affect a user task.
+- Describe current behavior only. Migration steps, removed options, and renames belong in changesets and release notes, not in `docs/**`.
+- Document the contract, not the mechanism. Leave out internal modules, algorithms, and data structures unless the reader needs them to configure, debug, or reason about a limit.
 
 ## Write for the task
 
-- Lead each page and section with the answer or outcome.
+- Lead each page and section with the answer or outcome. Feature pages follow the feature page shape in [references/content-types.md](references/content-types.md): opening, minimal example, rules, options, then variants.
+- Write prose in the reader's words, not eve's runtime vocabulary. See Plain words in [references/style-rules.md](references/style-rules.md).
 - Address the reader as `you`; use imperative verbs for steps.
 - Prefer active voice, present tense, concrete nouns, and consistent terms.
 - Preserve the author's supported meaning, nuance, and uncertainty. Make the minimum effective edit and leave strong prose alone.

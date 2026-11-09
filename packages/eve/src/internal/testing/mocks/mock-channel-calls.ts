@@ -6,7 +6,7 @@ import type { ContextAccessor, ContextKey } from "#context/key.js";
 import { SessionKey } from "#context/keys.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 
 /** `channel` as the compiled channel a channel factory returns. */
@@ -41,23 +41,22 @@ const sessionContext = (() => {
     sessionId: "test-session",
     turn: { id: "test-turn", sequence: 0 },
   });
+  // Handlers read the session's tables as of the event they observe.
+  enterSessionProjection(ctx, undefined);
   return ctx;
 })();
 
-/** A stream event of `type` carrying `data`. */
-export function channelEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { data, type } as UnstampedMessageStreamEvent;
+/** A session event of `type` carrying `data`. */
+export function channelEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { data, type } as SessionEvent;
 }
 
 /** Delivers `event` to the adapter's handler inside a session, as a running turn does. */
 export function callChannelEvent(
   adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   ctx: Parameters<typeof callAdapterEventHandler>[2],
-): Promise<UnstampedMessageStreamEvent> {
+): Promise<void> {
   return contextStorage.run(sessionContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 

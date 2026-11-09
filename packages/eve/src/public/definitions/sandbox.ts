@@ -10,7 +10,6 @@ export type {
   SandboxRunOptions,
   SandboxSession,
   RuntimeSandboxSession,
-  RuntimeSandboxSessionFor,
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,

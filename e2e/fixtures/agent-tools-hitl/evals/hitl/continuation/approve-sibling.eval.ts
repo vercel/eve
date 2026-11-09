@@ -23,12 +23,12 @@ export default defineEval({
 
     // When the user approves B only.
     const live = await session.startRespond([
-      { requestId: current.requestId, optionId: "approve" },
+      { interactionId: current.interactionId, optionId: "approve" },
     ]);
 
     // Then B executes once and the read gets a completed reply; the message cancelled A, which never runs.
     await expectToolResult(t, live, "read-draft");
-    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.requestId);
+    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.interactionId);
     reply.calledTool("change-b", { status: "completed", output: { executions: 1 }, count: 1 });
     expectChangeStillUnexecuted(session);
     expectApprovalCancelled(session, approvalA);

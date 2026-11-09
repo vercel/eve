@@ -25,7 +25,7 @@ export default defineEval({
     expectHealthyTurn(turn);
     turn.calledTool("refund_invoice", { count: 1, input: { invoiceId: "INV-2041" } });
     turn.calledTool("petstore__getInventory");
-    turn.notEvent("compaction.completed");
+    turn.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
     expectCacheReuse(t, [turn]);
   },
 });

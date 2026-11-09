@@ -6,17 +6,16 @@
 
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import {
-  AuthKey,
-  OfferedCatalogToolsKey,
-  SessionIdKey,
-  type OfferedCatalogTools,
-} from "#context/keys.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import type { StepCatalog } from "#execution/catalog/step-catalog.js";
+import { stepCatalog } from "#definitions/step.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
@@ -106,6 +105,8 @@ export interface CatalogSkillSource {
 /** The parts of a session bundle the catalog reads: authored skills and dynamic subagent resolvers. */
 export function catalogBundle(
   input: {
+    /** The agent's `approval` from `agent.ts`. */
+    readonly approval?: ApprovalPolicy;
     /** The connections the agent declares. */
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
@@ -115,19 +116,24 @@ export function catalogBundle(
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
-    graph: undefined as never,
-    hookRegistry: undefined as never,
+    // The root session: its agent is the graph's root node.
+    graph: {
+      nodesByNodeId: new Map([
+        [ROOT_RUNTIME_AGENT_NODE_ID, { agent: { config: { approval: input.approval } } }],
+      ]),
+    } as never,
+    modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
-      config: { name: "test-agent" },
+      config: { approval: input.approval, name: "test-agent" },
       connections: input.connections ?? [],
-      dynamicSkillResolvers: [],
-      dynamicToolResolvers: [],
+      definitions: [],
+      instructions: [],
       skills: (input.skills ?? []).map((skill) => ({
         deferred: skill.deferred,
         description: skill.description ?? `${skill.name} skill`,
-        markdown: skill.markdown ?? `# ${skill.name}`,
+        content: skill.markdown ?? `# ${skill.name}`,
         name: skill.name,
       })),
     } as never,
@@ -137,7 +143,7 @@ export function catalogBundle(
       subagentsByName: new Map(),
     } as never,
     toolRegistry: { toolsByName: new Map() } as never,
-    turnAgent: undefined as never,
+    turnAgent: { tools: [] } as never,
   };
 }
 
@@ -254,12 +260,11 @@ export function connectionTool(
  * Alice's session with `tools`, `skills`, and `connections`, and the step
  * catalog built from it. `run` runs code inside the session's context.
  */
-export function catalogContext(
+export async function catalogContext(
   input: {
+    readonly approval?: ApprovalPolicy;
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
-    /** The catalog tools earlier steps of the session offered. */
-    readonly offered?: OfferedCatalogTools;
     readonly session?: { readonly rootSessionId?: string };
     readonly skills?: readonly CatalogSkillSource[];
     readonly tools?: readonly HarnessToolDefinition[];
@@ -277,6 +282,7 @@ export function catalogContext(
   ctx.set(
     BundleKey,
     catalogBundle({
+      approval: input.approval,
       connections: input.connections?.map((connection) => connection.definition),
       dynamicSubagents: input.dynamicSubagents,
       skills: input.skills,
@@ -285,8 +291,7 @@ export function catalogContext(
   if (input.connections !== undefined) {
     ctx.set(ConnectionRegistryKey, connectionRegistry(input.connections));
   }
-  if (input.offered !== undefined) ctx.set(OfferedCatalogToolsKey, input.offered);
-  const catalog = buildStepCatalog({
+  const catalog = await nativeCatalog({
     agentTools: toolMap(...(input.tools ?? [])),
     ctx,
     endsTurn: true,
@@ -315,3 +320,19 @@ export const NAMES_OUTSIDE_EVE_NAMESPACE = [
 
 /** How every reserved-name error explains the rule. */
 export const EVE_NAMESPACE_RESERVATION = 'eve reserves the "eve" namespace for its built-in tools';
+
+/** The catalog eve's own harness gives a step with `agentTools` in `ctx`. */
+export async function nativeCatalog(input: {
+  readonly agentTools: HarnessToolMap;
+  readonly ctx: ContextContainer;
+  readonly endsTurn: boolean;
+  readonly session: { readonly rootSessionId?: string };
+}): Promise<StepCatalog> {
+  return await stepCatalog({
+    config: { tools: input.agentTools },
+    ctx: input.ctx,
+    endsTurn: input.endsTurn,
+    finalReplyOnly: false,
+    session: input.session,
+  });
+}

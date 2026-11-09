@@ -1,6 +1,6 @@
 import { createAgentDelegationTransport } from "#compiled/@vercel/agent-runs/delegation.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
-import type { SessionParent, SessionTraceContext } from "#channel/types.js";
+import type { SessionParent, SessionTraceSeed } from "#channel/types.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { intersectInstrumentationDecisions } from "#shared/instrumentation-decision.js";
 import { readConversationBaggage } from "#tracing/eve/conversation-context.js";
@@ -40,10 +40,10 @@ export const agentDelegation = {
       delegated: boolean;
       trusted: boolean;
       parent?: SessionParent;
-      callerTrace?: SessionTraceContext;
-      parentTraceContext?: SessionTraceContext;
+      callerTrace?: SessionTraceSeed;
+      parentTraceContext?: SessionTraceSeed;
     },
-    execute: (context: { conversationId?: string; parentTraceContext?: SessionTraceContext }) => T,
+    execute: (context: { conversationId?: string; parentTraceContext?: SessionTraceSeed }) => T,
   ): T {
     return transport.receive(
       input.headers,

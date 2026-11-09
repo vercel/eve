@@ -2,13 +2,10 @@ import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel, type TestKernelConfig } from "#internal/testing/kernel.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot
-// be written; the attribute contract is covered by emit.test.ts.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+import type { HarnessSession } from "#harness/types.js";
+import { eachEvent } from "#internal/testing/session-machine.js";
 
 const usage = {
   inputTokens: {
@@ -82,23 +79,19 @@ describe("framework tool input validation (real AI SDK)", () => {
       modelId: "final-output-validation-model",
       provider: "eve-integration-mock",
     });
-    const config: ToolLoopHarnessConfig = {
+    const config: TestKernelConfig = {
+      agent: { model: { id: "final-output-validation-model" } },
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
     };
     const session: HarnessSession = {
-      agent: {
-        modelReference: { id: "final-output-validation-model" },
-        system: "Return structured output.",
-        tools: [],
-      },
-      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      compaction: {},
       continuationToken: "task:final-output-validation-session",
       history: [],
       outputSchema,
       sessionId: "final-output-validation-session",
     };
-    const runStep = createToolLoopHarness(config);
+    const runStep = createTestKernel(config);
 
     const invalidStep = await runStep(session, { message: "Finish the task." });
 
@@ -148,7 +141,8 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const execute = vi.fn(async () => ({ text: "Meeting moved to Friday." }));
-    const runStep = createToolLoopHarness({
+    const runStep = createTestKernel({
+      agent: { model: { id: "output-limit-model" } },
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [
@@ -167,12 +161,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       ]),
     });
     const session: HarnessSession = {
-      agent: {
-        modelReference: { id: "output-limit-model" },
-        system: "Help Alice with her notes.",
-        tools: [],
-      },
-      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      compaction: {},
       continuationToken: "task:output-limit-session",
       history: [],
       sessionId: "output-limit-session",
@@ -220,16 +209,17 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const events: string[] = [];
-    const runStep = createToolLoopHarness({
-      handleEvent: async (event) => {
-        if (event.type === "action.result") {
-          events.push(
-            `action.result:${event.data.result.callId}:${String(event.data.result.isError)}`,
-          );
-        } else {
+    const runStep = createTestKernel({
+      agent: { model: { id: "output-limit-model" } },
+      handleEvent: eachEvent((event) => {
+        if (event.type === "call.requested") events.push(`call.requested:${event.data.callId}`);
+        if (event.type === "call.settled") {
+          events.push(`call.settled:${event.data.callId}:${event.data.outcome}`);
+        }
+        if (event.type === "model.started" || event.type === "model.settled") {
           events.push(event.type);
         }
-      },
+      }),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [
@@ -246,12 +236,7 @@ describe("framework tool input validation (real AI SDK)", () => {
 
     await runStep(
       {
-        agent: {
-          modelReference: { id: "output-limit-model" },
-          system: "Help Alice with her notes.",
-          tools: [],
-        },
-        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        compaction: {},
         continuationToken: "task:output-limit-stream-session",
         history: [],
         sessionId: "output-limit-stream-session",
@@ -259,12 +244,11 @@ describe("framework tool input validation (real AI SDK)", () => {
       { message: "Read Alice's note." },
     );
 
-    const stepEvents = events.slice(events.indexOf("step.started"));
-    expect(stepEvents.slice(0, 4)).toEqual([
-      "step.started",
-      "actions.requested",
-      "action.result:read-skipped:true",
-      "step.completed",
+    expect(events).toEqual([
+      "model.started",
+      "call.requested:read-skipped",
+      "call.settled:read-skipped:failed",
+      "model.settled",
     ]);
   });
 });

@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
 import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
@@ -28,6 +29,7 @@ const from = {
 
 function opened(sessionId: string): Extract<WorkflowToolRunMessage, { kind: "agent-started" }> {
   return {
+    context: { parent: { sessionId: "parent" } } as AgentSessionContext,
     from,
     kind: "agent-started",
     session: {

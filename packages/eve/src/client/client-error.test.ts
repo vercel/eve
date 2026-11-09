@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ClientError } from "#client/client-error.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
+import { ClientError, createClientError } from "#client/client-error.js";
 
 describe("ClientError", () => {
   it("uses structured eve JSON error bodies as the public message", () => {
@@ -33,6 +34,18 @@ describe("ClientError", () => {
     const error = new ClientError(500, "Internal Server Error");
 
     expect(error.message).toBe("Internal Server Error");
+    expect(error.code).toBe("http_error");
+  });
+
+  it.each([
+    ["session_not_active", false],
+    ["session_not_ready", true],
+  ] as const)("maps a 409 %s response to SessionNotActiveError", (code, retryable) => {
+    const error = createClientError(409, JSON.stringify({ code, error: "x", ok: false }));
+
+    expect(SessionNotActiveError.is(error)).toBe(true);
+    expect(error.code).toBe(code);
+    expect((error as SessionNotActiveError).retryable).toBe(retryable);
   });
 
   it("preserves normalized response headers", () => {

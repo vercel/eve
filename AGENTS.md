@@ -41,10 +41,11 @@ report only checks actually run. Never create an issue solely to accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
-Once the first implementation is done, use the
-[`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill to open the PR
-early, run a fresh-context review, address and resolve comments, get CI green,
-and merge.
+When the user explicitly asks to shepherd, land, or merge a PR, or to get one
+green, use the [`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill
+to run a fresh-context review, address and resolve comments, get CI green,
+and merge. Do not start it on your own after an implementation or when only
+asked to open a PR.
 
 ## Commands
 
@@ -62,8 +63,8 @@ pnpm docs:check         # docs frontmatter and nav validation
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
 pnpm test:integration   # integration tests (several minutes; leave the full run to CI)
-pnpm test:scenario      # scenario tests (2–5 min; requires pnpm build first)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:scenario      # scenario tests (2–5 min; Turbo builds prerequisites)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
 pnpm test:webchat       # web chat template in headless Chromium (needs playwright-core's chromium-headless-shell)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
@@ -134,13 +135,20 @@ CI.
    public APIs. Wrap them in eve-owned surfaces so internals can change freely.
    Add runtime `dependencies` only as a last resort: prefer vendoring code or
    generated artifacts into the repository and listing the source package under
-   `devDependencies`. The `eve` package should aim to keep `nitro` as its only
-   runtime dependency. This keeps eve installs as small as possible and avoids
-   exposure to hijacked nested dependencies that are not pinned directly in the
-   main lockfile.
+   `devDependencies`. The `eve` package should aim to keep `nitro`, `rolldown`,
+   and `undici` as its only runtime dependencies. This keeps eve installs as
+   small as possible and avoids exposure to hijacked nested dependencies that
+   are not pinned directly in the main lockfile. eve hands its own `rolldown`
+   to Nitro through `deps.paths` and never lets Nitro resolve or install a
+   package on demand.
 
-6. **Pre-1.0: prefer breaking changes.** Favor correctness and simplicity over
-   backwards compatibility. No legacy fallback logic.
+6. **Stable APIs follow semantic versioning.** Break a stable public API only
+   in a major release. Prefer additive changes; when a stable API needs an
+   incompatible replacement, ship the replacement beside it, mark the old API
+   `@deprecated`, and remove it in the next major release. The
+   [stability policy](./docs/reference/typescript-api.md#stability-policy)
+   defines which surfaces carry this promise; experimental and internal APIs
+   do not.
 
 7. **Derive names from file paths.** Connection names, tool names, and similar
    identifiers come from the filesystem path (e.g.
@@ -157,6 +165,12 @@ CI.
     documentation. Comment only what the code cannot say itself — a non-obvious
     why, an invariant, a surprising edge case. Public API docs (principle 1) are
     the exception.
+
+11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
+    spec, one ordered plugin list, and one route table. Follow the foundation
+    invariants in
+    [`research/nitro-3-rc-migration.md`](./research/nitro-3-rc-migration.md#foundation-invariants)
+    when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
 runs in the CI lint job. If the guard fails, fix the violation rather than
@@ -202,7 +216,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts <path-or-patter
 ```
 
 Add `-t "<name>"` to filter by test name. If you touched anything under
-`#compiled/*`, run `pnpm --filter eve build:compiled` first — the tier configs
+`#compiled/*`, run `pnpm build:compiled` first — the tier configs
 do not rebuild it.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app
@@ -254,10 +268,21 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 ## Changesets
 
 Every PR that touches the published `eve` package must include a
-changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
-cases, including bug fixes and new features. Use `minor` only when the change
-breaks a public API. Write the body for someone reading release notes — what
-changed and what they'll see differently, in 1–2 sentences.
+changeset (`pnpm changeset`). Choose the bump by semantic versioning: `patch`
+for bug fixes and changes that add no public API, `minor` for new features and
+other backward-compatible public API additions, and `major` only when the
+change breaks a stable public API. Changes to experimental APIs never need
+`major`. Start the changeset body with one sentence for someone
+reading release notes; put migration details and contributor thanks in later
+paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`,
+`docs(feature):`, `docs(bugfix):`, or an internal type (`chore:`, `refactor:`,
+`test:`, `ci:`, `build:`, or `internal:`) in the PR title. An optional scope is
+allowed for all types except `docs`, where the scope selects the feature or bug
+fix section. CI checks the PR title because GitHub uses it as the squash-merge
+subject. Keep the prefix in the squash commit; its subject determines the
+release section. A `major` changeset always appears under Breaking Changes,
+and other internal changes are omitted from the release notes. Run `pnpm guard:invariants` to validate changeset summaries. See
+[Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When
 in doubt, add one.

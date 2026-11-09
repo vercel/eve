@@ -62,7 +62,7 @@ async function createEnvironmentFixture(): Promise<string> {
   );
   await writeFile(
     join(fixtureRoot, "agent", "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
   );
   await writeFile(join(fixtureRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
 
@@ -532,7 +532,7 @@ function makeEvalResult(id: string) {
     result: {
       derived: {
         failureCode: undefined,
-        inputRequests: [],
+        interactions: [],
         messageCount: 1,
         models: [],
         parked: false,

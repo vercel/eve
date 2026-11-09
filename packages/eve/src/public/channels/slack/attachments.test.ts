@@ -734,7 +734,7 @@ describe("buildSlackTurnMessage", () => {
     const result = buildSlackTurnMessage("check this image", fileParts);
 
     expect(Array.isArray(result)).toBe(true);
-    const content = result as Array<{ type: string }>;
+    const content = result as ReadonlyArray<{ type: string }>;
     expect(content).toHaveLength(2);
     expect(content[0]).toEqual({ type: "text", text: "check this image" });
     expect(content[1]).toBe(fileParts[0]);
@@ -753,7 +753,7 @@ describe("buildSlackTurnMessage", () => {
     const result = buildSlackTurnMessage("", fileParts);
 
     expect(Array.isArray(result)).toBe(true);
-    const content = result as Array<{ type: string }>;
+    const content = result as ReadonlyArray<{ type: string }>;
     expect(content).toHaveLength(1);
     expect(content[0]).toBe(fileParts[0]);
   });

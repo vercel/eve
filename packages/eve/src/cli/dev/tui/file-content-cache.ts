@@ -2,16 +2,18 @@
  * Session-local knowledge of file contents, so the write block can show a
  * real diff without any protocol addition. Two feeds keep it current: every
  * `write_file` input is a full replacement (exact), and every full-file
- * `read_file` result reconstructs to the file's exact lines. Files touched
- * outside these two paths (e.g. by `bash`) are invisible here — a write over
- * unknown prior content renders plain rather than pretending to be a diff.
+ * `read_file` result reconstructs to the file's exact lines. An `edit_file`
+ * call makes its file unknown. Files touched by `bash` are invisible here — a
+ * write over unknown prior content renders plain rather than pretending to be a
+ * diff.
  */
 
 /** Contents past this size are not cached or diffed. */
 const MAX_CACHED_CONTENT_CHARS = 200_000;
 
 interface FileSnapshot {
-  content: string;
+  /** Absent once a change this cache cannot replay, such as `edit_file`, makes it unknown. */
+  content?: string;
   /** What `content` replaced, kept while `writerCallId`'s call re-renders. */
   previous?: string;
   writerCallId?: string;
@@ -40,6 +42,21 @@ export class FileContentCache {
     if (previous !== undefined) snapshot.previous = previous;
     this.#byPath.set(input.path, snapshot);
     return previous;
+  }
+
+  /**
+   * Marks the content of `path` unknown after a change this cache cannot replay. A write that
+   * already rendered keeps returning its previous content when it re-renders.
+   */
+  forget(path: string): void {
+    const entry = this.#byPath.get(path);
+    if (entry?.writerCallId === undefined) {
+      this.#byPath.delete(path);
+      return;
+    }
+    const snapshot: FileSnapshot = { writerCallId: entry.writerCallId };
+    if (entry.previous !== undefined) snapshot.previous = entry.previous;
+    this.#byPath.set(path, snapshot);
   }
 
   /**

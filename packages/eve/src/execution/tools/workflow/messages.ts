@@ -1,30 +1,23 @@
-import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import type { RemoteAgentBinding } from "#eve-channel/support.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type {
-  ToolInputRequest,
-  ToolInputResponse,
-  ToolInputResponseResponder,
-} from "#tools/definition.js";
+import type { ToolQuestion, ToolAnswer } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
   readonly inbox: string;
 }
 
 /**
- * A child authorization event the owner should display. Unlike input requests
- * it has no answer: the authorization callback completes against the child
- * directly, so the owner only re-emits it.
+ * An interaction fact the run relays: one a session it opened with `ctx.agent` published, or the
+ * run's own sign-in. The session that owns the run mirrors it.
  */
-export interface WorkflowToolAuthorizationRequest {
-  readonly event: SubagentAuthorizationEventHookPayload;
-  readonly kind: "authorization-request";
+export interface WorkflowToolRelay {
+  readonly event: SubagentInteractionHookPayload;
+  readonly kind: "relay";
 }
 
 /** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
@@ -32,23 +25,10 @@ export interface WorkflowToolAskRequest {
   /** The run's control hook, where the session sends its decision on the question. */
   readonly control: string;
   readonly kind: "ask";
-  readonly request: ToolInputRequest;
+  readonly request: ToolQuestion;
 }
 
-/**
- * A child subagent's pending input requests for one step, forwarded as a unit
- * so the owner resolves them against the same child step they came from.
- */
-export interface WorkflowToolInputRequestBatch {
-  readonly kind: "input-batch";
-  readonly requests: readonly InputRequest[];
-}
-
-export type WorkflowToolRequest =
-  | WorkflowToolAuthorizationRequest
-  | WorkflowToolAskRequest
-  | InputRequest
-  | WorkflowToolInputRequestBatch;
+export type WorkflowToolRequest = WorkflowToolRelay | WorkflowToolAskRequest;
 
 /** Identifies the sending workflow tool run to an owner shared by many runs. */
 export interface WorkflowToolRunRef {
@@ -74,17 +54,9 @@ export interface WorkflowToolRunReport {
 }
 
 export interface WorkflowToolRunRequestMessage {
-  readonly childSessionInbox?: SessionInboxAddress;
-  readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
   readonly from: WorkflowToolRunRef;
-  readonly inputSource?: string;
   readonly replyTo: string;
   readonly request: WorkflowToolRequest;
-  readonly requestCoordinates?: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
 }
 
 export interface WorkflowToolRunOutcomeMessage {
@@ -105,10 +77,19 @@ export interface WorkflowToolRunWithdrawMessage {
   readonly replyTo: string;
 }
 
-/** The run opened a session with `ctx.agent`, which its session announces as `agent.started`. */
+/** The run opened a session with `ctx.agent`, which its session announces as `child.opened`. */
 export interface WorkflowToolRunAgentStartedMessage {
   readonly from: WorkflowToolRunRef;
   readonly session: AgentSessionAddress;
+  readonly context: AgentSessionContext;
+}
+
+/** A delivery a session the run opened accepted, sent for the call the run serves. */
+export interface WorkflowToolRunAgentSentMessage {
+  readonly from: WorkflowToolRunRef;
+  /** The session that accepted the delivery. */
+  readonly sessionId: string;
+  readonly deliveryId: string;
 }
 
 /**
@@ -147,6 +128,7 @@ export interface WorkflowToolRunStartedMessage {
 
 export type WorkflowToolRunMessage =
   | ({ readonly kind: "agent-started" } & WorkflowToolRunAgentStartedMessage)
+  | ({ readonly kind: "agent-sent" } & WorkflowToolRunAgentSentMessage)
   | ({ readonly kind: "started" } & WorkflowToolRunStartedMessage)
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
   | ({ readonly kind: "reply" } & WorkflowToolRunReplyMessage)
@@ -154,6 +136,13 @@ export type WorkflowToolRunMessage =
   | ({ readonly kind: "withdraw" } & WorkflowToolRunWithdrawMessage)
   | ({ readonly kind: "usage" } & WorkflowToolRunUsageMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
+
+/** A run's report of a session it opened or a delivery that session accepted. */
+export function isAgentSessionMessage(
+  message: WorkflowToolRunMessage,
+): message is Extract<WorkflowToolRunMessage, { readonly kind: "agent-started" | "agent-sent" }> {
+  return message.kind === "agent-started" || message.kind === "agent-sent";
+}
 
 /**
  * Messages a run relays to its session in one delivery, in the order its body
@@ -220,7 +209,7 @@ export interface WorkflowToolRunCall extends Pick<
 }
 
 /** A person's answer to a `ctx.ask()` question, as the session accepted it. */
-export type WorkflowToolRunAnswer = Extract<ToolInputResponse, { readonly status: "answered" }>;
+export type WorkflowToolRunAnswer = Extract<ToolAnswer, { readonly status: "answered" }>;
 
 /**
  * The session's decision on one `ctx.ask()` question: it accepted an answer,
@@ -292,18 +281,18 @@ function isWorkflowToolRunAnswer(value: unknown): value is WorkflowToolRunAnswer
   return (
     status === "answered" &&
     (optionId === undefined || typeof optionId === "string") &&
-    (responder === undefined || isToolInputResponseResponder(responder)) &&
+    (responder === undefined || isPrincipal(responder)) &&
     (text === undefined || typeof text === "string")
   );
 }
 
-function isToolInputResponseResponder(value: unknown): value is ToolInputResponseResponder {
+function isPrincipal(value: unknown): value is Principal {
   if (typeof value !== "object" || value === null) return false;
-  const { authenticator, principalId, principalType } = value as Record<string, unknown>;
+  const { id, type, issuer } = value as Record<string, unknown>;
   return (
-    typeof authenticator === "string" &&
-    typeof principalId === "string" &&
-    typeof principalType === "string"
+    typeof id === "string" &&
+    typeof type === "string" &&
+    (issuer === undefined || typeof issuer === "string")
   );
 }
 

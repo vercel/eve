@@ -13,16 +13,16 @@ export default defineEval({
       "Ask the `custom-provider` subagent with message: Verify the custom provider session marker and leave Bob his checklist.",
     );
     turn.expectOk();
-    const started = turn.events.find(
-      (event) => event.type === "agent.started" && event.data.name === "custom-provider",
+    const opened = turn.events.find(
+      (event) => event.type === "child.opened" && event.data.name === "custom-provider",
     );
-    if (started?.type !== "agent.started") {
+    if (opened?.type !== "child.opened") {
       throw new Error("The turn did not call the custom-provider subagent.");
     }
-    const child = (await t.target.watchTurn(started.data.sessionId).result()).expectOk();
+    const child = (await t.target.attach(opened.data.sessionId).watch().result()).expectOk();
 
     t.succeeded();
-    t.calledSubagent("custom-provider", { count: 1, status: "completed" });
+    t.calledAgent("custom-provider", { count: 1, status: "completed" });
     const verified = child.requireToolCall("verify-provider-session").output as {
       checklist: string | null;
       checklistAtRoot: string | null;

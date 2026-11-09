@@ -21,7 +21,7 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
   return runInNewContext(
     source
       .replace('import { getToken } from "@vercel/connect";', "")
-      .replace('import selfModification from "eve/self-modification/remote";', "")
+      .replace('import selfModification from "eve/extensions/self-modification/remote";', "")
       .replace("export default ", ""),
     {
       getToken,
@@ -32,25 +32,28 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
 }
 
 describe("self-modification setup", () => {
-  it("recognizes default local configurations", () => {
+  it("recognizes the current local mount without migrating retired configuration", () => {
     expect(renderSelfModificationConfig()).toContain(
-      'import selfModification from "eve/self-modification/local";',
+      'import selfModification from "eve/extensions/self-modification/local";',
     );
     expect(renderSelfModificationConfig()).toContain('// model: "provider/model"');
     expect(classifySelfModificationConfig(renderSelfModificationConfig())).toBe("local");
     expect(
       classifySelfModificationConfig(
         renderSelfModificationConfig().replace(
-          '"eve/self-modification/local"',
+          '"eve/extensions/self-modification/local"',
           '"eve/self-modification"',
         ),
       ),
-    ).toBe("local");
+    ).toBe("authored");
     expect(
       classifySelfModificationConfig(
-        'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n',
+        `import { defineSelfModificationConfig } from "eve/self-modification/config";
+
+export default defineSelfModificationConfig({});
+`,
       ),
-    ).toBe("local");
+    ).toBe("authored");
   });
 
   it("renders a generated Connect-backed deployed configuration", () => {
@@ -65,11 +68,13 @@ describe("self-modification setup", () => {
     expect(source).toContain('directory: "apps/support"');
     expect(source).toContain('target: { branch: "release/production" }');
     expect(source).toContain('import { getToken } from "@vercel/connect"');
-    expect(source).toContain('import selfModification from "eve/self-modification/remote"');
+    expect(source).toContain(
+      'import selfModification from "eve/extensions/self-modification/remote"',
+    );
     expect(source).not.toContain("deployed: {");
     expect(source).toContain('return await getToken("github/selfmod-acme-agents"');
     expect(source).toContain("async resolve({ capability, repository })");
-    expect(source).toContain('case "http"');
+    expect(source).toContain('case "channel:eve"');
     expect(source).toContain("const projectId = process.env.VERCEL_PROJECT_ID");
     expect(source).toContain('principal?.authenticator === "oidc"');
     expect(source).toContain("principal.attributes.project_id === projectId");
@@ -172,21 +177,23 @@ describe("self-modification setup", () => {
       principalType: "service",
     };
 
-    expect(authorize({ channel: { kind: "http" }, principal })).toBe(allowed);
+    expect(authorize({ channel: { kind: "channel:eve", metadata: {} }, principal })).toBe(allowed);
     expect(
       authorize({
-        channel: { kind: "http" },
+        channel: { kind: "channel:eve", metadata: {} },
         principal: { ...principal, attributes: { project_id: "prj_other" } },
       }),
     ).toBe(false);
     expect(
       authorize({
-        channel: { kind: "http" },
+        channel: { kind: "channel:eve", metadata: {} },
         principal: { ...principal, authenticator: "jwt-hmac" },
       }),
     ).toBe(false);
-    expect(authorize({ channel: { kind: "channel:slack" }, principal })).toBe(false);
-    expect(authorize({ channel: { kind: "http" }, principal: null })).toBe(false);
+    expect(authorize({ channel: { kind: "channel:slack", metadata: {} }, principal })).toBe(false);
+    expect(authorize({ channel: { kind: "channel:eve", metadata: {} }, principal: null })).toBe(
+      false,
+    );
   });
 
   it("refuses altered generated configuration as authored", () => {

@@ -1,6 +1,8 @@
 // Outcome classification for one eval attempt. A gap is an attempt that says
 // nothing about the model or eve: it counts toward coverage but is excluded
 // from pass rates and from latency and cost medians.
+import { sessionEvents } from "./measurements/events.mjs";
+import { indexSession, sessionFailures } from "./measurements/session.mjs";
 
 /**
  * Gap reasons, in classification priority order:
@@ -14,9 +16,20 @@
  */
 /** @typedef {"completed" | "timed_out" | "skipped" | "parked" | "gap"} Outcome */
 
-const FAILURE_EVENTS = new Set(["step.failed", "turn.failed", "session.failed"]);
 const NETWORK_FAILURE =
   /\b(UND_ERR_(?:BODY|CONNECT|HEADERS)_TIMEOUT|UND_ERR_SOCKET|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND)\b/;
+// v27 failures carry only a code and message, not the provider's status. eve
+// words the transient failures it recognizes (harness/semantic-errors/rules,
+// pinned by standard.test.mjs). Other 408, 429, and 5xx failures keep the
+// provider's message (model-call/errors.ts), which is often its status text.
+export const PROVIDER_UNAVAILABLE_MESSAGES = [
+  "AI Gateway rate-limited the request.",
+  "The model provider is overloaded or timing out upstream of AI Gateway.",
+  "AI Gateway temporarily throttled its credit balance check.",
+  "A network request failed before completing (",
+];
+const TRANSIENT_STATUS_TEXT =
+  /^(Request Timeout|Request timed out|Too Many Requests|Rate limit exceeded|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout|Overloaded)\b/i;
 const TIMEOUT_ERROR = /aborted due to timeout|TimeoutError/i;
 
 /**
@@ -26,13 +39,20 @@ const TIMEOUT_ERROR = /aborted due to timeout|TimeoutError/i;
 export function classifyOutcome(evalArtifact) {
   if (evalArtifact?.verdict === "skipped") return { outcome: "skipped" };
 
-  const events = (evalArtifact?.result?.sessions ?? []).flatMap((session) => session.events ?? []);
-  const failures = events.filter((event) => FAILURE_EVENTS.has(event.type));
-  if (failures.some(isProviderFailure)) return gap("provider-unavailable");
-  if (failures.some((event) => event.data?.code === "WORKFLOW_STREAM_WRITE_FAILED"))
+  const sessions = (evalArtifact?.result?.sessions ?? []).map((session) => {
+    const events = sessionEvents(session);
+    return { events, index: indexSession(events) };
+  });
+  const failures = sessions.flatMap(({ events, index }) => sessionFailures(events, index));
+  if (failures.some(({ error }) => isProviderFailure(error))) return gap("provider-unavailable");
+  if (failures.some(({ error }) => error.code === "WORKFLOW_STREAM_WRITE_FAILED"))
     return gap("stream-write-failed");
 
-  const completedSteps = events.filter((event) => event.type === "step.completed").length;
+  const completedSteps = sessions.reduce(
+    (total, { index }) =>
+      total + index.steps.filter((run) => run.settled?.data?.outcome === "completed").length,
+    0,
+  );
   const error = typeof evalArtifact?.error === "string" ? evalArtifact.error : undefined;
   const timedOut = error !== undefined && TIMEOUT_ERROR.test(error);
   // An eval that never completed a model step is a gap only when nothing in its
@@ -56,15 +76,21 @@ function gap(reason) {
 }
 
 /**
- * Provider-side and network failures are gaps. Other model-call 4xx responses
+ * Provider-side and network failures are gaps. Other model-call failures
  * (context too long, invalid request) and schema failures are real failures.
+ * Only pre-v27 failures carry `details` with the provider's HTTP status.
+ *
+ * @param {{ code?: string, message?: string, details?: object }} error
  */
-export function isProviderFailure(event) {
-  const { code, details } = event.data ?? {};
+export function isProviderFailure({ code, message, details } = {}) {
   if (code !== "MODEL_CALL_FAILED") return false;
   for (const status of [details?.statusCode, details?.upstreamStatusCode]) {
     if (typeof status === "number" && (status === 429 || status >= 500)) return true;
   }
   if (details?.semanticErrorId === "network-request-failed") return true;
-  return NETWORK_FAILURE.test(JSON.stringify(details ?? {}) + (event.data?.message ?? ""));
+  if (typeof message === "string") {
+    if (PROVIDER_UNAVAILABLE_MESSAGES.some((prefix) => message.startsWith(prefix))) return true;
+    if (TRANSIENT_STATUS_TEXT.test(message)) return true;
+  }
+  return NETWORK_FAILURE.test(JSON.stringify(details ?? {}) + (message ?? ""));
 }

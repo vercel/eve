@@ -1,5 +1,12 @@
+import { internalSession } from "#channel/session.js";
+import { MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH } from "#channel/delivery-idempotency.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
-import type { FilePart, TextPart, UserContent } from "ai";
+import {
+  MAX_MESSAGE_PARTS,
+  type MessageContent,
+  type MessageFilePart,
+  type MessageTextPart,
+} from "#shared/message-content.js";
 
 import type {
   SessionAuthContext,
@@ -8,7 +15,9 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
-import { strandedSessionResponse } from "#eve-channel/support.js";
+import { sessionCommandErrorResponse } from "#eve-channel/support.js";
+import { isV26Line } from "#protocol/v26-lines.js";
+import { v26LineStream } from "#execution/v26-history.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
@@ -20,35 +29,61 @@ import {
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
-  EVE_STREAM_CONTROL_VERSION,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_FORMAT_HEADER,
-  EVE_STREAM_LEASE_ENDED_CONTROL,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
+} from "#protocol/session-http.js";
 import type { ClientContextValue } from "#eve-channel/types.js";
+import {
+  HEARTBEAT_RECORD,
+  LEASE_ENDED_RECORD,
+  STREAM_ENDED_RECORD,
+} from "#protocol/session-events/envelope.js";
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
+  servesRemoteAgentCaller,
 } from "#protocol/remote-agent-protocol.js";
-import {
-  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
-  splitLegacyTaskFields,
-} from "#execution/legacy-remote-agent/protocol.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
-import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
+import { isAnswer, type ValidatedAnswer } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
+const SESSION_VERSION_CHECK_TIMEOUT_MS = 5_000;
+
+function rejectUnknownFields(
+  payload: Record<string, unknown>,
+  fields: readonly string[],
+): Response | undefined {
+  const unknown: string[] = [];
+  // One extra name reports omissions without walking the rest of the object.
+  for (const key in payload) {
+    if (!Object.hasOwn(payload, key) || fields.includes(key)) continue;
+    unknown.push(key.length > 128 ? `${key.slice(0, 128)}…` : key);
+    if (unknown.length === 9) break;
+  }
+  if (unknown.length === 0) return undefined;
+  const names = unknown
+    .slice(0, 8)
+    .sort()
+    .map((key) => `'${JSON.stringify(key).slice(1, -1).replaceAll("'", "\\'")}'`);
+  const omitted = unknown.length > 8 ? " (additional unknown fields omitted)" : "";
+  return Response.json(
+    {
+      ok: false,
+      error: `Unknown field${unknown.length === 1 ? "" : "s"} ${names.join(", ")}${omitted}. Accepted fields: ${fields.length === 0 ? "(none)" : fields.join(", ")}.`,
+    },
+    { status: 400 },
+  );
+}
 
 /** Replay-stable identity for one authenticated create operation. */
 export async function deriveOperationContinuationToken(input: {
@@ -71,14 +106,26 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  const legacy = splitLegacyTaskFields(input);
-  const { payload } = legacy;
-  if (payload.inputResponses !== undefined) {
-    return Response.json(
-      { error: "'inputResponses' is only accepted for an existing session.", ok: false },
-      { status: 400 },
-    );
-  }
+  // A newer protocol may introduce fields; preserve upgrade guidance before checking this one's envelope.
+  const protocolVersion =
+    input.callback === undefined ? undefined : parseProtocolVersionField(input.protocolVersion);
+  if (protocolVersion instanceof Response) return protocolVersion;
+  const fields = [
+    "message",
+    "clientContext",
+    "outputSchema",
+    "operationId",
+    "callback",
+    "protocolVersion",
+    "capabilities",
+    "stubs",
+    "forwardedPrincipal",
+  ];
+  // Supported callers can still send this retired advisory field when delegating.
+  if (input.callback !== undefined) fields.push("activityObserver");
+  const rejection = rejectUnknownFields(input, fields);
+  if (rejection !== undefined) return rejection;
+  const payload = input;
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 
@@ -87,10 +134,6 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const protocolVersion =
-    callback === undefined ? undefined : parseProtocolVersionField(payload.protocolVersion);
-  if (protocolVersion instanceof Response) return protocolVersion;
-
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
@@ -133,16 +176,16 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
-  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
-    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
-  }
   return result;
 }
 
 interface ParsedSessionMessageBody {
+  inbox?: string;
   callback?: SessionCallback;
-  message?: string | UserContent;
-  inputResponses?: readonly ValidatedInputResponse[];
+  /** Names the delivery: a repeat with the same key is the same delivery, with the same receipt. */
+  idempotencyKey?: string;
+  message?: MessageContent;
+  answers?: readonly ValidatedAnswer[];
   context?: ClientContextValue;
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
@@ -151,22 +194,30 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
-  const { payload } = splitLegacyTaskFields(input);
-  if (Object.hasOwn(payload, "stubs")) {
-    return Response.json(
-      { ok: false, error: "Tool stubs are fixed at session creation." },
-      { status: 400 },
-    );
-  }
-  const tokenRejection = rejectSessionContinuationToken(payload);
-  if (tokenRejection !== null) return tokenRejection;
+  const fields = [
+    "inbox",
+    "message",
+    "answers",
+    "clientContext",
+    "outputSchema",
+    "turnPolicy",
+    "callback",
+    "forwardedPrincipal",
+    "idempotencyKey",
+  ];
+  if (input.callback !== undefined) fields.push("activityObserver");
+  const rejection = rejectUnknownFields(input, fields);
+  if (rejection !== undefined) return rejection;
+  const payload = input;
+  const idempotencyKey = parseIdempotencyKeyField(payload.idempotencyKey);
+  if (idempotencyKey instanceof Response) return idempotencyKey;
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const inputResponses = parseInputResponses(payload.inputResponses);
-  if (inputResponses instanceof Response) return inputResponses;
+  const answers = parseAnswers(payload.answers);
+  if (answers instanceof Response) return answers;
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
@@ -174,51 +225,75 @@ export function parseSessionMessageBody(
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
   if (turnPolicy instanceof Response) return turnPolicy;
 
-  if (message === undefined && inputResponses === undefined) {
+  if (message === undefined && answers === undefined) {
     return Response.json(
       {
-        error: "Expected a non-empty 'message' or a non-empty 'inputResponses' array.",
+        error: "Expected a non-empty 'message' or a non-empty 'answers' array.",
         ok: false,
       },
       { status: 400 },
     );
   }
 
-  if (message !== undefined && inputResponses !== undefined) {
+  if (message !== undefined && answers !== undefined) {
     return Response.json(
-      { error: "'message' and 'inputResponses' are mutually exclusive.", ok: false },
+      { error: "'message' and 'answers' are mutually exclusive.", ok: false },
       { status: 400 },
     );
   }
 
   return {
+    inbox: typeof payload.inbox === "string" ? payload.inbox : undefined,
     callback,
     message,
-    inputResponses,
+    answers,
     context,
     outputSchema,
     turnPolicy,
+    ...(idempotencyKey !== undefined && { idempotencyKey }),
   };
 }
 
+function parseIdempotencyKeyField(value: unknown): string | undefined | Response {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH
+  ) {
+    return Response.json(
+      {
+        error: `Expected 'idempotencyKey' to be a nonempty string of at most ${String(MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH)} characters.`,
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
+  return value;
+}
+
 interface ParsedCancelTurnBody {
-  turnId?: string;
+  turnId?: string | null;
 }
 
 export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {
   const payload = await parseOptionalJsonRequest(req);
   if (payload instanceof Response) return payload;
-  const tokenRejection = rejectSessionContinuationToken(payload);
-  if (tokenRejection !== null) return tokenRejection;
+  const rejection = rejectUnknownFields(payload, ["turnId"]);
+  if (rejection !== undefined) return rejection;
 
   const turnId = payload.turnId;
-  if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
+  if (
+    turnId !== undefined &&
+    turnId !== null &&
+    (typeof turnId !== "string" || turnId.length === 0)
+  ) {
     return Response.json(
-      { error: "Expected 'turnId' to be a non-empty string.", ok: false },
+      { error: "Expected 'turnId' to be a non-empty string or null.", ok: false },
       { status: 400 },
     );
   }
-  return typeof turnId === "string" ? { turnId } : {};
+  return turnId === null || typeof turnId === "string" ? { turnId } : {};
 }
 
 export async function parseResetBody(
@@ -226,8 +301,8 @@ export async function parseResetBody(
 ): Promise<{ readonly reason?: string } | Response> {
   const payload = await parseOptionalJsonRequest(req);
   if (payload instanceof Response) return payload;
-  const tokenRejection = rejectSessionContinuationToken(payload);
-  if (tokenRejection !== null) return tokenRejection;
+  const rejection = rejectUnknownFields(payload, ["reason"]);
+  if (rejection !== undefined) return rejection;
   const reason = payload.reason;
   if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
     return Response.json(
@@ -243,7 +318,7 @@ export async function parseSessionControlBody(
 ): Promise<Record<string, unknown> | Response> {
   const payload = await parseOptionalJsonRequest(req);
   if (payload instanceof Response) return payload;
-  return rejectSessionContinuationToken(payload) ?? payload;
+  return rejectUnknownFields(payload, []) ?? payload;
 }
 
 export async function parseOptionalJsonRequest(
@@ -269,15 +344,6 @@ export async function parseOptionalJsonRequest(
   return payload as Record<string, unknown>;
 }
 
-export function rejectSessionContinuationToken(payload: Record<string, unknown>): Response | null {
-  return "continuationToken" in payload
-    ? Response.json(
-        { error: "Session-ID routes do not accept 'continuationToken'.", ok: false },
-        { status: 400 },
-      )
-    : null;
-}
-
 export function requireSessionId(params: Readonly<Record<string, string>>): string | Response {
   const sessionId = params.sessionId;
   return sessionId || Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
@@ -293,25 +359,48 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // Resolve the tail before committing a response; otherwise an unknown or
-    // unreachable session would answer 200 and fail mid-body. Open the event
-    // stream alongside the tail lookup to avoid an extra round trip.
-    const eventsPromise = session.getEventStream({ follow, startIndex });
-    // Handled below; this keeps an early rejection from being reported as unhandled.
-    eventsPromise.catch(() => {});
-    let tailIndex: number;
-    try {
-      tailIndex = await session.getStreamTailIndex();
-    } catch (error) {
-      void eventsPromise.then((events) => events.cancel()).catch(() => {});
-      throw error;
-    }
-    const events = await eventsPromise;
-    const controlVersion =
-      new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
-      EVE_STREAM_CONTROL_VERSION
-        ? EVE_STREAM_CONTROL_VERSION
+    // An unknown or unreachable session would otherwise answer 200 and then fail mid-body, so it
+    // must fail before any bytes are committed. A following read checks the session as it opens
+    // and a historical read always reports the tail, so only a response that reports the tail, or
+    // a tail-relative cursor that needs it to become a position, pays for the lookup. A position
+    // cursor opens the stream alongside it to save a round trip.
+    const early =
+      startIndex === undefined || startIndex >= 0
+        ? internalSession(session).getLineStream({ follow, startIndex: startIndex ?? 0 })
         : undefined;
+    // Handled below; this keeps an early rejection from being reported as unhandled.
+    early?.catch(() => {});
+    const earlierEve = startedOnEarlierEve(session);
+    let tailIndex: number | undefined;
+    if (includeTailIndex || early === undefined) {
+      try {
+        tailIndex = await internalSession(session).getStreamTailIndex();
+      } catch (error) {
+        void early?.then((lines) => lines.cancel()).catch(() => {});
+        throw error;
+      }
+    }
+    const from =
+      early === undefined
+        ? Math.max(0, (tailIndex ?? -1) + 1 + (startIndex ?? 0))
+        : (startIndex ?? 0);
+    let lines: ReadableStream<unknown>;
+    let lineLimit =
+      includeTailIndex && tailIndex !== undefined ? Math.max(0, tailIndex - from + 1) : undefined;
+    if (await earlierEve) {
+      // An eve before v27 recorded it: read every v26 line, each in light of those before it.
+      void early?.then((opened) => opened.cancel()).catch(() => {});
+      // With no owner left to write to it, following would only reconnect each lease to read the
+      // whole history again: end at the tail with `stream.ended`, so readers stop.
+      const live = follow && (await internalSession(session).hasRunnableOwner());
+      if (follow && !live) lineLimit = undefined;
+      lines = v26LineStream(
+        await internalSession(session).getLineStream({ follow: live, startIndex: 0 }),
+        from,
+      );
+    } else {
+      lines = await (early ?? internalSession(session).getLineStream({ follow, startIndex: from }));
+    }
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -320,20 +409,12 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (includeTailIndex) {
+    if (includeTailIndex && tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(
-      serializeAsNdjson(
-        events,
-        request.signal,
-        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
-        controlVersion !== undefined,
-      ),
-      { headers },
-    );
+    return new Response(serializeLines(lines, request.signal, lineLimit), { headers });
   } catch (error) {
-    const stranded = strandedSessionResponse(error);
+    const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;
     if (isExpiredWorkflowRunError(error)) {
       return Response.json(
@@ -346,6 +427,33 @@ export async function createSessionStreamResponse(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
       { status: notFound ? 404 : 503 },
     );
+  }
+}
+
+/**
+ * True when the session's first stored line is a v26 event. v27 readers can't read such a
+ * stream, so serving it as version 27 would leave a client waiting on facts that never come.
+ * Reads at most one line; an empty, unreadable, or slow stream reads as current.
+ */
+async function startedOnEarlierEve(session: Session): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let reader: ReadableStreamDefaultReader<unknown> | undefined;
+  const first = (async () => {
+    const lines = await internalSession(session).getLineStream({ follow: false, startIndex: 0 });
+    reader = lines.getReader();
+    const { done, value } = await reader.read();
+    return !done && isV26Line(value);
+  })();
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), SESSION_VERSION_CHECK_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([first, timeout]);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    void first.finally(() => reader?.cancel().catch(() => {})).catch(() => {});
   }
 }
 
@@ -380,12 +488,7 @@ function parseProtocolVersionField(value: unknown): number | Response {
     );
   }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (
-    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
-    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
-  ) {
-    return callerVersion;
-  }
+  if (servesRemoteAgentCaller(callerVersion)) return callerVersion;
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,
@@ -421,7 +524,7 @@ function parseCapabilitiesField(value: unknown): SessionCapabilities | Response 
   return requestInput === undefined ? {} : { requestInput };
 }
 
-function parseMessageField(value: unknown): string | UserContent | undefined | Response {
+function parseMessageField(value: unknown): MessageContent | undefined | Response {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.length > 0 ? value : undefined;
 
@@ -433,8 +536,16 @@ function parseMessageField(value: unknown): string | UserContent | undefined | R
   }
 
   if (value.length === 0) return undefined;
+  if (value.length > MAX_MESSAGE_PARTS)
+    return Response.json(
+      {
+        ok: false,
+        error: `Expected at most ${MAX_MESSAGE_PARTS} message parts. Combine text or reduce attachments.`,
+      },
+      { status: 400 },
+    );
 
-  const parts: Array<TextPart | FilePart> = [];
+  const parts: Array<MessageTextPart | MessageFilePart> = [];
   for (const raw of value) {
     const parsed = parseMessagePart(raw);
     if (parsed instanceof Response) return parsed;
@@ -443,7 +554,7 @@ function parseMessageField(value: unknown): string | UserContent | undefined | R
   return parts;
 }
 
-function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
+function parseMessagePart(raw: unknown): MessageTextPart | MessageFilePart | Response {
   if (raw === null || typeof raw !== "object") {
     return Response.json(
       { error: "Expected each message part to be an object.", ok: false },
@@ -475,20 +586,17 @@ function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
         { status: 400 },
       );
     }
-    // Callers must never supply framework-internal refs (`eve-url:`,
-    // `eve-sandbox:`): the staging pipeline trusts the scheme and would
-    // reconstitute the string into a privileged sandbox read.
+    // Only the framework can mint refs that invoke sandbox or adapter capabilities.
     if (hasInternalRefScheme(part.data)) {
       return Response.json(
         { error: "File part 'data' must not use a framework-internal ref scheme.", ok: false },
         { status: 400 },
       );
     }
-    const filePart: FilePart = { type: "file", mediaType: part.mediaType, data: part.data };
-    if (typeof part.filename === "string" && part.filename.length > 0) {
-      filePart.filename = part.filename;
-    }
-    return filePart;
+    const filePart: MessageFilePart = { type: "file", mediaType: part.mediaType, data: part.data };
+    return typeof part.filename === "string" && part.filename.length > 0
+      ? { ...filePart, filename: part.filename }
+      : filePart;
   }
 
   return Response.json(
@@ -537,27 +645,25 @@ export function checkUploadPolicy(
   );
 }
 
-function parseInputResponses(
-  value: unknown,
-): readonly ValidatedInputResponse[] | Response | undefined {
+function parseAnswers(value: unknown): readonly ValidatedAnswer[] | Response | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length === 0) {
     return Response.json(
-      { error: "Expected 'inputResponses' to be a non-empty array.", ok: false },
+      { error: "Expected 'answers' to be a non-empty array.", ok: false },
       { status: 400 },
     );
   }
-  const inputResponses = value.filter(isInputResponse);
-  if (inputResponses.length !== value.length) {
+  const answers = value.filter(isAnswer);
+  if (answers.length !== value.length) {
     return Response.json(
       {
-        error: "Expected every 'inputResponses' entry to match the HITL response schema.",
+        error: "Expected every 'answers' entry to match the HITL response schema.",
         ok: false,
       },
       { status: 400 },
     );
   }
-  return inputResponses;
+  return answers;
 }
 
 function parseClientContextField(value: unknown): ClientContextValue | Response | undefined {
@@ -625,28 +731,20 @@ export function parseStartIndex(request: Request): number | undefined | Response
   return parsed;
 }
 
-function streamEventLimit(
-  startIndex: number | undefined,
-  tailIndex: number | undefined,
-): number | undefined {
-  if (tailIndex === undefined) return undefined;
-  const resolvedStartIndex =
-    startIndex === undefined
-      ? 0
-      : startIndex < 0
-        ? Math.max(0, tailIndex + 1 + startIndex)
-        : startIndex;
-  return Math.max(0, tailIndex - resolvedStartIndex + 1);
-}
-
-function serializeAsNdjson(
-  events: ReadableStream<unknown>,
+/**
+ * Serializes stored lines as NDJSON, with the transport records every v27 reader understands: a
+ * heartbeat every 10 seconds of silence (and one first, so the response commits at once), a
+ * lease end after 60 seconds, and `stream.ended` when the durable stream is done. A bounded read
+ * ends after `lineLimit` lines, without `stream.ended`: the stream itself goes on.
+ */
+function serializeLines(
+  lines: ReadableStream<unknown>,
   signal: AbortSignal,
-  eventLimit?: number,
-  leased = false,
+  lineLimit?: number,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  let eventCount = 0;
+  const record = (value: unknown) => encoder.encode(`${JSON.stringify(value)}\n`);
+  let lineCount = 0;
   let heartbeat: ReturnType<typeof setTimeout> | undefined;
   let lease: ReturnType<typeof setTimeout> | undefined;
 
@@ -660,50 +758,48 @@ function serializeAsNdjson(
     clearTimeout(heartbeat);
     heartbeat = setTimeout(() => {
       try {
-        controller.enqueue(encoder.encode("\n"));
+        controller.enqueue(record(HEARTBEAT_RECORD));
         scheduleHeartbeat(controller);
       } catch {
         clearTimers();
       }
     }, SESSION_STREAM_HEARTBEAT_MS);
   };
-  const startLease = (controller: TransformStreamDefaultController<Uint8Array>) => {
-    scheduleHeartbeat(controller);
-    lease = setTimeout(() => {
-      clearTimers();
-      try {
-        controller.enqueue(encoder.encode(`${JSON.stringify(EVE_STREAM_LEASE_ENDED_CONTROL)}\n`));
-        controller.terminate();
-      } catch {
-        // The response was cancelled while the lease callback was already queued.
-      }
-    }, SESSION_STREAM_LEASE_MS);
-  };
 
   const transform = new TransformStream<unknown, Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) {
+      controller.enqueue(record(HEARTBEAT_RECORD));
+      if (lineLimit === 0) {
         controller.terminate();
-      } else if (leased) {
-        startLease(controller);
+        return;
       }
+      scheduleHeartbeat(controller);
+      lease = setTimeout(() => {
+        clearTimers();
+        try {
+          controller.enqueue(record(LEASE_ENDED_RECORD));
+          controller.terminate();
+        } catch {
+          // The response was cancelled while the lease callback was already queued.
+        }
+      }, SESSION_STREAM_LEASE_MS);
     },
-    transform(event, controller) {
-      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      eventCount += 1;
-      if (eventCount === eventLimit) {
+    transform(line, controller) {
+      controller.enqueue(record(line));
+      lineCount += 1;
+      if (lineCount === lineLimit) {
         clearTimers();
         controller.terminate();
-      } else if (leased) {
+      } else {
         scheduleHeartbeat(controller);
       }
     },
-    flush() {
+    flush(controller) {
       clearTimers();
+      controller.enqueue(record(STREAM_ENDED_RECORD));
     },
   });
-  void events
+  void lines
     .pipeTo(transform.writable, { signal })
     .catch(() => {})
     .finally(clearTimers);

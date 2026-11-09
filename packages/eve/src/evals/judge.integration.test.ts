@@ -6,7 +6,7 @@ import { computeEvalVerdict } from "#evals/runner/verdict.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import type { EveEvalContext, EveEvalJudgeConfig } from "#evals/types.js";
 
-const client = new Client({ host: "https://eve.test" });
+const client = new Client({ baseUrl: "https://eve.test" });
 const target = createEvalTargetHandle({
   capabilities: { devRoutes: true },
   client,

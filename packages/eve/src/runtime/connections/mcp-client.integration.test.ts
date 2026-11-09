@@ -23,6 +23,7 @@ describe.each(["static", "dynamic"] as const)(
     let discoveryError: { code: number; message: string; data?: unknown } | undefined;
     let discoveryDelayMs: number;
     let initializeError: { code: number; message: string } | undefined;
+    let initializeProtocolVersion: string;
     let callResult: Record<string, unknown>;
 
     async function createClient(protocolVersionDiscovery?: boolean) {
@@ -73,6 +74,7 @@ describe.each(["static", "dynamic"] as const)(
       };
       discoveryDelayMs = 0;
       initializeError = undefined;
+      initializeProtocolVersion = "2025-11-25";
       callResult = { content: [{ type: "text", text: "fixture-user" }] };
 
       // Replace only HTTP I/O: eve's connection, bundled SDK, and protocol parsing stay real.
@@ -100,14 +102,14 @@ describe.each(["static", "dynamic"] as const)(
             result = { capabilities: { tools: {} }, supportedVersions: ["2026-07-28"] };
             break;
           case "initialize":
-            expect(protocolVersion).toBe("2025-11-25");
-            expect(message.params?.protocolVersion).toBe("2025-11-25");
+            expect(protocolVersion).toBe(initializeProtocolVersion);
+            expect(message.params?.protocolVersion).toBe(initializeProtocolVersion);
             if (initializeError !== undefined) {
               return Response.json({ jsonrpc: "2.0", id: message.id, error: initializeError });
             }
             result = {
               capabilities: { tools: {} },
-              protocolVersion: "2025-11-25",
+              protocolVersion: initializeProtocolVersion,
               serverInfo: { name: "support-fixture", version: "1.0.0" },
             };
             break;
@@ -168,10 +170,69 @@ describe.each(["static", "dynamic"] as const)(
       ]);
     });
 
-    it("preserves Plain's version error when discovery is not disabled", async () => {
+    it.each([
+      ["no legacy version overlaps", { requested: "2026-07-28", supported: ["2026-07-28"] }],
+      ["supported is not a list", { requested: "2026-07-28", supported: "2025-11-25" }],
+      ["data is missing", undefined],
+    ])("keeps -32022 fatal when %s", async (_case, data) => {
       await createClient();
-      await expect(client.connect()).rejects.toMatchObject(discoveryError!);
+      discoveryError = { code: -32022, data, message: "Unsupported protocol version" };
+      await expect(client.connect()).rejects.toMatchObject({ code: -32022 });
       expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
+    });
+
+    it.each([-32020, -32021])("keeps discovery error code %s fatal", async (code) => {
+      await createClient();
+      discoveryError = { ...discoveryError!, code };
+      await expect(client.connect()).rejects.toMatchObject({ code });
+      expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
+    });
+
+    it("initializes at the latest legacy version when the server lacks discovery", async () => {
+      await createClient();
+      discoveryError = { code: -32601, message: "Method not found" };
+      await expect(client.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({ name: "getMyUser" }),
+      ]);
+      expect(requests).toEqual([
+        { method: "server/discover", protocolVersion: "2026-07-28" },
+        { method: "initialize", protocolVersion: "2025-11-25" },
+        { method: "notifications/initialized", protocolVersion: "2025-11-25" },
+        { method: "tools/list", protocolVersion: "2025-11-25" },
+      ]);
+    });
+
+    it("falls back to initialize when Plain-style discovery rejects a supported protocol version", async () => {
+      await createClient();
+      await expect(client.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({ name: "getMyUser" }),
+      ]);
+      expect(requests).toEqual([
+        { method: "server/discover", protocolVersion: "2026-07-28" },
+        { method: "initialize", protocolVersion: "2025-11-25" },
+        { method: "notifications/initialized", protocolVersion: "2025-11-25" },
+        { method: "tools/list", protocolVersion: "2025-11-25" },
+      ]);
+    });
+
+    it("uses the highest supported legacy version for initialize", async () => {
+      await createClient();
+      discoveryError = {
+        code: -32022,
+        data: { requested: "2026-07-28", supported: ["2025-03-26", "2025-06-18"] },
+        message: "Unsupported protocol version",
+      };
+      initializeProtocolVersion = "2025-06-18";
+
+      await expect(client.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({ name: "getMyUser" }),
+      ]);
+      expect(requests).toEqual([
+        { method: "server/discover", protocolVersion: "2026-07-28" },
+        { method: "initialize", protocolVersion: "2025-06-18" },
+        { method: "notifications/initialized", protocolVersion: "2025-06-18" },
+        { method: "tools/list", protocolVersion: "2025-06-18" },
+      ]);
     });
 
     it("stays on the modern protocol when a modern-only server answers discovery slowly", async () => {

@@ -79,7 +79,8 @@ export async function exportAuditEvent(
 }
 
 export interface QueuedAuditEvent {
-  readonly eventId: string;
+  /** The event's position, as `line:index`. */
+  readonly position: string;
   readonly type: string;
 }
 

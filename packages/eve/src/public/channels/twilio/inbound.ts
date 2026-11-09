@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import {
   parseTwilioWebhookBody,
@@ -78,7 +78,7 @@ export function parseTwilioTextMessage(params: URLSearchParams): TwilioTextMessa
  * per MMS media URL, which the channel's `fetchFile` downloads with the
  * account's credentials.
  */
-export function twilioMessageContent(message: TwilioTextMessage): string | UserContent {
+export function twilioMessageContent(message: TwilioTextMessage): MessageContent {
   const media = message.media ?? [];
   if (media.length === 0) return message.body;
   const files = media.map((item) => ({

@@ -6,14 +6,15 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 
 const channel = defineChannel({
   routes: [POST("/drop", async () => new Response("ok"))],
   state: {},
-  // A channel may drop a delivery, such as a message it does not handle.
+  // A channel drops a delivery it does not handle by replacing it with nothing to deliver.
   deliver(payload) {
-    return payload.message === "drop me" ? undefined : { message: payload.message };
+    return payload.message === "drop me" ? {} : undefined;
   },
 });
 
@@ -48,26 +49,29 @@ describe("pending session history", () => {
       try {
         const inbox = sessionInboxHookToken(continuationToken);
         await waitForHook({ runId: run.runId }, { token: inbox });
-        await resumeHook(inbox, { kind: "send", payload: { message: "drop me" } });
-        await resumeHook(inbox, { kind: "send", payload: { message: "hello" } });
+        const send = (message: string) =>
+          resumeHook(inbox, {
+            kind: "send",
+            payload: { message },
+            delivery: createChannelDeliveryMetadata({
+              channelKind: "channel:drop",
+              channelName: "drop",
+            }),
+          });
+        await send("drop me");
+        await send("hello");
 
         const turn = await stream.nextTurn();
         expect(
-          turn
-            .filter(({ type }) => type === "history.imported" || type === "message.received")
-            .map(({ data, type }) => [type, data]),
+          turn.filter(({ type }) => type === "delivery.consumed").map(({ data }) => data),
         ).toEqual([
-          [
-            "history.imported",
-            expect.objectContaining({
-              messages: [
-                { text: "Earlier question", role: "user" },
-                { text: "Earlier answer", role: "assistant" },
-              ],
-              turnId: "turn_0",
-            }),
-          ],
-          ["message.received", expect.objectContaining({ message: "hello", turnId: "turn_0" })],
+          expect.objectContaining({
+            history: [
+              { role: "user", text: "Earlier question" },
+              { role: "assistant", text: "Earlier answer" },
+            ],
+            parts: [{ kind: "text", text: "hello" }],
+          }),
         ]);
       } finally {
         stream.dispose();

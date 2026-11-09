@@ -90,16 +90,16 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
 function respondToBashJob(message: string, request: MockModelRequest): MockModelResponse | string {
   const outputs = request.toolResults
     .filter((result) => result.name === "bash")
-    .map(
-      (result) => result.output as { readonly outputDirectory?: unknown; readonly pid?: unknown },
-    );
+    .map((result) => formatOutput(result.output));
   if (outputs.length === 0) {
     const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
-    return { toolCalls: [{ input: { command }, name: "bash" }] };
+    return { toolCalls: [{ input: { command, timeout: 5 }, name: "bash" }] };
   }
-  const { outputDirectory, pid } = outputs[0] ?? {};
-  if (typeof outputDirectory !== "string" || typeof pid !== "number") {
-    return formatOutput(outputs[0]);
+  // The model reads the job's process group and output directory from the running message.
+  const pid = /as process group (\d+)/u.exec(outputs[0]!)?.[1];
+  const outputDirectory = /keeps writing to (\S+)\/stdout/u.exec(outputs[0]!)?.[1];
+  if (outputDirectory === undefined || pid === undefined) {
+    return outputs[0]!;
   }
   if (outputs.length === 1) {
     const command = `sleep 2; tail -n 1 ${outputDirectory}/stdout`;
@@ -118,12 +118,15 @@ function respondToFileTools(
   message: string,
   request: MockModelRequest,
 ): MockModelResponse | string {
-  const [, path = "", content = ""] =
+  const [, path = "", draft = ""] =
     /create (\S+) with exactly this content: (\S+)/u.exec(message) ?? [];
+  const [, oldText = "", newText = ""] = /replace (\S+) with (\S+) in /u.exec(message) ?? [];
   const steps = [
-    { input: { content, filePath: path }, name: "write_file" },
+    { input: { content: draft, filePath: path }, name: "write_file" },
     { input: { filePath: path }, name: "read_file" },
-    { input: { path: "notes", pattern: content }, name: "grep" },
+    // Edits as a JSON string, a shape models send, which edit_file repairs before validation.
+    { input: { edits: JSON.stringify([{ newText, oldText }]), path }, name: "edit_file" },
+    { input: { outputMode: "content", path: "notes", pattern: newText }, name: "grep" },
     { input: { command: `cat ${path}` }, name: "bash" },
   ];
   const next = steps[request.toolResults.length];
@@ -147,13 +150,14 @@ function taskResultOf(request: MockModelRequest, tool: string): string | undefin
 }
 
 function bashStdout(request: MockModelRequest): string {
-  const output = [...request.toolResults]
-    .reverse()
-    .find((result) => result.name === "bash")?.output;
-  if (typeof output === "object" && output !== null && "stdout" in output) {
-    return String((output as { stdout: unknown }).stdout).trim();
-  }
-  return formatOutput(output);
+  const output = formatOutput(
+    [...request.toolResults].reverse().find((result) => result.name === "bash")?.output,
+  );
+  // bash shows the model its stdout, then any `[stderr]` section; a failed command ends with `[exit code: N]`.
+  const body = output.replace(/\[exit code: -?\d+\]$/u, "");
+  const stderrAt = body.lastIndexOf("\n[stderr]\n");
+  const end = stderrAt !== -1 ? stderrAt : body.startsWith("[stderr]\n") ? 0 : body.length;
+  return body.slice(0, end).trim();
 }
 
 function toolOutput(request: MockModelRequest, name: string): string {

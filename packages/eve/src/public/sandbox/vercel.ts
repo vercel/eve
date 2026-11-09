@@ -15,6 +15,7 @@ export {
   type VercelSandboxRuntimeOptions,
 } from "#sandbox/providers/vercel.js";
 export type {
+  VercelSandboxCreateOptions,
   VercelSandboxMount,
   VercelSandboxMountMode,
   VercelSandboxMounts,

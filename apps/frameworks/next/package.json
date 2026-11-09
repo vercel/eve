@@ -12,8 +12,8 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@auth/core": "0.41.2",
-    "@vercel/connect": "2.2.0",
+    "@auth/core": "0.41.3",
+    "@vercel/connect": "catalog:",
     "ai": "catalog:",
     "eve": "workspace:*",
     "next": "catalog:",

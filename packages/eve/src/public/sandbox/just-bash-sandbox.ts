@@ -119,27 +119,34 @@ export interface JustBashSandboxCreateOptions {
    */
   readonly autoInstall?: boolean;
   /**
-   * Registers trusted host application code as commands in each live
-   * just-bash interpreter. Custom commands can participate in normal shell
-   * composition, including pipelines and redirections.
-   *
-   * Custom commands are not available during environment preparation. They run in
-   * eve's host process, outside the virtual filesystem security boundary, and
-   * are responsible for validating their own inputs and cleaning up host
-   * resources.
+   * just-bash-specific escape hatches. They expose just-bash's command and
+   * filesystem contracts, so their shape follows just-bash rather than eve's
+   * compatibility promise. Import their types from
+   * `eve/experimental/sandbox/just-bash`.
    */
-  readonly customCommands?: ReadonlyArray<JustBashCustomCommand>;
-  /**
-   * Composes the filesystem used by each live sandbox handle. The factory is
-   * called when a handle opens with eve's durable default filesystem; return a
-   * fresh filesystem that preserves eve-owned paths such as `/workspace`,
-   * `/tmp`, and the home directory.
-   *
-   * This just-bash-specific escape hatch requires the application to install
-   * a compatible `just-bash` version. It is not invoked during template
-   * preparation.
-   */
-  readonly filesystem?: (
-    context: JustBashFilesystemContext,
-  ) => JustBashFilesystem | Promise<JustBashFilesystem>;
+  readonly experimental?: {
+    /**
+     * Registers trusted host application code as commands in each live
+     * just-bash interpreter. Custom commands can participate in normal shell
+     * composition, including pipelines and redirections.
+     *
+     * Custom commands are not available during environment preparation. They run in
+     * eve's host process, outside the virtual filesystem security boundary, and
+     * are responsible for validating their own inputs and cleaning up host
+     * resources.
+     */
+    readonly customCommands?: ReadonlyArray<JustBashCustomCommand>;
+    /**
+     * Composes the filesystem used by each live sandbox handle. The factory is
+     * called when a handle opens with eve's durable default filesystem; return a
+     * fresh filesystem that preserves eve-owned paths such as `/workspace`,
+     * `/tmp`, and the home directory.
+     *
+     * This requires the application to install a compatible `just-bash`
+     * version. It is not invoked during template preparation.
+     */
+    readonly filesystem?: (
+      context: JustBashFilesystemContext,
+    ) => JustBashFilesystem | Promise<JustBashFilesystem>;
+  };
 }

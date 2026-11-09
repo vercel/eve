@@ -43,6 +43,44 @@ const waitForHttpProtocolDiscovery = patchMcpSourcePlugin("wait-for-http-discove
   ],
 ]);
 
+// The SDK already returns to legacy initialize for ordinary discovery failures,
+// but treats every -32022 as fatal. Negotiate only when the server lists a legacy
+// version this client supports, and preserve the highest overlapping version.
+const supportedProtocolVersionFallback = patchMcpSourcePlugin(
+  "supported-protocol-version-fallback",
+  [
+    [
+      "\t\t\tif (MCPClientError.isInstance(error) && error.code != null && MODERN_PROTOCOL_ERROR_CODES.includes(error.code)) throw error;",
+      `\t\t\tif (MCPClientError.isInstance(error) && error.code != null && MODERN_PROTOCOL_ERROR_CODES.includes(error.code)) {
+\t\t\t\tif (error.code !== -32022 || !Array.isArray(error.data?.supported)) throw error;
+\t\t\t\tconst supportedVersions = error.data.supported;
+\t\t\t\tconst protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find(
+\t\t\t\t\t(version) =>
+\t\t\t\t\t\tversion !== LATEST_PROTOCOL_VERSION && supportedVersions.includes(version),
+\t\t\t\t);
+\t\t\t\tif (protocolVersion === void 0) throw error;
+\t\t\t\tthis.protocolVersion = protocolVersion;
+\t\t\t\treturn false;
+\t\t\t}`,
+    ],
+    [
+      '\t\t\tthis.protocolEra = "legacy";\n\t\t\tthis.protocolVersion = LATEST_LEGACY_PROTOCOL_VERSION;\n\t\t\tthis.setTransportProtocolVersion(this.protocolVersion);',
+      `\t\t\tthis.protocolEra = "legacy";
+\t\t\tif (this.protocolVersion === LATEST_PROTOCOL_VERSION) {
+\t\t\t\tthis.protocolVersion = LATEST_LEGACY_PROTOCOL_VERSION;
+\t\t\t}
+\t\t\tthis.setTransportProtocolVersion(this.protocolVersion);`,
+    ],
+    [
+      'method: "initialize",\n\t\t\t\t\tparams: {\n\t\t\t\t\t\tprotocolVersion: LATEST_LEGACY_PROTOCOL_VERSION,\n\t\t\t\t\t\tcapabilities: this.clientCapabilities,',
+      `method: "initialize",
+\t\t\t\t\tparams: {
+\t\t\t\t\t\tprotocolVersion: this.protocolVersion,
+\t\t\t\t\t\tcapabilities: this.clientCapabilities,`,
+    ],
+  ],
+);
+
 // A 2025-era session allows one standalone GET stream; MCP SDK servers answer
 // a second with 409 and stateful gateways drop the session (#4379). Upstream
 // marks the stream only once a GET's response arrives, so one connect sends up
@@ -109,7 +147,12 @@ export default {
   packageName: "@ai-sdk/mcp",
   compiledPath: "@ai-sdk/mcp",
   chunkGroup: "workflow",
-  plugins: [waitForHttpProtocolDiscovery, singleInboundSseStream, boundedSessionTermination],
+  plugins: [
+    waitForHttpProtocolDiscovery,
+    supportedProtocolVersionFallback,
+    singleInboundSseStream,
+    boundedSessionTermination,
+  ],
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },

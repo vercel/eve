@@ -34,28 +34,27 @@ function response(body = {}) {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
-function context(target, signal = new AbortController().signal) {
+function context(target, abortSignal = new AbortController().signal) {
   return {
-    signal,
+    abortSignal,
     target,
     log() {},
-    calledSubagent() {},
+    calledAgent() {},
     session: () => {
       throw new Error("session was not expected");
     },
   };
 }
 
-/** Mirrors a recorded eval turn: idle turns end on session.waiting. */
-function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] } = {}) {
+/** Mirrors a recorded eval turn. */
+function completedTurn(sessionId, events = [], { input = {}, interactions = [] } = {}) {
   const call = { input, status: "completed" };
   return {
     sessionId,
     events,
-    inputRequests,
-    status: "waiting",
+    interactions,
+    sessionEnded: false,
     expectOk() {},
-    calledSubagent() {},
     requireToolCall(name, { status = "completed" } = {}) {
       if (call.status !== status) throw new Error(`${name} is ${call.status}, not ${status}.`);
       return call;
@@ -66,11 +65,23 @@ function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] 
 /** The parent events of an agent call that starts task `taskId` and opens `childSessionId`. */
 function agentCallEvents(childSessionId, taskId = "agent-1") {
   const name = "self-modification__agent";
+  const callId = `call-${taskId}`;
   return [
-    { type: "task.started", data: { callId: `call-${taskId}`, name, taskId, turnId: "turn-1" } },
     {
-      type: "agent.started",
-      data: { callId: `call-${taskId}`, name, sessionId: childSessionId, taskId, turnId: "turn-1" },
+      type: "task.started",
+      scope: { turnId: "turn-1" },
+      data: { kind: "agent", name, startedBy: { callId }, taskId },
+    },
+    { type: "call.started", scope: { turnId: "turn-1" }, data: { callId, taskId } },
+    {
+      type: "child.opened",
+      scope: { taskId, turnId: "turn-1" },
+      data: {
+        name,
+        owner: { callId },
+        sessionId: childSessionId,
+        stream: `/stream/${childSessionId}`,
+      },
     },
   ];
 }
@@ -92,8 +103,8 @@ function targetFor({ calls = [], turns = {} } = {}) {
       calls.push({ path, options });
       return response({ revision: "revision-after-cleanup" });
     },
-    watchTurn(sessionId) {
-      return turns[sessionId];
+    attach(sessionId) {
+      return { watch: () => turns[sessionId] };
     },
   };
 }
@@ -158,10 +169,12 @@ test("close retires every session before restoring the complete source tree", as
         parentFinished = true;
         return completedTurn(parent.sessionId, parentEvents);
       };
-      target.watchTurn = () => {
-        assert.equal(parentFinished, true);
-        return child;
-      };
+      target.attach = () => ({
+        watch() {
+          assert.equal(parentFinished, true);
+          return child;
+        },
+      });
 
       await harness.request("make a change");
       await harness.verify("verify it");
@@ -174,7 +187,7 @@ test("close retires every session before restoring the complete source tree", as
       const released = Promise.withResolvers();
       const fetch = target.fetch;
       target.fetch = async (path, options) => {
-        if (path.endsWith("/child/reset")) {
+        if (path.endsWith("/child/end")) {
           retiring.resolve();
           await released.promise;
         }
@@ -192,15 +205,13 @@ test("close retires every session before restoring the complete source tree", as
 
       assert.deepEqual(
         calls
-          .filter((call) => call.path.endsWith("/reset"))
+          .filter((call) => call.path.endsWith("/end"))
           .map((call) => call.path)
           .sort(),
-        [parent, child, verification]
-          .map((turn) => `/eve/v1/session/${turn.sessionId}/reset`)
-          .sort(),
+        [parent, child, verification].map((turn) => `/eve/v1/session/${turn.sessionId}/end`).sort(),
       );
       assert.ok(
-        calls.findLastIndex((call) => call.path.endsWith("/reset")) <
+        calls.findLastIndex((call) => call.path.endsWith("/end")) <
           calls.findIndex((call) => call.path.includes("/suspend?lease=")),
       );
       await assertTreeRestored(root);
@@ -215,13 +226,13 @@ test("close retires every session before restoring the complete source tree", as
   );
 });
 
-test("one reset failure still retires other sessions and leaves unsafe source untouched", async () => {
+test("one end failure still retires other sessions and leaves unsafe source untouched", async () => {
   const root = await sourceTree();
   const calls = [];
   const target = targetFor({ calls });
   target.fetch = async (path, options = {}) => {
     calls.push({ path, options });
-    if (path.includes("bad/reset")) return new Response("no", { status: 500 });
+    if (path.includes("bad/end")) return new Response("no", { status: 500 });
     return response({ revision: "revision" });
   };
   const parentEvents = agentCallEvents("bad");
@@ -233,12 +244,14 @@ test("one reset failure still retires other sessions and leaves unsafe source un
       return completedTurn("parent", parentEvents);
     },
   };
-  target.watchTurn = () => ({
-    sessionId: "bad",
-    events: [],
-    async result() {
-      return completedTurn("bad");
-    },
+  target.attach = () => ({
+    watch: () => ({
+      sessionId: "bad",
+      events: [],
+      async result() {
+        return completedTurn("bad");
+      },
+    }),
   });
   const t = context(target);
   t.session = async () => ({ start: async () => liveParent });
@@ -247,7 +260,7 @@ test("one reset failure still retires other sessions and leaves unsafe source un
   await writeFile(join(root, "keep.txt"), "unsafe mutation");
   await assert.rejects(populated.close(), /could not be retired/);
   assert.equal(await readFile(join(root, "keep.txt"), "utf8"), "unsafe mutation");
-  assert.equal(calls.filter((call) => call.path.endsWith("/reset")).length, 2);
+  assert.equal(calls.filter((call) => call.path.endsWith("/end")).length, 2);
   assert.equal(
     calls.some((call) => call.path.includes("/suspend?")),
     false,
@@ -402,31 +415,28 @@ test("request follows a continued agent task past stale child turns", async () =
   initialChild.session = { state: { streamIndex: 10 } };
   const message = "Repair the existing inventory tool.";
   const continuation = {
-    type: "task.started",
-    data: { callId: "call-2", name: "self-modification__agent", taskId: "agent-1" },
+    type: "call.started",
+    scope: { turnId: "turn-2" },
+    data: { callId: "call-2", taskId: "agent-1" },
   };
   const repairParent = liveTurn("parent", [continuation]);
   repairParent.result = async () =>
     completedTurn("parent", [continuation], { input: { taskId: "agent-1", message } });
   const diagnostic = liveTurn("child", [
-    { type: "message.received", data: { message: "Diagnose only." } },
+    { type: "delivery.consumed", data: { parts: [{ kind: "text", text: "Diagnose only." }] } },
   ]);
   diagnostic.session = { state: { streamIndex: 20 } };
-  diagnostic.result = async () => ({
-    ...completedTurn("child", diagnostic.events),
-    status: "waiting",
-  });
   const repaired = liveTurn("child", [
     ...diagnostic.events,
-    { type: "message.received", data: { message } },
+    { type: "delivery.consumed", data: { parts: [{ kind: "text", text: message }] } },
   ]);
   repaired.session = { state: { streamIndex: 30 } };
   const observed = [];
   await withHarness(async ({ harness, target }) => {
     const children = [initialChild, diagnostic, repaired];
-    target.watchTurn = (sessionId, options) => {
+    target.attach = (sessionId, options) => {
       observed.push({ sessionId, ...options });
-      return children.shift();
+      return { watch: () => children.shift() };
     };
     await harness.request("Create the tool.", { start: async () => initialParent });
     const result = await harness.request("Please repair it.", {

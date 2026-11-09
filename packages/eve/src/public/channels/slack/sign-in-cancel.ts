@@ -1,7 +1,8 @@
 import type { ChannelFrom } from "#channel/channel-operations.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createLogger } from "#internal/logging.js";
-import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
-import { slackContinuationToken } from "#public/channels/slack/api.js";
+import type { SlackChannelState, SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
+import { slackSessionToken } from "#public/channels/slack/api.js";
 
 const log = createLogger("slack.interactions");
 
@@ -9,11 +10,7 @@ const log = createLogger("slack.interactions");
 export const SIGN_IN_CANCEL_ACTION_ID = "eve_sign_in:cancel";
 
 /** The held turn a sign-in prompt's Cancel button cancels. */
-export interface SignInCancelTarget {
-  readonly channelId: string;
-  readonly threadTs: string;
-  readonly turnId: string;
-}
+export type SignInCancelTarget = SlackSessionTarget & { readonly turnId: string };
 
 /** Reads a Cancel click's target from a sign-in prompt's button value. */
 export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | undefined {
@@ -25,11 +22,10 @@ export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | un
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) return undefined;
-  const { channelId, threadTs, turnId } = parsed as Record<string, unknown>;
-  if (typeof channelId !== "string" || typeof threadTs !== "string" || typeof turnId !== "string") {
-    return undefined;
-  }
-  return { channelId, threadTs, turnId };
+  const { channelId, codeChannel, threadTs, turnId } = parsed as Record<string, unknown>;
+  if (typeof channelId !== "string" || typeof turnId !== "string") return undefined;
+  if (codeChannel === true) return { channelId, codeChannel, turnId };
+  return typeof threadTs === "string" ? { channelId, threadTs, turnId } : undefined;
 }
 
 /**
@@ -72,25 +68,36 @@ function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefine
   };
 }
 
-/** Cancels the turn held on the sign-in, then removes the private prompt. */
+/**
+ * Cancels the turn held on the sign-in, then removes the private prompt. A turn
+ * that already ended needs no cancel, so its prompt is removed too.
+ */
 async function cancelHeldSignIn(
   cancel: SignInCancel,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
 ): Promise<void> {
-  const { channelId, threadTs, turnId } = cancel.target;
+  const { turnId } = cancel.target;
   try {
-    await ctx.from(slackContinuationToken(channelId, threadTs)).cancel({ turnId });
+    await ctx.from(slackSessionToken(cancel.target)).cancel({ turnId });
   } catch (error) {
-    log.error("sign-in cancel delivery failed", { error });
-    return;
+    if (!SessionNotActiveError.is(error) || error.retryable) {
+      log.error("sign-in cancel delivery failed", { error });
+      return;
+    }
   }
   if (cancel.responseUrl === undefined) return;
   try {
-    await fetch(cancel.responseUrl, {
+    const response = await fetch(cancel.responseUrl, {
       body: JSON.stringify({ delete_original: true }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
+    if (!response.ok) {
+      log.warn("Slack refused to remove the cancelled sign-in prompt", {
+        body: await response.text(),
+        status: response.status,
+      });
+    }
   } catch (error) {
     log.warn("failed to remove the cancelled sign-in prompt", { error });
   }

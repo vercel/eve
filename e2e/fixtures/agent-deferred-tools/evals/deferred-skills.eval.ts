@@ -11,10 +11,10 @@ export default defineEval({
     const turn = await t.send("DEFERRED-SKILLS Alice asks how to fill a refund form.");
 
     turn.expectOk();
-    turn.noFailedActions();
-    t.loadedSkill("pdf-forms", { count: 1, output: /pdf-forms-skill-ok-R7K2/u });
-    t.loadedSkill("release_notes", { count: 1, output: /release-notes-skill-ok-L3M8/u });
-    t.loadedSkill("tenant-playbook", { count: 1, output: /tenant-playbook-ok-T9P4/u });
+    turn.noFailedCalls();
+    t.calledSkill("pdf-forms", { count: 1, output: /pdf-forms-skill-ok-R7K2/u });
+    t.calledSkill("release_notes", { count: 1, output: /release-notes-skill-ok-L3M8/u });
+    t.calledSkill("tenant-playbook", { count: 1, output: /tenant-playbook-ok-T9P4/u });
     t.messageIncludes(
       "pdf-forms-skill-ok-R7K2 release-notes-skill-ok-L3M8 tenant-playbook-ok-T9P4",
     );

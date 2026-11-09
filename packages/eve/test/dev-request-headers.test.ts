@@ -131,6 +131,7 @@ describe("createDevelopmentRequestHeadersAsync", () => {
   });
 
   it("falls back to unauthenticated headers when local OIDC resolution is unavailable", async () => {
+    vi.stubEnv("VERCEL_OIDC_TOKEN", undefined);
     vi.mocked(getVercelOidcToken).mockRejectedValue(new Error("not linked"));
 
     const headers = await createDevelopmentRequestHeadersAsync({
