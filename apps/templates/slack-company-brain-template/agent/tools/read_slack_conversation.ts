@@ -1,6 +1,12 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { callSlack, slackTeamId } from "../lib/slack.ts";
+import {
+  callSlack,
+  mentionedUserIds,
+  nameMentions,
+  slackTeamId,
+  slackUserNames,
+} from "../lib/slack.ts";
 
 interface SlackHistoryMessage {
   readonly ts: string;
@@ -8,6 +14,8 @@ interface SlackHistoryMessage {
   readonly text?: string;
   readonly thread_ts?: string;
   readonly reply_count?: number;
+  readonly username?: string;
+  readonly bot_profile?: { readonly name?: string };
 }
 
 const unavailable = (message: string) => ({ unavailable: true, message });
@@ -71,6 +79,10 @@ export default defineTool({
     }
 
     const messages = response.messages ?? [];
+    const names = await slackUserNames(
+      teamId,
+      messages.flatMap((message) => [message.user, ...mentionedUserIds(message.text ?? "")]),
+    );
     const anchor = threadTs ?? messages[0]?.ts;
     const link = anchor
       ? await callSlack<{ permalink: string }>(teamId, "chat.getPermalink", {
@@ -83,8 +95,12 @@ export default defineTool({
       permalink: link?.permalink,
       messages: messages.map((message) => ({
         ts: message.ts,
+        author:
+          (message.user && names.get(message.user)) ||
+          message.bot_profile?.name ||
+          message.username,
         userId: message.user,
-        text: message.text ?? "",
+        text: nameMentions(message.text ?? "", names),
         replyCount: message.reply_count || undefined,
         threadTs: message.reply_count ? message.ts : undefined,
       })),
