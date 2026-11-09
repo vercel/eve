@@ -14,6 +14,7 @@ specialists (subagents).
 agent/
   agent.ts                       # model selection
   instructions.md                # grounding, source routing, and Slack style
+  instructions/github.ts         # how to connect GitHub; delete once connected
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
@@ -157,7 +158,8 @@ scopes.
 ## Connect GitHub
 
 GitHub is optional. Without `GITHUB_ORG`, the agent still runs code in its
-sandbox but has no GitHub credentials. To enable it, create a Vercel Connect
+sandbox but has no GitHub credentials, and it tells people who ask how to
+connect GitHub (`agent/instructions/github.ts`). To enable it, create a Vercel Connect
 GitHub connector:
 
 ```bash
@@ -169,6 +171,9 @@ dashboard. Then set these in `.env.local` and the Vercel project:
 
 - `GITHUB_ORG`: the organization or user whose repositories the agent may access
 - `GITHUB_CONNECTOR`: the connector UID, if it isn't `github/company-brain`
+
+Redeploy, then delete `agent/instructions/github.ts`. It only tells the agent
+how to point people to this setup, and says nothing once `GITHUB_ORG` is set.
 
 Each `gh` command gets a GitHub App token scoped to one repository. The sandbox
 only sees a placeholder; `lib/github.ts` swaps in the real token at the sandbox
