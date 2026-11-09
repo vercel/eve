@@ -199,8 +199,10 @@ How it works:
   from a DM to get results in that DM.
 - **Who it runs as.** Each run is a new session that runs as the person who
   created the schedule, so per-person connections use their access. Before each
-  run, `auth` checks with Slack that the account is still active and, with
-  `SLACK_TEAM_ID` set, still in your workspace.
+  run, `auth` checks with Slack that the account is still an active full
+  member, not a guest, and, with `SLACK_TEAM_ID` set, still in your workspace.
+  For a private channel or group DM, it also checks that the creator is still
+  in it. That check needs the `groups:read` and `mpim:read` bot scopes.
 - **Who can manage it.** Each person sees and changes only their own schedules.
   Creating or changing one asks for approval in Slack first. Set `approval` in
   the definition to change that.
