@@ -47,9 +47,14 @@ export function faultyWorld(
   };
   return {
     ...world,
+    // Read through: a World that loads lazily knows its capabilities only once it loaded.
+    get capabilities() {
+      return world.capabilities;
+    },
     getDeploymentId: () => world.getDeploymentId(),
     events: {
-      create: (runId, data) => landing(entryOf(data), () => world.events.create(runId, data)),
+      create: (runId, data, params) =>
+        landing(entryOf(data), () => world.events.create(runId, data, params)),
       list: (params) => world.events.list(params),
     },
     runs: { list: (params) => world.runs.list(params) },

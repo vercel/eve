@@ -15,6 +15,8 @@ interface MemoryStream {
   /** The lines readers see: those kept. */
   readonly chunks: Uint8Array[];
   closed: boolean;
+  /** Why readers get no more lines, once the stream's writer can't go on. */
+  failed?: { readonly error: unknown };
   readonly waiters: Set<() => void>;
   /** Keeps what was written and not yet kept; resolves once it's kept. */
   flush: () => Promise<void>;
@@ -37,6 +39,11 @@ export interface MemoryLineStore extends SessionLineStore {
   flush(sessionId: string): Promise<void>;
   /** `flush` for every stream. */
   flushAll(): Promise<void>;
+  /**
+   * Ends `sessionId`'s stream for its readers with `error`, after the lines they haven't read:
+   * its writer will write no more (another process took the session over).
+   */
+  fail(sessionId: string, error: unknown): void;
   /** Every line `sessionId`'s stream holds so far. */
   recorded(sessionId: string): readonly Uint8Array[];
   /** The sessions this store holds a stream for. */
@@ -58,6 +65,12 @@ export function createMemoryLineStore(): MemoryLineStore {
   return {
     sessions: () => [...streams.keys()],
     flush: async (sessionId) => await streams.get(sessionId)?.flush(),
+    fail(sessionId, error) {
+      const stream = streams.get(sessionId);
+      if (stream === undefined || stream.closed) return;
+      stream.failed = { error };
+      wake(stream);
+    },
     async flushAll() {
       await Promise.all([...streams.values()].map((stream) => stream.flush()));
     },
@@ -145,6 +158,10 @@ export function createMemoryLineStore(): MemoryLineStore {
             }
             if (stream.closed) {
               controller.close();
+              return;
+            }
+            if (stream.failed !== undefined) {
+              controller.error(stream.failed.error);
               return;
             }
             await new Promise<void>((resolve) => stream.waiters.add(resolve));
