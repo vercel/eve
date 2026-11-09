@@ -322,7 +322,11 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       return rebuildTeamsContext(state, session, config);
     },
 
-    deliver(payload, channel) {
+    // `session.auth.current` is the caller of this delivery.
+    deliver(
+      payload,
+      channel: TeamsChannelContext & { readonly session: ChannelContext["session"] },
+    ) {
       const state = payload.state;
       const cards = state?.pendingPromptCards;
       if (cards !== undefined) {
@@ -331,7 +335,13 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           ...channel.state.pendingPromptCards,
         };
       }
-      const responders = state?.approvalResponderAccounts;
+      const caller = channel.session.auth.current;
+      // A message names its sender; an answer's state patch carries its responder.
+      const sender = payload.message === undefined ? undefined : state?.triggeringUser;
+      const responders =
+        caller !== null && sender !== undefined && sender !== null
+          ? { ...state?.approvalResponderAccounts, [caller.principalId]: sender }
+          : state?.approvalResponderAccounts;
       if (responders !== undefined) {
         channel.state.approvalResponderAccounts = {
           ...channel.state.approvalResponderAccounts,
@@ -772,7 +782,7 @@ async function dispatchAnswers(input: {
         .from(cardContinuationToken(activity, state, readTeamsInputReplyToActivityId(activity)))
         .respond(answers, {
           auth,
-          state: approvalResponseStatePatch(activity, auth),
+          state: answerStatePatch(activity, auth),
         }),
     {
       async retirePrompt(label) {
@@ -823,12 +833,17 @@ function cardContinuationToken(
   });
 }
 
-function approvalResponseStatePatch(
+/**
+ * What an answer adds to the session's state: the account behind its principal, so the answered
+ * card can name them, and for an approval, the card it answers.
+ */
+function answerStatePatch(
   activity: TeamsInvokeActivity | TeamsMessageActivity,
   auth: SessionAuthContext | null,
 ): Partial<TeamsChannelState> | undefined {
-  if (auth?.principalId === undefined || !isTeamsToolApprovalResponseActivity(activity)) {
-    return undefined;
+  if (auth?.principalId === undefined) return undefined;
+  if (!isTeamsToolApprovalResponseActivity(activity)) {
+    return { approvalResponderAccounts: { [auth.principalId]: activity.from } };
   }
   const requestId = deriveTeamsAnswers(activity)[0]?.interactionId;
   const activityId = activity.replyToId;
