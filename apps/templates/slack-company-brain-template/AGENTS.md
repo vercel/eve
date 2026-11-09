@@ -10,6 +10,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 - `agent/instructions/github.ts`: until the `github/company-brain` connector is
   attached, tells the agent GitHub isn't connected and how an admin connects
   it. Delete it once GitHub is connected.
+- `agent/instructions/notion.md` and `agent/instructions/linear.md`: tell the
+  agent those sources aren't connected and how an admin connects them with
+  `eve add connection/<name>`. Delete each once its connection exists.
 - `agent/channels/slack.ts`: who can reach the agent and what context each
   message carries.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack

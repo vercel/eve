@@ -15,6 +15,8 @@ agent/
   agent.ts                       # model selection
   instructions.md                # grounding, source routing, and Slack style
   instructions/github.ts         # how to connect GitHub; delete once connected
+  instructions/notion.md         # how to connect Notion; delete once connected
+  instructions/linear.md         # how to connect Linear; delete once connected
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
@@ -246,6 +248,11 @@ pnpm exec eve registry search docs       # find a connection
 pnpm exec eve add connection/notion      # writes agent/connections/notion.ts
 pnpm exec eve add connection/linear
 ```
+
+The template ships `agent/instructions/notion.md` and
+`agent/instructions/linear.md`, so until you connect them the agent tells people
+who ask how to. After `eve add` for one of them, delete its note and redeploy.
+Copy the pattern for other sources your company uses.
 
 These connect through Vercel Connect. By default each person signs in with
 their own account the first time the agent needs it, so the agent sees only what
