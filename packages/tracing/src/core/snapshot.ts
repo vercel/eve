@@ -219,10 +219,18 @@ export function validSnapshot(
       step: [],
       model: ["provider", "modelId"],
       tool: ["callId", "name"],
-      approval: ["requestId", "callId", "toolName"],
+      approval: ["requestId"],
       memory: ["operation", "phase", "slot", "storeId"],
+      decision: ["modelId"],
     };
     if (!fields[record.data.type].every((key) => typeof options[key] === "string")) return false;
+    if (
+      record.data.type === "approval" &&
+      !["kind", "connectionName", "callId", "toolName"].every(
+        (key) => options[key] === undefined || typeof options[key] === "string",
+      )
+    )
+      return false;
     if (record.data.type === "activation" && !Number.isSafeInteger(options.sequence)) return false;
     if (record.data.type === "step" && !Number.isSafeInteger(options.index)) return false;
     if (

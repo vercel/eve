@@ -391,7 +391,7 @@ async function withdrawSteeredSignIns(
     ...input,
     context: [
       ...(input?.context ?? []),
-      `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
+      `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead, and it won't be asked for again in this turn. If the new message still needs it, tell the user the action needs that access and that they can ask again to sign in.`,
     ],
   };
 }

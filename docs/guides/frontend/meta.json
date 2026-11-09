@@ -1,5 +1,5 @@
 {
   "title": "Frontend Frameworks",
   "defaultOpen": false,
-  "pages": ["use-eve-agent", "nextjs", "nuxt", "sveltekit", "tanstack"]
+  "pages": ["use-eve-agent", "nextjs", "nuxt", "sveltekit", "tanstack", "vite"]
 }

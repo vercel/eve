@@ -194,6 +194,10 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
       return writer;
     },
     active: () => activeTraceOperation(),
+    activeSpan(host) {
+      const span = trace.getSpan((host as Context | undefined) ?? context.active());
+      return span === undefined ? undefined : portableReference(span.spanContext());
+    },
     suppressed<T>(execute: () => T): T {
       return context.with(withErrorContent(suppressTracing(ROOT_CONTEXT), false), execute);
     },

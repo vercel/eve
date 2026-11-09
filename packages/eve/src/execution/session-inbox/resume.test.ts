@@ -9,7 +9,6 @@ import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import {
   AcceptedSessionIdentityError,
   resumeSessionInbox,
-  SessionHandoffPendingError,
 } from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
@@ -263,26 +262,6 @@ describe("session inbox resume", () => {
       stranded ? StrandedSessionOwnerError : DevelopmentRunUnavailableError,
     );
     if (stranded) expect(resumeHookMock).not.toHaveBeenCalled();
-  });
-
-  it("does not report a handoff that outlives the retry window as an unowned address", async () => {
-    vi.useFakeTimers();
-    try {
-      resumeHookMock.mockRejectedValue(new HookNotFoundError("inbox"));
-      getHookByTokenMock.mockImplementation(async (token: string) =>
-        sessionHook("releasing-owner", token, {}),
-      );
-
-      const delivery = resumeSessionInbox("channel:alias", {
-        kind: "send",
-        payload: { message: "Alice asks about the release." },
-      }).catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(6_000);
-
-      await expect(delivery).resolves.toBeInstanceOf(SessionHandoffPendingError);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

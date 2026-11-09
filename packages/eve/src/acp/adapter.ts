@@ -22,7 +22,12 @@ import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/type
 import { isFactType } from "#protocol/session-events/catalog.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
-import { callLabel, callOutputSource, callState } from "#protocol/session-projection/selectors.js";
+import {
+  callLabel,
+  callOutputSource,
+  callState,
+  showsActivity,
+} from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { actionLabel } from "#shared/action-label.js";
 import { failureOf } from "#client/session-utils.js";
@@ -463,7 +468,7 @@ export class EveAcpAdapter {
       case "call.requested": {
         const { callId, capability, input } = event.data;
         const row = session.view.calls[callId];
-        if (capability.kind === "control" || row === undefined) return;
+        if (!showsActivity(capability) || row === undefined) return;
         const toolCall: ToolCall = {
           toolCallId: callId,
           title: callLabel(row),

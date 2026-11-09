@@ -105,6 +105,8 @@ For Agent Runs sampling defaults and existing-deployment setup, see
 ## Instrument Node.js dependencies
 
 Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.
+Enable only the instrumentations you use, because each one loads when an instance starts. See
+[Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 For example, install the PostgreSQL instrumentation alongside `pg`:
 
 ```bash
@@ -168,9 +170,11 @@ An ordinary agent turn produces this trace:
 
 ```text
 invoke_agent <agent>
-  └── agent.step
-        ├── chat <model>
-        └── execute_tool <tool>
+  ├── agent.step
+  │     ├── chat <model>
+  │     └── execute_tool <tool>
+  │           └── agent.approval
+  └── agent.approval
 ```
 
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.

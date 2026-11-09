@@ -18,7 +18,12 @@ import {
   nextLinePosition,
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
-import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationProviderDefinition,
+  type InstrumentationScope,
+} from "#instrumentation/lifecycle.js";
 import {
   createInstrumentationHandleEvent,
   type CreateInstrumentationHandleEventInput,
@@ -42,6 +47,7 @@ function session(
     "parentLineage" | "parentTraceContext" | "rootSessionId"
   >,
   audience: ChannelAudience = "public",
+  authored: readonly InstrumentationProviderDefinition[] = [],
 ) {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -65,7 +71,7 @@ function session(
     }),
     tracePolicy,
   });
-  const hooks = createInstrumentationHooks([otel.hook]).forTrace!({
+  const hooks = createInstrumentationHooks([otel.hook, ...authored]).forTrace!({
     agentName: "weather",
     audience,
     channel: { kind: "http" },
@@ -74,23 +80,32 @@ function session(
   });
   const ctx = new ContextContainer();
   enterSessionProjectionAt(ctx, undefined);
-  const handle = createInstrumentationHandleEvent({
-    deliveryInput,
-    agentName: "weather",
-    channelAudience: audience,
-    channelKind: "http",
-    environment: "production",
-    functionId: "weather",
-    handleEvent: async (publication) => {
-      const facts = cascade(currentView(ctx), eventsOf(publication));
-      recordPublishedLine(ctx, { at, facts }, nextLinePosition(ctx), facts);
-    },
-    hooks,
-    sessionId: "s",
-    ...child,
-  })!;
+  const handleFor = (relayed: boolean) =>
+    createInstrumentationHandleEvent({
+      deliveryInput,
+      agentName: "weather",
+      channelAudience: audience,
+      channelKind: "http",
+      environment: "production",
+      functionId: "weather",
+      handleEvent: async (publication) => {
+        const facts = cascade(currentView(ctx), eventsOf(publication));
+        recordPublishedLine(ctx, { at, facts }, nextLinePosition(ctx), facts);
+      },
+      hooks,
+      relayed,
+      sessionId: "s",
+      ...child,
+    })!;
+  const handle = handleFor(false);
+  const relayHandle = handleFor(true);
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
+    /** Commits as a step that relays an exchange for a child session or a workflow run. */
+    relay: (...facts: SessionEvent[]) =>
+      contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
+    /** Runs a tool's `execute` the way the AI SDK bridge does, inside its call's span. */
+    runTool: otel.runInContext,
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();
@@ -286,6 +301,277 @@ describe("a session's spans, from its committed lines", () => {
 
       const [span] = (await spans()).filter((each) => each.name === "agent.approval");
       expect(span?.attributes["agent.approval.outcome"]).toBe(reported);
+    },
+  );
+
+  it.each([
+    {
+      ask: "a question a call asks",
+      request: { kind: "question", prompt: "Which region?" },
+      subject: { callId: "call_ask" },
+      kind: "question",
+      expected: [
+        "invoke_agent weather completed",
+        "  agent.step",
+        "    execute_tool ask_question completed",
+        "      agent.approval approved",
+      ],
+    },
+    {
+      ask: "a budget prompt",
+      request: { kind: "budget", prompt: "Keep going?" },
+      subject: turn,
+      kind: "budget",
+      expected: [
+        "invoke_agent weather completed",
+        "  agent.approval approved",
+        "  agent.step",
+        "    execute_tool ask_question completed",
+      ],
+    },
+    {
+      ask: "a sign-in the turn needs",
+      request: {
+        kind: "sign-in",
+        prompt: "Sign in to Calendar",
+        signIn: { name: "calendar", url: "https://example.com/oauth" },
+      },
+      subject: turn,
+      kind: "sign-in",
+      connection: "calendar",
+      expected: [
+        "invoke_agent weather completed",
+        "  agent.approval approved",
+        "  agent.step",
+        "    execute_tool ask_question completed",
+      ],
+    },
+  ])(
+    "records the wait on $ask as an approval span",
+    async ({ request, subject, kind, connection, expected }) => {
+      const { commit, spans } = session();
+      await commit(...opening);
+      await commit(requested("call_ask", "ask_question"));
+      await commit({
+        data: { interactionId: "i_wait", request, subject },
+        scope: turn,
+        type: "interaction.opened",
+      } as SessionEvent);
+      await commit({
+        data: { interactionId: "i_wait", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(settled("call_ask", { outcome: "completed", output: "eu" }));
+      await commit({
+        data: { outcome: "completed", runId: "run_0" },
+        scope: run,
+        type: "model.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const exported = await spans();
+      expect(tree(exported)).toEqual(expected);
+      const span = exported.find((each) => each.name === "agent.approval");
+      expect(span?.attributes["agent.approval.kind"]).toBe(kind);
+      expect(span?.attributes["eve.connection.name"]).toBe(connection);
+      expect(span?.attributes["gen_ai.agent.name"]).toBe("weather");
+      expect(JSON.stringify(span?.attributes)).not.toContain("oauth");
+    },
+  );
+
+  it.each([
+    ["a budget prompt", { kind: "budget", prompt: "Keep going?" }],
+    ["a sign-in", { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } }],
+  ])(
+    "records %s the turn holds before its first model run, without showing it to other providers",
+    async (_, request) => {
+      const heard: string[] = [];
+      const { commit, spans } = session(undefined, undefined, undefined, undefined, [
+        {
+          name: "authored",
+          events: {
+            "interaction.opened": (event) => void heard.push(event.type),
+            "interaction.settled": (event) => void heard.push(event.type),
+          },
+        },
+      ]);
+      await commit(...opening.slice(0, 2));
+      await commit({
+        data: { interactionId: "i_held", request, subject: turn },
+        scope: turn,
+        type: "interaction.opened",
+      } as SessionEvent);
+      await commit({
+        data: { interactionId: "i_held", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      expect(tree(await spans())).toEqual([
+        "invoke_agent weather completed",
+        "  agent.approval approved",
+      ]);
+      // Public scopes name a model run, and none has started.
+      expect(heard).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["a failure's reason code", "failed", "access_denied", "access_denied"],
+    ["a failure's error message", "failed", "Calendar said: token abc123 is invalid", undefined],
+    // Alice sent a new message, so the sign-in ended without anyone refusing it.
+    ["a withdrawal's reason", "withdrawn", "superseded-by-message", undefined],
+  ])("records an authorization reason for %s", async (_, outcome, reason, recorded) => {
+    const { commit, spans } = session();
+    await commit(...opening.slice(0, 2));
+    await commit({
+      data: {
+        interactionId: "i_held",
+        request: { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } },
+        subject: turn,
+      },
+      scope: turn,
+      type: "interaction.opened",
+    } as SessionEvent);
+    await commit({
+      data: { interactionId: "i_held", outcome, reason },
+      scope: turn,
+      type: "interaction.settled",
+    } as SessionEvent);
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const span = (await spans()).find((each) => each.name === "agent.approval");
+    expect(span?.attributes["agent.approval.outcome"]).toBe(
+      outcome === "failed" ? "failed" : "ignored",
+    );
+    expect(span?.attributes["agent.connection.authorization.reason"]).toBe(recorded);
+    expect(JSON.stringify(span?.attributes)).not.toContain("abc123");
+  });
+
+  it("records which connection refused a call and why, even when the trace keeps no errors", async () => {
+    const scopes = new Map<string, InstrumentationScope>();
+    const { commit, runTool, spans } = session(
+      () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      undefined,
+      undefined,
+      undefined,
+      [
+        {
+          name: "scopes",
+          events: { "call.requested": (event) => void scopes.set(event.callId, event.scope) },
+        },
+      ],
+    );
+    await commit(...opening);
+    await commit(requested("call_gh", "code__gh"));
+    // A turn a schedule started can't ask Alice to sign in, so the call fails without a prompt.
+    const refused = new ConnectionAuthorizationFailedError("github", {
+      message: "Alice has no GitHub token in this run.",
+      reason: "sign_in_unavailable",
+      retryable: false,
+    });
+    await expect(
+      runTool(
+        {
+          callId: "call_gh",
+          idempotencyKey: "tool:call_gh",
+          scope: scopes.get("call_gh")!,
+          toolName: "code__gh",
+          type: "tool.call",
+        },
+        () => Promise.reject(refused),
+      ),
+    ).rejects.toBe(refused);
+    await commit(
+      settled("call_gh", {
+        error: { code: "ACTION_RESULT_FAILED", message: refused.message, name: refused.name },
+        outcome: "failed",
+      }),
+    );
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const tool = (await spans()).find((span) => span.name === "execute_tool code__gh");
+    expect(tool?.attributes["eve.connection.name"]).toBe("github");
+    expect(tool?.attributes["agent.connection.authorization.reason"]).toBe("sign_in_unavailable");
+    expect(JSON.stringify(tool?.attributes)).not.toContain("Alice");
+  });
+
+  it.each([
+    {
+      asker: "a subagent's approval, which its own session records",
+      capability: { kind: "agent", name: "researcher" },
+      request: { kind: "approval", prompt: "Deploy?" },
+      origin: { call: { callId: "c_deploy", name: "deploy" }, sessionId: "child_s" },
+      expected: [],
+    },
+    {
+      asker: "a session a workflow run opened, which records its own",
+      capability: { kind: "tool", name: "flow" },
+      child: "child_w",
+      request: { kind: "question", prompt: "Which region?" },
+      origin: { sessionId: "child_w" },
+      expected: [],
+    },
+    {
+      asker: "a workflow tool's question, such as ask_question",
+      capability: { kind: "tool", name: "ask_question" },
+      request: { kind: "question", prompt: "Pick a color." },
+      origin: { call: { callId: "call_relay", name: "ask_question" }, sessionId: "wrun_0" },
+      expected: [["question", "execute_tool ask_question"]],
+    },
+    {
+      asker: "a workflow run's sign-in",
+      capability: { kind: "tool", name: "flow" },
+      request: { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } },
+      origin: { sessionId: "wrun_0" },
+      expected: [["sign-in", "invoke_agent weather"]],
+    },
+  ])(
+    "records a relayed request once, where it waits: $asker",
+    async ({ capability, child, request, origin, expected }) => {
+      const { commit, relay, spans } = session();
+      await commit(...opening);
+      await commit({
+        data: { callId: "call_relay", capability, input: {}, owner: run },
+        scope: run,
+        type: "call.requested",
+      } as SessionEvent);
+      if (child !== undefined)
+        await commit({
+          data: { name: "agent", owner: { callId: "call_relay" }, sessionId: child, stream: "s" },
+          type: "child.opened",
+        } as SessionEvent);
+      await relay({
+        data: {
+          interactionId: "i_relayed",
+          origin: { interactionId: "i_relayed", ...origin },
+          request,
+          subject: { callId: "call_relay" },
+        },
+        scope: turn,
+        type: "interaction.opened",
+      } as SessionEvent);
+      await relay({
+        data: { interactionId: "i_relayed", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(settled("call_relay", { outcome: "completed", output: "done" }));
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const exported = await spans();
+      const parentName = (id: string | undefined) =>
+        exported.find((span) => span.spanContext().spanId === id)?.name;
+      expect(
+        exported
+          .filter((span) => span.name === "agent.approval")
+          .map((span) => [
+            span.attributes["agent.approval.kind"],
+            parentName(span.parentSpanContext?.spanId),
+          ]),
+      ).toEqual(expected);
     },
   );
 

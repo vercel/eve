@@ -17,7 +17,7 @@ Before implementing an integration yourself, use `eve registry search <query>` o
   replacing the scaffold's placeholder with what the user said the agent should
   do.
 - Add a first typed tool under `agent/tools/` with `defineTool` from `eve/tools`
-  and a Zod `inputSchema`.
+  and a Zod `inputSchema`. Import any SDK client it needs inside `execute`, not at the top of the file.
 
 `{{devCommand}}` starts eve's HMR development server and opens the agent's
 terminal REPL. It does not start or control this coding-agent session, so don't

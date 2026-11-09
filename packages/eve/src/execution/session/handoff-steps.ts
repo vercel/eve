@@ -134,12 +134,10 @@ export type SessionCheckpointValidation =
  * so it returns rather than throws: retrying the step can never change it.
  */
 export async function prepareSuccessorStep(input: {
-  /** Absent for version 1 sources, which predate the field. */
-  readonly handoffVersion: number | undefined;
   readonly migration: Exclude<SessionCheckpointMigration, { readonly kind: "busy" }>;
   readonly sessionId: string;
-  /** Version 3: the run that still holds the session and the addresses it hands over. */
-  readonly source?: { readonly runId: string; readonly hookTokens: readonly string[] };
+  /** The run that still holds the session and the addresses it hands over. */
+  readonly source: { readonly runId: string; readonly hookTokens: readonly string[] };
 }): Promise<SessionCheckpointValidation> {
   "use step";
   const { migration } = input;
@@ -200,18 +198,8 @@ export async function prepareSuccessorStep(input: {
   if (!isSessionStateIdleForHandoff(checkpoint)) {
     return refuse("Session checkpoint contains pending work and cannot be handed off.");
   }
-  if (input.source !== undefined && !(await holdsEveryAddress(input.source))) {
-    return { kind: "source-gone" };
-  }
+  if (!(await holdsEveryAddress(input.source))) return { kind: "source-gone" };
   await recordSessionOwner(input.sessionId);
-  // Owners on releases before version 3 release their addresses first. This
-  // line shows when none remain, which is when that compatibility can go.
-  if ((input.handoffVersion ?? 1) < SESSION_HANDOFF_VERSION) {
-    log.info("session moved from an owner that releases its addresses first", {
-      handoffVersion: input.handoffVersion ?? 1,
-      sessionId: input.sessionId,
-    });
-  }
   // This line shows when no owner before v27 remains, which is when that import can go.
   if (migration.kind === "pre-v27")
     log.info("session handoff accepted from an owner before v27", { sessionId: input.sessionId });

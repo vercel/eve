@@ -138,6 +138,7 @@ import {
 } from "#public/channels/undelivered-reply.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -1132,8 +1133,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         await renderTurnStarted?.(event, ctx);
       },
       async "call.settled"(event, ctx) {
-        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first.
-        ctx.channel.state.quietStatus = null;
+        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first. A call
+        // whose tool set `label: false` isn't work to show, so the turn stays quiet. Task controls
+        // still end the quiet, as they always have, so this reads `hidden`, not `showsActivity`.
+        const settled = sessionTables(ctx.view).calls[event.data.callId];
+        if (settled === undefined || settled.capability.hidden !== true) {
+          ctx.channel.state.quietStatus = null;
+        }
         await renderCallSettled?.(event, ctx);
       },
       async "turn.settled"(event, ctx) {

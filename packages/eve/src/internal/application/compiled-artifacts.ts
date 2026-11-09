@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
 import {
   stringifyEsmImportSpecifier,
   stringifyNitroDataImportSpecifier,
@@ -99,7 +100,9 @@ export async function writeCompiledArtifactsFiles(input: {
   await writeFile(
     dataPath,
     JSON.stringify({
-      manifest: input.compileResult.manifest,
+      // Checked and defaulted here rather than at runtime: the runtime trusts a bundled manifest,
+      // since the same eve version wrote it.
+      manifest: compiledAgentManifestSchema.parse(input.compileResult.manifest),
       metadata: input.compileResult.metadata,
       modelMetadata,
       sandboxPreparedArtifacts,

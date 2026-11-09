@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -244,7 +247,7 @@ jobs:
         run: pnpm --filter @eve/agent-desktop test:live
 
   test-framework-fixtures:
-    name: test-framework-fixtures (next, nuxt, sveltekit, tanstack)
+    name: test-framework-fixtures (next, nuxt, sveltekit, tanstack, vite)
     runs-on: ubuntu-latest
 
     steps:
@@ -327,8 +330,9 @@ jobs:
 
   test-tui:
     runs-on: ubuntu-latest
-    env:
-      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+    environment:
+      name: eve-ci
+      deployment: false
 
     steps:
       - name: Checkout code
@@ -353,4 +357,6 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run TUI smoke tests
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
         run: pnpm test:tui

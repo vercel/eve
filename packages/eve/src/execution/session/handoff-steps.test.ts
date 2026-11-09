@@ -154,7 +154,6 @@ describe("prepareSuccessorStep", () => {
 
     await expect(
       prepareSuccessorStep({
-        handoffVersion: 3,
         migration: { kind: "current", checkpoint: createCheckpoint() },
         sessionId: "session-1",
         source: { hookTokens: SOURCE_TOKENS, runId: "run-a" },
@@ -232,9 +231,9 @@ describe("prepareSuccessorStep", () => {
 
     await expect(
       prepareSuccessorStep({
-        handoffVersion: 3,
         migration: { kind: "incompatible", detail },
         sessionId: "session-1",
+        source: NO_ADDRESSES,
       }),
     ).resolves.toEqual({ kind: "incompatible", reason: "checkpoint-version" });
     expect(deserializeContextMock).not.toHaveBeenCalled();
@@ -370,18 +369,21 @@ describe("signalSessionOwnerActivationStep", () => {
     resumeHookMock.mockRejectedValue(new HookNotFoundError("owner-1:handoff:0"));
     await expect(
       signalSessionOwnerActivationStep({
-        activation: { kind: "active" },
+        activation: { error: "boot failed", kind: "failed", payloads: [] },
         token: "owner-1:handoff:0",
       }),
     ).resolves.toBeUndefined();
   });
 });
 
+/** A source that hands over no addresses, so the check that it still holds them passes. */
+const NO_ADDRESSES = { hookTokens: [], runId: "run-a" };
+
 function validate(checkpoint: SessionCheckpoint) {
   return prepareSuccessorStep({
-    handoffVersion: 3,
     migration: { kind: "current", checkpoint },
     sessionId: "session-1",
+    source: NO_ADDRESSES,
   });
 }
 

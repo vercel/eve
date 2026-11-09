@@ -99,9 +99,10 @@ export function connectUserAuthorization(
 function translate(error: unknown, phase: Phase): Error {
   if (error instanceof UserAuthorizationRequiredError || error instanceof NoValidTokenError) {
     if (phase === "completeAuthorization") {
+      // The person reads this on the sign-in card, so it says what to do next.
       return new ConnectionAuthorizationFailedError("connect", {
         message:
-          "Authorization did not complete. Vercel Connect still reports the user as unauthorized.",
+          "The sign-in didn't finish, so you do not have access yet. Ask again for a new sign-in link and complete all steps to gain access.",
       });
     }
     return new ConnectionAuthorizationRequiredError("connect", { message: error.message });

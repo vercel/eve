@@ -38,6 +38,7 @@ function setup(
   options: {
     readonly tools?: readonly HarnessToolDefinition[];
     readonly calls?: readonly Parameters<typeof toolCallsStreamResult>[0][];
+    readonly finishReason?: Parameters<typeof toolCallsStreamResult>[1];
   } = {},
 ) {
   const events: SessionEvent[] = [];
@@ -46,7 +47,9 @@ function setup(
   const model = new MockLanguageModelV4({
     doStream: vi.fn().mockImplementation(async () => {
       const batch = calls[index++];
-      return batch === undefined ? textStreamResult("Finished.") : toolCallsStreamResult(batch);
+      return batch === undefined
+        ? textStreamResult("Finished.")
+        : toolCallsStreamResult(batch, options.finishReason);
     }),
     modelId: "approval-model",
     provider: "eve-integration-mock",
@@ -315,6 +318,41 @@ describe("approved call recheck (real AI SDK)", () => {
       tasks: [{ callId: "call-0", clearedBy: { policy: "approval" } }],
     });
   });
+  it.each([
+    ["length", "a denying policy"],
+    ["length", "always()"],
+    ["other", "a denying policy"],
+    ["other", "always()"],
+  ] as const)(
+    "starts no workflow call from a response that ended early (%s) under %s",
+    async (finishReason, policyName) => {
+      const policy = vi.fn(
+        policyName === "always()"
+          ? always()
+          : () => ({ type: "denied" as const, reason: "Deploys are frozen." }),
+      );
+      const fixture = setup(workflow("deploy", policy), { finishReason });
+
+      const result = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+
+      expect(runtimeWait(result.session.state)).toBeUndefined();
+      expect(policy).not.toHaveBeenCalled();
+      expect(fixture.events.some((event) => event.type === "interaction.opened")).toBe(false);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool" ? message.content : [],
+        ),
+      ).toMatchObject([
+        {
+          output: {
+            type: "error-text",
+            value: expect.stringContaining(`finish reason: ${finishReason}`),
+          },
+          toolCallId: "call-0",
+        },
+      ]);
+    },
+  );
   it.each(["local", "workflow", "agent"])(
     "rechecks an approved %s call before execution",
     async (kind) => {

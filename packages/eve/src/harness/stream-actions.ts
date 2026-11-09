@@ -38,10 +38,11 @@ export function createProviderStreamActionBatch(input: {
     const runId = input.state.runId ?? `${input.state.turnId}.run`;
     await input.emitFn(
       requestProviderCalls(
-        actions.map(({ action, presentationLabel }) => ({
+        actions.map(({ action, presentationLabel, hidden }) => ({
           action,
           owner: { runId },
           label: presentationLabel,
+          hidden,
         })),
       ),
     );

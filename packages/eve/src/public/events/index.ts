@@ -212,6 +212,7 @@ export {
   call,
   calls,
   callLabel,
+  showsActivity,
   callState,
   callOutputSource,
   callPreview,

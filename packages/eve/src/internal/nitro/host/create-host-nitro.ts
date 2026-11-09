@@ -72,6 +72,7 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     authoredWorkflowModules: locations.compiledArtifacts.authoredWorkflowModules,
     compiledArtifactsBootstrapPath: locations.compiledArtifacts.bootstrapPath,
     outDir: locations.workflowBuildDir,
+    inlineSourcemap: spec.development,
     rootDir: resolvePackageRoot(),
   }).build();
   const skillFilesPlugin = spec.runtimePlugins.includes("skill-files")

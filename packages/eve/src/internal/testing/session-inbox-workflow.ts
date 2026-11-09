@@ -71,27 +71,3 @@ export async function sessionInboxForceClaimWorkflow(input: {
     await inbox.dispose();
   }
 }
-
-/**
- * A session owner from before handoff version 3: on `release` it releases its
- * addresses, then waits for its successor's activation signal.
- */
-export async function releasingSessionOwnerWorkflow(input: {
-  readonly aliases: readonly string[];
-  readonly release: string;
-}): Promise<{ readonly activation: unknown; readonly released: readonly SessionInboxPayload[] }> {
-  "use workflow";
-
-  const sessionId = getWorkflowMetadata().workflowRunId;
-  const inbox = createSessionInbox(sessionId);
-  using release = createHook<void>({ token: input.release });
-  using activation = createHook<unknown>({ token: `${sessionId}:handoff` });
-  try {
-    await inbox.claimSessionHooks([sessionCommandHookToken(sessionId), ...input.aliases]);
-    await release;
-    const released = await inbox.release();
-    return { activation: await activation, released };
-  } finally {
-    await inbox.dispose();
-  }
-}

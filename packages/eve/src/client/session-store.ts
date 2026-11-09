@@ -329,9 +329,17 @@ export class SessionStore {
   }
 
   async #control(dispatch: (session: ClientSession) => Promise<Delivery>): Promise<Delivery> {
+    const lifetime = this.#controller;
+    // A control issued while this store creates its session goes to that session.
+    if (this.#session === undefined && this.#creation !== undefined) {
+      await waitWithSignal(
+        this.#creation.catch(() => undefined),
+        lifetime.signal,
+      );
+    }
+    throwIfAborted(lifetime.signal);
     const session = this.#session;
     if (session === undefined) throw new SessionNotActiveError();
-    const lifetime = this.#controller;
     this.#posting += 1;
     this.#ensureStream();
     this.#publish();

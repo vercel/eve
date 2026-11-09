@@ -33,6 +33,7 @@ export type { SessionView } from "./session-view.js";
 export type * from "./observations.js";
 export type { ReceivedEvent } from "./fold.js";
 export type { CallState } from "./selectors.js";
+export { showsActivity } from "./selectors.js";
 export type { RequestStatus } from "./request-status.js";
 
 function frozen<T>(value: T): T {
@@ -110,6 +111,7 @@ export function call(view: SessionView, callId: string): CallObservation | undef
     name: row.capability.name,
     kind: row.capability.kind,
     label: selectors.callLabel(row, snapshotState(view).previews.calls[callId]),
+    ...(row.capability.hidden === true && { hidden: true as const }),
     runId: selectors.callRun(tables, row),
     turnId: selectors.callTurn(tables, row),
     taskId: selectors.callTask(tables, row),

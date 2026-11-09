@@ -140,7 +140,7 @@ By default the channel streams. It posts a message and edits it as text arrives 
 
 Set `streaming: false` for surfaces that send one message per turn or can't edit messages, such as email and WhatsApp. The reply then posts once, when the turn completes.
 
-Where the adapter supports typing indicators, the channel shows `Working…` when a turn starts. On each tool call, it shows the call's [label](/docs/tools#label-tool-activity) or readable name, except for `eve__task_wait` and `eve__task_cancel`.
+Where the adapter supports typing indicators, the channel shows `Working…` when a turn starts. On each tool call, it shows the call's [label](/docs/tools#label-tool-activity) or readable name, except for `eve__task_wait`, `eve__task_cancel`, and tools with `label: false`.
 
 ## Optional capabilities degrade gracefully
 

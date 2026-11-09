@@ -158,6 +158,8 @@ On Vercel Workflow, a session's run executes only on the deployment that started
 
 eve doesn't detect a deleted deployment on other paths. A send by session ID can be accepted and never processed. The session timeout doesn't end the session, because its timer ran on the deleted deployment too.
 
+A session that handed off to a newer deployment still records its events on the deployment that started it. If only that first deployment is deleted, the session's current run is still live, so eve doesn't replace it, and its turns fail when they record events. To avoid both cases, keep deployments longer than the session timeout.
+
 #### Sessions from session-driver releases
 
 Some eve releases ran each session as a session driver with separate turn workflows. When such a driver sends its next turn to the current deployment, eve imports the session. The session keeps its ID, history, authored state, usage, limits, and event stream, and later turns use the new deployment's instructions, model, and tools.
