@@ -136,6 +136,38 @@ it("accepts a sign-in whose call fails before its tool runs, not as a failed aut
   expect(vi.mocked(callSignInsSettled).mock.calls[0]?.[2]).toBeUndefined();
 });
 
+it("accepts a sign-in when a telemetry wrapper throws before invoking the tool", async () => {
+  vi.mocked(callSignInsSettled).mockClear();
+  const lookup = tool("lookup", async () => "never");
+  const execute = vi.spyOn(lookup, "execute");
+  const approved = { ...approval("call-lookup", "lookup"), signIns: [plainSignIn] };
+
+  const result = await runApprovedCalls({
+    abortSignal: undefined,
+    messages: [],
+    publish: async () => {},
+    view,
+    approvals: [approved],
+    tools: new Map([["lookup", lookup]]),
+    telemetry: {
+      isEnabled: true,
+      integrations: {
+        executeTool: async () => {
+          throw new Error("wrapper failed before invocation");
+        },
+      },
+    },
+  });
+
+  expect(execute).not.toHaveBeenCalled();
+  expect(result.settled[0]?.part.output).toEqual({
+    type: "error-text",
+    value: "Error: wrapper failed before invocation",
+  });
+  expect(callSignInsSettled).toHaveBeenCalledOnce();
+  expect(vi.mocked(callSignInsSettled).mock.calls[0]?.[2]).toBeUndefined();
+});
+
 it("still fails a sign-in whose call throws once its tool runs", async () => {
   vi.mocked(callSignInsSettled).mockClear();
   const lookup = tool("lookup", async () => {

@@ -107,7 +107,11 @@ export async function executeToolCall(
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
      */
-    readonly beforeResult?: (failure?: Error | string) => Promise<void>;
+    readonly beforeResult?: (result: {
+      readonly failure: Error | string | undefined;
+      /** Whether the executor reached `invokeTool`, not merely the pre-execution hook. */
+      readonly invoked: boolean;
+    }) => Promise<void>;
   },
   approval: CallApproval,
 ): Promise<CallOutcome> {
@@ -118,6 +122,7 @@ export async function executeToolCall(
   // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
   // session, so it never runs a call with side effects a second time.
   let started = false;
+  let invoked = false;
   let completed: CallResult | undefined;
   try {
     throwIfTurnAborted(input.abortSignal);
@@ -129,7 +134,7 @@ export async function executeToolCall(
         : undefined;
     if (validation?.success === false) {
       const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
-      await input.beforeResult?.(message);
+      await input.beforeResult?.({ failure: message, invoked });
       await input.publish(
         settleCall(
           createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
@@ -160,7 +165,10 @@ export async function executeToolCall(
     if (decision.awaitsPerson === true)
       return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
     if (decision.denied) {
-      await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
+      await input.beforeResult?.({
+        failure: decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+        invoked,
+      });
       const denial = await publishDenial(
         { callId, input: args, toolName },
         { publish: input.publish, reason: decision.reason },
@@ -196,6 +204,7 @@ export async function executeToolCall(
           await input.publish(startCall(clearance));
           // Usage the tool records belongs to its call, including while a streaming tool iterates.
           await withUsageCall(callId, async () => {
+            invoked = true;
             const executed = invokeTool(
               definition,
               args,
@@ -281,7 +290,7 @@ export async function executeToolCall(
       },
     };
     settled.push(completed);
-    await input.beforeResult?.(failed ? thrown : undefined);
+    await input.beforeResult?.({ failure: failed ? thrown : undefined, invoked });
     await input.publish(
       settleCall(
         createRuntimeToolResultFromValue({
@@ -304,7 +313,7 @@ export async function executeToolCall(
     }
     const failure = toError(error);
     logError(log, "tool call failed", error, { toolName, toolCallId: callId });
-    await input.beforeResult?.(failure);
+    await input.beforeResult?.({ failure, invoked });
     const failed = failedCall({ callId, toolName, message: failure });
     await input.publish(settleCall(failed.result));
     return { settled: [{ part: failed.part }], toolResults };

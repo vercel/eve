@@ -90,17 +90,14 @@ export async function runApprovedCalls(input: {
       }
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
-        let ran = false;
         return await executeToolCall(
           call,
           {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
-            beforeExecute: () => {
-              ran = true;
-            },
-            beforeResult: (failure) => reportSignIns(approval, ran ? failure : undefined),
+            beforeResult: ({ failure, invoked }) =>
+              reportSignIns(approval, invoked ? failure : undefined),
           },
           "recheck",
         );
