@@ -21,7 +21,8 @@ export default defineTool({
     start: ({ threadTs }) => (threadTs ? "Reading a Slack thread" : "Reading a Slack channel"),
   },
   description:
-    "Read recent messages in a public Slack channel, or one thread with threadTs, such as a search match's ts. The agent must be a member of the channel. Never reads private channels or DMs.",
+    "Read recent messages in a public Slack channel, or one thread with threadTs, such as a search match's ts. The agent must be a member of the channel. Never reads private channels or DMs. " +
+    "A channel reads newest first and a thread oldest first. When the result has nextCursor, call again with it to read further, such as later replies in a long thread.",
   inputSchema: z.object({
     channelId: z
       .string()
@@ -29,8 +30,12 @@ export default defineTool({
       .describe("Channel ID, such as a search match's channelId or the ID in <#C…|name>."),
     threadTs: z.string().optional().describe("Timestamp of the thread's root message."),
     limit: z.number().int().min(1).max(100).optional().describe("Maximum messages. Default 20."),
+    cursor: z
+      .string()
+      .optional()
+      .describe("nextCursor from a previous read of the same channel or thread."),
   }),
-  async execute({ channelId, threadTs, limit }, ctx) {
+  async execute({ channelId, threadTs, limit, cursor }, ctx) {
     const auth = ctx.session.auth.current;
     const teamId = slackTeamId(auth);
     if (auth?.authenticator !== "slack-webhook" || !teamId) {
@@ -47,8 +52,11 @@ export default defineTool({
       return unavailable("That conversation is private. This tool reads public channels only.");
     }
 
-    const page = { channel: channelId, limit: limit ?? 20 };
-    const response = await callSlack<{ messages: SlackHistoryMessage[] }>(
+    const page = { channel: channelId, limit: limit ?? 20, cursor };
+    const response = await callSlack<{
+      messages: SlackHistoryMessage[];
+      response_metadata: { next_cursor?: string };
+    }>(
       teamId,
       threadTs ? "conversations.replies" : "conversations.history",
       threadTs ? { ...page, ts: threadTs } : page,
@@ -80,6 +88,8 @@ export default defineTool({
         replyCount: message.reply_count || undefined,
         threadTs: message.reply_count ? message.ts : undefined,
       })),
+      // Slack returns an empty string on the last page.
+      nextCursor: response.response_metadata?.next_cursor || undefined,
     };
   },
 });
