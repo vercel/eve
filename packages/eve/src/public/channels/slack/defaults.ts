@@ -1,4 +1,4 @@
-import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import { errorHintOf } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -354,8 +354,8 @@ async function settleSlackSignIn(
 }
 
 /**
- * Removes the sign-in's private prompt if its Connect click is recorded. Otherwise it records the
- * settlement, so a click that lands later removes the prompt in {@link removeSettledSignInPrompts}.
+ * Removes the sign-in's private prompt if its Connect click is recorded. A click that lands later
+ * finds the sign-in settled in the session view, in {@link removeSettledSignInPrompts}.
  */
 async function settleSlackSignInPrompt(
   interactionId: string,
@@ -363,10 +363,7 @@ async function settleSlackSignInPrompt(
 ): Promise<void> {
   const prompts = channel.state.signInPrompts ?? {};
   const responseUrl = prompts[interactionId]?.responseUrl;
-  if (responseUrl === undefined) {
-    channel.state.signInPrompts = { ...prompts, [interactionId]: { settled: true } };
-    return;
-  }
+  if (responseUrl === undefined) return;
   const next = { ...prompts };
   delete next[interactionId];
   channel.state.signInPrompts = next;
@@ -374,21 +371,23 @@ async function settleSlackSignInPrompt(
 }
 
 /**
- * Removes every private sign-in prompt whose sign-in settled before its Connect click was
- * recorded, and forgets it.
+ * Removes every recorded private sign-in prompt whose sign-in is no longer open in `view`, and
+ * forgets it. A Connect click's channel-state control can land after its sign-in settled.
  */
-export async function removeSettledSignInPrompts(channel: {
-  state: SlackChannelState;
-}): Promise<void> {
+export async function removeSettledSignInPrompts(
+  channel: { state: SlackChannelState },
+  view: SessionView,
+): Promise<void> {
   const prompts = channel.state.signInPrompts ?? {};
+  const { interactions } = sessionTables(view);
   const late = Object.entries(prompts).filter(
-    ([, prompt]) => prompt.settled === true && prompt.responseUrl !== undefined,
+    ([interactionId]) => interactions[interactionId]?.status !== "open",
   );
   if (late.length === 0) return;
   const next = { ...prompts };
   for (const [interactionId] of late) delete next[interactionId];
   channel.state.signInPrompts = next;
-  await Promise.all(late.map(([, prompt]) => removeSignInPrompt(prompt.responseUrl!)));
+  await Promise.all(late.map(([, prompt]) => removeSignInPrompt(prompt.responseUrl)));
 }
 
 /**

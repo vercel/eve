@@ -252,8 +252,7 @@ export interface SlackInteractionCardRecord {
 
 /** What the session knows of one private sign-in prompt; see {@link SlackChannelState.signInPrompts}. */
 export interface SlackSignInPrompt {
-  readonly responseUrl?: string;
-  readonly settled?: true;
+  readonly responseUrl: string;
 }
 
 /**
@@ -337,10 +336,10 @@ export interface SlackChannelState extends UndeliveredReplyState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   /**
-   * Sign-in interaction id to what is known of its private prompt: the `response_url` of its
-   * Connect click, and whether the sign-in has settled. Slack removes an ephemeral message only
-   * through such a URL, and the click and the settlement reach the session in either order, so
-   * whichever lands second removes the prompt and forgets the entry.
+   * Sign-in interaction id to its private prompt's `response_url`, recorded by its Connect click.
+   * Slack removes an ephemeral message only through such a URL. The click and the settlement reach
+   * the session in either order: the settlement removes a recorded prompt, and a click recorded
+   * once the session view shows the sign-in settled removes it on `delivery.settled`.
    * @internal
    */
   signInPrompts?: Record<string, SlackSignInPrompt>;
@@ -1150,7 +1149,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       },
       async "delivery.settled"(event, ctx) {
         // A Connect click's channel-state control may land after its sign-in settled.
-        await removeSettledSignInPrompts(ctx.channel);
+        await removeSettledSignInPrompts(ctx.channel, ctx.view);
         await renderDeliverySettled?.(event, ctx);
       },
       async "call.settled"(event, ctx) {

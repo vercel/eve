@@ -5,10 +5,11 @@ import type { InteractionSettledData } from "#protocol/session-events/families/i
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import {
-  defaultInteractionEvents,
-  removeSettledSignInPrompts,
-} from "#public/channels/slack/defaults.js";
+import type { CompiledChannel } from "#channel/compiled-channel.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
+import { mergePatch } from "#execution/session/json-merge-patch.js";
+import { defaultInteractionEvents } from "#public/channels/slack/defaults.js";
 import { answerFromSlackAction } from "#public/channels/slack/hitl.js";
 import {
   parseSignInConnectTarget,
@@ -21,9 +22,10 @@ import {
   type SlackInteractionCardParts,
   type SlackRenderer,
 } from "#public/channels/slack/renderers.js";
-import type {
-  SlackApprovalChannelResolver,
-  SlackChannelState,
+import {
+  slackChannel,
+  type SlackApprovalChannelResolver,
+  type SlackChannelState,
 } from "#public/channels/slack/slackChannel.js";
 
 const at = "2026-10-27T00:00:00.000Z";
@@ -59,6 +61,8 @@ function harness(
     readonly fails?: (sent: Sent) => string | undefined;
     /** Event types whose handlers don't run, as when a renderer skips `next()` for them. */
     readonly skip?: readonly string[];
+    /** Event types run by `slackChannel()`'s own handlers rather than the interaction defaults. */
+    readonly channelEvents?: readonly string[];
   } = {},
 ) {
   const sent: Sent[] = [];
@@ -117,6 +121,14 @@ function harness(
   );
   const view = emptySessionView();
   let position = 0;
+  const adapter = (slackChannel() as unknown as CompiledChannel<SlackChannelState>)
+    .adapter as unknown as Record<string, (event: SessionEvent, ctx: unknown) => Promise<void>>;
+  const session = new ContextContainer();
+  session.set(SessionKey, {
+    auth: { current: null, initiator: null },
+    sessionId: "s_0",
+    turn: { id: turnId, sequence: 0 },
+  });
 
   async function commit(...facts: SessionEvent[]): Promise<void> {
     // State persists as JSON between workflow steps, so each commit starts from a round trip.
@@ -132,6 +144,12 @@ function harness(
     };
     for (const fact of facts) {
       if (options.skip?.includes(fact.type)) continue;
+      if (options.channelEvents?.includes(fact.type)) {
+        await contextStorage.run(session, () =>
+          adapter[fact.type]!(fact, { ...channel, position: ctx.position, view }),
+        );
+        continue;
+      }
       const handler = events[fact.type as keyof typeof events] as
         | ((event: SessionEvent, ctx: unknown) => Promise<void>)
         | undefined;
@@ -1033,24 +1051,35 @@ describe("Slack sign-in prompts", () => {
     return fetchMock;
   }
 
+  const signInHarness = () => harness({ channelEvents: ["delivery.settled"] });
+
   async function heldSignIn() {
-    const slack = harness();
+    const slack = signInHarness();
     await slack.ask(bobsSignIn);
     return slack;
   }
 
-  /** What a Connect click's channel-state control merges in, then its `delivery.settled` handler. */
+  let clicks = 0;
+  /**
+   * A Connect click's `channel-state` control: its patch merges in as the session step applies it,
+   * then its delivery settles through `slackChannel()`'s own `delivery.settled` handler.
+   */
   async function recordClick(
-    slack: Awaited<ReturnType<typeof heldSignIn>>,
+    slack: ReturnType<typeof signInHarness>,
     interactionId: string,
     responseUrl: string,
   ): Promise<void> {
-    const prompts = slack.channel.state.signInPrompts ?? {};
-    slack.channel.state.signInPrompts = {
-      ...prompts,
-      [interactionId]: { ...prompts[interactionId], responseUrl },
-    };
-    await removeSettledSignInPrompts(slack.channel);
+    clicks += 1;
+    slack.channel.state = mergePatch(
+      { ...slack.channel.state },
+      {
+        signInPrompts: { [interactionId]: { responseUrl } },
+      },
+    ) as unknown as SlackChannelState;
+    await slack.commit(
+      { data: { deliveryId: `d_click_${clicks}` }, type: "delivery.admitted" },
+      { data: { deliveryId: `d_click_${clicks}`, outcome: "handled" }, type: "delivery.settled" },
+    );
   }
 
   it("lets the Connect click locate the prompt it was shown to", async () => {
@@ -1086,7 +1115,7 @@ describe("Slack sign-in prompts", () => {
 
       expect(fetchMock, outcome).toHaveBeenCalledTimes(1);
       expect(fetchMock, outcome).toHaveBeenCalledWith(...deleteOf(RESPONSE_URL));
-      expect(slack.channel.state.signInPrompts).toEqual({});
+      expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
       expect(slack.calls("chat.update"), "the public status still ends").toHaveLength(1);
     }
   });
@@ -1097,18 +1126,18 @@ describe("Slack sign-in prompts", () => {
 
     await slack.settle("s_weather", "accepted");
     expect(fetchMock, "no click recorded yet").not.toHaveBeenCalled();
-    expect(slack.channel.state.signInPrompts).toEqual({ s_weather: { settled: true } });
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
 
     await recordClick(slack, "s_weather", RESPONSE_URL);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(...deleteOf(RESPONSE_URL));
-    expect(slack.channel.state.signInPrompts).toEqual({});
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
   });
 
   it("keeps each pending prompt's click when several sign-ins wait", async () => {
     const fetchMock = stubFetch();
-    const slack = harness();
+    const slack = signInHarness();
     await slack.ask(bobsSignIn, {
       ...bobsSignIn,
       interactionId: "s_issues",
@@ -1126,7 +1155,7 @@ describe("Slack sign-in prompts", () => {
     await slack.settle("s_issues", "accepted");
 
     expect(fetchMock.mock.calls).toEqual([deleteOf(RESPONSE_URL), deleteOf(OLD_RESPONSE_URL)]);
-    expect(slack.channel.state.signInPrompts).toEqual({});
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
   });
 
   it("removes only the old prompt when it is clicked during a later attempt", async () => {
@@ -1137,7 +1166,7 @@ describe("Slack sign-in prompts", () => {
 
     await recordClick(slack, "s_weather", OLD_RESPONSE_URL);
     expect(fetchMock.mock.calls).toEqual([deleteOf(OLD_RESPONSE_URL)]);
-    expect(slack.channel.state.signInPrompts).toEqual({});
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
 
     await recordClick(slack, "s_weather_again", RESPONSE_URL);
     expect(fetchMock, "the new attempt's prompt stays while it is open").toHaveBeenCalledTimes(1);
@@ -1153,15 +1182,42 @@ describe("Slack sign-in prompts", () => {
     await slack.settle("s_weather", "accepted");
 
     expect(slack.calls("chat.update")).toHaveLength(1);
-    expect(slack.channel.state.signInPrompts).toEqual({});
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
   });
 
-  it("removes nothing when no Connect click located the prompt", async () => {
+  it("removes nothing and keeps no entry when no Connect click located the prompt", async () => {
     const fetchMock = stubFetch();
     const slack = await heldSignIn();
 
     await slack.settle("s_weather", "accepted");
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
+  });
+
+  it("keeps no entry for an approval responder's sign-in", async () => {
+    const fetchMock = stubFetch();
+    const slack = signInHarness();
+    await slack.ask(approval("a_deploy", "deploy"));
+    await slack.answer("a_deploy", { optionId: "approve" });
+    await slack.commit({
+      data: {
+        audience: { principalIds: ["p_bob"] },
+        interactionId: "s_responder",
+        request: {
+          kind: "sign-in",
+          prompt: "Sign in to Weather.",
+          signIn: { displayName: "Weather", name: "weather", url: "https://idp.example/authorize" },
+        },
+        subject: { responseId: "r_a_deploy" },
+      },
+      scope: { turnId },
+      type: "interaction.opened",
+    });
+
+    await slack.settle("s_responder", "accepted");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(slack.channel.state.signInPrompts ?? {}).toEqual({});
   });
 });
