@@ -8,3 +8,7 @@ export {
   type GitHubShellInput,
   type GitHubShellOutput,
 } from "./github-shell.ts";
+export {
+  GitHubCommandInputError,
+  isGitHubCommandInputError,
+} from "./github-command-input-error.ts";

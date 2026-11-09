@@ -1,6 +1,8 @@
 import { posix } from "node:path";
 import type { SandboxSession } from "eve/sandbox";
 
+import { GitHubCommandInputError } from "./github-command-input-error.ts";
+
 /** The person a commit or pull request is created for. */
 export interface GitHubCoAuthor {
   readonly email: string;
@@ -85,7 +87,9 @@ export async function attributeCommand(
       if (!path || path === "-") return result;
       const content = await sandbox.readTextFile({ path: posix.resolve(workingDirectory, path) });
       if (content === null)
-        throw new Error(`Pull request body file ${JSON.stringify(path)} not found.`);
+        throw new GitHubCommandInputError(
+          `Pull request body file ${JSON.stringify(path)} not found.`,
+        );
       await sandbox.writeTextFile({ content: withTrailer(content, trailer), path: bodyFile });
       if (inline === undefined) result[index + 1] = bodyFile;
       else result[index] = `${flag}=${bodyFile}`;

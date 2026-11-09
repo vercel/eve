@@ -21,6 +21,7 @@ import {
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
+import { isGitHubCommandInputError } from "../../extension/lib/github-command-input-error.ts";
 import { LEASE_LOCK_PATH, withSandboxLeaseLock } from "../../extension/lib/sandbox-lease-lock.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
@@ -976,3 +977,76 @@ function fakeSandbox(
   };
   return sandbox as NetworkPolicySandboxSession;
 }
+
+test("names the refusals the agent can fix by changing its input", async () => {
+  const dependencies = (result = { exitCode: 0, stdout: "", stderr: "" }) => ({
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "token";
+    },
+    async getSandbox() {
+      return fakeSandbox([], result);
+    },
+  });
+  const attributed = {
+    ...CONFIG,
+    attribution: () => ({ name: "octocat", email: "1+octocat@users.noreply.github.com" }),
+  };
+  const refusals: Array<[GitHubShellInput, typeof CONFIG, ReturnType<typeof dependencies>]> = [
+    [{ ...READ, command: "gh pr view 1 | cat" }, CONFIG, dependencies()],
+    [{ ...READ, repository: "not/a/repository" }, CONFIG, dependencies()],
+    [{ ...READ, workingDirectory: "../outside" }, CONFIG, dependencies()],
+    [
+      {
+        ...READ,
+        command: "gh-signed-commit --repo vercel/internal-agents -m fix",
+        workingDirectory: "missing",
+      },
+      CONFIG,
+      {
+        ...dependencies(),
+        async getSandbox() {
+          return fakeSandbox([], ({ command }) =>
+            command.includes("/workspace/missing")
+              ? { exitCode: 1, stdout: "", stderr: "No such file or directory" }
+              : { exitCode: 0, stdout: "/workspace\0", stderr: "" },
+          );
+        },
+      },
+    ],
+    [
+      { ...READ, command: "gh pr create --repo vercel/internal-agents --body-file body.md" },
+      attributed,
+      {
+        ...dependencies(),
+        async getSandbox() {
+          return {
+            ...fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }),
+            readTextFile: async () => null,
+          };
+        },
+      },
+    ],
+  ];
+  for (const [input, config, deps] of refusals) {
+    await assert.rejects(
+      executeGitHubShell(input, config, { ...deps, context: {} as ToolContext }),
+      (error) => isGitHubCommandInputError(error),
+      input.command,
+    );
+  }
+
+  await assert.rejects(
+    executeGitHubShell(READ, CONFIG, {
+      ...dependencies(),
+      async getConnectToken() {
+        return "";
+      },
+    }),
+    (error) => error instanceof Error && !isGitHubCommandInputError(error),
+  );
+  await assert.rejects(
+    executeGitHubShell(READ, undefined, dependencies()),
+    (error) => error instanceof Error && !isGitHubCommandInputError(error),
+  );
+});
