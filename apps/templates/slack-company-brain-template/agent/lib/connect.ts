@@ -38,10 +38,14 @@ interface SetupNote {
   readonly service: string;
   /** `--connection-method` for services with more than one. */
   readonly connectionMethod?: string;
+  /** Extra `vercel connect create` flags, such as `--data @credentials.json`. */
+  readonly createFlags?: string;
   /** What the agent can't reach without it, such as `pages and databases`. */
   readonly what: string;
   /** Path of the instructions file that defines this note. */
   readonly file: string;
+  /** Steps before creating the connector. */
+  readonly beforeCreate?: readonly string[];
   /** Steps after creating the connector. */
   readonly afterCreate?: readonly string[];
   /** Whether each person signs in with their own account. */
@@ -54,8 +58,10 @@ interface SetupNote {
  */
 export function connectorSetupNote(note: SetupNote) {
   const method = note.connectionMethod ? ` --connection-method ${note.connectionMethod}` : "";
+  const flags = note.createFlags ? ` ${note.createFlags}` : "";
   const steps = [
-    `From the agent's linked Vercel project, run \`vercel connect create ${note.service}${method} --name ${CONNECTOR_NAME}\`. It creates the connector and attaches it to the project.`,
+    ...(note.beforeCreate ?? []),
+    `From the agent's linked Vercel project, run \`vercel connect create ${note.service}${method} --name ${CONNECTOR_NAME}${flags}\`. It creates the connector and attaches it to the project.`,
     ...(note.afterCreate ?? []),
   ];
   const content = [

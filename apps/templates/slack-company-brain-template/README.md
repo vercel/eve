@@ -17,8 +17,11 @@ agent/
   instructions/github.ts         # how to connect GitHub; delete once connected
   instructions/notion.ts         # how to connect Notion; delete once connected
   instructions/linear.ts         # how to connect Linear; delete once connected
+  instructions/pagerduty.ts      # how to connect PagerDuty; delete once connected
+  instructions/google-drive.ts   # how to connect Google Drive; delete once connected
   connections/notion.ts          # Notion wiki, on once its connector exists
   connections/linear.ts          # Linear issues and projects, on once its connector exists
+  connections/pagerduty.ts       # on-call and incidents, on once its connector exists
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
@@ -29,6 +32,7 @@ agent/
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
   tools/search_slack.ts          # searches public Slack channels
   tools/read_slack_conversation.ts # reads a public channel or thread
+  tools/google_drive.ts          # searches and reads Google Drive, on once its connector exists
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
   lib/connect.ts                 # connector detection and setup notes
@@ -245,21 +249,38 @@ the new capability should answer, and check that it picks the right source.
 ### Connect a knowledge source
 
 Connections give the agent tools from an MCP server or an OpenAPI spec. The
-template ships Notion and Linear connections in `agent/connections/`. Each one
-turns on when its Vercel Connect connector exists. Create them from the linked
-project:
+template ships four sources, each off until its Vercel Connect connector
+exists. Create the ones you use from the linked project:
 
 ```bash
 vercel connect create notion --connection-method mcp --name company-brain
 vercel connect create linear --connection-method mcp --name company-brain
+vercel connect create google-drive --connection-method google-child --name company-brain
+vercel connect create pagerduty --connection-method mcp --name company-brain --data @pagerduty.json
 ```
 
-Keep the name `company-brain`. It gives the connectors the UIDs
-`notion/company-brain` and `linear/company-brain`, which the connections look
-for (`agent/lib/connect.ts`). The agent picks up a new connector within a few
-minutes, without a redeploy. Until then, `agent/instructions/notion.ts` and
-`agent/instructions/linear.ts` tell people who ask how to connect it. Delete a
-note once its source works, and delete a connection you don't want.
+- **Notion** (`agent/connections/notion.ts`): search and read pages.
+- **Linear** (`agent/connections/linear.ts`): issues, projects, and cycles.
+- **Google Drive** (`agent/tools/google_drive.ts`): Connect offers Google
+  through Vercel-managed OAuth rather than an MCP server, so the template calls
+  the Drive API with two tools. `search_google_drive` searches names and content
+  across My Drive and shared drives, and `read_google_drive_file` reads Docs and
+  Slides as text, Sheets as CSV, and text files. It can't read PDFs or images.
+  The connector asks for read-only Drive access. Vercel-managed Google OAuth is
+  still rolling out, so it may not be offered to your team yet.
+- **PagerDuty** (`agent/connections/pagerduty.ts`): on-call schedules,
+  incidents, and services. Connect needs your own PagerDuty OAuth app: a
+  PagerDuty admin registers one under **Integrations > Developer Tools > App
+  Registration**, then saves its client ID and secret as `pagerduty.json`
+  (`{ "clientId": "…", "clientSecret": "…" }`) for the command above.
+
+Keep the name `company-brain`. It gives each connector the UID
+`<service>/company-brain`, which the template looks for
+(`agent/lib/connect.ts`). The agent picks up a new connector within a few
+minutes, without a redeploy. Until then, the matching file in
+`agent/instructions/` tells people who ask how to connect it. Delete a note once
+its source works, and delete the connection or tool file of a source you don't
+want.
 
 For other sources, the eve registry has ready-made connections:
 
