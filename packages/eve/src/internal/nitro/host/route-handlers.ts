@@ -152,6 +152,20 @@ export function renderHostHandler(input: {
   ].join("\n");
 }
 
+/** The task that ticks a World host each minute, firing its World's due schedules. */
+export function renderWorldHostTickTaskModule(): string {
+  return [
+    `import { tickWorldHost } from ${importSourceModule("src/internal/nitro/routes/world-host.ts")};`,
+    importRouteConfig,
+    "export default {",
+    '  meta: { description: "Fire the World host\'s due schedules." },',
+    "  async run() {",
+    "    return { result: await tickWorldHost(config) };",
+    "  },",
+    "};",
+  ].join("\n");
+}
+
 /**
  * Workflow's route in a build for a World host: the World host first, as the function's durable
  * host (`prepareWorldHostRealm`), then Workflow's handler.

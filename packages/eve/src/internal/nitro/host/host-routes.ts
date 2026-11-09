@@ -22,6 +22,7 @@ import {
   renderChannelPreflightHandler,
   renderChannelWebSocketHandler,
   renderHostHandler,
+  renderWorldHostTickTaskModule,
   renderWorldHostWorkflowHandler,
   renderRouteConfigModule,
   renderScheduleTaskModule,
@@ -94,6 +95,11 @@ export interface HostRouteTable {
   readonly scheduleTasks: readonly ScheduleRegistration[];
   /** The Vercel cron path; the Vercel preset registers its handler. */
   readonly cronHandlerRoute?: string;
+  /**
+   * A World host's tick, each minute, which fires the dynamic schedules its World keeps: on
+   * Vercel, where no process ticks on its own (elsewhere `serve` does).
+   */
+  readonly worldHostTick?: true;
 }
 
 interface HostRouteTableInput {
@@ -103,6 +109,9 @@ interface HostRouteTableInput {
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
 }
+
+/** The Nitro task that ticks a World host on Vercel (`HostRouteTable.worldHostTick`). */
+const WORLD_HOST_TICK_TASK = "eve:world-host-tick";
 
 /** Every route, task, and cron path eve's Nitro host serves, in registration order. */
 export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable {
@@ -167,10 +176,17 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
   });
 
   const scheduleTasks = development ? [] : input.scheduleRegistrations;
+  const worldHostTick =
+    !development &&
+    input.vercel &&
+    buildsForWorldHost() &&
+    (manifest.scheduleCollections?.length ?? 0) > 0;
   return {
     routes: routes.map((route) => withHeadAllow(route, routes)),
     scheduleTasks,
-    ...(scheduleTasks.length > 0 && input.vercel && { cronHandlerRoute: createCronHandlerRoute() }),
+    ...((scheduleTasks.length > 0 || worldHostTick) &&
+      input.vercel && { cronHandlerRoute: createCronHandlerRoute() }),
+    ...(worldHostTick && { worldHostTick: true as const }),
   };
 }
 
@@ -384,6 +400,16 @@ export async function renderHostRoutes(
     if (!cronTasks.includes(task.taskName)) cronTasks.push(task.taskName);
   }
 
+  if (table.worldHostTick === true) {
+    const id = "#eve/world-host-tick";
+    virtual[id] = renderWorldHostTickTaskModule();
+    tasks[WORLD_HOST_TICK_TASK] = {
+      description: "Fire the World host's due schedules.",
+      handler: id,
+    };
+    (scheduledTasks["* * * * *"] ??= []).push(WORLD_HOST_TICK_TASK);
+  }
+
   return {
     handlers,
     scheduledTasks: Object.fromEntries(
@@ -394,7 +420,9 @@ export async function renderHostRoutes(
     ),
     tasks,
     virtual,
-    ...(table.scheduleTasks.length > 0 && { experimental: { tasks: true } }),
+    ...((table.scheduleTasks.length > 0 || table.worldHostTick === true) && {
+      experimental: { tasks: true },
+    }),
   };
 }
 

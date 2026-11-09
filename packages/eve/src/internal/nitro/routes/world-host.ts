@@ -81,6 +81,11 @@ export async function prepareWorldHostRealm(config: NitroArtifactsConfig): Promi
   await nitroWorldHost(config);
 }
 
+/** Fires the dynamic schedules due now (the minutely task on Vercel); the sessions they started. */
+export async function tickWorldHost(config: NitroArtifactsConfig): Promise<readonly string[]> {
+  return await (await nitroWorldHost(config)).host.tick();
+}
+
 /** The runtime sessions start in: the World host's for the agent. */
 export async function worldHostRuntime(config: NitroArtifactsConfig): Promise<Runtime> {
   const { agentName, host } = await nitroWorldHost(config);
