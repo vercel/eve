@@ -1,4 +1,4 @@
-import type { RunInput, SessionCommand } from "#channel/types.js";
+import type { RunInput, Runtime, SessionCommand } from "#channel/types.js";
 import type { ActivationOutcome, ActivationRun, Entities } from "#execution/entity/entities.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import { createInProcessRuntime } from "#execution/in-process/runtime.js";
@@ -14,6 +14,7 @@ import { createLogger } from "#internal/logging.js";
 //      state, or, for a session nothing ran yet, what it was created with (`SessionStart`). It
 //      writes through the activation's handle, and reads none of its stream's lines, only how
 //      many there are.
+//      What the restore started (its runs, a subagent's session) goes on to where it was first.
 //   2. What its mailbox holds is handed to the session's addresses, oldest first: a command as
 //      its channel sends it, a sign-in callback as its route resumes the address. Keeping one as
 //      an input consumes it in the same write; one only the session's memory takes (a callback)
@@ -53,6 +54,8 @@ export interface SessionActivationOptions {
   readonly holdForTimerMs?: number;
   /** Where sign-in links send the provider back to (`WorldHostOptions.callbackBaseUrl`). */
   readonly callbackBaseUrl?: string;
+  /** The host's runtime for the agent named `name`: where a step reaches other sessions. */
+  readonly runtime?: (name: string) => Runtime;
 }
 
 /** What runs a session each time its entity is activated. */
@@ -78,12 +81,20 @@ export function sessionActivation(options: SessionActivationOptions): Activation
       world: options.world,
       worldStore: store,
       ...(options.callbackBaseUrl !== undefined && { callbackBaseUrl: options.callbackBaseUrl }),
+      ...(options.runtime !== undefined && {
+        stepRuntime: () => options.runtime!(start.agent as string),
+      }),
     });
     let outcome: ActivationOutcome = { kind: "continue" };
     try {
       const saved = await runtime.load(sessionId, { lines: "count" });
       if (saved === undefined) await runtime.startSession(sessionId, start.input);
-      else await runtime.restore(saved, { stored: true });
+      else {
+        await runtime.restore(saved, { stored: true });
+        // What it ran goes on to where it was (a subagent reopens its session) before anything
+        // arrives: an answer the session forwards to a child finds the child here.
+        await settledAfterRestore(runtime, deadline);
+      }
       for (const message of await entity.inbox()) {
         store.receive(sessionId, message.id);
         const body = message.body as SessionMessage;
@@ -100,9 +111,15 @@ export function sessionActivation(options: SessionActivationOptions): Activation
       if (outcome.kind === "continue") await runtime.drain();
     } finally {
       try {
+        const ended = runtime.ended(sessionId);
         await runtime.dispose();
         // Stopped, with its state saved: what it took without keeping is consumed now.
         await store.flush(sessionId);
+        // A session that ended ends its entity: its addresses are free, and its retention applies.
+        if (ended) {
+          await entity.end();
+          outcome = { kind: "idle" };
+        }
       } finally {
         agent.release();
       }
@@ -110,6 +127,27 @@ export function sessionActivation(options: SessionActivationOptions): Activation
     log.debug("activation ended", { outcome: outcome.kind, sessionId });
     return outcome;
   };
+}
+
+const SETTLE_AFTER_RESTORE_MS = 100;
+
+/** Until everything a restore started waits again, or for at most a few seconds. */
+async function settledAfterRestore(
+  runtime: ReturnType<typeof createInProcessRuntime>,
+  deadline: number,
+): Promise<void> {
+  const until = Math.min(deadline, Date.now() + 5_000);
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Waiting, and still waiting a moment later: a restore finishes some of its work after it
+  // resolves (a child it reopened claims its addresses).
+  while (Date.now() < until) {
+    if (
+      (await runtime.quiescent()) &&
+      (await pause(SETTLE_AFTER_RESTORE_MS), await runtime.quiescent())
+    )
+      break;
+    await pause(10);
+  }
 }
 
 async function runUntilWaiting(

@@ -28,6 +28,8 @@ export interface DevelopmentNitroArtifactsConfig {
 export interface ProductionNitroArtifactsConfig {
   readonly kind: "production";
   readonly sandboxScope: string;
+  /** Set when the agent's sessions run on a World host instead of Workflow (experimental). */
+  readonly host?: "world";
 }
 
 export type NitroArtifactsConfig = DevelopmentNitroArtifactsConfig | ProductionNitroArtifactsConfig;

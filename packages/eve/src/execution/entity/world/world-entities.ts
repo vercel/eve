@@ -8,7 +8,7 @@ import {
 } from "#execution/entity/entities.js";
 import type { QueueWorld, RuntimeWorld } from "#execution/world/runtime-world.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { isHookNotFound } from "#shared/run-errors.js";
+import { isHookNotFound, isRunNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   appendRecord,
@@ -250,6 +250,10 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
       async inbox() {
         return await readMailbox(id, await consumedNow());
       },
+      async end() {
+        // A run that ended: the World disposes its hooks, and applies its retention.
+        await write(world, key, id, writer, { eventData: {}, eventType: "run_completed" });
+      },
       stream: {
         async length() {
           length ??= await streamLength(key);
@@ -339,7 +343,9 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
   return {
     newKey: () => `${kind.kind}_${createUlid()}`,
     async create(key, createOptions) {
-      const writer = await createRun(world, kind, key, createOptions.meta);
+      const writer = await createRun(world, kind, key, createOptions.meta, {
+        ...(createOptions.purgeOnEnd === true && { purgeOnEnd: true }),
+      });
       if (writer === undefined) throw new Error(`The World holds "${key}" already.`);
       const tokens = new Set([keyToken(runId(key)), ...(createOptions.aliases ?? [])]);
       for (const token of tokens) await createHook(key, writer, token);
@@ -401,6 +407,17 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
         : liveRead(world, id, name, from, tail, world.streams.get.bind(world.streams));
     },
     list: async () => await listRuns(world, kind),
+    async purged(key) {
+      if (world.runs.get === undefined) return false;
+      let run;
+      try {
+        run = await world.runs.get(runId(key), { resolveData: "none" });
+      } catch (error) {
+        if (isRunNotFound(error)) return false;
+        throw error;
+      }
+      return run.expiredAt !== undefined && new Date(run.expiredAt).getTime() <= Date.now();
+    },
     once: async (name, occurrence) => await claimOnce(world, name, occurrence),
     ...(activation !== undefined && { activation }),
   };

@@ -110,6 +110,11 @@ export interface InProcessHostOptions {
    * there. Without one, a store on `world`.
    */
   readonly worldStore?: WorldSessionStore;
+  /**
+   * The runtime a step reaches other sessions through (`ctx.to()`, a tool starting a session):
+   * a World host's, whose sessions run wherever their activations do. Without one, a step can't.
+   */
+  readonly stepRuntime?: () => Runtime;
 }
 
 /** A session running here: what the host records of it, and its loop. */
@@ -267,7 +272,7 @@ export function createInProcessHost(
     ...(options.callbackBaseUrl !== undefined && {
       callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""),
     }),
-    createRuntime: () => NO_STEP_RUNTIME,
+    createRuntime: () => options.stepRuntime?.() ?? NO_STEP_RUNTIME,
     // Attributes belong to a Workflow run; an in-process session has none.
     setAttributes: async () => {},
   };

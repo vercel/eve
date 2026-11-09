@@ -31,11 +31,11 @@
   },
   "src/execution/in-process/runtime.ts": {
     "static.modules": 812,
-    "static.kib": 4324,
+    "static.kib": 4325,
     "static.builtinFiles": 61,
     "static.workflow": 0,
     "total.modules": 984,
-    "total.kib": 6784,
+    "total.kib": 6785,
     "total.builtinFiles": 138,
     "total.workflow": 0
   },
@@ -51,11 +51,11 @@
   },
   "src/embed/session.ts": {
     "static.modules": 831,
-    "static.kib": 4386,
+    "static.kib": 4387,
     "static.builtinFiles": 64,
     "static.workflow": 0,
     "total.modules": 992,
-    "total.kib": 6804,
+    "total.kib": 6805,
     "total.builtinFiles": 140,
     "total.workflow": 0
   }

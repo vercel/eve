@@ -8,6 +8,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { createScheduleOccurrenceConsumer } from "#internal/schedules/occurrence-consumer.js";
+import { usesWorldHost, worldHostRuntime } from "#internal/nitro/routes/world-host.js";
 
 /** Receives verified Vercel Schedules occurrences and dispatches at-least-once callbacks. */
 export async function handleScheduleCollectionConsumer(
@@ -25,6 +26,9 @@ export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): 
 } {
   return createScheduleOccurrenceConsumer({
     compiledArtifactsSource: () => resolveNitroCompiledArtifactsSource(config),
-    runtime: (compiledArtifactsSource) => createWorkflowRuntime({ compiledArtifactsSource }),
+    runtime: (compiledArtifactsSource) =>
+      usesWorldHost(config)
+        ? worldHostRuntime(config)
+        : createWorkflowRuntime({ compiledArtifactsSource }),
   });
 }
