@@ -1,7 +1,7 @@
 import { defineDynamicSchedules } from "eve/experimental/schedules";
 import { z } from "zod";
 import slack from "../channels/slack.ts";
-import { isFullMember, slackTeamId } from "../lib/slack.ts";
+import { callSlack, isFullMember, slackTeamId } from "../lib/slack.ts";
 
 interface TaskPayload {
   task: string;
@@ -15,6 +15,47 @@ interface TaskPayload {
 function attribute(attributes: Readonly<Record<string, unknown>>, key: string) {
   const value = attributes[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+const MEMBER_PAGES = 10;
+
+// Whether the creator can still see the schedule's conversation. A full member
+// can read and join any public channel, and a DM with the app is always theirs,
+// so only private channels and group DMs need a membership check. Without it,
+// someone removed from a private channel would keep posting there through the
+// bot. Errors other than a missing channel throw so the provider retries.
+async function canReachChannel(payload: TaskPayload): Promise<boolean> {
+  const info = await callSlack<{
+    channel: { is_private?: boolean; is_im?: boolean; is_mpim?: boolean };
+  }>(payload.teamId, "conversations.info", { channel: payload.channelId });
+  if (!info.ok) {
+    if (info.error === "channel_not_found") return false;
+    throw new Error(`Slack conversations.info failed: ${info.error ?? "unknown error"}`);
+  }
+  const channel = info.channel;
+  if (!channel) return false;
+  if (channel.is_im || (!channel.is_private && !channel.is_mpim)) return true;
+
+  let cursor: string | undefined;
+  for (let page = 0; page < MEMBER_PAGES; page++) {
+    const response = await callSlack<{
+      members: string[];
+      response_metadata: { next_cursor?: string };
+    }>(payload.teamId, "conversations.members", {
+      channel: payload.channelId,
+      limit: 1000,
+      cursor,
+    });
+    if (!response.ok) {
+      if (response.error === "channel_not_found") return false;
+      throw new Error(`Slack conversations.members failed: ${response.error ?? "unknown error"}`);
+    }
+    if (response.members?.includes(payload.userId)) return true;
+    cursor = response.response_metadata?.next_cursor || undefined;
+    if (!cursor) return false;
+  }
+  // Too large to check: fail closed.
+  return false;
 }
 
 // People ask in Slack ("every Monday at 9, post open questions from #support
@@ -64,9 +105,11 @@ export default defineDynamicSchedules({
   async auth({ principal, payload }) {
     if (principal.type !== "user" || principal.authenticator !== "slack-webhook") return null;
     if (principal.principalId !== `slack:${payload.teamId}:${payload.userId}`) return null;
-    // A member who is deactivated, leaves, or becomes a guest stops their
-    // schedules. A failed lookup throws so the provider retries.
+    // A member who is deactivated, leaves, becomes a guest, or loses access to
+    // the conversation stops their schedules. A failed lookup throws so the
+    // provider retries.
     if (!(await isFullMember(payload.teamId, payload.userId))) return null;
+    if (!(await canReachChannel(payload))) return null;
     const { type: _type, ...identity } = principal;
     return {
       ...identity,
