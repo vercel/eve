@@ -504,6 +504,46 @@ All other `defineAgent` fields are optional. For the exported types, see the [Ty
 
 During `eve dev`, packages listed in `externalDependencies` use normal Node.js resolution instead of being bundled, so restart the dev server after replacing one.
 
+## Fields for agents defined in code
+
+`defineAgent` also describes an agent defined in code instead of in an `agent/` directory. The configuration on this page means the same thing there. The directory's contents become fields, so a code subagent reads like a file subagent:
+
+```ts
+import { defineAgent } from "eve";
+
+import { deploy } from "./deploy";
+
+export const release = defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  instructions: "You ship releases carefully.",
+  tools: { deploy },
+  subagents: {
+    reviewer: defineAgent({
+      description: "Reviews a release before it ships.",
+      model: "openai/gpt-5.4",
+    }),
+  },
+});
+```
+
+| Field          | Type                                        | In an `agent/` directory               |
+| -------------- | ------------------------------------------- | -------------------------------------- |
+| `name`         | `string`, `agent` by default                | the package name or app folder         |
+| `instructions` | `string`, or a function of the context      | `agent/instructions.md`                |
+| `tools`        | tools by name                               | `agent/tools/<name>.ts`                |
+| `skills`       | skills by name                              | `agent/skills/<name>.md`               |
+| `connections`  | connections by name                         | `agent/connections/<name>.ts`          |
+| `subagents`    | `defineAgent(...)` values by name           | `agent/subagents/<name>/agent.ts`      |
+| `definitions`  | further definitions, such as eve's defaults | files under `agent/`                   |
+| `version`      | `string`                                    | the deployment's version               |
+| `bare`         | `boolean`                                   | eve's runtime definitions always apply |
+
+Each value in `tools`, `skills`, `connections`, and `instructions` can also be a function of the call's context, as `defineDynamic()` makes a file dynamic. A tool in `tools` with the same name as one of eve's defaults replaces the default in its position, the way `agent/tools/bash.ts` does.
+
+`agent.ts` rejects these fields. The build error names the file or folder to use instead, for example `"tools" is a field of an agent defined in code; in an agent/ directory, put each tool in agent/tools/<name>.ts.`
+
+An agent defined in code refuses the fields that configure a directory's build or deployment: `build`, `defaultTools`, `tool`, and `experimental.workflow.world`. Its `compaction.model` must be a model id. The agent-wide `approval` isn't supported in code yet, so set `approval` on each tool.
+
 ## Where adjacent settings live
 
 | Concern                       | Lives in                                                                         |

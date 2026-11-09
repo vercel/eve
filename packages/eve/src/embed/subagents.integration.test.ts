@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
-import { codeAgent } from "#embed/agent.js";
+import { codeAgentOf } from "#embed/agent.js";
+import { type DefinedAgent, defineAgent } from "#public/definitions/agent.js";
 import { eve } from "#definitions/defaults.js";
 import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -17,7 +18,7 @@ import {
   shape,
   violations,
 } from "#internal/testing/in-process-sessions.js";
-import { holdSessionAgent, type CodeAgent } from "#runtime/sessions/session-agent.js";
+import { holdSessionAgent } from "#runtime/sessions/session-agent.js";
 
 // An agent defined in code delegates to the subagents it declares, as a file agent does to
 // `agent/subagents/`: each is a tool, whose call runs the framework `serve` body, which opens a
@@ -35,45 +36,40 @@ function toolResults(prompt: readonly { readonly role: string; readonly content:
 }
 
 /** Alice's release agent, which asks its `reviewer` before it replies. */
-function releaseWithReviewer(): CodeAgent {
-  const reviewer = codeAgent({
+function releaseWithReviewer(): DefinedAgent {
+  const reviewer = defineAgent({
     description: "Reviews a release before it ships.",
-    model: {
-      model: markMockModel(
-        new MockLanguageModelV4({
-          doStream: async () => textStreamResult("The release looks good."),
-          modelId: "reviewer",
-          provider: "eve-test",
-        }),
-      ),
-      modelContextWindowTokens: 200_000,
-    },
-    name: "reviewer",
+    model: markMockModel(
+      new MockLanguageModelV4({
+        doStream: async () => textStreamResult("The release looks good."),
+        modelId: "reviewer",
+        provider: "eve-test",
+      }),
+    ),
+    modelContextWindowTokens: 200_000,
   });
-  return codeAgent({
-    model: {
-      model: markMockModel(
-        new MockLanguageModelV4({
-          doStream: async ({ prompt }) => {
-            // The review arrives as the task's result, after the call started it.
-            if (JSON.stringify(prompt).includes("The release looks good."))
-              return textStreamResult("Bob's review: the release looks good.");
-            return toolResults(prompt).length > 0
-              ? textStreamResult("I asked the reviewer.")
-              : toolCallsStreamResult([
-                  {
-                    input: JSON.stringify({ message: "Review the release, please." }),
-                    toolCallId: "call-review",
-                    toolName: "reviewer",
-                  },
-                ]);
-          },
-          modelId: "release",
-          provider: "eve-test",
-        }),
-      ),
-      modelContextWindowTokens: 200_000,
-    },
+  return defineAgent({
+    model: markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          // The review arrives as the task's result, after the call started it.
+          if (JSON.stringify(prompt).includes("The release looks good."))
+            return textStreamResult("Bob's review: the release looks good.");
+          return toolResults(prompt).length > 0
+            ? textStreamResult("I asked the reviewer.")
+            : toolCallsStreamResult([
+                {
+                  input: JSON.stringify({ message: "Review the release, please." }),
+                  toolCallId: "call-review",
+                  toolName: "reviewer",
+                },
+              ]);
+        },
+        modelId: "release",
+        provider: "eve-test",
+      }),
+    ),
+    modelContextWindowTokens: 200_000,
     name: "release",
     subagents: { reviewer },
   });
@@ -81,7 +77,7 @@ function releaseWithReviewer(): CodeAgent {
 
 describe("subagents of an agent defined in code", () => {
   it("delegates to a declared subagent on Workflow, and replies with its answer", async () => {
-    const release = releaseWithReviewer();
+    const release = codeAgentOf(releaseWithReviewer());
     const test = await createTestRuntime({ agent: { name: "code-subagents-host" } });
     await test.run(async () => {
       const held = holdSessionAgent(release);
@@ -108,7 +104,7 @@ describe("subagents of an agent defined in code", () => {
   });
 
   it("delegates to a declared subagent in this process as it does on Workflow", async () => {
-    const release = releaseWithReviewer();
+    const release = codeAgentOf(releaseWithReviewer());
     const test = await createTestRuntime({ agent: { name: "code-subagents-in-process-host" } });
     await test.run(async () => {
       const held = holdSessionAgent(release);
@@ -139,45 +135,43 @@ describe("subagents of an agent defined in code", () => {
   }, 90_000);
 
   it("starts a copy of itself with the agent tool eve.defaults() lists, in this process as on Workflow", async () => {
-    const copying = codeAgent({
+    const copying = defineAgent({
       definitions: eve.defaults({
         without: ["bash", "read_file", "write_file", "web_fetch", "web_search"],
       }),
-      model: {
-        model: markMockModel(
-          new MockLanguageModelV4({
-            doStream: async ({ prompt }) => {
-              const text = JSON.stringify(prompt);
-              if (text.includes("Draft the notes") && !text.includes("Alice asks"))
-                return textStreamResult("Draft: ship on Friday.");
-              if (text.includes("Draft: ship on Friday."))
-                return textStreamResult("Alice, the copy drafted: ship on Friday.");
-              return toolResults(prompt).length > 0
-                ? textStreamResult("A copy is drafting.")
-                : toolCallsStreamResult([
-                    {
-                      input: JSON.stringify({ message: "Draft the notes." }),
-                      toolCallId: "call-copy",
-                      toolName: "agent",
-                    },
-                  ]);
-            },
-            modelId: "copying",
-            provider: "eve-test",
-          }),
-        ),
-        modelContextWindowTokens: 200_000,
-      },
+      model: markMockModel(
+        new MockLanguageModelV4({
+          doStream: async ({ prompt }) => {
+            const text = JSON.stringify(prompt);
+            if (text.includes("Draft the notes") && !text.includes("Alice asks"))
+              return textStreamResult("Draft: ship on Friday.");
+            if (text.includes("Draft: ship on Friday."))
+              return textStreamResult("Alice, the copy drafted: ship on Friday.");
+            return toolResults(prompt).length > 0
+              ? textStreamResult("A copy is drafting.")
+              : toolCallsStreamResult([
+                  {
+                    input: JSON.stringify({ message: "Draft the notes." }),
+                    toolCallId: "call-copy",
+                    toolName: "agent",
+                  },
+                ]);
+          },
+          modelId: "copying",
+          provider: "eve-test",
+        }),
+      ),
+      modelContextWindowTokens: 200_000,
       name: "copying",
     });
     const test = await createTestRuntime({ agent: { name: "code-agent-tool-host" } });
     await test.run(async () => {
-      const held = holdSessionAgent(copying);
-      const inProcess = createInProcessRuntime({ agent: copying });
+      const held = holdSessionAgent(codeAgentOf(copying));
+      const inProcess = createInProcessRuntime({ agent: codeAgentOf(copying) });
       try {
         const here = await conversation(inProcess, "alice-copy-here", "Alice asks for notes.");
         const deployed = await conversation(
-          createWorkflowRuntime({ agent: copying }),
+          createWorkflowRuntime({ agent: codeAgentOf(copying) }),
           "alice-copy-deployed",
           "Alice asks for notes.",
         );

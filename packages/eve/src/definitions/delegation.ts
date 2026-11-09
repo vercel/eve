@@ -36,7 +36,7 @@ export function subagentDefinitionOf(name: string, agent: CodeAgent): Definition
   const { description } = agent;
   if (description === undefined || description.trim() === "") {
     throw new Error(
-      `Subagent "${name}" needs a description, which the parent's model reads to delegate to it: agent({ description, ... }).`,
+      `Subagent "${name}" needs a description, which the parent's model reads to delegate to it: defineAgent({ description, ... }).`,
     );
   }
   const logicalPath = `subagents/${name}/agent.ts`;

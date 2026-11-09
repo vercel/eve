@@ -7,8 +7,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { eve } from "#definitions/defaults.js";
-import { codeAgent } from "#embed/agent.js";
 import { createSession } from "#embed/session.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import { codeSandbox, type CodeSandbox } from "#runtime/sandbox/code-sandbox.js";
@@ -73,9 +73,10 @@ const noteSteps: Step[] = [
 ];
 
 async function takeNote(name: string, sandbox: CodeSandbox): Promise<Reply> {
-  const coder = codeAgent({
+  const coder = defineAgent({
     definitions: eve.defaults({ sandbox, without: ["web_search"] }),
-    model: { model: scripted(noteSteps), modelContextWindowTokens: 200_000 },
+    model: scripted(noteSteps),
+    modelContextWindowTokens: 200_000,
     name,
   });
   const session = createSession(coder, { identity: alice });
@@ -111,12 +112,10 @@ describe("eve.defaults() for an agent defined in code", () => {
   });
 
   it("lets the agent's own tool keep a default's name", async () => {
-    const coder = codeAgent({
+    const coder = defineAgent({
       definitions: eve.defaults({ sandbox: memorySandbox() }),
-      model: {
-        model: scripted([{ input: { command: "echo default" }, toolName: "bash" }]),
-        modelContextWindowTokens: 200_000,
-      },
+      model: scripted([{ input: { command: "echo default" }, toolName: "bash" }]),
+      modelContextWindowTokens: 200_000,
       name: "own-bash",
       tools: {
         bash: defineTool({
@@ -140,19 +139,17 @@ describe("eve.defaults() for an agent defined in code", () => {
     "runs bash in a Docker sandbox",
     async () => {
       const { DockerSandbox } = await import("#sandbox/providers/docker.js");
-      const shell = codeAgent({
+      const shell = defineAgent({
         definitions: eve.defaults({
           sandbox: codeSandbox(DockerSandbox.environment({}), { appRoot }),
         }),
-        model: {
-          model: scripted([
-            {
-              input: { command: "echo $BASH_VERSION | cut -d. -f1 && uname -s" },
-              toolName: "bash",
-            },
-          ]),
-          modelContextWindowTokens: 200_000,
-        },
+        model: scripted([
+          {
+            input: { command: "echo $BASH_VERSION | cut -d. -f1 && uname -s" },
+            toolName: "bash",
+          },
+        ]),
+        modelContextWindowTokens: 200_000,
         name: "docker-coder",
       });
       const session = createSession(shell, { identity: alice });
