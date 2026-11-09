@@ -77,9 +77,9 @@ function beginReleaseCommand(owner: string): string {
     `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
     `  sleep 0.1`,
     `done`,
-    // Check the lock's age before its owner. A lock young enough to skip the guard can't be taken
-    // over between the two checks. If another command takes it over after the age check, the age
-    // reads as too old and cleanup is skipped.
+    // First read how old the lock is, then read which command owns it. A lock young enough to
+    // skip the guard can't be taken over between the two reads. If another command takes it over
+    // after the first read, the lock already counted as too old, so cleanup is skipped.
     `fresh=0`,
     `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
     `held=0`,
