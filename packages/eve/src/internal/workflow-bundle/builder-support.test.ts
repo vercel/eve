@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createWorkflowNodeBuiltinGuardPlugin } from "#internal/workflow-bundle/builder-support.js";
+import { resolvePackageRoot } from "#internal/application/package.js";
+import {
+  createWorkflowDriverAliasPlugin,
+  createWorkflowNodeBuiltinGuardPlugin,
+} from "#internal/workflow-bundle/builder-support.js";
 
 describe("createWorkflowNodeBuiltinGuardPlugin", () => {
   const plugin = createWorkflowNodeBuiltinGuardPlugin();
@@ -28,4 +32,28 @@ describe("createWorkflowNodeBuiltinGuardPlugin", () => {
   it("omits the importer clause when the importer is unknown", () => {
     expect(() => resolve("node:crypto")).toThrow(/Node\.js builtin "node:crypto"\. Move/);
   });
+});
+
+describe("createWorkflowDriverAliasPlugin", () => {
+  const plugin = createWorkflowDriverAliasPlugin(resolvePackageRoot());
+
+  function resolve(source: string, importer?: string): unknown {
+    return (plugin.resolveId as (s: string, i?: string) => unknown)(source, importer);
+  }
+
+  it.each(["eve/workflow", "eve/experimental/workflow", "workflow"])(
+    "resolves %s to the body-side shim",
+    (source) => {
+      expect(resolve(source)).toEqual({ id: expect.stringMatching(/workflow-core-shim\.[jt]s$/u) });
+    },
+  );
+
+  it.each(["eve/workflow/api", "eve/experimental/workflow/api", "workflow/api"])(
+    "rejects %s inside a workflow body",
+    (source) => {
+      expect(() => resolve(source, "/app/flow.ts")).toThrow(
+        /runtime API is not available inside a workflow body/u,
+      );
+    },
+  );
 });
