@@ -61,6 +61,12 @@ export interface LinearChannelState extends PromptQueueState {
    * @internal
    */
   pendingToolCallMessage?: string | null;
+  /**
+   * Fallback text of reply parts Linear can't show, such as a tool's card, held for the turn's
+   * next `response` activity: Linear marks a session complete on a `response`.
+   * @internal
+   */
+  pendingReplyParts?: string[] | null;
   readonly sourceCommentId?: string | null;
 }
 

@@ -83,6 +83,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
   return {
     async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
+      channel.state.pendingReplyParts = null;
       await postActivity(
         channel,
         options,
@@ -187,10 +188,11 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
 
     async "content.completed"({ data }, { channel }) {
       if (data.kind !== "text") {
-        // A part Linear can't show, such as a tool's card, posts its fallback text.
+        // A part Linear can't show, such as a tool's card, shows its fallback text with the
+        // turn's next response. A response of its own would mark the session complete mid-turn.
         const fallback = replyTextOf(data);
         if (fallback !== undefined) {
-          await postActivity(channel, options, { body: fallback, type: "response" });
+          channel.state.pendingReplyParts = [...(channel.state.pendingReplyParts ?? []), fallback];
         }
         return;
       }
@@ -204,8 +206,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       }
       channel.state.pendingToolCallMessage = null;
       if (!data.value) return;
+      const parts = channel.state.pendingReplyParts ?? [];
+      channel.state.pendingReplyParts = null;
       await postActivity(channel, options, {
-        body: data.value,
+        body: [...parts, data.value].join("\n\n"),
         type: "response",
       });
     },
@@ -220,6 +224,12 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "turn.settled"({ data }, { channel }) {
+      // Reply parts the turn's text never carried, such as a card that was its whole answer.
+      const parts = channel.state.pendingReplyParts ?? [];
+      channel.state.pendingReplyParts = null;
+      if (parts.length > 0) {
+        await postActivity(channel, options, { body: parts.join("\n\n"), type: "response" });
+      }
       const notice = failureNotice(data, "turn");
       if (notice === undefined) return;
       await postActivity(channel, options, {

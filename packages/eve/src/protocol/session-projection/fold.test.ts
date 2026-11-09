@@ -528,6 +528,7 @@ describe("the shared fold", () => {
       step("run_1", { kind: "result", partId: "run_1.result", value: { ok: true } }),
     ]);
     expect(reply(structured, "turn_0").map((part) => part.kind)).toEqual(["card", "result"]);
+    expect(replyText(structured, "turn_0")).toBe("A card.");
   });
 
   it("records a run's current attempt, each retry's start moving it on", () => {
