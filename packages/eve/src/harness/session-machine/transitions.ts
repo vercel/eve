@@ -525,6 +525,8 @@ export function relay(
     /** The sign-ins this session can call back, when it runs in a workflow. */
     readonly callsBack?: CallsBack;
     readonly payload: SubagentInteractionHookPayload;
+    /** The routes this session keeps for the requests it relays, by interaction id. */
+    readonly relays?: ReadonlyMap<string, Relay>;
     /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
     readonly workflowAsk?: WorkflowAskRoute;
@@ -555,6 +557,8 @@ export function relay(
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
+    // The route this session keeps for the request, else the one the asker relays it by.
+    const answersRoute = input.relays?.get(interactionId) ?? route;
     if (event.type === "interaction.opened" && !serving) continue;
     if (
       event.type !== "interaction.opened" &&
@@ -585,12 +589,15 @@ export function relay(
       }
       case "interaction.settled":
         if (mirror?.status !== "open") break;
-        events.push(...mirrorSettled(tables, event.data));
+        events.push(...mirrorSettled(tables, event.data, answersRoute));
         break;
       case "response.admitted": {
         // The asker admitted an answer this session forwarded: it stands here too, while the
         // rest of its batch waits.
-        const answer = mirror === undefined ? undefined : forwardedAnswer(tables, event.data);
+        const answer =
+          mirror === undefined
+            ? undefined
+            : forwardedAnswer(tables, interactionId, event.data.deliveryId, answersRoute);
         if (answer !== undefined && tables.responses[answer]?.status === "submitted")
           events.push(responseAdmitted(answer));
         break;
@@ -598,7 +605,10 @@ export function relay(
       case "response.settled": {
         // How the asker settled an answer this session forwarded; a deciding one settles with
         // its interaction.
-        const answer = mirror === undefined ? undefined : forwardedAnswer(tables, event.data);
+        const answer =
+          mirror === undefined
+            ? undefined
+            : forwardedAnswer(tables, interactionId, event.data.deliveryId, answersRoute);
         if (answer !== undefined && event.data.outcome !== "applied")
           events.push(responseSettled(answer, event.data.outcome, event.data.reason));
         break;
@@ -625,43 +635,66 @@ export function relayedMirror(
     : undefined;
 }
 
-/** The asker settled what this session mirrors: the mirror settles the same way. */
+/**
+ * The asker settled what this session mirrors: the mirror settles the same way, crediting the
+ * answer the asker names as its decider (`relayedInteractionEvents`).
+ */
 function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
+  route: Relay | undefined,
 ): SessionEvent[] {
-  const open = Object.values(tables.responses)
-    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
-    .sort((a, b) => a.introducedAt - b.introducedAt);
   const decided =
     settled.outcome === "accepted" ||
     settled.outcome === "declined" ||
     settled.outcome === "invalid";
+  const named =
+    settled.cause !== undefined && "deliveryId" in settled.cause
+      ? settled.cause.deliveryId
+      : undefined;
   // The writer withdraws the answers that didn't decide (`cascade`).
-  const decider = decided ? open.at(-1) : undefined;
+  const decider = decided
+    ? forwardedAnswer(tables, settled.interactionId, named, route)
+    : undefined;
   const events: SessionEvent[] =
-    decider === undefined ? [] : [responseSettled(decider.responseId, "applied", settled.reason)];
-  const cause = decider === undefined ? settled.cause : { responseId: decider.responseId };
+    decider === undefined ? [] : [responseSettled(decider, "applied", settled.reason)];
+  // Any id the asker names is its own, not one of this session's: only a policy or hook carries.
+  const cause =
+    decider !== undefined
+      ? { responseId: decider }
+      : settled.cause !== undefined && ("policy" in settled.cause || "hook" in settled.cause)
+        ? settled.cause
+        : undefined;
   events.push(fact("interaction.settled", { ...settled, cause }));
   return events;
 }
 
-/** The answer this session forwarded that an asker's settlement is about. */
+/**
+ * The open answer this session forwarded that an asker names by the delivery it received it in.
+ * An asker that names none, such as a protocol 2 remote, can mean only the one open answer;
+ * between several, or for a delivery this session didn't forward, there is none to credit.
+ */
 function forwardedAnswer(
   tables: PublicView,
-  settled: { readonly interactionId: string; readonly deliveryId?: string },
+  interactionId: string,
+  deliveryId: string | undefined,
+  route: Relay | undefined,
 ): string | undefined {
-  const open = Object.values(tables.responses)
-    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
-    .sort((a, b) => a.introducedAt - b.introducedAt);
-  const { deliveryId } = settled;
-  if (deliveryId === undefined) return open.at(-1)?.responseId;
-  // A child names a share of a payload this session forwarded by an id of its own.
+  const open = Object.values(tables.responses).filter(
+    (row) => row.interactionId === interactionId && row.status !== "settled",
+  );
+  if (deliveryId === undefined) return open.length === 1 ? open[0]!.responseId : undefined;
+  // A remote never sees this session's delivery ids, so it can name an answer only by a receipt.
+  if (route?.remote !== undefined) {
+    const receipts = route.receipts ?? {};
+    const ours = Object.hasOwn(receipts, deliveryId) ? receipts[deliveryId] : undefined;
+    return open.find((row) => row.deliveryId === ours)?.responseId;
+  }
+  // A local child names the delivery, or a share of a payload by an id of its own.
   const source = forwardedFrom(deliveryId);
   return (
     open.find((row) => row.deliveryId === deliveryId) ??
-    open.find((row) => row.deliveryId === source) ??
-    open.at(-1)
+    open.find((row) => row.deliveryId === source)
   )?.responseId;
 }
 
@@ -695,6 +728,8 @@ export function routeAnswer(
       readonly answer: Answer;
       readonly outcome: "accepted" | "declined";
     }[];
+    /** Routes that learned the receipt a remote asker gave the answers forwarded to it. */
+    readonly relays?: Readonly<Record<string, Relay>>;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -753,7 +788,9 @@ export function routeAnswer(
     events.push(deliveryApplied(delivery.deliveryId));
   }
   // The answered routes retire with the commit, so a later delivery can't route through them.
-  return unchanged(view, events);
+  return input.relays === undefined
+    ? unchanged(view, events)
+    : { ...unchanged(view, events), relays: input.relays };
 }
 
 // ---------------------------------------------------------------------------
