@@ -657,11 +657,11 @@ function mirrorSettled(
     : undefined;
   const events: SessionEvent[] =
     decider === undefined ? [] : [responseSettled(decider, "applied", settled.reason)];
-  // A delivery the asker names is its own, not one of this session's.
+  // Any id the asker names is its own, not one of this session's: only a policy or hook carries.
   const cause =
     decider !== undefined
       ? { responseId: decider }
-      : named === undefined
+      : settled.cause !== undefined && ("policy" in settled.cause || "hook" in settled.cause)
         ? settled.cause
         : undefined;
   events.push(fact("interaction.settled", { ...settled, cause }));
@@ -684,7 +684,10 @@ function forwardedAnswer(
   );
   if (deliveryId === undefined) return open.length === 1 ? open[0]!.responseId : undefined;
   // A remote names the receipt it gave; a local child, a share of a payload by an id of its own.
-  const ours = receipts?.[deliveryId] ?? deliveryId;
+  const ours =
+    receipts !== undefined && Object.hasOwn(receipts, deliveryId)
+      ? receipts[deliveryId]!
+      : deliveryId;
   const source = forwardedFrom(ours);
   return (
     open.find((row) => row.deliveryId === ours) ?? open.find((row) => row.deliveryId === source)

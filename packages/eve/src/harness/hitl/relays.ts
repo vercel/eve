@@ -85,12 +85,10 @@ export function parseRelay(value: unknown): Relay | undefined {
     if (typeof runId !== "string" || runId.length === 0) return undefined;
     relay.runId = runId;
   }
+  // Receipts only credit answers; the route still reaches the asker without them.
   const receipts = Reflect.get(value, "receipts");
-  if (receipts !== undefined) {
-    if (!isRecord(receipts) || Object.values(receipts).some((id) => typeof id !== "string"))
-      return undefined;
+  if (isRecord(receipts) && Object.values(receipts).every((id) => typeof id === "string"))
     relay.receipts = receipts as Record<string, string>;
-  }
   return relay;
 }
 

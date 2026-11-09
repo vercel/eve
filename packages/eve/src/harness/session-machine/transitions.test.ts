@@ -4,7 +4,6 @@ import { requireSignIn, settleLimit } from "#harness/hitl/approvals.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { dropClosedRecords, saveTransition, sessionView } from "#harness/session-machine/commit.js";
 import { readHitlState } from "#harness/hitl/requests.js";
-import type { Relay } from "#harness/hitl/relays.js";
 import { relayedInteractionEvents } from "#harness/interaction-relay.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import {
@@ -1010,7 +1009,6 @@ describe("crediting the answers this session forwarded", () => {
   function relayed(
     session: HarnessSession,
     events: SubagentInteractionHookPayload["events"],
-    relays?: ReadonlyMap<string, Relay>,
   ): readonly SessionEvent[] {
     return relay(viewOf(session), {
       payload: {
@@ -1020,7 +1018,6 @@ describe("crediting the answers this session forwarded", () => {
         kind: "subagent-interaction",
         subagentName: "deployer",
       },
-      relays,
     }).events;
   }
 
@@ -1053,32 +1050,20 @@ describe("crediting the answers this session forwarded", () => {
     expect(credited(settled)).toEqual({ "r-alice": "withdrawn", "r-bob": "withdrawn" });
   });
 
-  it("refuses and credits the answers a remote child names by the receipts it gave", () => {
+  it("credits nothing from an older child that names its own response as the cause", () => {
     const session = forwardedTwice();
-    const relays = new Map<string, Relay>([
-      [
-        interactionId,
-        {
-          childContinuationToken: "child",
-          receipts: { "receipt-alice": "d-alice", "receipt-bob": "d-bob" },
-        },
-      ],
-    ]);
-    const refused = withPublished(session, relayed(session, refusesBob("receipt-bob"), relays));
+    // An older child names the decider by its own response id, which means nothing here.
     const settled = withPublished(
-      refused,
-      relayed(
-        refused,
-        [
-          {
-            data: { cause: { deliveryId: "receipt-alice" }, interactionId, outcome: "accepted" },
-            type: "interaction.settled",
-          },
-        ],
-        relays,
-      ),
+      session,
+      relayed(session, [
+        {
+          data: { cause: { responseId: "response_d-bob_0" }, interactionId, outcome: "accepted" },
+          type: "interaction.settled",
+        },
+      ]),
     );
-    expect(credited(settled)).toEqual({ "r-alice": "applied", "r-bob": "refused" });
+    expect(credited(settled)).toEqual({ "r-alice": "withdrawn", "r-bob": "withdrawn" });
+    expect(viewOf(settled).projection.view.interactions[interactionId]?.cause).toBeUndefined();
   });
 
   it("credits the answer the child applied, not a later one that raced it", () => {
