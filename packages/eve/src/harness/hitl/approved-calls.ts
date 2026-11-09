@@ -25,8 +25,76 @@ import type { ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { AuthorizationChallenge, SignInCompleted } from "#harness/authorization.js";
+import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
+
+/**
+ * How the sign-ins a batch of resumed calls waited on are reported. A call that completes a sign-in
+ * reports it then (`completed`, read through `SignInCompletedKey`), so the other askers for the
+ * same grant resume while the call still runs; the call's end reports what is left (`report`):
+ * accepted if it returned, failed with the reason it didn't. Each attempt is reported once, by
+ * whichever comes first, however many calls complete it at the same time.
+ */
+export interface SignInReports {
+  readonly report: (call: ApprovedCall, failure?: Error | string) => Promise<void>;
+  /** The reporter for `SignInCompletedKey` while `calls` run: each attempt with the call it stopped. */
+  readonly completed: (calls: readonly ApprovedCall[]) => SignInCompleted;
+}
+
+export function signInReports(input: {
+  readonly publish: HandleEventFn;
+  readonly view: () => Pick<SessionView, "projection">;
+}): SignInReports {
+  const reported = new Map<string, Promise<void>>();
+  const settle = async (
+    call: ApprovedCall,
+    challenge: AuthorizationChallenge,
+    failure: Error | string | undefined,
+  ): Promise<void> => {
+    const refused = isConnectionAuthorizationFailedError(failure) ? failure : undefined;
+    const events = callSignInsSettled(
+      input.view(),
+      { ...call, signIns: [challenge] },
+      failure === undefined
+        ? undefined
+        : {
+            reason:
+              refused === undefined ? toErrorMessage(failure) : (refused.reason ?? refused.message),
+            ...(refused !== undefined && { retryable: refused.retryable }),
+          },
+    );
+    if (events.length > 0) await input.publish(commitOf(events));
+  };
+  const reportOne = (
+    call: ApprovedCall,
+    challenge: AuthorizationChallenge,
+    failure: Error | string | undefined,
+  ): Promise<void> => {
+    const key = signInAttemptKey(challenge);
+    let pending = reported.get(key);
+    if (pending === undefined) {
+      pending = settle(call, challenge, failure);
+      reported.set(key, pending);
+    }
+    return pending;
+  };
+  return {
+    report: async (call, failure) => {
+      await Promise.all(
+        (call.signIns ?? []).map((challenge) => reportOne(call, challenge, failure)),
+      );
+    },
+    completed: (calls) => async (result, failure) => {
+      if (result.attemptId === undefined) return;
+      for (const call of calls) {
+        const challenge = call.signIns?.find(({ attemptId }) => attemptId === result.attemptId);
+        if (challenge !== undefined) await reportOne(call, challenge, failure);
+      }
+    },
+  };
+}
 
 /**
  * Runs approved local calls before the model reads their results. Like the calls a model step
@@ -48,30 +116,13 @@ export async function runApprovedCalls(input: {
   readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
   /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
+  /** The batch's sign-in reports, shared by every group of calls resumed together. */
+  readonly signIns?: SignInReports;
 }): Promise<{
   readonly settled: readonly CallResult[];
   readonly signIns: readonly ToolSignIn[];
 }> {
-  /**
-   * The sign-ins a call waited on end with the call, once `completeAuthorization` has run in it:
-   * accepted if it returned, failed with the reason it didn't. Reported before the call's result.
-   */
-  const reportSignIns = async (call: ApprovedCall, failure?: Error | string): Promise<void> => {
-    if ((call.signIns?.length ?? 0) === 0) return;
-    const refused = isConnectionAuthorizationFailedError(failure) ? failure : undefined;
-    const events = callSignInsSettled(
-      input.view(),
-      call,
-      failure === undefined
-        ? undefined
-        : {
-            reason:
-              refused === undefined ? toErrorMessage(failure) : (refused.reason ?? refused.message),
-            ...(refused !== undefined && { retryable: refused.retryable }),
-          },
-    );
-    if (events.length > 0) await input.publish(commitOf(events));
-  };
+  const reportSignIns = (input.signIns ?? signInReports(input)).report;
   const executed = await Promise.allSettled(
     input.approvals.map(async (approval): Promise<CallOutcome> => {
       const { call } = approval;

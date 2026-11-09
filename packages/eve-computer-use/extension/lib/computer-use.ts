@@ -45,6 +45,8 @@ const FIREFOX_USER_JS = [
   'user_pref("browser.urlbar.maxRichResults", 0);',
   'user_pref("browser.newtabpage.activity-stream.feeds.topsites", false);',
   'user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);',
+  // Firefox opens a modal Terms of Use dialog over the first page; WebDriver sets this pref too.
+  'user_pref("termsofuse.bypassNotification", true);',
 ].join("\n");
 const FIREFOX_USER_CHROME = `
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
@@ -63,6 +65,7 @@ const FIREFOX_USER_CHROME = `
 #nav-bar-overflow-button,
 #identity-box,
 #tracking-protection-icon-container,
+#trust-icon-container,
 #page-action-buttons {
   display: none !important;
 }

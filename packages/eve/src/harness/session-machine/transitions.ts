@@ -48,13 +48,21 @@ import {
   openRunOf,
   type SessionProjection,
 } from "#protocol/session-projection.js";
-import type { SessionView as PublicView } from "#protocol/session-projection/tables.js";
+import type {
+  InteractionRow,
+  SessionView as PublicView,
+} from "#protocol/session-projection/tables.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import {
+  SIGN_IN_DECLINED,
+  signInAttemptKey,
+  waitingSignIn,
+  type CallsBack,
+} from "#harness/hitl/sign-ins.js";
 import { forwardedFrom, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
@@ -514,6 +522,8 @@ function withdrawInteraction(
 export function relay(
   view: SessionView,
   input: {
+    /** The sign-ins this session can call back, when it runs in a workflow. */
+    readonly callsBack?: CallsBack;
     readonly payload: SubagentInteractionHookPayload;
     /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
@@ -548,21 +558,24 @@ export function relay(
     if (event.type === "interaction.opened" && !serving) continue;
     if (
       event.type !== "interaction.opened" &&
-      (mirror?.origin === undefined ||
-        !("callId" in mirror.subject) ||
-        mirror.subject.callId !== payload.callId)
+      relayedMirror(tables, payload, interactionId) === undefined
     )
       continue;
     switch (event.type) {
       case "interaction.opened": {
         if (mirror !== undefined) break;
         events.push({
-          data: {
-            ...event.data,
-            // Every relayed request names its asker; one relayed from further down names its own.
-            origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
-            subject: { callId: payload.callId },
-          },
+          // A sign-in the person already has a card for waits on that card's answer.
+          data: waitingSignIn(
+            tables,
+            {
+              ...event.data,
+              // Every relayed request names its asker; one relayed from further down names its own.
+              origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
+              subject: { callId: payload.callId },
+            },
+            input.callsBack,
+          ),
           type: "interaction.opened",
         });
         // A person answers it here, and the answer goes back the way it came.
@@ -596,6 +609,20 @@ export function relay(
   return Object.keys(upsert).length > 0
     ? { ...unchanged(view, events), relays: upsert }
     : unchanged(view, events);
+}
+
+/** The row this session mirrors for the asker that relayed `payload`, about the call it serves. */
+export function relayedMirror(
+  tables: PublicView,
+  payload: SubagentInteractionHookPayload,
+  interactionId: string,
+): InteractionRow | undefined {
+  const mirror = tables.interactions[interactionId];
+  return mirror?.origin !== undefined &&
+    "callId" in mirror.subject &&
+    mirror.subject.callId === payload.callId
+    ? mirror
+    : undefined;
 }
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */
@@ -803,7 +830,7 @@ function signInCallbackFacts(
   tables: PublicView,
   challenge: AuthorizationChallenge,
   settled: {
-    readonly outcome: "accepted" | "failed";
+    readonly outcome: "accepted" | "declined" | "failed";
     readonly reason?: string;
     readonly retryable?: boolean;
   },
@@ -831,9 +858,9 @@ function signInCallbackFacts(
 }
 
 /**
- * A call a sign-in stopped settled: the sign-ins it waited on end with it, accepted if it returned
- * and failed with the reason it didn't. A failure with `retryable: false` is terminal, recorded as
- * the settlement's `response.retryable`. Published before the call's own settlement.
+ * A call a sign-in stopped settled: the sign-ins it waited on end with it, accepted if it returned,
+ * declined if the person refused consent, and failed with the reason it didn't otherwise. A
+ * failure with `retryable: false` is terminal, recorded as the settlement's `response.retryable`. Published before the call's own settlement.
  */
 export function callSignInsSettled(
   view: Pick<SessionView, "projection">,
@@ -844,7 +871,11 @@ export function callSignInsSettled(
   const settled =
     failure === undefined
       ? { outcome: "accepted" as const }
-      : { ...failure, outcome: "failed" as const };
+      : {
+          ...failure,
+          outcome:
+            failure.reason === SIGN_IN_DECLINED ? ("declined" as const) : ("failed" as const),
+        };
   return (call.signIns ?? []).flatMap((challenge) =>
     signInCallbackFacts(tables, challenge, settled),
   );

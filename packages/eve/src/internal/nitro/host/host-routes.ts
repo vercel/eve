@@ -263,7 +263,9 @@ export async function renderHostRoutes(
     switch (route.kind) {
       case "channel": {
         const routeKey = `${route.method} ${route.path}`;
-        const id = `#eve/channel/${routeKey}`;
+        // The bundler types a module by its id's extension, and an authored
+        // path can end in one (`/agent-card.json`), so the id ends in `.mjs`.
+        const id = `#eve/channel/${routeKey}.mjs`;
         const pattern = normalizeRoutePattern(route.path);
         if (route.method === "WEBSOCKET") {
           if (!httpGetPatterns.has(pattern)) {
@@ -290,7 +292,7 @@ export async function renderHostRoutes(
       }
       case "channel-preflight":
         addVirtualHandler(
-          `#eve/channel/OPTIONS ${route.path}`,
+          `#eve/channel/OPTIONS ${route.path}.mjs`,
           renderChannelPreflightHandler({ cors: route.cors }),
           { method: "OPTIONS", route: route.path },
         );
