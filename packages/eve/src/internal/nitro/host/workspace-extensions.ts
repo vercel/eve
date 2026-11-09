@@ -270,7 +270,16 @@ async function resolveWorkspaceExtensionDependency(input: {
   while (true) {
     const packageRoot = join(current, "node_modules", input.packageName);
     const manifest = await readFile(join(packageRoot, "package.json"), "utf8").catch(
-      () => undefined,
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error.code === "ENOENT" || error.code === "ENOTDIR")
+        ) {
+          return undefined;
+        }
+        throw error;
+      },
     );
     if (manifest !== undefined) {
       let pkg: { eve?: { extension?: unknown } };
