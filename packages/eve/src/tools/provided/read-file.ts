@@ -1,13 +1,14 @@
 import { type ReadFileInput, executeReadFileOnSandbox } from "#execution/sandbox/read-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
-import { basename } from "node:path";
 
 import { contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { toBase64 } from "#shared/bytes.js";
+import { basename } from "#platform/host-path.js";
 
 export interface ReadFileToolInput {
   filePath: string;
@@ -131,7 +132,7 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
       }
       return toolOutput.content([
         toolOutputPart.text(output.content),
-        toolOutputPart.file(Buffer.from(bytes).toString("base64"), {
+        toolOutputPart.file(toBase64(bytes), {
           filename: basename(output.path),
           mediaType: output.file.mediaType,
         }),

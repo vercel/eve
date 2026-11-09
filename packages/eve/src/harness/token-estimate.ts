@@ -8,6 +8,7 @@ import {
   inlinesSandboxRefAsBytes,
   isSandboxRefUrl,
 } from "#internal/attachments/sandbox-refs.js";
+import { fromBase64, utf8ByteLength } from "#shared/bytes.js";
 
 // Enough base64 to cover image headers, including a JPEG's EXIF block.
 const HEADER_BASE64_CHARS = 96 * 1024;
@@ -38,7 +39,7 @@ export function estimateTokens(value: unknown): number {
     return { mediaType, type };
   });
   // Whole tokens: the count reaches events, which carry integers.
-  return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
+  return Math.ceil(utf8ByteLength(serialized ?? "") / 4) + mediaTokens;
 }
 
 /**
@@ -123,7 +124,7 @@ function estimateInlineTokens(data: unknown, mediaType: string): number | undefi
 }
 
 function base64Header(base64: string): Uint8Array {
-  return Buffer.from(base64.slice(0, HEADER_BASE64_CHARS), "base64");
+  return fromBase64(base64.slice(0, HEADER_BASE64_CHARS));
 }
 
 // Only image dimensions come from a header; page counts need the whole

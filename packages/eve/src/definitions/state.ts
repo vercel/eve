@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { ContextReader } from "#context/key.js";
 import { ContextKey } from "#context/key.js";
 import type { AlsContext } from "#context/container.js";
@@ -7,6 +5,8 @@ import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
 import { REACTIONS_STATE_KEY, type Continuation } from "./continuation.js";
+import { sha256Base64Url } from "#shared/digest.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 // What the session's definitions keep, in its checkpointed state, never on the stream: one slot
 // per dynamic value with what's installed, memo results, and the commands hooks queued. Installed values that carry code live in an in-process
@@ -87,7 +87,7 @@ export function writeDefinitionsState(ctx: AlsContext, state: DefinitionsState):
 export const MEMOS_CAP = 4 * 1024 * 1024;
 
 export function memoBytes(result: JsonValue): number {
-  return Buffer.byteLength(JSON.stringify(result));
+  return utf8ByteLength(JSON.stringify(result));
 }
 
 /** A scope's evaluation succeeded: it keeps the memos it used, and only those. */
@@ -150,7 +150,7 @@ export function slotValueOf<T>(value: JsonValue | null | undefined): T {
 
 /** A stable digest of a JSON value. */
 export function digestOf(value: JsonValue): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("base64url").slice(0, 22);
+  return sha256Base64Url(canonicalJson(value)).slice(0, 22);
 }
 
 export function canonicalJson(value: JsonValue): string {

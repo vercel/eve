@@ -9,7 +9,8 @@ import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 import type { WriteFileResult } from "../src/execution/sandbox/write-file.js";
 import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file.js";
-import { createReadFileStamp, ReadFileStateKey } from "../src/execution/tools/file-state.js";
+import { createReadFileStamp } from "../src/execution/tools/file-state.js";
+import { ReadFileStateKey } from "../src/context/keys.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 

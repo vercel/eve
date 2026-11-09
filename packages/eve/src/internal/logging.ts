@@ -6,12 +6,14 @@
  */
 import { type Span, SpanStatusCode, trace } from "#compiled/@opentelemetry/api/index.js";
 import { getErrorMessage } from "#compiled/@ai-sdk/provider/index.js";
-import { inspect } from "node:util";
 
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
 import { truncateTelemetryText } from "#compiled/@vercel/agent-runs/otel.js";
+import { readEnv } from "#platform/env.js";
+import { inspectForLog } from "#platform/inspect.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 const MAX_INSPECT_STRING_LENGTH = 8 * 1024;
 const MAX_DETAIL_BYTES = 16 * 1024;
@@ -239,7 +241,7 @@ export function recordErrorOnSpan(span: Span, error: unknown): void {
  * rebuilding the logger.
  */
 function resolveThreshold(): number {
-  const configured = process.env.EVE_LOG_LEVEL?.toLowerCase();
+  const configured = readEnv("EVE_LOG_LEVEL")?.toLowerCase();
   if (
     configured === "debug" ||
     configured === "info" ||
@@ -391,23 +393,15 @@ function isFormattedError(
  * client-side stream-error capture).
  */
 export function inspectError(error: unknown): string {
-  return truncate(
-    inspect(error, {
-      breakLength: Number.POSITIVE_INFINITY,
-      compact: false,
-      depth: INSPECT_DEPTH,
-      maxStringLength: MAX_INSPECT_STRING_LENGTH,
-    }),
-    MAX_DETAIL_BYTES,
-  );
+  return truncate(inspectForLog(error, INSPECT_DEPTH, MAX_INSPECT_STRING_LENGTH), MAX_DETAIL_BYTES);
 }
 
 function truncate(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) {
+  if (utf8ByteLength(value) <= maxBytes) {
     return value;
   }
   let sliced = value.slice(0, maxBytes);
-  while (Buffer.byteLength(sliced, "utf8") > maxBytes && sliced.length > 0) {
+  while (utf8ByteLength(sliced) > maxBytes && sliced.length > 0) {
     sliced = sliced.slice(0, -1);
   }
   return `${sliced}<…truncated>`;

@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { defineDynamic, dynamicEvaluate } from "#dynamic/definition.js";
 import { createModelMetadata, type ModelMetadata } from "#internal/model-catalog.js";
 import { agent } from "#public/tools/agent.js";

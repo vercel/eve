@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import type { HarnessSession } from "#harness/types.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { mergeObjects } from "#shared/objects.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 /**
  * Adds a provider-specific end-user safety identifier without disclosing the
@@ -70,7 +69,7 @@ function mergeOpenAIPromptCacheKey(
   providerOptions: Readonly<Record<string, unknown>> | undefined,
   sessionId: string,
 ): Record<string, unknown> {
-  const promptCacheKey = createHash("sha256").update(sessionId, "utf8").digest("base64url");
+  const promptCacheKey = sha256Base64Url(sessionId);
   return mergeObjects({ openai: { promptCacheKey } }, providerOptions);
 }
 

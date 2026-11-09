@@ -27,7 +27,6 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeBlockingFailure } from "#definitions/kernel.js";
-import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
@@ -51,6 +50,7 @@ import {
 } from "#harness/session-machine/context-changes.js";
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { isDeepStrictEqual } from "#platform/deep-equal.js";
 
 const log = createLogger("harness.tool-loop");
 /**

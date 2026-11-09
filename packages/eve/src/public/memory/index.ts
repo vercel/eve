@@ -1,5 +1,4 @@
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
-import { createHash } from "node:crypto";
 
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
@@ -15,6 +14,8 @@ import {
 } from "#shared/public-route-prefix.js";
 import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
 import type { ToolDefinition } from "#tools/definition.js";
+import { readEnv } from "#platform/env.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 export interface MemoryNamespaceContext {
   readonly appRoot: string;
@@ -165,24 +166,24 @@ export function defaultNamespace(context: MemoryNamespaceContext): string {
     return JSON.stringify([
       "eve-memory-default-namespace-v1",
       "local",
-      createHash("sha256").update(context.appRoot).digest("base64url"),
+      sha256Base64Url(context.appRoot),
       context.node,
       context.slot,
     ]);
   }
 
   const environment =
-    process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim() || "production";
+    readEnv("VERCEL_TARGET_ENV")?.trim() || readEnv("VERCEL_ENV")?.trim() || "production";
   const previewIdentity =
     environment === "preview"
-      ? process.env.VERCEL_GIT_COMMIT_REF?.trim() ||
-        process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
-        process.env.VERCEL_URL?.trim() ||
+      ? readEnv("VERCEL_GIT_COMMIT_REF")?.trim() ||
+        readEnv("VERCEL_DEPLOYMENT_ID")?.trim() ||
+        readEnv("VERCEL_URL")?.trim() ||
         "unknown-preview"
       : null;
   const publicRoutePrefix =
-    process.env[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] === "1"
-      ? normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV])
+    readEnv(EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV) === "1"
+      ? normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV))
       : undefined;
   return JSON.stringify([
     "eve-memory-default-namespace-v1",

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "#platform/uuid.js";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Session } from "#channel/session.js";

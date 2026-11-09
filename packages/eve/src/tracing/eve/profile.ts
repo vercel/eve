@@ -4,6 +4,7 @@ import type {
   OutputMapping,
 } from "#compiled/@vercel/agent-runs/index.js";
 import { currentTraceSessionId } from "#tracing/eve/agent-trace-context-store.js";
+import { readEnv } from "#platform/env.js";
 
 export function eveOutputMapping(options?: {
   readonly resolve: (span: MappingContext) => {
@@ -24,7 +25,7 @@ export function eveOutputMapping(options?: {
       }
       if (attributes["agent.run.id"] !== undefined) {
         const context = options?.resolve(span) ?? {
-          platform: process.env.VERCEL_ENV === undefined ? "other" : "vercel",
+          platform: readEnv("VERCEL_ENV") === undefined ? "other" : "vercel",
           traceSessionId:
             typeof attributes["agent.run.id"] === "string"
               ? currentTraceSessionId(attributes["agent.run.id"])

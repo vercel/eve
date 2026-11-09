@@ -1,5 +1,5 @@
 import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";

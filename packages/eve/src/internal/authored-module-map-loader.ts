@@ -10,12 +10,12 @@ import type {
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { memoizeModuleNamespaceFactories } from "#compiler/source-graph.js";
+import { resolveExtensionBindingMountId } from "#compiler/module-map.js";
 import {
   collectRuntimeModuleBindingsForManifest,
   compiledModuleMapSchema,
-  resolveExtensionBindingMountId,
   type CompiledModuleMap,
-} from "#compiler/module-map.js";
+} from "#compiler/module-map-schema.js";
 import { loadFrameworkProgrammaticModule } from "#framework/sources/registry.js";
 import {
   bundleAuthoredModuleMapForGeneration,

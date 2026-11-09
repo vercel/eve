@@ -7,7 +7,12 @@ import {
 import type { CreateRuntime } from "#execution/node-step.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
 import type { ConnectionEventOwners } from "#runtime/connections/events/owners.js";
-import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
+import {
+  HookNotFoundError,
+  isRunNotFound,
+  isRunTargetGone,
+  RunNotFoundError,
+} from "#shared/run-errors.js";
 
 // The hosts in this realm, for code that addresses a hook, a run or a session stream by id, or
 // asks whether the durable step it runs in is a retry, and runs on any host.
@@ -124,11 +129,11 @@ export function uninstallDurableHost(host: DurableHost): void {
   if (state.durable === host) state.durable = undefined;
 }
 
-/** The durable host, for an id no route holds; without one, the id is gone. */
-function durableHostFor(id: string): DurableHost {
+/** The durable host, for a hook token or run id no route holds; without one, it's gone. */
+function durableHostFor(target: { readonly hook: string } | { readonly run: string }): DurableHost {
   const { durable } = hosts();
-  if (durable === undefined) throw new HookNotFoundError(id);
-  return durable;
+  if (durable !== undefined) return durable;
+  throw "hook" in target ? new HookNotFoundError(target.hook) : new RunNotFoundError(target.run);
 }
 
 /**
@@ -161,7 +166,7 @@ export async function deliverToHostedHook(token: string, payload: unknown): Prom
 /** Resumes the hook `token` names, wherever it's held. */
 export async function resumeRoutedHook(token: string, payload: unknown): Promise<void> {
   if (!(await deliverToHostedHook(token, payload)))
-    await durableHostFor(token).resumeHook(token, payload);
+    await durableHostFor({ hook: token }).resumeHook(token, payload);
 }
 
 /** Delivers `delivery` to the session `address` names, wherever it runs. */
@@ -171,7 +176,7 @@ export async function resumeRoutedSessionInbox(
 ): Promise<void> {
   const token = sessionInboxHookToken(logicalSessionToken(address));
   if (!(await deliverToHostedHook(token, delivery)))
-    await durableHostFor(token).resumeSessionInbox(address, delivery);
+    await durableHostFor({ hook: token }).resumeSessionInbox(address, delivery);
 }
 
 function hostedRunEnded(runId: string): boolean | undefined {
@@ -188,12 +193,14 @@ function isRunning(status: string): boolean {
 
 /**
  * Whether `runId` was accepted and has finished, wherever it runs. A durable run one `start()`
- * accepted may not be readable yet, so one not found hasn't ended; one whose target is gone has.
+ * accepted may not be readable yet, so one not found hasn't ended; one whose target is gone has,
+ * as has one no route holds in a realm with no durable host to run it.
  */
 export async function routedRunEnded(runId: string): Promise<boolean> {
   const hosted = hostedRunEnded(runId);
   if (hosted !== undefined) return hosted;
-  return await durableRunEnded(durableHostFor(runId), runId);
+  const { durable } = hosts();
+  return durable === undefined ? true : await durableRunEnded(durable, runId);
 }
 
 /** Whether the durable host's run `runId` has finished, as {@link routedRunEnded} reads it. */
@@ -212,7 +219,7 @@ export async function routedRunLive(runId: string): Promise<boolean> {
   const hosted = hostedRunEnded(runId);
   if (hosted !== undefined) return !hosted;
   try {
-    return isRunning(await durableHostFor(runId).runStatus(runId));
+    return isRunning(await durableHostFor({ run: runId }).runStatus(runId));
   } catch (error) {
     return !isRunTargetGone(error);
   }
@@ -221,7 +228,7 @@ export async function routedRunLive(runId: string): Promise<boolean> {
 /** Cancels `runId` outright, wherever it runs. */
 export async function cancelRoutedRun(runId: string, reason: string): Promise<void> {
   for (const route of hosts().routes) if (route.cancelRun(runId, reason) !== undefined) return;
-  await durableHostFor(runId).cancelRun(runId, reason);
+  await durableHostFor({ run: runId }).cancelRun(runId, reason);
 }
 
 /**

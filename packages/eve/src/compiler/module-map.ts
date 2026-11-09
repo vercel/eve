@@ -1,41 +1,23 @@
 import { bindingMountId } from "#compiler/extension-mount-bindings.js";
-import { z } from "#compiled/zod/index.js";
-import type {
-  CompiledAgentManifest,
-  CompiledAgentNodeManifest,
-  CompiledAgentResources,
-} from "#compiler/manifest.js";
+import type { CompiledAgentManifest, CompiledAgentResources } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import {
-  type AgentSourceRegistry,
-  type CompiledModuleBinding,
-  type ProgrammaticModuleNamespace,
-} from "#compiler/source-graph.js";
+import type { AgentSourceRegistry, ProgrammaticModuleNamespace } from "#compiler/source-graph.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import {
+  type BoundModule,
+  type CompiledModuleMap,
+  collectRuntimeModuleBindingsForManifest,
+  orderBoundModules,
+} from "#compiler/module-map-schema.js";
 
 export { resolveExtensionBindingMountId } from "#compiler/load-binding-namespace.js";
-
-export type CompiledModuleMap = z.infer<typeof compiledModuleMapSchema>;
-
-const compiledModuleNodeScopeSchema = z
-  .object({ modules: z.record(z.string(), z.object({}).passthrough()) })
-  .strict();
-
-export const compiledModuleMapSchema = z
-  .object({ nodes: z.record(z.string(), compiledModuleNodeScopeSchema) })
-  .strict();
 
 interface CreateCompiledModuleMapSourceInput {
   importSpecifierStyle?: "absolute" | "relative";
   manifest: CompiledAgentManifest;
   moduleMapPath: string;
   programmaticLoaderImportSpecifier?: string;
-}
-
-interface BoundModule {
-  readonly binding: CompiledModuleBinding;
-  readonly sourceId: string;
 }
 
 interface BoundNodeScope {
@@ -171,54 +153,6 @@ export async function createProgrammaticCompiledModuleMap(
     nodes[scope.nodeId] = { modules };
   }
   return { nodes };
-}
-
-/** Returns one compiled node's finalized runtime entries, including remote config modules. */
-export function collectRuntimeModuleBindingsForManifest(
-  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
-): readonly BoundModule[] {
-  const modules = new Map<string, CompiledModuleBinding>(
-    Object.entries(manifest.bindings).filter(([, binding]) => binding.usage.runtimeEntry),
-  );
-  for (const remote of manifest.remoteAgents) {
-    if (!remote.binding.usage.runtimeEntry) continue;
-    if (modules.has(remote.sourceId)) {
-      throw new Error(`Remote agent binding "${remote.sourceId}" collides with a node binding.`);
-    }
-    modules.set(remote.sourceId, remote.binding);
-  }
-  return orderBoundModules(
-    [...modules]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([sourceId, binding]) => ({ binding, sourceId })),
-  );
-}
-
-function orderBoundModules(
-  modules: readonly BoundModule[],
-  mountSourceId?: (binding: CompiledModuleBinding) => string | undefined,
-): readonly BoundModule[] {
-  const bySourceId = new Map(modules.map((module) => [module.sourceId, module]));
-  const ordered: BoundModule[] = [];
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (module: BoundModule): void => {
-    if (visited.has(module.sourceId)) return;
-    if (visiting.has(module.sourceId)) {
-      throw new Error(`Compiled module dependency cycle includes "${module.sourceId}".`);
-    }
-    visiting.add(module.sourceId);
-    const mount = mountSourceId?.(module.binding);
-    if (mount !== undefined && mount !== module.sourceId) {
-      const dependency = bySourceId.get(mount);
-      if (dependency !== undefined) visit(dependency);
-    }
-    visiting.delete(module.sourceId);
-    visited.add(module.sourceId);
-    ordered.push(module);
-  };
-  for (const module of modules) visit(module);
-  return ordered;
 }
 
 function collectBoundNodeScopes(manifest: CompiledAgentManifest): readonly BoundNodeScope[] {

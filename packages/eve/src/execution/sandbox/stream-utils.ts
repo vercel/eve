@@ -1,13 +1,11 @@
-/**
- * Collects all chunks of a `ReadableStream<Uint8Array>` into a single
- * Buffer.
- */
-export async function streamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
+import { concatHostBytes } from "#platform/host-bytes.js";
+/** Collects all chunks of a `ReadableStream<Uint8Array>` into one array of the host's bytes. */
+export async function streamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   for await (const chunk of stream) {
     chunks.push(chunk);
   }
-  return Buffer.concat(chunks);
+  return concatHostBytes(chunks);
 }
 
 /**
