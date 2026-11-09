@@ -51,6 +51,16 @@ describe("buildWorkspaceExtensions", () => {
       stat(join(plannerRoot, "dist", "extension", "_manifest.json")),
     ).resolves.toBeDefined();
   });
+
+  it("builds a workspace extension that only another extension's subagent mounts", async () => {
+    const { appRoot, plannerRoot } = await createMountingWorkspaceAgent({ appMountsAlpha: false });
+
+    await buildWorkspaceExtensions(appRoot);
+
+    await expect(
+      stat(join(plannerRoot, "dist", "extension", "_manifest.json")),
+    ).resolves.toBeDefined();
+  });
 });
 
 describe("prepareDevelopmentWorkspaceExtensions", () => {
@@ -67,8 +77,13 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
 });
 
 /** Adds a `planner` extension whose packaged subagent mounts the `alpha` workspace extension. */
-async function createMountingWorkspaceAgent(): Promise<{ appRoot: string; plannerRoot: string }> {
+async function createMountingWorkspaceAgent(
+  options: { appMountsAlpha?: boolean } = {},
+): Promise<{ appRoot: string; plannerRoot: string }> {
   const { appRoot, packageRoot: alphaRoot } = await createWorkspaceAgent();
+  if (options.appMountsAlpha === false) {
+    await rm(join(appRoot, "agent", "extensions", "alpha.ts"));
+  }
   const plannerRoot = await createWorkspaceExtension(appRoot, "planner", {
     dependencies: { "@acme/alpha": "workspace:*" },
   });
