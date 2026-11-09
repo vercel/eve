@@ -4,8 +4,11 @@ import { chatSdkInstrumentation } from "#public/channels/chat-sdk/audience.js";
 import type { ChatSdkChannelState } from "#public/channels/chat-sdk/chatSdkChannel.js";
 import type { SerializedThread } from "#compiled/chat/index.js";
 
-function space(thread: Pick<SerializedThread, "adapterName" | "channelId" | "isDM"> | null) {
-  const state = { thread: thread && { _type: "chat:Thread", id: "t1", ...thread } };
+function space(
+  thread: Pick<SerializedThread, "adapterName" | "channelId" | "isDM"> | null,
+  extra: Partial<ChatSdkChannelState> = {},
+) {
+  const state = { thread: thread && { _type: "chat:Thread", id: "t1", ...thread }, ...extra };
   return chatSdkInstrumentation.space({ state: state as ChatSdkChannelState });
 }
 
@@ -21,7 +24,10 @@ describe("chat SDK space", () => {
     });
   });
 
-  it("reports none without a thread", () => {
+  it("reports none without a thread, or when a thread ID can't say whether it is a DM", () => {
     expect(space(null)).toBeUndefined();
+    expect(
+      space({ adapterName: "slack", channelId: "slack:D1", isDM: false }, { spaceUnknown: true }),
+    ).toBeUndefined();
   });
 });

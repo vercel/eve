@@ -69,7 +69,11 @@ Built-in channels report:
 | Chat SDK | `<adapter>:<channel>`                              | None              |
 
 Slack uses the installation team, which stays the same for every member of a
-Slack Connect channel. A Teams channel conversation reports the Teams channel,
+Slack Connect channel. A Slack `app_mention` has no `channel_type`, so its type
+comes from the `conversations.info` lookup eve already makes for its audience.
+A channel that can't name the workspace, as with a `receive()` target without
+Slack's `installationTeamId` or Teams' `tenantId`, reports no space rather than
+one that differs from the place's inbound space. A Teams channel conversation reports the Teams channel,
 not the thread its conversation ID names.
 
 ## Boundaries

@@ -9,12 +9,10 @@ describe("slackConversationSpace", () => {
     ).toEqual({ id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" });
   });
 
-  it("falls back to the event team, then to the channel alone", () => {
+  it("falls back to the event team, and reports none without a team", () => {
     expect(slackConversationSpace({ channelId: "C1", teamId: "T2" })?.id).toBe("slack:T2:C1");
-    expect(slackConversationSpace({ channelId: "C1", teamId: null })).toEqual({
-      id: "slack:C1",
-      type: "channel",
-    });
+    // A proactive send that names no installation team can't match its channel's inbound space.
+    expect(slackConversationSpace({ channelId: "C1", teamId: null })).toBeUndefined();
   });
 
   it("reads the type from the event, else from the conversation ID", () => {
