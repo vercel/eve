@@ -15,8 +15,10 @@ agent/
   agent.ts                       # model selection
   instructions.md                # grounding, source routing, and Slack style
   instructions/github.ts         # how to connect GitHub; delete once connected
-  instructions/notion.md         # how to connect Notion; delete once connected
-  instructions/linear.md         # how to connect Linear; delete once connected
+  instructions/notion.ts         # how to connect Notion; delete once connected
+  instructions/linear.ts         # how to connect Linear; delete once connected
+  connections/notion.ts          # Notion wiki, on once its connector exists
+  connections/linear.ts          # Linear issues and projects, on once its connector exists
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
@@ -29,6 +31,7 @@ agent/
   tools/read_slack_conversation.ts # reads a public channel or thread
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
+  lib/connect.ts                 # connector detection and setup notes
   lib/github.ts                  # GitHub connector and firewall credential broker
   lib/conversation.ts            # tells private conversations from shared channels
 ```
@@ -162,14 +165,15 @@ scopes.
 
 GitHub is optional. Without it, the agent still runs code in its sandbox but
 has no GitHub credentials, and it tells people who ask how to connect GitHub
-(`agent/instructions/github.ts`). The agent expects a Vercel Connect GitHub
-connector with the UID `github/company-brain`. Create it and attach it to the
-linked project:
+(`agent/instructions/github.ts`). To connect it, create a Vercel Connect GitHub
+connector from the linked project:
 
 ```bash
 vercel connect create github --name company-brain
-vercel connect attach github/company-brain --yes
 ```
+
+The name matters: it gives the connector the UID `github/company-brain`, which
+the agent looks for, and the CLI attaches it to the linked project.
 
 Install its GitHub App on the repositories the agent may use, from the Connect
 dashboard. The agent can reach only those repositories. The agent notices the
@@ -240,43 +244,41 @@ the new capability should answer, and check that it picks the right source.
 
 ### Connect a knowledge source
 
-Connections give the agent tools from an MCP server or an OpenAPI spec. The eve
-registry has ready-made ones for common workplace tools:
+Connections give the agent tools from an MCP server or an OpenAPI spec. The
+template ships Notion and Linear connections in `agent/connections/`. Each one
+turns on when its Vercel Connect connector exists. Create them from the linked
+project:
+
+```bash
+vercel connect create notion --connection-method mcp --name company-brain
+vercel connect create linear --connection-method mcp --name company-brain
+```
+
+Keep the name `company-brain`. It gives the connectors the UIDs
+`notion/company-brain` and `linear/company-brain`, which the connections look
+for (`agent/lib/connect.ts`). The agent picks up a new connector within a few
+minutes, without a redeploy. Until then, `agent/instructions/notion.ts` and
+`agent/instructions/linear.ts` tell people who ask how to connect it. Delete a
+note once its source works, and delete a connection you don't want.
+
+For other sources, the eve registry has ready-made connections:
 
 ```bash
 pnpm exec eve registry search docs       # find a connection
-pnpm exec eve add connection/notion      # writes agent/connections/notion.ts
-pnpm exec eve add connection/linear
+pnpm exec eve add connection/datadog     # writes agent/connections/datadog.ts
 ```
 
-The template ships `agent/instructions/notion.md` and
-`agent/instructions/linear.md`, so until you connect them the agent tells people
-who ask how to. After `eve add` for one of them, delete its note and redeploy.
-Copy the pattern for other sources your company uses.
-
-These connect through Vercel Connect. By default each person signs in with
+Connections connect through Vercel Connect. By default each person signs in with
 their own account the first time the agent needs it, so the agent sees only what
 that person can see. To share one service account with everyone instead, switch
-the connection to app-scoped auth (the generated file shows how). Only do that
+the connection to app-scoped auth with `connect(uid, { principalType: "app" })`. Only do that
 for content everyone who can reach the agent may read: the agent answers in
 shared threads.
 
 Write a precise `description` on each connection. The agent uses it to decide
 which source owns a question. For a read-only knowledge source, also limit its
-tools:
-
-```ts title="agent/connections/notion.ts"
-import { connect } from "@vercel/connect/eve";
-import { defineMcpClientConnection } from "eve/connections";
-
-export default defineMcpClientConnection({
-  url: "https://mcp.notion.com/mcp",
-  description:
-    "Company wiki: policies, runbooks, specs, and project pages. Not for Slack discussions.",
-  auth: connect("notion"),
-  tools: { allow: ["notion-search", "notion-fetch"] },
-});
-```
+tools, as `agent/connections/notion.ts` does with
+`tools: { allow: ["notion-search", "notion-fetch"] }`.
 
 See [Connections](https://eve.dev/docs/connections) and
 [Add Integrations](https://eve.dev/docs/install-integrations).

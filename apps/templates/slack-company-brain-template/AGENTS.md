@@ -7,12 +7,13 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 
 - `agent/instructions.md`: the root prompt. Keep it about behavior that applies
   to every turn: grounding, source routing, and Slack style.
-- `agent/instructions/github.ts`: until the `github/company-brain` connector is
-  attached, tells the agent GitHub isn't connected and how an admin connects
-  it. Delete it once GitHub is connected.
-- `agent/instructions/notion.md` and `agent/instructions/linear.md`: tell the
-  agent those sources aren't connected and how an admin connects them with
-  `eve add connection/<name>`. Delete each once its connection exists.
+- `agent/instructions/{github,notion,linear}.ts`: until the matching
+  `<service>/company-brain` connector is attached, tell the agent that source
+  isn't connected and give the `vercel connect create` command. Delete each
+  once its source works.
+- `agent/connections/notion.ts` and `agent/connections/linear.ts`: turn on
+  once their connectors are attached. Detection and setup notes live in
+  `agent/lib/connect.ts`.
 - `agent/channels/slack.ts`: who can reach the agent and what context each
   message carries.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
@@ -36,8 +37,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 
 ## Extending
 
-- Add a knowledge source as a connection (`eve add connection/<name>`) or a
-  tool, not by pasting its content into instructions.
+- Add a knowledge source as a connection (see `agent/connections/notion.ts`,
+  or `eve add connection/<name>`) or a tool, not by pasting its content into
+  instructions.
 - Give a group of related sources its own subagent when it needs its own
   prompt, tools, or model. Write the subagent's `description` as a routing
   contract: what it owns, example questions, what to pass it, what it returns,
