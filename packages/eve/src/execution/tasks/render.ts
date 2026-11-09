@@ -204,6 +204,8 @@ function fitToBudget(body: string, budget: { bytes: number; lines: number }): st
   for (const line of lines) {
     const cost = encoder.encode(line).byteLength + 1;
     if (budget.lines === 0 || cost > budget.bytes) {
+      const head = budget.lines === 0 ? "" : cutToBytes(encoder, line, budget.bytes - 1);
+      if (head !== "") kept.push(head);
       kept.push(TRUNCATED_MARKER);
       budget.lines = 0;
       budget.bytes = 0;
@@ -214,6 +216,13 @@ function fitToBudget(body: string, budget: { bytes: number; lines: number }): st
     budget.bytes -= cost;
   }
   return kept.join("\n");
+}
+
+/** The longest prefix of `text` within `maxBytes` of UTF-8, without splitting a character. */
+function cutToBytes(encoder: TextEncoder, text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  const { read } = encoder.encodeInto(text, new Uint8Array(maxBytes));
+  return text.slice(0, read);
 }
 
 function escapeTaskResultBody(body: string): string {
