@@ -20,6 +20,7 @@ import type {
   CommittedLine,
 } from "#public/definitions/channel.js";
 import { failureNotice, replyTextOf } from "#public/channels/reply.js";
+import { replyMarkdownOf } from "#channel/content-cards.js";
 
 /** What a channel can do in its conversation, in its platform's terms. */
 export interface ChannelSurface<TChannel> {
@@ -29,6 +30,8 @@ export interface ChannelSurface<TChannel> {
   post(channel: TChannel, text: string): Promise<unknown>;
   /** What a person starts after the session fails: "message", "comment". */
   readonly restart: string;
+  /** Posts markdown, so a reply part its renderer draws as markdown posts that. */
+  readonly markdown?: boolean;
   /** How the platform asks people. */
   readonly requests: ButtonRequests<TChannel> | TextRequests<TChannel>;
   signIns(channel: TChannel): SignInSurface;
@@ -108,7 +111,7 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
       await settleSignIn(view, event.data, surface.signIns(channel));
     },
     async "content.completed"({ data }, { channel }) {
-      await post(channel, replyTextOf(data));
+      await post(channel, surface.markdown === true ? replyMarkdownOf(data) : replyTextOf(data));
     },
     async "turn.settled"({ data }, { channel }) {
       await post(channel, failureNotice(data, "turn"));

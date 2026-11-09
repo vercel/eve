@@ -82,7 +82,12 @@ it("previews a reply tool's input as its reply part", async () => {
             inputSchema: jsonSchema({ type: "object" }),
             label: false,
             name: "card",
-            replyPart: { build: () => null, kind: "card", streamInput: true },
+            replyPart: {
+              build: () => null,
+              kind: "card",
+              mediaType: "application/vnd.acme.card+json",
+              streamInput: true,
+            },
           },
         ],
       ]),
@@ -92,7 +97,13 @@ it("previews a reply tool's input as its reply part", async () => {
   expect(events.filter((event) => event.type === "call.input")).toHaveLength(0);
   expect(events.filter((event) => event.type === "content.delta")).toEqual([
     {
-      data: { callId: "call-card", delta: '{"root":', kind: "card", partId: "call-card.reply" },
+      data: {
+        callId: "call-card",
+        delta: '{"root":',
+        kind: "card",
+        mediaType: "application/vnd.acme.card+json",
+        partId: "call-card.reply",
+      },
       scope: { runId: "run_0", turnId: "turn_0" },
       type: "content.delta",
     },

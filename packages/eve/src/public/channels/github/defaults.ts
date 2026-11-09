@@ -105,6 +105,7 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     ...surfaceEvents<GitHubEventContext>({
       post: postCommentChunks,
       restart: "comment",
+      markdown: true,
       // A comment can only answer the prompt it sees, so prompts post one at a time.
       requests: { showOne: showPrompt },
       signIns: gitHubSignIns,

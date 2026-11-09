@@ -1,7 +1,8 @@
+import { replyMarkdownOf } from "#channel/content-cards.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { signInEndedText, signInOf } from "#channel/sign-in.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
-import { failureNotice, replyTextOf } from "#public/channels/reply.js";
+import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueue } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -190,7 +191,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       if (data.kind !== "text") {
         // A part Linear can't show, such as a tool's card, shows its fallback text with the
         // turn's next response. A response of its own would mark the session complete mid-turn.
-        const fallback = replyTextOf(data);
+        const fallback = replyMarkdownOf(data);
         if (fallback !== undefined) {
           channel.state.pendingReplyParts = [...(channel.state.pendingReplyParts ?? []), fallback];
         }

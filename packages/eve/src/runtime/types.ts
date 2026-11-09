@@ -210,6 +210,13 @@ export type ResolvedToolDefinition = Readonly<
  * {@link resolveHookDefinition}; missing handlers are simply absent from
  * the resolved maps.
  */
+/** A content renderer, with its functions reattached from its module. */
+export interface ResolvedRendererDefinition extends ResolvedModuleSourceRef {
+  readonly slug: string;
+  readonly extensionNamespace?: string;
+  readonly renderer: import("#public/definitions/content-renderer.js").ContentRendererDefinition;
+}
+
 export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
   /**
    * Path-relative slug used for diagnostics and ordering.
@@ -400,6 +407,7 @@ export interface ResolvedDynamicDefinition<
 export type ResolvedDefinition =
   | { [K in DynamicDefinitionKind]: ResolvedDynamicDefinition<K> }[DynamicDefinitionKind]
   | (ResolvedHookDefinition & { readonly kind: "hook" })
+  | (ResolvedRendererDefinition & { readonly kind: "renderer" })
   | (ResolvedMemoryDefinition & { readonly kind: "memory" })
   | (ResolvedScheduleCollection & { readonly kind: "schedules" });
 

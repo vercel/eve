@@ -1,3 +1,9 @@
+import { callAdapterEventHandler } from "#channel/adapter.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { defineContentRenderer } from "#public/definitions/content-renderer.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -282,6 +288,55 @@ describe("chatSdkChannel completing a streamed reply", () => {
 
     expect(reply.adapter.posted).toEqual([
       { message: { markdown: "Deploys: 1,284" }, threadId: THREAD_ID },
+    ]);
+  });
+
+  it("posts a card its renderer draws in place of the card's fallback text", async () => {
+    const reply = streamingReply();
+    const ctx = buildAdapterContext(reply.channel, stubSessionAccessor());
+    // A step whose agent has a renderer for the card, as a running turn has.
+    const step = new ContextContainer();
+    step.setVirtualContext(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "test-session",
+      turn: { id: "test-turn", sequence: 0 },
+    });
+    enterSessionProjection(step, undefined);
+    step.set(BundleKey, {
+      resolvedAgent: {
+        definitions: [
+          {
+            kind: "renderer",
+            renderer: defineContentRenderer({
+              card: (value) => ({
+                children: [],
+                title: (value as { title: string }).title,
+                type: "card",
+              }),
+              mediaType: "application/vnd.acme.summary+json",
+            }),
+          },
+        ],
+      },
+    } as never);
+    await contextStorage.run(step, () =>
+      callAdapterEventHandler(
+        reply.channel,
+        channelEvent("content.completed", {
+          callId: "call-1",
+          fallbackText: "Weekly summary",
+          kind: "card",
+          mediaType: "application/vnd.acme.summary+json",
+          partId: "call-1.reply",
+          phase: "reply",
+          value: { title: "Weekly summary" },
+        }),
+        ctx,
+      ),
+    );
+
+    expect(reply.adapter.posted).toEqual([
+      { message: { children: [], title: "Weekly summary", type: "card" }, threadId: THREAD_ID },
     ]);
   });
 

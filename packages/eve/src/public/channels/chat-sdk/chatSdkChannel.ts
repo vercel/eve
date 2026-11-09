@@ -1,3 +1,10 @@
+import {
+  dropContentCards,
+  previewContentCard,
+  showContentCard,
+  type CardMessages,
+  type ContentCardsState,
+} from "#channel/content-cards.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
@@ -80,7 +87,7 @@ const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-w
 
 /** Durable Chat SDK thread state. */
 export interface ChatSdkChannelState
-  extends Record<string, unknown>, PromptQueueState, UndeliveredReplyState {
+  extends Record<string, unknown>, PromptQueueState, UndeliveredReplyState, ContentCardsState {
   thread: SerializedThread | null;
   /** @internal Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
@@ -507,6 +514,11 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       clearStream(channel.state);
       await safeStartTyping(channel.thread, "Working...");
     },
+    // A call that fails takes back the card it was previewing.
+    async "call.settled"({ data }, { channel }) {
+      if (data.outcome === "completed" || !channel.thread) return;
+      await dropContentCards(cardMessages(channel), channel.state, data.callId);
+    },
     async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
@@ -520,6 +532,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
     async "content.delta"({ data }, { channel }) {
+      if (channel.thread && (await previewContentCard(cardMessages(channel), channel.state, data)))
+        return;
       if (!channel.thread || !canStream(channel)) return;
       // Only text streams: a part announces its kind with its first delta.
       const streaming = channel.state.streamPartId === data.partId;
@@ -571,7 +585,9 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     committed: prompts,
     async "content.completed"({ data }, { channel, session }) {
       if (data.kind !== "text") {
-        // A part the adapter can't show, such as a tool's card, posts its fallback text.
+        if (channel.thread && (await showContentCard(cardMessages(channel), channel.state, data)))
+          return;
+        // A part no renderer draws, such as a tool's card, posts its fallback text.
         const fallback = replyTextOf(data);
         if (fallback !== undefined) await channel.thread?.post({ markdown: fallback });
         return;
@@ -699,6 +715,33 @@ async function finalizeStreamedMessage(
 /** Whether streamed edits are enabled and still supported by the adapter. */
 function canStream(channel: ChatSdkChannelContext): boolean {
   return channel.streaming && channel.state.editSupported !== false;
+}
+
+/** How a Chat SDK adapter posts, edits, and removes a reply part's card. */
+function cardMessages(channel: ChatSdkChannelContext): CardMessages {
+  const thread = channel.thread!;
+  return {
+    async post(card) {
+      const sent = await thread.post(card);
+      return sent.id || undefined;
+    },
+    async edit(id, card) {
+      try {
+        await thread.adapter.editMessage(thread.id, id, card);
+      } catch (error) {
+        if (!isNotImplemented(error)) throw error;
+        channel.state.editSupported = false;
+      }
+    },
+    async remove(id) {
+      try {
+        await thread.adapter.deleteMessage(thread.id, id);
+      } catch (error) {
+        if (!isNotImplemented(error)) throw error;
+      }
+    },
+    streams: canStream(channel),
+  };
 }
 
 /** Resets the streaming anchor so the next step starts a fresh message. */

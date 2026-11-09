@@ -264,6 +264,16 @@
       "import": "./dist/src/public/hooks/index.js",
       "default": "./dist/src/public/hooks/index.js"
     },
+    "./renderers": {
+      "types": "./dist/src/public/renderers/index.d.ts",
+      "import": "./dist/src/public/renderers/index.js",
+      "default": "./dist/src/public/renderers/index.js"
+    },
+    "./cards": {
+      "types": "./dist/src/public/cards/index.d.ts",
+      "import": "./dist/src/public/cards/index.js",
+      "default": "./dist/src/public/cards/index.js"
+    },
     "./events": {
       "types": "./dist/src/public/events/index.d.ts",
       "import": "./dist/src/public/events/index.js",

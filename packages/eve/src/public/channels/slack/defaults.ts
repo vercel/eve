@@ -1,3 +1,10 @@
+import {
+  dropContentCards,
+  previewContentCard,
+  showContentCard,
+  type CardMessages,
+} from "#channel/content-cards.js";
+import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
@@ -579,6 +586,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "content.delta"(event, ctx) {
     const { data } = event;
     const { channel } = ctx;
+    if (await previewContentCard(slackCardMessages(channel), channel.state, data)) return;
     const found = deltaStream(channel.state, data, event.scope?.runId);
     if (found === undefined) return;
     const { kind, stream } = found;
@@ -633,6 +641,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "call.settled"(event, ctx) {
     const { data } = event;
     const { channel } = ctx;
+    if (data.outcome !== "completed") {
+      await dropContentCards(slackCardMessages(channel), channel.state, data.callId);
+    }
     // Task replies settle their calls, not their reusable task. The next model run reads them.
     const { taskId, turnId } = event.scope ?? {};
     if (taskId !== undefined && turnId !== undefined && data.outcome !== "interrupted") {
@@ -657,7 +668,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
       return;
     }
     if (data.kind !== "text") {
-      // A part Slack can't show, such as a tool's card, posts its fallback text.
+      if (await showContentCard(slackCardMessages(channel), channel.state, data)) return;
+      // A part no renderer draws, such as a tool's card, posts its fallback text.
       const fallback = replyTextOf(data);
       if (fallback !== undefined)
         await deliverCompletedSlackReply(channel, fallback, { turnId: ctx.session.turn.id });
@@ -729,3 +741,26 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 };
+
+/** How Slack posts, edits, and removes a reply part's card. */
+function slackCardMessages(channel: SlackEventContext): CardMessages {
+  const { slack, thread } = channel;
+  return {
+    async post(card) {
+      const posted = await thread.post(card);
+      return posted.id || undefined;
+    },
+    async edit(id, card) {
+      await slack.request("chat.update", {
+        blocks: cardToBlocks(card),
+        channel: slack.channelId,
+        text: cardToFallbackText(card),
+        ts: id,
+      });
+    },
+    async remove(id) {
+      await slack.request("chat.delete", { channel: slack.channelId, ts: id });
+    },
+    streams: true,
+  };
+}

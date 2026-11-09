@@ -18,6 +18,7 @@ agent/
 ├── connections/
 ├── extensions/
 ├── hooks/
+├── renderers/
 ├── skills/
 ├── lib/
 ├── memory/
@@ -55,6 +56,7 @@ Paths below are relative to the agent directory. Root agents can use every path;
 | `connections/`                                          | External MCP and OpenAPI services         | Yes                    | Static files define path-named connections; dynamic sources can resolve caller-specific connections.                                                          |
 | `extensions/`                                           | Mounted extension packages                | Yes                    | File or directory mounts. See [Extensions](/docs/extensions).                                                                                                 |
 | `hooks/`                                                | Handlers for session stream events        | Yes                    | Module-backed only; recursive directories are supported.                                                                                                      |
+| `renderers/`                                            | Native rendering for reply parts          | No                     | One media type per file. See [Render reply parts natively](/docs/tools#render-reply-parts-natively).                                                          |
 | `skills/`                                               | On-demand procedures and supporting files | Yes                    | Flat Markdown, module-backed skills, or packaged skills.                                                                                                      |
 | `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not copied into the sandbox. Helpers can import data files such as JSON from here.                                                               |
 | `memory.ts` or `memory/<name>.ts`                       | Cross-session memory                      | Yes                    | Provider-backed slots. See [Memory](/docs/memory).                                                                                                            |

@@ -350,6 +350,48 @@ The session stream records the part as a `content.completed` event with your `ki
 
 The model sees the call's ordinary result, which [`toModelOutput`](#shape-what-the-model-sees-with-tomodeloutput) can still shape.
 
+### Render reply parts natively
+
+Add a content renderer to show reply parts of one `mediaType` natively instead of as their fallback text. Put it in `agent/renderers/`, or in an extension's `extension/renderers/`:
+
+```ts title="agent/renderers/card.ts"
+import { Card, Field, Fields } from "eve/cards";
+import { defineContentRenderer } from "eve/renderers";
+
+interface AcmeCard {
+  title?: string;
+  rows?: { label?: string; value?: string }[];
+}
+
+export default defineContentRenderer({
+  mediaType: "application/vnd.acme.card+json",
+  card(value) {
+    const card = value as AcmeCard;
+    if (card.title === undefined) return null;
+    const rows = (card.rows ?? []).filter((row) => row.label && row.value);
+    return Card({
+      title: card.title,
+      children: [Fields(rows.map((row) => Field({ label: row.label!, value: row.value! })))],
+    });
+  },
+  markdown(value) {
+    const card = value as AcmeCard;
+    return [
+      `**${card.title}**`,
+      ...(card.rows ?? []).map((row) => `- ${row.label}: ${row.value}`),
+    ].join("\n");
+  },
+});
+```
+
+- `card` returns a card from `eve/cards`, or `null` to show the part's fallback text. Slack and the Chat SDK channel post it natively, as Block Kit and as each adapter's card format.
+- While the model writes a part with `streamInput`, `card` also runs with `{ partial: true }` and the JSON parsed so far, for a `+json` media type. The channel posts the card once it renders and edits it at most every 500 ms. Return `null` until the partial value has enough to show.
+- `markdown` returns markdown for the GitHub and Linear channels, or `null` to show the fallback text.
+- A renderer that throws shows the fallback text. When a call fails after its card started streaming, the channel removes the card.
+- A renderer in the agent wins over an extension's renderer for the same media type. Two extensions with renderers for one media type fail the build until the agent adds its own.
+
+Other channels, the dev TUI, and ACP clients show the fallback text. Subagents don't have renderers, because only the root agent has channels.
+
 ### Keep a tool out of the tool list
 
 Set `deferred: true` for a tool the model rarely needs, or when an agent has too many tools to send in every request:

@@ -1,3 +1,4 @@
+import type { ContentCardsState } from "#channel/content-cards.js";
 import { createHash } from "node:crypto";
 
 import type {
@@ -255,7 +256,7 @@ export interface SlackInteractionCardRecord {
  * step boundaries. Anything written here must round-trip through
  * `JSON.stringify` / `JSON.parse`.
  */
-export interface SlackChannelState extends UndeliveredReplyState {
+export interface SlackChannelState extends UndeliveredReplyState, ContentCardsState {
   /** Audience classification captured before the session is dispatched. */
   audience?: ChannelAudience;
   /** Slack channel id seeded by the inbound mention. */

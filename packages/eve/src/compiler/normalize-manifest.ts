@@ -48,7 +48,12 @@ import {
 } from "#compiler/normalize-helpers.js";
 import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-subagent.js";
 import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
-import { compileHookEntry, compileMemoryDefinition } from "#compiler/normalize-definitions.js";
+import {
+  compileHookEntry,
+  compileMemoryDefinition,
+  compileRendererEntry,
+  selectRenderers,
+} from "#compiler/normalize-definitions.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
@@ -461,6 +466,7 @@ class AgentGraphCompiler {
   ): Promise<CompiledAgentResources> {
     const tools: CompiledToolDefinition[] = [];
     const definitions: CompiledDefinition[] = [];
+    const renderers: { definition: CompiledDefinition; candidate: AgentSourceCandidate }[] = [];
     const skills: CompiledSkillDefinition[] = [];
     const instructions: CompiledInstructionsDefinition[] = [];
     const connections: CompiledConnectionDefinition[] = [];
@@ -525,6 +531,16 @@ class AgentGraphCompiler {
             await compileHookEntry(entry.source, { binding: binding!, loadNamespace }),
           );
           state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          break;
+        case "renderer":
+          // Bound once the renderer wins its media type: the agent's own shadows an extension's.
+          renderers.push({
+            candidate,
+            definition: withExtensionNamespace(
+              await compileRendererEntry(entry.source, { binding: binding!, loadNamespace }),
+              candidate.owner,
+            ),
+          });
           break;
         case "instructions": {
           const result = await compileInstructionsEntry(
@@ -633,6 +649,21 @@ class AgentGraphCompiler {
       }
     }
 
+    const drawing = new Set(selectRenderers(renderers.map((entry) => entry.definition)));
+    for (const { candidate, definition } of renderers) {
+      if (drawing.has(definition)) {
+        definitions.push(definition);
+        state.evaluation.requireRuntimeEntry(candidate.sourceId);
+        continue;
+      }
+      state.composed = disableComposedCandidate({
+        allowUnmatched: true,
+        candidate,
+        composed: state.composed,
+      });
+      delete state.bindings[candidate.sourceId];
+      selectedSourceIds.delete(candidate.sourceId);
+    }
     if (sandbox === undefined) {
       throw new Error(`Agent node "${input.nodeId}" has no selected sandbox source.`);
     }

@@ -57,6 +57,12 @@ export const DISCOVER_TOOLS_DIRECTORY_INVALID = "discover/tools-directory-invali
 export const DISCOVER_HOOKS_DIRECTORY_INVALID = "discover/hooks-directory-invalid";
 
 /**
+ * Shared diagnostic emitted when the authored `renderers/` root is not a
+ * directory.
+ */
+export const DISCOVER_RENDERERS_DIRECTORY_INVALID = "discover/renderers-directory-invalid";
+
+/**
  * Shared diagnostic emitted when the authored `channels/` root is not a
  * directory.
  */
@@ -104,6 +110,9 @@ const DISCOVER_CHANNEL_NAME_INVALID = "discover/channel-name-invalid";
  * directory segment does not satisfy the hook slug charset rule.
  */
 export const DISCOVER_HOOK_NAME_INVALID = "discover/hook-name-invalid";
+
+/** Shared diagnostic emitted when an authored `renderers/**` segment is not a legal name. */
+export const DISCOVER_RENDERER_NAME_INVALID = "discover/renderer-name-invalid";
 
 /**
  * Shared diagnostic emitted when an authored `extensions/*.{ts,…}` mount
@@ -517,6 +526,24 @@ export function createHookNameDiagnostic(
     code: DISCOVER_HOOK_NAME_INVALID,
     message:
       `Hook path segment "${segment}" is not a legal hook name. ` +
+      `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+    sourcePath,
+  });
+}
+
+/**
+ * Returns a discovery diagnostic when a renderer filesystem segment violates the hook naming
+ * rule, or `null` when it satisfies it.
+ */
+export function createRendererNameDiagnostic(
+  segment: string,
+  sourcePath: string,
+): DiscoverDiagnostic | null {
+  if (HOOK_SLUG_PATTERN.test(segment)) return null;
+  return createDiscoverErrorDiagnostic({
+    code: DISCOVER_RENDERER_NAME_INVALID,
+    message:
+      `Renderer path segment "${segment}" is not a legal renderer name. ` +
       `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
     sourcePath,
   });

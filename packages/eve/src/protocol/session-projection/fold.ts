@@ -511,14 +511,18 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
   if (view.session.status === "ended") return;
   switch (progress.type) {
     case "content.delta": {
-      const { callId, delta, kind, partId } = progress.data;
+      const { callId, delta, kind, mediaType, partId } = progress.data;
       if (view.parts[partId] !== undefined || typeof delta !== "string") return;
       const preview: PartPreview | undefined = previews.parts[partId];
       if (preview !== undefined) {
         previews.parts[partId] = { ...preview, text: preview.text + delta };
       } else if (kind !== undefined) {
         const announced: PartPreview = { kind, partId, runId: progress.scope?.runId, text: delta };
-        previews.parts[partId] = callId === undefined ? announced : { ...announced, callId };
+        previews.parts[partId] = {
+          ...announced,
+          ...(callId !== undefined && { callId }),
+          ...(mediaType !== undefined && { mediaType }),
+        };
       }
       return;
     }

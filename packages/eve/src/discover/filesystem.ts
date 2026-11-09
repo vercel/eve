@@ -51,6 +51,7 @@ type AgentRootEntryKind =
   | "lib-directory"
   | "memory-directory"
   | "memory-module"
+  | "renderers-directory"
   | "sandbox-directory"
   | "schedules-directory"
   | "skills-directory"
@@ -191,6 +192,10 @@ export function classifyAgentRootEntry(
 
     if (name === "hooks") {
       return "hooks-directory";
+    }
+
+    if (name === "renderers") {
+      return "renderers-directory";
     }
 
     if (name === "instructions") {

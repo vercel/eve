@@ -3,7 +3,7 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-An extension is a package of eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
+An extension is a package of eve tools, channels, connections, skills, schedules, subagents, instruction fragments, hooks, and content renderers. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
 
 To add a ready-made extension with `eve add`, see [Add Integrations](/docs/install-integrations).
 
@@ -32,6 +32,7 @@ The command creates the package with `extension/extension.ts`, TypeScript config
     subagents/reviewer/agent.ts
     instructions.md
     hooks/audit.ts
+    renderers/card.ts
     lib/http.ts
 ```
 

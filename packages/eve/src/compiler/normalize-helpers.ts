@@ -105,7 +105,7 @@ export function compiledDefinition(
   kind: CompiledDefinitionKind,
   source: ModuleSourceRef,
   slug: string,
-  extra: Pick<CompiledDefinition, "description" | "eventNames"> = {},
+  extra: Pick<CompiledDefinition, "description" | "eventNames" | "mediaType"> = {},
 ): CompiledDefinition {
   return {
     ...(source.exportName !== undefined && { exportName: source.exportName }),

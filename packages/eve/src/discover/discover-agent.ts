@@ -28,11 +28,13 @@ import {
   createChannelNameDiagnostic,
   createExtensionNameDiagnostic,
   createHookNameDiagnostic,
+  createRendererNameDiagnostic,
   createToolNameDiagnostic,
   createUnsupportedRootDirectoryDiagnostics,
   DISCOVER_CHANNELS_DIRECTORY_INVALID,
   DISCOVER_EXTENSIONS_DIRECTORY_INVALID,
   DISCOVER_HOOKS_DIRECTORY_INVALID,
+  DISCOVER_RENDERERS_DIRECTORY_INVALID,
   DISCOVER_TOOLS_DIRECTORY_INVALID,
   discoverFlatModuleSource,
   discoverInstructionsSource,
@@ -220,6 +222,21 @@ export async function discoverAgentRoot(input: {
       validateSegment: createHookNameDiagnostic,
     }),
   ).sources;
+  // Renderers draw what the agent's channels post, and only the root agent has channels.
+  const renderers = subagent
+    ? []
+    : found(
+        await discoverNamedSourceDirectory({
+          directoryName: "renderers",
+          invalidDirectoryCode: DISCOVER_RENDERERS_DIRECTORY_INVALID,
+          invalidDirectoryMessage: `Expected "${join(rootPath, "renderers")}" to be a directory of authored content renderers.`,
+          recursive: true,
+          rootEntries,
+          rootPath,
+          source,
+          validateSegment: createRendererNameDiagnostic,
+        }),
+      ).sources;
   const { skills } = found(await discoverSkills({ agentRoot: rootPath, source }));
   const { subagents } = found(await discoverSubagents({ agentRoot: rootPath, appRoot, source }));
   const { mounts } = found(
@@ -231,6 +248,7 @@ export async function discoverAgentRoot(input: {
     ...connections,
     ...hooks,
     ...memories,
+    ...renderers,
     ...(sandbox.sandbox === null ? [] : [sandbox.sandbox]),
     ...tools,
     ...instructions,

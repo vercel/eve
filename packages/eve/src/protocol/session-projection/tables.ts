@@ -245,6 +245,7 @@ export interface PartPreview {
   readonly runId?: string;
   /** The call that writes it, when a tool does: the preview lives until that call settles. */
   readonly callId?: string;
+  readonly mediaType?: string;
   readonly kind: string;
   readonly text: string;
 }

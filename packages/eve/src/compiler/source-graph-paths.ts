@@ -47,6 +47,7 @@ export function validateProgrammaticLogicalPathInternal(
       "hooks",
       "instructions",
       "memory",
+      "renderers",
       "schedules",
       "skills",
       "tools",

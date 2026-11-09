@@ -69,6 +69,7 @@ interface AgentSourceRefs {
   readonly hook: ModuleSourceRef;
   readonly instructions: InstructionsSourceRef;
   readonly memory: MemorySourceRef;
+  readonly renderer: ModuleSourceRef;
   readonly sandbox: ModuleSourceRef;
   readonly schedule: ScheduleSourceRef;
   readonly skill: SkillSourceRef;
@@ -81,6 +82,7 @@ const SOURCE_KIND_BY_SLOT_ROOT: Readonly<Record<string, AgentSourceKind>> = {
   hooks: "hook",
   instructions: "instructions",
   memory: "memory",
+  renderers: "renderer",
   sandbox: "sandbox",
   schedules: "schedule",
   skills: "skill",

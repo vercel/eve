@@ -146,7 +146,10 @@ async function consumeStreamContent(
   const actionInputs = new Map<string, JsonObject>();
   const streamingActionInputs = new Map<string, { toolName: string; announced: boolean }>();
   // Calls whose input previews the reply part they write, in place of the call's input preview.
-  const streamingReplyParts = new Map<string, { kind: string; announced: boolean }>();
+  const streamingReplyParts = new Map<
+    string,
+    { kind: string; mediaType?: string; announced: boolean }
+  >();
 
   const completePart = async (
     partId: string,
@@ -199,7 +202,17 @@ async function consumeStreamContent(
     const partId = replyPartId(callId);
     const event: SessionEvent = part.announced
       ? { data: { delta, partId }, type: "content.delta" }
-      : { data: { callId, delta, kind: part.kind, partId }, scope, type: "content.delta" };
+      : {
+          data: {
+            callId,
+            delta,
+            kind: part.kind,
+            ...(part.mediaType !== undefined && { mediaType: part.mediaType }),
+            partId,
+          },
+          scope,
+          type: "content.delta",
+        };
     part.announced = true;
     await emitFn(event);
   };
@@ -418,7 +431,11 @@ async function consumeStreamContent(
             );
           }
           if (reply?.streamInput === true) {
-            streamingReplyParts.set(part.id, { announced: false, kind: reply.kind });
+            streamingReplyParts.set(part.id, {
+              announced: false,
+              kind: reply.kind,
+              ...(reply.mediaType !== undefined && { mediaType: reply.mediaType }),
+            });
           } else {
             streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
           }

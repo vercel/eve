@@ -247,6 +247,7 @@ export type CompiledDefinitionKind =
   | "hook"
   | "instructions"
   | "memory"
+  | "renderer"
   | "skill"
   | "tool";
 
@@ -265,6 +266,8 @@ export interface CompiledDefinition extends ModuleSourceRef {
   readonly eventNames?: readonly string[];
   /** A memory's description. */
   readonly description?: string;
+  /** A content renderer's media type. */
+  readonly mediaType?: string;
 }
 
 /** A node's definitions of one kind, in the order it declares them. */

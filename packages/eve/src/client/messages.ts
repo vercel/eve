@@ -136,6 +136,7 @@ export function assistantMessages(
           ...(preview.callId !== undefined && { callId: preview.callId }),
           id: preview.partId,
           kind: preview.kind,
+          ...(preview.mediaType !== undefined && { mediaType: preview.mediaType }),
           state: "streaming",
           stepIndex: at.stepIndex,
           text: preview.text,

@@ -8,6 +8,7 @@ import {
   dynamicEvaluate,
   isDynamicSentinel,
 } from "#dynamic/definition.js";
+import { normalizeContentRenderer } from "#internal/authored-definition/content-renderer.js";
 import { normalizeHookHandlers } from "#internal/authored-definition/hook.js";
 import { memoryMismatch, normalizeMemoryDefinition } from "#internal/authored-definition/memory.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
@@ -35,7 +36,7 @@ export async function resolveDefinition(
   definition: CompiledDefinition,
   scope: Scope,
 ): Promise<ResolvedDefinition> {
-  const { eventNames: _events, ...ref } = definition;
+  const { eventNames: _events, mediaType: _mediaType, ...ref } = definition;
   return await resolving(definition, definition.kind, async () => {
     const value = await loadResolvedModuleExport({
       ...scope,
@@ -45,6 +46,8 @@ export async function resolveDefinition(
     switch (definition.kind) {
       case "hook":
         return { ...ref, events: normalizeHookHandlers(value, definition), kind: "hook" };
+      case "renderer":
+        return { ...ref, kind: "renderer", renderer: normalizeContentRenderer(value, definition) };
       case "memory":
         return {
           ...normalizeMemoryDefinition(value, memoryMismatch(definition)),

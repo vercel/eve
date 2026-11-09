@@ -17,6 +17,8 @@ export interface ContentDeltaData {
   readonly kind?: ContentKind;
   /** On the announcing record only: the call that writes the part, when a tool writes it. */
   readonly callId?: string;
+  /** On the announcing record only: the media type the completed part's value will have. */
+  readonly mediaType?: string;
   readonly delta: string;
 }
 
@@ -74,6 +76,7 @@ export const contentProgressSchemas = {
         callId: id.optional(),
         delta: z.string(),
         kind: z.string().optional(),
+        mediaType: z.string().optional(),
         partId: id,
       }),
     ),

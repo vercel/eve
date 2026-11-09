@@ -38,6 +38,7 @@ export type ProjectedModuleSource =
         | "hook"
         | "instructions"
         | "memory"
+        | "renderer"
         | "sandbox"
         | "schedule"
         | "skill"
@@ -431,6 +432,7 @@ const EXTENSION_CONTRIBUTION_ROOTS = new Set([
   "connections",
   "hooks",
   "instructions",
+  "renderers",
   "schedules",
   "skills",
   "subagents",
