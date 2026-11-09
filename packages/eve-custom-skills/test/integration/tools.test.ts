@@ -14,9 +14,7 @@ import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
 import read from "../../extension/tools/read.ts";
 import remove from "../../extension/tools/remove.ts";
-import rollback from "../../extension/tools/rollback.ts";
 import setMode from "../../extension/tools/set_mode.ts";
-import versions from "../../extension/tools/versions.ts";
 
 const ROUTING = "Use when the user asks for a deploy checklist.";
 const alice: SessionAuthContext = {
@@ -320,25 +318,33 @@ test("a person can inspect, publish, roll back, and change the mode of their own
     ),
     [[id, "deploy", 1, [2]]],
   );
+  const latest = await run(read, { name: "deploy" }, context());
+  assert.equal(latest.version, 2);
+  assert.equal(latest.instructions, "Check the build and the logs.");
   assert.deepEqual(
-    (
-      (await run(versions, { name: "deploy" }, context())).versions as Array<
-        Record<string, unknown>
-      >
-    ).map(({ version, status }) => [version, status]),
+    (latest.versions as Array<Record<string, unknown>>).map(({ version, status }) => [
+      version,
+      status,
+    ]),
     [
       [2, "draft"],
       [1, "active"],
     ],
   );
   assert.equal(
-    (await run(read, { name: "deploy", version: 2 }, context())).instructions,
-    "Check the build and the logs.",
+    (await run(read, { name: "deploy", version: 1 }, context())).instructions,
+    "Check the build.",
   );
 
   const approved = context({ approvedBy: alice });
   assert.equal((await run(publish, { name: "deploy", id, version: 2 }, approved)).liveVersion, 2);
-  assert.equal((await run(rollback, { name: "deploy", id, version: 1 }, approved)).liveVersion, 1);
+  // Publishing an earlier version rolls back to it, and the rule and card call it that.
+  const rollingBack = { name: "deploy", id, version: 1 };
+  const { prompt } = await decide(publish, rollingBack, context());
+  assert.match(prompt, /^Roll back "deploy" for you to v1/);
+  const rolledBack = await run(publish, rollingBack, approved);
+  assert.equal(rolledBack.liveVersion, 1);
+  assert.match(String(rolledBack.message), /^Rolled back "deploy" to version 1/);
   const deferred = await run(
     setMode,
     { name: "deploy", id, version: 1, mode: "deferred" },

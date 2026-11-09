@@ -66,7 +66,7 @@ test("a draft saved in another mode doesn't change how the live version applies"
   const published = await skills.publish(alice, "persona", 2);
   assert.equal(published.skill.applicationMode, "on-demand");
   assert.deepEqual(published.previous, { version: 1, applicationMode: "always" });
-  const rolledBack = await skills.rollback(alice, "persona", 1);
+  const rolledBack = await skills.publish(alice, "persona", 1);
   assert.equal(rolledBack.skill.applicationMode, "always");
 });
 
@@ -78,7 +78,7 @@ test("status derives from the live version across publish and rollback", async (
   await skills.save(alice, { ...input, markdown: "three" }, { savedBy });
   await skills.publish(alice, "release", 3);
   await assert.rejects(skills.publish(alice, "release", 3), /already live/);
-  await skills.rollback(alice, "release", 2);
+  await skills.publish(alice, "release", 2);
   assert.deepEqual(
     (await skills.listVersions(alice, "release")).map(({ version, status }) => [version, status]),
     [
@@ -87,7 +87,6 @@ test("status derives from the live version across publish and rollback", async (
       [1, "superseded"],
     ],
   );
-  await assert.rejects(skills.rollback(alice, "release", 3), /only to an earlier version/);
   const [summary] = await skills.listSummaries(alice);
   assert.deepEqual(summary?.draftVersions, [3]);
   assert.equal(summary?.description, ROUTING);

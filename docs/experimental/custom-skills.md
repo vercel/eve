@@ -6,7 +6,7 @@ description: "Let the people who talk to your agent save their own versioned ski
 `eve/experimental/extensions/custom-skills` lets the people who talk to an agent teach it their own [skills](/docs/skills): a release checklist, a writing style, a team's triage steps. A person asks the agent to save one, and it applies from their next message.
 
 - **Personal and shared.** Personal skills follow their owner into every conversation. Shared skills apply to everyone in a channel or group chat.
-- **Versions.** Each save is an immutable version. A skill's first clean version goes live; later saves are drafts until someone publishes them, and any earlier version can be rolled back to.
+- **Versions.** Each save is an immutable version. A skill's first clean version goes live; later saves are drafts until someone publishes them, and publishing an earlier version rolls back to it.
 - **Application modes.** An `always` skill is in the system prompt on every turn, such as a persona. An `on-demand` skill is listed for the model to load when it's relevant. A `deferred` skill stays out of the prompt until the model searches for it.
 - **Approval.** Publishing, rolling back, deleting, and anything that goes live in a shared scope wait for approval. The approval card shows the content that would apply.
 
@@ -35,23 +35,21 @@ Give each agent that shares a Blob store its own `namespace`, or the agents shar
 
 The mount name prefixes everything. Mounted as `skills`, the agent gets:
 
-| Name               | What it does                                                                    |
-| ------------------ | ------------------------------------------------------------------------------- |
-| `skills__create`   | Saves a new version of a skill.                                                 |
-| `skills__list`     | Lists a scope's skills, with their IDs, versions, drafts, and modes.            |
-| `skills__publish`  | Makes an exact version live. Asks for approval.                                 |
-| `skills__read`     | Reads one version. Deferred.                                                    |
-| `skills__versions` | Lists every version of one skill. Deferred.                                     |
-| `skills__rollback` | Makes an earlier version live again. Asks for approval. Deferred.               |
-| `skills__set_mode` | Changes how the live version applies. Deferred.                                 |
-| `skills__remove`   | Deletes skills with every version. Asks for approval. Deferred.                 |
-| `skills__manage`   | A skill with the lifecycle rules, which the model loads before changing skills. |
+| Name               | What it does                                                                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `skills__create`   | Saves a new version of a skill.                                                                    |
+| `skills__list`     | Lists a scope's skills, with their IDs, versions, drafts, and modes.                               |
+| `skills__publish`  | Makes an exact version live: a newer draft, or an earlier version to roll back. Asks for approval. |
+| `skills__read`     | Reads one version, with a list of every version. Deferred.                                         |
+| `skills__set_mode` | Changes how the live version applies. Deferred.                                                    |
+| `skills__remove`   | Deletes skills with every version. Asks for approval. Deferred.                                    |
+| `skills__manage`   | A skill with the lifecycle rules, which the model loads before changing skills.                    |
 
 Deferred tools stay out of the tool list until the model finds them with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), so the extension adds three tools to every request.
 
 People's skills load as `skills__<name>`, or `skills__channel_<name>` for shared ones, so they can't shadow the agent's own skills or each other. Keep the mount name short: a loadable skill name is at most 64 characters, so with the default 40-character skill names, the mount name has 14.
 
-`publish`, `rollback`, `set_mode`, and `remove` take a skill's `id` as well as its name, which the model reads from `list` or `create`. An approval then applies only to the skill its card showed: if someone deletes the skill and saves a new one under the same name while the approval waits, the approved call is refused.
+`publish`, `set_mode`, and `remove` take a skill's `id` as well as its name, which the model reads from `list` or `create`. An approval then applies only to the skill its card showed: if someone deletes the skill and saves a new one under the same name while the approval waits, the approved call is refused.
 
 ## Scopes
 

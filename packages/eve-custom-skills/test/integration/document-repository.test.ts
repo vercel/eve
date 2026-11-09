@@ -32,7 +32,7 @@ test("saves, publishes, and rolls back through one catalog document per scope", 
   assert.equal(first.skill.savedBy.label, "alice@example.com");
   await skills.save(alice, { ...input, markdown: "Deploy v2." }, { savedBy });
   await skills.publish(alice, "deploy", 2);
-  const rolledBack = await skills.rollback(alice, "deploy", 1);
+  const rolledBack = await skills.publish(alice, "deploy", 1);
   assert.equal(rolledBack.skill.instructions, "Deploy.");
   assert.deepEqual(
     (await skills.listVersions(alice, "deploy")).map(({ version, status }) => [version, status]),

@@ -147,7 +147,10 @@ export type SkillChangeEvent =
       readonly skills: readonly SkillRef[];
     });
 
-/** The lifecycle tools that change skills. */
+/**
+ * What a change does. `rollback` is a `publish` of a version older than the
+ * live one, named apart so approval rules and cards can treat it differently.
+ */
 export type SkillAction = "create" | "publish" | "rollback" | "set_mode" | "remove";
 
 /** One skill a change affects, as the approval rule and card see it. */

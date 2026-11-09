@@ -8,18 +8,18 @@ description: Lifecycle rules for user-created custom skills — versions and dra
 These rules apply to custom skills saved with this extension's `create` tool.
 The agent's own authored skills have no lifecycle versions.
 
-`create`, `list`, and `publish` are always available. `read`, `versions`,
-`rollback`, `set_mode`, and `remove` are deferred: find them with
-`eve__search` (for example "custom skill rollback") and call them through
-`eve__tool`.
+`create`, `list`, and `publish` are always available. `read`, `set_mode`,
+and `remove` are deferred: find them with `eve__search` (for example "read
+custom skill") and call them through `eve__tool`.
 
 - A clean first version goes live immediately. Every later save is an
   immutable draft: it changes neither the live version nor how it applies.
-  The live version changes only when `publish` or `rollback` succeeds.
+  The live version changes only when `publish` succeeds.
 - Each version is saved with an application mode, and it applies in that
   mode once published. `set_mode` changes how the live version applies.
 - The live (`active`) version is what applies. Versions above it are drafts;
-  versions below it are superseded and can be restored with `rollback`.
+  versions below it are superseded. To roll back, `publish` the earlier
+  version.
 - Every `create` call needs `applicationMode`:
   - `always` for a persona, writing preference, or standing behavior. It is
     injected on every turn.
@@ -36,8 +36,9 @@ The agent's own authored skills have no lifecycle versions.
   as `channel`, a scope prefix. `list` and `create` return that `loadName`.
   Lifecycle tools take the bare name plus `scope`.
 - Changes apply from the next message, not the current turn.
-- Use `versions` and `read` to inspect an exact draft before publishing it.
-- `publish`, `rollback`, `set_mode`, and `remove` take each skill's `id` as
+- Use `read` to inspect an exact draft before publishing it; it also lists
+  every version.
+- `publish`, `set_mode`, and `remove` take each skill's `id` as
   well as its name, from `list`, `read`, or `create`. If a call says the skill
   was replaced, or that the scope changed while it was checked, list the
   skills again and call it with the current id.

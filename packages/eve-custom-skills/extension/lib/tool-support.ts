@@ -114,6 +114,8 @@ export async function withSkillScope<T extends object>(
 /** What a planner returns: the plan the tool runs, and what the approval rule judges. */
 export interface ChangeOutline<TPlan> {
   readonly plan: TPlan;
+  /** The action the approval rule sees, when the plan decides it, such as a publish that rolls back. */
+  readonly action?: SkillAction;
   readonly changesLive: boolean;
   readonly targets: readonly SkillApprovalTarget[];
 }
@@ -191,7 +193,7 @@ export function skillChange<
       scopes,
       plan: outline.plan,
       request: {
-        action: input.action,
+        action: outline.action ?? input.action,
         scope,
         caller: ctx.session.auth.current,
         changesLive: outline.changesLive,

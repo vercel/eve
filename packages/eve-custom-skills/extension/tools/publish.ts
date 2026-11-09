@@ -24,22 +24,31 @@ const { approval, execute } = skillChange({
   action: "publish",
   failure: "Failed to publish the skill version.",
   fallbackCard: ({ name, version }: z.infer<typeof inputSchema>) =>
-    `Publish skill "${name}" version ${version}?`,
+    `Make skill "${name}" version ${version} live?`,
   async plan(input, { skills, scope }) {
     const name = skills.normalizeName(input.name);
     const planned = await skills.planPublish(scope, name, input.version);
     requireSkillId(name, planned.head.id, input.id);
-    return { plan: planned, changesLive: true, targets: [publishTarget(name, planned)] };
+    const live = planned.head.liveVersion;
+    return {
+      plan: planned,
+      // Making an earlier version live again is a rollback, which the card and approval rule name.
+      ...(live !== null && input.version < live && { action: "rollback" as const }),
+      changesLive: true,
+      targets: [publishTarget(name, planned)],
+    };
   },
   async run(plan, { skills, scope, approved }) {
     requireApproval(approved);
     const { skill, previous } = await skills.applyPublish(scope, plan);
+    const verb =
+      previous.version !== null && skill.version < previous.version ? "Rolled back" : "Published";
     return {
       output: {
         name: skill.name,
         liveVersion: skill.version,
         applicationMode: skill.applicationMode,
-        message: `Published "${skill.name}" version ${skill.version} in ${skill.applicationMode} mode. ${NEXT_TURN}`,
+        message: `${verb} "${skill.name}" to version ${skill.version}, ${skill.applicationMode}. ${NEXT_TURN}`,
       },
       change: { kind: "published", skill, previous },
     };
@@ -48,11 +57,11 @@ const { approval, execute } = skillChange({
 
 export default defineTool({
   label: {
-    start: ({ name, version }) => `Publishing ${name} v${version}`,
-    complete: ({ name, version }) => `Published ${name} v${version}`,
+    start: ({ name, version }) => `Making ${name} v${version} live`,
+    complete: ({ name, version }) => `Made ${name} v${version} live`,
   },
   description:
-    "Make an exact saved version of a custom skill the live version, in the application mode it was saved with. Read it first. The approval card shows the version's content and is the only confirmation. If the version is already live but not applying, check its application mode instead.",
+    "Make an exact saved version of a custom skill the live version, in the application mode it was saved with: a newer draft to publish it, or an earlier version to roll back to it. Read it first. The approval card shows the version's content and is the only confirmation. If the version is already live but not applying, check its application mode instead.",
   inputSchema,
   approval,
   execute,

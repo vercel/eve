@@ -39,8 +39,10 @@ scope (personal, channel, …)
 ```
 
 - A clean first version goes live. Later saves are drafts. `publish` makes an
-  exact version live in the mode it was saved with, `rollback` an earlier one,
-  and `set_mode` changes how the live version applies.
+  exact version live in the mode it was saved with, which rolls back when the
+  version is older than the live one, and `set_mode` changes how the live
+  version applies. Six tools: `create`, `list`, and `publish` load on every
+  turn; `read`, `set_mode`, and `remove` are deferred.
 - `always` skills join the system prompt, `on-demand` skills are listed for
   `eve__skill`, and `deferred` skills wait for `eve__search`.
 - Load names are `<mount>__<name>` and `<mount>__<prefix>_<name>`; skill

@@ -426,31 +426,6 @@ export class SkillLifecycle {
     );
   }
 
-  /** Checks that `target` is earlier than the live version and can go live. */
-  async planRollback(scope: SkillScope, name: string, target: number): Promise<HeadPlan> {
-    const head = await this.#requireHead(scope, name);
-    if (head.liveVersion === null) {
-      throw new InvalidSkillTransitionError(`Skill "${name}" has no active version to roll back.`);
-    }
-    if (target >= head.liveVersion) {
-      throw new InvalidSkillTransitionError(
-        `Skill "${name}" cannot roll back from version ${head.liveVersion} to version ${target}. Roll back only to an earlier version; publish a later one instead.`,
-      );
-    }
-    const plan = await this.planPublish(scope, name, target);
-    if (plan.head.liveVersion !== head.liveVersion) {
-      throw new SkillConflictError(`Skill "${name}" changed while rolling back.`);
-    }
-    return plan;
-  }
-
-  /** Makes an exact earlier version live again, in the mode it was saved with. */
-  async rollback(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
-    return this.#retrying(async () =>
-      this.applyPublish(scope, await this.planRollback(scope, name, target)),
-    );
-  }
-
   /** Checks that the live version is `target` and can apply in `mode`. */
   async planSetMode(
     scope: SkillScope,
