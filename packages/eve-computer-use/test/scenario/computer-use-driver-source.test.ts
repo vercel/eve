@@ -74,7 +74,7 @@ test("computer-use bootstrap writes all assets and installs pinned dependencies 
   assert.match(installScript, /firefox-esr/u);
   // Mozilla stops serving an ESR line after its end of life, so any line gate
   // breaks every new install once that happens (#5829).
-  assert.doesNotMatch(installScript, /firefox-esr[=/]|madison firefox-esr/u);
+  assert.doesNotMatch(installScript, /firefox-esr[=/]|madison firefox-esr|Pin: version/u);
   assert.match(installScript, /\bffmpeg\b/u);
   assert.match(installScript, /\bxterm\b/u);
   assert.match(
