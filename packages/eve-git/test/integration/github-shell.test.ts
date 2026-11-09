@@ -932,7 +932,7 @@ test("a stale lock's release that can't take the guard leaves the policy to the 
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   try {
-    // A waiter holds the guard while it breaks this holder's stale lock.
+    // Another command holds the guard while it takes over this command's old lock.
     execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     execFileSync("touch", ["-t", "200001010000", lockPath]);
@@ -942,8 +942,8 @@ test("a stale lock's release that can't take the guard leaves the policy to the 
         cleaned = true;
       },
     });
-    // The waiter's successor replaces the policy, so clearing it here could clear theirs, and the
-    // lock is the waiter's to break.
+    // The command taking over sets its own credential, so clearing the policy here could clear it,
+    // and the lock is left for that command to take over.
     assert.equal(cleaned, false);
     assert.equal(
       execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }),
@@ -959,7 +959,7 @@ test("a fresh lock's release cleans up even when the guard is busy", async () =>
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   try {
-    // Another command's release holds the guard, and no waiter can break a lock this young.
+    // Another command's release holds the guard, and no command can take over a lock this young.
     execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     let cleaned = false;

@@ -50,17 +50,20 @@ function acquireCommand(owner: string): string {
   ].join("\n");
 }
 
+/** How long a finishing command gets to clear its credential before another can take over its lock. */
+const RELEASE_MARGIN_SECONDS = 60;
 /**
- * A lock younger than this is safe to release without the guard. Waiters break only locks older
- * than {@link STALE_AFTER_SECONDS}, so the holder has {@link GUARD_STALE_AFTER_SECONDS} left to
- * clear its credential. Nothing makes the policy write finish in that time.
+ * A finishing command whose lock is younger than this may clear its credential without the guard.
+ * Another command takes over a lock only once it is older than {@link STALE_AFTER_SECONDS}, so the
+ * finishing command has at least {@link RELEASE_MARGIN_SECONDS} to clear it. The code doesn't time
+ * out that Sandbox API call, so a call slower than the margin can still overlap a takeover.
  */
-const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - GUARD_STALE_AFTER_SECONDS;
+const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - RELEASE_MARGIN_SECONDS;
 
 /**
  * Starts a release. It tries briefly to take the guard, removing one a stopped sandbox left behind,
  * then prints three flags: `guarded` (this release holds the guard), `held` (`owner` still holds
- * the lock) and `fresh` (the lock is too young for a waiter to break).
+ * the lock) and `fresh` (the lock is too young for another command to take over).
  */
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
@@ -74,8 +77,9 @@ function beginReleaseCommand(owner: string): string {
     `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
     `  sleep 0.1`,
     `done`,
-    // Check the age before the owner. A fresh lock can't be replaced between the two checks, and a
-    // lock replaced after the age check reads as stale, so the release skips cleanup.
+    // Check the lock's age before its owner. A lock young enough to skip the guard can't be taken
+    // over between the two checks. If another command takes it over after the age check, the age
+    // reads as too old and cleanup is skipped.
     `fresh=0`,
     `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
     `held=0`,
@@ -179,13 +183,13 @@ async function release(
       fresh = young === "1";
     }
   } catch {}
-  // Without the guard, a waiter can break a stale lock at any moment. Clearing the policy or
-  // removing the lock could then undo the next holder's, so both are left to that waiter. The next
-  // holder replaces the policy.
+  // Without the guard, another command can take over an old lock at any moment. Clearing the
+  // policy or removing the lock could then remove that command's credential or lock, so this
+  // release leaves both alone. The command that takes over sets its own credential.
   if (held !== undefined && !guarded && !fresh) return;
   try {
-    // If the sandbox can't say who holds the lock, clear the credential anyway. Leaving it in the
-    // policy is worse than clearing the next holder's.
+    // If the sandbox can't report who holds the lock, clear the credential anyway. Leaving it usable
+    // after the command ends is worse than clearing the next command's.
     if (held === undefined || held) await cleanup?.();
   } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
