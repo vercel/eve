@@ -1,5 +1,5 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import type { SessionAuthContext, SessionParent } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
@@ -7,6 +7,7 @@ import { simulateReadableStream, type LanguageModel } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { conversationOf } from "#client/conversation.js";
 import type { EveToolPart } from "#client/message-types.js";
 import { defineDynamic } from "#dynamic/definition.js";
@@ -43,7 +44,7 @@ import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { DENY_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
-import { defineTool } from "#tools/definition.js";
+import { defineTool, type ToolContext } from "#tools/definition.js";
 import { z } from "zod";
 import {
   defineWorkflowTool,
@@ -263,8 +264,9 @@ interface ToolSpec {
   readonly name: string;
   readonly approval?: boolean;
   readonly allowOtherResponders?: boolean;
+  readonly response?: ApprovalResponsePolicy;
   readonly inputSchema?: z.ZodType;
-  readonly execute?: (input: unknown) => unknown;
+  readonly execute?: (input: unknown, ctx: ToolContext) => unknown;
   /** A `"use workflow"` body from the test fixtures, which makes this a workflow tool. */
   readonly workflow?: (...args: never[]) => unknown;
 }
@@ -282,10 +284,11 @@ interface Session {
   readonly send: (message: string, auth?: SessionAuthContext) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
   readonly answer: (
-    interactionId: string,
+    interactionId: string | readonly string[],
     optionId: string,
     auth?: SessionAuthContext,
-  ) => Promise<void>;
+    fields?: Omit<DeliverPayload, "answers">,
+  ) => Promise<string>;
   readonly answerAndSend: (interactionId: string, message: string) => Promise<string>;
   readonly control: (
     kind: "cancel" | "clear" | "compact" | "reset",
@@ -345,14 +348,15 @@ async function withSession(
                         ...(tool.allowOtherResponders && {
                           response: () => ({ status: "allowed" as const }),
                         }),
+                        ...(tool.response !== undefined && { response: tool.response }),
                       }
                     : undefined,
                 description: `Run ${tool.name}.`,
-                execute: async (input) => {
+                execute: async (input, ctx) => {
                   ran.push(tool.name);
                   return tool.execute === undefined
                     ? { ran: tool.name }
-                    : await tool.execute(input);
+                    : await tool.execute(input, ctx);
                 },
                 inputSchema: tool.inputSchema ?? z.object({}).passthrough(),
               }),
@@ -422,13 +426,23 @@ async function withSession(
               ? [event.data.interactionId]
               : [],
           ),
-        async answer(interactionId, optionId, auth = ALICE) {
+        async answer(interactionId, optionId, auth = ALICE, fields = {}) {
+          const interactionIds =
+            typeof interactionId === "string" ? [interactionId] : interactionId;
+          const delivery = createChannelDeliveryMetadata({
+            channelKind: "http",
+            channelName: "test",
+          });
           await resumeHook(commandInbox, {
             auth,
             kind: "send",
-            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-            payload: { answers: [{ interactionId, optionId }] },
+            delivery,
+            payload: {
+              ...fields,
+              answers: interactionIds.map((interactionId) => ({ interactionId, optionId })),
+            },
           });
+          return delivery.deliveryId;
         },
         async answerAndSend(interactionId, message) {
           const delivery = createChannelDeliveryMetadata({
@@ -1717,36 +1731,39 @@ describe("work delegated to a child session", () => {
     ).toMatchObject({ output: `Stopped ${ended!.data.taskId}; it won't report back.` });
   });
 
+  const delegatedDeploy = () =>
+    scriptedModel((_prompt, raw) => {
+      const prompt = JSON.stringify(raw);
+      const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
+      // The child, whose conversation starts with the parent's message: deploys, behind an
+      // approval, and reports.
+      const first = raw.find((message) => message.role === "user");
+      if (JSON.stringify(first?.content).includes("CHILD:")) {
+        return called("deploy")
+          ? "Child deployed."
+          : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
+      }
+      // The parent: delegates once, waits for its child, and reports. A delegated call's
+      // result arrives when its task ends, so the prompt shows the call before it does.
+      if (!called("agent"))
+        return [
+          {
+            input: { message: "CHILD: deploy it." },
+            toolName: "agent",
+            toolCallId: "call_agent",
+          },
+        ];
+      if (!called("eve__task_wait"))
+        return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
+      return "The child is done.";
+    });
+
   it("relays a child's approval to its parent, and answering it there runs the child's call", async () => {
     const { events, ran } = await withSession(
       "edge-child-approval",
       {
         message: "Delegate the deploy.",
-        model: scriptedModel((_prompt, raw) => {
-          const prompt = JSON.stringify(raw);
-          const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
-          // The child, whose conversation starts with the parent's message: deploys, behind an
-          // approval, and reports.
-          const first = raw.find((message) => message.role === "user");
-          if (JSON.stringify(first?.content).includes("CHILD:")) {
-            return called("deploy")
-              ? "Child deployed."
-              : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
-          }
-          // The parent: delegates once, waits for its child, and reports. A delegated call's
-          // result arrives when its task ends, so the prompt shows the call before it does.
-          if (!called("agent"))
-            return [
-              {
-                input: { message: "CHILD: deploy it." },
-                toolName: "agent",
-                toolCallId: "call_agent",
-              },
-            ];
-          if (!called("eve__task_wait"))
-            return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
-          return "The child is done.";
-        }),
+        model: delegatedDeploy(),
         tools: [{ approval: true, name: "deploy" }],
       },
       async (session) => {
@@ -1780,6 +1797,383 @@ describe("work delegated to a child session", () => {
     ).toMatchObject({ outcome: "completed", output: "Child deployed." });
     expect(ofType(events, "child.opened")).toHaveLength(1);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  // #5726: Slack sends its responder as `state` with every button answer. That field stays
+  // with the parent, and the child still has to admit the answer forwarded to it.
+  it("runs the child's call when its relayed approval's answer also carries channel state", async () => {
+    const { events, ran } = await withSession(
+      "edge-child-approval-state",
+      {
+        message: "Delegate the deploy.",
+        model: delegatedDeploy(),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("relayed approval pause");
+        await session.answer(session.approvals()[0]!, "approve", ALICE, {
+          state: { responder: "U123" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "accepted",
+    ]);
+    expect(
+      ofType(events, "call.settled").find((event) => event.data.callId === "call_agent")?.data,
+    ).toMatchObject({ outcome: "completed", output: "Child deployed." });
+  });
+
+  // What every session, child sessions included, records about its deliveries and answers.
+  const observeReceipts = () => {
+    const seen: { session: string; type: string; data: Record<string, unknown> }[] = [];
+    const record = (event: { type: string; data: object }, ctx: { session: { id: string } }) =>
+      void seen.push({ data: { ...event.data }, session: ctx.session.id, type: event.type });
+    const hook = defineHook({
+      events: {
+        "delivery.admitted": record,
+        "delivery.settled": record,
+        "response.admitted": record,
+        "response.settled": record,
+        "response.submitted": record,
+      },
+    });
+    const of = (session: string, type: string) =>
+      seen.filter((entry) => entry.session === session && entry.type === type);
+    return { hooks: { receipts: hook }, of, seen };
+  };
+  const childSessions = (events: readonly SessionStreamEvent[]) =>
+    ofType(events, "child.opened").map((event) => event.data.sessionId);
+  const principal = (auth: SessionAuthContext | null | undefined) =>
+    auth == null
+      ? null
+      : {
+          authenticator: auth.authenticator,
+          issuer: auth.issuer,
+          principalId: auth.principalId,
+          principalType: auth.principalType,
+        };
+
+  // Without a response policy only the requester answers; the answer's channel state keeps the
+  // payload split, so the refusal happens in the child that admits its share.
+  it("refuses another person's relayed approval that carries channel state, and keeps the child waiting", async () => {
+    const receipts = observeReceipts();
+    const callers: unknown[] = [];
+    let bobAnswer = "";
+    let aliceAnswer = "";
+    const { events, ran } = await withSession(
+      "edge-child-approval-state-refused",
+      {
+        hooks: receipts.hooks,
+        message: "Delegate the deploy.",
+        model: delegatedDeploy(),
+        tools: [
+          {
+            approval: true,
+            execute: (_input, ctx) => void callers.push(principal(ctx.session.auth.current)),
+            name: "deploy",
+          },
+        ],
+      },
+      async (session) => {
+        await session.next("relayed approval pause");
+        const [child] = childSessions(session.events());
+        bobAnswer = await session.answer(session.approvals()[0]!, "approve", BOB, {
+          state: { responder: "U_BOB" },
+        });
+        await vi.waitFor(
+          () =>
+            expect(receipts.of(child!, "response.settled").map(({ data }) => data.outcome)).toEqual(
+              ["refused"],
+            ),
+          { timeout: 20_000 },
+        );
+        expect(callers).toEqual([]);
+        aliceAnswer = await session.answer(session.approvals()[0]!, "approve", ALICE, {
+          state: { responder: "U_ALICE" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(callers).toEqual([principal(ALICE)]);
+    const [child] = childSessions(events);
+    expect(receipts.of(child!, "response.settled").map(({ data }) => data.outcome)).toEqual([
+      "refused",
+      "applied",
+    ]);
+    // Each answer reaches the child as a delivery of its own, under the person who sent it.
+    const receiptOf = (type: string, deliveryId: string) =>
+      receipts.of(child!, type).find(({ data }) => data.deliveryId === deliveryId)?.data;
+    expect(
+      [bobAnswer, aliceAnswer].map((deliveryId) => [
+        (receiptOf("delivery.admitted", deliveryId)?.principal as { id: string } | undefined)?.id,
+        receiptOf("delivery.settled", deliveryId)?.outcome,
+      ]),
+    ).toEqual([
+      ["bob", "refused"],
+      ["alice", "handled"],
+    ]);
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "accepted",
+    ]);
+    expect(
+      ofType(events, "call.settled").find((event) => event.data.callId === "call_agent")?.data,
+    ).toMatchObject({ outcome: "completed", output: "Child deployed." });
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("runs the child's call as its caller while the policy and the call see the approving responder", async () => {
+    const SLACK_BOB = {
+      attributes: {},
+      authenticator: "slack",
+      issuer: "T_ACME",
+      principalId: "U_BOB",
+      principalType: "user" as const,
+    };
+    const policySaw: unknown[] = [];
+    const callSaw: unknown[] = [];
+    const { ran } = await withSession(
+      "edge-child-approval-state-responder",
+      {
+        message: "Delegate the deploy.",
+        model: delegatedDeploy(),
+        tools: [
+          {
+            approval: true,
+            execute: (_input, ctx) =>
+              void callSaw.push({
+                caller: principal(ctx.session.auth.current),
+                responder: principal(ctx.approval?.responder),
+              }),
+            name: "deploy",
+            response: ({ request, response }) => {
+              policySaw.push({
+                requester: principal(request.principal),
+                responder: principal(response.principal),
+              });
+              return response.principal.principalId === "U_BOB"
+                ? { status: "allowed" }
+                : { reason: "Only Bob approves deploys.", status: "rejected" };
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await session.next("relayed approval pause");
+        await session.answer(session.approvals()[0]!, "approve", SLACK_BOB, {
+          state: { responder: "U_BOB" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(policySaw).toEqual([{ requester: principal(ALICE), responder: principal(SLACK_BOB) }]);
+    expect(callSaw).toEqual([{ caller: principal(ALICE), responder: principal(SLACK_BOB) }]);
+  });
+
+  // The parent delegates two deploys, each behind an approval in its child, and waits for both.
+  const twoDelegatedDeploys = () =>
+    scriptedModel((_prompt, raw) => {
+      const prompt = JSON.stringify(raw);
+      const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
+      const first = raw.find((message) => message.role === "user");
+      if (JSON.stringify(first?.content).includes("CHILD:")) {
+        return called("deploy")
+          ? "Child deployed."
+          : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
+      }
+      if (!called("agent"))
+        return [
+          { input: { message: "CHILD: deploy a." }, toolName: "agent", toolCallId: "call_a" },
+          { input: { message: "CHILD: deploy b." }, toolName: "agent", toolCallId: "call_b" },
+        ];
+      // Waits until both children report.
+      const reported = prompt.split("Child deployed.").length - 1;
+      const waits = prompt.split('"toolName":"eve__task_wait"').length - 1;
+      if (reported < 2)
+        return [{ input: {}, toolName: "eve__task_wait", toolCallId: `call_wait_${waits}` }];
+      return "Both children are done.";
+    });
+
+  // One payload that answers two children's prompts gives each child a share. Each share is a
+  // delivery of its own in its child, named from the payload's id and the child's place in it,
+  // so a retried forward names it the same way and the child admits it once.
+  it("forwards one payload's answers to each child that asked, each under its own stable receipt", async () => {
+    const receipts = observeReceipts();
+    const ranIn: string[] = [];
+    let deliveryId = "";
+    const { events, ran } = await withSession(
+      "edge-children-share-one-answer",
+      {
+        hooks: receipts.hooks,
+        message: "Delegate both deploys.",
+        model: twoDelegatedDeploys(),
+        tools: [
+          {
+            approval: true,
+            execute: (_input, ctx) => void ranIn.push(ctx.session.id),
+            name: "deploy",
+          },
+        ],
+      },
+      async (session) => {
+        let opened = 0;
+        await session.until(
+          "both relayed approvals",
+          (event) => event.type === "interaction.opened" && ++opened === 2,
+        );
+        deliveryId = await session.answer(session.approvals(), "approve", ALICE, {
+          state: { responder: "U_ALICE" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+        // A retried forward sends each child its share again under the same receipt. A cancel
+        // after it shows when the child has read it.
+        for (const child of childSessions(session.events())) {
+          const inbox = sessionInboxHookToken(sessionCommandHookToken(child));
+          for (const { data } of receipts.of(child, "response.submitted"))
+            await resumeHook(inbox, {
+              auth: ALICE,
+              deliveryMetadata: [
+                {
+                  channelKind: "http",
+                  channelName: "test",
+                  deliveryId: data.deliveryId as string,
+                  payloadIndex: 0,
+                },
+              ],
+              kind: "deliver",
+              payloads: [
+                {
+                  answers: [{ interactionId: data.interactionId as string, optionId: "approve" }],
+                },
+              ],
+            });
+          await resumeHook(inbox, { auth: ALICE, deliveryId: `probe_${child}`, kind: "cancel" });
+        }
+        await vi.waitFor(
+          () =>
+            expect(
+              receipts.seen.filter(
+                ({ data, type }) =>
+                  type === "delivery.settled" && String(data.deliveryId).startsWith("probe_"),
+              ),
+            ).toHaveLength(2),
+          { timeout: 20_000 },
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy", "deploy"]);
+    const children = childSessions(events);
+    expect(children).toHaveLength(2);
+    expect(ranIn.toSorted()).toEqual(children.toSorted());
+    // Each child admitted one share, under its own receipt, and nothing more but the probe.
+    const answeredIn = children.map((child) =>
+      receipts
+        .of(child, "delivery.admitted")
+        .map(({ data }) => data.deliveryId as string)
+        .filter((id) => id.startsWith(deliveryId)),
+    );
+    expect(answeredIn.toSorted()).toEqual([[deliveryId], [`${deliveryId}_forwarded_1`]]);
+    for (const child of children) {
+      const [answer] = receipts.of(child, "response.submitted");
+      expect(receipts.of(child, "response.submitted")).toHaveLength(1);
+      expect(receipts.of(child, "response.settled").map(({ data }) => data)).toEqual([
+        { outcome: "applied", responseId: answer!.data.responseId },
+      ]);
+      expect(
+        receipts
+          .of(child, "delivery.settled")
+          .find(({ data }) => data.deliveryId === answer!.data.deliveryId)?.data,
+      ).toMatchObject({ outcome: "handled" });
+    }
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "accepted",
+      "accepted",
+    ]);
+    for (const callId of ["call_a", "call_b"])
+      expect(
+        ofType(events, "call.settled").find((event) => event.data.callId === callId)?.data,
+      ).toMatchObject({ outcome: "completed", output: "Child deployed." });
+  });
+
+  // A child reports how it settled its share under the share's own id, which this session never
+  // recorded. It still credits the outcome to the answer that share came from, not to a later
+  // person's answer to the same prompt.
+  it("credits a child's refusal of its share to the answer it came from, not a later one", async () => {
+    let prompts: string[] = [];
+    let bobAnswer = "";
+    let aliceAnswer = "";
+    const { events, ran } = await withSession(
+      "edge-children-share-refused",
+      {
+        message: "Delegate both deploys.",
+        model: twoDelegatedDeploys(),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        let opened = 0;
+        await session.until(
+          "both relayed approvals",
+          (event) => event.type === "interaction.opened" && ++opened === 2,
+        );
+        // Bob answers both prompts, and Alice answers them too before either child has read
+        // Bob's answer. Only Alice, who asked, may approve.
+        prompts = session.approvals();
+        bobAnswer = await session.answer(prompts, "approve", BOB, {
+          state: { responder: "U_BOB" },
+        });
+        aliceAnswer = await session.answer(prompts, "approve", ALICE, {
+          state: { responder: "U_ALICE" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy", "deploy"]);
+    const settled = new Map(
+      ofType(events, "response.settled").map(({ data }) => [data.responseId, data.outcome]),
+    );
+    const answeredBy = new Map([
+      [bobAnswer, "bob"],
+      [aliceAnswer, "alice"],
+    ]);
+    const [a, b] = prompts;
+    expect(
+      ofType(events, "response.submitted")
+        .map(({ data }) => [
+          answeredBy.get(data.deliveryId),
+          data.interactionId === a ? "a" : data.interactionId === b ? "b" : data.interactionId,
+          settled.get(data.responseId),
+        ])
+        .toSorted(),
+    ).toEqual([
+      ["alice", "a", "applied"],
+      ["alice", "b", "applied"],
+      ["bob", "a", "refused"],
+      ["bob", "b", "refused"],
+    ]);
   });
 
   // #4923: a typed answer to a relayed prompt is a message, so only the turn's

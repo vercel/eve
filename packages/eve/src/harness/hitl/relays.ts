@@ -26,6 +26,24 @@ export interface Relay extends RelayRoute {
   readonly runId?: string;
 }
 
+const FORWARDED_SHARE = /^(.+)_forwarded_\d+$/;
+
+/**
+ * The delivery id a child admits its share of a forwarded payload under. One payload can answer
+ * several children, and nested relays can bring two shares to one session, so every share after
+ * the first gets an id of its own. The id is unique within the receiving child only; the
+ * forwarding session still records its answers under `deliveryId` and maps what the child relays
+ * back with {@link forwardedFrom}.
+ */
+export function forwardedShareId(deliveryId: string, share: number): string {
+  return share === 0 ? deliveryId : `${deliveryId}_forwarded_${share}`;
+}
+
+/** The forwarding session's delivery id for a share id {@link forwardedShareId} named. */
+export function forwardedFrom(deliveryId: string): string {
+  return FORWARDED_SHARE.exec(deliveryId)?.[1] ?? deliveryId;
+}
+
 /** Reads one stored route, or `undefined` when it is malformed. */
 export function parseRelay(value: unknown): Relay | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;

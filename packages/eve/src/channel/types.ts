@@ -360,14 +360,14 @@ export type RelayedInteractionEvent =
  */
 export interface RelayedResponseAdmission {
   readonly interactionId: string;
-  /** The delivery the asker received the answer in, when it kept the forwarder's id. */
+  /** The delivery the asker received the answer in: the forwarder's id, or its share's id. */
   readonly deliveryId?: string;
 }
 
 /** How an asker settled an answer: which interaction, from which delivery, and how. */
 export interface RelayedResponseSettlement {
   readonly interactionId: string;
-  /** The delivery the asker received the answer in, when it kept the forwarder's id. */
+  /** The delivery the asker received the answer in: the forwarder's id, or its share's id. */
   readonly deliveryId?: string;
   readonly outcome: ResponseOutcome;
   readonly reason?: string;

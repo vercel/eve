@@ -32,7 +32,7 @@ import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol
 import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
-import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
+import { forwardedShareId, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
 import { admitDeliveries } from "#harness/session-machine/deliveries.js";
@@ -205,12 +205,15 @@ async function routeProxiedDeliver(
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
-      if (routed.forSelf === undefined && childIndex === 0) {
-        for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
-          if (metadata.payloadIndex === sourcePayloadIndex) {
-            child.metadata.push({ ...metadata, payloadIndex: childPayloadIndex });
-          }
-        }
+      // Each child admits its answers as a delivery of its own, even when this session keeps
+      // the payload's other fields. Later shares get an id unique within the child; this
+      // session's answer rows keep the payload's id, and `relay` maps what the child reports back.
+      for (const metadata of payloadMetadata) {
+        child.metadata.push({
+          ...metadata,
+          deliveryId: forwardedShareId(metadata.deliveryId, childIndex),
+          payloadIndex: childPayloadIndex,
+        });
       }
       children.set(key, child);
     }
