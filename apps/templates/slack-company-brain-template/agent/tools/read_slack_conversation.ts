@@ -77,7 +77,8 @@ export default defineTool({
         ts: message.ts,
         userId: message.user,
         text: message.text ?? "",
-        ...(message.reply_count ? { replyCount: message.reply_count, threadTs: message.ts } : {}),
+        replyCount: message.reply_count || undefined,
+        threadTs: message.reply_count ? message.ts : undefined,
       })),
     };
   },
