@@ -91,7 +91,8 @@ call.settled   { outcome: "completed" }
   reply. Today a later step's reply replaces an earlier one's, so a card followed by "Here's
   last week's summary" would lose the card from `turn.reply`.
 - `fallbackText` is required for any kind other than `text`. Readers that only show text use
-  it: subagent answers, remote-agent results, ACP, transcripts, and eval text assertions.
+  it: channels without a renderer, ACP, the dev TUI, and eval reply assertions. A subagent's
+  answer stays the text its model wrote.
 - The model sees the tool's ordinary result. `toModelOutput` still applies.
 
 ### 2. Text fallback everywhere
@@ -108,7 +109,8 @@ A reply part of a kind a reader doesn't render is shown through its `fallbackTex
     readonly type: "content";
     readonly kind: string;
     readonly mediaType?: string;
-    readonly value?: unknown; // Partial while streaming.
+    readonly text?: string; // The raw preview while streaming.
+    readonly value?: unknown; // Once done.
     readonly fallbackText?: string;
     readonly callId?: string;
     readonly state: "streaming" | "done";
@@ -214,4 +216,5 @@ Each primitive is additive and ships on its own:
 
 - `reply` as the tool field name, beside the `eve__reply` tool that structured output uses.
 - Whether previews of `+json` media types should reach renderers already parsed, or as text.
+- Whether a subagent's answer should include its reply parts' fallback text.
 - Whether Teams and Discord card support belongs in this plan or follows it.
