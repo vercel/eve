@@ -117,6 +117,21 @@ export function abandonInstrumentationState(
   });
 }
 
+/**
+ * Lifts abandonment once a timed-out start handler finishes after all, so its terminal runs.
+ * A late start can still have opened work, such as a span, that only the terminal ends.
+ */
+export function reviveInstrumentationState(provider: string, idempotencyKey: string): void {
+  const key = stateKey(provider, idempotencyKey);
+  if (contextStorage.getStore()?.get(InstrumentationStateKey)?.[key]?.abandoned !== true) return;
+  writeInstrumentationState((state) => {
+    const current = state[key];
+    if (current?.abandoned !== true) return state;
+    const { abandoned: _abandoned, ...record } = current;
+    return writeSlot(state, key, record.value === undefined ? undefined : record);
+  });
+}
+
 export function isInstrumentationStateAbandoned(provider: string, idempotencyKey: string): boolean {
   return (
     contextStorage.getStore()?.get(InstrumentationStateKey)?.[stateKey(provider, idempotencyKey)]
