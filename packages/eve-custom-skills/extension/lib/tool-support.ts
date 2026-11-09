@@ -41,6 +41,23 @@ export const nameField = z
 
 export const versionField = z.number().int().positive();
 
+export const idField = z
+  .string()
+  .min(1)
+  .max(200)
+  .describe(
+    "The skill's `id`, as `list`, `read`, or `create` returned it. It pins the change to that skill, so a skill deleted and recreated under the same name isn't changed by mistake.",
+  );
+
+/** Refuses a change to `name` when it is no longer the skill `id` the caller read. */
+export function requireSkillId(name: string, actual: string, expected: string): void {
+  if (actual !== expected) {
+    throw new SkillChangeRefusedError(
+      `Skill "${name}" was replaced since its id ${expected} was read; it is now ${actual}. List the skills again before changing it.`,
+    );
+  }
+}
+
 export const modeField = z
   .enum(SKILL_APPLICATION_MODES)
   .describe(

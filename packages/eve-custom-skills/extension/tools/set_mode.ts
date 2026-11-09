@@ -2,10 +2,12 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import {
+  idField,
   modeField,
   nameField,
   NEXT_TURN,
   requireApproval,
+  requireSkillId,
   scopeField,
   skillChange,
   versionField,
@@ -13,6 +15,7 @@ import {
 
 const inputSchema = z.object({
   name: nameField,
+  id: idField,
   version: versionField,
   mode: modeField,
   scope: scopeField,
@@ -25,9 +28,11 @@ const { approval, execute } = skillChange({
     `Set skill "${name}" version ${version} to ${mode}?`,
   async plan(input, { skills, scope }) {
     const name = skills.normalizeName(input.name);
-    const { head, version } = await skills.planSetMode(scope, name, input.version, input.mode);
+    const planned = await skills.planSetMode(scope, name, input.version, input.mode);
+    const { head, version } = planned;
+    requireSkillId(name, head.id, input.id);
     return {
-      plan: { name, version: input.version, mode: input.mode },
+      plan: { planned, mode: input.mode },
       changesLive: head.applicationMode !== input.mode,
       targets: [
         {
@@ -42,9 +47,9 @@ const { approval, execute } = skillChange({
       ],
     };
   },
-  async run({ name, version, mode }, { skills, scope, approved }) {
+  async run({ planned, mode }, { skills, scope, approved }) {
     requireApproval(approved);
-    const { skill, previous } = await skills.setMode(scope, name, version, mode);
+    const { skill, previous } = await skills.applySetMode(scope, planned, mode);
     return {
       output: {
         name: skill.name,

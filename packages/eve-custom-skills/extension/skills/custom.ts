@@ -15,12 +15,13 @@ export default defineDynamic(async (ctx: DynamicContext) => {
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
     turnId: ctx.turn?.id,
   });
-  const entries: Record<string, ReturnType<typeof defineSkill>> = {};
+  // No prototype, so a skill named `constructor` is an entry like any other.
+  const entries: Record<string, ReturnType<typeof defineSkill>> = Object.create(null);
   for (const { scope, skills } of scopes) {
     for (const skill of skills) {
       if (skill.applicationMode === "always") continue;
       const name = loadName(scope, skill.name);
-      if (name in entries) continue;
+      if (Object.hasOwn(entries, name)) continue;
       entries[name] = defineSkill({
         description: skill.description,
         content: skill.instructions,
@@ -28,5 +29,5 @@ export default defineDynamic(async (ctx: DynamicContext) => {
       });
     }
   }
-  return Object.keys(entries).length > 0 ? entries : null;
+  return Object.keys(entries).length > 0 ? { ...entries } : null;
 });

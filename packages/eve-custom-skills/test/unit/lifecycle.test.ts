@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { SkillConflictError } from "../../extension/lib/errors.ts";
 import { SkillLifecycle } from "../../extension/lib/lifecycle.ts";
 import type { SkillScope } from "../../extension/lib/types.ts";
 import { memoryRepository } from "./memory-repository.ts";
@@ -301,4 +302,29 @@ test("a replaced validator decides content rules on save, publish, and mode chan
     }).planSave(alice, { name: "long", description: "x", markdown: "four" }),
     /3 characters or fewer/,
   );
+});
+
+test("applying a mode change planned as a no-op fails if the scope changed since", async () => {
+  const skills = lifecycle();
+  await skills.save(alice, { name: "lookup", description: ROUTING, markdown: "v1" }, { savedBy });
+  const noOp = await skills.planSetMode(alice, "lookup", 1, "on-demand");
+  // Someone else defers the skill after the no-op was judged.
+  await skills.setMode(alice, "lookup", 1, "deferred");
+  await assert.rejects(
+    skills.applySetMode(alice, noOp, "on-demand"),
+    /changed while this change was checked|scope changed/,
+  );
+  assert.equal((await skills.listLive(alice))[0]?.applicationMode, "deferred");
+});
+
+test("applying a planned publish or save fails if the scope changed since", async () => {
+  const skills = lifecycle();
+  const input = { name: "deploy", description: ROUTING, markdown: "v1" };
+  await skills.save(alice, input, { savedBy });
+  await skills.save(alice, { ...input, markdown: "v2" }, { savedBy });
+  const publish = await skills.planPublish(alice, "deploy", 2);
+  const draft = await skills.planSave(alice, { ...input, markdown: "v3" });
+  await skills.save(alice, { ...input, markdown: "v3 from Bob" }, { savedBy });
+  await assert.rejects(skills.applyPublish(alice, publish), SkillConflictError);
+  await assert.rejects(skills.applySave(alice, draft, { savedBy }), SkillConflictError);
 });

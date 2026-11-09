@@ -205,3 +205,19 @@ test("a new skill can't take a name another skill in the scope holds", async () 
   await repository.appendVersion(alice, { ...request, id: "a" });
   await assert.rejects(repository.appendVersion(alice, { ...request, id: "b" }), /already exists/);
 });
+
+test("a skill can be named like a built-in object property", async () => {
+  const { skills } = setup();
+  for (const name of ["constructor", "tostring", "proto"]) {
+    const saved = await skills.save(
+      alice,
+      { name, description: ROUTING, markdown: `${name} steps.` },
+      { savedBy, idempotencyKey: `s1:${name}` },
+    );
+    assert.equal(saved.skill.status, "active");
+  }
+  assert.deepEqual(
+    (await skills.listLive(alice)).map(({ name }) => name),
+    ["constructor", "proto", "tostring"],
+  );
+});

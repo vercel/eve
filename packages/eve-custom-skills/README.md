@@ -107,7 +107,7 @@ Always-on limits apply per scope, so a turn with a personal and a channel scope 
 
 ## Storage
 
-Every skill has a stable `id`, the same across its versions and in every `onChange` event, and a `name` that is unique within its scope. People and the model use names; use the ID to link a skill to records elsewhere. The tools remove skills by the ID they planned with, so a skill recreated under the same name isn't removed by an earlier approval.
+Every skill has a stable `id`, the same across its versions and in every `onChange` event, and a `name` that is unique within its scope. People and the model use names; use the ID to link a skill to records elsewhere. `publish`, `rollback`, `set_mode`, and `remove` take the skill's ID as well as its name, so an approval applies only to the skill its card showed: a skill deleted and recreated under the same name while the approval waits is refused, not changed. Since versions are immutable, the ID and version pin the exact content that goes live. Each tool also writes against the scope revision its approval rule judged, so a change that raced another fails and is retried instead of applying something nobody judged.
 
 The default store writes a documented, versioned layout under `namespace`:
 

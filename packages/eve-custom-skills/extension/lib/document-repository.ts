@@ -133,6 +133,14 @@ export function documentRepository(options: DocumentRepositoryOptions): SkillRep
   return new DocumentSkillRepository(options);
 }
 
+/**
+ * Copies a parsed record into an object without a prototype, so names and IDs
+ * such as `constructor` or `__proto__` are only ever the record's own keys.
+ */
+function dictionary<T>(record: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null) as Record<string, T>, record);
+}
+
 function toHead(id: string, entry: SkillEntry): SkillHead {
   return {
     id,
@@ -233,8 +241,8 @@ class DocumentSkillRepository implements SkillRepository {
   async #readCatalog(scope: SkillScope): Promise<{ catalog: Catalog; version: string | null }> {
     const read = await this.#read(this.#catalogKey(scope), catalogSchema);
     return read
-      ? { catalog: read.value, version: read.version }
-      : { catalog: { schemaVersion: SCHEMA_VERSION, skills: {} }, version: null };
+      ? { catalog: { ...read.value, skills: dictionary(read.value.skills) }, version: read.version }
+      : { catalog: { schemaVersion: SCHEMA_VERSION, skills: dictionary({}) }, version: null };
   }
 
   #updateCatalog<T>(
@@ -245,8 +253,11 @@ class DocumentSkillRepository implements SkillRepository {
     return this.#update({
       key: this.#catalogKey(scope),
       schema: catalogSchema,
-      empty: (): Catalog => ({ schemaVersion: SCHEMA_VERSION, skills: {} }),
-      change,
+      empty: (): Catalog => ({ schemaVersion: SCHEMA_VERSION, skills: dictionary({}) }),
+      change: (catalog) => {
+        catalog.skills = dictionary(catalog.skills);
+        return change(catalog);
+      },
       ...(expectedRevision !== undefined && { expectedVersion: expectedRevision }),
     });
   }
@@ -261,6 +272,7 @@ class DocumentSkillRepository implements SkillRepository {
       schema: indexSchema,
       empty: (): ScopeIndex => ({ schemaVersion: SCHEMA_VERSION, scopes: {} }),
       change: (index) => {
+        index.scopes = dictionary(index.scopes);
         const existing = index.scopes[scope.key];
         if (existing) {
           const { updatedAt: _updatedAt, ...rest } = existing;

@@ -120,7 +120,11 @@ test("a change that needs approval nobody gave is held back", async () => {
   const held = await run(create, input, context());
   assert.equal(held.status, "draft");
 
-  const refused = await run(publish, { name: "deploy", version: 1, scope: "channel" }, context());
+  const refused = await run(
+    publish,
+    { name: "deploy", id: held.id, version: 1, scope: "channel" },
+    context(),
+  );
   assert.equal(refused.success, false);
   assert.match(String(refused.error), /needs approval/);
 });
@@ -144,10 +148,16 @@ test("removal reports who removed what", async () => {
   const events = mount();
   const created = await run(create, { ...deploy }, context());
   const ctx = context({ approvedBy: alice });
-  const { status, prompt } = await decide(remove, { names: ["deploy", "missing"] }, ctx);
+  const input = {
+    skills: [
+      { name: "deploy", id: created.id },
+      { name: "missing", id: "skill-missing" },
+    ],
+  };
+  const { status, prompt } = await decide(remove, input, ctx);
   assert.equal(status, "user-approval");
   assert.match(prompt, /^Delete skill "deploy" for you, with every version\?/);
-  const result = await run(remove, { names: ["deploy", "missing"] }, ctx);
+  const result = await run(remove, input, ctx);
   assert.deepEqual([result.deleted, result.notFound], [["deploy"], ["missing"]]);
   assert.deepEqual(events.at(-1), {
     kind: "removed",
@@ -173,4 +183,36 @@ test("only the requester may answer by default", () => {
     ).status,
     "rejected",
   );
+});
+
+test("an approval applies only to the skill it showed, not one recreated under its name", async () => {
+  mount();
+  const input = { ...deploy, scope: "channel" };
+  const approvedBy = { approvedBy: alice };
+  const original = await run(create, input, context(approvedBy));
+  await run(create, { ...input, instructions: "Check the build twice." }, context());
+
+  // While Alice's approval to publish the original's v2 waits, Bob replaces the skill.
+  const publishOriginal = { name: "deploy", id: original.id, version: 2, scope: "channel" };
+  assert.equal((await decide(publish, publishOriginal, context())).status, "user-approval");
+  await run(
+    remove,
+    { skills: [{ name: "deploy", id: original.id }], scope: "channel" },
+    context(approvedBy),
+  );
+  const replacement = await run(create, input, context(approvedBy));
+  await run(create, { ...input, instructions: "Skip the checks." }, context());
+
+  const published = await run(publish, publishOriginal, context(approvedBy));
+  assert.equal(published.success, false);
+  assert.match(String(published.error), /was replaced since/);
+
+  // Removing by the original's id leaves the replacement alone.
+  const removal = await run(
+    remove,
+    { skills: [{ name: "deploy", id: original.id }], scope: "channel" },
+    context(approvedBy),
+  );
+  assert.deepEqual([removal.deleted, removal.notFound], [[], ["deploy"]]);
+  assert.notEqual(replacement.id, original.id);
 });

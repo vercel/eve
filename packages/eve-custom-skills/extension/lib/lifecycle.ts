@@ -279,42 +279,50 @@ export class SkillLifecycle {
 
   /**
    * Saves a new immutable version. A clean first version goes live; every
-   * other save is a draft that doesn't change what applies.
+   * other save is a draft that doesn't change what applies. A save that loses
+   * a race plans again.
    */
   async save(
     scope: SkillScope,
     input: SaveSkillInput,
     options: SaveSkillOptions,
   ): Promise<SkillChange & { readonly replayed: boolean }> {
-    for (let attempt = 1; ; attempt += 1) {
-      const plan = await this.planSave(scope, input);
-      const expectedLatest = plan.version === 1 ? null : plan.version - 1;
-      try {
-        const result = await this.#repository.appendVersion(scope, {
-          id: plan.id ?? randomUUID(),
-          name: plan.name,
-          expectedLatest,
-          expectedRevision: plan.revision,
-          idempotencyKey: options.idempotencyKey,
-          version: {
-            description: plan.description,
-            markdown: plan.markdown,
-            applicationMode: plan.applicationMode,
-            checksum: skillChecksum(plan.name, plan.description, plan.markdown),
-            validation: plan.validation,
-            savedBy: options.savedBy,
-          },
-          activate: plan.activates && options.draft !== true,
-        });
-        return {
-          skill: materialize(result.version, result.head),
-          previous: { version: plan.live.version, applicationMode: plan.live.applicationMode },
-          replayed: result.replayed,
-        };
-      } catch (error) {
-        if (!(error instanceof SkillConflictError) || attempt >= SAVE_ATTEMPTS) throw error;
-      }
-    }
+    return this.#retrying(async () =>
+      this.applySave(scope, await this.planSave(scope, input), options),
+    );
+  }
+
+  /**
+   * Writes exactly what `plan` describes. It fails with `SkillConflictError`
+   * if anything in the scope changed since the plan, instead of planning
+   * again, so a change judged by an approval rule is the change that runs.
+   */
+  async applySave(
+    scope: SkillScope,
+    plan: SavePlan,
+    options: SaveSkillOptions,
+  ): Promise<SkillChange & { readonly replayed: boolean }> {
+    const result = await this.#repository.appendVersion(scope, {
+      id: plan.id ?? randomUUID(),
+      name: plan.name,
+      expectedLatest: plan.version === 1 ? null : plan.version - 1,
+      expectedRevision: plan.revision,
+      idempotencyKey: options.idempotencyKey,
+      version: {
+        description: plan.description,
+        markdown: plan.markdown,
+        applicationMode: plan.applicationMode,
+        checksum: skillChecksum(plan.name, plan.description, plan.markdown),
+        validation: plan.validation,
+        savedBy: options.savedBy,
+      },
+      activate: plan.activates && options.draft !== true,
+    });
+    return {
+      skill: materialize(result.version, result.head),
+      previous: { version: plan.live.version, applicationMode: plan.live.applicationMode },
+      replayed: result.replayed,
+    };
   }
 
   /** Every live skill in the scope, read in one batch. */
@@ -400,7 +408,8 @@ export class SkillLifecycle {
     return { head, version, revision: catalog.revision };
   }
 
-  async #applyPublish(scope: SkillScope, plan: HeadPlan): Promise<SkillChange> {
+  /** Makes `plan`'s version live, failing if the scope changed since the plan; see {@link applySave}. */
+  async applyPublish(scope: SkillScope, plan: HeadPlan): Promise<SkillChange> {
     const updated = await this.#repository.updateHead(scope, {
       id: plan.head.id,
       liveVersion: plan.version.version,
@@ -413,7 +422,7 @@ export class SkillLifecycle {
   /** Makes an exact version live, in the mode it was saved with. */
   async publish(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
     return this.#retrying(async () =>
-      this.#applyPublish(scope, await this.planPublish(scope, name, target)),
+      this.applyPublish(scope, await this.planPublish(scope, name, target)),
     );
   }
 
@@ -438,7 +447,7 @@ export class SkillLifecycle {
   /** Makes an exact earlier version live again, in the mode it was saved with. */
   async rollback(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
     return this.#retrying(async () =>
-      this.#applyPublish(scope, await this.planRollback(scope, name, target)),
+      this.applyPublish(scope, await this.planRollback(scope, name, target)),
     );
   }
 
@@ -471,9 +480,9 @@ export class SkillLifecycle {
   }
 
   /**
-   * Changes how the exact live version applies. The write fails if anything in
-   * the scope changed since the check, so a version published meanwhile is
-   * never changed in this one's place.
+   * Changes how the exact live version applies. A write that loses a race
+   * plans again, so a version published meanwhile is checked, and never
+   * changed in this one's place.
    */
   async setMode(
     scope: SkillScope,
@@ -481,18 +490,37 @@ export class SkillLifecycle {
     target: number,
     mode: SkillApplicationMode,
   ): Promise<SkillChange> {
-    return this.#retrying(async () => {
-      const { head, version, revision } = await this.planSetMode(scope, name, target, mode);
-      const updated =
-        head.applicationMode === mode
-          ? head
-          : await this.#repository.updateHead(scope, {
-              id: head.id,
-              applicationMode: mode,
-              expectedRevision: revision,
-            });
-      return { skill: materialize(version, updated), previous: liveState(head) };
+    return this.#retrying(async () =>
+      this.applySetMode(scope, await this.planSetMode(scope, name, target, mode), mode),
+    );
+  }
+
+  /**
+   * Applies `plan`'s version in `mode`, failing if the scope changed since the
+   * plan; see {@link applySave}. A plan that was a no-op still checks the
+   * revision, so a concurrent mode change isn't silently undone.
+   */
+  async applySetMode(
+    scope: SkillScope,
+    plan: HeadPlan,
+    mode: SkillApplicationMode,
+  ): Promise<SkillChange> {
+    const { head, version, revision } = plan;
+    if (head.applicationMode === mode) {
+      const current = await this.#repository.listHeads(scope);
+      if (current.revision !== revision) {
+        throw new SkillConflictError(
+          "The skills in this scope changed while this change was checked. Try again.",
+        );
+      }
+      return { skill: materialize(version, head), previous: liveState(head) };
+    }
+    const updated = await this.#repository.updateHead(scope, {
+      id: head.id,
+      applicationMode: mode,
+      expectedRevision: revision,
     });
+    return { skill: materialize(version, updated), previous: liveState(head) };
   }
 
   /** Each named skill's ID and live state, `null` for any that don't exist. */

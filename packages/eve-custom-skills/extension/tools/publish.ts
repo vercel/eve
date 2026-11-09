@@ -2,16 +2,23 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import {
+  idField,
   nameField,
   NEXT_TURN,
   publishTarget,
   requireApproval,
+  requireSkillId,
   scopeField,
   skillChange,
   versionField,
 } from "../lib/tool-support.ts";
 
-const inputSchema = z.object({ name: nameField, version: versionField, scope: scopeField });
+const inputSchema = z.object({
+  name: nameField,
+  id: idField,
+  version: versionField,
+  scope: scopeField,
+});
 
 const { approval, execute } = skillChange({
   action: "publish",
@@ -21,15 +28,12 @@ const { approval, execute } = skillChange({
   async plan(input, { skills, scope }) {
     const name = skills.normalizeName(input.name);
     const planned = await skills.planPublish(scope, name, input.version);
-    return {
-      plan: { name, version: input.version },
-      changesLive: true,
-      targets: [publishTarget(name, planned)],
-    };
+    requireSkillId(name, planned.head.id, input.id);
+    return { plan: planned, changesLive: true, targets: [publishTarget(name, planned)] };
   },
-  async run({ name, version }, { skills, scope, approved }) {
+  async run(plan, { skills, scope, approved }) {
     requireApproval(approved);
-    const { skill, previous } = await skills.publish(scope, name, version);
+    const { skill, previous } = await skills.applyPublish(scope, plan);
     return {
       output: {
         name: skill.name,

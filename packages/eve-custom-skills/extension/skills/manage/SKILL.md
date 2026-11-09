@@ -32,6 +32,10 @@ The agent's own authored skills have no lifecycle versions.
   Lifecycle tools take the bare name plus `scope`.
 - Changes apply from the next message, not the current turn.
 - Use `versions` and `read` to inspect an exact draft before publishing it.
+- `publish`, `rollback`, `set_mode`, and `remove` take each skill's `id` as
+  well as its name, from `list`, `read`, or `create`. If a call says the skill
+  was replaced, or that the scope changed while it was checked, list the
+  skills again and call it with the current id.
 - Some changes need approval, such as publishing, rolling back, deleting, and
   anything that goes live in a shared scope. Call the tool directly with the
   exact target: the approval card shows the change and is the only
@@ -40,7 +44,7 @@ The agent's own authored skills have no lifecycle versions.
   anything else. Never publish a version that is already live; switch an
   `on-demand` skill with persistent behavior to `always` with `set_mode`.
 - To delete several skills, call `list` once, then `remove` once with every
-  name.
+  skill's name and id.
 - `list` names the scopes available here. Default to the personal scope. Use a
   shared scope such as `channel` only when the user asks for a team or channel
   skill. A shared-scope change affects everyone in that scope. A read-only
