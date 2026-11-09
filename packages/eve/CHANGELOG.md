@@ -1,5 +1,55 @@
 # eve
 
+## 1.0.0-rc.7
+
+Released 2026-11-09 · [Compare with 1.0.0-rc.6](https://github.com/vercel/eve/compare/eve%401.0.0-rc.6...eve%401.0.0-rc.7)
+
+### Features
+
+- Add the `eveVite()` plugin from `eve/vite` to run eve agents alongside any Vite app in development, `vite preview`, and Vercel deployments.
+  `eveSvelteKit()`, `eveTanStack()`, and the Nuxt module now share its agent discovery and Vercel services, so all of them mount `agents/` workspace members at `/eve/<name>/v1/*`. The SvelteKit plugin no longer sets `EVE_BASE_URL` in the dev server process; set it yourself if your server code reads it to reach the agent. On non-Vercel hosts, the Nuxt module proxies each workspace member to its own local server on consecutive ports from `EVE_NUXT_PRODUCTION_PORT` (default `4274`), or to `/eve/<name>/v1` on `EVE_NUXT_PRODUCTION_ORIGIN` when set. ([#6097](https://github.com/vercel/eve/pull/6097))
+- Add `label: false` to keep a tool's calls out of activity, such as emoji reactions.
+  Channels show no status for these calls, and a call doesn't end a quiet turn's silence, so a deferred Slack turn that only reacts and ends with `no_reply` stays silent. The call's `capability` and its message part from `eve/react`, `eve/vue`, and `eve/svelte` carry `hidden: true`, and `showsActivity(call)` from `eve/events` applies the same rule in custom renderers. ([#6017](https://github.com/vercel/eve/pull/6017))
+- Add `github.permissions` to the git extension's `"app"` config. eve mints each installation token with only those permissions, so a broker no longer has to re-mint a narrower token and rebuild the credential header for every GitHub host eve leases. ([#5966](https://github.com/vercel/eve/pull/5966))
+- New projects' `AGENTS.md` and the coding-agent setup prompt now point to guidance on keeping the deployed bundle small and cold starts fast. ([#6079](https://github.com/vercel/eve/pull/6079))
+- Hosted agents start faster: the bundled manifest is checked when the agent is built instead of on every cold start, the workflow driver code ships as plain text without an inline source map in production builds, and error-message formatters are created only when an error needs them. ([#6047](https://github.com/vercel/eve/pull/6047))
+- Add `decision <model>` OpenTelemetry spans for `decide`, automatic model selection, and tool approvals, with policy-aware model, usage, cost, and failure metadata that distinguishes refusals from request failures.
+  A decision sits under the operation it runs in, or under the turn when model routing runs before the turn's first step. `@vercel/agent-runs` adds `AgentRun.decision` and an optional `AgentTelemetry.activeSpan`, so a decision nests under a host span inside its operation but not under a host span from another trace, such as a workflow step. ([#5349](https://github.com/vercel/eve/pull/5349))
+
+### Bug Fixes
+
+- A channel route whose path ends in a file extension, such as `/.well-known/agent-card.json` or `/robots.txt`, now builds and serves its handler.
+  Thanks @mattcreager for reporting this and tracing it to the route module ids in #5742. ([#5744](https://github.com/vercel/eve/pull/5744))
+- Computer use installs again because the sandbox takes the Firefox ESR line Mozilla currently serves instead of requiring ESR 140, which Mozilla no longer offers.
+  The managed Firefox profile also skips the Terms of Use dialog that ESR 153 opens over the first page. `COMPUTER_USE_REVALIDATION_KEY` changes, so templates that include it rebuild and drop the cached ESR 140, which no longer gets security fixes. Thanks @treydoe1 for reporting this in #5829. ([#5831](https://github.com/vercel/eve/pull/5831))
+- Answer workflow tool calls from a model response that ended early (finish reason `length` or `other`) as not run, like other skipped calls, instead of starting their workflows without deciding their approval. ([#6010](https://github.com/vercel/eve/pull/6010))
+- Make local world stream reads scale with new chunks: a repeated `getInfo` or cursor `getChunks` on a long stream no longer reopens every earlier chunk file. ([#5910](https://github.com/vercel/eve/pull/5910))
+- Start a fresh session when a channel message reaches a session whose Vercel deployment was deleted, instead of failing with `RunKeyFetchError`.
+  Thanks @kashifrayani for diagnosing the channel failure in #5261. ([#5954](https://github.com/vercel/eve/pull/5954))
+- Retry model calls that AI Gateway aborts with `gateway_stream_timeout` instead of parking the session after the first cut stream.
+  Thanks @Benny-Gil for the original fix in #3108. ([#4558](https://github.com/vercel/eve/pull/4558))
+- The experimental Vercel schedule provider bundles Schedules SDK 0.0.3, the first stable release after alpha.19. ([#6027](https://github.com/vercel/eve/pull/6027))
+- One answer now settles every parallel subagent waiting on the same Vercel Connect sign-in for the same person.
+  Signing in on any one of their sign-in cards completes every other subagent waiting on that grant, and declining one declines the others, so none of them asks again this turn. A sign-in callback with the provider's `access_denied` now settles the sign-in as declined rather than as a retryable failure. A failed sign-in still settles only its own card. The parent calls each subagent's own callback, and each subagent settles it under its own principal, so no principal or credential passes between them. Sign-ins without a grant, for another principal, or minted by another deployment are still answered one by one. ([#6086](https://github.com/vercel/eve/pull/6086))
+- Slack no longer copies a direct-message question's answer into the shared thread: once the request settles, the thread's `Waiting on a response` note says only who answered, while the DM card still shows the answer.
+  Approval notes still name the decision, such as `Answered: Approve`. ([#6041](https://github.com/vercel/eve/pull/6041))
+- Fixed subagent approvals answered from Slack, or with any `state` on the response, failing the subagent with "Session delivery has no identity" instead of running the approved call.
+  Thanks @Phelickz for reporting this in #5726. ([#5728](https://github.com/vercel/eve/pull/5728))
+- Keep the head of a task result line that overflows the 50 KB budget instead of replacing it with `[truncated]`, so a one-line JSON result past the budget still reaches the model.
+  Thanks @nsxdavid for reporting this in #5746. ([#5748](https://github.com/vercel/eve/pull/5748))
+- Make connection sign-ins countable in traces: each sign-in span names its agent, a failed sign-in records its reason, and a call a connection refused records which connection and why.
+  `agent.approval` spans now carry `gen_ai.agent.name` and `agent.name`, so a query scoped to one agent no longer drops its sign-in prompts. A sign-in that fails with a reason code such as `access_denied` records it as `agent.connection.authorization.reason`; a sign-in that ends any other way, such as one a new message withdrew, records none. A tool call that fails with `ConnectionAuthorizationFailedError`, including one that never asked anyone to sign in, such as `principal_required` or `sign_in_unavailable` in a turn a schedule started, records `eve.connection.name` and `agent.connection.authorization.reason` on its `execute_tool` span. Only reason codes are recorded: a free-text reason or error message stays off the span whatever the trace policy records. ([#6078](https://github.com/vercel/eve/pull/6078))
+- Vercel sandboxes created without a snapshot now receive their configured network policy at creation, so an interrupted first open cannot leave them with unrestricted network access.
+  Base setup needs no network access. Reopening a sandbox preserves its live policy, including changes made through `setNetworkPolicy()`, rather than applying changed open options.
+  Existing sandboxes are not migrated or reset. Recycle any sandbox that may have been left unrestricted by an interrupted initialization before this fix. ([#6042](https://github.com/vercel/eve/pull/6042))
+- Fix `eve/react` and `eve/client` throwing `ReferenceError: e is not defined` in production builds from custom webpack setups older than 5.90. ([#5042](https://github.com/vercel/eve/pull/5042))
+- Show workspace agents on the Vercel project overview card when `vercel.ts` composes them with `withEve`.
+  `withEve` now writes the root `.eve/agent-summary.json` index that points Vercel at each member's summary, matching the hostless `eve build` path. Thanks @cnaccio for reporting this in #5706. ([#5710](https://github.com/vercel/eve/pull/5710))
+- Workflow and step modules can now embed files from `node_modules` with relative asset imports.
+  Before, `eve build` failed with `UNLOADABLE_DEPENDENCY` for an import such as `../node_modules/pkg/README.md?raw`, even though the same import worked in a tool. Thanks @mikestevenson-aries for reporting this in #5847. ([#5849](https://github.com/vercel/eve/pull/5849))
+- `eve build`, `eve dev`, and `eve eval` now build a workspace extension after the workspace extensions it depends on, so an extension whose subagent mounts another workspace extension builds from a clean checkout.
+  Thanks @dretanacr for reporting this in #5837 and for the implementation plan. ([#5839](https://github.com/vercel/eve/pull/5839))
+
 ## 1.0.0-rc.6
 
 Released 2026-11-05 · [Compare with 1.0.0-rc.5](https://github.com/vercel/eve/compare/eve%401.0.0-rc.5...eve%401.0.0-rc.6)

@@ -1,6 +1,6 @@
 {
   "name": "@eve/agent-desktop",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0-rc.1",
   "description": "eve extension that gives agents desktop computer-use tools backed by agent-desktop",
   "keywords": [
     "agent-desktop",
