@@ -5,7 +5,7 @@ import {
   type SlackInboundMessageContext,
   type SlackMessage,
 } from "eve/channels/slack";
-import { isHomeTeam, slackCredentials } from "../lib/slack.ts";
+import { isFullMember, isHomeTeam, slackCredentials, slackTeamId } from "../lib/slack.ts";
 
 // Slack Connect events name the author's own workspace in `user_team` or
 // `team`. Same-workspace events can omit both, and then the envelope's team is
@@ -39,9 +39,23 @@ function withActionToken(
   return { ...auth, attributes: { ...auth.attributes, action_token: token.trim() } };
 }
 
-function admit(ctx: SlackInboundMessageContext, message: SlackMessage) {
+// Fails closed: a lookup error drops the message or click instead of
+// letting someone through unchecked.
+async function canUseAgent(teamId: string | undefined, userId: string | undefined) {
+  if (!teamId || !userId) return false;
+  try {
+    return await isFullMember(teamId, userId);
+  } catch (error) {
+    console.error("Slack member check failed", error);
+    return false;
+  }
+}
+
+async function admit(ctx: SlackInboundMessageContext, message: SlackMessage) {
   if (message.author?.isBot !== false) return null;
   if (!isHomeTeam(authorTeamId(message))) return null;
+  const teamId = message.installationTeamId ?? message.teamId;
+  if (!(await canUseAgent(teamId, message.author.userId))) return null;
   return { auth: withActionToken(defaultSlackAuth(message, ctx), message) };
 }
 
@@ -59,7 +73,7 @@ async function followThread(ctx: SlackInboundMessageContext, message: SlackMessa
   const followed =
     ctx.edit !== undefined || (message.threadTs !== message.ts && (await ctx.isSubscribed()));
   if (!followed) return null;
-  const admitted = admit(ctx, message);
+  const admitted = await admit(ctx, message);
   return (
     admitted && { ...admitted, status: "deferred" as const, guidance: FOLLOWED_THREAD_GUIDANCE }
   );
@@ -74,12 +88,14 @@ export default slackChannel({
   onAppMention: admit,
   onDirectMessage: admit,
   onMessage: followThread,
-  // Clicks carry the clicker's team, so guests can't answer approvals or
-  // questions in a thread a member started.
-  onAnswers: (ctx) => {
-    const teamId = ctx.defaultAuth.attributes.team_id;
-    return isHomeTeam(typeof teamId === "string" ? teamId : undefined)
-      ? { auth: ctx.defaultAuth }
-      : null;
+  // The same check for clicks, so guests can't answer approvals or questions
+  // in a thread a member started.
+  onAnswers: async (ctx) => {
+    const userId = ctx.defaultAuth.attributes.user_id;
+    const allowed = await canUseAgent(
+      slackTeamId(ctx.defaultAuth),
+      typeof userId === "string" ? userId : undefined,
+    );
+    return allowed ? { auth: ctx.defaultAuth } : null;
   },
 });

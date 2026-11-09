@@ -45,9 +45,11 @@ agent/
   to find relevant messages in public channels, best match first, with
   permalinks the agent cites, and `read_slack_conversation` reads a match's
   thread or a named channel. See [Slack search](#slack-search).
-- **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
-  can start a conversation or answer approvals and questions, so guests in
-  Slack Connect channels can't.
+- **Workspace gate.** Workspace guests (multi- and single-channel) and
+  deactivated accounts can't start a conversation or answer approvals and
+  questions. The agent reads Slack with the bot's access, which reaches
+  channels a guest can't see. With `SLACK_TEAM_ID` set, people from other
+  companies in Slack Connect channels can't either.
 - **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
   private one per person, and a shared one per Slack channel. See
   [Memory](#memory).
@@ -338,9 +340,9 @@ carries. The Slack docs cover common next steps:
 - **Shared threads are public to their members.** Anything the agent retrieves
   can appear in a thread other people read. Prefer per-person auth for
   connections, and use app-scoped auth only for content everyone may see.
-- **Set `SLACK_TEAM_ID`.** Without it, anyone Slack delivers a message from,
-  including Slack Connect guests, can start a conversation or answer an
-  approval.
+- **Set `SLACK_TEAM_ID`.** Without it, full members of other workspaces in
+  Slack Connect channels can start a conversation or answer an approval.
+  Workspace guests are always refused.
 - **The sandbox has open egress.** Like eve's coding agent template, code the
   agent runs can reach any host; only GitHub credentials are held back at the
   firewall. Don't put other credentials in the sandbox, and narrow the network
