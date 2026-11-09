@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
-import type { SandboxAccess } from "#sandbox/state.js";
 import {
   BundleKey,
   ChannelKey,
@@ -131,8 +130,18 @@ describe("sandboxProvider", () => {
 
   it("opens the sandbox for a prewarmed session but leaves it alone when a turn starts", async () => {
     const ctx = new ContextContainer();
-    const access = { prepare: vi.fn(), resumeRecorded: vi.fn() };
-    ctx.set(SandboxKey, access as unknown as SandboxAccess);
+    const access = {
+      captureState: vi.fn(),
+      release: vi.fn(),
+      end: vi.fn(),
+      get: vi.fn(),
+      stop: vi.fn(),
+      open: vi.fn(),
+      prepare: vi.fn(),
+      resumeRecorded: vi.fn(),
+      settle: vi.fn(),
+    } satisfies EnsuredSandboxAccess;
+    ctx.set(SandboxKey, access);
 
     sandboxPrewarmer.start(ctx, "turn");
     expect(access.prepare).not.toHaveBeenCalled();
