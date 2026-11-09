@@ -51,17 +51,16 @@ function acquireCommand(owner: string): string {
 }
 
 /**
- * A lock younger than this can't be broken before its holder finishes cleaning up, since a waiter
- * breaks only a lock it finds stale under the guard. It assumes the cleanup's policy write finishes
- * within {@link GUARD_STALE_AFTER_SECONDS}; nothing bounds that write.
+ * A lock younger than this is safe to release without the guard. Waiters break only locks older
+ * than {@link STALE_AFTER_SECONDS}, so the holder has {@link GUARD_STALE_AFTER_SECONDS} left to
+ * clear its credential. Nothing makes the policy write finish in that time.
  */
 const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - GUARD_STALE_AFTER_SECONDS;
 
 /**
- * Starts a release: takes the guard (briefly retrying, and breaking one a stopped sandbox left
- * behind) so no waiter can break the lock while the holder clears its credential, then prints
- * `<guarded> <held> <fresh>`, where `held` says whether `owner` still holds the lock and `fresh`
- * whether it is too young for any waiter to break.
+ * Starts a release. It tries briefly to take the guard, removing one a stopped sandbox left behind,
+ * then prints three flags: `guarded` (this release holds the guard), `held` (`owner` still holds
+ * the lock) and `fresh` (the lock is too young for a waiter to break).
  */
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
@@ -75,8 +74,8 @@ function beginReleaseCommand(owner: string): string {
     `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
     `  sleep 0.1`,
     `done`,
-    // Age first: a lock found fresh can't be replaced before the ownership read, while one
-    // replaced after a stale age read only withholds cleanup.
+    // Check the age before the owner. A fresh lock can't be replaced between the two checks, and a
+    // lock replaced after the age check reads as stale, so the release skips cleanup.
     `fresh=0`,
     `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
     `held=0`,
@@ -180,13 +179,13 @@ async function release(
       fresh = young === "1";
     }
   } catch {}
-  // A stale lock released without the guard can be broken at any moment: clearing its credential
-  // could clear the successor's, and removing it could remove the successor's lock. It is left to
-  // the breaker, whose successor replaces the policy.
+  // Without the guard, a waiter can break a stale lock at any moment. Clearing the policy or
+  // removing the lock could then undo the next holder's, so both are left to that waiter. The next
+  // holder replaces the policy.
   if (held !== undefined && !guarded && !fresh) return;
   try {
-    // When the sandbox can't say who holds the lock, clean up anyway: leaving a credential leased
-    // is worse than clearing a successor's.
+    // If the sandbox can't say who holds the lock, clear the credential anyway. Leaving it in the
+    // policy is worse than clearing the next holder's.
     if (held === undefined || held) await cleanup?.();
   } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
