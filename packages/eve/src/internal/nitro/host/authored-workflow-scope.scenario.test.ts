@@ -215,8 +215,6 @@ export async function deliver() {
         .map((file) => readFile(join(outputDir, "server", file), "utf8")),
     );
     expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
-    expect(serverCode.some((code) => workflowCode(code).includes(WORKFLOW_ASSET_MARKER))).toBe(
-      true,
-    );
+    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
   });
 });
