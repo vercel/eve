@@ -49,6 +49,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getWorkflowMetadata: () => ({ url: "https://parent.example" }),
+  // Every task_wait now carries a timeout; these tests settle the wait before it could pass.
+  sleep: () => new Promise<never>(() => {}),
 }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({
   dispatchCoordinationStep: vi.fn(),
@@ -1258,7 +1260,7 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
       drain: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
+      hasPending: vi.fn(() => runtimePayloads.length > 0),
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
@@ -1273,7 +1275,7 @@ describe("SessionExecution checkpoints", () => {
           ...callsPause({
             callIds: ["wait-call"],
             dispatch: false,
-            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
+            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait", timeoutMs: 1_800_000 }],
           }),
           serializedContext: {},
           sessionState,
@@ -1815,7 +1817,7 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
       drain: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
+      hasPending: vi.fn(() => true),
       whenPending: () => new Promise<void>(() => {}),
       // The pump signals a delivery as it arrives, then the wait reads it.
       next: vi.fn(async () => {
@@ -1847,7 +1849,7 @@ describe("SessionExecution checkpoints", () => {
           ...callsPause({
             callIds: ["wait-call"],
             dispatch: false,
-            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
+            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait", timeoutMs: 1_800_000 }],
           }),
           serializedContext: {},
           sessionState,
