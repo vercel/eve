@@ -68,6 +68,7 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
     },
     sandbox: async () => ({
       registry: bundle.graph.root.sandboxRegistry,
+      sharesParent: true,
       template: { compiledArtifactsSource: bundle.compiledArtifactsSource },
     }),
     get settings() {

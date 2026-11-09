@@ -35,8 +35,10 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     if (agent === undefined || sandbox === undefined) return undefined;
     const { registry } = sandbox;
     const sessionId = ctx.require(SessionIdKey);
-    const channel = ctx.get(ChannelKey);
-    const adapterState = channel?.state as Record<string, unknown> | undefined;
+    // A child that shares its parent's sandbox finds it on its channel: the subagent adapter's state.
+    const adapterState = sandbox.sharesParent
+      ? (ctx.get(ChannelKey)?.state as Record<string, unknown> | undefined)
+      : undefined;
     const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
     const inheritsParent = registry.sandbox?.definition.kind === "parent";
     const ownerSandboxSessionId = adapterState?.sandboxSessionId as string | undefined;

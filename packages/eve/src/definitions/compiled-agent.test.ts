@@ -69,9 +69,10 @@ describe("fromCompiledBundle", () => {
     });
   });
 
-  it("opens the node's sandbox from the build's artifacts", async () => {
+  it("opens the node's sandbox from the build's artifacts, shared with its parent as its graph says", async () => {
     await expect(fromCompiledBundle(bundle({})).sandbox()).resolves.toEqual({
       registry: sandboxRegistry,
+      sharesParent: true,
       template: { compiledArtifactsSource: source },
     });
   });

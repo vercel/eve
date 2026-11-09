@@ -1229,7 +1229,11 @@ const HOST_NEUTRAL_FILES = new Set([
   "packages/eve/src/execution/session/step-state-delta.ts",
   "packages/eve/src/execution/session-inbox/inbox.ts",
 ]);
-const HOST_NEUTRAL_DIRS = ["packages/eve/src/execution/in-process/", "packages/eve/src/platform/"];
+const HOST_NEUTRAL_DIRS = [
+  "packages/eve/src/execution/in-process/",
+  "packages/eve/src/embed/",
+  "packages/eve/src/platform/",
+];
 /** Each import's specifier and line, static or lazy, wherever its quotes fall. */
 const RULE66_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm;
 
