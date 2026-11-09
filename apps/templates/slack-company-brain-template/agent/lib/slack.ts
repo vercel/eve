@@ -65,3 +65,45 @@ export async function isFullMember(teamId: string, userId: string): Promise<bool
     isHomeTeam(user.team_id)
   );
 }
+
+const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/gu;
+// Bounds the users.info calls one tool result makes.
+const MAX_NAME_LOOKUPS = 30;
+
+/** User IDs mentioned as `<@U…>` in Slack message text. */
+export function mentionedUserIds(text: string): string[] {
+  return [...text.matchAll(MENTION)].map((match) => match[1]!);
+}
+
+/**
+ * Looks up display names for Slack users and bots, so the agent can refer to
+ * them by name instead of an ID or a mention that would notify them. IDs Slack
+ * can't resolve are left out.
+ */
+export async function slackUserNames(
+  teamId: string,
+  ids: Iterable<string | undefined>,
+): Promise<Map<string, string>> {
+  const unique = [...new Set([...ids].filter((id): id is string => !!id))].slice(
+    0,
+    MAX_NAME_LOOKUPS,
+  );
+  const entries = await Promise.all(
+    unique.map(async (id) => {
+      const response = await callSlack<{
+        user: { name?: string; real_name?: string; profile?: { display_name?: string } };
+      }>(teamId, "users.info", { user: id });
+      const user = response.ok ? response.user : undefined;
+      return [id, user?.profile?.display_name || user?.real_name || user?.name] as const;
+    }),
+  );
+  return new Map(entries.filter((entry): entry is readonly [string, string] => !!entry[1]));
+}
+
+/** Replaces `<@U…>` mentions with `@Name`, keeping mentions it has no name for. */
+export function nameMentions(text: string, names: ReadonlyMap<string, string>): string {
+  return text.replace(MENTION, (mention, id: string) => {
+    const name = names.get(id);
+    return name ? `@${name}` : mention;
+  });
+}

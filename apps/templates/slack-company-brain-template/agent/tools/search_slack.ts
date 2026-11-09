@@ -1,6 +1,12 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { callSlack, slackTeamId } from "../lib/slack.ts";
+import {
+  callSlack,
+  mentionedUserIds,
+  nameMentions,
+  slackTeamId,
+  slackUserNames,
+} from "../lib/slack.ts";
 
 interface SearchContextMessage {
   readonly author_name?: string;
@@ -72,14 +78,19 @@ export default defineTool({
       throw new Error(`Slack search failed: ${response.error ?? "unknown error"}`);
     }
 
+    const messages = response.results?.messages ?? [];
+    const names = await slackUserNames(
+      teamId,
+      messages.flatMap((message) => mentionedUserIds(message.content ?? "")),
+    );
     return {
-      matches: (response.results?.messages ?? []).map((message) => ({
+      matches: messages.map((message) => ({
         channelId: message.channel_id,
         channelName: message.channel_name,
         author: message.author_name,
         authorUserId: message.author_user_id,
         ts: message.message_ts,
-        text: message.content ?? "",
+        text: nameMentions(message.content ?? "", names),
         permalink: message.permalink,
         replyCount: message.reply_count,
       })),
