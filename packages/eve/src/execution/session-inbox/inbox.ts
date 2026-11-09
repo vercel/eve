@@ -1,8 +1,9 @@
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
-import type {
-  WorkflowToolRunMessage,
-  WorkflowToolRunMessageBatch,
+import {
+  isWorkflowToolRunMessage,
+  type WorkflowToolRunMessage,
+  type WorkflowToolRunMessageBatch,
 } from "#execution/tools/workflow/messages.js";
 
 /** All session addresses accept the same protocol. Callback routes construct
@@ -526,15 +527,5 @@ export function createSessionInbox<Hook extends InboxHook>(
 }
 
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
-  return (
-    value.kind === "agent-started" ||
-    value.kind === "agent-sent" ||
-    value.kind === "started" ||
-    value.kind === "report" ||
-    value.kind === "reply" ||
-    value.kind === "request" ||
-    value.kind === "withdraw" ||
-    value.kind === "usage" ||
-    value.kind === "outcome"
-  );
+  return isWorkflowToolRunMessage(value);
 }

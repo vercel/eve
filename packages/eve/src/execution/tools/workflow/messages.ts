@@ -3,6 +3,7 @@ import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/start.js";
+import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolQuestion, ToolAnswer } from "#tools/definition.js";
@@ -151,6 +152,38 @@ export function isAgentSessionMessage(
 export interface WorkflowToolRunMessageBatch {
   readonly kind: "workflow-batch";
   readonly messages: readonly WorkflowToolRunMessage[];
+}
+
+/** Every kind of run message, so the one check below can't miss a new one. */
+const RUN_MESSAGE_KINDS: Readonly<Record<WorkflowToolRunMessage["kind"], true>> = {
+  "agent-sent": true,
+  "agent-started": true,
+  outcome: true,
+  reply: true,
+  report: true,
+  request: true,
+  started: true,
+  usage: true,
+  withdraw: true,
+};
+
+/** Whether `value` is one message a run sent its session. */
+export function isWorkflowToolRunMessage(value: unknown): value is WorkflowToolRunMessage {
+  return (
+    isObject(value) &&
+    typeof value.kind === "string" &&
+    Object.hasOwn(RUN_MESSAGE_KINDS, value.kind)
+  );
+}
+
+/**
+ * The run messages a payload sent to a session's inbox holds: a batch's, a lone message, or none.
+ * A session counts what it heard from a run by it, and the run what it sent, so both agree.
+ */
+export function runMessagesIn(payload: unknown): readonly WorkflowToolRunMessage[] {
+  if (isObject(payload) && payload.kind === "workflow-batch" && Array.isArray(payload.messages))
+    return payload.messages.filter(isWorkflowToolRunMessage);
+  return isWorkflowToolRunMessage(payload) ? [payload] : [];
 }
 
 /**

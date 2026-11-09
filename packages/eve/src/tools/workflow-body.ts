@@ -2,8 +2,8 @@ import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 
 /**
  * A workflow tool's body as a plain function, under the id its `"use workflow"` function has.
- * Workflow registers the transformed function itself; a host without Workflow runs this body in
- * its place.
+ * Workflow registers the transformed function itself; a host without Workflow, such as the
+ * in-process one, runs this body in its place.
  */
 export interface WorkflowBody {
   readonly workflowId: string;

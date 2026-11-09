@@ -18,6 +18,9 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { SessionInputQueue, type ControlOrigin } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { openedBy, type OpenTurn } from "#execution/session/open-turn.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
@@ -28,6 +31,7 @@ import { finalizeSession, type SessionTerminalOutcome } from "#execution/session
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import type { SessionHandoff } from "#execution/session/handoff.js";
+import type { SessionTransferState } from "#execution/session/checkpoint.js";
 import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -64,7 +68,9 @@ export type SessionStart =
    */
   | { readonly kind: "first-message" }
   /** A successor that received a settled session waits for its next input. */
-  | { readonly kind: "parked" };
+  | { readonly kind: "parked" }
+  /** Continues a turn that a host saved open, from where its last adopted step left it. */
+  | { readonly kind: "resume"; readonly from: OpenTurn };
 
 export interface SessionBoot {
   readonly admittedDeliveryKeys: readonly string[];
@@ -84,6 +90,12 @@ export interface SessionBoot {
   readonly sessionTimeoutControl?: SessionTimeoutControl;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  /**
+   * The stream holds lines past the checkpoint, which a process that stopped inside a step wrote:
+   * the session's first step runs again and folds them. Only a host that restores sessions
+   * itself sets it; Workflow retries the step.
+   */
+  readonly rerunFirst?: boolean;
 }
 
 type SessionLoopOutcome =
@@ -122,6 +134,40 @@ export interface SessionHost extends SessionTurnHost {
   readonly moves: SessionMoves;
   /** Serves a stubbed eval's tool stubs while its root session runs; see {@link ToolStubHost}. */
   readonly toolStubs?: ToolStubHost;
+  /** A host that keeps the session's record itself; Workflow's event log is its own. */
+  readonly recorder?: SessionRecorder;
+}
+
+/**
+ * How a host that keeps sessions follows one. The loop records the session after each step it
+ * adopts, and before a step a restore must run again; it goes on once the record resolves.
+ */
+export interface SessionRecorder {
+  adopted(record: SessionRecord): Promise<void>;
+  /**
+   * Whether the host suspended the session: it stopped keeping it, to continue it later from
+   * the record it kept, as after a crash. A suspended session's loop stops without ending the
+   * session, so nothing it holds (its sandbox, its children) is torn down.
+   */
+  suspended(): boolean;
+}
+
+/**
+ * The session as a successor would continue it, where its open turn goes on, and the run
+ * messages it read since the record before.
+ */
+export interface SessionRecord {
+  readonly transfer: SessionTransferState;
+  readonly open: OpenTurn | undefined;
+  readonly consumed: readonly WorkflowToolRunMessage[];
+}
+
+/** A session loop started by {@link startPreparedSession}. */
+export interface StartedSession {
+  /** The loop's result, once the session ends or moves. */
+  readonly finished: Promise<WorkflowEntryResult>;
+  /** Resolves once no step of the session is running and the last one is recorded. */
+  settledStep(): Promise<void>;
 }
 
 /** Runs an already prepared owner against its session's existing stream. */
@@ -130,26 +176,101 @@ export async function runPreparedSession(
   inbox: SessionInboxHandle,
   host: SessionHost,
 ): Promise<WorkflowEntryResult> {
+  return await startPreparedSession(boot, inbox, host).finished;
+}
+
+/** {@link runPreparedSession}, with a handle on the loop while it runs. */
+export function startPreparedSession(
+  boot: SessionBoot,
+  inbox: SessionInboxHandle,
+  host: SessionHost,
+): StartedSession {
   const scope = boot.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined;
   if (scope !== undefined && scope.rootSessionId === undefined) {
     boot.serializedContext[STUB_CONTEXT_KEY] = { ...scope, rootSessionId: boot.sessionId };
   }
-  const cursor = new SessionStateCursor({
+  const { recorder } = host;
+  const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
+  const cursor: SessionStateCursor = new SessionStateCursor({
     history: boot.history,
     inbox,
+    open: openTurnOf(boot.start),
     sessionWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
+    ...(recorder !== undefined && {
+      record: async (change) =>
+        await recorder.adopted({ ...change, transfer: transferStateOf(cursor, queue) }),
+    }),
+    ...(boot.rerunFirst === true && { rerunFirst: true }),
   });
+  return {
+    finished: runSession(boot, { cursor, host, inbox, queue, scope }),
+    settledStep: () => cursor.settledStep(),
+  };
+}
+
+/** The record of a session as it boots, before its loop records it. */
+export function recordOf(boot: SessionBoot): SessionRecord {
+  const { admittedDeliveryKeys, history, serializedContext, sessionState } = boot;
+  return {
+    consumed: [],
+    open: openTurnOf(boot.start),
+    transfer: { admittedDeliveryKeys, history, serializedContext, sessionState },
+  };
+}
+
+/** Where the open turn goes on as a session starts: the one it resumes, or its first message's. */
+function openTurnOf(start: SessionStart): OpenTurn | undefined {
+  switch (start.kind) {
+    case "resume":
+      return start.from;
+    case "turn":
+      return openedBy(start.input);
+    default:
+      return undefined;
+  }
+}
+
+/** What a successor would continue the session from, as of the last step it adopted. */
+function transferStateOf(
+  cursor: SessionStateCursor,
+  queue: SessionInputQueue,
+): SessionTransferState {
+  return {
+    admittedDeliveryKeys: queue.admittedDeliveryKeys,
+    history: cursor.history,
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+  };
+}
+
+/** What a suspended session's loop returns: it didn't end, so it has no result. */
+const SUSPENDED_RESULT: WorkflowEntryResult = { output: "" };
+
+async function runSession(
+  boot: SessionBoot,
+  deps: {
+    readonly cursor: SessionStateCursor;
+    readonly host: SessionHost;
+    readonly inbox: SessionInboxHandle;
+    readonly queue: SessionInputQueue;
+    readonly scope: StubScope | undefined;
+  },
+): Promise<WorkflowEntryResult> {
+  const { cursor, host, inbox, queue, scope } = deps;
   const progress: SessionProgress = { caller: boot.caller };
   const handoff = host.moves;
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
   let finalizing = false;
+  // Once its host suspended it, whatever the loop decides (its inbox closed, a turn that lost its
+  // inbox failing) is the host going away, not the session ending.
+  const suspended = (): boolean => host.recorder?.suspended() === true;
   try {
     result = await runServingToolStubs(host.toolStubs, scope, boot.sessionId, async () => {
       try {
-        loop = await runSessionLoop(boot, { cursor, host, inbox, progress });
+        loop = await runSessionLoop(boot, { cursor, host, inbox, progress, queue });
       } finally {
         await inbox.dispose();
       }
@@ -158,6 +279,7 @@ export async function runPreparedSession(
         result = await handoff.awaitAnchoredResult();
         return result;
       }
+      if (suspended()) return SUSPENDED_RESULT;
       finalizing = true;
       result = await finalizeSession(loop.outcome, {
         caller: progress.caller,
@@ -168,6 +290,7 @@ export async function runPreparedSession(
     });
     return result;
   } catch (error) {
+    if (!finalizing && suspended()) return SUSPENDED_RESULT;
     // Once finalization of the decided outcome starts, failing it must not report a different
     // outcome. The channel may already have handled the decided terminal event.
     if (!finalizing) {
@@ -240,11 +363,11 @@ async function runSessionLoop(
     readonly host: SessionHost;
     readonly inbox: SessionInboxHandle;
     readonly progress: SessionProgress;
+    readonly queue: SessionInputQueue;
   },
 ): Promise<SessionLoopOutcome> {
-  const { cursor, host, inbox, progress } = deps;
+  const { cursor, host, inbox, progress, queue } = deps;
   const handoff = host.moves;
-  const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -346,7 +469,10 @@ async function runSessionLoop(
   // Set when a turn compacts and kept until the session moves to a fresh run,
   // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
-  const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
+  const runTurn = async (
+    payload: TurnStepPayload | undefined,
+    pause?: TurnPause,
+  ): Promise<TurnOutcome> => {
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
@@ -356,19 +482,18 @@ async function runSessionLoop(
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
         : undefined;
-    const outcome = await execution.runTurn(payload, { caller, control });
+    const outcome = await execution.runTurn(payload, {
+      caller,
+      control,
+      ...(pause !== undefined && { pause }),
+    });
     progress.turnId = undefined;
     sessionTimeout?.recordActivity();
     if (outcome.caller !== undefined) progress.caller = outcome.caller;
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
   };
-  const transferState = () => ({
-    admittedDeliveryKeys: queue.admittedDeliveryKeys,
-    history: cursor.history,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
+  const transferState = (): SessionTransferState => transferStateOf(cursor, queue);
   const compactionHandoffReady = (): boolean =>
     compactionHandoffDue &&
     progress.caller === undefined &&
@@ -392,12 +517,23 @@ async function runSessionLoop(
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async (reportUsage: boolean, control?: ControlDelivery) => {
-    const settled = await cursor.advanceWithHistory((state) =>
-      settleCancelledTurnStep({ ...state, control, reportUsage }),
+  /**
+   * Settles the turn a cancel stopped. With `report`, its delegated caller hears it, with the
+   * turn's usage. A host that keeps sessions records it first, so a restore settles it again.
+   */
+  const settleCancelledTurn = async (report: boolean, control?: ControlDelivery) => {
+    const { caller } = progress;
+    const settled = await cursor.advanceWithHistory(
+      (state) => settleCancelledTurnStep({ ...state, control, reportUsage: report }),
+      { after: () => undefined, before: { at: "cancel", report, ...(control && { control }) } },
     );
     progress.caller = undefined;
-    return settled;
+    if (report && caller !== undefined) {
+      const notification = { caller, sessionId: boot.sessionId };
+      await notifyCancelledTaskCallerStep(
+        settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
+      );
+    }
   };
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
@@ -469,6 +605,21 @@ async function runSessionLoop(
         const action = await runTurn(input === undefined ? undefined : { delivery: input });
         return { action, kind: "action" };
       }
+      case "resume": {
+        const { from } = boot.start;
+        // The turn answers the caller of the input it goes on with, or else the one its first
+        // step bound into the context, as a failed boot does: one only the loop held is gone.
+        progress.caller ??=
+          (from.at === "step" ? from.input?.delivery?.caller : undefined) ??
+          (await resolveInitialTurnCallerStep({ serializedContext: cursor.serializedContext }));
+        if (from.at === "cancel") {
+          await settleCancelledTurn(from.report, from.control);
+          return { action: { kind: "park" }, kind: "action" };
+        }
+        const action =
+          from.at === "step" ? await runTurn(from.input) : await runTurn(undefined, from.pause);
+        return { action, kind: "action" };
+      }
     }
   };
 
@@ -491,14 +642,7 @@ async function runSessionLoop(
       await settleUnstarted();
 
       if (action.cancelled === true) {
-        const { caller } = progress;
-        const settled = await settleCancelledTurn(caller !== undefined, action.cancelledBy);
-        if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
-          await notifyCancelledTaskCallerStep(
-            settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
-          );
-        }
+        await settleCancelledTurn(progress.caller !== undefined, action.cancelledBy);
       } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
