@@ -24,7 +24,8 @@ describe("discordConversationSpace", () => {
     expect(discordConversationSpace(state({ channelType: 3 }))?.type).toBe("group");
   });
 
-  it("reports none before a channel is known", () => {
+  it("reports none before a channel is known, or for a proactive send to an unknown channel", () => {
     expect(discordConversationSpace(state({ channelId: null }))).toBeUndefined();
+    expect(discordConversationSpace(state({}))).toBeUndefined();
   });
 });

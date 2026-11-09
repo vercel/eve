@@ -40,6 +40,7 @@ function chatSdkSpace(thread: SerializedThread | null): ConversationSpace | unde
 
 export const chatSdkInstrumentation = {
   audience: (input: AudienceContext<ChatSdkChannelState>) => chatSdkAudience(input.state.thread),
-  space: (input: ConversationSpaceContext<ChatSdkChannelState>) => chatSdkSpace(input.state.thread),
+  space: (input: ConversationSpaceContext<ChatSdkChannelState>) =>
+    input.state.spaceUnknown === true ? undefined : chatSdkSpace(input.state.thread),
   metadata: chatSdkInstrumentationMetadata,
 } as const;

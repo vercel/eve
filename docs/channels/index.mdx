@@ -50,15 +50,15 @@ export default defineTool({
 
 A space has a stable `id`, namespaced by platform and workspace so it is unique across channels, a `type`, and, when the platform has one, a `workspaceId`. The `type` is `direct` for a one-to-one conversation with the agent, `group` for a private conversation among a fixed set of people, and `channel` for a named place that members join. `space` is absent when the channel can't tell where the conversation happens.
 
-| Channel  | Space                                                                                    | `workspaceId`          |
-| -------- | ---------------------------------------------------------------------------------------- | ---------------------- |
-| Slack    | The Slack channel, DM, or group DM a thread is in: `slack:<team>:<channel>`.             | The app's installation |
-| Discord  | The Discord channel, thread, or DM: `discord:<guild>:<channel>`, or `discord:<channel>`. | The guild              |
-| Teams    | The Teams channel, or the personal or group chat: `teams:<tenant>:<id>`.                 | The tenant             |
-| Telegram | The chat: `telegram:<chat>`.                                                             | None                   |
-| Chat SDK | The adapter's channel: `<adapter>:<channel>`.                                            | None                   |
+| Channel  | Space                                                                                              | `workspaceId`          |
+| -------- | -------------------------------------------------------------------------------------------------- | ---------------------- |
+| Slack    | The Slack channel, DM, or group DM a thread is in: `slack:<team>:<channel>`.                       | The app's installation |
+| Discord  | The Discord channel, thread, DM, or group DM: `discord:<guild>:<channel>`, or `discord:<channel>`. | The guild              |
+| Teams    | The Teams channel, or the personal or group chat: `teams:<tenant>:<id>`.                           | The tenant             |
+| Telegram | The chat: `telegram:<chat>`.                                                                       | None                   |
+| Chat SDK | The adapter's channel: `<adapter>:<channel>`.                                                      | None                   |
 
-Other built-in channels report no space. A [custom channel](/docs/channels/custom#conversation-space) reports its own. Like the audience, the space is fixed when the session is created, and a local subagent inherits its parent's.
+A session started with `receive()` reports a space only when its target names the workspace, such as Slack's `installationTeamId` or Teams' `tenantId`, so it never reports a different space than the conversations already in that place. Discord sessions started with `receive()` report none, and so do Chat SDK sessions started from a thread ID whose adapter can't tell DMs apart. Other built-in channels report no space. A [custom channel](/docs/channels/custom#conversation-space) reports its own. Like the audience, the space is fixed when the session is created, and a local subagent inherits its parent's.
 
 A space identifies a place, not who may act there. Check the caller in `ctx.session.auth.current` before you let them change data that everyone in the space shares.
 

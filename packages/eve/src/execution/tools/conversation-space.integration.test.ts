@@ -24,22 +24,34 @@ const signingSecret = "conversation-space-signing-secret";
 describe("ctx.conversation in tools", () => {
   it.each([
     {
+      // Slack's app_mention events carry no channel_type, so eve reads conversations.info.
+      conversation: { id: "C_TEAM", is_channel: true, is_private: false },
       expected: { id: "slack:T01:C_TEAM", type: "channel", workspaceId: "slack:T01" },
-      event: { channel: "C_TEAM", channel_type: "channel", type: "app_mention" },
+      event: { channel: "C_TEAM", type: "app_mention" },
       label: "a Slack channel mention",
     },
     {
+      conversation: { id: "G_GROUP", is_mpim: true, is_private: true },
+      expected: { id: "slack:T01:G_GROUP", type: "group", workspaceId: "slack:T01" },
+      event: { channel: "G_GROUP", type: "app_mention" },
+      label: "a Slack group DM mention",
+    },
+    {
+      conversation: null,
       expected: { id: "slack:T01:D_ALICE", type: "direct", workspaceId: "slack:T01" },
       event: { channel: "D_ALICE", channel_type: "im", type: "message" },
       label: "a Slack DM",
     },
   ] as const)(
     "reports the space of $label",
-    async ({ event, expected }) => {
+    async ({ conversation: info, event, expected }) => {
       const realFetch = globalThis.fetch;
       vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : String(input));
         if (url.hostname !== "slack.com") return realFetch(input, init);
+        if (url.pathname.endsWith("/conversations.info")) {
+          return Response.json(info ? { ok: true, channel: info } : { ok: false });
+        }
         return Response.json({ ok: true, channel: event.channel, ts: "1700000001.000100" });
       });
       vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
@@ -49,7 +61,7 @@ describe("ctx.conversation in tools", () => {
         reported = resolve;
       });
       const runtime = await createTestRuntime({
-        agent: { name: `conversation-space-${event.channel_type}` },
+        agent: { name: `conversation-space-${event.channel}` },
         modules: [
           { logicalPath: "channels/slack.ts", loadNamespace: async () => ({ default: slack }) },
           {

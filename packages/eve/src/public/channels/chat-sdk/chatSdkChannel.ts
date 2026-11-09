@@ -82,6 +82,8 @@ const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-w
 export interface ChatSdkChannelState
   extends Record<string, unknown>, PromptQueueState, UndeliveredReplyState {
   thread: SerializedThread | null;
+  /** @internal The session started from a thread ID whose DM status is unknown, so it reports no space. */
+  spaceUnknown?: boolean;
   /** @internal Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
   /** @internal Text streamed for the anchor so far, including deltas no throttled edit has shown yet. */
@@ -396,9 +398,12 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     }),
     async receive({ message, target, ...send }, { from }) {
       const thread = serializeReceiveTarget(bot, target);
+      // A thread ID alone can't say whether it is a DM unless the adapter can tell.
+      const spaceUnknown =
+        target.thread === undefined && bot.getAdapter(thread.adapterName).isDM === undefined;
       return from(thread.id).send(message, {
         ...send,
-        state: { thread },
+        state: { thread, ...(spaceUnknown && { spaceUnknown: true }) },
       });
     },
     // `session.auth.current` is the caller of this delivery.
@@ -900,7 +905,7 @@ function serializeThread<TAdapters extends ChatSdkAdapters>(
       channelId: adapter.channelIdFromThreadId(thread),
       channelVisibility: adapter.getChannelVisibility?.(thread),
       id: thread,
-      isDM: false,
+      isDM: adapter.isDM?.(thread) ?? false,
     };
   }
   if (isSerializedThread(thread)) return thread;

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   isPrivateSlackConversation,
+  readSlackConversationKind,
   readSlackConversationPrivacy,
 } from "#public/channels/slack/privacy.js";
 
@@ -70,4 +71,19 @@ describe("Slack conversation privacy", () => {
       }),
     ).resolves.toBe(true);
   });
+
+  it.each([
+    { channel: { is_im: true }, spaceType: "direct" },
+    { channel: { is_mpim: true, is_private: true }, spaceType: "group" },
+    { channel: { is_channel: true, is_private: false }, spaceType: "channel" },
+    { channel: { is_private: true }, spaceType: "channel" },
+    { channel: {}, spaceType: undefined },
+  ])(
+    "reads an app mention's space type from conversations.info: $spaceType",
+    async ({ channel, spaceType }) => {
+      const request = vi.fn().mockResolvedValue({ ok: true, channel });
+      const kind = await readSlackConversationKind({ channelId: "G01", raw: {}, request });
+      expect(kind.spaceType).toBe(spaceType);
+    },
+  );
 });

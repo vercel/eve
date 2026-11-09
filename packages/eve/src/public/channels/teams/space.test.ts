@@ -29,6 +29,17 @@ describe("teamsConversationSpace", () => {
     ).toMatchObject({ id: "teams:t1:19:g", type: "group" });
   });
 
+  it("reports none without a tenant", () => {
+    expect(
+      teamsConversationSpace({
+        ...base,
+        tenantId: null,
+        conversationId: "a:1",
+        conversationType: "personal",
+      }),
+    ).toBeUndefined();
+  });
+
   it("reports none for an unknown conversation type", () => {
     expect(
       teamsConversationSpace({ ...base, conversationId: "x", conversationType: "meeting" }),

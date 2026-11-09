@@ -104,7 +104,10 @@ import {
   formatSlackThreadContext,
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
-import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
+import {
+  readSlackConversationKind,
+  type SlackConversationKind,
+} from "#public/channels/slack/privacy.js";
 import {
   createSlackUserResolver,
   resolveSlackUsers,
@@ -139,7 +142,7 @@ import {
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { ConversationSpaceType } from "#shared/conversation-context.js";
-import { readSlackSpaceType, slackConversationSpace } from "#public/channels/slack/space.js";
+import { slackConversationSpace } from "#public/channels/slack/space.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { markEventHandled } from "./utils.js";
 
@@ -1883,13 +1886,14 @@ async function dispatchSlackMessage(input: {
     resolveSession: input.resolveSession,
     state: channelState,
   });
-  let privateConversation: Promise<boolean> | undefined;
-  const isDMOrPrivateChannel = () =>
-    (privateConversation ??= isPrivateSlackConversation({
+  let conversationKind: Promise<SlackConversationKind> | undefined;
+  const readConversationKind = () =>
+    (conversationKind ??= readSlackConversationKind({
       channelId: input.message.channelId,
       raw: input.message.raw,
       request: conversationRequest,
     }));
+  const isDMOrPrivateChannel = async () => (await readConversationKind()).isPrivate;
   const openCodeChannel = async (options: SlackOpenCodeChannelOptions = {}) => {
     if (!input.detectCodeChannels) {
       throw new Error(
@@ -1962,10 +1966,9 @@ async function dispatchSlackMessage(input: {
     await acknowledgeMessage(input.received, input.message, { slack, thread });
   }
 
-  const isPrivateConversation = await isDMOrPrivateChannel();
+  const { isPrivate: isPrivateConversation, spaceType } = await readConversationKind();
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
-  const spaceType = readSlackSpaceType(input.message.raw);
   if (spaceType !== undefined) channelState.spaceType = spaceType;
   await deliverSlackMessage({
     botUserId: input.receivingBotUserId,

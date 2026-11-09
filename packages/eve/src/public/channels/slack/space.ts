@@ -19,7 +19,10 @@ export function readSlackSpaceType(
 
 /**
  * The Slack conversation a session is in. The installation team names the
- * workspace, so a Slack Connect channel reads the same for every member.
+ * workspace, so a Slack Connect channel reads the same for every member. A
+ * session with no known team, such as a proactive send without
+ * `installationTeamId`, reports no space rather than one that differs from
+ * its channel's.
  */
 export function slackConversationSpace(state: {
   readonly channelId: string | null;
@@ -31,7 +34,6 @@ export function slackConversationSpace(state: {
   const team = state.installationTeamId || state.teamId;
   // Slack DM conversation IDs start with `D`; proactive sends carry no event to read.
   const type = state.spaceType ?? (state.channelId.startsWith("D") ? "direct" : "channel");
-  return team
-    ? { id: `slack:${team}:${state.channelId}`, type, workspaceId: `slack:${team}` }
-    : { id: `slack:${state.channelId}`, type };
+  if (!team) return undefined;
+  return { id: `slack:${team}:${state.channelId}`, type, workspaceId: `slack:${team}` };
 }
