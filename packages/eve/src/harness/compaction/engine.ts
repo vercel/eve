@@ -15,7 +15,12 @@ import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/mes
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { CompactionConfig, CompactionStage, CompactionState } from "#harness/types.js";
+import type {
+  CompactionConfig,
+  CompactionStage,
+  CompactionState,
+  PromptMeasurement,
+} from "#harness/types.js";
 
 /**
  * Most of the conversation kept word for word next to a compaction summary.
@@ -79,9 +84,14 @@ export function getInputTokenCount(
   );
 }
 
-/** The settings without the last measured prompt, which a rewritten history no longer matches. */
+/** The settings without the measured prompts, which a rewritten history no longer matches. */
 export function withoutPromptMeasurement(config: CompactionState): CompactionState {
-  const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
+  const {
+    lastKnownInputTokens: _input,
+    lastKnownPromptMessageCount: _count,
+    measurementsByModel: _byModel,
+    ...rest
+  } = config;
   return rest;
 }
 
@@ -100,28 +110,64 @@ export function withPromptMeasurement(
     /** The history of the request the provider counted. */
     readonly promptMessages?: readonly ModelMessage[];
     readonly inputTokens?: number;
+    /** The model that counted the prompt. Other models' measurements of the history are kept. */
+    readonly modelId?: string;
     readonly promptMessageCount?: number;
     /** The rest of that request: instructions, tools and framing. */
     readonly requestEnvelopeTokens?: number;
   },
 ): CompactionState {
-  const { lastStage, requestEnvelopeTokens: _envelope, ...rest } = withoutPromptMeasurement(config);
-  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return rest;
+  const { lastStage, requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
+  const { measurementsByModel } = config;
+  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) {
+    return measurementsByModel === undefined ? next : { ...next, measurementsByModel };
+  }
   const { inputTokens } = measured;
   const estimatedTokens =
     measured.promptMessages === undefined
       ? undefined
       : estimateTokens(measured.promptMessages) + (measured.requestEnvelopeTokens ?? 0);
+  const measurement: PromptMeasurement = {
+    inputTokens: measured.inputTokens,
+    promptMessageCount: measured.promptMessageCount,
+    ...(measured.requestEnvelopeTokens !== undefined && {
+      requestEnvelopeTokens: measured.requestEnvelopeTokens,
+    }),
+  };
   return {
-    ...rest,
+    ...next,
     ...(lastStage !== undefined && config.lastKnownInputTokens === undefined && { lastStage }),
     ...(estimatedTokens !== undefined &&
       estimatedTokens > 0 &&
       inputTokens > 0 && { estimateRatio: inputTokens / estimatedTokens }),
-    lastKnownInputTokens: measured.inputTokens,
-    lastKnownPromptMessageCount: measured.promptMessageCount,
-    ...(measured.requestEnvelopeTokens !== undefined && {
-      requestEnvelopeTokens: measured.requestEnvelopeTokens,
+    lastKnownInputTokens: measurement.inputTokens,
+    lastKnownPromptMessageCount: measurement.promptMessageCount,
+    ...(measurement.requestEnvelopeTokens !== undefined && {
+      requestEnvelopeTokens: measurement.requestEnvelopeTokens,
+    }),
+    ...(measured.modelId !== undefined && {
+      measurementsByModel: { ...measurementsByModel, [measured.modelId]: measurement },
+    }),
+  };
+}
+
+/**
+ * The settings measured by `modelId` when it has counted the history: a count from another
+ * model's tokenizer can sit far from this model's. Otherwise the latest measurement stands.
+ */
+export function withModelPromptMeasurement(
+  config: CompactionState,
+  modelId: string,
+): CompactionState {
+  const own = config.measurementsByModel?.[modelId];
+  if (own === undefined) return config;
+  const { requestEnvelopeTokens: _envelope, ...rest } = config;
+  return {
+    ...rest,
+    lastKnownInputTokens: own.inputTokens,
+    lastKnownPromptMessageCount: own.promptMessageCount,
+    ...(own.requestEnvelopeTokens !== undefined && {
+      requestEnvelopeTokens: own.requestEnvelopeTokens,
     }),
   };
 }

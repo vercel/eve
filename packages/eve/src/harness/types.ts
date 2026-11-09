@@ -29,6 +29,13 @@ export type SessionStateMap = Readonly<Record<string, unknown>>;
  */
 export type CompactionStage = "summary-only" | "tail" | "text-tail";
 
+/** One model's count of a prompt: its first `promptMessageCount` history messages and envelope. */
+export interface PromptMeasurement {
+  readonly inputTokens: number;
+  readonly promptMessageCount: number;
+  readonly requestEnvelopeTokens?: number;
+}
+
 /** Prompt observations that survive rebuilding the agent's settings on each turn. */
 export interface CompactionState {
   /**
@@ -42,6 +49,11 @@ export interface CompactionState {
   readonly lastStage?: CompactionStage;
   /** The previous request's non-history estimate, also used before the next request is built. */
   readonly requestEnvelopeTokens?: number;
+  /**
+   * Each model's latest measurement of the current history, by model ID. Tokenizers differ, so
+   * after a model switch a call is judged by its own model's count, not the last model's.
+   */
+  readonly measurementsByModel?: Readonly<Record<string, PromptMeasurement>>;
 }
 
 /** How one model call's history compacts: the session's observations, and the model's limit. */

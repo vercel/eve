@@ -99,6 +99,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     compaction: withPromptMeasurement(step.session.compaction, {
       promptMessages,
       inputTokens: result.usage?.inputTokens,
+      modelId: step.model?.reference.id,
       promptMessageCount: input.durableModelPromptMessageCount,
       requestEnvelopeTokens: input.requestEnvelopeTokens,
     }),

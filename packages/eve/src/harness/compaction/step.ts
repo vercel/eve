@@ -136,8 +136,8 @@ export async function historyBeforeCall(
   },
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
-  const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
   const config = compactionConfig(step);
+  const previousEnvelope = config.requestEnvelopeTokens;
   if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }

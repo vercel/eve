@@ -1,4 +1,5 @@
 import { agentSettings } from "#execution/effective-agent-config.js";
+import { withModelPromptMeasurement } from "#harness/compaction/engine.js";
 import { type Step, stepReference } from "#harness/step/context.js";
 import type { CompactionConfig, CompactionState } from "#harness/types.js";
 
@@ -19,13 +20,14 @@ export function compactionConfig(
   },
 ): CompactionConfig {
   const thresholdPercent = agentSettings(step).thresholdPercent ?? DEFAULT_THRESHOLD_PERCENT;
-  const window = stepReference(step).contextWindowTokens;
+  const reference = stepReference(step);
+  const window = reference.contextWindowTokens;
   const threshold =
     window === undefined
       ? UNKNOWN_WINDOW_THRESHOLD
       : Math.max(1, Math.floor(window * thresholdPercent));
   return {
-    ...step.session.compaction,
+    ...withModelPromptMeasurement(step.session.compaction, reference.id),
     recentWindowSize: RECENT_WINDOW_SIZE,
     target: Math.min(threshold, Math.floor((window ?? UNKNOWN_WINDOW_THRESHOLD) * TARGET_SHARE)),
     threshold,
