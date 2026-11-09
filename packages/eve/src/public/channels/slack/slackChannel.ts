@@ -139,6 +139,7 @@ import {
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { moveSessionOnCallSettled } from "#public/channels/slack/move-to-code-channel.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -1141,6 +1142,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           ctx.channel.state.quietStatus = null;
         }
         await renderCallSettled?.(event, ctx);
+        if (config.codeChannels === true) await moveSessionOnCallSettled(event, ctx);
       },
       async "turn.settled"(event, ctx) {
         ctx.channel.state.quietStatus = null;

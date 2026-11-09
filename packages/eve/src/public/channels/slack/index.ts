@@ -1,4 +1,9 @@
 export {
+  moveToCodeChannel,
+  type SlackCodeChannelMoveResult,
+} from "#public/channels/slack/move-to-code-channel.js";
+
+export {
   openCodeChannel,
   type SlackCodeChannelOpenResult,
 } from "#public/channels/slack/open-code-channel.js";
