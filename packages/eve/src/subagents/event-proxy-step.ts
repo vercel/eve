@@ -21,7 +21,7 @@ import {
   type SignInEnding,
 } from "#harness/hitl/index.js";
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
-import { relay } from "#harness/session-machine/transitions.js";
+import { relay, relayedMirror } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
@@ -111,7 +111,7 @@ async function workflowCallbackBaseUrl(): Promise<string | undefined> {
 }
 
 /** The answers in a child's relayed events to sign-ins this session mirrors for that child. */
-function relayedAnswers(
+export function relayedAnswers(
   tables: SessionView,
   payload: SubagentInteractionHookPayload,
 ): readonly SignInAnswer[] {
@@ -119,16 +119,9 @@ function relayedAnswers(
     if (event.type !== "interaction.settled") return [];
     const { interactionId, outcome } = event.data;
     if (outcome !== "accepted" && outcome !== "declined") return [];
-    const answered = tables.interactions[interactionId];
+    const answered = relayedMirror(tables, payload, interactionId);
     const signIn = answered?.request.signIn;
-    if (
-      answered?.status !== "open" ||
-      answered.origin === undefined ||
-      !("callId" in answered.subject) ||
-      answered.subject.callId !== payload.callId ||
-      signIn === undefined
-    )
-      return [];
+    if (answered?.status !== "open" || signIn === undefined) return [];
     return [{ interactionId, outcome, signIn }];
   });
 }
@@ -142,14 +135,8 @@ function relayedEndings(
     if (event.type !== "interaction.settled") return [];
     const { interactionId, outcome } = event.data;
     if (outcome === "accepted" || outcome === "declined") return [];
-    const ended = tables.interactions[interactionId];
-    if (
-      ended?.status !== "open" ||
-      ended.request.signIn === undefined ||
-      !("callId" in ended.subject) ||
-      ended.subject.callId !== payload.callId
-    )
-      return [];
+    const ended = relayedMirror(tables, payload, interactionId);
+    if (ended?.status !== "open" || ended.request.signIn === undefined) return [];
     return [{ interactionId, reason: event.data.reason ?? outcome }];
   });
 }

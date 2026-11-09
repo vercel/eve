@@ -28,7 +28,7 @@ import {
   type AgentSessionRequest,
 } from "#execution/agent-sessions/requests.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
-import { signInsAnswered } from "#subagents/event-proxy-step.js";
+import { relayedAnswers, signInsAnswered } from "#subagents/event-proxy-step.js";
 import type { SuspendedStep } from "#harness/session-machine/state.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -1093,6 +1093,45 @@ describe("a remote agent's relayed sign-in", () => {
         signInsEnded(tables, { interactionId: "own-sign-in", reason: "steered" }, OWN),
       ).toEqual([]);
     }
+  });
+
+  it("never lets a remote agent settle a subagent's mirrored sign-in", async () => {
+    // The subagent's sign-in waits on Alice's card; the remote then reports it declined, and
+    // withdrawn, claiming the subagent's call and session.
+    const mirrored = await forwarded(parentAsking(), [opened()]);
+    const asked = withPublished(parentAsking(), mirrored);
+    const tables = viewOf(asked).projection.view;
+    for (const outcome of ["declined", "withdrawn"] as const) {
+      const settled = {
+        type: "interaction.settled" as const,
+        data: { interactionId: "forged", outcome },
+      };
+      expect(await forwarded(asked, [settled], REMOTE)).toEqual([]);
+      expect(
+        relayedAnswers(tables, {
+          kind: "subagent-interaction",
+          callId: "agent",
+          childSessionId: REMOTE.sessionId,
+          subagentName: "helper",
+          events: [settled],
+        }),
+      ).toEqual([]);
+    }
+    // The subagent's own decline settles it.
+    const declined = {
+      type: "interaction.settled" as const,
+      data: { interactionId: "forged", outcome: "declined" as const },
+    };
+    expect(await forwarded(asked, [declined])).toMatchObject([{ type: "interaction.settled" }]);
+    expect(
+      relayedAnswers(tables, {
+        kind: "subagent-interaction",
+        callId: "agent",
+        childSessionId: "child-1",
+        subagentName: "helper",
+        events: [declined],
+      }),
+    ).toMatchObject([{ interactionId: "forged", outcome: "declined" }]);
   });
 });
 
