@@ -7,6 +7,9 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
 
 - `agent/instructions.md`: the root prompt. Keep it about behavior that applies
   to every turn: grounding, source routing, and Slack style.
+- `agent/instructions/github.ts`: while `GITHUB_ORG` is unset, tells the agent
+  GitHub isn't connected and how an admin connects it. Delete it once GitHub is
+  connected.
 - `agent/channels/slack.ts`: who can reach the agent and what context each
   message carries.
 - `agent/schedules/tasks.ts`: schedules people create by asking in Slack
