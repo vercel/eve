@@ -1,3 +1,7 @@
+import {
+  buildsForWorldHost,
+  EVE_WORLD_HOST_QUEUE_ROUTE_PATH,
+} from "#internal/nitro/world-host-flag.js";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -18,6 +22,7 @@ import {
   renderChannelPreflightHandler,
   renderChannelWebSocketHandler,
   renderHostHandler,
+  renderWorldHostWorkflowHandler,
   renderRouteConfigModule,
   renderScheduleTaskModule,
   renderWorkflowFileHandler,
@@ -34,7 +39,7 @@ import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/developme
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 
 /** The dedicated Vercel function a route needs instead of the shared server function. */
-export type HostRouteVercelFunction = "schedule-queue" | "workflow-queue";
+export type HostRouteVercelFunction = "schedule-queue" | "workflow-queue" | "world-host-queue";
 
 type HostRoute =
   | {
@@ -67,6 +72,13 @@ type HostRoute =
       readonly method: "POST";
       readonly path: string;
       readonly vercelFunction: "schedule-queue";
+    }
+  | {
+      /** A World host's activations, in a build for one (`world-host-flag.ts`). */
+      readonly kind: "world-host-queue";
+      readonly method: "POST";
+      readonly path: string;
+      readonly vercelFunction: "world-host-queue";
     }
   | {
       readonly kind: "workflow";
@@ -137,6 +149,13 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
       vercelFunction: "schedule-queue",
     });
   }
+  if (!development && buildsForWorldHost())
+    routes.push({
+      kind: "world-host-queue",
+      method: "POST",
+      path: staticVercelFunctionPath(EVE_WORLD_HOST_QUEUE_ROUTE_PATH),
+      vercelFunction: "world-host-queue",
+    });
   routes.push({
     kind: "workflow",
     method: "ALL",
@@ -329,23 +348,29 @@ export async function renderHostRoutes(
           { method: route.method, route: route.path },
         );
         break;
-      case "workflow":
-        // On a World host, the queue's function runs the host's activations, not Workflow's.
+      case "world-host-queue":
+        addVirtualHandler(
+          `#eve/route${route.path}`,
+          renderHostHandler({
+            handlerExport: "handleWorldHostQueue",
+            modulePath: "src/internal/nitro/routes/world-host.ts",
+          }),
+          { method: route.method, route: route.path },
+        );
+        break;
+      case "workflow": {
+        const handler = await writeWorkflowFileHandler(route, input);
+        // On a World host, Workflow runs the authored workflow tools, whose steps report to
+        // sessions on the World host: it's this function's durable host before Workflow runs.
         if (input.artifactsConfig.kind === "production" && input.artifactsConfig.host === "world")
           addVirtualHandler(
             `#eve/route${route.path}`,
-            renderHostHandler({
-              handlerExport: "handleWorldHostQueue",
-              modulePath: "src/internal/nitro/routes/world-host.ts",
-            }),
+            renderWorldHostWorkflowHandler({ workflowHandlerPath: handler }),
             { route: route.path },
           );
-        else
-          handlers.push({
-            handler: await writeWorkflowFileHandler(route, input),
-            route: route.path,
-          });
+        else handlers.push({ handler, route: route.path });
         break;
+      }
     }
   }
 

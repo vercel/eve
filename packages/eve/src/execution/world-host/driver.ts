@@ -1,3 +1,4 @@
+import type { StartWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import type { RunInput, Runtime, SessionCommand } from "#channel/types.js";
 import type { ActivationOutcome, ActivationRun, Entities } from "#execution/entity/entities.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
@@ -56,6 +57,8 @@ export interface SessionActivationOptions {
   readonly callbackBaseUrl?: string;
   /** The host's runtime for the agent named `name`: where a step reaches other sessions. */
   readonly runtime?: (name: string) => Runtime;
+  /** Starts a run of a workflow tool whose body this host doesn't hold (`WorldHostOptions.workflow`). */
+  readonly startDurableRun?: StartWorkflowToolRun;
 }
 
 /** What runs a session each time its entity is activated. */
@@ -84,6 +87,7 @@ export function sessionActivation(options: SessionActivationOptions): Activation
       ...(options.runtime !== undefined && {
         stepRuntime: () => options.runtime!(start.agent as string),
       }),
+      ...(options.startDurableRun !== undefined && { startDurableRun: options.startDurableRun }),
     });
     let outcome: ActivationOutcome = { kind: "continue" };
     try {
