@@ -144,6 +144,7 @@ async function acquire(
   const span = trace.getTracer("eve.git").startSpan("agent.github.lease.wait");
   const deadline = Date.now() + LEASE_WAIT_MS;
   let attempts = 0;
+  let waited = false;
   let outcome: LeaseWaitOutcome = "failed";
   try {
     for (;;) {
@@ -161,6 +162,7 @@ async function acquire(
           `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
         );
       }
+      waited = true;
       if (Date.now() >= deadline) {
         outcome = "timed_out";
         throw new Error(
@@ -176,7 +178,7 @@ async function acquire(
     span.setAttributes({
       "agent.github.lease.attempts": attempts,
       "agent.github.lease.outcome": outcome,
-      "agent.github.lease.waited": attempts > 1,
+      "agent.github.lease.waited": waited,
     });
     if (outcome === "timed_out" || outcome === "failed") {
       span.setStatus({ code: SpanStatusCode.ERROR });

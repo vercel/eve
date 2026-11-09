@@ -964,6 +964,44 @@ test("a lease records how long it waited for another command", async () => {
   }
 });
 
+test("a lease cancelled after finding the lock busy records that it waited", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  const exporter = new InMemorySpanExporter();
+  trace.setGlobalTracerProvider(
+    new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }),
+  );
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    const controller = new AbortController();
+    const sandboxFake: Pick<SandboxSession, "run"> = {
+      async run(input) {
+        const result = await runLockCommand(input.command, lockPath);
+        // Cancel during the first retry delay, before a second attempt.
+        controller.abort(new Error("cancelled"));
+        return result;
+      },
+    };
+    await assert.rejects(
+      withSandboxLeaseLock(sandboxFake as SandboxSession, "waiter", async () => undefined, {
+        signal: controller.signal,
+      }),
+      /cancelled/u,
+    );
+    const [span] = exporter
+      .getFinishedSpans()
+      .filter((finished) => finished.name === "agent.github.lease.wait");
+    assert.ok(span);
+    assert.equal(span.attributes["agent.github.lease.outcome"], "cancelled");
+    assert.equal(span.attributes["agent.github.lease.attempts"], 1);
+    assert.equal(span.attributes["agent.github.lease.waited"], true);
+  } finally {
+    trace.disable();
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
 /** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */
 async function runLockCommand(
   command: string,
