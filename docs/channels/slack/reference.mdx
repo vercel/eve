@@ -769,7 +769,19 @@ A route, schedule, or `onEvent` handler can open a code channel the same way, fr
 
 #### Move a thread's session into a code channel
 
-`openCodeChannel()` forks: the code channel gets a new session that starts from the conversation's text, with a fresh sandbox. To keep the work already under way, including the sandbox and tool results, give the agent a tool that calls `moveToCodeChannel()` instead. The calling session itself moves into the code channel, and the thread gets a fresh session on its next message:
+`openCodeChannel()` forks: the code channel gets a new session that starts from the conversation's text, with a fresh sandbox. To keep the work already under way, including the sandbox and tool results, give the agent a tool that calls `moveToCodeChannel()` instead. The calling session itself moves into the code channel, and the thread gets a fresh session on its next message.
+
+Name the tool in `codeChannels`, so only its calls can move a session:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  codeChannels: { moveTool: "move_to_code_channel" },
+});
+```
 
 ```ts title="agent/tools/move_to_code_channel.ts"
 import { moveToCodeChannel } from "eve/channels/slack";
@@ -781,16 +793,16 @@ export default defineTool({
   description:
     "Move this conversation, and the work in progress, into a new code channel. Afterward your replies post there.",
   inputSchema: z.object({ name: z.string().max(80).describe("Short title for the channel.") }),
-  execute({ name }, ctx) {
-    return moveToCodeChannel(ctx, slack, { name });
+  async execute({ name }, ctx) {
+    return await moveToCodeChannel(ctx, slack, { name });
   },
 });
 ```
 
-- The move happens once the call settles. The rest of the turn, including its replies, status, and task card, posts in the code channel.
+- The tool opens the code channel from the triggering message. When Slack refuses, it throws Slack's error, and the session stays in the thread.
+- Once the call settles, the session moves. The rest of the turn, including its replies, status, and task card, posts in the code channel.
 - The thread's address is released, so the thread's next message starts a new session. Load the thread's messages in your message hook if that session needs them.
-- Outside a Slack thread or inside a code channel, it returns `{ status: "unavailable", reason }`. When Slack refuses permanently, the session stays in the thread and posts why.
-- It needs `codeChannels: true` on your Slack channel.
+- Outside a Slack thread, inside a code channel, or from a tool other than `moveTool`, it returns `{ status: "unavailable", reason }`.
 
 #### Open a code channel from a message hook
 

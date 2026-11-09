@@ -57,6 +57,7 @@
   "SlackChannelState",
   "SlackCodeChannelMoveResult",
   "SlackCodeChannelOpenResult",
+  "SlackCodeChannelOptions",
   "SlackCodeChannelTarget",
   "SlackCompletedReply",
   "SlackContext",
