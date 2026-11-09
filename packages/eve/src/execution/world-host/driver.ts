@@ -3,6 +3,8 @@ import type { ActivationOutcome, ActivationRun, Entities } from "#execution/enti
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import { createWorldSessionStore } from "#execution/in-process/world-store.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import { createLogger } from "#internal/logging.js";
 
@@ -13,9 +15,11 @@ import { createLogger } from "#internal/logging.js";
 //      state, or, for a session nothing ran yet, what it was created with (`SessionStart`). It
 //      writes through the activation's handle, and reads none of its stream's lines, only how
 //      many there are.
-//   2. What its mailbox holds is handed to the session's addresses, oldest first. Keeping one as
-//      an input consumes it in the same write; one the session doesn't keep is consumed after.
-//      So a crash hands each message over once.
+//   2. What its mailbox holds is handed to the session's addresses, oldest first: a command as
+//      its channel sends it, a sign-in callback as its route resumes the address. Keeping one as
+//      an input consumes it in the same write; one only the session's memory takes (a callback)
+//      is consumed by its next save, or when it stops. So a crash hands each message over until
+//      the session kept what it did with it.
 //   3. The session runs: its turns, its subagents' sessions and its runs, all here. Once
 //      everything waits, and keeps waiting, it's stopped (suspended: nothing it holds is torn
 //      down), with its earliest timer as the entity's alarm. A timer due in a moment is waited for.
@@ -42,6 +46,8 @@ export interface SessionActivationOptions {
   readonly settleMs?: number;
   /** A timer due within this long is waited for, rather than set as the alarm. */
   readonly holdForTimerMs?: number;
+  /** Where sign-in links send the provider back to (`WorldHostOptions.callbackBaseUrl`). */
+  readonly callbackBaseUrl?: string;
 }
 
 /** What runs a session each time its entity is activated. */
@@ -66,6 +72,7 @@ export function sessionActivation(options: SessionActivationOptions): Activation
       servesLines: false,
       world: options.world,
       worldStore: store,
+      ...(options.callbackBaseUrl !== undefined && { callbackBaseUrl: options.callbackBaseUrl }),
     });
     let outcome: ActivationOutcome = { kind: "continue" };
     try {
@@ -73,18 +80,26 @@ export function sessionActivation(options: SessionActivationOptions): Activation
       if (saved === undefined) await runtime.startSession(sessionId, start.input);
       else await runtime.restore(saved, { stored: true });
       for (const message of await entity.inbox()) {
-        const command = message.body as SessionCommand;
         store.receive(sessionId, message.id);
-        if (message.via === undefined) await runtime.dispatchSession({ command, sessionId });
-        else await runtime.dispatchContinuation({ command, continuationToken: message.via });
-        await store.received(sessionId);
+        const body = message.body as SessionCommand | AuthorizationCallbackPayload;
+        const token = message.via ?? sessionCommandHookToken(sessionId);
+        if (body.kind === "authorization-callback") await runtime.deliver(token, body);
+        else if (message.via === undefined)
+          await runtime.dispatchSession({ command: body, sessionId });
+        else await runtime.dispatchContinuation({ command: body, continuationToken: token });
+        store.received(sessionId);
       }
       outcome = await runUntilWaiting(runtime, { deadline, holdForTimerMs, settleMs });
       // Out of time with work left: stopped where a step ends, so no call runs twice.
       if (outcome.kind === "continue") await runtime.drain();
     } finally {
-      await runtime.dispose();
-      agent.release();
+      try {
+        await runtime.dispose();
+        // Stopped, with its state saved: what it took without keeping is consumed now.
+        await store.flush(sessionId);
+      } finally {
+        agent.release();
+      }
     }
     log.debug("activation ended", { outcome: outcome.kind, sessionId });
     return outcome;

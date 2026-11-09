@@ -18,7 +18,10 @@ import {
   readSessionRecords,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  logicalSessionInboxToken,
+  sessionCommandHookToken,
+} from "#execution/session-inbox/address.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
 import { bootInitialOwner } from "#execution/session/owner-boot.js";
@@ -110,6 +113,11 @@ export interface InProcessRuntime extends Runtime {
   nextTimer(): number | undefined;
   /** Lets running steps finish and starts no other, so `dispose` stops at a step boundary. */
   drain(): Promise<void>;
+  /**
+   * Delivers `payload` to the hook `token` names, physical or logical, as a callback route's
+   * resume would: `delivered`, `gone` for one it held once, `undefined` for one it never held.
+   */
+  deliver(token: string, payload: unknown): Promise<"delivered" | "gone" | undefined>;
   /**
    * Ends `sessionId` here deliberately: its turn is cancelled, the sessions its runs opened end
    * with it, its sandbox is released, and its stream records the end, in the store too. Resolves
@@ -290,6 +298,10 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     nextTimer: () => timers.next(),
 
     drain: () => host.drain(),
+
+    async deliver(token, payload) {
+      return (await host.inboxes.deliver(logicalSessionInboxToken(token) ?? token, payload))?.kind;
+    },
 
     async dispatchContinuation<TCommand extends SessionCommand>(
       input: DispatchContinuationInput<TCommand>,
