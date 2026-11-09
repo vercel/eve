@@ -12,27 +12,11 @@ type NetworkPolicySandboxSession = SandboxSession & {
   "eve-code-connect-authentication-test";
 const { authenticateTurn } = await import("../../extension/lib/connect-authentication.ts");
 
-test("does not broker GitHub credentials at turn start", async () => {
-  let requestedSandbox = false;
-  await authenticateTurn(
-    { github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } },
-    async () => {
-      requestedSandbox = true;
-      return fakeSandbox([]);
-    },
-    async () => {
-      throw new Error("GitHub tokens belong to the gh tool");
-    },
-  );
-  assert.equal(requestedSandbox, false);
-});
-
 test("authenticates only the Vercel connector at turn start", async () => {
   const calls: { connector: string; params: ConnectTokenParams }[] = [];
   const policies: { allow: Record<string, unknown> }[] = [];
   await authenticateTurn(
     {
-      github: { connector: "github/acme-bot", org: "acme", broker: async () => {} },
       vercel: { connector: "vercel/acme-bot", delivery: "firewall" },
     },
     async () => fakeSandbox(policies),

@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { z } from "zod";
 
@@ -22,16 +22,13 @@ describe("defineTool auth field", () => {
 });
 
 describe("defineTool approvalKey", () => {
-  it("infers readonly input from the schema", () => {
-    const definition = defineTool({
+  it("rejects the removed field with approval policy guidance", () => {
+    const definition = {
       description: "Scoped write",
       inputSchema: z.object({ scope: z.string() }),
-      approvalKey(input) {
-        expectTypeOf(input).toEqualTypeOf<Readonly<{ scope: string }>>();
-        return `write:${input.scope}`;
-      },
-      execute: (input) => input.scope,
-    });
-    expect(definition.approvalKey?.({ scope: "repo" })).toBe("write:repo");
+      approvalKey: () => "write:repo",
+      execute: () => "ok",
+    };
+    expect(() => defineTool(definition)).toThrow(/approvalKey.*approval policy/);
   });
 });

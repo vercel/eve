@@ -14,7 +14,7 @@ const CODE_WORD_QUESTION = "What is Alice's project code word?";
 
 async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const message = request.lastUserMessage ?? "";
-  if (message.includes(AGENT_TASK_CANCEL)) return cancelAndContinueSleeper(request);
+  if (message.includes(AGENT_TASK_CANCEL)) return cancelAndRestartSleeper(request);
   if (message.includes("Alice is preparing the 2026 report.")) {
     await new Promise((resolve) => setTimeout(resolve, 30_000));
     return "Original 2026 report";
@@ -108,11 +108,11 @@ function replyAfterCancelledTurn(request: MockModelRequest): string {
 
 /**
  * Calls the sleeper agent, waits briefly for it to reach its tool, cancels
- * the task, then continues it by taskId and returns its follow-up result.
+ * the task, then starts a fresh task and returns its reply without the cancelled task's history.
  */
-function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse | string {
+function cancelAndRestartSleeper(request: MockModelRequest): MockModelResponse | string {
   const calls = (name: string) => request.toolResults.filter((entry) => entry.name === name);
-  const [started, continued] = calls("sleeper");
+  const [started, restarted] = calls("sleeper");
   if (started === undefined) {
     return {
       toolCalls: [{ input: { message: "Please wait for cancellation." }, name: "sleeper" }],
@@ -126,8 +126,8 @@ function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse 
   if (calls("eve__task_cancel").length === 0) {
     return { toolCalls: [{ input: { taskId }, name: "eve__task_cancel" }] };
   }
-  if (continued === undefined) {
-    return { toolCalls: [{ input: { message: SLEEPER_FOLLOW_UP, taskId }, name: "sleeper" }] };
+  if (restarted === undefined) {
+    return { toolCalls: [{ input: { message: SLEEPER_FOLLOW_UP }, name: "sleeper" }] };
   }
   const result = [...request.messages]
     .reverse()

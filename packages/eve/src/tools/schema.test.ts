@@ -13,7 +13,7 @@ import {
   toModelSchema,
   toOutputSchema,
 } from "#tools/schema.js";
-import { serializeModelInputSchema } from "#public/tools/index.js";
+import { serializeModelInputSchema } from "#tools/schema.js";
 
 const AI_SDK_SCHEMA = Symbol.for("vercel.ai.schema");
 

@@ -28,6 +28,8 @@ export default defineConfig({
     ],
   },
   test: {
+    // As in integration: a session a test drives fails on a line readers couldn't fold.
+    env: { EVE_CHECK_SESSION_EVENTS: "1" },
     environment: "node",
     exclude: [
       "**/node_modules/**",

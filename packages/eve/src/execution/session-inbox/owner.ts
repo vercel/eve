@@ -1,4 +1,6 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { readInboxHandle } from "#execution/session-inbox/handle.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -7,12 +9,16 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
 /**
- * The session's owner was built by another eve version, so this build cannot
- * execute it and ingress refused the command before committing it. Internal:
- * carries the owner run, which never reaches a client.
+ * The session's owner can never execute again: another eve version built it,
+ * or its Vercel deployment was deleted. Ingress refuses a command for an owner
+ * another eve version built before committing it. A deleted deployment shows
+ * only when a read fails, possibly after the owner accepted the command, but
+ * that owner can never replay it. Internal: carries the owner run, which never
+ * reaches a client.
  */
 export class StrandedSessionOwnerError extends Error {
   /** The owner's hook, when ingress looked it up; its metadata names the session. */
@@ -38,23 +44,62 @@ export class StrandedSessionOwnerError extends Error {
 
 /**
  * The single ingress path into a hook: refuses a session inbox whose owner
- * cannot execute before anything is committed, then resumes by token. Any
- * other hook resumes unchecked. Resuming by token rather than by the looked-up
- * hook keeps Workflow's delivery dedup, which a caller-supplied hook disables.
+ * cannot execute before anything is committed. Vercel can reuse a validated
+ * inbox handle: Workflow requires its guarded, deduplicated write endpoint.
+ * Only a definite refusal falls back to resolving the current token owner.
  */
 export async function resumeRunnableHook(
   token: string,
   payload: unknown,
+  inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
+  const world = inbox !== undefined ? await getWorld() : undefined;
+  if (
+    inbox !== undefined &&
+    inbox.length <= 8_192 &&
+    world !== undefined &&
+    routesToOwnerDeployment(world) &&
+    world.capabilities !== undefined &&
+    "resolvedHookResume" in world.capabilities &&
+    world.capabilities.resolvedHookResume === true
+  ) {
+    const parsed = readInboxHandle(inbox);
+    const cached = parsed?.token === token ? parsed : undefined;
+    if (cached !== undefined) {
+      try {
+        return await resumeHook(cached, payload);
+      } catch (error) {
+        // Only a definite refusal may be retried against a freshly resolved owner.
+        if (!HookNotFoundError.is(error)) throw error;
+      }
+    }
+  }
   if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
+}
+
+/**
+ * Delivers a sign-in callback to its asker's inbox. An asker whose session is gone has nothing
+ * waiting on the sign-in anymore, so its missing hook is not an error.
+ */
+export async function resumeSignInCallback(
+  token: string,
+  payload: AuthorizationCallbackPayload,
+): Promise<void> {
+  try {
+    await resumeRunnableHook(token, payload);
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+  }
 }
 
 /**
  * Throws {@link StrandedSessionOwnerError} when the run holding a physical
  * session inbox token cannot execute. An unheld token passes: resuming it
  * reports the absence. Where the World replays each run on its own
- * deployment, every owner can execute, so nothing is looked up.
+ * deployment, nothing is looked up: an owner whose deployment was deleted
+ * shows only through {@link isOwnerDeploymentDeletedError} on a failed read,
+ * so a healthy owner pays nothing for the check.
  */
 export async function assertRunnableSessionInbox(token: string): Promise<void> {
   const world = await getWorld();
@@ -63,11 +108,14 @@ export async function assertRunnableSessionInbox(token: string): Promise<void> {
   if (holder !== undefined) await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
-/** {@link assertRunnableSessionInbox} for a hook the caller already looked up. */
-export async function assertRunnableSessionOwner(hook: Hook): Promise<void> {
+/** {@link assertRunnableSessionInbox} for a holder the caller already looked up. */
+export async function assertRunnableSessionOwner(holder: {
+  readonly runId: string;
+  readonly hook?: Hook;
+}): Promise<void> {
   const world = await getWorld();
   if (routesToOwnerDeployment(world)) return;
-  await assertRunnableOwner(world, hook.runId, hook);
+  await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
 /**
@@ -101,6 +149,23 @@ export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
     if (!DevelopmentRunUnavailableError.is(error)) throw error;
     await assertRunnableOwner(await getWorld(), error.runId);
     throw error;
+  }
+}
+
+/**
+ * `hook`'s owner as {@link StrandedSessionOwnerError} when `error` shows its
+ * deployment was deleted; otherwise, or when the run cannot be read, `error`.
+ * `error` must come from reading or resuming this exact hook: a token may have
+ * moved to a live owner since.
+ */
+export async function strandedIfDeploymentDeleted(error: unknown, hook: Hook): Promise<unknown> {
+  if (!isOwnerDeploymentDeletedError(error)) return error;
+  try {
+    const world = await getWorld();
+    const ownerRun = await world.runs.get(hook.runId, { resolveData: "none" });
+    return new StrandedSessionOwnerError(ownerRun, hook);
+  } catch {
+    return error;
   }
 }
 

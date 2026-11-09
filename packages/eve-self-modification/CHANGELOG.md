@@ -141,7 +141,7 @@
 
 - b7ac284: The self-modification subagent can now install items from the configured eve
   registry. A new `selfmod__registry_add` tool runs `eve add <address>
---non-interactive --skip-setup` in the application root under `eve dev`,
+  --non-interactive --skip-setup` in the application root under `eve dev`,
   pausing the authored-source watcher for the whole install and reporting the
   item's declared environment variables that are still unset. Failed dependency
   installs restore tracked project files and return a sanitized, structured reason

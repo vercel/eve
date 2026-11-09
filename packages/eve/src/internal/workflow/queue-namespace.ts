@@ -9,9 +9,14 @@ export function deriveEveWorkflowQueueNamespace(agentName: string): string {
   return `eve${encodedAgentName}`;
 }
 
+/** Formats the Workflow queue prefix for an installed namespace. */
+export function workflowQueuePrefix(namespace: string): string {
+  return `__${namespace}_wkf_workflow_`;
+}
+
 /** Derives the queue prefix consumed by an eve agent's workflow handler. */
 export function deriveEveWorkflowQueuePrefix(agentName: string): string {
-  return `__${deriveEveWorkflowQueueNamespace(agentName)}_wkf_workflow_`;
+  return workflowQueuePrefix(deriveEveWorkflowQueueNamespace(agentName));
 }
 
 /** Derives the queue topic registered for an eve agent's workflow handler. */

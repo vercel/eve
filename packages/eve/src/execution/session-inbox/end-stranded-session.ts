@@ -1,3 +1,5 @@
+import type { SessionControlIdentity } from "#channel/types.js";
+import { principalOf } from "#execution/session/delivery-facts.js";
 import { EVE_SESSION_ATTRIBUTE, EVE_TYPE_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import {
   logicalSessionInboxToken,
@@ -13,10 +15,13 @@ import {
 import { logicalSessionToken, requireSessionId } from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
+import { streamSessionEvents } from "#execution/session-event-stream.js";
+import { createLineCommitter } from "#harness/session-machine/lines.js";
 import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import { sessionFailed } from "#harness/session-machine/transitions.js";
-import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
+import { endSession } from "#harness/session-machine/deliveries.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 type World = Awaited<ReturnType<typeof getWorld>>;
 
@@ -25,11 +30,21 @@ const HOOK_PAGE_LIMIT = 100;
 const MAX_HOOK_PAGES = 10;
 /** Publication is best effort; a stalled stream write must not hold up the reset. */
 const TERMINAL_EVENT_TIMEOUT_MS = 5_000;
+/** A long but healthy history must finish reading; only a stalled read gives up. */
+const HISTORY_READ_TIMEOUT_MS = 30_000;
 
 const log = createLogger("execution.session-inbox");
 
 /** What made eve end a stranded session; recorded for operators. */
 export type StrandedSessionEndTrigger = "message" | "reset" | "timeout";
+
+/**
+ * The `session.ended` cause naming what ended a stranded session without a control delivery:
+ * `stranded-message` or `stranded-timeout`. A reset's cause names its control delivery instead.
+ */
+export function strandedEndPolicy(trigger: StrandedSessionEndTrigger): string {
+  return `stranded-${trigger}`;
+}
 
 /**
  * Ends a stranded session without running any of its code, so none of its
@@ -51,7 +66,10 @@ export async function endStrandedSession(
   /** The address the caller used; a session address names the session outright. */
   address: string | SessionInboxAddress,
   trigger: StrandedSessionEndTrigger,
+  control?: SessionControlIdentity,
 ): Promise<string> {
+  if (trigger === "reset" && control === undefined)
+    throw new Error("A stranded reset requires its control delivery identity.");
   const sessionId =
     typeof address === "string" ? await resolveStrandedSessionId(stranded) : address.sessionId;
   const { ownerRunId } = stranded;
@@ -60,12 +78,12 @@ export async function endStrandedSession(
   // Listed before cancelling: a cancelled run's hooks are disposed and no longer listed.
   const ownedTokens = await listOwnedSessionTokens(world, ownerRunId);
   // Publish before cancellation can expire zero-retention data.
-  await publishTerminalEvent(sessionId, trigger);
+  await publishTerminalEvent(sessionId, trigger, control);
   // The session id is the original run; after a handoff it parks as the stream anchor.
   await cancelRuns(world, [ownerRunId, sessionId], "Session ended: its deployment was retired");
   await waitForSessionHooksRelease(
     [sessionCommandHookToken(sessionId), logicalSessionToken(address), ...ownedTokens],
-    ownerRunId,
+    { ownerRunId, sessionId },
   );
   log.warn("Reset stranded session", {
     currentEveVersion: resolveInstalledPackageInfo().version,
@@ -95,30 +113,37 @@ async function assertStillServesSession(sessionId: string, ownerRunId: string): 
 }
 
 /**
- * Appends `session.failed` and closes the stream without running authored
- * hooks. Unavailable payload keys, an already-closed stream, or a stalled
- * write must not prevent the reset.
+ * Appends `session.ended`, closing what it leaves open, and closes the stream without running
+ * authored hooks. Unavailable payload keys, an already-closed stream, or a stalled
+ * write must not prevent the reset; a stalled history read fails it before anything is cancelled.
  */
 async function publishTerminalEvent(
   sessionId: string,
   trigger: StrandedSessionEndTrigger,
+  control?: SessionControlIdentity,
 ): Promise<void> {
+  // An owner's end ends everything under it in the same commit, as the session's own end would.
+  const view = await readRecordedView(sessionId);
+  if (view === undefined) return;
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   const publication = (async () => {
-    await writer.write(
-      encodeMessageStreamEvent(
-        stampMessageStreamEvent(
-          sessionFailed({
-            code: "session_stranded",
-            // A replacement reading this history skips it when a reset ended the session.
-            details: { trigger },
-            message: "This session is no longer available.",
-            sessionId,
-            usage: undefined,
-          }),
-        ),
-      ),
+    // A replacement reading this history skips it when a reset ended the session.
+    // A stream that never recorded its start, as an older deployment's, starts as it ends.
+    const facts = endSession(
+      { view },
+      {
+        cause: control === undefined ? { policy: strandedEndPolicy(trigger) } : undefined,
+        control:
+          control === undefined
+            ? undefined
+            : { deliveryId: control.deliveryId, principal: principalOf(control.auth) },
+        error: { code: "session_stranded", message: "This session is no longer available." },
+        outcome: "failed",
+      },
     );
+    // The same commit a session's own writer makes: closed by cascade, and checked.
+    const lines = (await createLineCommitter()).commit(view, facts, view.position);
+    for (const { bytes } of lines) await writer.write(bytes);
     await writer.close();
     return true;
   })();
@@ -132,12 +157,51 @@ async function publishTerminalEvent(
     if (!(await Promise.race([publication, timeout]))) {
       log.warn("Timed out finishing the stranded session stream", { sessionId });
     }
-  } catch {
-    log.warn("Could not finish the stranded session stream", { sessionId });
+  } catch (error) {
+    log.warn("Could not finish the stranded session stream", { error, sessionId });
   } finally {
     clearTimeout(timer);
     writer.releaseLock();
   }
+}
+
+/**
+ * An incomplete history cannot safely determine which descendants or terminal outcomes remain.
+ * Undecodable history skips the terminal event; a stalled read fails before anything is cancelled.
+ */
+async function readRecordedView(sessionId: string): Promise<SessionView | undefined> {
+  const view = emptySessionView();
+  const controller = new AbortController();
+  const read = (async () => {
+    for await (const event of streamSessionEvents(sessionId, {
+      follow: false,
+      signal: controller.signal,
+    })) {
+      foldReceivedEvent(view, event);
+    }
+  })();
+  // Settles after the reset fails when the read stalls.
+  read.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), HISTORY_READ_TIMEOUT_MS);
+  });
+  let timedOut: boolean;
+  try {
+    timedOut = !(await Promise.race([read.then(() => true), timeout]));
+  } catch (error) {
+    log.warn("Could not read the stranded session history", { error, sessionId });
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (timedOut) {
+    controller.abort();
+    throw new Error(
+      `Timed out reading the history of stranded session "${sessionId}". Nothing was ended; retry the request.`,
+    );
+  }
+  return view;
 }
 
 /** Cancels exactly these runs; one that already ended counts as cancelled. */
@@ -162,7 +226,9 @@ async function cancelRuns(
  * their encrypted hook metadata. Guessing would cancel the wrong anchor, so an
  * unknown session fails.
  */
-async function resolveStrandedSessionId(stranded: StrandedSessionOwnerError): Promise<string> {
+export async function resolveStrandedSessionId(
+  stranded: StrandedSessionOwnerError,
+): Promise<string> {
   const { attributes, runId } = stranded.ownerRun;
   const recorded = attributes[EVE_SESSION_ATTRIBUTE];
   if (recorded !== undefined) return recorded;

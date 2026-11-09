@@ -1,4 +1,8 @@
-import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
+import {
+  expectAgentToolExposure,
+  expectObjectRecord,
+  expectOnlyKnownKeys,
+} from "#internal/authored-module.js";
 import type {
   DynamicSchedulesDefinition,
   ScheduleProvider,
@@ -93,10 +97,7 @@ export function normalizeScheduleCollectionDefinition(
   for (const method of PROVIDER_METHODS)
     if (typeof provider[method] !== "function")
       throw new Error(`${message} provider.${method} must be a function.`);
-  if (record.tool !== undefined && typeof record.tool !== "boolean")
-    throw new Error(
-      `${message} "tool" must be true or false; deferred tools are not supported yet.`,
-    );
+  if (record.tool !== undefined) expectAgentToolExposure(record.tool, message);
   if (record.tool === false && record.approval !== undefined)
     throw new Error(`${message} "approval" cannot be configured when tool is false.`);
   if (record.approval !== undefined) {

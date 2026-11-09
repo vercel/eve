@@ -76,22 +76,21 @@ function getDevelopmentEnvironmentLoader(
   const resolvedEnvironmentRoot = resolve(environmentRoot ?? resolvedAppRoot);
   if (existingLoader?.environmentRoot === resolvedEnvironmentRoot) return existingLoader;
 
-  const loader = createDevelopmentEnvironmentLoader(resolvedAppRoot, resolvedEnvironmentRoot);
+  const loader = createDevelopmentEnvironmentLoader(resolvedEnvironmentRoot);
   developmentEnvironmentLoaders.set(resolvedAppRoot, loader);
   return loader;
 }
 
-function createDevelopmentEnvironmentLoader(
-  appRoot: string,
-  environmentRoot: string,
-): DevelopmentEnvironmentLoader {
+function createDevelopmentEnvironmentLoader(environmentRoot: string): DevelopmentEnvironmentLoader {
   const protectedKeys = new Set(Object.keys(process.env));
   const managedValues = new Map<string, string>();
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
     const nextValues = readDevelopmentEnvironmentValues(environmentRoot);
-    const settings = readProviderSettingsSync(appRoot);
+    // `/login` saves the connection beside the env files: at the workspace
+    // root, not in the member directory.
+    const settings = readProviderSettingsSync(environmentRoot);
     const affectedKeys = new Set([
       ...managedValues.keys(),
       ...nextValues.keys(),

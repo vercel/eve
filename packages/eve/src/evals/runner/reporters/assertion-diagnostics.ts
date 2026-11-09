@@ -5,11 +5,10 @@ const MAX_DETAIL_LINE_LENGTH = 240;
 const MAX_DETAIL_LINES = 4;
 
 export function formatAssertionFailureHeadline(assertion: AssertionResult): string {
-  const threshold = assertion.threshold ?? (assertion.severity === "gate" ? 1 : undefined);
   const comparison =
-    threshold === undefined
+    assertion.threshold === undefined || assertion.score === undefined
       ? ""
-      : ` (${formatPercent(assertion.score)} < ${formatPercent(threshold)})`;
+      : ` (${formatPercent(assertion.score)} < ${formatPercent(assertion.threshold)})`;
   const [headline] = assertion.message?.split("\n") ?? [];
   const detail =
     headline === undefined ? "" : `: ${truncateDiagnostic(headline, MAX_DETAIL_LINE_LENGTH)}`;

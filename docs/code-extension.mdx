@@ -3,13 +3,13 @@ title: "Code Extension"
 description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
 ---
 
-`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension contributes file-editing and search tools, coding skills, a read-only worker subagent, and sandbox bootstrap helpers. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
+`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds coding instructions that steer the model toward eve's default [file tools](/docs/concepts/built-in-tools#default-tools), the project's `AGENTS.md`, coding skills, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
 <EveCodeBenchmark dataset="deepswe-lean" />
 
-These results show baseline performance. Each harness uses its standard setup with high reasoning. The results do not show how a harness performs with other models, settings, or tasks.
+These results show baseline performance, with each harness in its standard setup and high reasoning. Other models, settings, or tasks can perform differently.
 
 <details>
 <summary>How the benchmark works</summary>
@@ -31,18 +31,18 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 <details>
 <summary>How the results update</summary>
 
-1. A maintainer runs the `eve-code` workflow on `main` with the `deepswe-lean` dataset.
-2. The workflow runs eve-code, opencode, and pi. It saves each complete result in the eve-bench result store.
-3. The workflow writes a summary of the result to `apps/docs/lib/evals/eve-code-benchmark.json`. Then it commits the file to `main`.
-4. The next docs deployment shows the new results.
+1. The `eve-code` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
+2. The workflow runs eve-code, opencode, pi, and [fx](https://fx.sh) on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
+3. The workflow opens a pull request with a summary of the default Anthropic model's result. This page shows only that model.
+4. After a maintainer approves and merges the pull request, the next docs deployment shows the new results.
 
-The workflow does not publish incomplete runs, single-task runs, or pull request runs. Results can be older than `main`, because a maintainer starts each run. Select a harness name to open the GitHub Actions run for that result.
+The workflow skips incomplete runs, single-task runs, and pull request runs. Results can be a week or more older than `main`, because the workflow runs weekly and each refresh waits for review. Select a harness name to open the GitHub Actions run for that result.
 
 </details>
 
 ## Mount the extension
 
-Create an extension file in your agent. The file name sets the mount name, which prefixes every contributed tool and subagent ID (for example, `code__grep`):
+Create an extension file in your agent. The file name sets the prefix of every skill the extension adds, such as `code__investigate`:
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -50,37 +50,39 @@ import code from "eve/extensions/code";
 export default code({});
 ```
 
-`code({})` mounts the extension without Vercel authentication. Add the options below when the agent needs them.
+`code({})` mounts the extension without Vercel authentication.
 
 ## Configure the extension
 
-| Option                         | Required      | Effect                                                                                         |
-| ------------------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
-| `vercel.connector`             | With `vercel` | Connector that requests an app-subject Vercel token                                            |
-| `vercel.delivery`              | No            | `"firewall"` (default) or `"command"`                                                          |
-| `broker`                       | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
-| `worker.model`                 | With `worker` | Model for the `worker` subagent. Defaults to `openai/gpt-5.6-terra-fast`                       |
-| `worker.reasoning`             | With `worker` | Reasoning level for the `worker` subagent. Defaults to `xhigh`                                 |
-| `worker.openaiReasoningEffort` | No            | Passed to OpenAI models as `reasoningEffort`                                                   |
+| Option             | Required      | Effect                                                                                         |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
+| `vercel.connector` | With `vercel` | Vercel Connect connector that gets a Vercel token for the app, not for a user                  |
+| `vercel.delivery`  | No            | `"firewall"` (default) or `"command"`                                                          |
+| `broker`           | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
 
 export default code({
   vercel: { connector: "vercel/acme-bot" },
-  worker: { model: "openai/gpt-5.6-terra-fast", reasoning: "high" },
 });
 ```
 
 ### Credentials stay outside the sandbox
 
-With firewall delivery, Vercel tokens never enter sandbox processes. Firewall delivery without a top-level `broker` requires a sandbox provider that exposes `setNetworkPolicy()`, and fails otherwise. Set `vercel.delivery: "command"` for providers without a mutable network policy.
+With firewall delivery, Vercel tokens never enter sandbox processes. Firewall delivery needs a top-level `broker` or a sandbox provider with `setNetworkPolicy()`. For other providers, set `vercel.delivery: "command"`.
 
-To use a personal access token or another credential provider, omit the connector and call `authenticateGitHub` or `authenticateVercel` from `eve/extensions/code/sandbox` in your own sandbox lifecycle. These helpers authenticate commands you run yourself; they do not configure the `gh` tool.
+To use a personal access token or another credential provider, omit the connector. Call `authenticateGitHub` or `authenticateVercel` from `eve/extensions/code/sandbox` in your own sandbox setup code. These helpers authenticate commands you run yourself, not the `gh` tool.
+
+## Project instructions
+
+The extension reads `AGENTS.md` from the workspace root, or `CLAUDE.md` when there is no `AGENTS.md`, and adds it to the conversation as project instructions. The content joins the conversation again only when it changes. A file over 64,000 bytes is cut off with a note that tells the model where to read the rest.
+
+The extension reads the file once per session, with one sandbox command at the start of the first turn, which starts the session's sandbox. Later edits to the file reach the model only when it reads the file itself. If the read fails, the turn continues without project instructions, and the next model call tries again. For other directories, the extension's instructions tell the model to read the nearest `AGENTS.md` or `CLAUDE.md` before working there.
 
 ## Publish with the git extension
 
-`eve/extensions/git` contributes the GitHub instructions and the `pr` skill. Mount it next to the code extension when the agent should open pull requests:
+`eve/extensions/git` adds the GitHub instructions and the `pr` skill. Mount it next to the code extension when the agent should open pull requests. `code()` rejects a `github` option, so configure GitHub here. Import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`:
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";
@@ -88,21 +90,78 @@ import git from "eve/extensions/git";
 export default git({});
 ```
 
-`git({})` assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`. No tool is added.
+`git({})` adds no tool and assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`.
 
-Configure `github` to broker GitHub access through Connect instead. The extension then adds the authenticated `git__gh` tool, tells the agent to use it for every authenticated GitHub operation, and switches `git__pr` to `gh-signed-commit` for repositories that require verified signatures.
+Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures.
 
-| Option             | Required      | Effect                                                                                     |
-| ------------------ | ------------- | ------------------------------------------------------------------------------------------ |
-| `github.connector` | With `github` | Connector that mints a GitHub token                                                        |
-| `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                   |
-| `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
+`gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
-The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
+| Option                 | Required      | Effect                                                                                     |
+| ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
+| `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |
+| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
+| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token         |
+| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
+| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
+| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
 
-### Migrate from `code({ github })`
+With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
 
-`code({ github })` is deprecated. While it is set, the code extension still contributes `code__gh`, its GitHub instructions, and the signed-commit `code__pr` skill. Without it, the code extension contributes no GitHub tool, instructions, or pull request skill. Move the `github` option to `git({ github })`, and import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`.
+Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
+
+### Control access with `authorize`
+
+`github.authorize` is the agent's only access control. A command runs only when it returns `true`; otherwise the token never reaches the sandbox. It runs before every `gh` call and receives the parsed `argv`, the caller's `auth`, `repository`, and the minted `token`. What the token can reach depends on `principalType`:
+
+| `principalType` | Token                                                                                                                                                          | `authorize` also receives      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `"app"`         | A GitHub App installation token for the declared repository, or for the whole installation when the call declares only an owner.                               | `owner`                        |
+| `"user"`        | The caller's own token, which reaches everything the caller can reach on GitHub. eve asks the caller to sign in when needed and when GitHub rejects the token. | `repository: null`, no `owner` |
+
+With `"user"`, `authorize` always receives `repository: null`, even when the command declares a repository. Repository allowlists therefore deny user-token calls. Use `"app"` with a full `owner/name` declaration when your policy restricts repository access. Use `"user"` only when your policy permits the caller's full GitHub access, and authorize the caller through `auth`.
+
+```ts title="agent/extensions/git.ts"
+import git from "eve/extensions/git";
+
+import { brokerGitHubLease } from "../lib/github";
+
+export default git({
+  github: {
+    connector: "github/my-agent",
+    broker: brokerGitHubLease,
+    principalType: "app",
+    authorize: ({ owner }) => owner.toLowerCase() === "acme",
+  },
+});
+```
+
+### Credit the person behind a turn
+
+The GitHub App is the author of commits that the `gh` tool makes. Return a verified user from
+`github.attribution` to add that person's `Co-authored-by` trailer. eve adds it to
+`gh-signed-commit` messages and to `gh pr create` bodies passed through `--body` or `--body-file`.
+The callback receives the tool context, including `ctx.session.auth.current` and `ctx.getToken`.
+Return `null` to omit attribution. eve keeps existing co-author trailers. Commands without a body
+flag and direct `gh api` calls get no attribution.
+
+For example, resolve the author through your application's user mapping:
+
+```ts title="agent/extensions/git.ts"
+import git from "eve/extensions/git";
+import { brokerGitHubLease, coAuthorFor } from "../lib/github";
+
+export default git({
+  github: {
+    connector: "github/my-agent",
+    broker: brokerGitHubLease,
+    principalType: "app",
+    authorize: ({ owner }) => owner.toLowerCase() === "acme",
+    attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
+  },
+});
+```
+
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
 
 ## Prepare the sandbox
 
@@ -122,13 +181,21 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-Preparation installs `gh`, wrappers for `gh`, `vc`, and `gh-signed-commit`, and TypeScript diagnostics. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
+Preparation installs `gh` and wrappers for `gh`, `vc`, and `gh-signed-commit`. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
 
-eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers. Upgrading eve alone does not rebuild an existing prepared environment.
+eve rebuilds a prepared environment only when the sandbox file or environment options change. A change to an imported helper or to the eve version doesn't rebuild it.
+
+## Troubleshooting
+
+| What you see                                                                                                        | What to do                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve-code firewall credential delivery requires a sandbox provider with mutable network policy (setNetworkPolicy).` | Set `vercel.delivery: "command"`, or pass a top-level `broker` callback.                                                              |
+| `The current caller is not authorized to access <repository>.`                                                      | Your `github.authorize` callback returned `false` for that caller and repository. Check the callback's rule.                          |
+| `Invalid extension config: eve-code no longer ships a worker subagent; ...`                                         | Remove the `worker` option from `code()`. To delegate work, use the [built-in `agent` tool](/docs/subagents#the-built-in-agent-tool). |
 
 ## What to read next
 
 - [Extensions](/docs/extensions): mount, configure, and override extension packages
 - [Sandbox](/docs/sandbox): environments, preparation, and network policy
-- [Subagents](/docs/subagents): how declared subagents run and inherit configuration
+- [Subagents](/docs/subagents#the-built-in-agent-tool): delegate work to a child agent with the built-in `agent` tool
 - [Skills](/docs/skills): how the model loads skills on demand

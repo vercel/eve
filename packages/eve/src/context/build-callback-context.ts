@@ -3,7 +3,8 @@ import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js"
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { loadContext } from "#context/container.js";
-import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js";
+import type { ContextReader } from "#context/key.js";
+import { SandboxKey, SessionKey } from "#context/keys.js";
 
 /**
  * Builds a {@link SessionContext} from the active ALS scope.
@@ -25,36 +26,41 @@ export function buildCallbackContext(): SessionContext {
       predecessor: session.predecessor,
     },
 
-    getSandbox(environment?: SandboxEnvironmentIdentity): Promise<RuntimeSandboxSession> {
-      const access = ctx.get(SandboxKey);
-      if (access === undefined) {
-        throw new Error(
-          "eve sandbox runtime access is unavailable in the current async context. " +
-            "Call ctx.getSandbox() only from authored runtime functions such as tools, hooks, and channel events.",
-        );
-      }
-      if (environment !== undefined && access.environment !== environment) {
-        throw new Error("The requested sandbox environment is not active for the current session.");
-      }
-      return access.get().then((sandbox) => {
-        if (sandbox === null) {
-          throw new Error("The sandbox is not available in the current authored runtime context.");
-        }
-        return withRuntimeSandboxLifecycle(
-          sandbox,
-          async (options) => {
-            if (access.delete === undefined) {
-              throw new Error("The active sandbox runtime does not support deletion.");
-            }
-            await access.delete(options);
-            // A recreated sandbox can reuse the same persisted identity.
-            ctx.delete(DynamicSkillSandboxKey);
-          },
-          async () => await access.stop(),
-        );
-      });
-    },
+    getSandbox: sandboxOf(ctx),
   };
+}
+
+/**
+ * `ctx.getSandbox()` over a context's sandbox access: the session's sandbox, started on first use.
+ */
+export function sandboxOf(ctx: Pick<ContextReader, "get">): SessionContext["getSandbox"] {
+  return ((environment?: SandboxEnvironmentIdentity): Promise<RuntimeSandboxSession> => {
+    const access = ctx.get(SandboxKey);
+    if (access === undefined) {
+      throw new Error(
+        "eve sandbox runtime access is unavailable in the current async context. " +
+          "Call ctx.getSandbox() only from authored runtime functions such as tools, hooks, dynamic values, and channel events.",
+      );
+    }
+    if (environment !== undefined && access.environment !== environment) {
+      throw new Error("The requested sandbox environment is not active for the current session.");
+    }
+    return access.get().then((sandbox) => {
+      if (sandbox === null) {
+        throw new Error("The sandbox is not available in the current authored runtime context.");
+      }
+      return withRuntimeSandboxLifecycle(
+        sandbox,
+        async (options) => {
+          if (access.delete === undefined) {
+            throw new Error("The active sandbox runtime does not support deletion.");
+          }
+          await access.delete(options);
+        },
+        async () => await access.stop(),
+      );
+    });
+  }) as SessionContext["getSandbox"];
 }
 
 export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(

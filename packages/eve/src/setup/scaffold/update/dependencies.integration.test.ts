@@ -27,28 +27,28 @@ describe("ensurePackageDependencies", () => {
 
     await expect(
       ensurePackageDependencies({
-        dependencies: { "@vercel/connect": "2.2.0", microsandbox: "0.5.5" },
+        dependencies: { "@vercel/connect": "2.2.0", example: "1.0.0" },
         projectRoot: root,
       }),
     ).resolves.toEqual([
       {
-        dependencies: ["microsandbox"],
+        dependencies: ["example"],
         devDependencies: [],
         path: join(root, "package.json"),
         scripts: [],
       },
     ]);
     await expect(readFile(join(root, "package.json"), "utf8")).resolves.toContain(
-      '"microsandbox": "0.5.5"',
+      '"example": "1.0.0"',
     );
   });
 
   it("does not report a mutation when dependencies already match", async () => {
-    const root = await project({ dependencies: { microsandbox: "0.5.5" } });
+    const root = await project({ dependencies: { example: "1.0.0" } });
 
     await expect(
       ensurePackageDependencies({
-        dependencies: { microsandbox: "0.5.5" },
+        dependencies: { example: "1.0.0" },
         projectRoot: root,
       }),
     ).resolves.toEqual([]);

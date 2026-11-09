@@ -27,6 +27,7 @@ interface Choice {
 interface AdaptiveCard {
   readonly body?: readonly {
     readonly choices?: readonly Choice[];
+    readonly inlines?: readonly { readonly text?: string }[];
     readonly text?: string;
     readonly type?: string;
   }[];
@@ -50,6 +51,8 @@ interface PressHandle {
   /** The card's activity, which Teams names as `replyToId` on the press. */
   readonly activityId: string;
   readonly data: Record<string, unknown>;
+  /** Whether the button is an `Action.Execute`, which Teams sends as an invoke. */
+  readonly execute: boolean;
   /** The chosen ChoiceSet value; unset when each option is its own Submit action. */
   readonly value?: string;
 }
@@ -176,26 +179,50 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     shownMessage(call) {
       const body = call.body as ActivityBody;
       if (body.type !== "message") return undefined;
-      const texts = (adaptiveCard(body)?.body ?? []).flatMap((element) =>
-        element.type === "TextBlock" && element.text !== undefined ? [element.text] : [],
-      );
       return {
         id: activityIdOf(call),
         links: linkTargets(adaptiveCard(body)?.actions),
         options: cardOptions(call),
-        text: [body.text ?? "", ...texts].join("\n"),
+        text: [body.text ?? "", cardText(adaptiveCard(body))].join("\n"),
+      };
+    },
+    shownReply(body) {
+      // Teams shows an `Action.Execute` invoke's answer card to the presser alone.
+      const reply = body as { readonly type?: string; readonly value?: unknown };
+      if (reply.type === "application/vnd.microsoft.activity.message") {
+        return { id: "", onlyPerson: true, options: [], text: String(reply.value ?? "") };
+      }
+      if (reply.type !== "application/vnd.microsoft.card.adaptive") return undefined;
+      const card = reply.value as AdaptiveCard;
+      return {
+        id: "",
+        links: linkTargets(card.actions),
+        onlyPerson: true,
+        options: [],
+        text: cardText(card),
       };
     },
     personShownAs: [PERSON.name],
     press: (option: RenderedOption, person: Person) => {
-      const { activityId: cardActivityId, data, value } = option.handle as PressHandle;
+      const { activityId: cardActivityId, data, execute, value } = option.handle as PressHandle;
+      const submitted = value === undefined ? data : { ...data, eve_option: value };
+      if (execute) {
+        return activity({
+          from: PEOPLE[person],
+          id: `INVOKE-${activityId + 1}`,
+          name: "adaptiveCard/action",
+          replyToId: cardActivityId,
+          type: "invoke",
+          value: { action: { data: submitted } },
+        });
+      }
+      // An Action.Submit button in a conversation posts a message activity whose value is the
+      // action's data merged with the card's inputs; only Action.Execute sends an invoke.
       return activity({
         from: PEOPLE[person],
-        id: `INVOKE-${activityId + 1}`,
-        name: "adaptiveCard/action",
         replyToId: cardActivityId,
-        type: "invoke",
-        value: { action: { data: value === undefined ? data : { ...data, eve_option: value } } },
+        type: "message",
+        value: submitted,
       });
     },
     postedText(call) {
@@ -216,24 +243,42 @@ function adaptiveCard(body: ActivityBody): AdaptiveCard | undefined {
   )?.content;
 }
 
+function cardText(card: AdaptiveCard | undefined): string {
+  return (card?.body ?? [])
+    .flatMap((element) => {
+      if (element.type === "TextBlock" && element.text !== undefined) return [element.text];
+      if (element.type !== "RichTextBlock") return [];
+      return [(element.inlines ?? []).map((inline) => inline.text ?? "").join("")];
+    })
+    .join("\n");
+}
+
 function cardOptions(call: PlatformCall): RenderedOption[] {
   const card = adaptiveCard(call.body as ActivityBody);
   const activityId = activityIdOf(call);
   const choiceSet = card?.body?.find((element) => element.type === "Input.ChoiceSet");
   const submits = (card?.actions ?? []).filter(
-    (action) => action.type === "Action.Submit" && action.data !== undefined,
+    (action) =>
+      (action.type === "Action.Submit" || action.type === "Action.Execute") &&
+      action.data !== undefined,
   );
   // A select renders one ChoiceSet and a single Submit; other choices are one Submit each.
   if (choiceSet?.choices !== undefined) {
-    const data = submits[0]?.data;
-    if (data === undefined) return [];
+    const submit = submits[0];
+    if (submit?.data === undefined) return [];
+    const { data } = submit;
+    const execute = submit.type === "Action.Execute";
     return choiceSet.choices.map((choice) => ({
-      handle: { activityId, data, value: choice.value } satisfies PressHandle,
+      handle: { activityId, data, execute, value: choice.value } satisfies PressHandle,
       label: choice.title,
     }));
   }
   return submits.map((action) => ({
-    handle: { activityId, data: action.data! } satisfies PressHandle,
+    handle: {
+      activityId,
+      data: action.data!,
+      execute: action.type === "Action.Execute",
+    } satisfies PressHandle,
     label: action.title ?? "",
   }));
 }

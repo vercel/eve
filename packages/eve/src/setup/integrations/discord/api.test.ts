@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   configureDiscordInteractionsEndpoint,
+  enableDiscordMessageContentIntent,
   registerDiscordCommand,
   resolveDiscordApplication,
 } from "./api.js";
@@ -70,5 +71,44 @@ describe("Discord setup API", () => {
         }),
       }),
     );
+  });
+
+  describe("enableDiscordMessageContentIntent", () => {
+    function discordApp(flags: number, patchStatus = 200) {
+      return vi.fn<typeof fetch>(async (_url, init) =>
+        init?.method === "PATCH"
+          ? new Response("{}", { status: patchStatus })
+          : Response.json({ flags }),
+      );
+    }
+
+    it("turns on the limited intent and keeps the other limited intents set", async () => {
+      // Limited guild members (1 << 15) set, plus an unrelated read-only flag (1 << 23).
+      const fetchImpl = discordApp((1 << 15) | (1 << 23));
+
+      await expect(enableDiscordMessageContentIntent("bot-token", fetchImpl)).resolves.toBe(true);
+
+      expect(fetchImpl).toHaveBeenLastCalledWith(
+        "https://discord.com/api/v10/applications/@me",
+        expect.objectContaining({
+          body: JSON.stringify({ flags: (1 << 15) | (1 << 19) }),
+          method: "PATCH",
+        }),
+      );
+    });
+
+    it("leaves an app whose Message Content intent is already approved alone", async () => {
+      const fetchImpl = discordApp(1 << 18);
+
+      await expect(enableDiscordMessageContentIntent("bot-token", fetchImpl)).resolves.toBe(true);
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a refusal, as for a verified app that needs approval", async () => {
+      await expect(
+        enableDiscordMessageContentIntent("bot-token", discordApp(0, 403)),
+      ).resolves.toBe(false);
+    });
   });
 });

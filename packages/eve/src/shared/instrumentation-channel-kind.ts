@@ -1,4 +1,4 @@
-import type { InstrumentationChannelKind } from "#public/channels/index.js";
+import type { InstrumentationChannelKind } from "#shared/instrumentation-channel.js";
 
 const FRAMEWORK_CHANNEL_KINDS: ReadonlySet<string> = new Set(["http", "schedule", "subagent"]);
 

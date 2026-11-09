@@ -85,10 +85,7 @@ function createResourceRoot(
   return {
     contentHash,
     logicalPath: normalizeLogicalPath(join(RESOURCES_DIRECTORY, resourceDirectoryName(nodeId))),
-    rootEntries: deriveResourceRootEntries({
-      sandboxWorkspaces: manifest.sandboxWorkspaces,
-      skills: manifest.skills,
-    }),
+    rootEntries: deriveResourceRootEntries(manifest.sandboxWorkspaces),
   };
 }
 
@@ -132,7 +129,7 @@ async function materializeSkill(input: {
   const skillRoot = join(input.nodeRoot, RESOURCE_SKILLS_DIRECTORY, input.skill.name);
 
   if (input.skill.sourceKind === "skill-package") {
-    await cp(input.skill.rootPath, skillRoot, { recursive: true });
+    await cp(input.skill.rootPath, skillRoot, { recursive: true, verbatimSymlinks: true });
     return;
   }
 
@@ -161,8 +158,10 @@ async function copyDirectoryContents(input: {
       continue;
     }
 
+    // Without verbatimSymlinks, cp rewrites nested relative links as absolute host paths.
     await cp(join(input.sourcePath, entry.name), join(input.targetPath, entry.name), {
       recursive: true,
+      verbatimSymlinks: true,
     });
   }
 }

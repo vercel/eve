@@ -288,7 +288,7 @@ async function discoverPackagedSkill(input: {
   } = {
     description: definition.description,
     logicalPath,
-    markdown: definition.markdown,
+    markdown: definition.content,
     name: input.skillId,
     rootPath: input.skillRootPath,
     skillFilePath,

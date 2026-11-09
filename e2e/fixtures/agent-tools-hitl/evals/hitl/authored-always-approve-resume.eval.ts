@@ -12,32 +12,22 @@ export default defineEval({
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
     const session = parked.session;
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    const approval = session.requireInputRequest({
+    const approval = session.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
-    // This sends only `inputResponses` in a separate turn. No user message or
+    // This sends only `answers` in a separate turn. No user message or
     // channel context follows the tool approval response in the model input.
     const approved = await session.respond([
       {
         optionId: "approve",
-        requestId: approval.requestId,
+        interactionId: approval.interactionId,
       },
     ]);
 
     approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
+    approved.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

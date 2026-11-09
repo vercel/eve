@@ -60,6 +60,22 @@ describe("renderToolSignature", () => {
       expected: "f(input: { node: { name: string; next?: unknown } }): Promise<unknown>",
     },
     {
+      name: "comments a referenced property from its target, preferring its own keywords",
+      inputSchema: {
+        type: "object",
+        properties: {
+          url: { $ref: "#/$defs/Url" },
+          home: { $ref: "#/$defs/HomeUrl", description: "Home page." },
+        },
+        $defs: {
+          HomeUrl: { $ref: "#/$defs/Url" },
+          Url: { type: "string", format: "uri", description: "A web address." },
+        },
+      },
+      expected:
+        'f(input: { url?: string /* A web address; format: "uri" */; home?: string /* Home page; format: "uri" */ }): Promise<unknown>',
+    },
+    {
       name: "renders the output type",
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
@@ -79,6 +95,23 @@ describe("renderToolSignature", () => {
     });
     expect(signature).toHaveLength(4_000);
     expect(signature.endsWith("...")).toBe(true);
+  });
+
+  it("keeps every property name when long descriptions overflow the cap", () => {
+    // Like Linear's `save_issue`: dozens of documented fields whose names alone fit easily.
+    const names = Array.from({ length: 40 }, (_, index) => `field${index}`);
+    const properties = Object.fromEntries(
+      names.map((name) => [
+        name,
+        { type: "string", description: `Sets ${name}. ${"x".repeat(200)}` },
+      ]),
+    );
+    const signature = renderToolSignature({
+      name: "f",
+      inputSchema: { type: "object", properties },
+    });
+    expect(signature.length).toBeLessThanOrEqual(4_000);
+    expect(names.filter((name) => !signature.includes(`${name}?:`))).toEqual([]);
   });
 
   it("bounds the work for schemas whose shared refs expand exponentially", () => {

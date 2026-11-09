@@ -54,11 +54,12 @@ describe("discoverSkills (memory)", () => {
     expect(result.skills).toEqual([
       {
         assetsPath: join(packagedSkillRoot, "assets"),
+        deferred: undefined,
         description: "Use the weather tool before answering forecast questions.",
         sourceKind: "skill-package",
         license: "MIT",
         logicalPath: "skills/get-weather/skill.MD",
-        markdown: "When the user asks about weather, call the weather tool before answering.",
+        content: "When the user asks about weather, call the weather tool before answering.",
         metadata: {
           audience: "forecast",
         },
@@ -78,7 +79,7 @@ describe("discoverSkills (memory)", () => {
       {
         definition: {
           description: "Research complex weather questions before replying.",
-          markdown: "Research complex weather questions before replying.",
+          content: "Research complex weather questions before replying.",
         },
         sourceKind: "markdown",
         logicalPath: "skills/weather-research.md",
@@ -90,8 +91,8 @@ describe("discoverSkills (memory)", () => {
       createAgentSourceManifest({
         agentRoot: project.agentRoot,
         appRoot: project.appRoot,
-        skills: result.skills,
-      }).skills,
+        sources: result.skills,
+      }).sources,
     ).toEqual(result.skills);
   });
 
@@ -135,7 +136,7 @@ describe("discoverSkills (memory)", () => {
       {
         definition: {
           description: "Use the weather tool before answering forecast questions.",
-          markdown: "Use the weather tool before answering forecast questions.",
+          content: "Use the weather tool before answering forecast questions.",
         },
         sourceKind: "markdown",
         logicalPath: "skills/get-weather.md",
@@ -161,6 +162,7 @@ describe("discoverSkills (memory)", () => {
           "name: other-name",
           "description: Use the weather tool before answering forecast questions.",
           "argument-hint: '[location]'",
+          "allowed-tools: Bash Read",
           "disable-model-invocation: true",
           "---",
           "When the user asks about weather, call the weather tool before answering.",
@@ -170,7 +172,7 @@ describe("discoverSkills (memory)", () => {
           "name: other-name",
           "description: Research complex weather questions.",
           "argument-hint: '[topic]'",
-          "disable-model-invocation: true",
+          "disable-model-invocation: false",
           "---",
           "Research weather patterns before replying.",
         ].join("\n"),
@@ -188,10 +190,16 @@ describe("discoverSkills (memory)", () => {
     ]);
     expect(result.skills).toEqual([
       {
+        assetsPath: undefined,
+        content: "When the user asks about weather, call the weather tool before answering.",
+        deferred: undefined,
         description: "Use the weather tool before answering forecast questions.",
+        license: undefined,
+        metadata: undefined,
+        referencesPath: undefined,
+        scriptsPath: undefined,
         sourceKind: "skill-package",
         logicalPath: "skills/named-package/SKILL.md",
-        markdown: "When the user asks about weather, call the weather tool before answering.",
         name: "named-package",
         rootPath: namedPackageRoot,
         skillFilePath: join(namedPackageRoot, "SKILL.md"),
@@ -201,7 +209,7 @@ describe("discoverSkills (memory)", () => {
       {
         definition: {
           description: "Research complex weather questions.",
-          markdown: "Research weather patterns before replying.",
+          content: "Research weather patterns before replying.",
         },
         sourceKind: "markdown",
         logicalPath: "skills/weather-research.md",

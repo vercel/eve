@@ -8,6 +8,8 @@ export type HttpMethod = (typeof HTTP_METHODS)[number];
 /** Internal descriptor for one resolved OpenAPI operation. */
 export interface OpenApiOperation {
   readonly toolName: string;
+  /** The document's `operationId`, when the operation declares one. */
+  readonly operationId: string | undefined;
   readonly method: HttpMethod;
   readonly pathTemplate: string;
   readonly description: string;
@@ -31,8 +33,9 @@ export function operationName(
   method: HttpMethod,
   pathTemplate: string,
 ): string {
-  if (typeof operation.operationId === "string" && operation.operationId.length > 0) {
-    const sanitized = sanitizeToolName(operation.operationId);
+  const operationId = declaredOperationId(operation);
+  if (operationId !== undefined) {
+    const sanitized = sanitizeToolName(operationId);
     if (sanitized.length > 0) {
       return sanitized;
     }
@@ -44,12 +47,21 @@ export function operationName(
   return sanitizeToolName(`${method}_${sanitizedPath}`);
 }
 
+/** The operation's `operationId`, when it declares a non-empty one. */
+export function declaredOperationId(operation: Record<string, unknown>): string | undefined {
+  return typeof operation.operationId === "string" && operation.operationId.length > 0
+    ? operation.operationId
+    : undefined;
+}
+
+const MAX_TOOL_NAME_LENGTH = 64;
+
 /** Coerces an arbitrary string into a provider-legal tool name (`[a-zA-Z0-9_-]`, ≤64). */
 function sanitizeToolName(name: string): string {
   return name
     .replace(/[^a-zA-Z0-9_-]+/g, "_")
     .replace(/^[_-]+|[_-]+$/g, "")
-    .slice(0, 64);
+    .slice(0, MAX_TOOL_NAME_LENGTH);
 }
 
 /** Disambiguates a tool name against names already used in the same connection. */
@@ -57,7 +69,8 @@ export function uniqueName(name: string, used: Set<string>): string {
   let candidate = name;
   let suffix = 2;
   while (used.has(candidate)) {
-    candidate = `${name}_${suffix}`;
+    const ending = `_${suffix}`;
+    candidate = `${name.slice(0, MAX_TOOL_NAME_LENGTH - ending.length)}${ending}`;
     suffix += 1;
   }
   used.add(candidate);

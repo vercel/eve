@@ -18,6 +18,9 @@ concurrency:
   group: docker-image-size-analysis-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     if: ${{ github.event.pull_request.head.repo.fork == false }}
@@ -101,8 +104,8 @@ jobs:
             test "$(stat -c %U /workspace)" = vercel-sandbox
             test "$(stat -c %U /usr/local/bin/node)" = root
             test "$(npm prefix -g)" = "$HOME/.local"
-            test "$(pnpm bin -g)" = "$PNPM_HOME/bin"
             test -d "$HOME/.local/bin"
+            node -e "require(\"node:crypto\").randomUUID()"
             git init --quiet /workspace
             git -C /workspace remote add origin https://github.com/vercel/eve.git
             sudo -n true

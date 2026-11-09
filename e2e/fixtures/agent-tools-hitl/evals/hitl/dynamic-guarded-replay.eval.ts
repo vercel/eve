@@ -14,7 +14,7 @@ export default defineEval({
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
     const session = parked.session;
-    session.requireInputRequest({
+    session.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
@@ -22,15 +22,9 @@ export default defineEval({
 
     const approved = await session.respondAll("approve");
     approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          toolName: TOOL_NAME,
-          output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
-        },
-        status: "completed",
-      },
+    approved.calledTool(TOOL_NAME, {
+      output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
+      status: "completed",
       count: 1,
     });
 

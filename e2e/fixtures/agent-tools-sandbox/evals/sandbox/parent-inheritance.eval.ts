@@ -22,14 +22,14 @@ export default defineEval({
         "and reply with the command output verbatim.",
     );
     childTurn.expectOk();
-    await t.require(childTurn.message, includes(PARENT_TOKEN));
+    await t.require(childTurn.reply, includes(PARENT_TOKEN));
 
     const parentRead = await conversation.send(
       `Run the bash command \`cat ${CHILD_PATH}\` and reply with the file contents verbatim.`,
     );
 
     t.succeeded();
-    t.calledSubagent("parent-sandbox", { status: "completed", count: 1 });
-    t.check(parentRead.message, includes(CHILD_TOKEN));
+    t.calledAgent("parent-sandbox", { status: "completed", count: 1 });
+    t.check(parentRead.reply, includes(CHILD_TOKEN));
   },
 });

@@ -10,36 +10,33 @@ export default defineEval({
   description: "HITL smoke: a denied once() call does not execute and re-gates the next call.",
   async test(t) {
     const { session } = await t.send('Call the guarded-echo tool with note "denied-call".');
-    const request = session.requireInputRequest({ toolName: "guarded-echo" });
+    const request = session.requireInteraction({ toolName: "guarded-echo" });
 
-    const denied = await session.respondAll("cancel");
+    const denied = await session.respondAll("deny");
     denied.expectOk();
-    denied.event("action.result", {
+    denied.event("call.settled", {
       data: {
-        result: {
-          kind: "tool-result",
-          output: {
-            approval: { requestId: request.requestId, status: "denied" },
-            code: "TOOL_EXECUTION_DENIED",
-            tool: { result: "not_run" },
-          },
-          toolName: "guarded-echo",
+        callId: request.call?.callId,
+        outcome: "rejected",
+        output: {
+          approval: { interactionId: request.interactionId, status: "denied" },
+          code: "TOOL_EXECUTION_DENIED",
+          tool: { result: "not_run" },
         },
-        status: "rejected",
       },
       count: 1,
     });
     // The denial returns to the model as context; real models paraphrase it,
     // so judge the acknowledgment instead of matching literal wording.
     t.judge("The reply acknowledges that the guarded-echo tool call was denied and did not run.", {
-      on: denied.message,
+      on: denied.reply,
     }).atLeast(0.5);
 
     await session.send('Call the guarded-echo tool once more with note "retry-call".');
     // Denial does not grant: the follow-up call must re-park.
-    session.requireInputRequest({ toolName: "guarded-echo" });
+    session.requireInteraction({ toolName: "guarded-echo" });
 
-    t.parked();
+    t.awaitingInput();
     t.calledTool("guarded-echo", { status: "rejected", count: 1 });
     t.calledTool("guarded-echo", { status: "pending", count: 1 });
   },

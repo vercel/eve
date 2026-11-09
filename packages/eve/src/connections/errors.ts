@@ -67,7 +67,7 @@ export interface ConnectionAuthorizationFailedErrorOptions {
   /**
    * Stable machine-readable code describing why authorization failed.
    *
-   * The runtime surfaces this code on the `authorization.completed`
+   * The runtime surfaces this code on the sign-in `interaction.settled`
    * stream event and on the failed tool result the model sees. Use a
    * short kebab- or snake-cased string (e.g. `"access_denied"`,
    * `"invalid_grant"`).
@@ -80,6 +80,11 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    * - `"app_not_installed"`: an authored `getToken` for a
    *   `principalType: "app"` connection signalled the agent's own
    *   credentials are missing. Terminal.
+   * - `"sign_in_cancelled"`: the same sign-in already ended without being
+   *   completed in this turn, such as one a new message cancelled.
+   *   Terminal for the turn.
+   * - `"sign_in_unavailable"`: a turn a schedule started needed a sign-in.
+   *   Scheduled turns never ask for one. Terminal.
    */
   readonly reason?: string;
 
@@ -97,9 +102,9 @@ export interface ConnectionAuthorizationFailedErrorOptions {
  * Thrown from a connection's `getToken` when no valid credential is
  * available and authorization must be completed before the connection
  * can be used. Covers both interactive OAuth (the runtime emits
- * `authorization.required` and suspends the turn on a webhook) and
+ * sign-in `interaction.opened` and suspends the turn on a webhook) and
  * non-interactive / out-of-band flows such as static API keys (the
- * runtime emits `authorization.required` without suspending).
+ * runtime emits sign-in `interaction.opened` without suspending).
  */
 export class ConnectionAuthorizationRequiredError extends Error {
   readonly connectionName: string;

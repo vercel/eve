@@ -1,14 +1,49 @@
 import type { Sandbox } from "@vercel/agent-eval";
 
 import type { AuthoringSetup, AuthoringSetupContext } from "./authoring-case.js";
+import { crmLocalEnvSetup } from "./setups/crm-local-env.js";
+import { helpdeskExtensionSetup } from "./setups/helpdesk-extension.js";
 import { inventoryOpenApiSetup } from "./setups/inventory-openapi.js";
+import { northstarFulfillmentSetup } from "./setups/northstar-fulfillment.js";
+import { tallyAppSetup } from "./setups/tally-app.js";
+import { vercelSetup } from "./setups/vercel.js";
+
+const sessionSetups: readonly AuthoringSetup[] = [
+  crmLocalEnvSetup,
+  helpdeskExtensionSetup,
+  inventoryOpenApiSetup,
+  northstarFulfillmentSetup,
+  tallyAppSetup,
+  vercelSetup,
+];
 
 interface FixtureBootstrap {
   readonly startingPoint: "scaffolded" | "empty";
   readonly projectDirectory?: string;
+  readonly skipSandboxPrewarm?: boolean;
   readonly revision: string;
   readonly setupIds: readonly string[];
 }
+
+/** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
+export const JUST_BASH_VERSION = "3.6.0";
+/** Matches the workspace catalog, so it accepts the `vite` version eve's peer range requires. */
+export const VITEST_VERSION = "5.0.2";
+
+/**
+ * OpenCode asks before some tool calls, and a run has nobody to answer: the request is
+ * rejected and the session ends. agent-eval's project `opencode.json` allows writes, edits, and
+ * commands, but OpenCode's defaults still ask before touching anything outside the project,
+ * before reading `.env` files, and after three identical calls in a row (`doom_loop`). Agents
+ * stopped at `cat /usr/local/bin/eve-benchmark-build` and at reading the case's `.env.local`.
+ * OpenCode merges its global config under
+ * the project's, so this adds the permission without replacing agent-eval's file. Other
+ * harnesses never read it, so every run gets it.
+ */
+export const OPENCODE_GLOBAL_CONFIG = `${JSON.stringify({
+  $schema: "https://opencode.ai/config.json",
+  permission: { external_directory: "allow", read: "allow", doom_loop: "allow" },
+})}\n`;
 
 export function createNativeAuthoringSetup(options: {
   readonly packageSpec: string;
@@ -22,6 +57,7 @@ export function createNativeAuthoringSetup(options: {
     if (bootstrap.revision !== options.revision) {
       throw new Error("Native fixture revision does not match the selected subject.");
     }
+    const setups = setupsFor(bootstrap.setupIds);
     await run(
       sandbox,
       "rm -f .eve-authoring-bootstrap.json CASE.ts package.json package-lock.json PROMPT.md",
@@ -44,40 +80,68 @@ export function createNativeAuthoringSetup(options: {
       if (bootstrap.projectDirectory === undefined) {
         throw new Error("An empty native fixture must declare its project directory.");
       }
+      let build = `npm --prefix ${bootstrap.projectDirectory} run build`;
+      if (bootstrap.skipSandboxPrewarm === true) {
+        // Kept outside the workspace so the flag doesn't hint at the case's answer.
+        build = "eve-benchmark-build";
+        await sandbox.writeFiles({
+          "/usr/local/bin/eve-benchmark-build": `#!/bin/sh\ncd ${shellQuote(bootstrap.projectDirectory)} && exec npm exec -- eve build --skip-sandbox-prewarm\n`,
+        });
+        await run(sandbox, "chmod +x /usr/local/bin/eve-benchmark-build", "build wrapper");
+      }
       await sandbox.writeFiles({
         "package.json": `${JSON.stringify({
           private: true,
           scripts: {
             typecheck: `npm --prefix ${bootstrap.projectDirectory} run typecheck`,
-            build: `npm --prefix ${bootstrap.projectDirectory} run build`,
+            build,
           },
         })}\n`,
       });
     }
 
     // DefaultSandbox selects just-bash inside the Linux eval container, where Docker
-    // and microsandbox are unavailable. Supply its optional peer before the model runs.
+    // is unavailable. Supply its optional peer before the model runs. The grader
+    // needs vitest too: agent-eval only installs its fallback `vitest@^3` when the
+    // workspace has none, and that fallback fails silently against eve's vite peer.
+    // Saving it keeps it through the agent's own `npm install`s.
     await run(
       sandbox,
-      "npm install --save-dev --save-exact just-bash@3.1.0",
-      "local sandbox dependency",
+      `npm install --save-dev --save-exact just-bash@${JUST_BASH_VERSION} vitest@${VITEST_VERSION}`,
+      "local sandbox and grader dependencies",
     );
 
-    const context = setupContext(sandbox, bootstrap.projectDirectory);
-    for (const setup of setupsFor(bootstrap.setupIds)) await setup.onSession?.(context);
+    const context = setupContext(sandbox, options.packageSpec, bootstrap.projectDirectory);
+    for (const setup of setups) await setup.onSession?.(context);
     if (options.treatment === "baseline") await run(sandbox, "rm -f AGENTS.md CLAUDE.md GEMINI.md");
     if (bootstrap.startingPoint === "scaffolded") {
       await run(sandbox, "npm run typecheck && npm run build", "starting workspace validation");
     }
+    await run(
+      sandbox,
+      `dir="\${XDG_CONFIG_HOME:-$HOME/.config}/opencode" && mkdir -p "$dir" && printf '%s' ${shellQuote(OPENCODE_GLOBAL_CONFIG)} > "$dir/opencode.json"`,
+      "OpenCode permissions",
+    );
     await run(sandbox, "git add . && git commit --amend --no-edit --quiet");
   };
 }
 
-function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
-  return ids.flatMap((id) => (id === inventoryOpenApiSetup.id ? [inventoryOpenApiSetup] : []));
+// A case whose setup is skipped would hand the model a workspace without its fixture.
+export function setupsFor(ids: readonly string[]): readonly AuthoringSetup[] {
+  return ids.map((id) => {
+    const setup = sessionSetups.find((candidate) => candidate.id === id);
+    if (setup === undefined) {
+      throw new Error(`Setup ${JSON.stringify(id)} is not registered with the native runner.`);
+    }
+    return setup;
+  });
 }
 
-function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSetupContext {
+function setupContext(
+  sandbox: Sandbox,
+  packageSpec: string,
+  projectDirectory?: string,
+): AuthoringSetupContext {
   const workspace =
     projectDirectory === undefined
       ? sandbox.getWorkingDirectory()
@@ -85,6 +149,7 @@ function setupContext(sandbox: Sandbox, projectDirectory?: string): AuthoringSet
   return {
     workspace,
     artifactsRoot: "/tmp/photon",
+    packageSpec,
     run: async (command, workingDirectory = workspace) =>
       run(sandbox, command, command, undefined, workingDirectory),
     write: async (path, content) =>

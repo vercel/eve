@@ -1,18 +1,10 @@
 import { readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import type { Plugin } from "rolldown";
+
 import { type ParseError, parse as parseJsonc } from "#compiled/jsonc-parser/index.js";
-
-type RolldownResolveResult = {
-  readonly id: string;
-};
-
-type RolldownResolveContext = {
-  resolve(
-    source: string,
-    importer: string | undefined,
-    options: { kind: string; skipSelf: boolean },
-  ): Promise<RolldownResolveResult | null>;
-};
+import { isNodeModulesPath } from "#internal/authored-package-boundary.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type PackageTsConfigPaths = {
   readonly baseDirectory: string;
@@ -39,8 +31,12 @@ const nearestPackageRootCache = new Map<string, Promise<string | undefined>>();
  */
 export function createAuthoredPackageTsConfigPathsPlugin(input: {
   appPackageRoot: string;
+  /** Leaves imports from installed dependencies to the bundler. */
+  authoredSourceOnly?: boolean;
   extensions: readonly string[];
-}): Record<string, unknown> {
+  /** With `authoredSourceOnly`, installed importers to handle anyway. */
+  handlesInstalledModule?: (path: string) => boolean;
+}): Plugin {
   const probeStat = createCachedStatProbe();
 
   return {
@@ -51,13 +47,14 @@ export function createAuthoredPackageTsConfigPathsPlugin(input: {
           exclude: NON_PACKAGE_IMPORT_FILTER,
         },
       },
-      async handler(
-        this: RolldownResolveContext,
-        source: string,
-        importer: string | undefined,
-        options: { kind: string },
-      ) {
-        if (importer === undefined || !isPackageImport(source)) {
+      async handler(source, importer, options) {
+        if (
+          importer === undefined ||
+          !isPackageImport(source) ||
+          (input.authoredSourceOnly === true &&
+            isNodeModulesPath(importer) &&
+            input.handlesInstalledModule?.(importer) !== true)
+        ) {
           return undefined;
         }
 
@@ -325,13 +322,4 @@ function isPackageImport(source: string): boolean {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }

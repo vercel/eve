@@ -1,4 +1,4 @@
-import type { ToolInputResponse, WorkflowToolContext } from "#public/tools/index.js";
+import type { ToolAnswer, WorkflowToolContext } from "#public/tools/index.js";
 
 export const DAY_PROMPT = "Which day works for the review?";
 export const TIME_PROMPT = "Which time works for the review?";
@@ -43,6 +43,6 @@ function choices(...labels: string[]) {
   return labels.map((label) => ({ id: label, label }));
 }
 
-function summarize(answer: ToolInputResponse): string {
+function summarize(answer: ToolAnswer): string {
   return answer.status === "answered" ? (answer.optionId ?? answer.text ?? "") : answer.status;
 }

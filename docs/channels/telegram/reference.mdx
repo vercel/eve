@@ -1,0 +1,122 @@
+---
+title: "Telegram Reference"
+description: "Telegram channel options, credentials, dispatch rules, delivery, human-in-the-loop, proactive sessions, and attachments."
+type: reference
+---
+
+This page documents every part of `telegramChannel` from `eve/channels/telegram`. For setup and common tasks, start with [Telegram](/docs/channels/telegram).
+
+The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`, receives Bot API webhooks at `POST /eve/v1/telegram`, and replies with `sendMessage`. See [Channels](/docs/channels) for what every channel shares.
+
+## Setup and credentials
+
+Create a bot by sending `/newbot` to [@BotFather](https://t.me/BotFather), then run `eve add channel/telegram`. eve asks how to store the bot token, then asks for the token and checks it with Telegram's `getMe`, which also gives the `botUsername` it writes.
+
+### Vercel Connect
+
+This path needs an authenticated Vercel CLI. eve links a Vercel project, stores the token in a [Vercel Connect](https://vercel.com/docs/connect) Telegram connector, and routes its triggers to `/eve/v1/telegram`. Connect registers the bot's webhook and forwards each update with a Vercel OIDC token that `connectTelegramCredentials` verifies, so your deployment holds no bot token or webhook secret:
+
+```ts title="agent/channels/telegram.ts"
+import { connectTelegramCredentials } from "@vercel/connect/eve";
+import { telegramChannel } from "eve/channels/telegram";
+
+export default telegramChannel({
+  botUsername: "my_bot",
+  credentials: connectTelegramCredentials("telegram/my-agent"),
+});
+```
+
+Setup routes updates to production. To test a preview, create a second bot and connector and attach it with `--environment preview`, as in Slack's [Test a preview branch](/docs/channels/slack/reference#test-a-preview-branch).
+
+### Portable credentials
+
+On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/telegram`. eve writes the bot token and a random webhook secret to `.env.local`:
+
+```ts title="agent/channels/telegram.ts"
+import { telegramChannel } from "eve/channels/telegram";
+
+export default telegramChannel({
+  botUsername: "my_bot",
+});
+```
+
+```bash
+TELEGRAM_BOT_TOKEN=123456:...        # replies, typing, callbacks, proactive sends
+TELEGRAM_WEBHOOK_SECRET_TOKEN=...    # must match the secret_token you register
+```
+
+Or pass them as `credentials: { botToken, webhookSecretToken }`. The channel checks the `X-Telegram-Bot-Api-Secret-Token` header on each webhook. A supplied `webhookVerifier` takes precedence over `webhookSecretToken`. eve doesn't call `setWebhook`, so register the deployed URL yourself:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://your-app.example.com/eve/v1/telegram",
+       "secret_token":"'"$TELEGRAM_WEBHOOK_SECRET_TOKEN"'",
+       "allowed_updates":["message","callback_query"]}'
+```
+
+## Options
+
+`telegramChannel(config)` takes these options. All are optional.
+
+| Option            | Default                                                  | Description                                                                                |
+| ----------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `botUsername`     | None                                                     | The bot's username, without `@`. Needed to recognize group mentions and targeted commands. |
+| `credentials`     | `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET_TOKEN` | `{ botToken, webhookSecretToken, webhookVerifier }`.                                       |
+| `route`           | `/eve/v1/telegram`                                       | Webhook path.                                                                              |
+| `api`             | `https://api.telegram.org` and the global `fetch`        | `{ apiBaseUrl, fileBaseUrl, fetch }` for Bot API calls and file downloads.                 |
+| `turnPolicy`      | `"steer"`                                                | `"steer"` or `"queue"` for messages that arrive during a turn.                             |
+| `uploadPolicy`    | Any media type, up to 25 MB                              | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound photos and documents.        |
+| `onMessage`       | Group filter and `defaultTelegramAuth`                   | `(ctx, message)` hook. Return `{ auth }` to dispatch or `null` to ignore.                  |
+| `onCallbackQuery` | Answer with `Unsupported action.`                        | `(ctx, query)` hook for callback queries that aren't eve's HITL buttons.                   |
+| `events`          | eve's default handlers                                   | Per-event handler overrides, such as `content.completed`.                                  |
+
+The channel mounts `POST /eve/v1/telegram`.
+
+## Dispatch
+
+In a private chat, text, captions, photos, and documents all reach the agent. In a group, only a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's messages does.
+
+The model sees a `<telegram_context>` block with `bot_username` and `is_mentioned`. `is_mentioned` is `true` only for an exact `@bot_username` token or a targeted command such as `/ask@my_bot`.
+
+Each forum topic gets its own session, keyed by `message_thread_id`.
+
+Override `onMessage` to choose which messages run the agent, and as whom. Return `{ auth }` to run it, optionally with `title` to set the run title. Set group privacy mode in BotFather.
+
+Custom `onMessage` hooks can import `defaultTelegramAuth` from
+`eve/channels/telegram` and return `{ auth: defaultTelegramAuth(message) }` to
+keep the default actor identity. The helper uses the message's `from` user,
+scopes group identities to the chat, and returns `null` when no user is present.
+For a button press, pass the button presser as `from`, not the message's author.
+
+## Delivery
+
+By default, the bot sends each reply as plain text with `sendMessage` and no `parse_mode`, so Markdown shows as typed. Replies over Telegram's 4096-character limit are split across messages. Custom handlers use `ctx.channel.telegram`.
+
+## Human-in-the-loop (HITL)
+
+Approvals and questions with options render as inline-keyboard buttons, and free-text questions as `ForceReply`. eve acknowledges its own callbacks with `answerCallbackQuery` and passes others to `onCallbackQuery`. A press on a prompt whose session has ended replaces the keyboard with `No longer active` and tells the person to send a new message.
+
+A text reply to a pending `ForceReply` prompt answers it. A reply to any other bot message reaches the agent as a new message. It starts a new session when no session answers in that thread.
+
+## Proactive sessions
+
+To start a session without an incoming message, call `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required; add `messageThreadId` to post in a forum topic.
+
+A private-chat session is keyed to the chat, or the chat and topic. A group or supergroup session is keyed to the bot message Telegram returns. Replies to different bot messages can resume different sessions in one chat. If Telegram returns no recognized chat type, the session stays unanchored.
+
+## Attachments
+
+Inbound photos and documents reach the agent when `uploadPolicy` allows their type. eve downloads them with `getFile`. Omit `uploadPolicy` to accept any type up to 25 MB:
+
+```ts
+export default telegramChannel({
+  botUsername: "my_bot",
+  uploadPolicy: { allowedMediaTypes: ["image/*", "application/pdf"], maxBytes: 10 * 1024 * 1024 },
+});
+```
+
+## What to read next
+
+- [Channels overview](/docs/channels): what every channel shares, and every built-in channel
+- [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

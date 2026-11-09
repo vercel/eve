@@ -1,15 +1,16 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { IFileSystem } from "just-bash";
 
 import { getLocalDevCapability } from "eve/local-dev";
 
+import type { JustBashFilesystem } from "#public/sandbox/just-bash-sandbox.js";
+
 export async function createSelfModificationFilesystem(input: {
   readonly appRoot?: string;
-  readonly defaultFilesystem: IFileSystem;
+  readonly defaultFilesystem: JustBashFilesystem;
   resolveProjectPath?(path: string): string;
   readonly justBash: typeof import("just-bash");
-}): Promise<IFileSystem> {
+}): Promise<JustBashFilesystem> {
   const capability = getLocalDevCapability();
   if (capability === undefined) {
     throw new Error(

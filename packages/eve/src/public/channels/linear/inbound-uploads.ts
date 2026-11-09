@@ -1,4 +1,9 @@
-import type { FilePart, TextPart, UserContent } from "ai";
+import type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 
 import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import type { LinearFetch } from "#public/channels/linear/api.js";
@@ -47,10 +52,10 @@ export function extractLinearUploadReferences(markdown: string): readonly Linear
 
 /** Adds authenticated Linear uploads, images and other files, to otherwise text-only inbound content. */
 export async function attachLinearInboundUploads(input: {
-  readonly content: UserContent;
+  readonly content: MessageContent;
   readonly credentials?: LinearChannelCredentials;
   readonly fetch?: LinearFetch;
-}): Promise<UserContent> {
+}): Promise<MessageContent> {
   if (typeof input.content !== "string") return input.content;
 
   const references = extractLinearUploadReferences(input.content);
@@ -88,7 +93,7 @@ async function fetchLinearUpload(
   reference: LinearUploadReference,
   token: string,
   fetchUpload: LinearFetch,
-): Promise<FilePart | null> {
+): Promise<MessageFilePart | null> {
   if (parseLinearUploadUrl(reference.url.href) === null) return null;
 
   try {
@@ -105,13 +110,14 @@ async function fetchLinearUpload(
     const mediaType = readMediaType(response.headers.get("content-type"), reference.image);
     if (mediaType === null) return null;
 
-    const file: FilePart = {
+    const file: MessageFilePart = {
       data: await readLimitedBytes(response, DEFAULT_UPLOAD_POLICY.maxBytes, "linear"),
       mediaType,
       type: "file",
     };
-    if (!reference.image && reference.label.length > 0) file.filename = reference.label;
-    return file;
+    return !reference.image && reference.label.length > 0
+      ? { ...file, filename: reference.label }
+      : file;
   } catch {
     return null;
   }
@@ -132,11 +138,11 @@ function readMediaType(contentType: string | null, image: boolean): string | nul
 function buildLinearUploadContent(
   markdown: string,
   references: readonly LinearUploadReference[],
-  files: readonly (FilePart | null)[],
-): UserContent {
+  files: readonly (MessageFilePart | null)[],
+): MessagePart[] {
   let cursor = 0;
   let text = "";
-  const attached: (FilePart | TextPart)[] = [];
+  const attached: (MessageFilePart | MessageTextPart)[] = [];
 
   for (const [index, reference] of references.entries()) {
     text += markdown.slice(cursor, reference.start);
@@ -153,6 +159,6 @@ function buildLinearUploadContent(
   text += markdown.slice(cursor);
 
   if (text.trim().length === 0) return attached;
-  const textPart: TextPart = { text, type: "text" };
+  const textPart: MessageTextPart = { text, type: "text" };
   return [textPart, ...attached];
 }

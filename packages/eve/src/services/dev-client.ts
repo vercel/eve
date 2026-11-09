@@ -1,5 +1,5 @@
-import type { UserContent } from "ai";
-import type { InputResponse } from "#shared/input.js";
+import type { MessageContent } from "#shared/message-content.js";
+import type { Answer } from "#shared/input.js";
 import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
 import {
   readDevelopmentRuntimeArtifactsRevision,
@@ -20,8 +20,8 @@ export interface DevelopmentRuntimeArtifactRefresher {
    * Refreshes the artifact revision before a normal turn.
    */
   refresh(input: {
-    readonly inputResponses?: readonly InputResponse[];
-    readonly message?: string | UserContent;
+    readonly answers?: readonly Answer[];
+    readonly message?: MessageContent;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
@@ -66,8 +66,8 @@ class LocalDevelopmentRuntimeArtifactRefresher implements DevelopmentRuntimeArti
   }
 
   async refresh(input: {
-    readonly inputResponses?: readonly InputResponse[];
-    readonly message?: string | UserContent;
+    readonly answers?: readonly Answer[];
+    readonly message?: MessageContent;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
@@ -132,10 +132,10 @@ class LocalDevelopmentRuntimeArtifactRefresher implements DevelopmentRuntimeArti
 }
 
 function shouldRefreshRuntimeArtifactsForTurn(input: {
-  readonly inputResponses?: readonly InputResponse[];
-  readonly message?: string | UserContent;
+  readonly answers?: readonly Answer[];
+  readonly message?: MessageContent;
 }): boolean {
-  return input.message !== undefined && (input.inputResponses?.length ?? 0) === 0;
+  return input.message !== undefined && (input.answers?.length ?? 0) === 0;
 }
 
 /**

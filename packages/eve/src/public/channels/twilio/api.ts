@@ -1,3 +1,5 @@
+import type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
+export type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
 import {
   callTwilioApi as callPrimitive,
   encodeTwilioForm,
@@ -13,7 +15,7 @@ import type { FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { limitedFetch } from "#internal/attachments/limited-read.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
-import { resolveTwilioAuthToken, type TwilioAuthToken } from "#public/channels/twilio/verify.js";
+import { resolveTwilioAuthToken } from "#public/channels/twilio/verify.js";
 
 const DEFAULT_TWILIO_API_BASE_URL = "https://api.twilio.com";
 
@@ -21,7 +23,13 @@ const DEFAULT_TWILIO_API_BASE_URL = "https://api.twilio.com";
  * Builds the Twilio channel-local continuation token (`<from>:<to>`).
  * Eve namespaces this with the channel name before handing it to the runtime.
  */
-export function twilioContinuationToken(from: string, to: string | undefined): string {
+export function twilioContinuationToken({
+  from,
+  to,
+}: {
+  readonly from: string;
+  readonly to?: string | undefined;
+}): string {
   return `${from}:${to ?? ""}`;
 }
 
@@ -31,14 +39,10 @@ export type TwilioAccountSid = TwilioCredential;
 export type { TwilioApiResponse, TwilioFetch };
 
 /** Credentials used for Twilio REST API calls and webhook verification. */
-export interface TwilioCredentials {
-  readonly accountSid?: TwilioAccountSid;
-  readonly authToken?: TwilioAuthToken;
-}
 
 /** Shared Twilio REST API options. */
 export interface TwilioApiOptions {
-  readonly credentials?: TwilioCredentials;
+  readonly credentials?: TwilioChannelCredentials;
   readonly apiBaseUrl?: string;
   readonly fetch?: TwilioFetch;
 }
@@ -77,7 +81,7 @@ export async function resolveTwilioAccountSid(accountSid?: TwilioAccountSid): Pr
  * behavior: non-2xx Twilio responses become `{ ok: false, status, body }`.
  */
 export async function callTwilioApi(input: {
-  readonly credentials?: TwilioCredentials;
+  readonly credentials?: TwilioChannelCredentials;
   readonly apiBaseUrl?: string;
   readonly fetch?: TwilioFetch;
   readonly path: string;
@@ -171,7 +175,7 @@ export function createTwilioFetchFile(
 }
 
 async function resolveCredentials(
-  credentials: TwilioCredentials | undefined,
+  credentials: TwilioChannelCredentials | undefined,
 ): Promise<{ accountSid: string; authToken: string }> {
   return {
     accountSid: await resolveTwilioAccountSid(credentials?.accountSid),

@@ -27,7 +27,7 @@ const APP_ROOT = "/tmp/rebuild-status-app";
 process.env.EVE_TUI_UNICODE = "1";
 
 void (async () => {
-  const client = new Client({ host: UNREACHABLE_HOST });
+  const client = new Client({ baseUrl: UNREACHABLE_HOST });
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const renderer = new TerminalRenderer({

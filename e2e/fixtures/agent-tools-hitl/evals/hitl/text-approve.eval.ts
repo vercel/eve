@@ -9,38 +9,30 @@ export default defineEval({
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
     const conversation = parked.session;
-    const approval = conversation.requireInputRequest({
+    const approval = conversation.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
     const rejectedTurn = await conversation.startRespond(
-      [{ optionId: "approve", requestId: approval.requestId }],
+      [{ optionId: "approve", interactionId: approval.interactionId }],
       { headers: { "x-eve-fixture-user": "unauthorized-responder" } },
     );
-    await rejectedTurn.waitForEvent("approval.candidate", {
-      data: { outcome: "rejected", requestId: approval.requestId },
-    });
+    await rejectedTurn.waitForEvent("response.settled", { data: { outcome: "refused" } });
 
     // Finish consuming the refusal boundary before opening the next response reader.
     (await rejectedTurn.result()).expectOk();
     const approved = await rejectedTurn.session.respond(
-      [{ optionId: "approve", requestId: approval.requestId }],
+      [{ optionId: "approve", interactionId: approval.interactionId }],
       { headers: { "x-eve-fixture-user": "e2e-approval-responder" } },
     );
     approved.expectOk();
-    approved.event("approval.settled", {
+    approved.event("interaction.settled", {
       count: 1,
-      data: { outcome: "approved", requestId: approval.requestId },
+      data: { interactionId: approval.interactionId, outcome: "accepted" },
     });
-    approved.event("action.result", {
-      count: 1,
-      data: {
-        result: { kind: "tool-result", output: new RegExp(MARKER), toolName: TOOL_NAME },
-        status: "completed",
-      },
-    });
+    approved.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

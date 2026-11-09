@@ -1,0 +1,17 @@
+[
+  "IMESSAGE_TAPBACKS",
+  "IMessageTapback",
+  "IMessageTapbackContext",
+  "IMessageTapbackResult",
+  "IMessageTapbackToolInput",
+  "IMessageTapbackType",
+  "LinqChannel",
+  "LinqChannelConfig",
+  "LinqChannelCredentials",
+  "LinqCredentialValue",
+  "LinqInboundMessageContext",
+  "LinqInboundResult",
+  "LinqWebhookVerifier",
+  "defaultLinqAuth",
+  "linqChannel"
+]

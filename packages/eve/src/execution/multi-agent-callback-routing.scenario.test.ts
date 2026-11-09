@@ -132,8 +132,7 @@ interface RecordedServiceRequest {
 
 function createStubSession(sessionId: string): HarnessSession {
   return {
-    agent: { modelReference: { id: "test" }, system: "", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: `${sessionId}:continuation`,
     history: [],
     sessionId,
@@ -267,6 +266,9 @@ describe("multi-agent callback routing", () => {
     // and (post-fix) the agent's public route prefix.
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
+    // The stand-in deployment listens on loopback, which callbacks may only
+    // target on local development servers.
+    vi.stubEnv("EVE_DEV", "1");
     if (publicRoutePrefix !== undefined) {
       vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", publicRoutePrefix);
     }
@@ -321,11 +323,12 @@ describe("multi-agent callback routing", () => {
       const callbackToken = `${agent.name}-session:callback-token`;
 
       expect(remoteSessionId).toBe("remote-session-1");
+      // Every callback URL names the protocol the parent and child agreed.
       expect(callback.url).toBe(
         `${deploymentOrigin}${joinEveRoutePath(
           agent.publicRoutePrefix,
           createEveCallbackRoutePath(callbackToken),
-        )}`,
+        )}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
 
       // Remote-side create-session validation (public/channels/eve.ts):
@@ -414,7 +417,7 @@ describe("multi-agent callback routing", () => {
       // Without the prefix the minted URL targets the bare /eve/v1 path that
       // nothing serves in multi-agent mode — the exact production failure.
       expect(callback.url).toBe(
-        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}`,
+        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
       const sessionCallback = {
         callId: "call-support",

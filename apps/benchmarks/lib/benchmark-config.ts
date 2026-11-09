@@ -139,6 +139,20 @@ export const benchmarkModels = [
     support: "supported",
   },
   {
+    id: "claude-sonnet-5-5",
+    model: "anthropic/claude-sonnet-5.5",
+    displayName: "Claude Sonnet 5.5",
+    harness: "Claude Code",
+    support: "candidate",
+  },
+  {
+    id: "claude-haiku-5-5",
+    model: "anthropic/claude-haiku-5.5",
+    displayName: "Claude Haiku 5.5",
+    harness: "Claude Code",
+    support: "candidate",
+  },
+  {
     id: "gpt-6-sol-high",
     model: "openai/gpt-6-sol",
     agentModel: "openai/gpt-6-sol?reasoningEffort=high",
@@ -153,6 +167,22 @@ export const benchmarkModels = [
     displayName: "GPT-6 Luna (high)",
     harness: "Codex",
     support: "supported",
+  },
+  {
+    id: "gpt-6-1-sol-high",
+    model: "openai/gpt-6.1-sol",
+    agentModel: "openai/gpt-6.1-sol?reasoningEffort=high",
+    displayName: "GPT-6.1 Sol (high)",
+    harness: "Codex",
+    support: "candidate",
+  },
+  {
+    id: "gpt-6-1-terra-high",
+    model: "openai/gpt-6.1-terra",
+    agentModel: "openai/gpt-6.1-terra?reasoningEffort=high",
+    displayName: "GPT-6.1 Terra (high)",
+    harness: "Codex",
+    support: "candidate",
   },
   {
     id: "grok-4-7",

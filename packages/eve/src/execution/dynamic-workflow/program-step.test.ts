@@ -1,93 +1,47 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  continueWorkflowSandboxInterrupt: vi.fn(),
-  createParkingHostTool: vi.fn((input) => input),
-  createWorkflowSandboxTool: vi.fn(),
-  getWorkflowSandboxPendingInterrupts: vi.fn(),
-  unwrapWorkflowSandboxResult: vi.fn(),
+import { FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
+import { RunConcurrencyError, RunCpuTimeoutError, RunError } from "#compiled/run/index.js";
+
+const run = vi.fn();
+vi.mock("#shared/workflow-sandbox.js", () => ({
+  loadWorkflowSandboxModule: async () => ({
+    RunError,
+    createRunner: () => ({ run }),
+    createSignedContinuationCodec: () => ({}),
+    getHostFunctionContext: () => ({}),
+  }),
 }));
 
-vi.mock("#shared/workflow-sandbox.js", () => mocks);
-
 import { runWorkflowProgramStep } from "#execution/dynamic-workflow/program-step.js";
-import {
-  WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
-  WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND,
-  readWorkflowProgramCallInterrupt,
-  type WorkflowProgramInput,
-} from "#execution/dynamic-workflow/schema.js";
 
-const program: WorkflowProgramInput = {
-  continuationSecurity: { signingKey: "key" },
-  js: "return ctx.agent('researcher', { message: 'x' });",
-  maxSubagents: 3,
-};
+const step = () =>
+  runWorkflowProgramStep({
+    callId: "call",
+    program: { continuationSecurity: { signingKey: "key" }, js: "return 1;", maxSubagents: 1 },
+  });
 
-const callPayload = {
-  kind: WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND,
-  task: undefined,
-  toolInput: { input: { message: "x" }, target: "researcher" },
-  toolName: "agent" as const,
-};
-const interrupt = { payload: callPayload } as never;
-
-describe("runWorkflowProgramStep", () => {
+describe("runWorkflowProgramStep failures", () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it("exposes one restricted agent bridge and returns pending calls", async () => {
-    const execute = vi.fn().mockResolvedValue("parked");
-    mocks.createWorkflowSandboxTool.mockResolvedValue({ execute });
-    mocks.unwrapWorkflowSandboxResult.mockResolvedValue({ interrupt, status: "interrupted" });
-    mocks.getWorkflowSandboxPendingInterrupts.mockReturnValue([interrupt]);
+  it("retries when run has no free worker", async () => {
+    run.mockRejectedValue(new RunConcurrencyError(4));
 
-    await expect(runWorkflowProgramStep({ callId: "call", program })).resolves.toEqual({
-      interrupt,
-      pending: [interrupt],
-      status: "interrupted",
-    });
-    expect(mocks.createWorkflowSandboxTool).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bridgeRequestLimit: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
-        continuationSecurity: program.continuationSecurity,
-        hostTools: { agent: expect.anything() },
-      }),
+    const error = await step().catch((caught: unknown) => caught);
+    expect(RetryableError.is(error)).toBe(true);
+    expect(FatalError.is(error)).toBe(false);
+    expect((error as RetryableError).message).toBe(
+      "JavaScript runtime maxWorkers limit reached (4).",
     );
-    expect(mocks.createParkingHostTool).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledWith(
-      {
-        js: expect.stringContaining("agent: (target, input) => tools.agent({ target, input })"),
-      },
-      { toolCallId: "call" },
-    );
+    expect((error as RetryableError).retryAfter.getTime()).toBeGreaterThan(Date.now() + 4_000);
   });
 
-  it("returns JSON output after ordered continuation resolutions", async () => {
-    mocks.continueWorkflowSandboxInterrupt.mockResolvedValue("complete");
-    mocks.unwrapWorkflowSandboxResult.mockResolvedValue({
-      output: { ok: true },
-      status: "completed",
-    });
-
-    await expect(
-      runWorkflowProgramStep({
-        callId: "call",
-        program,
-        resume: {
-          interrupt,
-          resolutions: [{ status: "completed", output: { answer: 1 } }],
-        },
-      }),
-    ).resolves.toEqual({ output: { ok: true }, status: "completed" });
-    expect(mocks.continueWorkflowSandboxInterrupt).toHaveBeenCalledWith(
-      expect.objectContaining({ bridgeRequestLimit: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT }),
-    );
-  });
-
-  it("validates interrupt payloads", () => {
-    expect(readWorkflowProgramCallInterrupt(interrupt)).toEqual(callPayload);
-    expect(() => readWorkflowProgramCallInterrupt({ payload: { kind: "other" } } as never)).toThrow(
-      'Unsupported workflow program interrupt kind "other"',
+  it("keeps other run failures fatal", async () => {
+    run.mockRejectedValue(new RunCpuTimeoutError(30_000));
+    const cpu = await step().catch((caught: unknown) => caught);
+    expect(FatalError.is(cpu)).toBe(true);
+    expect((cpu as FatalError).message).toBe(
+      "JavaScript runtime exceeded its CPU time limit of 30000ms.",
     );
   });
 });

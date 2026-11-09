@@ -1,6 +1,6 @@
 import {
   estimateMediaTokens,
-  readMediaMetadata,
+  readImageDimensions,
   type MediaMetadata,
 } from "#internal/attachments/media-metadata.js";
 import {
@@ -37,7 +37,8 @@ export function estimateTokens(value: unknown): number {
     };
     return { mediaType, type };
   });
-  return Buffer.byteLength(serialized ?? "") / 4 + mediaTokens;
+  // Whole tokens: the count reaches events, which carry integers.
+  return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
 }
 
 /**
@@ -129,5 +130,5 @@ function base64Header(base64: string): Uint8Array {
 // payload, so inline PDFs fall back to their size.
 function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number): MediaMetadata {
   if (!mediaType.startsWith("image/")) return { mediaType, size };
-  return { ...readMediaMetadata(header, mediaType), size };
+  return { ...readImageDimensions(header), mediaType, size };
 }

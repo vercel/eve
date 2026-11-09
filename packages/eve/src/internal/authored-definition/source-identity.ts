@@ -16,7 +16,7 @@ type FallbackDefinitionSource =
       readonly definitions: WeakSet<object>;
       readonly firstEntry: DefinitionSourceEntry;
     })
-  | { readonly kind: "ambiguous" };
+  | { readonly kind: "ambiguous"; readonly conflict: string; warned: boolean };
 
 export type RegisteredDefinitionSource =
   | { readonly kind: DefinitionSourceKind; readonly names: ReadonlySet<string> }
@@ -41,6 +41,15 @@ const fallbackSources = registryContainer[FALLBACK_REGISTRY_SYMBOL];
 /** Stamps the authoring-time fallback key used for copies eve never loaded. */
 export function stampDefinitionKey(definition: object, key: string): void {
   Object.defineProperty(definition, DEFINITION_KEY, { configurable: true, value: key });
+}
+
+/**
+ * Fallback key shared by the connection factories and the resolver. The
+ * description keeps connections on one host, such as Jira and Confluence,
+ * distinct.
+ */
+export function connectionDefinitionKey(url: string, description: string): string {
+  return `connection:${JSON.stringify([url, description])}`;
 }
 
 /**
@@ -72,7 +81,22 @@ export function readDefinitionSource(definition: object): RegisteredDefinitionSo
   const resolved = resolvedSources.get(definition);
   if (resolved !== undefined) return resolved;
   const key = readDefinitionKey(definition);
-  return key === undefined ? undefined : fallbackSources.get(key);
+  if (key === undefined) return undefined;
+  const fallback = fallbackSources.get(key);
+  if (fallback?.kind === "ambiguous" && !fallback.warned) {
+    // Warn only when a lookup needs the shared fallback. Loaded definitions
+    // resolve above through their source identity.
+    fallback.warned = true;
+    console.warn(
+      [
+        `eve could not assign a unique toolResultFrom identity for ${JSON.stringify(key)}.`,
+        `Conflicting definitions: ${fallback.conflict}.`,
+        "Multiple authored definitions share that fallback identity, so toolResultFrom will not match through it.",
+        "Use the original definition object loaded by eve so source-derived identity can be used instead.",
+      ].join(" "),
+    );
+  }
+  return fallback;
 }
 
 function registerFallbackSource(
@@ -99,15 +123,11 @@ function registerFallbackSource(
     existing.names.add(entry.name);
     return;
   }
-  console.warn(
-    [
-      `eve could not assign a unique toolResultFrom identity for ${JSON.stringify(key)}.`,
-      `Conflicting definitions: ${formatDefinitionSourceForWarning(existing.firstEntry)} and ${formatDefinitionSourceForWarning(entry)}.`,
-      "Multiple authored definitions share that fallback identity, so toolResultFrom will not match through it.",
-      "Use the original definition object loaded by eve so source-derived identity can be used instead.",
-    ].join(" "),
-  );
-  fallbackSources.set(key, { kind: "ambiguous" });
+  fallbackSources.set(key, {
+    conflict: `${formatDefinitionSourceForWarning(existing.firstEntry)} and ${formatDefinitionSourceForWarning(entry)}`,
+    kind: "ambiguous",
+    warned: false,
+  });
 }
 
 function readDefinitionKey(definition: object): string | undefined {

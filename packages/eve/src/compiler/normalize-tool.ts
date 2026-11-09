@@ -1,8 +1,9 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
-import type { ToolSourceRef } from "#discover/manifest.js";
-import type { CompiledToolDefinition, CompiledDynamicToolDefinition } from "#compiler/manifest.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { CompiledDefinition, CompiledToolDefinition } from "#compiler/manifest.js";
 import {
+  compiledDefinition,
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
@@ -22,7 +23,7 @@ export type CompiledToolEntry =
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
     }
-  | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
+  | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
 /**
  * Compiles one authored tool module into the normalized tool entry
@@ -38,7 +39,7 @@ export type CompiledToolEntry =
  */
 export async function compileToolEntry(
   _agentRoot: string,
-  source: ToolSourceRef,
+  source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledToolEntry> {
   const entry = normalizeToolDefinition(
@@ -95,18 +96,7 @@ export async function compileToolEntry(
   }
 
   if (entry.kind === "dynamic-tool") {
-    return {
-      kind: "dynamic-tool",
-      definition: {
-        eventNames: [...entry.eventNames],
-        exportName: source.exportName,
-        logicalPath: source.logicalPath,
-        rebindMissingCallbacks: entry.rebindMissingCallbacks || undefined,
-        slug: toolName,
-        sourceId: source.sourceId,
-        sourceKind: "module",
-      },
-    };
+    return { definition: compiledDefinition("tool", source, toolName), kind: "dynamic" };
   }
 
   const { workflow } = entry.definition;

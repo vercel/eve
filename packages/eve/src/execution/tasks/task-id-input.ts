@@ -5,7 +5,7 @@ import {
 } from "#execution/tasks/render.js";
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { displayTitle } from "#shared/display-name.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 import type { JsonObject } from "#shared/json.js";
 import { firstSentence } from "#shared/presentation-text.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
@@ -44,7 +44,10 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
     ),
     inputSchema: withTaskIdSchema(schema),
   };
-  if (!agent || definition.label?.start !== undefined) return described;
+  // `label: false` keeps the call out of activity, so it gets no label either.
+  if (!agent || definition.label === false || definition.label?.start !== undefined) {
+    return described;
+  }
   return {
     ...described,
     label: { ...definition.label, start: (input) => agentCallLabel(definition.name, input) },
@@ -74,7 +77,8 @@ export interface ServeCallInput {
 
 export function splitTaskIdInput(modelInput: JsonObject): ServeCallInput {
   const { [TASK_ID_INPUT]: taskId, ...input } = modelInput;
-  if (typeof taskId !== "string") return { input };
+  // Some models fill an optional string with "" instead of omitting it.
+  if (typeof taskId !== "string" || taskId === "") return { input };
   return { input, taskId };
 }
 

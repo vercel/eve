@@ -11,12 +11,12 @@ export default defineEval({
     turn.messageIncludes("Investigate, analyze, and explain questions without changing systems.");
     turn.messageIncludes("Execute operational changes to systems and deployments.");
     await t.require(
-      Object.keys(JSON.parse(turn.message ?? "{}")).sort(),
+      Object.keys(JSON.parse(turn.reply ?? "{}")).sort(),
       equals(["agent", "operator", "researcher"]),
     );
     turn.calledTool("inspect-agents", { count: 1 });
-    turn.notEvent("agent.started");
+    turn.notEvent("child.opened");
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

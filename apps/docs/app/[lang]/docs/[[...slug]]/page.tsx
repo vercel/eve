@@ -9,7 +9,7 @@ import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { config } from "@/lib/geistdocs/config";
 import { defaultLanguage } from "@/lib/geistdocs/languages";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
-import { staticOgImage } from "@/lib/geistdocs/og";
+import { docsOgImage } from "@/lib/geistdocs/og";
 import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { docsArticleStructuredData, docsBreadcrumbs } from "@/lib/geistdocs/structured-data";
@@ -17,19 +17,15 @@ import { getSiteOrigin } from "@/lib/geistdocs/url";
 
 type DocsPageEntry = NonNullable<ReturnType<typeof geistdocsSource.source.getPage>>;
 
-const resolveTitle = (page: DocsPageEntry, lang: string): string => {
-  const title = resolveDocsPageTitle({
-    pageTitle: page.data.title,
-    pageUrl: page.url,
-    tree: geistdocsSource.source.getPageTree(lang),
-  });
+const resolveTitle = (page: DocsPageEntry): string => {
+  const title = resolveDocsPageTitle({ pageTitle: page.data.title, pageUrl: page.url });
   if (!title) throw new Error(`Missing title for docs page ${page.url}`);
   return title;
 };
 
 const DocsStructuredData = ({ page }: { page: DocsPageEntry }) => {
   const lang = page.locale ?? defaultLanguage;
-  const title = resolveTitle(page, lang);
+  const title = resolveTitle(page);
   const pathname = getPublicPath(page.url, config.basePath);
   const data = docsArticleStructuredData({
     breadcrumbs: docsBreadcrumbs({
@@ -38,7 +34,7 @@ const DocsStructuredData = ({ page }: { page: DocsPageEntry }) => {
       tree: geistdocsSource.source.getPageTree(lang),
     }),
     description: page.data.description,
-    image: staticOgImage,
+    image: new URL(docsOgImage(page.slugs), getSiteOrigin()).href,
     lang,
     pathname,
     title,
@@ -58,8 +54,9 @@ const docsPage = createDocsPage({
     return getMDXComponents(components);
   },
   metadata: ({ metadata, page, params }) => {
-    const titleMetadata = pageTitleMetadata(resolveTitle(page, params.lang));
+    const titleMetadata = pageTitleMetadata(resolveTitle(page));
     const pathname = getPublicPath(page.url, config.basePath);
+    const ogImage = docsOgImage(page.slugs);
 
     return {
       ...metadata,
@@ -74,13 +71,13 @@ const docsPage = createDocsPage({
         // Override with the static OG image for now. To restore dynamic per-page
         // OG generation, swap the line below back to:
         // images: geistdocsSource.getPageImage(page).url,
-        images: [staticOgImage],
+        images: [ogImage],
       },
       twitter: {
         ...metadata.twitter,
         ...titleMetadata.twitter,
         card: "summary_large_image",
-        images: [staticOgImage],
+        images: [ogImage],
       },
     };
   },

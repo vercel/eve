@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -15,14 +15,12 @@ import { startProductionServer } from "./start-production-server.js";
 import { prepareProductionApplicationHost } from "./prepare-application-host.js";
 
 const ALIAS_MARKER = "workflow-alias-resolved";
+const WORKFLOW_ASSET_MARKER = "workflow-raw-asset-embedded";
+const STEP_ASSET_MARKER = "step-raw-asset-embedded";
 
-function workflowCode(source: string): string {
-  const match = source.match(
-    /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-  );
-  return Buffer.from((JSON.parse(match?.[1] ?? "[]") as string[]).join(""), "base64").toString(
-    "utf8",
-  );
+/** The driver code the workflow build writes beside its entrypoint. */
+function readWorkflowCode(buildDir: string): Promise<string> {
+  return readFile(join(buildDir, "workflows.code.txt"), "utf8");
 }
 
 describe("authored workflow scope", () => {
@@ -38,10 +36,32 @@ describe("authored workflow scope", () => {
           [configFile]: JSON.stringify({
             compilerOptions: { baseUrl: ".", paths: { "@/*": ["./*"] } },
           }),
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/instructions.md": "Call the probe tool.",
           "agent/tools/probe.ts":
-            'import { defineWorkflowTool } from "eve/tools"; import { describe } from "@/lib/describe"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, async execute() { "use workflow"; return describe(); } });',
+            'import { defineWorkflowTool } from "eve/tools"; import { run } from "@/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+          "agent/channels/probe.ts": `import { defineChannel, GET } from "eve/channels";
+import { start, getRun } from "eve/workflow/api";
+import { run } from "@/lib/run";
+export default defineChannel({ routes: [GET("/workflow-api", async () => {
+  const started = await start(run);
+  return Response.json(await getRun(started.runId).returnValue);
+})] });`,
+          "lib/run.ts": `import { createHook } from "eve/workflow";
+import { describe } from "@/lib/describe";
+import { deliver } from "./step";
+export async function run() {
+  "use workflow";
+  using hook = createHook<string>({ token: "workflow-api-probe" });
+  const returnedUndefined = await deliver();
+  return { marker: describe(), returnedUndefined, payload: await hook };
+}`,
+          "lib/step.ts": `import { resumeHook } from "eve/workflow/api";
+export async function deliver() {
+  "use step";
+  return (await resumeHook("workflow-api-probe", "approved")) === undefined;
+}`,
           "lib/describe.ts": `export function describe() { return ${JSON.stringify(ALIAS_MARKER)}; }`,
         },
       });
@@ -55,19 +75,25 @@ describe("authored workflow scope", () => {
           compiledArtifactsBootstrapPath: host.compiledArtifacts.bootstrapPath,
           outDir: workspace.workflow.buildDir,
           rootDir: resolvePackageRoot(),
-          watch: false,
           authoredWorkflowModules: host.compiledArtifacts.authoredWorkflowModules,
         });
         await builder.build();
-        const code = workflowCode(
-          await readFile(join(workspace.workflow.buildDir, "workflows.mjs"), "utf8"),
-        );
+        const code = await readWorkflowCode(workspace.workflow.buildDir);
         expect(code).toContain(ALIAS_MARKER);
         expect(code).not.toContain('require("@/lib/describe")');
         await buildApplication(appRoot, { skipSandboxPrewarm: false });
         const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
         try {
           expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
+          const response = await fetch(new URL("/workflow-api", server.url), {
+            signal: AbortSignal.timeout(30_000),
+          });
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({
+            marker: ALIAS_MARKER,
+            returnedUndefined: true,
+            payload: "approved",
+          });
         } finally {
           await server.close();
         }
@@ -82,7 +108,8 @@ describe("authored workflow scope", () => {
       name: "workflow-agent-scope",
       installDependencies: true,
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Call the probe tool.",
         "agent/tools/probe.ts":
           'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
@@ -106,14 +133,11 @@ describe("authored workflow scope", () => {
         compiledArtifactsBootstrapPath: host.compiledArtifacts.bootstrapPath,
         outDir: workspace.workflow.buildDir,
         rootDir: resolvePackageRoot(),
-        watch: false,
         authoredWorkflowModules: host.compiledArtifacts.authoredWorkflowModules,
       });
       await builder.build();
       const steps = await readFile(join(workspace.workflow.buildDir, "steps.mjs"), "utf8");
-      const code = workflowCode(
-        await readFile(join(workspace.workflow.buildDir, "workflows.mjs"), "utf8"),
-      );
+      const code = await readWorkflowCode(workspace.workflow.buildDir);
       expect(steps).toContain("lib/step.ts");
       expect(code).toContain("workflow//./lib/run//run");
       expect(code).toContain("step//./lib/step//readMarker");
@@ -122,5 +146,75 @@ describe("authored workflow scope", () => {
     } finally {
       await removeApplicationBuildWorkspace(workspace);
     }
+  });
+
+  // A workspace member without its own package.json shares the enclosing
+  // package, so its workflow may import modules and assets from outside the app root.
+  it.each([
+    { layout: "a standalone app", member: "", toPackageRoot: "../.." },
+    { layout: "a workspace member", member: "agents/probe/", toPackageRoot: "../../../.." },
+  ])("embeds ?raw assets imported by workflow and step modules in $layout", async (input) => {
+    const app = await scenarioApp({
+      name: "workflow-raw-assets",
+      installDependencies: true,
+      files: {
+        [`${input.member}agent/agent.ts`]:
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        [`${input.member}agent/instructions.md`]: "Call the probe tool.",
+        [`${input.member}agent/tools/probe.ts`]: `import { defineWorkflowTool } from "eve/tools"; import { run } from "${input.toPackageRoot}/lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });`,
+        "lib/run.ts":
+          'import header from "../prompts/workflow.txt?raw"; import { readPrompt } from "./step"; export async function run() { "use workflow"; return header + (await readPrompt()); }',
+        "lib/step.ts":
+          'import prompt from "../prompts/step.md?raw"; export async function readPrompt() { "use step"; return prompt; }',
+        "prompts/workflow.txt": WORKFLOW_ASSET_MARKER,
+        "prompts/step.md": STEP_ASSET_MARKER,
+      },
+    });
+    const appRoot = join(await realpath(app.appRoot), input.member);
+    const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
+    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
+    const serverCode = await Promise.all(
+      serverFiles
+        .filter((file) => file.endsWith(".mjs"))
+        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
+    );
+    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
+    // The host bundles the driver code as a plain string, so the marker appears in the output.
+    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
+  });
+
+  // The host and workflow bundles leave dependency imports to the host bundler,
+  // but an authored import of an installed package's file is still authored.
+  it("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
+    const app = await scenarioApp({
+      name: "workflow-dependency-raw-assets",
+      installDependencies: true,
+      dependencies: { "raw-assets": "file:./vendor/raw-assets" },
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "Call the probe tool.",
+        "agent/tools/probe.ts":
+          'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+        "lib/run.ts":
+          'import header from "../node_modules/raw-assets/workflow.txt?raw"; import { readPrompt } from "./step"; export async function run() { "use workflow"; return header + (await readPrompt()); }',
+        "lib/step.ts":
+          'import prompt from "../node_modules/raw-assets/step.md?raw"; export async function readPrompt() { "use step"; return prompt; }',
+        "vendor/raw-assets/package.json": JSON.stringify({ name: "raw-assets", version: "1.0.0" }),
+        "vendor/raw-assets/workflow.txt": WORKFLOW_ASSET_MARKER,
+        "vendor/raw-assets/step.md": STEP_ASSET_MARKER,
+      },
+    });
+    const outputDir = await buildApplication(await realpath(app.appRoot), {
+      skipSandboxPrewarm: false,
+    });
+    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
+    const serverCode = await Promise.all(
+      serverFiles
+        .filter((file) => file.endsWith(".mjs"))
+        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
+    );
+    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
+    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
   });
 });

@@ -3,7 +3,7 @@
  * `actionLabel`, the same text its task card row shows, so both surfaces name a
  * call the same way: `Run pnpm test`, `researcher: Find the March incidents`.
  */
-import { displayName } from "#shared/display-name.js";
+import { displayName } from "#protocol/session-projection/display-name.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 
 /** The first call's label, plus `+N more` when the model made several calls in one step. */

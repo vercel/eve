@@ -323,7 +323,9 @@ async function bundleTemplate(): Promise<string> {
       alias: [
         { find: /^@\//u, replacement: `${appRoot}/` },
         // Test the eve source under change, not its last build.
+        { find: /^eve\/client$/u, replacement: join(EVE_SOURCE_ROOT, "client/index.ts") },
         { find: /^eve\/react$/u, replacement: join(EVE_SOURCE_ROOT, "react/index.ts") },
+        { find: /^eve\/events$/u, replacement: join(EVE_SOURCE_ROOT, "public/events/index.ts") },
       ],
       // Resolves eve's `#*.js` imports to `src/*.ts`.
       conditions: [...defaultClientConditions, "eve-source"],

@@ -26,9 +26,9 @@ export default defineEval({
     expectApprovalCancelled(session, authorized);
     // And approving A runs it once and completes the held turn.
     const live = await session.startRespond([
-      { requestId: approvalA.requestId, optionId: "approve" },
+      { interactionId: approvalA.interactionId, optionId: "approve" },
     ]);
-    const reply = await expectResponseReply(t, live, "Change A resolved.", approvalA.requestId);
+    const reply = await expectResponseReply(t, live, "Change A resolved.", approvalA.interactionId);
     reply.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
   },
 });

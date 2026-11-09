@@ -16,6 +16,16 @@ function directiveCall(message: string): MockModelToolCall | undefined {
       name: CALL_TOOL,
     };
   }
+  if (message.includes("MCP_CANCEL")) {
+    return {
+      id: "mcp-cancel",
+      input: {
+        input: { invocationId: "inv_front_desk" },
+        name: `${LOOPBACK_CONNECTION}__agent_cancel`,
+      },
+      name: CALL_TOOL,
+    };
+  }
   const notice = PUBLISH_DIRECTIVE.exec(message)?.[1];
   if (notice !== undefined) {
     return {

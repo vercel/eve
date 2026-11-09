@@ -28,7 +28,7 @@ describe("deployed self-modification configuration", () => {
     });
   });
 
-  it("requires opting into the self-hosted PAT exception", () => {
+  it("requires explicitly opting into the PAT credential", () => {
     expect(resolveDeployedSelfModificationConfig(deployed)).toMatchObject({
       credentials: { kind: "pat" },
     });

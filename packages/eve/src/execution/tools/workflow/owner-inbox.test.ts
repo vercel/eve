@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  workflowAskPayload,
   workflowToolRunFailureOutput,
-  workflowToolRunRequestToInputRequestPayload,
+  workflowToolRunOutcomeToToolResult,
 } from "#execution/tools/workflow/owner-inbox.js";
 
 const from = {
@@ -15,84 +16,33 @@ const from = {
   turnId: "turn-1",
 };
 
-describe("workflow-tool task input", () => {
-  it("preserves a forwarded child request id independently of its session route", () => {
-    const request = {
-      action: {
-        callId: "child-call",
-        input: { ticker: "GOOG" },
-        kind: "tool-call" as const,
-        toolName: "get_stock_price",
+it("keeps the authored question heading in the relayed interaction", () => {
+  const payload = workflowAskPayload({
+    from,
+    replyTo: "question-1",
+    request: {
+      kind: "ask",
+      control: "run-control",
+      request: {
+        title: "Deployment review",
+        prompt: "Which environment should Alice use?",
+        options: [{ id: "staging", label: "Staging" }],
       },
-      kind: "tool-approval" as const,
-      prompt: "Approve tool call: get_stock_price",
-      requestId: "approval-1",
-    };
-
-    expect(
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request,
-      }),
-    ).toMatchObject({
-      childContinuationToken: "subagent:parent:call-1",
-      event: {
-        requests: [request],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-    });
+    },
   });
-
-  it("keeps the producer identity when forwarding a child request", () => {
-    const request = {
-      action: { callId: "child-call", input: {}, kind: "tool-call" as const, toolName: "ask" },
-      kind: "question" as const,
-      prompt: "What is Alice's answer?",
-      requestId: "alice-ask",
-    };
-    expect(
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        inputSource: "child:alice",
-        replyTo: "child-inbox",
-        request,
-      }),
-    ).toMatchObject({ inputSource: "child:alice", event: { requests: [request] } });
-  });
-
-  it("uses child event coordinates for repeated forwarded requests", () => {
-    const request = {
-      action: {
-        callId: "child-call",
-        input: {},
-        kind: "tool-call" as const,
-        toolName: "approval_gate",
+  expect(payload.events).toMatchObject([
+    {
+      type: "interaction.opened",
+      data: {
+        interactionId: "question-1",
+        request: {
+          kind: "question",
+          title: "Deployment review",
+          prompt: "Which environment should Alice use?",
+        },
       },
-      kind: "tool-approval" as const,
-      prompt: "Approve?",
-      requestId: "approval-2",
-    };
-
-    expect(
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request,
-        requestCoordinates: { sequence: 4, stepIndex: 2, turnId: "turn-child" },
-      }),
-    ).toMatchObject({
-      childContinuationToken: "subagent:parent:call-1",
-      event: {
-        requests: [request],
-        sequence: 4,
-        stepIndex: 2,
-        turnId: "turn-child",
-      },
-    });
-  });
+    },
+  ]);
 });
 
 describe("workflow-tool task outcomes", () => {
@@ -127,4 +77,14 @@ describe("workflow-tool task outcomes", () => {
       }),
     ).toEqual("export failed");
   });
+});
+
+it.each([undefined, "QUOTA"])("keeps the thrown workflow error name with code %s", (code) => {
+  const error: Record<string, string> = { name: "QuotaError", message: "quota exceeded" };
+  if (code !== undefined) error.code = code;
+  const result = workflowToolRunOutcomeToToolResult({
+    from,
+    result: { status: "failed", error },
+  });
+  expect(result).toMatchObject({ errorName: "QuotaError", isError: true });
 });

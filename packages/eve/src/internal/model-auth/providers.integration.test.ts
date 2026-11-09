@@ -10,6 +10,7 @@ vi.mock("./vercel.js", () => ({
 }));
 import { openai } from "#public/models/openai/index.js";
 import { anthropic } from "#public/models/anthropic/index.js";
+import { toAiSdkLanguageModel } from "#internal/runtime-model.js";
 import { localGatewayModel } from "./transport.js";
 beforeEach(() => {
   vi.stubEnv("EVE_DEV", "1");
@@ -34,7 +35,7 @@ it.each([
         new Response("", { status: 401 }),
     );
     vi.stubGlobal("fetch", fetch);
-    const model = provider === "openai" ? openai() : anthropic();
+    const model = toAiSdkLanguageModel(provider === "openai" ? openai() : anthropic());
     if (typeof model === "string") throw new Error("Expected a provider model");
     await expect(
       model.doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] }),
@@ -109,7 +110,7 @@ it("streams the first response with a newly saved connection", async () => {
         }),
     ),
   );
-  const model = openai();
+  const model = toAiSdkLanguageModel(openai());
   if (typeof model === "string") throw new Error("Expected OpenAI model");
   const result = await model.doStream({
     prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],

@@ -1,7 +1,27 @@
+import type { LanguageModelV2, LanguageModelV3, LanguageModelV4 } from "@ai-sdk/provider";
+import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
+import { formatLanguageModelGatewayId, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import { anthropic } from "#public/models/anthropic/index.js";
+import type { EveLanguageModel } from "#public/models/index.js";
+
+describe("EveLanguageModel", () => {
+  it("accepts every AI SDK language model specification", () => {
+    expectTypeOf<LanguageModelV2>().toExtend<EveLanguageModel>();
+    expectTypeOf<LanguageModelV3>().toExtend<EveLanguageModel>();
+    expectTypeOf<LanguageModelV4>().toExtend<EveLanguageModel>();
+    expectTypeOf<Exclude<LanguageModel, string>>().toExtend<EveLanguageModel>();
+    expectTypeOf<MockLanguageModelV3>().toExtend<EveLanguageModel>();
+  });
+
+  it("describes the same shape the runtime guard accepts", () => {
+    expect(isRuntimeLanguageModel(new MockLanguageModelV3())).toBe(true);
+    expect(isRuntimeLanguageModel(anthropic())).toBe(true);
+    expect(isRuntimeLanguageModel({ provider: "p", modelId: "m" })).toBe(false);
+  });
+});
 
 describe("formatLanguageModelGatewayId", () => {
   it("passes through a string id unchanged", () => {

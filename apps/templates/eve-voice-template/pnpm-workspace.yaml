@@ -1,0 +1,10 @@
+packages:
+  - "."
+
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - ai
+  - eve
+
+allowBuilds:
+  esbuild: true

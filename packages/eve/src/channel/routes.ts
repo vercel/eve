@@ -1,11 +1,12 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { InvokeToolFn } from "#channel/invoke-tool.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { AgentDescription, AgentSkillFileDescription } from "#channel/agent-description.js";
 
@@ -28,7 +29,11 @@ export interface RouteHandlerArgs<TState = undefined> {
    * on the returned handle; the target channel owns its address and initial state.
    */
   readonly to: CrossChannelToFn;
-  /** Path parameters matched for the current route. */
+  /**
+   * Path parameters matched for the current route, percent-decoded except
+   * `%2F` and `%5C`, which stay encoded so a parameter never gains a path
+   * separator.
+   */
   params: Readonly<Record<string, string>>;
   /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;
@@ -51,8 +56,8 @@ export interface RouteHandlerArgs<TState = undefined> {
    * Reads one file of a compiled skill as raw bytes. `path` is relative to
    * the skill root and defaults to its `SKILL.md`. Rejects paths that are
    * absolute or contain `.`, `..`, or empty segments, files the skill does
-   * not list, and files over 512 KiB. Production builds ship skill files as
-   * server assets, so they count toward the deployed function's size.
+   * not list, and files over 512 KiB. Production builds embed skill files in
+   * the server bundle, so they count toward the deployed function's size.
    */
   readSkill(skill: string, path?: string): Promise<Uint8Array>;
   /** Runs one of the agent's tools as `auth`, outside any conversation. */
@@ -60,15 +65,20 @@ export interface RouteHandlerArgs<TState = undefined> {
 }
 
 export interface SendPayload {
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
   readonly [key: string]: unknown;
-  readonly inputResponses?: readonly InputResponse[];
+  readonly answers?: readonly Answer[];
   /**
    * Context strings contributed by the channel. eve appends each entry
    * as a `role: "user"` message to `session.history` before the delivery
    * message and persists it across the session.
    */
   readonly context?: readonly string[];
+  /**
+   * Prior conversation added as user and assistant turns before this
+   * delivery's `context` and message.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /**
    * Run-scoped JSON schema the turn's result must match.
    */

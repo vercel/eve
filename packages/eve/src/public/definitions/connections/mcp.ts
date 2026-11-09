@@ -1,3 +1,4 @@
+import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
@@ -7,7 +8,10 @@ import type { ConnectionToolCallDefinition } from "#public/definitions/connectio
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
+import {
+  connectionDefinitionKey,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
 
 /**
  * Public definition for an MCP client connection authored in
@@ -22,6 +26,8 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
  * servers that require no authentication (e.g. localhost).
  */
 export interface McpClientConnectionDefinition {
+  /** Opt-in Connect webhook callbacks. Enabling this does not subscribe. */
+  readonly experimental?: { readonly events?: ConnectionEvents };
   /**
    * The MCP server's HTTP endpoint URL.
    *
@@ -58,7 +64,7 @@ export interface McpClientConnectionDefinition {
    *
    * - `getToken`-only: covers static API keys, pre-provisioned
    *   JWTs, and out-of-band OAuth. Defaults to
-   *   `credentialOwner: "app"` when omitted.
+   *   `principalType: "app"` when omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into
    *   interactive OAuth authorization.
@@ -129,7 +135,7 @@ export function defineMcpClientConnection(
   if (definition.auth !== undefined && typeof definition.auth !== "function") {
     definition.auth = normalizeAuthorizationSpec(definition.auth, "defineMcpClientConnection:");
   }
-  stampDefinitionKey(definition, `connection:${definition.url}`);
+  stampDefinitionKey(definition, connectionDefinitionKey(definition.url, definition.description));
   stampConnectionProtocol(definition, "mcp");
   return definition;
 }

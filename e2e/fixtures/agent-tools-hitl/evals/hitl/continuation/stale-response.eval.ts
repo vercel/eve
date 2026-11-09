@@ -21,12 +21,12 @@ export default defineEval({
     const session = first.session;
     const second = await session.send("Prepare change B, then acknowledge my decision.");
     const approvalB = requestFrom(second, "change-b");
-    const cancelB = [{ requestId: approvalB.requestId, optionId: "cancel" }];
+    const cancelB = [{ interactionId: approvalB.interactionId, optionId: "deny" }];
     await expectResponseReply(
       t,
       await session.startRespond(cancelB),
       "Change B resolved.",
-      approvalB.requestId,
+      approvalB.interactionId,
     );
 
     // When the user repeats the saved cancellation response for B.
@@ -36,9 +36,7 @@ export default defineEval({
     await expectToolResult(t, repeated, "read-draft");
     await expectReply(t, repeated, "Draft status: ready.");
     expectChangeStillUnexecuted(session, "change-a");
-    session.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "change-b" } },
-    });
+    session.calledTool("change-b", { status: "completed", count: 0 });
     expectApprovalCancelled(session, approvalA);
   },
 });

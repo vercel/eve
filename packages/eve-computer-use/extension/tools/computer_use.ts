@@ -315,7 +315,7 @@ export default defineTool({
                     action.app === "xterm" ? action.instance : undefined,
                   )
                 : computerUseWindowLayoutCommand(sandbox, action.layout),
-        abortSignal: ctx.abortSignal,
+        signal: ctx.abortSignal,
       });
       ensureSuccess(input.action, launch);
     }
@@ -383,7 +383,7 @@ async function callComputerUseDriver(
       COMPUTER_USE_REQUEST: JSON.stringify(request),
       COMPUTER_USE_SOCKET_PATH: computerUsePaths(sandbox).driverSocket,
     },
-    abortSignal,
+    signal: abortSignal,
   });
   ensureSuccess(request.action.action, result);
   try {

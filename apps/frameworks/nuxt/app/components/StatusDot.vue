@@ -3,14 +3,15 @@ import type { UseEveAgentStatus } from "eve/vue";
 
 const props = defineProps<{
   status?: UseEveAgentStatus;
+  error?: boolean;
 }>();
 
-const isLive = computed(() => props.status === "submitted" || props.status === "streaming");
+const isLive = computed(() => props.status === "busy");
 
 const tone = computed(() => {
-  if (props.status === "error") return "bg-destructive";
+  if (props.error) return "bg-destructive";
   if (isLive.value) return "bg-sky-500";
-  if (props.status === "ready") return "bg-emerald-500";
+  if (props.status === "idle") return "bg-emerald-500";
   return "bg-muted-foreground/50";
 });
 </script>
@@ -24,6 +25,6 @@ const tone = computed(() => {
       />
       <span :class="[tone, 'relative inline-flex size-1.5 rounded-full']" />
     </span>
-    <span>{{ status }}</span>
+    <span>{{ error ? "error" : status }}</span>
   </div>
 </template>

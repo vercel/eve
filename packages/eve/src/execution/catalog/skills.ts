@@ -5,14 +5,9 @@
  * separate names.
  */
 
-import type { ContextReader } from "#context/key.js";
-import { DynamicSkillManifestKey } from "#context/keys.js";
-import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { skillTarget } from "#shared/action-request-name.js";
-import { stripSkillFrontmatter } from "#shared/skill-package.js";
 import { toInputSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
@@ -26,30 +21,8 @@ export interface CatalogSkill {
   readonly name: string;
   /** The skill's `SKILL.md` under the skills root, when it has package files. */
   readonly path?: string;
-}
-
-/** The session's skills by name; a dynamic skill overrides a same-named authored one. */
-export function sessionSkills(ctx: ContextReader | undefined): ReadonlyMap<string, CatalogSkill> {
-  const skills = new Map<string, CatalogSkill>();
-  for (const skill of ctx?.get(BundleKey)?.resolvedAgent.skills ?? []) {
-    skills.set(skill.name, {
-      deferred: skill.deferred === true,
-      description: skill.description,
-      markdown: skill.markdown,
-      name: skill.name,
-      path: skillFilePath(skill.name),
-    });
-  }
-  for (const skill of Object.values(ctx?.get(DynamicSkillManifestKey) ?? {}).flat()) {
-    skills.set(skill.name, {
-      deferred: skill.deferred === true,
-      description: skill.description,
-      markdown: stripSkillFrontmatter(skill.markdown),
-      name: skill.name,
-      path: skill.revision === undefined ? undefined : skillFilePath(skill.name),
-    });
-  }
-  return skills;
+  /** The dynamic definition that offers it; the agent's own skills have none. */
+  readonly source?: string;
 }
 
 const SKILL_LOAD_LABEL = {

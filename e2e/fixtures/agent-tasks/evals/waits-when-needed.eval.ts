@@ -16,13 +16,13 @@ export default defineEval({
     );
     turn.expectOk();
 
-    t.calledSubagent("researcher", { status: "completed" });
+    t.calledAgent("researcher", { status: "completed" });
     turn.calledTool("eve__task_wait");
     turn.eventsSatisfy(
       "the model never replies while the researcher works",
       (events) => !heldTurn(events),
     );
     turn.messageIncludes(EMEA_CHURN.findingId);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

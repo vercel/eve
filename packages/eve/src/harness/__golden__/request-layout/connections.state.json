@@ -1,0 +1,310 @@
+{
+  "history": [
+    {
+      "content": "Your connections have more tools than are loaded here. Before saying you have no tool for a task, look for one with eve__search, which searches your own catalog, not the web. Call them with eve__tool({ name, input }).\nConnections, whose tools are named <connection>__<tool>; search one connection's tools with \"<connection>__\":\n- linear: Linear issues for the release team.\n- notion: Alice's Notion workspace.",
+      "kind": "context.state",
+      "role": "user"
+    },
+    {
+      "content": "What can you reach?",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_0"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "I can reach Linear and Notion.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Thanks.",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_1"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "I can reach Linear and Notion.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "serializedContext": {
+    "eve.auth": null,
+    "eve.bundle": {
+      "source": {
+        "kind": "bundled"
+      }
+    },
+    "eve.callbackBaseUrl": "http://localhost:3000",
+    "eve.capabilities": {
+      "requestInput": true
+    },
+    "eve.channel": {
+      "kind": "http",
+      "state": {}
+    },
+    "eve.channelDelivery": {
+      "channelKind": "channel:http",
+      "channelName": "http",
+      "deliveryId": "<uuid0>"
+    },
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {}
+    },
+    "eve.continuationHookTokens": [
+      "http:layout-connections"
+    ],
+    "eve.continuationToken": "http:layout-connections",
+    "eve.conversation": {
+      "audience": "unknown",
+      "channel": {
+        "kind": "channel:http",
+        "name": "http"
+      },
+      "environment": "production",
+      "principalType": "anonymous"
+    },
+    "eve.conversationId": "wrun_<ulid0>",
+    "eve.historyState": {
+      "announcements": {
+        "catalog": "{\"connections\":{\"items\":[{\"description\":\"Linear issues for the release team.\",\"name\":\"linear\"},{\"description\":\"Alice's Notion workspace.\",\"name\":\"notion\"}],\"more\":false},\"kinds\":[],\"namespaces\":{\"items\":[],\"more\":false}}"
+      },
+      "messages": {
+        "catalog": "1XA5v7FHJ-iBX-W8FyiFC0"
+      }
+    },
+    "eve.initiatorAuth": null,
+    "eve.model": {
+      "reference": {
+        "contextWindowTokens": 200000,
+        "id": "eve-test/layout"
+      }
+    },
+    "eve.otelTraceEnabled": false,
+    "eve.reactions": {
+      "at": "<time>",
+      "latest": {
+        "*": 15,
+        "content.completed": 13,
+        "content.delta": 12,
+        "delivery.admitted": 8,
+        "delivery.consumed": 9,
+        "delivery.settled": 15,
+        "model.requested": 10,
+        "model.settled": 14,
+        "model.started": 11,
+        "session.started": 0,
+        "turn.settled": 15,
+        "turn.started": 9,
+        "usage.recorded": 14
+      },
+      "revision": "bundled",
+      "slots": {
+        "connection::notion": {
+          "digest": "J0-PtNirH7MYvUeYANymIT",
+          "live": true,
+          "since": 1,
+          "value": [
+            {
+              "instanceId": "connection:kM8bOXL0l6DY2Ps4I9aopykjoIG5SCLJ7WfGTOl3kc4",
+              "name": "notion",
+              "protocol": "mcp",
+              "url": "https://mcp.notion.example/mcp"
+            }
+          ]
+        },
+        "eve.catalog": {
+          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "since": 1,
+          "value": {
+            "connections": true,
+            "searchableSkills": false,
+            "skills": false,
+            "tools": true
+          }
+        },
+        "model:agent": {
+          "digest": "1qJ47UPfGIJVLn1ESASMhk",
+          "live": true,
+          "since": 1,
+          "value": {
+            "reference": {
+              "contextWindowTokens": 200000,
+              "id": "eve-test/layout"
+            }
+          }
+        }
+      }
+    },
+    "eve.sessionId": "wrun_<ulid0>",
+    "eve.sessionInbox": {
+      "sessionId": "wrun_<ulid0>"
+    },
+    "eve.sessionTitle": "What can you reach?",
+    "eve.stateLayout": 1,
+    "eve.turnDeliveryIds": [
+      "<uuid1>"
+    ]
+  },
+  "sessionState": {
+    "continuationToken": "http:layout-connections",
+    "hasProxyInputRequests": false,
+    "sessionId": "wrun_<ulid0>",
+    "snapshot": {
+      "session": {
+        "compaction": {
+          "lastKnownInputTokens": 1,
+          "lastKnownPromptMessageCount": 4,
+          "requestEnvelopeTokens": 2989
+        },
+        "continuationToken": "http:layout-connections",
+        "sandboxState": {
+          "session": null
+        },
+        "sessionId": "wrun_<ulid0>",
+        "state": {
+          "eve.harness.reportedSessionUsage": {
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "inputTokens": 2,
+            "outputTokens": 2
+          },
+          "eve.harness.sessionProjection": {
+            "counters": {
+              "changes": 0,
+              "runs": 2
+            },
+            "outputStarted": "turn_1",
+            "view": {
+              "calls": {},
+              "changes": {},
+              "children": {},
+              "deliveries": {
+                "<uuid1>": {
+                  "closedAt": "<closedAt>",
+                  "consumedAt": "<consumedAt>",
+                  "deliveryId": "<uuid1>",
+                  "endedAt": "<time>",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "handled",
+                  "parts": [
+                    {
+                      "kind": "text",
+                      "text": "Thanks."
+                    }
+                  ],
+                  "source": {
+                    "channel": "channel:http"
+                  },
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_1"
+                }
+              },
+              "interactions": {},
+              "parts": {
+                "run_1.0": {
+                  "introducedAt": "<introducedAt>",
+                  "kind": "text",
+                  "partId": "run_1.0",
+                  "phase": "reply",
+                  "runId": "run_1",
+                  "startedAt": "<time>",
+                  "value": "I can reach Linear and Notion."
+                }
+              },
+              "position": 16,
+              "responses": {},
+              "runs": {
+                "run_1": {
+                  "attempt": 0,
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "finishReason": "stop",
+                  "introducedAt": "<introducedAt>",
+                  "modelId": "eve-test/layout",
+                  "outcome": "completed",
+                  "owner": {
+                    "turnId": "turn_1"
+                  },
+                  "runId": "run_1",
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "step": 0,
+                  "usage": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 1,
+                    "outputTokens": 1
+                  }
+                }
+              },
+              "session": {
+                "latestTurnId": "turn_1",
+                "runtime": {
+                  "agentId": "layout-connections",
+                  "agentName": "layout-connections",
+                  "eveVersion": "<eveVersion>"
+                },
+                "startedAt": "<time>",
+                "status": "open",
+                "turnCount": 2
+              },
+              "tasks": {},
+              "turns": {
+                "turn_1": {
+                  "cause": {
+                    "deliveryId": "<uuid1>"
+                  },
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "follows": "turn_0",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "completed",
+                  "reply": [
+                    "run_1.0"
+                  ],
+                  "runs": 1,
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_1"
+                }
+              },
+              "usage": {
+                "byKind": {
+                  "model": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 2,
+                    "outputTokens": 2
+                  }
+                },
+                "total": {
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "inputTokens": 2,
+                  "outputTokens": 2
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "version": 2
+  }
+}

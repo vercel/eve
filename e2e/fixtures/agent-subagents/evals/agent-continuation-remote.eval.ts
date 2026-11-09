@@ -4,15 +4,15 @@ import { continueKeeperAcrossTurns } from "./agent-continuation.shared";
 
 /**
  * Deterministic counterpart of `agent-messaging-remote`: the keeper is this
- * deployment's root agent reached over HTTP, and the cancel travels the
- * remote protocol.
+ * deployment's root agent reached over HTTP; cancellation retires that
+ * remote child before a new task starts another.
  */
 export default defineEval({
   description:
-    "A remote agent task is continued by taskId across turns and after eve__task_cancel with its conversation intact.",
+    "A remote keeper remembers across idle turns; cancellation ends its task and child, and a new keeper learns Alice's name again.",
   timeoutMs: 120_000,
   async test(t) {
     await continueKeeperAcrossTurns(t, "remote-loopback");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

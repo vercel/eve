@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
+import { clearedBySchema } from "#protocol/session-events/families/call.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -150,6 +151,7 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
+    clearedBy: clearedBySchema.optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
@@ -225,6 +227,8 @@ export type RuntimeToolResultActionResult = z.infer<typeof runtimeToolResultActi
 const runtimeToolResultActionResultSchema = z
   .object({
     callId: z.string(),
+    /** The `name` of the error the tool threw, such as `"QuotaError"`. */
+    errorName: z.string().optional(),
     isError: z.boolean().optional(),
     kind: z.literal("tool-result"),
     output: jsonValueSchema,

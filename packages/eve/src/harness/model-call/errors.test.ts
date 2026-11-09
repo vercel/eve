@@ -1,3 +1,4 @@
+import { APICallError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,7 +12,14 @@ import {
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+
+const cyberPolicyBody = {
+  code: "cyber_policy",
+  message: "This content was flagged for possible cybersecurity risk.",
+  type: "invalid_request",
+};
 
 /**
  * Builds the shape `ai@7.0.0-canary.169+` rejects with when a model
@@ -206,6 +214,19 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(new Error("stream failed", { cause: overloaded }))).toBe("retry");
   });
 
+  it("returns retry for an AI Gateway stream timeout payload", () => {
+    // The gateway aborts a long stream with a plain payload keyed on
+    // `code`; the harness wraps it through normalizeModelStreamError.
+    const payload = {
+      code: "gateway_stream_timeout",
+      message: "Stream exceeded maximum duration before function timeout",
+      origin: "gateway",
+    };
+
+    expect(classifyModelCallError(normalizeModelStreamError(payload))).toBe("retry");
+    expect(classifyModelCallError(payload)).toBe("retry");
+  });
+
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {
     for (const statusCode of [408, 409, 429]) {
       const err = Object.assign(new Error("retryable"), { statusCode });
@@ -238,6 +259,21 @@ describe("classifyModelCallError", () => {
     ).toBe("recoverable");
   });
 
+  // Issue #5427: the gateway reuses `insufficient_funds` when it only throttled the balance check.
+  it("retries an AI Gateway 402 that asks to retry shortly instead of reporting exhausted credits", () => {
+    const err = gatewayModelCallError({
+      gatewayName: "GatewayInternalServerError",
+      gatewayType: "internal_server_error",
+      statusCode: 402,
+      upstreamMessage:
+        "AI Gateway credit balance verification is temporarily throttled. Please retry shortly.",
+      upstreamType: "insufficient_funds",
+    });
+
+    expect(summarizeKnownError(err)?.id).toBe("gateway-credit-check-throttled");
+    expect(classifyModelCallError(err)).toBe("retry");
+  });
+
   it.each([
     "AI Gateway requires a valid credit card on file to service requests.",
     "Model call failed: Free tier users do not have access to this model.",
@@ -262,6 +298,25 @@ describe("classifyModelCallError", () => {
     });
 
     expect(classifyModelCallError(err)).toBe("terminal");
+  });
+
+  // `@ai-sdk/openai` keeps the provider code only in the body: in `data` for an error frame
+  // received before any output, and in the response body for an HTTP 400.
+  it.each([
+    { title: "an error frame before any output", body: { type: "error", error: cyberPolicyBody } },
+    { title: "an HTTP 400", body: { error: cyberPolicyBody } },
+  ])("returns recoverable when OpenAI refuses a prompt as $title", ({ body }) => {
+    const err = new APICallError({
+      message: cyberPolicyBody.message,
+      url: "https://api.openai.com/v1/responses",
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: JSON.stringify(body),
+      data: body,
+      isRetryable: false,
+    });
+
+    expect(classifyModelCallError(err)).toBe("recoverable");
   });
 
   it("returns terminal for structural 4xx errors", () => {

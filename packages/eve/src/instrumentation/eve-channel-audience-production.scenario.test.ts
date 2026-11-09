@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
@@ -74,26 +75,30 @@ describe("eve channel production audience", () => {
       });
       await hooks.publish({
         idempotencyKey: modelCallIdempotencyKey(
-          {
-            attemptId: `session-${conversation.audience}:turn-1:0:0`,
-            attemptIndex: 0,
-            sessionId: `session-${conversation.audience}`,
-            stepIndex: 0,
-            turnId: "turn-1",
-          },
+          instrumentationScope(
+            {
+              runId: `session-${conversation.audience}:turn-1:0:0`,
+              attempt: 0,
+              sessionId: `session-${conversation.audience}`,
+              turnId: "turn-1",
+            },
+            0,
+          ),
           0,
           0,
         ),
         input: { instructions: "private instructions", messages: [] },
         model: { modelId: "test", provider: "test" },
-        scope: {
-          attemptId: `session-${conversation.audience}:turn-1:0:0`,
-          attemptIndex: 0,
-          channelAudience: conversation.audience,
-          sessionId: `session-${conversation.audience}`,
-          stepIndex: 0,
-          turnId: "turn-1",
-        },
+        scope: instrumentationScope(
+          {
+            runId: `session-${conversation.audience}:turn-1:0:0`,
+            attempt: 0,
+            channelAudience: conversation.audience,
+            sessionId: `session-${conversation.audience}`,
+            turnId: "turn-1",
+          },
+          0,
+        ),
         type: "model.call.started",
       });
     }

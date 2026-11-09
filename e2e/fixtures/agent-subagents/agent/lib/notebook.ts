@@ -19,10 +19,8 @@ import {
   type NotebookDirective,
 } from "../../constants.js";
 
-// The notebook continuation script. Over three parent turns, the parent asks a
-// keeper agent to remember a name, gives the same task a review that it
-// cancels, then asks the same task for the name again. Only a keeper whose
-// conversation survived the cancel can answer.
+// The notebook script checks the keeper's memory while idle, cancels its next
+// review, then starts a fresh task with the name supplied again before recall.
 //
 // The correction script is one parent turn: the parent asks a keeper to
 // measure a pier, then corrects the pier by `taskId` while the keeper's
@@ -71,6 +69,18 @@ function parentTurn(
         ],
         finish: (request) => latestTaskResult(request, tool),
       };
+    case "NOTEBOOK-CHECK":
+      return {
+        calls: [
+          {
+            id: "notebook-idle-recall",
+            input: (request) => ({ message: RECALL_ENTRY, taskId: keeperTask(request) }),
+            name: tool,
+          },
+          { id: "notebook-idle-recall-wait", name: "eve__task_wait" },
+        ],
+        finish: (request) => latestTaskResult(request, tool),
+      };
     case "NOTEBOOK-REVIEW":
       return {
         calls: [
@@ -92,12 +102,23 @@ function parentTurn(
         ],
         finish: (request) => outputOf(request, "notebook-cancel"),
       };
+    case "NOTEBOOK-RESTART":
+      return {
+        calls: [
+          { id: "notebook-restart", input: () => ({ message: REMEMBER_ENTRY }), name: tool },
+          { id: "notebook-restart-wait", name: "eve__task_wait" },
+        ],
+        finish: (request) => latestTaskResult(request, tool),
+      };
     case "NOTEBOOK-RECALL":
       return {
         calls: [
           {
             id: "notebook-recall",
-            input: (request) => ({ message: RECALL_ENTRY, taskId: keeperTask(request) }),
+            input: (request) => ({
+              message: RECALL_ENTRY,
+              taskId: taskIdFromReceipt(request, "notebook-restart"),
+            }),
             name: tool,
           },
           { id: "notebook-recall-wait", name: "eve__task_wait" },
@@ -125,7 +146,7 @@ function parentTurn(
 
 /**
  * A keeper, local or remote: saves the name, reviews until its turn is
- * cancelled, and answers the name from its own conversation.
+ * cancelled, and answers the name only when its own conversation contains it.
  */
 export function respondAsNotebookKeeper(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";

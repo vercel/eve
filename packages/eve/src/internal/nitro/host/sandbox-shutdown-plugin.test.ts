@@ -1,36 +1,33 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  shutdownActiveSandboxHandles,
-  trackActiveSandboxHandle,
-} from "#execution/sandbox/active-handles.js";
+  shutdownActiveSandboxConnections,
+  trackActiveSandboxConnection,
+} from "#execution/sandbox/active-connections.js";
 import {
-  installSandboxShutdownHandlers,
+  installSandboxShutdown,
   runSandboxShutdown,
   shouldInstallSandboxShutdown,
 } from "#internal/nitro/host/sandbox-shutdown-plugin.js";
 
-type SignalListener = () => void;
-
-function createFakeProcess(env: Record<string, string | undefined> = {}) {
-  const listeners = new Map<string, SignalListener>();
-  const exit = vi.fn<(code?: number) => void>();
+function createNitroApp() {
+  const closeHandlers: Array<() => Promise<void>> = [];
   return {
-    emit(event: string): void {
-      listeners.get(event)?.();
+    close: async () => {
+      for (const handler of closeHandlers) await handler();
     },
-    env,
-    exit,
-    listeners,
-    once(event: "SIGINT" | "SIGTERM", listener: SignalListener): unknown {
-      listeners.set(event, listener);
-      return this;
+    closeHandlers,
+    hooks: {
+      hook(name: "close", handler: () => Promise<void>) {
+        if (name === "close") closeHandlers.push(handler);
+        return undefined;
+      },
     },
   };
 }
 
 afterEach(async () => {
-  await shutdownActiveSandboxHandles();
+  await shutdownActiveSandboxConnections();
   vi.unstubAllEnvs();
 });
 
@@ -53,75 +50,33 @@ describe("shouldInstallSandboxShutdown", () => {
   });
 });
 
-describe("installSandboxShutdownHandlers", () => {
-  it("registers no handlers when shutdown ownership is elsewhere", () => {
-    const fakeProcess = createFakeProcess({ VERCEL: "1" });
+describe("installSandboxShutdown", () => {
+  it("registers no close hook when shutdown ownership is elsewhere", () => {
+    const nitroApp = createNitroApp();
 
-    installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
+    installSandboxShutdown({ env: { VERCEL: "1" }, log: () => {}, nitroApp });
 
-    expect(fakeProcess.listeners.size).toBe(0);
+    expect(nitroApp.closeHandlers).toHaveLength(0);
   });
 
-  it("stops tracked sandboxes and exits 143 on SIGTERM", async () => {
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
-    const fakeProcess = createFakeProcess();
+  it("stops tracked sandboxes when the server closes", async () => {
+    const connection = { stop: vi.fn(async () => {}) };
+    trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
+    const nitroApp = createNitroApp();
 
-    installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
-    fakeProcess.emit("SIGTERM");
+    installSandboxShutdown({ env: {}, log: () => {}, nitroApp });
+    await nitroApp.close();
 
-    await vi.waitFor(() => {
-      expect(fakeProcess.exit).toHaveBeenCalledWith(143);
-    });
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
-  });
-
-  it("stops tracked sandboxes and exits 130 on SIGINT", async () => {
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
-    const fakeProcess = createFakeProcess();
-
-    installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
-    fakeProcess.emit("SIGINT");
-
-    await vi.waitFor(() => {
-      expect(fakeProcess.exit).toHaveBeenCalledWith(130);
-    });
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
-  });
-
-  it("stops tracked sandboxes through the nitro close hook", async () => {
-    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
-    let closeHandler: (() => Promise<void>) | undefined;
-    const nitroApp = {
-      hooks: {
-        hook(name: "close", handler: () => Promise<void>) {
-          if (name === "close") {
-            closeHandler = handler;
-          }
-          return undefined;
-        },
-      },
-    };
-
-    installSandboxShutdownHandlers({
-      log: () => {},
-      nitroApp,
-      process: createFakeProcess(),
-    });
-    await closeHandler?.();
-
-    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
+    expect(connection.stop).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("runSandboxShutdown", () => {
-  it("exits even when a handle shutdown never settles", async () => {
+  it("exits even when a connection shutdown never settles", async () => {
     vi.useFakeTimers();
     try {
-      const handle = { onRuntimeShutdown: vi.fn(() => new Promise<void>(() => {})) };
-      trackActiveSandboxHandle({ providerName: "docker", handle, sessionId: "session-1" });
+      const connection = { stop: vi.fn(() => new Promise<void>(() => {})) };
+      trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
       const log = vi.fn();
 
       const shutdown = runSandboxShutdown(log);

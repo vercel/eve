@@ -8,7 +8,7 @@ Before writing code, read the installed eve package docs for extensions, tools, 
 
 - Without `github` config, contribute no tools: agents use the `gh` and `git` CLIs from their own shell. Never tell them shell credentials are unavailable.
 - With `github` config, the `gh` tool leases a repository-scoped GitHub token per invocation. Broker credentials without placing them in model-authored URLs or arguments.
-- Keep GitHub and pull request content here, not in `@eve/code`. `@eve/code` imports `extension/lib/sandbox.ts` helpers for its deprecated `code({ github })` path.
+- Keep GitHub and pull request content here, not in `@eve/code`. Shared tooling sources used by `@eve/code` are exposed through `eve/internal/git`, not the public sandbox API.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
 
 ## Build and publish

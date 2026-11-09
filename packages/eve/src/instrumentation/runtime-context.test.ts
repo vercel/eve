@@ -8,18 +8,13 @@ import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
 } from "#instrumentation/runtime-context.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type { RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const session: HarnessSession = {
-  agent: {
-    modelReference: { id: "test-model" },
-    system: "You are a test assistant.",
-    tools: [],
-  },
-  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  compaction: {},
   continuationToken: "http:test-session",
   history: [],
   sessionId: "test-session",
@@ -30,6 +25,7 @@ const emissionState: TurnPosition = {
   sequence: 2,
   stepIndex: 1,
   turnId: "turn_2",
+  runId: "run_1",
 };
 
 const messages: readonly ModelMessage[] = [{ content: "hello", role: "user" }];
@@ -42,6 +38,7 @@ function build(
   overrides: Partial<BuildTelemetryRuntimeContextInput> = {},
 ): Record<string, unknown> | undefined {
   return buildTelemetryRuntimeContext({
+    attempt: 0,
     capturesContent: false,
     emissionState,
     environment: "test",
@@ -90,11 +87,11 @@ describe("buildTelemetryRuntimeContext", () => {
   });
 
   it("withholds model content from hosted unknown-audience resolvers", () => {
-    let captured: InstrumentationStepStartedEventInput | undefined;
+    let captured: InstrumentationModelStartedInput | undefined;
 
     build({
       providerResolvers: [
-        (input: InstrumentationStepStartedEventInput) => {
+        (input: InstrumentationModelStartedInput) => {
           captured = input;
           return {};
         },
@@ -110,13 +107,13 @@ describe("buildTelemetryRuntimeContext", () => {
       kind: "channel:public",
       metadata: { audience: "public" },
     });
-    let captured: InstrumentationStepStartedEventInput | undefined;
+    let captured: InstrumentationModelStartedInput | undefined;
 
     contextStorage.run(ctx, () =>
       build({
         capturesContent: true,
         providerResolvers: [
-          (input: InstrumentationStepStartedEventInput) => {
+          (input: InstrumentationModelStartedInput) => {
             captured = input;
             return {};
           },
@@ -142,11 +139,11 @@ describe("buildTelemetryRuntimeContext", () => {
       principalType: "user",
     });
 
-    let captured: InstrumentationStepStartedEventInput | undefined;
+    let captured: InstrumentationModelStartedInput | undefined;
     contextStorage.run(ctx, () =>
       build({
         providerResolvers: [
-          (input: InstrumentationStepStartedEventInput) => {
+          (input: InstrumentationModelStartedInput) => {
             captured = input;
             return {};
           },

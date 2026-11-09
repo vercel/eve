@@ -7,7 +7,7 @@ export default defineAgent({
   // the limit, so the next conversation turn deterministically parks on the
   // session-limit continuation prompt.
   limits: {
-    maxInputTokensPerSession: 1,
+    sessionUsage: ({ window }) => window.inputTokens >= 1,
   },
   // Without the built-in agent tool there are no task tools, so the one-call budget can't go to eve__task_wait.
   tool: false,

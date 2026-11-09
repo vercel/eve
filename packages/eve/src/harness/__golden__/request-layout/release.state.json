@@ -1,0 +1,331 @@
+{
+  "history": [
+    {
+      "content": "Summary of our conversation so far:",
+      "kind": "context.compaction",
+      "role": "user"
+    },
+    {
+      "content": "Summary of the conversation so far.",
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "Deployed.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Release brief: v2.3 ships Friday.",
+      "kind": "context.instruction",
+      "role": "user"
+    },
+    {
+      "content": "Alice is on the release team.",
+      "kind": "context.instruction",
+      "role": "user"
+    },
+    {
+      "content": "Did it ship?",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_3"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Yes.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "serializedContext": {
+    "eve.auth": null,
+    "eve.bundle": {
+      "source": {
+        "kind": "bundled"
+      }
+    },
+    "eve.callbackBaseUrl": "http://localhost:3000",
+    "eve.capabilities": {
+      "requestInput": true
+    },
+    "eve.channel": {
+      "kind": "http",
+      "state": {}
+    },
+    "eve.channelDelivery": {
+      "channelKind": "channel:http",
+      "channelName": "http",
+      "deliveryId": "<uuid0>"
+    },
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {}
+    },
+    "eve.continuationHookTokens": [
+      "http:layout-release"
+    ],
+    "eve.continuationToken": "http:layout-release",
+    "eve.conversation": {
+      "audience": "unknown",
+      "channel": {
+        "kind": "channel:http",
+        "name": "http"
+      },
+      "environment": "production",
+      "principalType": "anonymous"
+    },
+    "eve.conversationId": "wrun_<ulid0>",
+    "eve.historyState": {
+      "announcements": {
+        "eve.instructions:instructions/brief": "XDMXPTYCDRpXGjgnW-3Fg_",
+        "instructions:viewer": "BatRFpAm4Wx_y9qb1kLiB-"
+      },
+      "messages": {
+        "eve.instructions:instructions/brief": "IJwuWThZSUlG3u1JzvevPL",
+        "instructions:viewer": "VGKsvOTYmnB1OQE12yjr_7"
+      }
+    },
+    "eve.initiatorAuth": null,
+    "eve.model": {
+      "reference": {
+        "contextWindowTokens": 200000,
+        "id": "eve-test/layout"
+      }
+    },
+    "eve.otelTraceEnabled": false,
+    "eve.reactions": {
+      "at": "<time>",
+      "latest": {
+        "*": 51,
+        "call.requested": 18,
+        "call.settled": 23,
+        "call.started": 5,
+        "content.completed": 49,
+        "content.delta": 48,
+        "context.settled": 42,
+        "context.settled:compaction": 42,
+        "context.started": 40,
+        "context.started:compaction": 40,
+        "delivery.admitted": 44,
+        "delivery.consumed": 45,
+        "delivery.settled": 51,
+        "interaction.opened": 20,
+        "interaction.settled": 23,
+        "model.requested": 46,
+        "model.settled": 50,
+        "model.started": 47,
+        "session.started": 0,
+        "turn.paused": 21,
+        "turn.settled": 51,
+        "turn.started": 45,
+        "usage.recorded": 50
+      },
+      "revision": "bundled",
+      "slots": {
+        "eve.catalog": {
+          "digest": "Vl4VfY1ZgBF_IG2QfAX8kn",
+          "since": 1,
+          "value": {
+            "connections": false,
+            "searchableSkills": false,
+            "skills": true,
+            "tools": false
+          }
+        },
+        "instructions:today": {
+          "digest": "qXZ_qqKCYJMmYUfqNAkNMG",
+          "since": 1,
+          "value": {
+            "content": "Today is Thursday.",
+            "role": "system"
+          }
+        },
+        "instructions:viewer": {
+          "digest": "BatRFpAm4Wx_y9qb1kLiB-",
+          "since": 1,
+          "value": {
+            "content": "Alice is on the release team.",
+            "role": "user"
+          }
+        },
+        "model:agent": {
+          "digest": "1qJ47UPfGIJVLn1ESASMhk",
+          "live": true,
+          "since": 1,
+          "value": {
+            "reference": {
+              "contextWindowTokens": 200000,
+              "id": "eve-test/layout"
+            }
+          }
+        }
+      }
+    },
+    "eve.sessionId": "wrun_<ulid0>",
+    "eve.sessionInbox": {
+      "sessionId": "wrun_<ulid0>"
+    },
+    "eve.sessionTitle": "What's in the release?",
+    "eve.stateLayout": 1,
+    "eve.turnDeliveryIds": [
+      "<uuid1>"
+    ]
+  },
+  "sessionState": {
+    "continuationToken": "http:layout-release",
+    "hasProxyInputRequests": false,
+    "sessionId": "wrun_<ulid0>",
+    "snapshot": {
+      "session": {
+        "compaction": {
+          "lastKnownInputTokens": 1,
+          "lastKnownPromptMessageCount": 6,
+          "requestEnvelopeTokens": 2908
+        },
+        "continuationToken": "http:layout-release",
+        "sandboxState": {
+          "session": null
+        },
+        "sessionId": "wrun_<ulid0>",
+        "state": {
+          "eve.harness.reportedSessionUsage": {
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "inputTokens": 7,
+            "outputTokens": 7
+          },
+          "eve.harness.sessionProjection": {
+            "counters": {
+              "changes": 1,
+              "runs": 7
+            },
+            "outputStarted": "turn_3",
+            "view": {
+              "calls": {},
+              "changes": {},
+              "children": {},
+              "deliveries": {
+                "<uuid1>": {
+                  "closedAt": "<closedAt>",
+                  "consumedAt": "<consumedAt>",
+                  "deliveryId": "<uuid1>",
+                  "endedAt": "<time>",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "handled",
+                  "parts": [
+                    {
+                      "kind": "text",
+                      "text": "Did it ship?"
+                    }
+                  ],
+                  "source": {
+                    "channel": "channel:http"
+                  },
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_3"
+                }
+              },
+              "interactions": {},
+              "parts": {
+                "run_6.0": {
+                  "introducedAt": "<introducedAt>",
+                  "kind": "text",
+                  "partId": "run_6.0",
+                  "phase": "reply",
+                  "runId": "run_6",
+                  "startedAt": "<time>",
+                  "value": "Yes."
+                }
+              },
+              "position": 52,
+              "responses": {},
+              "runs": {
+                "run_6": {
+                  "attempt": 0,
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "finishReason": "stop",
+                  "introducedAt": "<introducedAt>",
+                  "modelId": "eve-test/layout",
+                  "outcome": "completed",
+                  "owner": {
+                    "turnId": "turn_3"
+                  },
+                  "runId": "run_6",
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "step": 0,
+                  "usage": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 1,
+                    "outputTokens": 1
+                  }
+                }
+              },
+              "session": {
+                "latestTurnId": "turn_3",
+                "runtime": {
+                  "agentId": "layout-release",
+                  "agentName": "layout-release",
+                  "eveVersion": "<eveVersion>"
+                },
+                "startedAt": "<time>",
+                "status": "open",
+                "turnCount": 4
+              },
+              "tasks": {},
+              "turns": {
+                "turn_3": {
+                  "cause": {
+                    "deliveryId": "<uuid1>"
+                  },
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "follows": "turn_2",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "completed",
+                  "reply": [
+                    "run_6.0"
+                  ],
+                  "runs": 1,
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_3"
+                }
+              },
+              "usage": {
+                "byKind": {
+                  "model": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 7,
+                    "outputTokens": 7
+                  }
+                },
+                "total": {
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "inputTokens": 7,
+                  "outputTokens": 7
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "version": 2
+  }
+}

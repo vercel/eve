@@ -16,27 +16,26 @@ export default defineEval({
   async test(t) {
     const session = await t.session({ headers: ALICE });
     const parked = await session.send("Prepare an authorized change.", { headers: ALICE });
-    const { requestId } = parked.session.requireInputRequest({ toolName: TOOL });
+    const { interactionId } = parked.session.requireInteraction({ toolName: TOOL });
 
-    const refused = await session.respond([{ optionId: "cancel", requestId }], { headers: BOB });
-    refused.event("approval.candidate", {
-      count: 1,
-      data: {
-        outcome: "rejected",
-        reason: "Only the requester can cancel this change.",
-        requestId,
-        responderPrincipalId: "bob",
-      },
+    const refused = await session.respond([{ optionId: "deny", interactionId }], {
+      headers: BOB,
     });
-    refused.notEvent("approval.settled");
-    refused.notEvent("input.resolved");
+    refused.event("delivery.admitted", { count: 1, data: { principal: { id: "bob" } } });
+    refused.event("response.submitted", { count: 1, data: { interactionId: interactionId } });
+    refused.event("response.settled", {
+      count: 1,
+      data: { outcome: "refused", reason: "Only the requester can cancel this change." },
+    });
+    refused.notEvent("interaction.settled");
 
-    const cancelled = await session.respond([{ optionId: "cancel", requestId }], {
+    const cancelled = await session.respond([{ optionId: "deny", interactionId }], {
       headers: ALICE,
     });
-    cancelled.event("approval.settled", {
+    cancelled.event("delivery.admitted", { count: 1, data: { principal: { id: "alice" } } });
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { outcome: "cancelled", requestId, responderPrincipalId: "alice" },
+      data: { interactionId: interactionId, outcome: "declined" },
     });
     cancelled.calledTool(TOOL, { status: "completed", count: 0 });
     t.succeeded();

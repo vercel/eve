@@ -4,6 +4,7 @@ import { watch } from "#compiled/chokidar/index.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
+import { EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX } from "#internal/nitro/host/build-extension.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
@@ -14,6 +15,7 @@ import {
   formatChangeDetectedLogLine,
   type WatcherChangeEvent,
 } from "#internal/nitro/host/dev-watcher-log.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const DEBOUNCE_MS = 120;
 const WATCHED_LOCKFILE_NAMES = [
@@ -337,15 +339,10 @@ function shouldIgnoreWatcherPath(
   const pathParts = normalizedPath.split(sep).filter(Boolean);
 
   return (
-    pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||
-    workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
-  );
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
+    pathParts.some(
+      (part) =>
+        WATCHER_IGNORED_DIRECTORY_NAMES.has(part) ||
+        part.startsWith(EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX),
+    ) || workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
   );
 }

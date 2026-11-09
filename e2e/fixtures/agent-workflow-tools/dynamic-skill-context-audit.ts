@@ -1,42 +1,42 @@
-import { defineState } from "eve/context";
-import type { DynamicResolveContext } from "eve/skills";
+import type { DynamicContext } from "eve/skills";
 
-function snapshot(ctx: DynamicResolveContext) {
+function snapshot(ctx: DynamicContext) {
   return {
-    abortSignal: ctx.abortSignal === undefined ? null : { aborted: ctx.abortSignal.aborted },
-    model: ctx.model,
     session: {
       id: ctx.session.id,
       auth: ctx.session.auth,
       schedule: ctx.session.schedule ?? null,
       predecessor: ctx.session.predecessor ?? null,
-    } satisfies Record<keyof DynamicResolveContext["session"], unknown>,
+      parent: ctx.session.parent ?? null,
+    } satisfies Record<keyof DynamicContext["session"], unknown>,
     channel: {
       kind: ctx.channel.kind ?? null,
       continuationToken: ctx.channel.continuationToken ?? null,
       metadata: ctx.channel.metadata ?? null,
-    } satisfies Record<keyof DynamicResolveContext["channel"], unknown>,
+    } satisfies Record<keyof DynamicContext["channel"], unknown>,
     conversation: ctx.conversation ?? null,
-    messages: ctx.messages,
-  } satisfies Record<keyof DynamicResolveContext, unknown>;
+  };
 }
 
 export interface DynamicSkillContextObservation {
-  readonly event: "session.started" | "turn.started";
+  readonly turnId: string | null;
   readonly context: ReturnType<typeof snapshot>;
 }
 
-export const dynamicSkillContextAudit = defineState<DynamicSkillContextObservation[]>(
-  "workflow-fixture.dynamic-skill-context-audit",
-  () => [],
-);
+/**
+ * Observations by session, kept independently of the definition's memo state.
+ */
+const observations = new Map<string, DynamicSkillContextObservation[]>();
 
-export function recordDynamicSkillContext(
-  event: DynamicSkillContextObservation["event"],
-  ctx: DynamicResolveContext,
-): void {
-  dynamicSkillContextAudit.update((observations) => [
-    ...observations,
-    { event, context: snapshot(ctx) },
+export function recordDynamicSkillContext(ctx: DynamicContext): void {
+  observations.set(ctx.session.id, [
+    ...(observations.get(ctx.session.id) ?? []),
+    { turnId: ctx.turn?.id ?? null, context: snapshot(ctx) },
   ]);
+}
+
+export function dynamicSkillContextObservations(
+  sessionId: string,
+): readonly DynamicSkillContextObservation[] {
+  return observations.get(sessionId) ?? [];
 }

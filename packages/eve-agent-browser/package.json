@@ -1,0 +1,72 @@
+{
+  "name": "@eve/agent-browser",
+  "version": "0.1.0-rc.1",
+  "description": "eve extension that gives agents browser automation tools backed by agent-browser",
+  "keywords": [
+    "agent-browser",
+    "browser-automation",
+    "eve",
+    "eve-extension",
+    "sandbox"
+  ],
+  "homepage": "https://agent-browser.dev",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-agent-browser"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox/sandbox.d.ts",
+      "default": "./dist/sandbox/sandbox.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "eve extension build && tsc -p tsconfig.sandbox.json && node ../../scripts/copy-package-license.mjs .",
+    "test": "pnpm run build && node --test test/*.test.mjs",
+    "test:integration": "node --test test/*.test.mjs",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": ">=1.0.0-rc.1"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}

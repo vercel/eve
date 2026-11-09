@@ -2,13 +2,9 @@ import { jsonSchema } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createCodexSubscriptionModel } from "./model.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot
-// be written; the attribute contract is covered by emit.test.ts.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -38,7 +34,8 @@ describe("ChatGPT streamed reasoning replay", () => {
       },
     );
     const execute = vi.fn(async () => ({ id: "invoice-1", total: 42 }));
-    const runStep = createToolLoopHarness({
+    const runStep = createTestKernel({
+      agent: { model: { id: "chatgpt-reasoning-test" } },
       handleEvent: async () => {},
       resolveModel: async () => model,
       tools: new Map([
@@ -54,18 +51,7 @@ describe("ChatGPT streamed reasoning replay", () => {
       ]),
     });
     const session: HarnessSession = {
-      agent: {
-        modelReference: { id: "chatgpt-reasoning-test" },
-        system: "Check the invoice.",
-        tools: [
-          {
-            name: "get_invoice",
-            description: "Read the invoice.",
-            inputSchema: { type: "object", properties: {} },
-          },
-        ],
-      },
-      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      compaction: {},
       continuationToken: "http:chatgpt-reasoning-test",
       history: [],
       sessionId: "chatgpt-reasoning-test",

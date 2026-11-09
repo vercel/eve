@@ -1,0 +1,17 @@
+node_modules
+.env*
+!.env.example
+.eve
+.vercel
+.workflow-data
+.output
+.nitro
+dist
+*.tsbuildinfo
+data/
+dbt/.venv/
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+dbt/dbt_packages/
+agent/lib/catalog.ts.tmp

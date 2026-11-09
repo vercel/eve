@@ -3,6 +3,22 @@ import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 /**
+ * Rejects a policy Docker cannot enforce, so a restrictive one never runs
+ * with open egress instead.
+ */
+export function assertDockerNetworkPolicy(
+  policy: SandboxNetworkPolicy,
+): asserts policy is "allow-all" | "deny-all" {
+  if (policy !== "allow-all" && policy !== "deny-all") {
+    throw new Error(
+      'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
+        "policies. Domain-level allow-lists and credential brokering require the Vercel provider " +
+        "(VercelSandbox).",
+    );
+  }
+}
+
+/**
  * Applies a coarse-grained run-time network policy by attaching or
  * detaching the container's networks. Domain-level policies and
  * credential brokering require the firewall on the Vercel provider.
@@ -12,13 +28,7 @@ export async function setDockerNetworkPolicy(
   containerName: string,
   policy: SandboxNetworkPolicy,
 ): Promise<void> {
-  if (policy !== "allow-all" && policy !== "deny-all") {
-    throw new Error(
-      'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
-        "policies. Domain-level allow-lists and credential brokering require the Vercel provider " +
-        "(VercelSandbox) or MicrosandboxSandbox.",
-    );
-  }
+  assertDockerNetworkPolicy(policy);
 
   const inspect = await cli.run([
     "container",

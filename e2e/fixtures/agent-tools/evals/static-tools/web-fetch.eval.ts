@@ -38,7 +38,7 @@ export default defineEval({
         );
       },
     });
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.messageIncludes(CONTENT_MARKER);
   },
 });

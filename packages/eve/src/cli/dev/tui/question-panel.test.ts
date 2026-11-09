@@ -96,6 +96,34 @@ describe("renderQuestionPanel", () => {
     expect(rows.every((row) => !row.includes("\n"))).toBe(true);
   });
 
+  it("keeps the selected choice and its description visible in a short viewport", () => {
+    const options = [
+      { id: "production", label: "Production", description: "Deploy to production" },
+      { id: "staging", label: "Staging", description: "Deploy to staging" },
+      { id: "preview", label: "Preview", description: "Deploy to preview\nNo production changes" },
+    ];
+    for (const [cursor, option] of options.entries()) {
+      const rows = renderQuestionPanel(
+        {
+          prompt: "Which environment should Alice use?",
+          options,
+          cursor,
+          allowFreeform: false,
+          editor: EMPTY_LINE,
+          caretVisible: false,
+          maxRows: 3,
+        },
+        theme,
+        60,
+      ).map(stripAnsi);
+      expect(rows).toHaveLength(3);
+      expect(rows).toContain(`     ${option.label}`);
+      for (const line of option.description.split("\n")) {
+        expect(rows.some((row) => row.trim() === line)).toBe(true);
+      }
+    }
+  });
+
   it("clips every row to the panel width", () => {
     for (const row of render({ cursor: 0 })) {
       expect(row.length).toBeLessThanOrEqual(60);

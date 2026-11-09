@@ -1,0 +1,22 @@
+[
+  "Approval",
+  "ApprovalConfiguration",
+  "ApprovalContext",
+  "ApprovalPolicy",
+  "ApprovalPrompt",
+  "ApprovalPromptContext",
+  "ApprovalRequest",
+  "ApprovalResponse",
+  "ApprovalResponseAuth",
+  "ApprovalResponseContext",
+  "ApprovalResponseDecision",
+  "ApprovalResponsePolicy",
+  "ApprovalResponseSession",
+  "ApprovalStatus",
+  "AutoApprovalOptions",
+  "ConnectionToolAnnotations",
+  "always",
+  "auto",
+  "never",
+  "once"
+]

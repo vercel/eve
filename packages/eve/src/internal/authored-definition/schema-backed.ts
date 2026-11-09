@@ -36,12 +36,7 @@ import {
   UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
-import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
-import {
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -83,11 +78,7 @@ type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
   | { readonly kind: "web-search-tool"; readonly selection: WebSearchSelection }
-  | {
-      readonly kind: "dynamic-tool";
-      readonly eventNames: readonly DynamicToolEventName[];
-      readonly rebindMissingCallbacks: boolean;
-    };
+  | { readonly kind: "dynamic-tool" };
 
 /**
  * Normalizes one authored tool default export. Recognizes real tool
@@ -98,12 +89,8 @@ type NormalizedToolEntry =
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
-    assertResolverOnlyDynamicSentinel(value, message);
-    return {
-      kind: "dynamic-tool",
-      eventNames: Object.keys(value.events) as DynamicToolEventName[],
-      rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
-    };
+    assertDynamicSentinelKeys(value, message);
+    return { kind: "dynamic-tool" };
   }
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
@@ -160,7 +147,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "execute",
       "inputSchema",
       "approval",
-      "approvalKey",
       "outputSchema",
       "toModelOutput",
       ...(workflow === undefined ? [] : [workflow.entryPoint]),
@@ -224,7 +210,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
-  if (record.label !== undefined) {
+  // `label: false` hides the tool's calls from activity.
+  if (record.label !== undefined && record.label !== false) {
     const label = expectObjectRecord(record.label, message);
     expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
     expectFunction(label.start, message);
@@ -234,10 +221,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   if (record.approval !== undefined) {
     normalizeApproval(record.approval, message);
-  }
-
-  if (record.approvalKey !== undefined) {
-    expectFunction(record.approvalKey, message);
   }
 
   if (record.toModelOutput !== undefined) {

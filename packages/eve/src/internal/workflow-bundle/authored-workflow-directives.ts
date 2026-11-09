@@ -1,13 +1,21 @@
-import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 import {
   mayContainWorkflowDirective,
   readWorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
-const ENTRY_POINT_METHODS = new Intl.ListFormat("en", { type: "disjunction" }).format(
-  WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
-);
+// Built when an error needs it: the first `Intl` formatter in a process loads locale data, which
+// would otherwise add to every cold start.
+function formatEntryPointMethods(): string {
+  return new Intl.ListFormat("en", { type: "disjunction" }).format(
+    WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
+  );
+}
+
+// Earlier eve releases exported these helpers from `eve/workflow`; name the replacement instead
+// of surfacing a generic missing-export error.
+const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
 type AstNode = {
   async?: boolean;
@@ -20,6 +28,7 @@ type AstNode = {
   end?: number;
   expression?: AstNode | boolean | null;
   id?: AstNode | null;
+  imported?: AstNode | null;
   key?: AstNode | null;
   kind?: string;
   local?: AstNode | null;
@@ -34,6 +43,7 @@ type AstNode = {
   typeParameters?: AstNode | null;
   value?: unknown;
   arguments?: AstNode[];
+  callee?: AstNode;
   source?: AstNode;
 };
 
@@ -68,17 +78,37 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
-  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("eve/workflow")) {
+  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("workflow")) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
-  const program = (await parseWithNitroRolldownAst(parsePath, input.source)) as AstProgram;
+  const program = (await parseWithRolldownAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];
-  if (body.some((node) => node.source?.value === "eve/workflow")) {
-    throw new Error(
-      `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(target, input) or ctx.ask(request) in its executor.`,
-    );
-  }
+  visit(program as AstNode, (node) => {
+    const specifier =
+      node.source?.value ??
+      (node.type === "CallExpression" && node.callee?.name === "require"
+        ? node.arguments?.[0]?.value
+        : undefined);
+    if (specifier === "eve/workflow") {
+      const removed = node.specifiers?.find(isRemovedWorkflowHelper);
+      if (removed !== undefined) {
+        throw new Error(
+          `${input.filePath}: "${specifierName(removed)}" is no longer exported from "eve/workflow". ` +
+            'Use defineWorkflowTool() from "eve/tools" and call ctx.agent(target, input) or ctx.ask(request) in its executor.',
+        );
+      }
+    }
+    if (
+      typeof specifier === "string" &&
+      (specifier === "workflow" || specifier.startsWith("workflow/"))
+    ) {
+      throw new Error(
+        `${input.filePath}: Import from \`eve/workflow\` (or \`eve/workflow/api\`) instead of "${specifier}". ` +
+          "Only documented exports are supported; other Workflow SDK subpaths and exports are not public eve APIs.",
+      );
+    }
+  });
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
     const directive = readWorkflowDirective(statement);
@@ -86,7 +116,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(directive)} in "${input.filePath}" is a module-level directive. ` +
           `Put it as the first statement of the function it marks: a top-level "async function" declaration` +
-          ` or the ${ENTRY_POINT_METHODS} method of a default-exported defineWorkflowTool().`,
+          ` or the ${formatEntryPointMethods()} method of a default-exported defineWorkflowTool().`,
       );
     }
   }
@@ -118,7 +148,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
           `Workflow directives must mark a top-level "async function" declaration` +
-          ` or the ${ENTRY_POINT_METHODS} method of a default-exported defineWorkflowTool().`,
+          ` or the ${formatEntryPointMethods()} method of a default-exported defineWorkflowTool().`,
       );
     }
     if (entry.fn.async !== true) {
@@ -283,6 +313,18 @@ function isFunctionLike(node: AstNode): boolean {
     node.type === "FunctionExpression" ||
     node.type === "ArrowFunctionExpression"
   );
+}
+
+/** The source-module name of an import or re-export specifier. */
+function specifierName(specifier: AstNode): unknown {
+  const name = specifier.type === "ImportSpecifier" ? specifier.imported : specifier.local;
+  return name?.name ?? name?.value;
+}
+
+function isRemovedWorkflowHelper(specifier: AstNode): boolean {
+  if (specifier.type !== "ImportSpecifier" && specifier.type !== "ExportSpecifier") return false;
+  const name = specifierName(specifier);
+  return typeof name === "string" && REMOVED_WORKFLOW_HELPERS.has(name);
 }
 
 function visit(node: AstNode, visitor: (node: AstNode) => void): void {

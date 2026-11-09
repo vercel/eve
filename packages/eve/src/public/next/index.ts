@@ -11,16 +11,18 @@ import { resolveDevServerTimeout } from "#shared/framework-eve-server.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import {
   EVE_NEXT_HOST,
+  ensureEveProductionServer,
   NEXT_PHASE_PRODUCTION_BUILD,
+  NEXT_PHASE_PRODUCTION_SERVER,
   resolveEveDestinationPrefix,
 } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
- * Default private route namespace for legacy manually configured Vercel
+ * Default private route namespace for manually configured Vercel
  * services. {@link WithEveOptions.servicePrefix} defaults to this value.
  */
-export const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
+const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
@@ -33,18 +35,18 @@ type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
 /**
  * Next.js rewrite rule that {@link withEve} emits.
  */
-export type EveNextRewriteRule = ArrayElement<NextRewrites>;
+type EveNextRewriteRule = ArrayElement<NextRewrites>;
 
 /**
  * Resolved return type of a Next.js `rewrites` function: an array of rules, or
  * the sectioned `{ beforeFiles, afterFiles, fallback }` object.
  */
-export type EveNextRewrites = NextRewrites;
+type EveNextRewrites = NextRewrites;
 
 /**
  * Sectioned Next.js rewrite rules.
  */
-export type EveNextRewriteSections = Extract<
+type EveNextRewriteSections = Extract<
   NextRewrites,
   {
     readonly afterFiles?: EveNextRewriteRule[];
@@ -55,16 +57,16 @@ export type EveNextRewriteSections = Extract<
 
 /**
  * Alias of Next.js's `NextConfig`, the config object form {@link withEve}
- * accepts (the other being {@link EveNextConfigFunction}).
+ * accepts (the other being {@link WithEveConfigFunction}).
  */
-export type EveNextConfig = NextConfig;
+type EveNextConfig = NextConfig;
 
 /**
  * Structural shape of a Next.js config function: receives the build `phase` and
  * a `context` containing `defaultConfig`, and returns a config (or a promise of
  * one). This is the form {@link withEve} returns.
  */
-export type EveNextConfigFunction<TConfig extends EveNextConfig = EveNextConfig> = (
+export type WithEveConfigFunction<TConfig extends object = object> = (
   phase: string,
   context: {
     readonly defaultConfig: TConfig;
@@ -74,8 +76,8 @@ export type EveNextConfigFunction<TConfig extends EveNextConfig = EveNextConfig>
 /**
  * Next.js config input that {@link withEve} accepts.
  */
-export type EveNextConfigInput<TConfig extends EveNextConfig = EveNextConfig> =
-  | EveNextConfigFunction<TConfig>
+export type WithEveConfigInput<TConfig extends object = object> =
+  | WithEveConfigFunction<TConfig>
   | TConfig;
 
 /**
@@ -94,7 +96,7 @@ export interface WithEveAgentOptions {
    */
   readonly buildCommand?: string;
   /**
-   * Private route namespace for this agent's legacy manually configured Vercel
+   * Private route namespace for this agent's manually configured Vercel
    * service and non-Vercel production proxying.
    */
   readonly servicePrefix?: string;
@@ -140,9 +142,9 @@ export interface WithEveOptions {
    */
   readonly eveBuildCommand?: string;
   /**
-   * Private route namespace for legacy manually configured Vercel services and
-   * non-Vercel production proxying. Defaults to {@link EVE_NEXT_SERVICE_PREFIX}
-   * (`/_eve_internal/eve`). `withEve` normalizes the prefix (adds a leading
+   * Private route namespace for manually configured Vercel services and
+   * non-Vercel production proxying. Defaults to `/_eve_internal/eve`.
+   * `withEve` normalizes the prefix (adds a leading
    * slash, strips trailing slashes) and rejects a prefix that resolves to the
    * root route.
    */
@@ -296,15 +298,15 @@ function isRewriteSections(rewrites: EveNextRewrites): rewrites is EveNextRewrit
   return !Array.isArray(rewrites);
 }
 
-async function resolveNextConfig<TConfig extends EveNextConfig>(
-  configOrFunction: EveNextConfigInput<TConfig>,
+async function resolveNextConfig<TConfig extends object>(
+  configOrFunction: WithEveConfigInput<TConfig>,
   phase: string,
   context: {
     readonly defaultConfig: TConfig;
   },
 ): Promise<TConfig> {
   return typeof configOrFunction === "function"
-    ? await configOrFunction(phase, context)
+    ? await (configOrFunction as WithEveConfigFunction<TConfig>)(phase, context)
     : configOrFunction;
 }
 
@@ -428,10 +430,10 @@ async function buildAgentWorkspaceExtensions(
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
  * to the origin serving the eve service namespace.
  */
-export function withEve<TConfig extends EveNextConfig>(
-  configOrFunction: EveNextConfigInput<TConfig>,
+export function withEve<TConfig extends object>(
+  configOrFunction: WithEveConfigInput<TConfig>,
   options: WithEveOptions = {},
-): EveNextConfigFunction<TConfig> {
+): WithEveConfigFunction<TConfig> {
   const nextRoot = process.cwd();
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NEXT_HOST);
   assertValidWithEveOptions(options);
@@ -443,7 +445,7 @@ export function withEve<TConfig extends EveNextConfig>(
     if (phase === NEXT_PHASE_PRODUCTION_BUILD) {
       await buildAgentWorkspaceExtensions(agents);
     }
-    const existingRewrites = nextConfig.rewrites;
+    const existingRewrites = (nextConfig as NextConfig).rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({
       agents: agents.map((agent) => {
         const outputAgent: {
@@ -487,6 +489,18 @@ export function withEve<TConfig extends EveNextConfig>(
         productionDestination,
       };
     });
+    if (phase === NEXT_PHASE_PRODUCTION_SERVER) {
+      await Promise.all(
+        agentsWithDestinations.map(async ({ appRoot, productionDestination }) => {
+          if (productionDestination.localServerOrigin !== undefined) {
+            await ensureEveProductionServer({
+              appRoot,
+              origin: productionDestination.localServerOrigin,
+            });
+          }
+        }),
+      );
+    }
 
     return {
       ...nextConfig,
@@ -499,9 +513,7 @@ export function withEve<TConfig extends EveNextConfig>(
                 appRoot: agent.appRoot,
                 devServerTimeoutMs,
                 logLabel: agent.name,
-                phase,
                 productionDestinationPrefix: agent.productionDestination.destinationPrefix,
-                productionServerOrigin: agent.productionDestination.localServerOrigin,
                 workspaceAgentName: agent.workspaceMember === true ? agent.name : undefined,
               });
 

@@ -1,76 +1,57 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, posix as pathPosix } from "node:path";
 
-import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
-import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
+import type { SandboxProviderResourceFile } from "#shared/sandbox-provider.js";
 
 const RESOURCE_WORKSPACE_DIRECTORY = "workspace";
 const RESOURCE_SKILLS_DIRECTORY = "skills";
 
-/**
- * One concrete file materialized from a workspace seed directory for
- * sandbox template preparation.
- */
-interface MaterializedWorkspaceFile {
-  readonly content: Buffer;
-  readonly path: string;
+/** The files of one resource directory, split into the trees sandbox providers receive. */
+export interface MaterializedResourceTrees {
+  readonly skills: readonly SandboxProviderResourceFile[];
+  readonly workspace: readonly SandboxProviderResourceFile[];
 }
 
 /**
- * Walks a directory tree on disk and returns one entry per file rooted at
- * `/workspace/...`, sorted by path. The directory is treated as the
- * `/workspace` root for the resulting seed file paths.
+ * Reads a compiled resource directory into its `workspace/` and `skills/`
+ * trees, each sorted by relative path. A directory with neither subdirectory
+ * is read as the workspace tree itself.
  */
 export async function materializeWorkspaceDirectory(
   sourceDirectoryPath: string,
-): Promise<readonly MaterializedWorkspaceFile[]> {
-  const files: MaterializedWorkspaceFile[] = [];
+): Promise<MaterializedResourceTrees> {
   const entries = await readdir(sourceDirectoryPath, {
     withFileTypes: true,
   });
-  const workspaceEntry = entries.find(
-    (entry) => entry.name === RESOURCE_WORKSPACE_DIRECTORY && entry.isDirectory(),
-  );
-  const skillsEntry = entries.find(
-    (entry) => entry.name === RESOURCE_SKILLS_DIRECTORY && entry.isDirectory(),
-  );
+  const hasDirectory = (name: string) =>
+    entries.some((entry) => entry.name === name && entry.isDirectory());
+  const hasWorkspace = hasDirectory(RESOURCE_WORKSPACE_DIRECTORY);
+  const hasSkills = hasDirectory(RESOURCE_SKILLS_DIRECTORY);
 
-  if (workspaceEntry !== undefined || skillsEntry !== undefined) {
-    if (workspaceEntry !== undefined) {
-      await addMaterializedDirectoryFiles({
-        files,
-        logicalDirectoryPath: ".",
-        sourceDirectoryPath: join(sourceDirectoryPath, RESOURCE_WORKSPACE_DIRECTORY),
-        targetRoot: WORKSPACE_ROOT,
-      });
-    }
-
-    if (skillsEntry !== undefined) {
-      await addMaterializedDirectoryFiles({
-        files,
-        logicalDirectoryPath: ".",
-        sourceDirectoryPath: join(sourceDirectoryPath, RESOURCE_SKILLS_DIRECTORY),
-        targetRoot: MODEL_SKILL_ROOT,
-      });
-    }
-  } else {
-    await addMaterializedDirectoryFiles({
-      files,
-      logicalDirectoryPath: ".",
-      sourceDirectoryPath,
-      targetRoot: WORKSPACE_ROOT,
-    });
+  if (!hasWorkspace && !hasSkills) {
+    return { skills: [], workspace: await readResourceTree(sourceDirectoryPath) };
   }
+  return {
+    skills: hasSkills
+      ? await readResourceTree(join(sourceDirectoryPath, RESOURCE_SKILLS_DIRECTORY))
+      : [],
+    workspace: hasWorkspace
+      ? await readResourceTree(join(sourceDirectoryPath, RESOURCE_WORKSPACE_DIRECTORY))
+      : [],
+  };
+}
 
-  files.sort((left, right) => left.path.localeCompare(right.path));
+async function readResourceTree(rootPath: string): Promise<SandboxProviderResourceFile[]> {
+  const files: SandboxProviderResourceFile[] = [];
+  await addResourceFiles({ files, relativeDirectoryPath: ".", sourceDirectoryPath: rootPath });
+  files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
   return files;
 }
 
-async function addMaterializedDirectoryFiles(input: {
-  readonly files: MaterializedWorkspaceFile[];
-  readonly logicalDirectoryPath: string;
+async function addResourceFiles(input: {
+  readonly files: SandboxProviderResourceFile[];
+  readonly relativeDirectoryPath: string;
   readonly sourceDirectoryPath: string;
-  readonly targetRoot: string;
 }): Promise<void> {
   const entries = await readdir(input.sourceDirectoryPath, {
     withFileTypes: true,
@@ -82,21 +63,20 @@ async function addMaterializedDirectoryFiles(input: {
     }
 
     const sourcePath = join(input.sourceDirectoryPath, entry.name);
-    const logicalPath = pathPosix.join(input.logicalDirectoryPath, entry.name);
+    const relativePath = pathPosix.join(input.relativeDirectoryPath, entry.name);
 
     if (entry.isDirectory()) {
-      await addMaterializedDirectoryFiles({
+      await addResourceFiles({
         files: input.files,
-        logicalDirectoryPath: logicalPath,
+        relativeDirectoryPath: relativePath,
         sourceDirectoryPath: sourcePath,
-        targetRoot: input.targetRoot,
       });
       continue;
     }
 
     input.files.push({
       content: await readFile(sourcePath),
-      path: pathPosix.join(input.targetRoot, logicalPath),
+      relativePath,
     });
   }
 }

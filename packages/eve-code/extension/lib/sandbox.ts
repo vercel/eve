@@ -3,22 +3,19 @@ import type { SandboxSession } from "eve/sandbox";
 
 import { commandFailureDetail } from "./command-failure.ts";
 import {
-  DIAGNOSTICS_WORKER_SOURCE,
   GH_SIGNED_COMMIT_SOURCE,
   GH_SIGNED_COMMIT_VERSION,
   ghWrapperSource,
   toolingPaths,
-  TYPESCRIPT_VERSION,
-  typescriptInstallCommand,
   vercelWrapperSource,
 } from "./tooling.ts";
 
 type ToolingSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 /** Include in the consumer's sandbox `revalidationKey` so cached templates rebuild when the tooling changes. */
-export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
+export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:4:${GH_SIGNED_COMMIT_VERSION}`;
 
-/** Install CLI wrappers, signed commits, and TypeScript diagnostics. */
+/** Install CLI wrappers and signed commits. */
 export async function installCodeTooling(
   sandbox: ToolingSandbox,
   options: { readonly vercel?: boolean } = {},
@@ -27,7 +24,6 @@ export async function installCodeTooling(
   await Promise.all([
     sandbox.writeTextFile({ path: paths.ghWrapper, content: ghWrapperSource(sandbox) }),
     sandbox.writeTextFile({ path: paths.signedCommit, content: GH_SIGNED_COMMIT_SOURCE }),
-    sandbox.writeTextFile({ path: paths.workerSource, content: DIAGNOSTICS_WORKER_SOURCE }),
     ...(options.vercel === true
       ? [
           sandbox.writeTextFile({
@@ -63,14 +59,12 @@ function toolingInstallCommand(
     "fi",
     `chmod 755 ${quote(paths.ghWrapper)} ${quote(paths.signedCommit)}`,
     "if [ \"$(id -u)\" = 0 ]; then INSTALL=install; else INSTALL='sudo -n install'; fi",
-    `$INSTALL -d -o root -g root -m 755 ${quote(paths.trustedRoot)} ${quote(paths.typescriptRoot)}`,
+    `$INSTALL -d -o root -g root -m 755 ${quote(paths.trustedRoot)}`,
     `[ -x /usr/bin/gh ] || { echo 'eve-code requires gh at /usr/bin/gh' >&2; exit 1; }`,
     `$INSTALL -m 755 /usr/bin/gh ${quote(paths.ghReal)}`,
     `$INSTALL -m 755 ${quote(paths.signedCommit)} ${quote(paths.trustedSignedCommit)}`,
-    `$INSTALL -m 644 ${quote(paths.workerSource)} ${quote(paths.worker)}`,
     `$INSTALL -m 755 ${quote(paths.ghWrapper)} /usr/local/bin/gh`,
     `$INSTALL -m 755 ${quote(paths.trustedSignedCommit)} /usr/local/bin/gh-signed-commit`,
-    typescriptInstallCommand(sandbox),
     ...(vercel
       ? [
           'if [ "$(id -u)" = 0 ]; then npm install -g vercel@latest; else sudo -n npm install -g vercel@latest; fi',
@@ -86,19 +80,3 @@ export {
   authenticateVercel,
   type BrokeredCredentialOptions,
 } from "./credentials.ts";
-
-/** @deprecated Import from `eve/computer-use/sandbox` and mount `eve/computer-use`. */
-export {
-  COMPUTER_USE_REVALIDATION_KEY,
-  installComputerUse,
-  startComputerUse,
-} from "eve/computer-use/sandbox";
-
-/** @deprecated Import from `eve/extensions/git/sandbox`. */
-export {
-  executeGitHubShell,
-  githubShellApproval,
-  type GitHubLeaseRule,
-  type GitHubShellInput,
-  type GitHubShellOutput,
-} from "eve/extensions/git/sandbox";

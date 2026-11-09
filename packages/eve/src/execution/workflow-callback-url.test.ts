@@ -25,17 +25,15 @@ describe("resolveVercelProductionCallbackBaseUrl", () => {
     expect(resolveVercelProductionCallbackBaseUrl()).toBe("https://agent.example.com");
   });
 
-  it("adds the Vercel automation bypass query param when configured", () => {
+  it("keeps the Vercel automation bypass secret out of callback URLs", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
 
     expect(
       createWorkflowCallbackUrl("https://agent.example.com", "/eve/v1/callback/eve%3Aparent-token"),
-    ).toBe(
-      "https://agent.example.com/eve/v1/callback/eve%3Aparent-token?x-vercel-protection-bypass=secret+value",
-    );
+    ).toBe("https://agent.example.com/eve/v1/callback/eve%3Aparent-token");
   });
 
-  it("preserves existing callback query params when adding the Vercel bypass query param", () => {
+  it("preserves callback query params without adding deployment credentials", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
 
     expect(
@@ -43,9 +41,7 @@ describe("resolveVercelProductionCallbackBaseUrl", () => {
         "https://agent.example.com",
         "/eve/v1/connections/linear/callback/tok123?code=abc",
       ),
-    ).toBe(
-      "https://agent.example.com/eve/v1/connections/linear/callback/tok123?code=abc&x-vercel-protection-bypass=secret",
-    );
+    ).toBe("https://agent.example.com/eve/v1/connections/linear/callback/tok123?code=abc");
   });
 });
 
@@ -121,7 +117,7 @@ describe("createWorkflowCallbackUrl", () => {
     ).toBe("https://agent.example.com/eve/support/v1/callback/eve%3Aparent-token");
   });
 
-  it("preserves the prefix when adding the Vercel bypass query param", () => {
+  it("preserves the prefix without adding the Vercel bypass secret", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
 
     expect(
@@ -129,8 +125,6 @@ describe("createWorkflowCallbackUrl", () => {
         "https://agent.example.com/eve/support",
         "/eve/v1/connections/linear/callback/tok123?code=abc",
       ),
-    ).toBe(
-      "https://agent.example.com/eve/support/v1/connections/linear/callback/tok123?code=abc&x-vercel-protection-bypass=secret",
-    );
+    ).toBe("https://agent.example.com/eve/support/v1/connections/linear/callback/tok123?code=abc");
   });
 });

@@ -1,15 +1,17 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
+  checkExtensionVersionCompatibility,
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
-  findUnsupportedExtensionCapabilities,
   parseExtensionCompatibilityManifest,
+  UnsupportedExtensionManifestVersionError,
 } from "#compiler/extension-compatibility.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
 import { type ProjectSource, readPackageJsonName } from "#discover/project-source.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   parseBuiltInExtensionPackageRoots,
   parseExtensionPackageRoots,
@@ -53,11 +55,9 @@ const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
 export const DISCOVER_EXTENSION_COMPATIBILITY_INVALID = "discover/extension-compatibility-invalid";
 
 /**
- * Emitted when this eve cannot consume one of the extension capabilities the
- * distribution requires.
+ * Emitted when the consumer cannot load this extension distribution.
  */
-export const DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE =
-  "discover/extension-capability-incompatible";
+export const DISCOVER_EXTENSION_VERSION_INCOMPATIBLE = "discover/extension-version-incompatible";
 
 /**
  * Emitted when an extension source tree declares agent-level config (`agent.ts`),
@@ -192,6 +192,17 @@ export async function locateExtensionMount(input: {
       compatibilityPath,
     );
   } catch (error) {
+    if (error instanceof UnsupportedExtensionManifestVersionError) {
+      return {
+        diagnostics: [
+          createDiscoverErrorDiagnostic({
+            code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+            message: `Extension "${location.packageName}" uses an old epoch-based distribution manifest at "${compatibilityPath}". Rebuild the extension with this eve release or install a compatible extension release.`,
+            sourcePath: compatibilityPath,
+          }),
+        ],
+      };
+    }
     return {
       diagnostics: [
         createDiscoverErrorDiagnostic({
@@ -203,16 +214,22 @@ export async function locateExtensionMount(input: {
     };
   }
 
-  const unsupportedCapabilities = findUnsupportedExtensionCapabilities(compatibility);
-  if (unsupportedCapabilities.length > 0) {
+  const incompatible = checkExtensionVersionCompatibility(
+    compatibility,
+    resolveInstalledPackageInfo().version,
+  );
+  if (incompatible !== undefined) {
     return {
-      diagnostics: unsupportedCapabilities.map((unsupported) =>
+      diagnostics: [
         createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-          message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message:
+            incompatible.kind === "newer-eve"
+              ? `Extension "${location.packageName}" was built with eve ${incompatible.minimumVersion}. Upgrade eve to ${incompatible.minimumVersion} or later, or install an extension built with your eve version.`
+              : `Extension "${location.packageName}" requires distribution contract ${incompatible.contractMajor}, which this eve does not support. Rebuild the extension with this eve or install a compatible extension release.`,
           sourcePath: compatibilityPath,
         }),
-      ),
+      ],
     };
   }
 
@@ -343,12 +360,6 @@ export async function locateExtensionMountPackage(input: {
     },
     diagnostics: [],
   };
-}
-
-function formatSupportedVersions(versions: readonly number[]): string {
-  return versions.length === 0
-    ? "versions: none"
-    : `versions: ${versions.map((v) => `v${v}`).join(", ")}`;
 }
 
 async function resolvePackageRoot(input: {

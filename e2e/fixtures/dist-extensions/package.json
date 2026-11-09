@@ -6,6 +6,7 @@
   "scripts": {
     "build": "eve build",
     "dev": "eve dev",
+    "e2e:dependencies": "pnpm update gizmo-extension gadget-extension",
     "start": "eve start",
     "test:e2e": "eve eval --strict"
   },

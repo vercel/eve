@@ -1,24 +1,37 @@
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-interface MessageResponse {
+interface Delivery {
   readonly ok: boolean;
   readonly sessionId?: string;
 }
 
 interface ClearResponse {
   readonly sessionId?: string;
-  readonly status?: "accepted" | "no_active_session";
+  readonly deliveryId?: string;
+  readonly code?: string;
 }
 
-async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unknown): Promise<T> {
+/** The line after the last event read: where the next read starts. */
+function nextLine(
+  events: readonly { readonly meta: { readonly position: { readonly line: number } } }[],
+) {
+  return (events.at(-1)?.meta.position.line ?? -1) + 1;
+}
+
+async function postJson<T>(
+  target: EveEvalTargetHandle,
+  path: string,
+  body: unknown,
+  expectedStatus = 200,
+): Promise<T> {
   const response = await target.fetch(path, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
   const text = await response.text();
-  if (!response.ok) {
+  if (response.status !== expectedStatus) {
     throw new Error(`POST ${path} failed (${response.status}): ${text}`);
   }
   return JSON.parse(text) as T;
@@ -34,33 +47,37 @@ export default defineEval({
       t.target,
       `/threads/${crypto.randomUUID()}/clear`,
       {},
+      409,
     );
     await t.require(
       unknownThread,
       satisfies(
-        (value: ClearResponse) => value.status === "no_active_session",
-        "clearing an unknown thread reports no_active_session",
+        (value: ClearResponse) => value.code === "session_not_active",
+        "clearing an unknown thread reports session_not_active",
       ),
     );
 
     const threadId = crypto.randomUUID();
-    const started = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const started = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly CLEAR-INITIAL-OK.",
     });
     await t.require(
       started,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        (value: Delivery) => value.ok === true && typeof value.sessionId === "string",
         "the initial message starts a session",
       ),
     );
     const sessionId = started.sessionId!;
 
-    const initial = await t.target.watchTurn(sessionId).result();
-    initial.notEvent("turn.failed");
-    initial.notEvent("session.failed");
+    const initial = await t.target.attach(sessionId).watch().result();
+    initial.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initial.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    const liveClear = t.target.watchTurn(sessionId, { startIndex: initial.events.length });
+    // A context change between turns ends no turn: the read ends with its settlement.
+    const liveClear = t.target
+      .attach(sessionId, { startIndex: nextLine(initial.events) })
+      .watch({ until: (event) => event.type === "context.settled" });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const clearedResponse = await postJson<ClearResponse>(
       t.target,
@@ -70,36 +87,39 @@ export default defineEval({
     await t.require(
       clearedResponse,
       satisfies(
-        (value: ClearResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: ClearResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "the channel accepts a clear for the active session",
       ),
     );
 
     const cleared = await liveClear.result();
-    cleared.event("context.cleared", { count: 1 });
-    cleared.eventOrder([{ type: "context.cleared" }, { type: "session.waiting" }]);
+    cleared.event("context.settled", { count: 1, data: { kind: "clear", outcome: "completed" } });
+    cleared.eventOrder([
+      { data: { kind: "clear", outcome: "completed" }, type: "context.settled" },
+    ]);
     cleared.notEvent("turn.started");
-    cleared.notEvent("turn.failed");
-    cleared.notEvent("session.failed");
+    cleared.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cleared.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    const followUpTurn = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length + cleared.events.length,
-    });
+    const followUpTurn = t.target
+      .attach(sessionId, { startIndex: nextLine(cleared.events) })
+      .watch();
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const resumed = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly CLEAR-FOLLOW-UP-OK.",
     });
     await t.require(
       resumed,
       satisfies(
-        (value: MessageResponse) => value.sessionId === sessionId,
+        (value: Delivery) => value.sessionId === sessionId,
         "the thread resumes the same session after clearing context",
       ),
     );
 
     const followUp = await followUpTurn.result();
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/CLEAR-FOLLOW-UP-OK/i);
 
     t.succeeded();

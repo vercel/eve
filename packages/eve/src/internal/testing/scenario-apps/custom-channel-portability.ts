@@ -18,20 +18,21 @@ export default defineChannel({
         auth: null,
         state: { lastSender: body.userId ?? "anonymous" },
       });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
 
     GET("/api/stream/:sessionId", async (req, { attachSession, params }) => {
       const session = attachSession(params.sessionId);
-      const events = await session.getEventStream();
-      return new Response(events, { headers: { "content-type": "text/event-stream" } });
+      const events = ReadableStream.from(session.stream()).pipeThrough(new TransformStream({
+        transform(event, controller) { controller.enqueue(JSON.stringify(event) + "\\n"); },
+      })).pipeThrough(new TextEncoderStream());
+      return new Response(events, { headers: { "content-type": "application/x-ndjson" } });
     }),
   ],
 
   events: {
-    "message.completed"(event, ctx) {
-      if (event.finishReason === "tool-calls") return;
-      console.log("Reply from", ctx.sender, ":", event.message);
+    "content.completed"(_event, ctx) {
+      void ctx.channel.sender;
     },
   },
 });

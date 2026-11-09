@@ -5,7 +5,9 @@ import { createAgentSourceManifest } from "#discover/manifest.js";
 import { defineAgent, type AgentDefinition } from "#public/definitions/agent.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
-import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
+import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
   createProgrammaticCompiledModuleMap,
   type CompiledModuleMap,
@@ -24,12 +26,7 @@ export interface CompileFromMemoryInput {
   readonly appRoot?: string;
   readonly agentRoot?: string;
   readonly model: string;
-  readonly limits?: {
-    readonly maxInputTokensPerSession?: number | false;
-    readonly maxOutputTokensPerSession?: number | false;
-    readonly maxTokenCostUsdPerSession?: number | false;
-    readonly sessionTimeoutMs?: number | false;
-  };
+  readonly limits?: import("#shared/agent-definition.js").AgentLimitsDefinition;
   readonly revision?: string;
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly tools?: readonly CompileFromMemoryToolInput[];
@@ -55,6 +52,7 @@ export interface CompileFromMemorySkillInput {
 
 interface CompileFromMemoryResult {
   readonly manifest: CompiledAgentManifest;
+  readonly modelMetadata: ModelMetadata;
   readonly moduleMap: CompiledModuleMap;
 }
 
@@ -85,7 +83,7 @@ export async function compileFromMemory(
       loadNamespace: async () => ({
         default: defineSkill({
           description: skill.description,
-          markdown: skill.markdown ?? `# ${skill.name}\n`,
+          content: skill.markdown ?? `# ${skill.name}\n`,
         }),
       }),
       logicalPath: `skills/${skill.name}.ts`,
@@ -106,12 +104,15 @@ export async function compileFromMemory(
     agentRoot,
     appRoot,
   });
-  const manifest = await compileAgentManifest(discovered, { sourceRegistries: [registry] });
+  const modelCatalog = createCompiledRuntimeModelCatalogLoader(appRoot);
+  const manifest = withoutSkillFiles(
+    await compileAgentManifest(discovered, { modelCatalog, sourceRegistries: [registry] }),
+  );
   const moduleMap = await createProgrammaticCompiledModuleMap(manifest, [
     frameworkAgentSourceRegistry,
     registry,
   ]);
-  return { manifest, moduleMap };
+  return { manifest, modelMetadata: await modelCatalog.loadModelMetadata(), moduleMap };
 }
 
 function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefinition {
@@ -128,4 +129,28 @@ function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefi
     outputSchema: input.outputSchema,
     toModelOutput: input.toModelOutput,
   });
+}
+
+// A build writes a skill's sibling files into the workspace resources a sandbox seeds, and keeps
+// them out of the manifest. Memory has no such resources, so the files stay unwritten; the
+// skill's content still lists and loads.
+function withoutSkillFiles(manifest: CompiledAgentManifest): CompiledAgentManifest {
+  return {
+    ...stripSkillFiles(manifest),
+    subagents: manifest.subagents.map((subagent) =>
+      subagent.configResolver === undefined
+        ? { ...subagent, agent: stripSkillFiles(subagent.agent) }
+        : {
+            ...subagent,
+            agent: stripSkillFiles(subagent.agent),
+            configResolver: subagent.configResolver,
+          },
+    ),
+  };
+}
+
+function stripSkillFiles<T extends { readonly skills: readonly CompiledSkillDefinition[] }>(
+  node: T,
+): T {
+  return { ...node, skills: node.skills.map(({ files: _files, ...skill }) => skill) };
 }

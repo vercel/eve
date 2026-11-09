@@ -33,6 +33,7 @@ vi.mock("./model-source-change.js", () => ({
 }));
 import { runModelLogin } from "./model-login.js";
 import { openai } from "#public/models/openai/index.js";
+import { toAiSdkLanguageModel } from "#internal/runtime-model.js";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -87,7 +88,7 @@ it("logs in and streams the first response without exposing the entered key", as
   });
   expect(state.defaults).toHaveBeenCalledWith("openai");
   expect(JSON.stringify(fake)).not.toContain("fixture-key");
-  const model = openai();
+  const model = toAiSdkLanguageModel(openai());
   if (typeof model === "string") throw new Error("Expected a model");
   const response = await model.doStream({
     prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],

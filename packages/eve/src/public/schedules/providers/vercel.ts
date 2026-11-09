@@ -26,6 +26,11 @@ export function readVercelScheduleClientOptions(
   return CLIENT_OPTIONS.get(provider);
 }
 
+/** Sent with every Schedules API request so Vercel Schedules can attribute eve's traffic. */
+export const VERCEL_SCHEDULES_CLIENT_HEADERS: Readonly<Record<string, string>> = {
+  "x-vss-framework": "eve",
+};
+
 export interface VercelScheduleProviderOptions {
   /** Overrides the public Vercel Schedules endpoint. */
   readonly baseUrl?: string;
@@ -123,6 +128,7 @@ async function createClient(
   const fetchImpl = options.fetch ?? fetch;
   return new SchedulesClient({
     ...options,
+    headers: VERCEL_SCHEDULES_CLIENT_HEADERS,
     fetch: (input, init) => fetchImpl(input, { ...init, signal }),
   });
 }
@@ -192,11 +198,6 @@ function isNotFoundError(error: unknown): boolean {
 function assertSupportedVercelEnvironment(): void {
   if (isVercelSchedulesDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
-    throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
-  }
-  if (process.env.VERCEL_ENV !== "production") {
-    throw new Error(
-      "Vercel Schedules currently supports production deployments only. Deploy with `vercel --prod`.",
-    );
+    throw new Error("vercelScheduleProvider() requires a Vercel deployment or eve dev.");
   }
 }

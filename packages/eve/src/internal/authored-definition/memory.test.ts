@@ -9,11 +9,9 @@ function validDefinition() {
   return defineMemory({
     provider: {
       capture: {
-        "compaction.requested": async () => {},
         "turn.completed": async () => {},
       },
       recall: {
-        "compaction.completed": async () => null,
         "turn.started": async () => null,
       },
       tools: async () => null,

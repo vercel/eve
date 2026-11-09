@@ -1,19 +1,16 @@
-import { lookup } from "node:dns";
-import { isIP } from "node:net";
-import type { LookupFunction } from "node:net";
-
 import type { Dispatcher1Wrapper } from "undici";
 
-import { isLoopbackHostname, isPrivateOrReservedIpAddress } from "#shared/network-address.js";
+import {
+  assertPublicHostname,
+  cancelResponseBody,
+  createPublicDispatcher,
+  fetchWithDispatcher,
+  readBoundedResponse,
+} from "#execution/public-destination.js";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 10;
-const UNSAFE_DESTINATION_ERROR =
-  "URL must not target localhost, private, link-local, or reserved IP addresses.";
-
-type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
-  readonly dispatcher: Dispatcher1Wrapper;
-};
+const WEB_FETCH_DESTINATION_POLICY = { allowLoopback: false } as const;
 
 /** Options for an SSRF-safe HTTPS request. */
 interface PublicUrlRequestOptions {
@@ -51,7 +48,7 @@ export async function requestPublicUrl(
         continue;
       }
 
-      return await consumeResponse(response, options.maxResponseSize);
+      return await readBoundedResponse(response, options.maxResponseSize);
     } finally {
       await dispatcher.close();
     }
@@ -78,14 +75,8 @@ async function requestOnce(
   url: URL,
   options: PublicUrlRequestOptions,
 ): Promise<{ readonly dispatcher: Dispatcher1Wrapper; readonly response: Response }> {
-  assertPublicHostname(url.hostname);
-  const { Agent, Dispatcher1Wrapper } = await import("undici");
-  const agent = new Agent({
-    connect: {
-      lookup: createPublicLookup(),
-    },
-  });
-  const dispatcher = new Dispatcher1Wrapper(agent);
+  assertPublicHostname(url.hostname, WEB_FETCH_DESTINATION_POLICY);
+  const dispatcher = await createPublicDispatcher(WEB_FETCH_DESTINATION_POLICY);
 
   try {
     const response = await fetchWithDispatcher(url, {
@@ -99,150 +90,4 @@ async function requestOnce(
     await dispatcher.close();
     throw error;
   }
-}
-
-function fetchWithDispatcher(url: URL, options: DispatcherRequestInit): Promise<Response> {
-  // Node's fetch types describe its bundled undici version, while the wrapper
-  // adapts the installed undici dispatcher to that runtime protocol.
-  const fetchWithUndici = fetch as typeof fetch &
-    ((input: URL, init: DispatcherRequestInit) => Promise<Response>);
-  return fetchWithUndici(url, options);
-}
-
-function assertPublicHostname(hostname: string): void {
-  const normalizedHostname = hostname.replace(/^\[(.*)\]$/u, "$1");
-  const family = isIP(normalizedHostname);
-
-  if (family !== 0) {
-    assertPublicAddress(normalizedHostname);
-    return;
-  }
-
-  if (isLoopbackHostname(normalizedHostname)) {
-    throw new Error(UNSAFE_DESTINATION_ERROR);
-  }
-}
-
-function assertPublicAddress(address: string): void {
-  if (isPrivateOrReservedIpAddress(address)) {
-    throw new Error(UNSAFE_DESTINATION_ERROR);
-  }
-}
-
-function createPublicLookup(): LookupFunction {
-  return (hostname, lookupOptions, callback) => {
-    lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
-      if (error !== null) {
-        callback(error, "", 0);
-        return;
-      }
-
-      try {
-        for (const { address } of addresses) {
-          assertPublicAddress(address);
-        }
-      } catch (error) {
-        callback(error as Error, "", 0);
-        return;
-      }
-
-      const matchingAddresses =
-        lookupOptions.family === undefined || lookupOptions.family === 0
-          ? addresses
-          : addresses.filter(({ family }) => family === lookupOptions.family);
-
-      if (matchingAddresses.length === 0) {
-        const error = new Error(
-          `Unable to resolve URL hostname "${hostname}" in the requested IP family.`,
-        );
-        Object.assign(error, { code: "ENOTFOUND" });
-        callback(error, "", 0);
-        return;
-      }
-
-      if (lookupOptions.all === true) {
-        callback(null, matchingAddresses);
-        return;
-      }
-
-      const selected = matchingAddresses[0]!;
-      callback(null, selected.address, selected.family);
-    });
-  };
-}
-
-async function consumeResponse(response: Response, maxResponseSize: number): Promise<Response> {
-  const declaredLength = parseContentLength(response.headers.get("content-length"));
-
-  if (declaredLength !== undefined && declaredLength > maxResponseSize) {
-    await cancelResponseBody(response);
-    throw createResponseTooLargeError(maxResponseSize);
-  }
-
-  const body = await readBoundedBody(response, maxResponseSize);
-  const responseBody = body.byteLength === 0 ? null : Uint8Array.from(body).buffer;
-
-  return new Response(responseBody, {
-    headers: response.headers,
-    status: response.status,
-    statusText: response.statusText,
-  });
-}
-
-function parseContentLength(value: string | null): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-async function readBoundedBody(response: Response, maxResponseSize: number): Promise<Uint8Array> {
-  if (response.body === null) {
-    return new Uint8Array();
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let byteLength = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      byteLength += value.byteLength;
-      if (byteLength > maxResponseSize) {
-        await reader.cancel();
-        throw createResponseTooLargeError(maxResponseSize);
-      }
-
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const body = new Uint8Array(byteLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
-
-async function cancelResponseBody(response: Response): Promise<void> {
-  try {
-    await response.body?.cancel();
-  } catch {
-    // The connection will still be closed with its per-request dispatcher.
-  }
-}
-
-function createResponseTooLargeError(maxResponseSize: number): Error {
-  return new Error(`Response too large (exceeds ${maxResponseSize} bytes).`);
 }

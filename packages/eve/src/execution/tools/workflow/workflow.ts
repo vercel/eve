@@ -10,6 +10,7 @@ import {
 import {
   isWorkflowToolRunAskDecision,
   isWorkflowToolRunControlMessage,
+  type WorkflowToolRunMessage,
   type WorkflowToolRunOutcome,
 } from "#execution/tools/workflow/messages.js";
 import {
@@ -32,8 +33,18 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
 
   const owner = createBlockingWorkflow(input);
   const inbox = openWorkflowToolRunOwnerInbox();
-  if (input.entry.entryPoint !== "execute") await reportTaskStarted(input);
+  const isTask = input.entry.entryPoint !== "execute";
+  // A task's session holds its commands until the run reports started, and a
+  // command that reaches the control hook before it is registered is lost.
+  if (isTask && !(await owner.register())) {
+    // A duplicate start of the task: the run holding the hook does its work.
+    // Started still releases the commands the session holds to that hook.
+    await reportTaskStarted(input);
+    return;
+  }
   const started = startWorkflowBody({ ...input, owner: inbox.owner });
+  // Reported alongside the body's first step instead of before it.
+  const reported = isTask ? reportTaskStarted(input) : undefined;
   const signal = started.control.runSignal;
   const body: ChannelReader<"body", WorkflowToolRunOutcome> = createChannelReader(
     "body",
@@ -48,6 +59,8 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   // Close the body on every exit: a relay throws once the calling session's
   // inbox is gone, which is exactly when what the body opened must stop.
   try {
+    // A task's session must hear started before anything else.
+    await reported;
     while (true) {
       if (started.control.unwinding) {
         cleanupDeadline ??= sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
@@ -96,12 +109,9 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
           commandsOpen = false;
           continue;
         }
-        if (read.channel === "body") {
-          outcome = { status: "failed", error: "Workflow body ended without an outcome." };
-          break;
-        }
-        if (signal.aborted) break;
-        return;
+        // The inbox never ends, so only the body can.
+        outcome = { status: "failed", error: "Workflow body ended without an outcome." };
+        break;
       }
       if (read.channel === "control") {
         // The deadline counts from the cancel the body is unwinding now.
@@ -113,10 +123,11 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
         bodyOutcome = read.next.value;
         continue;
       }
-      const message = read.next.value;
-      if (message.kind === "outcome") continue;
-      relayedMessages += 1;
-      await owner.handleMessage(message);
+      const messages = read.next.value;
+      relayedMessages += messages.length;
+      // An execute run's generated token can't be held by another run.
+      if (messages.some(isAnsweredOnControlHook)) await owner.register();
+      await owner.relay(messages);
     }
   } finally {
     await started.close();
@@ -140,9 +151,8 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
 }
 
 /**
- * Tells the session a task's run can take commands. Sending suspends the run,
- * which registers its control hook before the session hears of it, so a cancel
- * the session held until now reaches the body.
+ * Tells the session a task's run can take commands. Call it only once a run
+ * holds the control hook, so a cancel the session held until now reaches it.
  */
 async function reportTaskStarted(input: WorkflowToolRunInput): Promise<void> {
   await resumeHookStep(
@@ -164,6 +174,17 @@ function applyControlMessage(started: StartedWorkflowBody, message: unknown): vo
     return;
   }
   started.control.apply(message);
+}
+
+/**
+ * The session may answer a question, or its withdrawal, on the control hook
+ * as soon as it reads it, so the hook must be registered before the relay.
+ * Waiting for that only when needed keeps the run's first steps inline.
+ */
+function isAnsweredOnControlHook(message: WorkflowToolRunMessage): boolean {
+  return (
+    message.kind === "withdraw" || (message.kind === "request" && message.request.kind === "ask")
+  );
 }
 
 /** Starts the body the run's entry point names. */

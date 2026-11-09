@@ -6,7 +6,7 @@ import { computeEvalVerdict } from "#evals/runner/verdict.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import type { EveEvalContext, EveEvalJudgeConfig } from "#evals/types.js";
 
-const client = new Client({ host: "https://eve.test" });
+const client = new Client({ baseUrl: "https://eve.test" });
 const target = createEvalTargetHandle({
   capabilities: { devRoutes: true },
   client,
@@ -123,11 +123,11 @@ describe("decision-backed judge runner", () => {
     expect(outcome.assertions).toHaveLength(batch ? 2 : 1);
     for (const assertion of outcome.assertions) {
       expect(assertion).toMatchObject({
-        score: 0,
         severity: "gate",
         passed: false,
         errored: true,
       });
+      expect(assertion.score).toBeUndefined();
       expect(assertion.message).toContain(
         "score criteria must contain at least two ordered levels",
       );

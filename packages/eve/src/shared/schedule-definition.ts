@@ -8,15 +8,15 @@ export type GenericScheduleRunHandler<TArgs> = (args: TArgs) => Promise<void> | 
 /** Constraint shape that bounds the authored keys accepted by {@link defineSchedule}. */
 export interface GenericScheduleDefinitionFields<TArgs> {
   readonly cron: string;
-  readonly markdown?: string;
+  readonly content?: string;
   readonly run?: GenericScheduleRunHandler<TArgs>;
 }
 
 /**
  * Public definition for a schedule authored in TypeScript. Provide a required
- * `cron` expression plus exactly one of `markdown` or `run`:
+ * `cron` expression plus exactly one of `content` or `run`:
  *
- * - `markdown`: fire-and-forget agent invocation. The framework runs the agent
+ * - `content`: fire-and-forget agent invocation. The framework runs the agent
  *   on the prompt and discards the output (equivalent to the `<name>.md`
  *   markdown form).
  * - `run`: full handler ({@link GenericScheduleRunHandler}). Receives
@@ -28,11 +28,11 @@ export interface GenericScheduleDefinitionFields<TArgs> {
 export type GenericScheduleDefinition<TArgs> =
   | {
       readonly cron: string;
-      readonly markdown: string;
+      readonly content: string;
       readonly run?: never;
     }
   | {
       readonly cron: string;
-      readonly markdown?: never;
+      readonly content?: never;
       readonly run: GenericScheduleRunHandler<TArgs>;
     };

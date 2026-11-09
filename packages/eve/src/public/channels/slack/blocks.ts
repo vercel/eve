@@ -1,5 +1,6 @@
-import { cardToSlackBlocks } from "#compiled/@chat-adapter/slack/blocks.js";
-import { cardChildToFallbackText, type CardChild, type CardElement } from "#compiled/chat/index.js";
+import { cardToSlackBlocks, type SlackCardChild } from "#compiled/@chat-adapter/slack/blocks.js";
+import { cardChildToFallbackText } from "#compiled/chat/index.js";
+import type { CardChild, CardElement } from "#public/channels/slack/cards.js";
 
 /** A Slack Block Kit block emitted by {@link cardToBlocks}. */
 export type BlockKitBlock = Record<string, unknown>;
@@ -8,7 +9,7 @@ export type BlockKitBlock = Record<string, unknown>;
 export function cardToBlocks(card: CardElement): BlockKitBlock[] {
   return cardToSlackBlocks({
     ...card,
-    children: card.children.map(preserveLinkActionId),
+    children: card.children.map(toSlackCardChild),
   });
 }
 
@@ -24,11 +25,11 @@ export function cardToFallbackText(card: CardElement): string {
   return lines.join("\n").trim();
 }
 
-function preserveLinkActionId(child: CardChild): CardChild {
+function toSlackCardChild(child: CardChild): SlackCardChild {
   if (child.type === "section") {
     return {
       ...child,
-      children: child.children.map(preserveLinkActionId),
+      children: child.children.map(toSlackCardChild),
     };
   }
   if (child.type === "actions") {

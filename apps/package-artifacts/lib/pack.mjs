@@ -40,7 +40,7 @@ export async function packPackage(packageRoot, version, env = process.env) {
         `Expected packed version ${version}, received ${String(packResult.version)}.`,
       );
     }
-    return readFile(join(finalDirectory, packResult.filename));
+    return await readFile(join(finalDirectory, packResult.filename));
   } finally {
     await rm(workDirectory, { force: true, recursive: true });
   }

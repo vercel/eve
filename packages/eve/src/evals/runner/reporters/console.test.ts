@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { Console } from "#evals/runner/reporters/console.js";
+import { consoleReporter } from "#evals/runner/reporters/console.js";
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
 
-describe("Console", () => {
+describe("consoleReporter", () => {
   it("reports skipped evals and their reason", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
     const result = skippedResult();
 
     reporter.onEvalComplete(result);
@@ -19,7 +19,7 @@ describe("Console", () => {
 
   it("indents multiline assertion failure details", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -40,10 +40,11 @@ describe("Console", () => {
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "sourcing",
       result: {
+        sessionEnded: false,
         derived: createEmptyDerivedFacts(),
         events: [],
-        finalMessage: "No source.",
-        output: "No source.",
+        reply: "No source.",
+        data: "No source.",
         status: "completed",
         traceContexts: [],
       },
@@ -56,9 +57,107 @@ describe("Console", () => {
     expect(lines).toContain('    answer: {"type":"boolean","probability":0}');
   });
 
+  it("warns when repeated soft assertions merge different scores and leaves gates quiet", () => {
+    const lines: string[] = [];
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
+
+    reporter.onEvalComplete({
+      assertions: [
+        { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 0.4, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 1, severity: "gate" },
+        { name: "succeeded", passed: true, errored: false, score: 1, severity: "gate" },
+        {
+          name: "succeeded",
+          passed: false,
+          errored: false,
+          score: 0,
+          severity: "gate",
+          threshold: 1,
+        },
+      ],
+      completedAt: "2026-01-01T00:00:01.000Z",
+      id: "quality",
+      result: {
+        sessionEnded: false,
+        derived: createEmptyDerivedFacts(),
+        events: [],
+        reply: "ok",
+        data: "ok",
+        status: "completed",
+        traceContexts: [],
+      },
+      startedAt: "2026-01-01T00:00:00.000Z",
+      verdict: "failed",
+    });
+
+    expect(lines).toEqual([
+      "✗  quality  gates 2/3  judge.boolean: 90%  judge.boolean: 40%",
+      "  ✗ succeeded (0% < 100%)",
+      "  ⚠ judge.boolean recorded 2 times with different scores; Braintrust and Datadog keep only the lowest. Add .label() to tell them apart.",
+    ]);
+  });
+
+  it("aggregates repeated soft scores as one value per eval in the run summary", () => {
+    const lines: string[] = [];
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
+    const result: EveEvalResult = {
+      assertions: [
+        { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 0.4, severity: "soft" },
+      ],
+      completedAt: "2026-01-01T00:00:01.000Z",
+      id: "quality",
+      result: {
+        sessionEnded: false,
+        derived: createEmptyDerivedFacts(),
+        events: [],
+        reply: "ok",
+        data: "ok",
+        status: "completed",
+        traceContexts: [],
+      },
+      startedAt: "2026-01-01T00:00:00.000Z",
+      verdict: "passed",
+    };
+
+    reporter.onRunComplete(summary(result));
+
+    expect(lines).toContain("  judge.boolean: 40% (1 evals)");
+  });
+
+  it("summarizes repeated attempts as a gate pass rate per eval", () => {
+    const lines: string[] = [];
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
+    const verdicts = [
+      ["flaky", "passed"],
+      ["flaky", "failed"],
+      ["flaky", "skipped"],
+      ["stable", "passed"],
+      ["stable", "passed"],
+      ["judged", "scored"],
+    ] as const;
+    const results = verdicts.map(([id, verdict], index): EveEvalResult => ({
+      ...skippedResult(),
+      id,
+      attempt: index + 1,
+      verdict,
+    }));
+
+    reporter.onRunComplete({ ...summary(results[0] ?? skippedResult()), results });
+
+    const start = lines.indexOf("Repeatability:");
+    expect(lines.slice(start, start + 3)).toEqual([
+      "Repeatability:",
+      "  1/2 passed  flaky",
+      "  2/2 passed  stable",
+    ]);
+    expect(lines.join("\n")).not.toContain("judged");
+  });
+
   it("does not print diagnostics for passing assertions", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -75,10 +174,11 @@ describe("Console", () => {
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "sourcing",
       result: {
+        sessionEnded: false,
         derived: createEmptyDerivedFacts(),
         events: [],
-        finalMessage: "A sourced answer.",
-        output: "A sourced answer.",
+        reply: "A sourced answer.",
+        data: "A sourced answer.",
         status: "completed",
         traceContexts: [],
       },
@@ -96,10 +196,11 @@ function skippedResult(): EveEvalResult {
     completedAt: "2026-01-01T00:00:01.000Z",
     id: "schedule",
     result: {
+      sessionEnded: false,
       derived: createEmptyDerivedFacts(),
       events: [],
-      finalMessage: null,
-      output: null,
+      reply: undefined,
+      data: null,
       status: "completed",
       traceContexts: [],
     },

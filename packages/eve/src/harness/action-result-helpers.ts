@@ -1,9 +1,7 @@
 import type { ModelMessage, ToolSet, TypedToolError, TypedToolResult } from "ai";
 
-import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
-import type { RuntimeActionResult, RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
-import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   authorizationPendingAsJsonObject,
@@ -40,7 +38,7 @@ function toJsonValue(value: unknown): JsonValue {
 /**
  * Builds a `RuntimeToolResultActionResult` from a raw tool output value.
  *
- * This is the single coercion point for `action.result` projection. Both
+ * This is the single coercion point for `call.settled` projection. Both
  * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
  * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
  * funnel through here, so the raw-output-vs-`toModelOutput` decision —
@@ -53,16 +51,14 @@ export function createRuntimeToolResultFromValue(input: {
   readonly output: unknown;
   readonly isError?: boolean;
 }): RuntimeToolResultActionResult {
+  const thrown = input.isError === true && input.output instanceof Error ? input.output : undefined;
   const result: RuntimeToolResultActionResult = {
     callId: input.callId,
     kind: "tool-result",
     output: toolResultOutputToJsonValue({
       output: {
         type: input.isError === true ? "error-json" : "json",
-        value:
-          input.isError === true && input.output instanceof Error
-            ? input.output.message
-            : input.output,
+        value: thrown === undefined ? input.output : thrown.message,
       },
       toolCallId: input.callId,
       toolName: input.toolName,
@@ -70,7 +66,11 @@ export function createRuntimeToolResultFromValue(input: {
     toolName: input.toolName,
   };
 
-  return input.isError === true ? { ...result, isError: true } : result;
+  if (input.isError !== true) return result;
+  // The output keeps only a thrown error's message; its name lets instrumentation classify the failure.
+  return thrown === undefined
+    ? { ...result, isError: true }
+    : { ...result, errorName: thrown.name, isError: true };
 }
 
 /**
@@ -101,26 +101,6 @@ export function createRuntimeToolResultFromToolError(
     output: toError(toolError.error),
     toolName: toolError.toolName,
   });
-}
-
-/**
- * The action result a call's tool result reports. A skill load reports the
- * `load-skill-result` of the skill its `input` names, as its call reports a
- * `load-skill` action.
- */
-export function toActionResult(
-  result: RuntimeToolResultActionResult,
-  input: unknown,
-): RuntimeActionResult {
-  const skill = result.toolName === SKILL_ENTRY_NAME ? skillTarget(input) : undefined;
-  if (skill === undefined) return result;
-  return {
-    callId: result.callId,
-    isError: result.isError,
-    kind: "load-skill-result",
-    name: skill,
-    output: result.output,
-  };
 }
 
 /**

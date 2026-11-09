@@ -34,6 +34,17 @@ export async function getVercelSandboxCredentials(
   return getVercelSandboxCredentialsFromOidcToken(oidcToken);
 }
 
+/** Credentials when eve can resolve them; otherwise `{}` so the SDK falls back to its own resolution. */
+export async function resolveVercelSandboxCredentials(
+  createOptions: VercelCreateOptions,
+): Promise<VercelSandboxCredentials | Record<string, never>> {
+  try {
+    return await getVercelSandboxCredentials(createOptions);
+  } catch {
+    return {};
+  }
+}
+
 function readNonEmptyString(object: object, key: string): string | undefined {
   const value = Reflect.get(object, key);
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;

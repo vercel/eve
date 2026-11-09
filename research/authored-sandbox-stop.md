@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1709
 status: implemented
-last_updated: "2026-08-07"
+last_updated: "2026-10-22"
 ---
 
 # Authored sandbox stop
@@ -49,8 +49,8 @@ flowchart LR
 ```
 
 - Each built-in provider maps `stop()` to its native lifecycle operation:
-  Vercel stops its persistent sandbox, Docker stops its session container,
-  microsandbox stops and detaches its VM, and just-bash disposes its interpreter.
+  Vercel stops its persistent sandbox, Docker stops its session container, and
+  just-bash disposes its interpreter.
 - A resolved stop preserves the durable session state. A later callback opens
   the same session through the provider's normal `open()` path. Vercel also
   automatically resumes the same handle on later I/O, matching its inactivity

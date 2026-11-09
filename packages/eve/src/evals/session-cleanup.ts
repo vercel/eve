@@ -1,5 +1,5 @@
 interface CleanupSession {
-  readonly sessionId: string | undefined;
+  readonly id: string | undefined;
   cleanup(signal: AbortSignal): Promise<void>;
 }
 
@@ -10,7 +10,7 @@ export async function cleanupEvalSessions(
 ): Promise<readonly PromiseSettledResult<void>[]> {
   const known = new Map<string, CleanupSession>();
   for (const session of sessions) {
-    const sessionId = session.sessionId;
+    const sessionId = session.id;
     if (sessionId !== undefined && !known.has(sessionId)) known.set(sessionId, session);
   }
   return await Promise.allSettled(

@@ -30,7 +30,12 @@ import { isObject } from "#shared/guards.js";
 export interface SlackAuthor {
   readonly userId: string;
   readonly userName: string | undefined;
+  /** Slack real name; set by `messageContext.users`. */
   readonly fullName: string | undefined;
+  /** Slack display name; set by `messageContext.users`. */
+  readonly displayName?: string;
+  /** Slack email; set by `messageContext.users` with `email: true`. */
+  readonly email?: string;
   readonly isBot: boolean;
   readonly isMe: boolean;
 }
@@ -82,6 +87,13 @@ export interface SlackMessage {
   readonly author: SlackAuthor | undefined;
   /** File / image attachments on the inbound message. */
   readonly attachments: readonly SlackAttachment[];
+  /**
+   * Slack's `action_token` for this message, when Slack sent one. The Real-time
+   * Search API (`assistant.search.context`) needs it to search for the
+   * message's author with a bot token. `defaultSlackAuth` copies it to
+   * the `action_token` auth attribute, where tools read it.
+   */
+  readonly actionToken?: string;
   /** Raw inbound event payload from Slack. */
   readonly raw: Record<string, unknown>;
 }
@@ -196,9 +208,8 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
  * Returns `null` when:
  * - the envelope is not an IM `message` event,
  * - required fields (channel id, ts) are missing,
- * - the message carries a system `subtype` (edits, deletes, joins, etc.)
- *   other than `file_share` — file uploads are real user messages and
- *   must reach the handler with their attachments intact, or
+ * - the message carries a subtype that does not post a new message
+ *   (edits, deletes, joins, etc.), or
  * - the message was posted by a bot (`bot_id` set) — this prevents the
  *   bot's own DM replies from re-triggering the handler.
  */
@@ -258,6 +269,66 @@ export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | 
   return buildSlackMessage(message, envelope);
 }
 
+/**
+ * A person's edit to one of their Slack messages, handed to
+ * `slackChannel({ onMessageEdited })`.
+ */
+export interface SlackMessageEdit {
+  /** The message as edited: the edited `text`, with the original message's `ts` and thread. */
+  readonly message: SlackMessage;
+  /** The message's text before the edit (mrkdwn), or `undefined` when Slack didn't include it. */
+  readonly previousText: string | undefined;
+  /** Slack ts of the edit. */
+  readonly editedTs: string;
+}
+
+/**
+ * Parses a Slack `message_changed` event in which a person edited their message's
+ * text. Returns `null` for other events and for changes that aren't a person's
+ * text edit, such as link unfurls and bot or app updates (including `chat.update`).
+ */
+export function parseMessageEditEvent(envelope: SlackEventCallback): SlackMessageEdit | null {
+  if (envelope.type !== "event_callback") return null;
+  const event = envelope.event;
+  if (event?.type !== "message" || event.subtype !== "message_changed") return null;
+  const edited = event.message;
+  if (!isObject(edited) || !isObject(edited.edited)) return null;
+  if (typeof edited.bot_id === "string" && edited.bot_id.length > 0) return null;
+
+  // The edited message omits its conversation; the privacy check reads `channel_type`.
+  const message = buildSlackMessage(
+    {
+      ...edited,
+      type: "message",
+      channel: event.channel,
+      channel_type: event.channel_type,
+    } as SlackMessageEvent,
+    envelope,
+  );
+  if (message === null || message.author === undefined) return null;
+
+  const previous = isObject(event.previous_message) ? event.previous_message : undefined;
+  if (previous !== undefined) {
+    // An edited message keeps `edited`, so a later link preview repeats its ts. The person's
+    // text, not the preview text the resolved content adds, says whether they changed it.
+    const previousEdit = isObject(previous.edited) ? previous.edited : undefined;
+    if (previousEdit !== undefined && previousEdit.ts === edited.edited.ts) return null;
+    if (previous.text === edited.text) return null;
+  }
+  const previousText =
+    previous === undefined
+      ? undefined
+      : resolveSlackInboundMrkdwn(typeof previous.text === "string" ? previous.text : "", previous);
+
+  const editedTs =
+    typeof edited.edited.ts === "string"
+      ? edited.edited.ts
+      : typeof event.ts === "string"
+        ? event.ts
+        : message.ts;
+  return { message, previousText, editedTs };
+}
+
 // Change events such as `message_changed` carry the edit's own `ts` and nest
 // the author under `message`, so they cannot be routed as new messages.
 const POSTED_MESSAGE_SUBTYPES: ReadonlySet<string> = new Set([
@@ -284,13 +355,7 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
 }
 
 function isHumanMessage(message: SlackMessageEvent): boolean {
-  if (
-    typeof message.subtype === "string" &&
-    message.subtype.length > 0 &&
-    message.subtype !== "file_share"
-  ) {
-    return false;
-  }
+  if (!isPostedMessageSubtype(message.subtype)) return false;
   return !(typeof message.bot_id === "string" && message.bot_id.length > 0);
 }
 
@@ -299,13 +364,7 @@ export function slackMessageFromWebhookPayload(
   installationTeamId?: string,
 ): SlackMessage | null {
   if (payload.kind === "direct_message") {
-    if (
-      typeof payload.subtype === "string" &&
-      payload.subtype.length > 0 &&
-      payload.subtype !== "file_share"
-    ) {
-      return null;
-    }
+    if (!isPostedMessageSubtype(payload.subtype)) return null;
     if (typeof payload.botId === "string" && payload.botId.length > 0) return null;
   }
 
@@ -321,6 +380,7 @@ export function slackMessageFromWebhookPayload(
     installationTeamId,
     author: parsePayloadAuthor(payload),
     attachments: parsePayloadAttachments(payload.files),
+    ...withActionToken(payload.raw),
     raw: payload.raw,
   };
 }
@@ -349,8 +409,18 @@ function buildSlackMessage(
     installationTeamId,
     author: parseAuthor(event),
     attachments: parseAttachments(event.files),
+    ...withActionToken(event),
     raw: event as Record<string, unknown>,
   };
+}
+
+function withActionToken(raw: Record<string, unknown>): { actionToken?: string } {
+  // Slack nests the token under `assistant_thread` in app threads, not at the top level its docs show.
+  const nested = isObject(raw.assistant_thread) ? raw.assistant_thread.action_token : undefined;
+  const token = [raw.action_token, nested].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  return token === undefined ? {} : { actionToken: token.trim() };
 }
 
 function parseAuthor(event: SlackAppMentionEvent | SlackMessageEvent): SlackAuthor | undefined {
@@ -443,6 +513,8 @@ export interface SlackInboundContext {
   readonly userId: string;
   readonly userName?: string;
   readonly fullName?: string;
+  readonly displayName?: string;
+  readonly email?: string;
   readonly channelId: string;
   readonly isMentioned?: boolean;
   readonly threadTs: string;

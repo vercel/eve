@@ -15,7 +15,7 @@ export default defineEval({
     await t.send("Please use the dynamic tenant policy skill and follow its instructions exactly.");
 
     t.succeeded();
-    t.loadedSkill("dynamic-tenant-policy", {
+    t.calledSkill("dynamic-tenant-policy", {
       output: new RegExp(DYNAMIC_SKILL_TOKEN, "u"),
     });
     t.messageIncludes(DYNAMIC_SKILL_TOKEN);

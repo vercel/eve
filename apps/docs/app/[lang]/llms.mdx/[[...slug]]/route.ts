@@ -14,7 +14,7 @@ import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { integrationSource } from "@/lib/integrations/source";
 
-const markdownRoute = createDocsMarkdownRoute({
+const markdownRoute = createDocsMarkdownRoute<{ lang: string; slug?: string[] }>({
   notFound: { getRequestedPath: getMarkdownRequestedPath },
   sources: [geistdocsSource, integrationSource],
 });

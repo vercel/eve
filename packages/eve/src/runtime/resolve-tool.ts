@@ -1,5 +1,10 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
-import { isFrameworkTool, frameworkTool } from "#tools/provided/framework-tool.js";
+import {
+  isFrameworkTool,
+  frameworkTool,
+  isInteractionOnly,
+  markInteractionOnly,
+} from "#tools/provided/framework-tool.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
@@ -99,7 +104,10 @@ export async function resolveToolDefinition(
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),
     };
-    return isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
+    const marked = isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
+    // Checked on the authored executor, so only a definition that runs a built-in interaction
+    // executor is marked, never one that merely shares its name.
+    return isInteractionOnly(resolvedRecord.execute) ? markInteractionOnly(marked) : marked;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;
@@ -120,10 +128,10 @@ export async function resolveToolDefinition(
  * export declared the corresponding hook so callers can `...spread` the
  * result without clobbering required fields with `undefined`.
  */
+type LabelCallbacks = Exclude<NonNullable<ResolvedToolDefinition["label"]>, false>;
+
 type OptionalResolvedFields = {
-  -readonly [
-    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput"
-  ]?: ResolvedToolDefinition[K];
+  -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -137,7 +145,9 @@ function extractOptionalHooks(
 ): OptionalResolvedFields {
   const optional: OptionalResolvedFields = {};
 
-  if (record.label !== undefined) {
+  if (record.label === false) {
+    optional.label = false;
+  } else if (record.label !== undefined) {
     const label = expectObjectRecord(
       record.label,
       describe(definition, "to provide a valid label definition"),
@@ -149,18 +159,18 @@ function extractOptionalHooks(
           : (expectFunction(
               label.complete,
               describe(definition, "to provide an label complete function"),
-            ) as NonNullable<ResolvedToolDefinition["label"]>["complete"]),
+            ) as LabelCallbacks["complete"]),
       delta:
         label.delta === undefined
           ? undefined
           : (expectFunction(
               label.delta,
               describe(definition, "to provide an label delta function"),
-            ) as NonNullable<ResolvedToolDefinition["label"]>["delta"]),
+            ) as LabelCallbacks["delta"]),
       start: expectFunction(
         label.start,
         describe(definition, "to provide a label start callback function"),
-      ) as NonNullable<ResolvedToolDefinition["label"]>["start"],
+      ) as LabelCallbacks["start"],
     };
   }
 
@@ -169,13 +179,6 @@ function extractOptionalHooks(
       record.approval,
       describe(definition, "to provide a valid approval definition"),
     );
-  }
-
-  if (record.approvalKey !== undefined) {
-    optional.approvalKey = expectFunction(
-      record.approvalKey,
-      describe(definition, "to provide an approvalKey function"),
-    ) as ResolvedToolDefinition["approvalKey"];
   }
 
   if (record.endsTurn !== undefined) {

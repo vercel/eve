@@ -6,23 +6,17 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { DIAGNOSTICS_WORKER_SOURCE, GH_SIGNED_COMMIT_SOURCE } from "../../extension/lib/tooling.ts";
+import { GH_SIGNED_COMMIT_SOURCE } from "../../extension/lib/tooling.ts";
 import { installCodeTooling } from "../../extension/lib/sandbox.ts";
 
 const execFileAsync = promisify(execFile);
 
-test("embedded Node tooling sources parse", async () => {
+test("embedded signed commit source parses", async () => {
   const dir = await mkdtemp(join(tmpdir(), "eve-code-tooling-"));
   try {
-    const files = [
-      ["diagnostics.cjs", DIAGNOSTICS_WORKER_SOURCE],
-      ["gh-signed-commit.cjs", GH_SIGNED_COMMIT_SOURCE],
-    ] as const;
-    for (const [name, source] of files) {
-      const path = join(dir, name);
-      await writeFile(path, source);
-      await execFileAsync(process.execPath, ["--check", path]);
-    }
+    const path = join(dir, "gh-signed-commit.cjs");
+    await writeFile(path, GH_SIGNED_COMMIT_SOURCE);
+    await execFileAsync(process.execPath, ["--check", path]);
   } finally {
     await rm(dir, { force: true, recursive: true });
   }
@@ -63,12 +57,9 @@ test("signed commit missing-token error names the authenticated gh invocation", 
           stderr,
           /command "gh-signed-commit --repo owner\/name --branch branch -m headline"/u,
         );
-        assert.match(
-          stderr,
-          /permissions \[\{"provider":"github","repositories":\["owner\/name"\],"access":"write"\}\]/u,
-        );
+        assert.match(stderr, /repository "owner\/name"/u);
         assert.match(stderr, /description.*workingDirectory/u);
-        assert.match(stderr, /scoped credential lease/u);
+        assert.match(stderr, /supplies the credential lease/u);
         assert.doesNotMatch(stderr, /login tool|gh auth login/u);
         return true;
       },

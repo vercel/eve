@@ -1,4 +1,7 @@
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
+
+// Sibling file tools keep write_file's read record current through its own module.
+export { refreshReadFileStamp } from "#execution/sandbox/write-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -22,7 +25,8 @@ export const WRITE_FILE_INPUT_SCHEMA = defineJsonSchema<WriteFileToolInput>({
     content: { type: "string", description: "Complete replacement file contents." },
     filePath: {
       type: "string",
-      description: "The absolute path to the file to write. A leading $HOME is supported.",
+      description:
+        "The path to the file to write: absolute, relative to the workspace root, or beginning with $HOME/.",
     },
   },
   required: ["content", "filePath"],

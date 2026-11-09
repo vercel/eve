@@ -1,137 +1,62 @@
 import { z } from "#compiled/zod/index.js";
+import { conforming } from "#protocol/session-events/common.js";
+import type { Answer } from "#protocol/session-events/families/response.js";
 
-import { runtimeToolCallActionRequestSchema } from "#shared/action-types.js";
+export type { Answer };
 
-/**
- * One selectable option presented to the user in an input request.
- */
-export type InputOption = z.infer<typeof inputOptionSchema>;
+/** Zod schema for one answer. */
+export const answerSchema = conforming<Answer>()(
+  z
+    .object({
+      interactionId: z.string(),
+      optionId: z.string().optional(),
+      text: z.string().optional(),
+    })
+    .strict(),
+);
 
-/** Zod schema for one input option. */
-export const inputOptionSchema = z
-  .object({
-    description: z.string().describe("Optional additional context for this option.").optional(),
-    id: z.string().describe("Stable identifier for the option."),
-    label: z.string().describe("User-facing label for the option."),
-    style: z
-      .enum(["primary", "danger", "default"])
-      .describe("Visual treatment hint for the option.")
-      .optional(),
-  })
-  .strict();
+declare const validatedAnswerBrand: unique symbol;
 
-/**
- * Framework-owned source of an input request.
- *
- * Consumers use this discriminator for behavior. The action tool name and
- * request id are presentation and identity fields, not request semantics.
- */
-export type InputRequestKind = z.infer<typeof inputRequestKindSchema>;
+/** An answer proven to match the strict durable wire schema. */
+export type ValidatedAnswer = Answer & { readonly [validatedAnswerBrand]: true };
 
-/** Zod schema for the framework-owned source of an input request. */
-export const inputRequestKindSchema = z.enum(["question", "session-limit", "tool-approval"]);
-
-/** Unified input request surfaced when the agent needs user input. */
-export type InputRequest = z.infer<typeof inputRequestSchema>;
-
-/**
- * Zod schema for one input request.
- */
-export const inputRequestSchema = z
-  .object({
-    action: runtimeToolCallActionRequestSchema,
-    allowFreeform: z
-      .boolean()
-      .describe(
-        "Whether the user may answer with freeform text instead of selecting one of the provided options.",
-      )
-      .optional(),
-    display: z
-      .enum(["confirmation", "select", "text"])
-      .describe("Rendering hint: the channel uses this to pick a UX treatment.")
-      .optional(),
-    kind: inputRequestKindSchema.describe(
-      "Framework-owned request source used to resolve, route, and render the response.",
-    ),
-    options: z
-      .array(inputOptionSchema)
-      .describe("Selectable answer options to present to the user.")
-      .optional(),
-    prompt: z.string().describe("The prompt to present to the user."),
-    requestId: z.string().describe("Stable identifier for this request."),
-  })
-  .strict();
-
-/**
- * Unified input response submitted by the client for a pending request.
- */
-export type InputResponse = z.infer<typeof inputResponseSchema>;
-
-declare const validatedInputResponseBrand: unique symbol;
-
-/** Input response proven to match the strict durable wire schema. */
-export type ValidatedInputResponse = InputResponse & {
-  readonly [validatedInputResponseBrand]: true;
-};
-
-/**
- * Zod schema for one input response.
- */
-export const inputResponseSchema = z
-  .object({
-    optionId: z.string().optional(),
-    requestId: z.string(),
-    text: z.string().optional(),
-  })
-  .strict();
-
-/** Parses one response and preserves schema validation in its static type. */
-export function parseInputResponse(value: unknown): ValidatedInputResponse {
-  return inputResponseSchema.parse(value) as ValidatedInputResponse;
+/** Parses one answer and preserves schema validation in its static type. */
+export function parseAnswer(value: unknown): ValidatedAnswer {
+  return answerSchema.parse(value) as ValidatedAnswer;
 }
 
-/** Parses response arrays whose element types were widened before delivery. */
-export function parseInputResponses(value: unknown): readonly ValidatedInputResponse[] {
-  return inputResponseSchema
+/** Parses answer arrays whose element types were widened before delivery. */
+export function parseAnswers(value: unknown): readonly ValidatedAnswer[] {
+  return answerSchema
     .array()
     .parse(value)
-    .map((response) => response as ValidatedInputResponse);
+    .map((answer) => answer as ValidatedAnswer);
 }
 
-type IsWidenedInputResponse<TResponse extends InputResponse> =
-  keyof TResponse extends keyof InputResponse
-    ? keyof InputResponse extends keyof TResponse
-      ? InputResponse extends TResponse
-        ? true
-        : false
+type IsWidenedAnswer<TAnswer extends Answer> = keyof TAnswer extends keyof Answer
+  ? keyof Answer extends keyof TAnswer
+    ? Answer extends TAnswer
+      ? true
       : false
-    : false;
+    : false
+  : false;
 
-type StrictInputResponse<TResponse extends InputResponse> = TResponse extends ValidatedInputResponse
-  ? TResponse
-  : IsWidenedInputResponse<TResponse> extends true
+type StrictAnswer<TAnswer extends Answer> = TAnswer extends ValidatedAnswer
+  ? TAnswer
+  : IsWidenedAnswer<TAnswer> extends true
     ? never
-    : TResponse & {
-        readonly [TKey in Exclude<keyof TResponse, keyof InputResponse>]: never;
-      };
+    : TAnswer & { readonly [TKey in Exclude<keyof TAnswer, keyof Answer>]: never };
 
-/** Rejects extra response keys and imprecise arrays not proven by the strict schema. */
-export type StrictInputResponses<TResponses extends readonly InputResponse[]> = TResponses & {
-  readonly [TIndex in keyof TResponses]: TResponses[TIndex] extends InputResponse
-    ? StrictInputResponse<TResponses[TIndex]>
-    : TResponses[TIndex];
+/** Rejects extra answer keys and imprecise arrays not proven by the strict schema. */
+export type StrictAnswers<TAnswers extends readonly Answer[]> = TAnswers & {
+  readonly [TIndex in keyof TAnswers]: TAnswers[TIndex] extends Answer
+    ? StrictAnswer<TAnswers[TIndex]>
+    : TAnswers[TIndex];
 };
 
-/**
- * Returns true when a value matches the input request contract.
- */
-export function isInputRequest(value: unknown): value is InputRequest {
-  return z.validate(inputRequestSchema, value);
+/** Returns true when a value matches the answer contract. */
+export function isAnswer(value: unknown): value is ValidatedAnswer {
+  return z.validate(answerSchema, value);
 }
 
-/**
- * Returns true when a value matches the input response contract.
- */
-export function isInputResponse(value: unknown): value is ValidatedInputResponse {
-  return z.validate(inputResponseSchema, value);
-}
+export { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";

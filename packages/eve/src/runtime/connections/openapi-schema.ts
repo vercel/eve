@@ -1,8 +1,5 @@
 import { isObject } from "#shared/guards.js";
 
-/** Max structural depth the schema dereferencer descends before truncating. */
-const MAX_DEREF_DEPTH = 12;
-
 /** A path, query, header, or cookie parameter resolved from an operation. */
 export interface OpenApiParameter {
   readonly name: string;
@@ -22,11 +19,13 @@ export interface OpenApiRequestBody {
 /**
  * Builds the combined JSON Schema the model fills in: each path, query,
  * and header parameter becomes a top-level property; the request body
- * (when present) is nested under `body`.
+ * (when present) is nested under `body`. The component schemas they refer
+ * to sit under `$defs`.
  */
 export function buildInputSchema(
   parameters: readonly OpenApiParameter[],
   requestBody: OpenApiRequestBody | undefined,
+  defs: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
@@ -52,6 +51,9 @@ export function buildInputSchema(
   if (required.length > 0) {
     schema.required = required;
   }
+  if (Object.keys(defs).length > 0) {
+    schema.$defs = defs;
+  }
   return schema;
 }
 
@@ -63,71 +65,122 @@ export function deref(document: Record<string, unknown>, node: Record<string, un
   return resolveRef(document, node.$ref) ?? {};
 }
 
+/** Keywords whose value maps names to subschemas, where names may shadow keywords. */
+const SCHEMA_MAP_KEYWORDS = new Set(["properties", "patternProperties", "$defs", "definitions"]);
+/** Keywords that set a schema's base URI, which would re-root the `#/$defs` refs inside it. */
+const BASE_URI_KEYWORDS = new Set(["$id", "$anchor", "$dynamicAnchor", "$schema"]);
+
+/** Converts one operation's schemas, collecting what they refer to. */
+export interface SchemaConverter {
+  /**
+   * Converts an OpenAPI schema to JSON Schema draft 2020-12. Each local
+   * `$ref` points into {@link defs}, which gets the converted target once.
+   */
+  readonly convert: (schema: unknown) => unknown;
+  /** The converted `$ref` targets, keyed by the names `convert` points at. */
+  readonly defs: Readonly<Record<string, unknown>>;
+}
+
 /**
- * Deeply resolves local `$ref` pointers in a JSON Schema, truncating
- * `$ref` cycles and over-deep nesting so the result stays finite and
- * serializable.
+ * Creates a converter for one operation's input schema.
  *
- * Truncation only ever happens at an **object** node — which is always a
- * schema position — by replacing it with an empty schema (`{}`). Scalars
- * (`type` strings, `required` entries, `enum` values) pass through
- * unchanged and arrays are always preserved as arrays, so array-valued
- * keywords like `oneOf`/`anyOf`/`allOf` and `type: [..., "null"]` keep
- * their shape. This keeps the output valid JSON Schema (draft 2020-12)
- * for strict model providers, while the depth bound prevents recursive
- * specs (e.g. Notion blocks) from expanding without limit.
+ * `$ref`s stay references instead of being copied in place, so a schema
+ * shared by many properties, or one that refers to itself (Notion blocks),
+ * costs its size once. Copying them in place would grow exponentially and
+ * need a depth limit that cuts valid deep schemas off.
  */
-export function derefSchema(
-  document: Record<string, unknown>,
-  node: unknown,
-  depth = 0,
-  seen: ReadonlySet<string> = new Set(),
-): unknown {
-  if (isArray(node)) {
-    return node.map((item) => derefSchema(document, item, depth + 1, seen));
-  }
-  if (!isObject(node)) {
-    return node;
-  }
-  if (depth > MAX_DEREF_DEPTH) {
-    return {};
-  }
-  if (typeof node.$ref === "string") {
-    if (seen.has(node.$ref)) {
-      return {};
+export function createSchemaConverter(document: Record<string, unknown>): SchemaConverter {
+  const defs: Record<string, unknown> = {};
+  const keys = new Map<string, string | undefined>();
+  // Targets wait here instead of converting in place, so a long `$ref` chain
+  // cannot overflow the stack.
+  const pending: (readonly [key: string, target: unknown])[] = [];
+
+  const define = (ref: string): string | undefined => {
+    if (keys.has(ref)) {
+      return keys.get(ref);
     }
-    const target = resolveRef(document, node.$ref);
-    if (target === undefined) {
-      return {};
+    const target = resolveRef(document, ref);
+    const key = target === undefined ? undefined : uniqueKey(ref, defs);
+    keys.set(ref, key);
+    if (key !== undefined) {
+      defs[key] = {};
+      if (!isAliasCycle(document, ref)) {
+        pending.push([key, target]);
+      }
     }
-    return derefSchema(document, target, depth + 1, new Set([...seen, node.$ref]));
-  }
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(node)) {
-    if (key === "default" || key === "example") {
-      result[key] = value;
-    } else if (
-      (key === "properties" ||
-        key === "patternProperties" ||
-        key === "$defs" ||
-        key === "definitions") &&
-      isObject(value)
-    ) {
-      // Property and definition names can themselves be annotation keywords.
-      result[key] = Object.fromEntries(
-        Object.entries(value).map(([name, schema]) => [
-          name,
-          derefSchema(document, schema, depth + 2, seen),
-        ]),
-      );
-    } else {
-      result[key] = derefSchema(document, value, depth + 1, seen);
+    return key;
+  };
+
+  const walk = (node: unknown): unknown => {
+    if (isArray(node)) {
+      return node.map(walk);
     }
+    if (!isObject(node)) {
+      return node;
+    }
+    if (typeof node.$ref === "string") {
+      const key = define(node.$ref);
+      return key === undefined ? {} : { $ref: `#/$defs/${key}` };
+    }
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "default" || key === "example") {
+        result[key] = value;
+      } else if (SCHEMA_MAP_KEYWORDS.has(key) && isObject(value)) {
+        result[key] = Object.fromEntries(
+          Object.entries(value).map(([name, schema]) => [name, walk(schema)]),
+        );
+      } else if (!BASE_URI_KEYWORDS.has(key)) {
+        result[key] = walk(value);
+      }
+    }
+    normalizeSchemaType(result);
+    normalizeNullable(result);
+    normalizeSchemaAnnotations(result);
+    return result;
+  };
+
+  const convert = (schema: unknown): unknown => {
+    const result = walk(schema);
+    for (let entry = pending.pop(); entry !== undefined; entry = pending.pop()) {
+      defs[entry[0]] = walk(entry[1]);
+    }
+    return result;
+  };
+
+  return { convert, defs };
+}
+
+/**
+ * Whether `ref` leads only through `$ref`s into a loop. Such a schema
+ * constrains nothing, and the validator would follow it forever.
+ */
+function isAliasCycle(document: Record<string, unknown>, ref: string): boolean {
+  const seen = new Set<string>();
+  for (let next: unknown = ref; typeof next === "string";) {
+    if (seen.has(next)) {
+      return true;
+    }
+    seen.add(next);
+    const target = resolveRef(document, next);
+    next = isObject(target) ? target.$ref : undefined;
   }
-  normalizeSchemaType(result);
-  normalizeNullable(result);
-  normalizeSchemaAnnotations(result);
-  return result;
+  return false;
+}
+
+/**
+ * A `$defs` key for `ref`, named after its last segment. Keys use only
+ * characters that need no escaping in a JSON pointer or URI fragment.
+ */
+function uniqueKey(ref: string, defs: Readonly<Record<string, unknown>>): string {
+  const name = (ref.slice(ref.lastIndexOf("/") + 1) || "schema").replace(/[^\w.-]/g, "_");
+  let key = name;
+  // Assigning `__proto__` would replace the prototype instead of adding a key.
+  for (let suffix = 2; Object.hasOwn(defs, key) || key === "__proto__"; suffix += 1) {
+    key = `${name}_${suffix}`;
+  }
+  return key;
 }
 
 /** Valid JSON Schema `type` values (draft 2020-12). */

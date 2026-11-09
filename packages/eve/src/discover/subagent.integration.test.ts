@@ -1,3 +1,4 @@
+import { sourcesOf } from "#discover/manifest.js";
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -66,7 +67,28 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "lib/client.js",
           },
         ],
-        instructions: [
+        configModule: {
+          sourceKind: "module",
+          logicalPath: "agent.mjs",
+          sourceId: "agent.mjs",
+        },
+        sources: [
+          {
+            logicalPath: "memory/profile.ts",
+            slot: "profile",
+            sourceId: "memory/profile.ts",
+            sourceKind: "module",
+          },
+          {
+            sourceKind: "module",
+            logicalPath: "sandbox/sandbox.js",
+            sourceId: "sandbox/sandbox.js",
+          },
+          {
+            sourceKind: "module",
+            logicalPath: "tools/search.js",
+            sourceId: "tools/search.js",
+          },
           {
             definition: {
               content: "Research tasks thoroughly.",
@@ -77,32 +99,7 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "instructions.md",
           },
         ],
-        memories: [
-          {
-            logicalPath: "memory/profile.ts",
-            slot: "profile",
-            sourceId: "memory/profile.ts",
-            sourceKind: "module",
-          },
-        ],
-        sandbox: {
-          sourceKind: "module",
-          logicalPath: "sandbox/sandbox.js",
-          sourceId: "sandbox/sandbox.js",
-        },
-        configModule: {
-          sourceKind: "module",
-          logicalPath: "agent.mjs",
-          sourceId: "agent.mjs",
-        },
-        tools: [
-          {
-            sourceKind: "module",
-            logicalPath: "tools/search.js",
-            sourceId: "tools/search.js",
-          },
-        ],
-        version: 15,
+        version: 16,
       },
       rootPath: researcherRoot,
       sourceId: "subagents/researcher",
@@ -127,7 +124,17 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "lib/review.js",
           },
         ],
-        instructions: [
+        configModule: {
+          sourceKind: "module",
+          logicalPath: "agent.js",
+          sourceId: "agent.js",
+        },
+        sources: [
+          {
+            sourceKind: "module",
+            logicalPath: "sandbox/sandbox.mjs",
+            sourceId: "sandbox/sandbox.mjs",
+          },
           {
             definition: {
               content: "Review drafts for clarity.",
@@ -138,17 +145,7 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "instructions.md",
           },
         ],
-        sandbox: {
-          sourceKind: "module",
-          logicalPath: "sandbox/sandbox.mjs",
-          sourceId: "sandbox/sandbox.mjs",
-        },
-        configModule: {
-          sourceKind: "module",
-          logicalPath: "agent.js",
-          sourceId: "agent.js",
-        },
-        version: 15,
+        version: 16,
       },
       rootPath: reviewerRoot,
       sourceId: "subagents/reviewer",
@@ -165,9 +162,9 @@ describe("discoverSubagents (memory)", () => {
         }),
         "node_modules/@acme/research/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "test",
-          requires: { extension: 1, tool: 1 },
+          formatVersion: 3,
+          builtWithEve: "0.0.0",
+          contractMajor: 0,
         }),
         "node_modules/@acme/research/extension/tools/search.ts": "export default {};",
       },
@@ -198,7 +195,7 @@ describe("discoverSubagents (memory)", () => {
       packageName: "@acme/research",
       specifier: "@acme/research",
       manifest: {
-        tools: [
+        sources: [
           {
             logicalPath: "tools/search.ts",
             sourceId: "tools/search.ts",
@@ -224,7 +221,7 @@ describe("discoverSubagents (memory)", () => {
     });
 
     expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.subagents[0]?.manifest.instructions).toEqual([
+    expect(sourcesOf(result.manifest.subagents[0]!.manifest, "instructions")).toEqual([
       {
         definition: {
           content: "Research carefully.",
@@ -324,10 +321,10 @@ describe("discoverSubagents (memory)", () => {
           errors: 1,
           warnings: 0,
         },
-        schedules: [],
       },
       subagentId: "scheduled",
     });
+    expect(sourcesOf(result.subagents[0]!.manifest, "schedule")).toEqual([]);
   });
 
   it("reports an invalid sandbox root inside local subagent packages", async () => {
@@ -354,10 +351,10 @@ describe("discoverSubagents (memory)", () => {
           errors: 1,
           warnings: 0,
         },
-        sandbox: null,
       },
       subagentId: "researcher",
     });
+    expect(sourcesOf(result.subagents[0]!.manifest, "sandbox")).toEqual([]);
   });
 
   it("discovers file entries directly under subagents/ as single-file subagents", async () => {

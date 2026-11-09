@@ -1,5 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { getAdapterKind } from "#channel/adapter.js";
+import { getAdapterKind, seedChannelState } from "#channel/adapter.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -110,8 +110,8 @@ export function createRuntimeAdapterRegistry(input: {
  * Rehydrates one serialized adapter from the runtime-owned registry.
  *
  * Looks up the adapter config by `kind`, then merges the serialized state
- * onto it. The result is a full adapter with behavior functions and
- * restored state.
+ * onto a copy of its seed state. The result is a full adapter with behavior
+ * functions and restored state.
  */
 export function deserializeRuntimeAdapter(
   registry: RuntimeAdapterRegistry,
@@ -130,7 +130,11 @@ export function deserializeRuntimeAdapter(
     );
   }
 
-  return { ...adapterConfig, state: serialized.state };
+  // Runs at every step boundary, not only on resume. The seed restores fields
+  // added to it after this session started, so `context(state)` never sees
+  // them missing; a deleted field is restored the same way, since the two
+  // cannot be told apart.
+  return { ...adapterConfig, state: seedChannelState(adapterConfig.state, serialized.state) };
 }
 
 function requireAdapterKind(
@@ -172,7 +176,7 @@ function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   }
 
   // Remaining keys on a ChannelAdapter object correspond to stream
-  // event handlers (keyed by event type, e.g. "input.requested").
+  // event handlers (keyed by event type, e.g. "interaction.opened").
   for (const [key, value] of Object.entries(adapter)) {
     if (ADAPTER_NON_EVENT_FIELDS.has(key)) {
       continue;

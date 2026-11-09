@@ -29,7 +29,6 @@ describe("docs analytics", () => {
     ["/", "home"],
     ["https://eve.dev/docs/agent-config?tab=files", "docs"],
     ["/integrations/slack", "integrations"],
-    ["/templates/eve-chat-template", "templates"],
     ["/api/search", "other"],
     [undefined, "other"],
   ])("classifies %s as %s without retaining the URL", (value, expected) => {

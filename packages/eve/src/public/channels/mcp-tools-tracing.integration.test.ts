@@ -348,7 +348,7 @@ describe("invokeTool trace policy", () => {
       invokeTool(runtime, "lookup", { text: "plain" }, { auth: alice }),
     );
     (parent as Span).end();
-    expect(result).toMatchObject({ status: "completed" });
+    expect(result).toMatchObject({ outcome: "completed" });
     expect(finished().map((span) => span.name)).toEqual(["platform request"]);
     expect(finished()[0]!.status.code).not.toBe(SpanStatusCode.ERROR);
     expectNoContent();
@@ -367,7 +367,7 @@ describe("invokeTool trace policy", () => {
       invokeTool(runtime, "explode", { text: SENTINEL }, { auth: alice }),
     );
     (parent as Span).end();
-    expect(result).toMatchObject({ status: "failed" });
+    expect(result).toMatchObject({ outcome: "failed" });
     expect(finished().map((span) => span.name)).toEqual(["platform request"]);
     expectNoContent();
   });

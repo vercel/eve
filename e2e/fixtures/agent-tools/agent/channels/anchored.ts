@@ -63,7 +63,7 @@ export default defineChannel({
         ok: true,
         anchorToken,
         initialContinuationToken: `pending:${body.threadId}`,
-        sessionId: session.id,
+        sessionId: session.sessionId,
       });
     }),
 
@@ -75,16 +75,21 @@ export default defineChannel({
         state: initialState(anchorToken),
       });
 
-      return Response.json({ ok: true, anchorToken, sessionId: session.id });
+      return Response.json({ ok: true, anchorToken, sessionId: session.sessionId });
     }),
   ],
   events: {
-    "turn.started"(event, channel) {
-      channel.state.turnIds.push(event.turnId);
+    "turn.started"(event, { channel }) {
+      channel.state.turnIds.push(event.data.turnId);
     },
-    "message.completed"(event, channel) {
+    "content.completed"(event, { channel }) {
+      if (event.data.phase !== "reply" || event.data.kind !== "text") return;
+      channel.state.completedMessages.push(
+        typeof event.data.value === "string" ? event.data.value : "",
+      );
+    },
+    "turn.settled"(_event, { channel }) {
       channel.state.completedTurns += 1;
-      channel.state.completedMessages.push(event.message ?? "");
 
       const anchorToken = channel.state.anchorToken;
       const continuation = channel.continuation;

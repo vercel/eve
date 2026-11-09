@@ -119,7 +119,8 @@ export function resolveConnectionPrincipalFromAuth(
   };
 }
 
-function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
+/** Whether `current` is a Vercel user authenticated by a development OIDC token for this project. */
+export function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
   return (
     current.authenticator === "oidc" &&
     isVercelOidcIssuer(current.issuer) &&

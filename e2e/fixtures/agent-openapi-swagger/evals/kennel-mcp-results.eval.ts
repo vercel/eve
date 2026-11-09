@@ -19,11 +19,11 @@ export default defineEval({
       count: 1,
       output: { petId: 4217, name: "Biscuit", kennel: "B3" },
     });
-    // A text result without an output schema is parsed as JSON, and the
-    // omitted `day` reaches the server as its schema default.
+    // A text result without an output schema is parsed as JSON. The call keeps
+    // the model's input, and the server echoes the schema default it received
+    // for the omitted `day`.
     turn.calledTool("kennel__list_feedings", {
       count: 1,
-      input: { day: "today" },
       output: (value) =>
         Array.isArray(value) &&
         value.length === 2 &&
