@@ -19,7 +19,8 @@ export async function forwardAgentSessionRequest(input: {
   readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
 }): Promise<void> {
   const { from, remote } = input;
-  const request = remote === undefined ? input.request : remoteRequest(input.request);
+  const request =
+    remote === undefined ? input.request : remoteRequest(input.request, remote.sessionId);
   const route =
     request.route === undefined
       ? undefined
@@ -41,21 +42,26 @@ export async function forwardAgentSessionRequest(input: {
 
 /**
  * A remote child's request as this session can trust it. A remote session describes its sign-ins
- * itself, so their grant, principal, callback and the card they wait on are its claims, as is the
- * call it names. A sign-in shares a card only through `grant` and `waitsOn`, so without them a
- * remote's sign-in keeps its own card, and its answer never settles another sign-in here. A
- * remote's genuine sign-in names its own deployment's callback, so it never shared one anyway.
+ * itself, so their grant, principal, callback and the card they wait on are its claims, as are
+ * the call and the session it names. A sign-in shares a card only through `grant` and `waitsOn`,
+ * so without them a remote's sign-in keeps its own card, and its answer never settles another
+ * sign-in here. A remote's genuine sign-in names its own deployment's callback, so it never shared
+ * one anyway. Its requests come from the session this one opened (`sessionId`), so they open and
+ * settle only mirrors with that session as their origin.
  */
-function remoteRequest(request: AgentSessionRequest): AgentSessionRequest {
+function remoteRequest(request: AgentSessionRequest, sessionId: string): AgentSessionRequest {
   return {
     ...request,
+    childSessionId: sessionId,
     events: request.events.map((event) => {
-      const signIn = event.type === "interaction.opened" ? event.data.request.signIn : undefined;
-      if (event.type !== "interaction.opened" || signIn === undefined) return event;
+      if (event.type !== "interaction.opened") return event;
+      const origin = { ...event.data.origin, interactionId: event.data.interactionId, sessionId };
+      const signIn = event.data.request.signIn;
+      if (signIn === undefined) return { ...event, data: { ...event.data, origin } };
       const { grant: _grant, waitsOn: _waitsOn, ...claimed } = signIn;
       return {
         ...event,
-        data: { ...event.data, request: { ...event.data.request, signIn: claimed } },
+        data: { ...event.data, origin, request: { ...event.data.request, signIn: claimed } },
       };
     }),
   };
