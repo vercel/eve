@@ -51,6 +51,11 @@ export default defineExtension({
            * repository, and the installation token. Return `true` to run it.
            */
           authorize: fn<GitHubAuthorize<GitHubAppAuthorizeRequest>>(),
+          /**
+           * Installation permissions each minted token carries, such as
+           * `"contents:write"`. Omit it for every permission the App holds.
+           */
+          permissions: z.array(z.string().min(1)).min(1).optional(),
           /** `"app"` mints GitHub App installation tokens. */
           principalType: z.literal("app"),
         }),

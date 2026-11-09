@@ -637,6 +637,39 @@ test("mints an owner-wide installation token for owner-level discovery", async (
   assert.equal(runs.length, 1);
 });
 
+test("mints app tokens with only the configured permissions", async () => {
+  const tokenCalls: ConnectTokenParams[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  await executeGitHubShell(
+    { ...READ, command: "gh pr view 7 --repo acme/widgets", repository: "acme/widgets" },
+    { ...CONFIG, permissions: ["contents:read", "pull_requests:write"] },
+    {
+      sessionId: "session-1",
+      async getConnectToken(_connector, params) {
+        tokenCalls.push(params);
+        return "token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
+  );
+  assert.deepEqual(tokenCalls, [
+    {
+      authorizationDetails: [
+        {
+          type: "github_app_installation",
+          org: "acme",
+          repositories: ["widgets"],
+          permissions: ["contents:read", "pull_requests:write"],
+        },
+      ],
+      subject: { type: "app" },
+    },
+  ]);
+  assert.equal(runs.length, 1);
+});
+
 test("scopes app tokens to the declared owner's installation and leaves owners to authorize", async () => {
   const tokenCalls: ConnectTokenParams[] = [];
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
