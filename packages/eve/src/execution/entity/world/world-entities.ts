@@ -1,9 +1,10 @@
-import type {
-  Activation,
-  ActivationOutcome,
-  Entities,
-  EntityHandle,
-  EntityMessage,
+import {
+  AliasTakenError,
+  type Activation,
+  type ActivationOutcome,
+  type Entities,
+  type EntityHandle,
+  type EntityMessage,
 } from "#execution/entity/entities.js";
 import type { QueueWorld, RuntimeWorld } from "#execution/world/runtime-world.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -25,6 +26,7 @@ import {
   streamNameOf,
   write,
   type Writer,
+  writtenAs,
 } from "./runs.js";
 import { liveRead, polledRead } from "./stream-read.js";
 
@@ -97,11 +99,13 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
   const runId = (key: string) => runIdOf(kind, key);
 
   const createHook = async (key: string, writer: Writer, token: string) => {
-    await write(world, key, runId(key), writer, {
+    const result = await write(world, key, runId(key), writer, {
       correlationId: `hook_${createUlid()}`,
       eventData: { token },
       eventType: "hook_created",
     });
+    // A World that holds the token for another run keeps it there, and says so.
+    if (writtenAs(result) === "hook_conflict") throw new AliasTakenError(token);
   };
 
   const newestEvent = async (key: string): Promise<string | undefined> =>
