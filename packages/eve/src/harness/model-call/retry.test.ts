@@ -43,4 +43,13 @@ describe("runModelCallWithRetries", () => {
     await expect(runModelCallWithRetries(call, session)).rejects.toThrow("maximum duration");
     expect(call).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps the full retry budget for other transient failures", async () => {
+    const call = vi.fn(async () => {
+      throw busy();
+    });
+
+    await expect(runModelCallWithRetries(call, session)).rejects.toThrow("busy");
+    expect(call).toHaveBeenCalledTimes(3);
+  });
 });
