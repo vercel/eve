@@ -1,15 +1,15 @@
-import { contentPhase } from "#protocol/session-events/catalog.js";
+import { contentPhase, textOfPart } from "#protocol/session-events/catalog.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { ContentCompletedData } from "#protocol/session-events/families/content.js";
 import { formatErrorHint } from "#internal/logging.js";
 
 // What built-in channels post: a turn's reply text as each part completes, and failures with
-// the error's code as their hint. Narration (text the turn continues after) isn't posted.
+// the error's code as their hint. Narration (text the turn continues after) isn't posted. A reply
+// part of a kind the channel can't show, such as a tool's card, posts its fallback text.
 
 /** The text a completed content part replies with, or `undefined` for anything else. */
 export function replyTextOf(part: ContentCompletedData): string | undefined {
-  if (part.kind !== "text" || contentPhase(part.phase) !== "reply") return undefined;
-  return typeof part.value === "string" && part.value.length > 0 ? part.value : undefined;
+  return contentPhase(part.phase) === "reply" ? textOfPart(part) : undefined;
 }
 
 /** A failure as the error hint formatter reads it. */

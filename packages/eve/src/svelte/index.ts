@@ -21,6 +21,7 @@ export type {
   ConversationState,
 } from "#client/conversation-state.js";
 export type {
+  EveContentPart,
   EveInteractionPart,
   EveMessage,
   EveMessageMetadata,

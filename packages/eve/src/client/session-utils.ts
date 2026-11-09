@@ -5,6 +5,8 @@ import type {
   DeliverySettledData,
 } from "#protocol/session-events/families/delivery.js";
 import type { TurnOutcome } from "#protocol/session-events/families/turn.js";
+import { textOfPart } from "#protocol/session-events/catalog.js";
+import type { ContentCompletedData } from "#protocol/session-events/families/content.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openInteractions } from "#protocol/session-projection/selectors.js";
@@ -53,7 +55,7 @@ export function turnSummary(deliveryId?: string): {
   const turnResults = new Map<string, unknown>();
   const turnFailures = new Map<string, ErrorInfo>();
   let sessionFailure: ErrorInfo | undefined;
-  const parts = new Map<string, { readonly kind: string; readonly value: unknown }>();
+  const parts = new Map<string, ContentCompletedData>();
   let boundary: SessionEvent | undefined;
   let failure: ErrorInfo | undefined;
   let message: string | undefined;
@@ -74,7 +76,7 @@ export function turnSummary(deliveryId?: string): {
       if (event.type === "session.ended") sessionFailure = failed;
     }
     if (event.type === "content.completed") {
-      parts.set(event.data.partId, { kind: event.data.kind, value: event.data.value });
+      parts.set(event.data.partId, event.data);
       if (event.data.kind === "result") {
         result = event.data.value;
         if (event.scope?.turnId !== undefined) turnResults.set(event.scope.turnId, result);
@@ -83,7 +85,8 @@ export function turnSummary(deliveryId?: string): {
     if (event.type === "turn.settled") {
       const text = (event.data.reply ?? []).flatMap((partId) => {
         const part = parts.get(partId);
-        return part?.kind === "text" && typeof part.value === "string" ? [part.value] : [];
+        const shown = part === undefined ? undefined : textOfPart(part);
+        return shown === undefined ? [] : [shown];
       });
       message = text.length === 0 ? undefined : text.join("\n");
       turnReplies.set(event.data.turnId, message);

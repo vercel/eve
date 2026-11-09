@@ -37,7 +37,8 @@ export interface EveMessageMetadata {
  * One renderable part of an {@link EveMessage}, discriminated by `type`.
  *
  * `text` and `reasoning` carry the model's text, `"streaming"` until the part completes; `file`
- * is an attachment a person sent; `tool` ({@link EveToolPart}) is a call the turn made; and
+ * is an attachment a person sent; `content` ({@link EveContentPart}) is a reply part of another
+ * kind, such as a tool's card; `tool` ({@link EveToolPart}) is a call the turn made; and
  * `interaction` ({@link EveInteractionPart}) is something the turn asked a person that no call
  * carries. `stepIndex` is the turn's step that produced the part. Assistant text and reasoning
  * keep the `id` of their content part as they stream and complete.
@@ -65,8 +66,29 @@ export type EveMessagePart =
       readonly type: "file";
       readonly url?: string;
     }
+  | EveContentPart
   | EveInteractionPart
   | EveToolPart;
+
+/**
+ * A reply part of a kind other than text, such as a card a tool added. Render `value` by `kind`
+ * or `mediaType`, or show `fallbackText`. While the model writes it, the part is `"streaming"`
+ * and `text` holds the raw preview, such as partial JSON; once complete it is `"done"` with
+ * `value`. `callId` names the call that wrote it, when a tool did.
+ */
+export interface EveContentPart {
+  readonly type: "content";
+  readonly id: string;
+  readonly kind: string;
+  readonly mediaType?: string;
+  readonly callId?: string;
+  readonly stepIndex?: number;
+  readonly state: "done" | "streaming";
+  /** The raw preview while streaming. */
+  readonly text?: string;
+  readonly value?: unknown;
+  readonly fallbackText?: string;
+}
 
 /**
  * An interaction no call carries, where its turn asked it: a sign-in, the budget prompt, or a

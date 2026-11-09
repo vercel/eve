@@ -17,6 +17,7 @@ import {
   openWork,
   queue,
   reply,
+  replyText,
   waiting,
 } from "#protocol/session-projection/selectors.js";
 
@@ -441,6 +442,8 @@ describe("the shared fold", () => {
 
     const shown = folded(lines("completed"));
     expect(reply(shown, "turn_0").map((part) => part.partId)).toEqual(["c_card.reply", "p_after"]);
+    // Readers that show only text read the card's fallback text in its place.
+    expect(replyText(shown, "turn_0")).toBe("A card.\nDone.");
     expect(shown.parts["c_card.reply"]).toMatchObject({ callId: "c_card", turnId: "turn_0" });
 
     const failedPreviews = emptyPreviews();

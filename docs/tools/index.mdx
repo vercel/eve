@@ -340,7 +340,7 @@ export default defineTool({
 });
 ```
 
-The session stream records the part as a `content.completed` event with your `kind`, `mediaType`, `value`, and `fallbackText`, `phase: "reply"`, and the `callId` of the call that wrote it. The part joins the reply of the call's turn and stays there when the model replies again afterward. eve's built-in channels post text replies only, so render the part in your own client by reading it from the session stream.
+The session stream records the part as a `content.completed` event with your `kind`, `mediaType`, `value`, and `fallbackText`, `phase: "reply"`, and the `callId` of the call that wrote it. The part joins the reply of the call's turn and stays there when the model replies again afterward. Built-in channels, the dev TUI, ACP clients, and eval reply assertions show its `fallbackText`. A subagent's answer to its parent is the text the model wrote, without the part. Web clients get it as a [`content` message part](/docs/guides/frontend/use-eve-agent#content-parts) to render.
 
 - `kind` names the part, such as `"card"`. eve rejects `"text"`, `"reasoning"`, `"result"`, and `"file"` at build time.
 - `streamInput: true` streams the call's input as `content.delta` events for the part while the model writes it, in place of the call's own input preview. A call that fails drops the preview.

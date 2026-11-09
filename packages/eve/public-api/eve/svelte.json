@@ -4,6 +4,7 @@
   "AskedCall",
   "ConversationAgentSession",
   "ConversationState",
+  "EveContentPart",
   "EveInteractionPart",
   "EveMessage",
   "EveMessageMetadata",

@@ -1,3 +1,4 @@
+import { EVE_CONTENT_KINDS } from "#protocol/session-events/catalog.js";
 import { callState } from "#protocol/session-projection/selectors.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
@@ -84,6 +85,24 @@ export function assistantMessages(
     const at = partPlace(view, row);
     if (!shows(at?.turnId)) continue;
     if (row.kind === "result") results.set(at.turnId, row.value);
+    if (!EVE_CONTENT_KINDS.has(row.kind)) {
+      place(at.turnId, {
+        at: row.introducedAt,
+        part: {
+          ...(row.callId !== undefined && { callId: row.callId }),
+          ...(row.fallbackText !== undefined && { fallbackText: row.fallbackText }),
+          id: row.partId,
+          kind: row.kind,
+          ...(row.mediaType !== undefined && { mediaType: row.mediaType }),
+          state: "done",
+          stepIndex: at.stepIndex,
+          type: "content",
+          value: row.value,
+        },
+        rank: 0,
+      });
+      continue;
+    }
     const type = textKind(row.kind);
     if (type === undefined || typeof row.value !== "string") continue;
     place(at.turnId, {
@@ -110,6 +129,22 @@ export function assistantMessages(
 
   for (const preview of Object.values(previews.parts)) {
     const at = runPlace(view, preview.runId);
+    if (shows(at?.turnId) && !EVE_CONTENT_KINDS.has(preview.kind)) {
+      place(at.turnId, {
+        at: Infinity,
+        part: {
+          ...(preview.callId !== undefined && { callId: preview.callId }),
+          id: preview.partId,
+          kind: preview.kind,
+          state: "streaming",
+          stepIndex: at.stepIndex,
+          text: preview.text,
+          type: "content",
+        },
+        rank: 0,
+      });
+      continue;
+    }
     const type = textKind(preview.kind);
     if (!shows(at?.turnId) || type === undefined) continue;
     place(at.turnId, {

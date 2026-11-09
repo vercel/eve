@@ -1,3 +1,4 @@
+import { EVE_CONTENT_KINDS } from "#protocol/session-events/catalog.js";
 import {
   isWorkflowToolDefinition,
   readWorkflowToolEntryPoints,
@@ -288,14 +289,12 @@ function expectOneOf<const T extends string>(
   return text as T;
 }
 
-// Kinds eve writes itself; a tool's part would read as one of them.
-const RESERVED_REPLY_KINDS = new Set(["text", "reasoning", "result", "file"]);
-
 function assertToolReplyPart(value: unknown, message: string): void {
   const reply = expectObjectRecord(value, message);
   expectOnlyKnownKeys(reply, ["build", "kind", "mediaType", "streamInput"], message);
   const kind = expectString(reply.kind, message);
-  if (kind.length === 0 || RESERVED_REPLY_KINDS.has(kind)) {
+  // A tool's part would read as one of the kinds eve writes itself.
+  if (kind.length === 0 || EVE_CONTENT_KINDS.has(kind)) {
     throw new Error(
       `${message} "replyPart.kind" must name a kind of its own, such as "card", not "${kind}".`,
     );

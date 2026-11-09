@@ -1,5 +1,5 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
-import { errorHintOf } from "#public/channels/reply.js";
+import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
@@ -656,7 +656,13 @@ export const defaultEvents: SlackChannelInternalEvents = {
       stream.reasoning = "";
       return;
     }
-    if (data.kind !== "text") return;
+    if (data.kind !== "text") {
+      // A part Slack can't show, such as a tool's card, posts its fallback text.
+      const fallback = replyTextOf(data);
+      if (fallback !== undefined)
+        await deliverCompletedSlackReply(channel, fallback, { turnId: ctx.session.turn.id });
+      return;
+    }
     const text = typeof data.value === "string" ? data.value : "";
     if (contentPhase(data.phase) === "narration") {
       channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;

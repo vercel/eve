@@ -40,6 +40,7 @@
   "CreateSessionOptions",
   "CreatedClientSession",
   "CreatedIdleClientSession",
+  "EveContentPart",
   "EveError",
   "EveInteractionPart",
   "EveMessage",

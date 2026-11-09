@@ -94,6 +94,7 @@ export type {
 } from "#client/types.js";
 
 export type {
+  EveContentPart,
   EveInteractionPart,
   EveMessage,
   EveMessageMetadata,

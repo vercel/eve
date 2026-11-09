@@ -254,6 +254,37 @@ describe("chatSdkChannel completing a streamed reply", () => {
     expect(completed.channel.state.anchorMessageId).toBeNull();
   });
 
+  it("posts a card it can't show as its fallback text, and leaves the card's preview alone", async () => {
+    const reply = streamingReply();
+    const ctx = buildAdapterContext(reply.channel, stubSessionAccessor());
+    await callChannelEvent(
+      reply.channel,
+      channelEvent("content.delta", {
+        callId: "call-1",
+        delta: '{"root":',
+        kind: "card",
+        partId: "call-1.reply",
+      }),
+      ctx,
+    );
+    await callChannelEvent(
+      reply.channel,
+      channelEvent("content.completed", {
+        callId: "call-1",
+        fallbackText: "Deploys: 1,284",
+        kind: "card",
+        partId: "call-1.reply",
+        phase: "reply",
+        value: { root: "summary" },
+      }),
+      ctx,
+    );
+
+    expect(reply.adapter.posted).toEqual([
+      { message: { markdown: "Deploys: 1,284" }, threadId: THREAD_ID },
+    ]);
+  });
+
   it("finishes a throttled reply with one edit to the full text", async () => {
     const reply = streamingReply(60_000);
     await reply.delta("Hel", true);

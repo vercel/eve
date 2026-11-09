@@ -189,7 +189,7 @@ export class ConversationTranscript {
       const activeSteps = activeToolSteps(states);
 
       for (const [index, part] of message.parts.entries()) {
-        if (part.type === "text" || part.type === "reasoning") {
+        if (part.type === "text" || part.type === "reasoning" || part.type === "content") {
           const block = this.#contentBlock(message, index, options, working);
           if (block !== undefined) blocks.push(block);
         } else if (part.type === "interaction") {
@@ -543,6 +543,17 @@ export class ConversationTranscript {
     working: boolean,
   ): Block | undefined {
     const part = message.parts[index];
+    if (part?.type === "content") {
+      // The terminal shows a reply part of another kind, such as a card, as its fallback text.
+      if (part.state !== "done" || part.fallbackText === undefined) return undefined;
+      const body = stripTerminalControls(part.fallbackText).trim();
+      if (body.length === 0) return undefined;
+      return this.#memoize(`content:${part.id}`, [body], () => ({
+        kind: "assistant",
+        body,
+        live: false,
+      }));
+    }
     if (part?.type !== "text" && part?.type !== "reasoning") return undefined;
     if (part.type === "reasoning" && options.reasoning !== "full") return undefined;
     const body = stripTerminalControls(part.text).trim();

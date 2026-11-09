@@ -198,6 +198,70 @@ describe("the conversation", () => {
     expect(tool(conversation)?.inputText).toBeUndefined();
   });
 
+  it("shows a card a call writes as a content part, streaming and then done", () => {
+    const card = {
+      data: {
+        callId: "call_0",
+        capability: { kind: "tool", name: "card" },
+        input: { root: "summary" },
+        owner: { runId },
+      },
+      scope,
+      type: "call.requested",
+    } satisfies SessionEvent;
+    const conversation = observe([
+      ...started,
+      {
+        data: { callId: "call_0", delta: '{"root":', kind: "card", partId: "call_0.reply" },
+        scope,
+        type: "content.delta",
+      },
+      card,
+    ]);
+    expect(assistantParts(conversation)).toContainEqual(
+      expect.objectContaining({
+        callId: "call_0",
+        kind: "card",
+        state: "streaming",
+        text: '{"root":',
+        type: "content",
+      }),
+    );
+
+    observe(
+      [
+        {
+          data: {
+            callId: "call_0",
+            fallbackText: "Deploys: 1,284",
+            kind: "card",
+            mediaType: "application/vnd.acme.card+json",
+            partId: "call_0.reply",
+            phase: "reply",
+            value: { root: "summary" },
+          },
+          scope: { turnId },
+          type: "content.completed",
+        },
+        { data: { callId: "call_0", outcome: "completed" }, scope, type: "call.settled" },
+      ],
+      conversation,
+    );
+    expect(assistantParts(conversation).filter((part) => part.type === "content")).toEqual([
+      {
+        callId: "call_0",
+        fallbackText: "Deploys: 1,284",
+        id: "call_0.reply",
+        kind: "card",
+        mediaType: "application/vnd.acme.card+json",
+        state: "done",
+        stepIndex: 0,
+        type: "content",
+        value: { root: "summary" },
+      },
+    ]);
+  });
+
   it("reads a call's part from its row: state, output, and label", () => {
     const conversation = observe([
       ...started,

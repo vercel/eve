@@ -15,6 +15,7 @@ import {
 } from "#protocol/session-projection/tree.js";
 import type { CallOwner, Capability } from "#protocol/session-events/families/call.js";
 import type { InteractionSubject } from "#protocol/session-events/families/interaction.js";
+import { textOfPart } from "#protocol/session-events/catalog.js";
 import type {
   CallRow,
   ChangeRow,
@@ -66,11 +67,12 @@ export function reply(view: SessionView, turnId: string): readonly PartRow[] {
   });
 }
 
-/** A turn's reply as text: its text parts, one per line. */
+/** A turn's reply as text: its text parts, and other parts' fallback text, one per line. */
 export function replyText(view: SessionView, turnId: string): string | undefined {
-  const text = reply(view, turnId).flatMap((part) =>
-    part.kind === "text" && typeof part.value === "string" ? [part.value] : [],
-  );
+  const text = reply(view, turnId).flatMap((part) => {
+    const shown = textOfPart(part);
+    return shown === undefined ? [] : [shown];
+  });
   return text.length === 0 ? undefined : text.join("\n");
 }
 

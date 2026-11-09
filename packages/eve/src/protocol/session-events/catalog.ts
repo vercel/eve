@@ -4,6 +4,7 @@
 
 import type { CallOutcome } from "./families/call.js";
 import type { ContextOutcome } from "./families/context.js";
+import type { ContentKind } from "./families/content.js";
 import type { DeliveryOutcome } from "./families/delivery.js";
 import type { InteractionOutcome } from "./families/interaction.js";
 import type { ModelOutcome } from "./families/model.js";
@@ -12,6 +13,7 @@ import type { SessionOutcome } from "./families/session.js";
 import type { TaskOutcome } from "./families/task.js";
 import type { TurnOutcome } from "./families/turn.js";
 import type { Fact, Progress } from "./facts.js";
+import type { JsonValue } from "./json.js";
 
 export type Family =
   | "session"
@@ -183,4 +185,30 @@ export function isKnownOutcome(type: TerminalType, outcome: unknown): boolean {
 /** A content part's phase, with unknown values read as narration. */
 export function contentPhase(phase: unknown): "narration" | "reply" {
   return phase === "reply" ? "reply" : "narration";
+}
+
+/** The kinds eve writes itself. Any other kind, such as a tool's `"card"`, carries `fallbackText`. */
+export const EVE_CONTENT_KINDS: ReadonlySet<string> = new Set([
+  "text",
+  "reasoning",
+  "result",
+  "file",
+]);
+
+/**
+ * What a reader that shows only text shows for a part: a text part's text, or the fallback text of
+ * a kind eve doesn't write. `undefined` for reasoning, results, files, and empty parts.
+ */
+export function textOfPart(part: {
+  readonly kind: ContentKind;
+  readonly value?: JsonValue;
+  readonly fallbackText?: string;
+}): string | undefined {
+  const text =
+    part.kind === "text"
+      ? part.value
+      : EVE_CONTENT_KINDS.has(part.kind)
+        ? undefined
+        : part.fallbackText;
+  return typeof text === "string" && text.length > 0 ? text : undefined;
 }

@@ -69,18 +69,33 @@ About snapshots:
 
 `messages` are eve's own `EveMessage[]`. To pass them to an API typed as AI SDK `UIMessage[]`, adapt them first.
 
-| Part type     | What it is                                                                                               |
-| ------------- | -------------------------------------------------------------------------------------------------------- |
-| `text`        | Message text                                                                                             |
-| `reasoning`   | Model reasoning                                                                                          |
-| `file`        | An attachment a person sent. `url` can be absent                                                         |
-| `tool`        | A call the turn made                                                                                     |
-| `interaction` | Something the turn asked a person that no call carries: a sign-in, the budget prompt, or a free question |
+| Part type     | What it is                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `text`        | Message text                                                                                               |
+| `reasoning`   | Model reasoning                                                                                            |
+| `file`        | An attachment a person sent. `url` can be absent                                                           |
+| `content`     | A reply part of another kind, such as a card a [tool's `reply`](/docs/tools#add-a-part-to-the-reply) added |
+| `tool`        | A call the turn made                                                                                       |
+| `interaction` | Something the turn asked a person that no call carries: a sign-in, the budget prompt, or a free question   |
 
 - **Keys:** assistant text and reasoning parts carry a stable `id` that survives appends and completion. Use `part.id` as the React key. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
 - **Steps:** each assistant part carries its turn's `stepIndex`.
 - **Follow-ups split replies:** each message a person sends is its own bubble, placed where its turn took it in. A message that arrives while the agent works splits the response around it, and both pieces share `metadata.turnId`. A single event that combines several deliveries stays one bubble.
 - **Attachments:** after `delivery.consumed` confirms an attachment turn, each attachment shows as a `file` part with `mediaType`, optional `filename` and `size`, and a `url` only when the original was browser-resolvable.
+
+### Content parts
+
+A `content` part is a reply part your app renders by its `kind` or `mediaType`, such as a card. Show `fallbackText` for a kind you don't render.
+
+| Field          | What it is                                                         |
+| -------------- | ------------------------------------------------------------------ |
+| `id`, `kind`   | The part, and its kind, such as `card`                             |
+| `mediaType`    | The media type of `value`, when the tool set one                   |
+| `state`        | `streaming` while the model writes it, then `done`                 |
+| `text`         | The raw preview while `state` is `streaming`, such as partial JSON |
+| `value`        | The part's value, once `state` is `done`                           |
+| `fallbackText` | Text to show instead, once `state` is `done`                       |
+| `callId`       | The call that wrote the part, when a tool did                      |
 
 ### Tool parts
 

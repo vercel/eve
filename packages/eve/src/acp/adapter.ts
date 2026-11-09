@@ -1,3 +1,4 @@
+import { replyTextOf } from "#public/channels/reply.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
@@ -455,7 +456,20 @@ export class EveAcpAdapter {
       }
       case "content.completed": {
         const { partId, kind, value } = event.data;
-        if (session.parts.has(partId) || typeof value !== "string") return;
+        if (session.parts.has(partId)) return;
+        // A reply part ACP can't show, such as a tool's card, sends its fallback text.
+        const fallback =
+          kind === "text" || kind === "reasoning" ? undefined : replyTextOf(event.data);
+        if (fallback !== undefined) {
+          session.parts.set(partId, "text");
+          await notifyUpdate(client, sessionId, {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: fallback },
+            messageId: partId,
+          });
+          return;
+        }
+        if (typeof value !== "string") return;
         if (kind !== "text" && kind !== "reasoning") return;
         session.parts.set(partId, kind === "text" ? "text" : "reasoning");
         await notifyUpdate(client, sessionId, {
