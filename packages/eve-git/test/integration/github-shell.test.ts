@@ -934,30 +934,42 @@ test("a lease waits on the host and stops when its call is cancelled", async () 
   }
 });
 
-test("a release that can't take the guard leaves the policy to the next holder", async () => {
+test("a stale lock's release that can't take the guard leaves the policy to the next holder", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   try {
-    // A waiter holds the guard while it breaks this holder's lock as stale.
+    // A waiter holds the guard while it breaks this holder's stale lock.
     execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
-    let calls = 0;
-    const sandboxFake: Pick<SandboxSession, "run"> = {
-      async run(input: Parameters<SandboxSession["run"]>[0]) {
-        calls += 1;
-        // Skip acquisition: the holder already owns the lock.
-        if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
-        return runLockCommand(input.command, lockPath);
-      },
-    };
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
     let cleaned = false;
-    await withSandboxLeaseLock(sandboxFake as SandboxSession, "holder", async () => undefined, {
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
       cleanup: async () => {
         cleaned = true;
       },
     });
     // The waiter's successor replaces the policy, so clearing it here could clear theirs.
     assert.equal(cleaned, false);
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock.guard\n");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a fresh lock's release cleans up even when the guard is busy", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    // Another command's release holds the guard, and no waiter can break a lock this young.
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    let cleaned = false;
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    });
+    assert.equal(cleaned, true);
     assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock.guard\n");
   } finally {
     rmSync(lockRoot, { recursive: true, force: true });
@@ -971,16 +983,8 @@ test("a release breaks a guard a stopped sandbox left behind", async () => {
     execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     execFileSync("touch", ["-t", "200001010000", `${lockPath}.guard`]);
-    let calls = 0;
-    const sandboxFake: Pick<SandboxSession, "run"> = {
-      async run(input: Parameters<SandboxSession["run"]>[0]) {
-        calls += 1;
-        if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
-        return runLockCommand(input.command, lockPath);
-      },
-    };
     let cleanedWhileHeld = "";
-    await withSandboxLeaseLock(sandboxFake as SandboxSession, "holder", async () => undefined, {
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
       cleanup: async () => {
         cleanedWhileHeld = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
       },
@@ -1021,6 +1025,19 @@ test("a lease records how long it waited for another command", async () => {
     rmSync(lockRoot, { recursive: true, force: true });
   }
 });
+
+/** A sandbox whose holder already owns the lock at `lockPath`, so only its release runs. */
+function heldLockSandbox(lockPath: string): SandboxSession {
+  let calls = 0;
+  const sandbox: Pick<SandboxSession, "run"> = {
+    async run(input: Parameters<SandboxSession["run"]>[0]) {
+      calls += 1;
+      if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
+      return runLockCommand(input.command, lockPath);
+    },
+  };
+  return sandbox as SandboxSession;
+}
 
 /** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */
 async function runLockCommand(

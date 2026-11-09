@@ -52,10 +52,16 @@ function acquireCommand(owner: string): string {
 }
 
 /**
+ * A lock younger than this can't be broken before its holder finishes cleaning up, since a waiter
+ * breaks only a lock it finds stale under the guard.
+ */
+const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - GUARD_STALE_AFTER_SECONDS;
+
+/**
  * Starts a release: takes the guard (briefly retrying, and breaking one a stopped sandbox left
  * behind) so no waiter can break the lock while the holder clears its credential, then prints
- * `<guarded> <held>`, where `held` says whether `owner` still holds the lock. A guard that stays
- * busy belongs to a waiter breaking this holder's lock, whose successor replaces the policy.
+ * `<guarded> <held> <fresh>`, where `held` says whether `owner` still holds the lock and `fresh`
+ * whether it is too young for any waiter to break.
  */
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
@@ -71,7 +77,9 @@ function beginReleaseCommand(owner: string): string {
     `done`,
     `held=0`,
     `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
-    `printf '%s %s' "$guarded" "$held"`,
+    `fresh=0`,
+    `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
+    `printf '%s %s %s' "$guarded" "$held" "$fresh"`,
   ].join("\n");
 }
 
@@ -197,20 +205,22 @@ async function release(
 ): Promise<void> {
   let guarded = false;
   let held: boolean | undefined;
+  let fresh = false;
   try {
     const begun = await sandbox.run({ command: beginReleaseCommand(owner) });
-    const [guard, holder] = begun.stdout.trim().split(" ");
-    if (begun.exitCode === 0 && holder !== undefined) {
+    const [guard, holder, young] = begun.stdout.trim().split(" ");
+    if (begun.exitCode === 0 && young !== undefined) {
       guarded = guard === "1";
       held = holder === "1";
+      fresh = young === "1";
     }
   } catch {}
   try {
-    // Clearing without the guard could clear a successor's credential: a waiter holding it is
-    // breaking this holder's lock, and the successor it lets in replaces the policy. When the
-    // sandbox can't say who holds the lock, clean up anyway: leaving a credential leased is worse
-    // than clearing a successor's.
-    if (held === undefined || (held && guarded)) await cleanup?.();
+    // A stale lock cleared without the guard could be broken mid-cleanup, clearing the credential
+    // of the successor the breaker lets in, which replaces the policy anyway. When the sandbox
+    // can't say who holds the lock, clean up anyway: leaving a credential leased is worse than
+    // clearing a successor's.
+    if (held === undefined || (held && (guarded || fresh))) await cleanup?.();
   } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
     await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(
