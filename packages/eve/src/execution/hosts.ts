@@ -34,6 +34,17 @@ export interface HostedRoute {
 }
 
 /** The realm's durable host: what no route holds is its, and its steps can be retried. */
+/** What a session's run records of it (`DurableHost.sessionRecord`). */
+export interface SessionRunRecord {
+  /** The session's id, as its invocation names it. */
+  readonly runId: string;
+  /** As a Workflow run's: `"running"`, or `"completed"`, `"failed"` or `"cancelled"` once it ended. */
+  readonly status: string;
+  readonly createdAt: Date;
+  readonly expiredAt?: Date;
+  readonly attributes: Readonly<Record<string, string>>;
+}
+
 export interface DurableHost {
   /** Names the host: each module copy that installs it builds an equal one. */
   readonly name: string;
@@ -55,6 +66,12 @@ export interface DurableHost {
   cancelRun(runId: string, reason: string): Promise<void>;
   /** Where the sessions it runs keep their streams. */
   readonly lineStore: SessionLineStore;
+  /**
+   * What a session's run records of it, where its host keeps that other than as a Workflow run:
+   * when it started, when it expires, and its attributes (an external invocation's owner and
+   * token). `undefined` for a session it doesn't hold. Without it, Workflow's run is read.
+   */
+  sessionRecord?(sessionId: string): Promise<SessionRunRecord | undefined>;
   /** The attempt of the durable step running now: 1 for its first, more for a retry. */
   stepAttempt(): number | undefined;
   /** A runtime whose sessions run on this host: what a schedule's occurrence starts in. */

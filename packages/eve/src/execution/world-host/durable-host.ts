@@ -1,12 +1,19 @@
+import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
+import { rootOfChild } from "#execution/in-process/world-store.js";
+import { inProcessRunOwner } from "#execution/in-process/runs.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { Runtime } from "#channel/types.js";
 import type { Entities } from "#execution/entity/entities.js";
 import type { DurableHost } from "#execution/hosts.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
-import { logicalSessionInboxToken, logicalSessionToken } from "#execution/session-inbox/address.js";
+import {
+  logicalSessionInboxToken,
+  logicalSessionToken,
+  sessionIdOfCommandToken,
+} from "#execution/session-inbox/address.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { RunNotFoundError } from "#shared/run-errors.js";
-import type { SessionMessage } from "./driver.js";
+import type { SessionMessage, SessionStart } from "./driver.js";
 
 // A World host as its realm's durable host: what no route in this process holds goes to the
 // World, as it would go to Workflow on a deployment. A hook or a session's inbox is resumed by
@@ -41,6 +48,22 @@ export function worldDurableHost(input: {
     async resumeHook(token, payload) {
       const alias = logicalSessionInboxToken(token) ?? token;
       if (await sent(alias, payload)) return;
+      // A hook of a run an activation ran, which may have stopped since, or of a session another
+      // session's activation runs (a subagent's): the entity whose activation runs it.
+      const child = sessionIdOfCommandToken(alias);
+      const owner =
+        inProcessRunOwner(token) ??
+        (child === undefined
+          ? undefined
+          : rootOfChild(await entities.meta(child).catch(() => undefined)));
+      if (
+        owner !== undefined &&
+        (await entities.send({ key: owner }, {
+          deliver: payload,
+          token,
+        } satisfies SessionMessage)) !== undefined
+      )
+        return;
       if (fallback === undefined) throw new HookNotFoundError(alias);
       await fallback.resumeHook(token, payload);
     },
@@ -59,6 +82,20 @@ export function worldDurableHost(input: {
       await fallback.cancelRun(runId, reason);
     },
     lineStore: input.lineStore,
+    async sessionRecord(sessionId) {
+      const meta = (await entities.meta(sessionId).catch(() => undefined)) as
+        | Partial<SessionStart>
+        | undefined;
+      if (meta?.input === undefined) return await fallback?.sessionRecord?.(sessionId);
+      const info = await entities.info(sessionId);
+      if (info === undefined) return undefined;
+      const invocation = meta.input.externalInvocation;
+      return {
+        ...info,
+        runId: sessionId,
+        attributes: invocation === undefined ? {} : buildInvocationAttributes(invocation),
+      };
+    },
     // A Workflow step's attempt, inside one.
     stepAttempt: () => fallback?.stepAttempt(),
     createRuntime({ compiledArtifactsSource }) {

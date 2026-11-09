@@ -1,3 +1,4 @@
+import { installedDurableHost } from "#execution/hosts.js";
 import { interactionJson } from "#protocol/interaction-json.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { MessageContent } from "#shared/message-content.js";
@@ -172,6 +173,14 @@ export class WorkflowAgentInvocationExecution {
   }
 
   async #readInvocationRun(invocationId: string, auth: SessionAuthContext | null) {
+    // A session whose host records it other than as a Workflow run (a World host's).
+    const recorded = await installedDurableHost()?.sessionRecord?.(invocationId);
+    if (recorded !== undefined) {
+      if (recorded.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) return undefined;
+      return recorded.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth)
+        ? recorded
+        : undefined;
+    }
     const world = await getWorld();
     try {
       const run = await world.runs.get(invocationId);

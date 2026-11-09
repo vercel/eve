@@ -214,7 +214,9 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
       );
     return front;
   };
-  const lineStore = entityLineStore(entities);
+  // A session this host doesn't hold (one a Workflow run opened, as a workflow tool's `ctx.agent`
+  // does) is read where it lives: Workflow's, when this host wraps it.
+  const lineStore = entityLineStore(entities, options.workflow?.host.lineStore);
   const releaseLines = registerFallbackLineStore(lineStore);
   // What no route here holds goes to the World, unless this realm has a durable host already
   // (Workflow's, in a process that also runs a deployment's sessions).
@@ -367,19 +369,42 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
 }
 
 /** A session's stream as its entity's, for readers in any process. */
-function entityLineStore(entities: Entities): SessionLineStore {
+function entityLineStore(entities: Entities, fallback?: SessionLineStore): SessionLineStore {
   // A purged session's stream may have chunks left behind on its World: none of it is read.
-  const assertReadable = async (sessionId: string) => {
+  const assertPurgedUnread = async (sessionId: string) => {
     if (await entities.purged(sessionId))
       throw new RunExpiredError("Session history is no longer available.", sessionId, "completed");
   };
-  return {
-    assertReadable,
+  const own: SessionLineStore = {
+    assertReadable: assertPurgedUnread,
     readable: (sessionId, startIndex) => entities.read(sessionId, startIndex),
     async tail(sessionId) {
-      await assertReadable(sessionId);
+      await assertPurgedUnread(sessionId);
       return (await entities.streamLength(sessionId)) - 1;
     },
+  };
+  if (fallback === undefined) return own;
+  // Whether a session is this host's: it is once it has been, so it's asked once.
+  const held = new Set<string>();
+  const storeOf = async (sessionId: string): Promise<SessionLineStore> => {
+    if (held.has(sessionId)) return own;
+    // A key the entities can't hold (a Workflow session's run id) is no entity of theirs.
+    const meta = await entities.meta(sessionId).catch(() => undefined);
+    if (meta === undefined) return fallback;
+    held.add(sessionId);
+    return own;
+  };
+  return {
+    assertReadable: async (sessionId) => await (await storeOf(sessionId)).assertReadable(sessionId),
+    readable(sessionId, startIndex) {
+      // Decided as the stream opens: what's read pipes through once it's known where from.
+      const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+      void storeOf(sessionId)
+        .then((store) => store.readable(sessionId, startIndex).pipeTo(writable))
+        .catch((error: unknown) => writable.abort(error).catch(() => {}));
+      return readable;
+    },
+    tail: async (sessionId) => await (await storeOf(sessionId)).tail(sessionId),
   };
 }
 

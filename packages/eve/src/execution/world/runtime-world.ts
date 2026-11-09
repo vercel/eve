@@ -97,6 +97,8 @@ export interface WorldRun {
   readonly runId: string;
   readonly workflowName: string;
   readonly createdAt: Date;
+  /** Where it is in its life: `"completed"`, `"failed"` and `"cancelled"` are its ends. */
+  readonly status?: string;
 }
 
 /** One chunk of a stream, at its index. */
