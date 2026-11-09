@@ -46,7 +46,8 @@ agent/
   permalinks the agent cites, and `read_slack_conversation` reads a match's
   thread or a named channel. See [Slack search](#slack-search).
 - **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
-  can start a conversation, so guests in Slack Connect channels can't.
+  can start a conversation or answer approvals and questions, so guests in
+  Slack Connect channels can't.
 - **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
   private one per person, and a shared one per Slack channel. See
   [Memory](#memory).
@@ -68,17 +69,19 @@ agent/
 
 ```bash
 pnpm install
-pnpm exec eve add channel/slack   # creates the Slack app through Vercel Connect
-cp .env.example .env.local        # then set SLACK_TEAM_ID
+vercel link                       # link a Vercel project
+vercel connect create slack --name company-brain --triggers --trigger-path /eve/v1/slack
+cp -n .env.example .env.local     # then set SLACK_CONNECTOR and SLACK_TEAM_ID
 pnpm exec eve integration setup file-memory  # private Blob store for memory
 vercel env pull                   # Vercel credentials for AI Gateway, sandbox, and memory
 pnpm dev
 ```
 
-`eve add channel/slack` links a Vercel project, creates or reuses a Slack app,
-and asks you to install it. If it offers to replace `agent/channels/slack.ts`,
-keep this template's version. Set `SLACK_CONNECTOR` and `SLACK_TEAM_ID` in the
-Vercel project's environment too, then deploy:
+`vercel connect create` creates the Slack app through Vercel Connect and
+forwards its events to the linked project. Put the connector UID it prints in
+`SLACK_CONNECTOR`. `cp -n` leaves an existing `.env.local` alone; add the
+variables to it yourself in that case. Set `SLACK_CONNECTOR` and
+`SLACK_TEAM_ID` in the Vercel project's environment too, then deploy:
 
 ```bash
 pnpm exec eve deploy
@@ -336,7 +339,8 @@ carries. The Slack docs cover common next steps:
   can appear in a thread other people read. Prefer per-person auth for
   connections, and use app-scoped auth only for content everyone may see.
 - **Set `SLACK_TEAM_ID`.** Without it, anyone Slack delivers a message from,
-  including Slack Connect guests, can start a conversation.
+  including Slack Connect guests, can start a conversation or answer an
+  approval.
 - **The sandbox has open egress.** Like eve's coding agent template, code the
   agent runs can reach any host; only GitHub credentials are held back at the
   firewall. Don't put other credentials in the sandbox, and narrow the network
@@ -346,7 +350,7 @@ carries. The Slack docs cover common next steps:
   benefits from, and can add to, that channel's notes. Review the channel
   memory description if your channels hold sensitive discussions.
 - **Keep checks in sensitive tools.** The channel gate decides who can start a
-  turn. A tool that reads or changes sensitive data should check
+  turn or answer an approval. A tool that reads or changes sensitive data should check
   `ctx.session.auth` itself.
 
 ## Learn more

@@ -7,10 +7,13 @@ import {
 } from "eve/channels/slack";
 import { isHomeTeam, slackCredentials } from "../lib/slack.ts";
 
+// Slack Connect events name the author's own workspace in `user_team` or
+// `team`. Same-workspace events can omit both, and then the envelope's team is
+// the author's.
 function authorTeamId(message: SlackMessage): string | undefined {
   const { user_team: userTeam, team } = message.raw;
   if (typeof userTeam === "string") return userTeam;
-  return typeof team === "string" ? team : undefined;
+  return typeof team === "string" ? team : message.teamId;
 }
 
 // WORKAROUND(vercel/eve#6088): copies Slack's per-message `action_token` into
@@ -71,4 +74,12 @@ export default slackChannel({
   onAppMention: admit,
   onDirectMessage: admit,
   onMessage: followThread,
+  // Clicks carry the clicker's team, so guests can't answer approvals or
+  // questions in a thread a member started.
+  onAnswers: (ctx) => {
+    const teamId = ctx.defaultAuth.attributes.team_id;
+    return isHomeTeam(typeof teamId === "string" ? teamId : undefined)
+      ? { auth: ctx.defaultAuth }
+      : null;
+  },
 });

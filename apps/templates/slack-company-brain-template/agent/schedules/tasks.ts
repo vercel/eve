@@ -4,12 +4,12 @@ import slack from "../channels/slack.ts";
 import { callSlack, isHomeTeam, slackTeamId } from "../lib/slack.ts";
 
 interface TaskPayload {
-  readonly task: string;
-  readonly teamId: string;
-  readonly userId: string;
-  readonly channelId: string;
+  task: string;
+  teamId: string;
+  userId: string;
+  channelId: string;
   /** Set when results go back to the thread the schedule was created in. */
-  readonly threadTs?: string;
+  threadTs?: string;
 }
 
 function attribute(attributes: Readonly<Record<string, unknown>>, key: string) {
@@ -67,37 +67,36 @@ export default defineDynamicSchedules({
     if (!teamId || !userId || !channelId) {
       throw new Error("This Slack message is missing the workspace, user, or channel.");
     }
-    return {
+    const payload: TaskPayload = {
       task: input.task,
       teamId,
       userId,
       channelId,
-      ...(input.reply === "this_thread" && threadTs ? { threadTs } : {}),
     };
+    if (input.reply === "this_thread" && threadTs) payload.threadTs = threadTs;
+    return payload;
   },
   async auth({ principal, payload }) {
     if (principal.type !== "user" || principal.authenticator !== "slack-webhook") return null;
     if (principal.principalId !== `slack:${payload.teamId}:${payload.userId}`) return null;
     if (!(await isActiveMember(payload))) return null;
+    const { type: _type, ...identity } = principal;
     return {
+      ...identity,
       attributes: {
         author_type: "user",
         channel_id: payload.channelId,
         team_id: payload.teamId,
         user_id: payload.userId,
       },
-      authenticator: principal.authenticator,
-      ...(principal.issuer === undefined ? {} : { issuer: principal.issuer }),
-      principalId: principal.principalId,
       principalType: "user",
-      ...(principal.subject === undefined ? {} : { subject: principal.subject }),
     };
   },
   async run({ payload, occurrence, to }) {
     const target = {
       channelId: payload.channelId,
       installationTeamId: payload.teamId,
-      ...(payload.threadTs === undefined ? {} : { threadTs: payload.threadTs }),
+      threadTs: payload.threadTs,
     };
     await to(slack, target).send(
       [

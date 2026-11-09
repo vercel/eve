@@ -1,11 +1,11 @@
 import { connectSlackCredentials } from "@vercel/connect/eve";
 import { callSlackApi } from "eve/channels/slack";
 
-// SLACK_CONNECTOR is provisioned by `eve add channel/slack` or the "Deploy with
-// Vercel" button. To create one yourself, run
-// `vercel connect create slack --triggers` and put its UID in SLACK_CONNECTOR.
+// The "Deploy with Vercel" button provisions SLACK_CONNECTOR. To create a
+// connector yourself, run `vercel connect create slack --triggers` and put its
+// UID in SLACK_CONNECTOR.
 export const slackCredentials = connectSlackCredentials(
-  process.env.SLACK_CONNECTOR ?? "slack/company-brain",
+  process.env.SLACK_CONNECTOR || "slack/company-brain",
 );
 
 // When SLACK_TEAM_ID is set, only members of that workspace can reach the agent.
