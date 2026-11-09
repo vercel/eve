@@ -173,10 +173,12 @@ const DISCORD_GATEWAY_BROKEN = {
 };
 
 const SIGN_IN_PRESS_RULE = "someone else pressing a sign-in isn't shown its link or code";
-const SIGN_IN_SENT_PRIVATELY = {
-  [SIGN_IN_PRESS_RULE]:
+const SIGN_IN_SENT_PRIVATELY = Object.fromEntries(
+  [SIGN_IN_PRESS_RULE, "completing a sign-in takes away the button that opens it"].map((rule) => [
+    rule,
     "the sign-in goes privately to the person signing in, so the thread shows nothing to press",
-} satisfies Partial<Record<ContractRuleName, string>>;
+  ]),
+) satisfies Partial<Record<ContractRuleName, string>>;
 
 const DISCORD_UNSUPPORTED = {
   "a file sent earlier in the conversation is still there on a later message":
@@ -231,11 +233,7 @@ const WEB_CHAT_SINGLE_PERSON =
  */
 const channelConformance = {
   "chat-sdk": [
-    {
-      driver: chatSdkDriver,
-      broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_LINGERS },
-      unsupported: SIGN_IN_SENT_PRIVATELY,
-    },
+    { driver: chatSdkDriver, broken: CHAT_SDK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY },
     { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],

@@ -1,8 +1,8 @@
 // How built-in channels show a sign-in, read from its interaction row. Its challenge (a link, a
 // code) is a credential, so it goes only where the person signing in alone reads it: the
 // conversation when it's theirs, otherwise privately, with a link-free status in the conversation.
-// When the sign-in ends, the status is edited, or the ending posted, and an accepted sign-in shows
-// the turn resuming. A sign-in an approval's responder needs has its own prompt.
+// When the sign-in ends, the status is edited, or the ending posted, a private challenge the
+// channel can edit is replaced by the ending, and an accepted sign-in shows the turn resuming. A sign-in an approval's responder needs has its own prompt.
 
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -87,6 +87,11 @@ export interface SignInSurface {
   postChallenge(signIn: SignIn): Promise<string | undefined>;
   /** Shows the challenge to its person alone, outside the conversation; false when it can't. */
   deliverPrivately?(signIn: SignIn): Promise<boolean>;
+  /**
+   * Replaces the challenge {@link deliverPrivately} showed with how the sign-in ended, once it
+   * ends, so its link and code stop showing. Without it, the private challenge stays as sent.
+   */
+  endPrivately?(signIn: SignIn, text: string): Promise<void>;
   /** Posts text in the conversation; the posted message's id, if it can edit it. */
   post(text: string): Promise<string | undefined>;
   /** Posts the link-free status its own way, instead of as the default text. */
@@ -145,6 +150,7 @@ export async function settleSignIn(
   const text = signInEndedText({ ...signIn, outcome: data.outcome, reason: data.reason });
   if (posted !== "" && surface.edit !== undefined) await surface.edit(posted, text);
   else await surface.post(text);
+  if (!surface.private) await surface.endPrivately?.(signIn, text);
   if (data.outcome === "accepted") await surface.typing?.("Connected. Resuming...");
 }
 

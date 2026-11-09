@@ -102,6 +102,11 @@ export interface ChatSdkChannelState
   /** @internal Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
   /**
+   * @internal Sign-in challenges sent to the person's DM because the adapter has no native
+   * ephemerals, keyed by connection name, so they can be replaced once the sign-in ends.
+   */
+  privateAuthMessages?: Record<string, { readonly messageId: string; readonly threadId: string }>;
+  /**
    * The Chat SDK user behind each principal that sent a message, so a sign-in
    * reaches them privately. `null` once more than one person sent as it.
    */

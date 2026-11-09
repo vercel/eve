@@ -32,7 +32,12 @@ function waitingOnGitHub(responseId?: string): SessionView {
   return view;
 }
 
-function surface(options: { private: boolean; delivers?: boolean; edits?: boolean }) {
+function surface(options: {
+  private: boolean;
+  delivers?: boolean;
+  edits?: boolean;
+  endsPrivately?: boolean;
+}) {
   const state: { pendingSignIns?: Record<string, string> } = {};
   const posts: string[] = [];
   const surface: SignInSurface = {
@@ -46,6 +51,7 @@ function surface(options: { private: boolean; delivers?: boolean; edits?: boolea
       return `status-${posts.length}`;
     }),
     ...(options.edits === true && { edit: vi.fn(async () => {}) }),
+    ...(options.endsPrivately === true && { endPrivately: vi.fn(async () => {}) }),
     typing: vi.fn(async () => {}),
     posted: postedIn(state, "pendingSignIns"),
   };
@@ -99,6 +105,24 @@ describe("a sign-in on a channel", () => {
     );
     expect(posting.posts).toEqual(["Github sign-in timed out (no answer)."]);
     expect(posting.surface.typing).not.toHaveBeenCalled();
+  });
+
+  it("replaces a challenge it sent privately with the ending, once the sign-in ends", async () => {
+    const view = waitingOnGitHub();
+    const group = surface({ delivers: true, edits: true, endsPrivately: true, private: false });
+    await showSignIn(view, "sign-in-1", group.surface);
+    await settleSignIn(view, { interactionId: "sign-in-1", outcome: "accepted" }, group.surface);
+    expect(group.surface.endPrivately).toHaveBeenCalledWith(
+      expect.objectContaining({ interactionId: "sign-in-1", name: "github" }),
+      "Github connected.",
+    );
+
+    // The challenge a person's own conversation shows is the posted message, already edited.
+    const dm = surface({ edits: true, endsPrivately: true, private: true });
+    await showSignIn(view, "sign-in-1", dm.surface);
+    await settleSignIn(view, { interactionId: "sign-in-1", outcome: "accepted" }, dm.surface);
+    expect(dm.surface.edit).toHaveBeenCalledWith("challenge-1", "Github connected.");
+    expect(dm.surface.endPrivately).not.toHaveBeenCalled();
   });
 
   it("reports a sign-in the runtime withdrew as cancelled, without its reason code", async () => {

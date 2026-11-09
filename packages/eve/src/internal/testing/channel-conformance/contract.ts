@@ -1084,6 +1084,33 @@ const signInRules = [
     },
   },
   {
+    rule: "completing a sign-in takes away the button that opens it",
+    source: "#6005",
+    requires: ["buttons"],
+    variesByConversation: true,
+    // Only a shared thread's link-free status carries a button that opens the sign-in.
+    surfaces: ["shared"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      const open = (await conversation.shownOptions()).find((option) =>
+        SIGN_IN_OPENERS.test(option.label),
+      );
+      expect(open, "a button that opens the sign-in").toBeDefined();
+      await conversation.press(open!);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
+      await conversation.waitForRest();
+      const left = (await conversation.visible())
+        .flatMap(({ options }) => options)
+        .filter((option) => SIGN_IN_OPENERS.test(option.label));
+      expect(
+        left.map(({ label }) => label),
+        "a button that opens the sign-in is still shown after signing in",
+      ).toEqual([]);
+    },
+  },
+  {
     rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
     source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
