@@ -2,11 +2,11 @@ import type { GitHubLeaseBroker } from "eve/extensions/git";
 import type { SandboxNetworkPolicy } from "eve/sandbox";
 import type { VercelSandboxSession } from "eve/sandbox/vercel";
 
-/** Vercel Connect GitHub connector that mints tokens for the `git__gh` tool. */
-export const GITHUB_CONNECTOR = process.env.GITHUB_CONNECTOR || "github/company-brain";
+/** Vercel Connect GitHub connector that mints tokens for the `git__gh` tool. Unset disables GitHub access. */
+export const GITHUB_CONNECTOR = process.env.GITHUB_CONNECTOR?.trim() || undefined;
 
-/** Organization or user whose repositories the agent may access. Unset disables GitHub access. */
-export const GITHUB_ORG = process.env.GITHUB_ORG?.trim() || undefined;
+/** Optional. Limits GitHub access to repositories owned by this organization or user. */
+export const GITHUB_ORG = process.env.GITHUB_ORG?.trim().toLowerCase() || undefined;
 
 /**
  * Installs one repository-scoped credential lease for a `gh` command, then

@@ -61,9 +61,10 @@ agent/
 - **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
   lets the agent run scripts, analyze attached files such as CSVs or logs, and
   read or write code in a sandbox.
-- **GitHub.** With `GITHUB_ORG` set, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
-  adds a `git__gh` tool for reading repositories, issues, and pull requests in
-  that organization, and a `pr` skill for opening draft pull requests. See
+- **GitHub.** With `GITHUB_CONNECTOR` set, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
+  adds a `git__gh` tool for reading repositories, issues, and pull requests the
+  connector's GitHub App is installed on, and a `pr` skill for opening draft
+  pull requests. See
   [Connect GitHub](#connect-github).
 - **Built-in eve Slack behavior.** Threads are sessions, the thread status shows
   progress, and approvals and questions appear as buttons.
@@ -157,7 +158,7 @@ scopes.
 
 ## Connect GitHub
 
-GitHub is optional. Without `GITHUB_ORG`, the agent still runs code in its
+GitHub is optional. Without `GITHUB_CONNECTOR`, the agent still runs code in its
 sandbox but has no GitHub credentials, and it tells people who ask how to
 connect GitHub (`agent/instructions/github.ts`). To enable it, create a Vercel Connect
 GitHub connector:
@@ -167,20 +168,23 @@ vercel connect create github --name company-brain
 ```
 
 Install its GitHub App on the repositories the agent may use, from the Connect
-dashboard. Then set these in `.env.local` and the Vercel project:
+dashboard. The agent can reach only those repositories. Then set these in
+`.env.local` and the Vercel project:
 
-- `GITHUB_ORG`: the organization or user whose repositories the agent may access
-- `GITHUB_CONNECTOR`: the connector UID, if it isn't `github/company-brain`
+- `GITHUB_CONNECTOR`: the connector UID
+- `GITHUB_ORG` (optional): limits access to repositories owned by one
+  organization or user, for an app installed on more than one account
 
 Redeploy, then delete `agent/instructions/github.ts`. It only tells the agent
-how to point people to this setup, and says nothing once `GITHUB_ORG` is set.
+how to point people to this setup, and says nothing once `GITHUB_CONNECTOR` is
+set.
 
 Each `gh` command gets a GitHub App token scoped to one repository. The sandbox
 only sees a placeholder; `lib/github.ts` swaps in the real token at the sandbox
 firewall for that command and removes it afterward. The `authorize` callback in
 `agent/extensions/git.ts` is the only access check: it allows Slack users in
-your workspace, including their scheduled tasks, and only repositories owned by
-`GITHUB_ORG`. Tighten it if not everyone who can reach the agent should open
+your workspace, including their scheduled tasks, and, with `GITHUB_ORG` set,
+only repositories that account owns. Tighten it if not everyone who can reach the agent should open
 pull requests.
 
 ## Scheduled tasks
