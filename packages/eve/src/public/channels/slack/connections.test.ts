@@ -8,6 +8,7 @@ import {
 } from "#public/channels/slack/connections.js";
 import {
   parseSignInCancelTarget,
+  parseSignInConnectTarget,
   SIGN_IN_CANCEL_ACTION_ID,
   SIGN_IN_CONNECT_ACTION_ID,
 } from "#public/channels/slack/sign-in-cancel.js";
@@ -103,7 +104,6 @@ describe("buildAuthEphemeralBlocks", () => {
         elements: [
           {
             type: "button",
-            action_id: SIGN_IN_CONNECT_ACTION_ID,
             text: { type: "plain_text", text: "Connect Linear" },
             url: "https://connect.example.com/authorize/sca_abc",
             style: "primary",
@@ -129,6 +129,46 @@ describe("buildAuthEphemeralBlocks", () => {
       text: { text: "Cancel", type: "plain_text" },
     });
     expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
+  });
+
+  it("gives the Connect button an action and the prompt's session, keeping its URL", () => {
+    const connect = {
+      channelId: "C01",
+      displayName: "Linear",
+      name: "linear",
+      threadTs: "1700000000.000001",
+      userId: "U_ALICE",
+    };
+    const blocks = buildAuthEphemeralBlocks({
+      connect,
+      displayName: "Linear",
+      url: "https://connect.example.com/authorize/sca_abc",
+    });
+    const button = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[0];
+    expect(button).toMatchObject({
+      action_id: SIGN_IN_CONNECT_ACTION_ID,
+      style: "primary",
+      text: { text: "Connect Linear", type: "plain_text" },
+      url: "https://connect.example.com/authorize/sca_abc",
+    });
+    expect(parseSignInConnectTarget(button?.value)).toEqual(connect);
+  });
+
+  it("round-trips a code channel's Connect target", () => {
+    const connect = {
+      channelId: "C01",
+      codeChannel: true,
+      displayName: "Linear",
+      name: "linear",
+      userId: "U1",
+    } as const;
+    const blocks = buildAuthEphemeralBlocks({
+      connect,
+      displayName: "Linear",
+      url: "https://connect.example.com/authorize/sca_abc",
+    });
+    const button = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[0];
+    expect(parseSignInConnectTarget(button?.value)).toEqual(connect);
   });
 
   it("round-trips a code channel's Cancel target", () => {

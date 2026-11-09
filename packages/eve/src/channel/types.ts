@@ -44,6 +44,14 @@ export type CompactSessionResult =
   | { readonly status: "no_active_session" };
 
 /**
+ * Result of patching a session's channel adapter state. Accepted once the
+ * owner has the patch; its delivery settles when the state has changed.
+ */
+export type ChannelStateSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
+
+/**
  * Result of queueing a manual context clear for a session. A stranded session
  * cannot run the clear, so it throws `SessionStrandedError` instead.
  */
@@ -198,6 +206,14 @@ export type SessionCommand =
     } & SessionControlIdentity)
   | { readonly kind: "prewarm"; readonly targetDeploymentId?: string }
   | ({ readonly kind: "compact" } & SessionControlIdentity)
+  | ({
+      readonly kind: "channel-state";
+      /**
+       * Shallow patch of the channel adapter's state. It changes no turn, auth, or principal;
+       * an active turn's next step reads it.
+       */
+      readonly state: JsonObject;
+    } & SessionControlIdentity)
   | ({ readonly kind: "clear" } & SessionControlIdentity)
   | ({ readonly kind: "reset"; readonly reason?: string } & SessionControlIdentity);
 
@@ -216,7 +232,9 @@ export interface SessionControlOptions {
 
 /** A control command as one delivery: a fresh id, and the sender when known. */
 export function controlCommand<
-  TCommand extends { readonly kind: "cancel" | "clear" | "compact" | "reset" },
+  TCommand extends {
+    readonly kind: "cancel" | "channel-state" | "clear" | "compact" | "reset";
+  },
 >(
   command: TCommand,
   options?: SessionControlOptions,
@@ -250,9 +268,11 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
         ? CancelTurnResult
         : TCommand extends { readonly kind: "compact" }
           ? CompactSessionResult
-          : TCommand extends { readonly kind: "clear" }
-            ? ClearSessionResult
-            : EndSessionResult;
+          : TCommand extends { readonly kind: "channel-state" }
+            ? ChannelStateSessionResult
+            : TCommand extends { readonly kind: "clear" }
+              ? ClearSessionResult
+              : EndSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;

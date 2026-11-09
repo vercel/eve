@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
@@ -7,6 +7,10 @@ import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import { defaultInteractionEvents } from "#public/channels/slack/defaults.js";
 import { answerFromSlackAction } from "#public/channels/slack/hitl.js";
+import {
+  parseSignInConnectTarget,
+  SIGN_IN_CONNECT_ACTION_ID,
+} from "#public/channels/slack/sign-in-cancel.js";
 import {
   composeInteractionCards,
   defineSlackRenderer,
@@ -34,6 +38,8 @@ interface Asked {
   readonly request: Record<string, unknown>;
   /** The call the request asks about; a budget prompt asks about its turn instead. */
   readonly call?: { readonly name: string; readonly input?: Record<string, string> };
+  /** The principals the request is for, as a sign-in names who must sign in. */
+  readonly audience?: { readonly principalIds: readonly string[] };
 }
 
 /**
@@ -96,6 +102,9 @@ function harness(
         if (!response.ok)
           throw Object.assign(new Error("Slack refused the ephemeral"), { response });
         return { id: "" };
+      },
+      async startTyping(status: string) {
+        respond("thread.startTyping", { status });
       },
     },
   };
@@ -165,8 +174,9 @@ function harness(
       ...(first
         ? [{ data: { outcome: "completed", runId }, scope, type: "model.settled" } as SessionEvent]
         : []),
-      ...requests.map(({ call, interactionId, request }): SessionEvent => ({
+      ...requests.map(({ audience, call, interactionId, request }): SessionEvent => ({
         data: {
+          ...(audience !== undefined && { audience }),
           interactionId,
           request: request as never,
           subject: call === undefined ? { turnId } : { callId: `call_${interactionId}` },
@@ -986,3 +996,108 @@ function controls(
 ): SlackInteractionCardParts {
   return { ...parts, controls: { ...parts.controls, blocks } };
 }
+
+describe("Slack sign-in prompts", () => {
+  const RESPONSE_URL = "https://hooks.slack.com/actions/T1/1/abc";
+  const signIn: Asked = {
+    call: { name: "get_weather" },
+    interactionId: "s_weather",
+    request: {
+      kind: "sign-in",
+      prompt: "Sign in to Weather.",
+      signIn: { displayName: "Weather", name: "weather", url: "https://idp.example/authorize" },
+    },
+  };
+  // Bob must sign in, and the thread knows his Slack user.
+  const bobsSignIn: Asked = { ...signIn, audience: { principalIds: ["p_bob"] } };
+  const deletePrompt = [
+    RESPONSE_URL,
+    {
+      body: JSON.stringify({ delete_original: true }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    },
+  ];
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function heldSignIn() {
+    const slack = harness();
+    await slack.ask(bobsSignIn);
+    return slack;
+  }
+
+  it("lets the Connect click locate the prompt it was shown to", async () => {
+    const slack = await heldSignIn();
+    const [prompt] = slack.calls("chat.postEphemeral");
+    expect(prompt!.body.user).toBe("U_BOB");
+    const blocks = (prompt!.body.text as { blocks: Array<Record<string, unknown>> }).blocks;
+    const actions = blocks.find((block) => block.type === "actions") as {
+      elements: Array<Record<string, unknown>>;
+    };
+    const [connect] = actions.elements;
+    expect(connect).toMatchObject({
+      action_id: SIGN_IN_CONNECT_ACTION_ID,
+      url: "https://idp.example/authorize",
+    });
+    expect(parseSignInConnectTarget(connect?.value)).toEqual({
+      channelId: "C1",
+      displayName: "Weather",
+      name: "weather",
+      threadTs: "1.0",
+      userId: "U_BOB",
+    });
+  });
+
+  it("removes the prompt its Connect click located once the sign-in ends", async () => {
+    for (const outcome of ["accepted", "declined"] as const) {
+      const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
+      vi.stubGlobal("fetch", fetchMock);
+      const slack = await heldSignIn();
+      // What the Connect click's channel-state control merged in while the turn was held.
+      slack.channel.state.signInPromptResponseUrls = { weather: RESPONSE_URL };
+
+      await slack.settle("s_weather", outcome);
+
+      expect(fetchMock, outcome).toHaveBeenCalledWith(...deletePrompt);
+      expect(slack.channel.state.signInPromptResponseUrls).toEqual({});
+      expect(slack.calls("chat.update"), "the public status still ends").toHaveLength(1);
+    }
+  });
+
+  it("removes the prompt even when the thread has no public status to edit", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const slack = await heldSignIn();
+    slack.channel.state.pendingAuthMessageTs = {};
+    slack.channel.state.signInPromptResponseUrls = { weather: RESPONSE_URL };
+
+    await slack.settle("s_weather", "accepted");
+
+    expect(fetchMock).toHaveBeenCalledWith(...deletePrompt);
+    expect(slack.calls("chat.update")).toEqual([]);
+  });
+
+  it("still ends the public status when Slack can't remove the prompt", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+    const slack = await heldSignIn();
+    slack.channel.state.signInPromptResponseUrls = { weather: RESPONSE_URL };
+
+    await slack.settle("s_weather", "accepted");
+
+    expect(slack.calls("chat.update")).toHaveLength(1);
+    expect(slack.channel.state.signInPromptResponseUrls).toEqual({});
+  });
+
+  it("removes nothing when no Connect click located the prompt", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const slack = await heldSignIn();
+
+    await slack.settle("s_weather", "accepted");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

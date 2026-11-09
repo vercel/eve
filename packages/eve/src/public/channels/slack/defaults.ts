@@ -14,6 +14,7 @@ import {
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
 import { slackSessionTargetOf } from "#public/channels/slack/api.js";
+import { removeSignInPrompt } from "#public/channels/slack/sign-in-cancel.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -272,17 +273,22 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   // the shared thread.
   const { instructions } = event;
   if (recipientUserId && (challengeUrl || instructions)) {
-    // The turn's own sign-in holds it, so the prompt can cancel that turn.
+    // The turn's own sign-in holds it, so the prompt can cancel that turn, and its Connect click
+    // can tell the session where the prompt is.
     const target = slackSessionTargetOf(channel.slack);
-    const cancel =
-      event.responseId === undefined &&
-      target.channelId &&
-      (target.codeChannel || target.threadTs) &&
-      event.turnId
-        ? { ...target, turnId: event.turnId }
+    const session =
+      event.responseId === undefined && target.channelId && (target.codeChannel || target.threadTs)
+        ? target
         : undefined;
+    const cancel =
+      session !== undefined && event.turnId ? { ...session, turnId: event.turnId } : undefined;
+    const connect =
+      session === undefined
+        ? undefined
+        : { ...session, displayName, name: event.name, userId: recipientUserId };
     const prompt = {
       cancel,
+      connect,
       displayName,
       instructions,
       url: challengeUrl,
@@ -312,6 +318,8 @@ async function settleSlackSignIn(
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
+  await removeSlackSignInPrompt(event.name, channel);
+
   const pending = channel.state.pendingAuthMessageTs ?? {};
   const ts = pending[event.name];
   if (ts === undefined) return;
@@ -338,6 +346,17 @@ async function settleSlackSignIn(
   const next = { ...pending };
   delete next[event.name];
   channel.state.pendingAuthMessageTs = next;
+}
+
+/** Removes the private sign-in prompt its Connect click located, once the sign-in ends. */
+async function removeSlackSignInPrompt(name: string, channel: SlackEventContext): Promise<void> {
+  const prompts = channel.state.signInPromptResponseUrls;
+  const responseUrl = prompts?.[name];
+  if (responseUrl === undefined) return;
+  const next = { ...prompts };
+  delete next[name];
+  channel.state.signInPromptResponseUrls = next;
+  await removeSignInPrompt(responseUrl);
 }
 
 /**

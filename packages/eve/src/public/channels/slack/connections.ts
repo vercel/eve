@@ -23,6 +23,7 @@ import {
   SIGN_IN_CANCEL_ACTION_ID,
   SIGN_IN_CONNECT_ACTION_ID,
   type SignInCancelTarget,
+  type SignInConnectTarget,
 } from "#public/channels/slack/sign-in-cancel.js";
 import { displayProperName } from "#protocol/session-projection/display-name.js";
 
@@ -91,6 +92,8 @@ export function buildAuthEphemeralBlocks(
   input: AuthEphemeralPrompt & {
     /** Lets the person cancel the held turn instead of connecting. */
     readonly cancel?: SignInCancelTarget;
+    /** Lets the Connect click tell eve where the prompt is, so it can be removed later. */
+    readonly connect?: SignInConnectTarget;
   },
 ): unknown[] {
   const intro =
@@ -112,7 +115,10 @@ export function buildAuthEphemeralBlocks(
       : [
           {
             type: "button",
-            action_id: SIGN_IN_CONNECT_ACTION_ID,
+            ...(input.connect !== undefined && {
+              action_id: SIGN_IN_CONNECT_ACTION_ID,
+              value: JSON.stringify(input.connect),
+            }),
             text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
             url: input.url,
             style: "primary",

@@ -181,6 +181,31 @@ describe("createChannelAddress", () => {
     expect(runtime.resolveContinuation).not.toHaveBeenCalled();
   });
 
+  it("sends a channel state patch as a control, never as a session", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress<{ prompts: Record<string, string> }>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    await address.patchState({ prompts: { linear: "https://hooks.slack.com/actions/1" } });
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: {
+        deliveryId: expect.any(String),
+        kind: "channel-state",
+        state: { prompts: { linear: "https://hooks.slack.com/actions/1" } },
+      },
+      continuationToken: "slack:C1:T1",
+    });
+    expect(runtime.createSession).not.toHaveBeenCalled();
+    await expect(
+      address.patchState({ prompts: new Map() as unknown as Record<string, string> }),
+    ).rejects.toThrow(TypeError);
+  });
+
   it("resolves explicitly to a fixed session handle", async () => {
     const runtime = createRuntime();
     vi.mocked(runtime.resolveContinuation).mockResolvedValue({ sessionId: "sess_2" });

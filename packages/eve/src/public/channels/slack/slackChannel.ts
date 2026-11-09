@@ -330,6 +330,13 @@ export interface SlackChannelState extends UndeliveredReplyState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   /**
+   * Connection name to the `response_url` of the Connect click on its private sign-in prompt.
+   * Slack removes an ephemeral message only through such a URL, so the sign-in's
+   * `interaction.settled` handler uses it to remove the prompt, then forgets it.
+   * @internal
+   */
+  signInPromptResponseUrls?: Record<string, string>;
+  /**
    * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
    * the `pendingApprovalCards` field that earlier versions wrote, so cards posted before an
@@ -1172,6 +1179,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       triggeringMessageTs: null,
       pendingToolCallMessage: null,
       pendingAuthMessageTs: {},
+      signInPromptResponseUrls: {},
       interactionCards: [],
       slackUsersByPrincipal: {},
     },
