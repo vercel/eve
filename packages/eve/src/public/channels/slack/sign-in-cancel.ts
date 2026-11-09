@@ -9,6 +9,13 @@ const log = createLogger("slack.interactions");
 /** `action_id` of the sign-in prompt's Cancel button; outside eve's `eve_input:` HITL prefix. */
 export const SIGN_IN_CANCEL_ACTION_ID = "eve_sign_in:cancel";
 
+/**
+ * `action_id` of the sign-in prompt's Connect link button. Slack opens the link
+ * and also sends a `block_actions` click, whose `response_url` is the only way
+ * to remove an ephemeral prompt.
+ */
+export const SIGN_IN_CONNECT_ACTION_ID = "eve_sign_in:connect";
+
 /** The held turn a sign-in prompt's Cancel button cancels. */
 export type SignInCancelTarget = SlackSessionTarget & { readonly turnId: string };
 
@@ -45,6 +52,24 @@ export function dispatchSignInCancel(
   return true;
 }
 
+/**
+ * Removes the private sign-in prompt in the background once its Connect button
+ * is clicked; the sign-in finishes in the browser tab Slack opened, and the
+ * public status shows how it ended. Returns false for any other interaction.
+ */
+export function dispatchSignInConnect(
+  raw: Record<string, unknown>,
+  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
+): boolean {
+  const actions = Array.isArray(raw.actions) ? (raw.actions as unknown[]) : [];
+  const clicked = actions.some(
+    (entry) => isObjectRecord(entry) && entry.action_id === SIGN_IN_CONNECT_ACTION_ID,
+  );
+  if (!clicked) return false;
+  if (typeof raw.response_url === "string") ctx.waitUntil(removePrompt(raw.response_url));
+  return true;
+}
+
 interface SignInCancel {
   readonly responseUrl: string | undefined;
   readonly target: SignInCancelTarget;
@@ -69,37 +94,41 @@ function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefine
 }
 
 /**
- * Cancels the turn held on the sign-in, then removes the private prompt. A turn
- * that already ended needs no cancel, so its prompt is removed too.
+ * Removes the private prompt, then cancels the turn held on the sign-in. The
+ * prompt goes whatever the cancel's outcome, because a click on Cancel always
+ * means the person is done with it.
  */
 async function cancelHeldSignIn(
   cancel: SignInCancel,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
 ): Promise<void> {
   const { turnId } = cancel.target;
+  const removed = cancel.responseUrl === undefined ? undefined : removePrompt(cancel.responseUrl);
   try {
     await ctx.from(slackSessionToken(cancel.target)).cancel({ turnId });
   } catch (error) {
     if (!SessionNotActiveError.is(error) || error.retryable) {
       log.error("sign-in cancel delivery failed", { error });
-      return;
     }
   }
-  if (cancel.responseUrl === undefined) return;
+  await removed;
+}
+
+async function removePrompt(responseUrl: string): Promise<void> {
   try {
-    const response = await fetch(cancel.responseUrl, {
+    const response = await fetch(responseUrl, {
       body: JSON.stringify({ delete_original: true }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
     if (!response.ok) {
-      log.warn("Slack refused to remove the cancelled sign-in prompt", {
+      log.warn("Slack refused to remove the sign-in prompt", {
         body: await response.text(),
         status: response.status,
       });
     }
   } catch (error) {
-    log.warn("failed to remove the cancelled sign-in prompt", { error });
+    log.warn("failed to remove the sign-in prompt", { error });
   }
 }
 

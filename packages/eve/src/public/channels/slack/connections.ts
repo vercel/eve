@@ -21,6 +21,7 @@ import type { InteractionOutcome } from "#protocol/session-events/families/inter
 import { truncatePlainText } from "#public/channels/slack/limits.js";
 import {
   SIGN_IN_CANCEL_ACTION_ID,
+  SIGN_IN_CONNECT_ACTION_ID,
   type SignInCancelTarget,
 } from "#public/channels/slack/sign-in-cancel.js";
 import { displayProperName } from "#protocol/session-projection/display-name.js";
@@ -111,6 +112,7 @@ export function buildAuthEphemeralBlocks(
       : [
           {
             type: "button",
+            action_id: SIGN_IN_CONNECT_ACTION_ID,
             text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
             url: input.url,
             style: "primary",

@@ -6,7 +6,9 @@ import type { Runtime } from "#channel/types.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 import {
   dispatchSignInCancel,
+  dispatchSignInConnect,
   SIGN_IN_CANCEL_ACTION_ID,
+  SIGN_IN_CONNECT_ACTION_ID,
 } from "#public/channels/slack/sign-in-cancel.js";
 
 const logger = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
@@ -44,6 +46,14 @@ function cancelClick(): Record<string, unknown> {
         value: JSON.stringify({ channelId: "C1", threadTs: "1.2", turnId: "turn_1" }),
       },
     ],
+    response_url: RESPONSE_URL,
+    type: "block_actions",
+  };
+}
+
+function connectClick(): Record<string, unknown> {
+  return {
+    actions: [{ action_id: SIGN_IN_CONNECT_ACTION_ID }],
     response_url: RESPONSE_URL,
     type: "block_actions",
   };
@@ -107,7 +117,7 @@ describe("dispatchSignInCancel", () => {
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
   });
 
-  it("keeps the prompt when the cancel throws a retryable SessionNotActiveError", async () => {
+  it("removes the prompt when the cancel throws a retryable SessionNotActiveError", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(
       vi.fn().mockRejectedValue(new SessionNotActiveError({ retryable: true })),
@@ -115,16 +125,16 @@ describe("dispatchSignInCancel", () => {
 
     await clickCancel(runtime);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(...deletePost);
   });
 
-  it("keeps the prompt when the cancel cannot be dispatched", async () => {
+  it("removes the prompt when the cancel cannot be dispatched", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(vi.fn().mockRejectedValue(new Error("runtime unavailable")));
 
     await clickCancel(runtime);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(...deletePost);
   });
 
   it("logs when Slack refuses the delete", async () => {
@@ -134,9 +144,43 @@ describe("dispatchSignInCancel", () => {
     await clickCancel(runtime);
 
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
-    expect(logger.warn).toHaveBeenCalledWith(
-      "Slack refused to remove the cancelled sign-in prompt",
-      { body: "expired_url", status: 404 },
+    expect(logger.warn).toHaveBeenCalledWith("Slack refused to remove the sign-in prompt", {
+      body: "expired_url",
+      status: 404,
+    });
+  });
+});
+
+describe("dispatchSignInConnect", () => {
+  it("removes the prompt when the Connect button is clicked", async () => {
+    const fetchMock = stubFetch();
+    const tasks: Promise<unknown>[] = [];
+
+    expect(dispatchSignInConnect(connectClick(), { waitUntil: (task) => tasks.push(task) })).toBe(
+      true,
     );
+    await Promise.all(tasks);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(...deletePost);
+  });
+
+  it("ignores other button actions and posts nothing", async () => {
+    const fetchMock = stubFetch();
+    const waitUntil = vi.fn();
+
+    expect(
+      dispatchSignInConnect(
+        {
+          actions: [{ action_id: "some_other_action" }],
+          response_url: RESPONSE_URL,
+          type: "block_actions",
+        },
+        { waitUntil },
+      ),
+    ).toBe(false);
+
+    expect(waitUntil).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
