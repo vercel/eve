@@ -6,7 +6,6 @@ import {
   type SlackMessage,
 } from "eve/channels/slack";
 import { isFullMember, isHomeTeam, slackCredentials, slackTeamId } from "../lib/slack.ts";
-import { slackMentions } from "../lib/slack-mentions.ts";
 
 // Slack Connect events name the author's own workspace in `user_team` or
 // `team`. Same-workspace events can omit both, and then the envelope's team is
@@ -86,7 +85,6 @@ export default slackChannel({
   threadContext: { since: "last-agent-reply" },
   // Sender names let the agent say who asked what. Adds the `users:read` scope.
   messageContext: { users: true },
-  renderers: [slackMentions],
   onAppMention: admit,
   onDirectMessage: admit,
   onMessage: followThread,
