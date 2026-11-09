@@ -108,6 +108,21 @@ describe("dispatchSignInCancel", () => {
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
   });
 
+  it("starts removing the prompt before the cancel settles", async () => {
+    const fetchMock = stubFetch();
+    const runtime = createRuntime(vi.fn().mockReturnValue(new Promise(() => {})));
+    const { from } = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+
+    dispatchSignInCancel(cancelClick(), { from, waitUntil: () => {} });
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith(...deletePost));
+    expect(runtime.dispatchContinuation).toHaveBeenCalled();
+  });
+
   it("removes the prompt when the held turn has already ended", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(vi.fn().mockResolvedValue({ status: "no_active_turn" }));
