@@ -1,4 +1,22 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": [".agents/**", "**/next-env.d.ts", "**/routeTree.gen.ts"]
+  "ignorePatterns": [".agents/**", "**/next-env.d.ts", "**/routeTree.gen.ts"],
+  "overrides": [
+    {
+      "files": ["packages/eve/demo/steps/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^#|/src/",
+                "message": "These demos run from the published package (demo/steps/bundle.sh): import eve's public entries only."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

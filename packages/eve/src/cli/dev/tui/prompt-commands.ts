@@ -1,6 +1,7 @@
 export type PromptCommandExtensionName = "login" | "model" | "add" | "deploy";
 
-type PromptCommandTarget = "local" | "remote";
+/** Where the TUI runs: `eve dev`'s local server, a remote agent, or an agent embedded in a program. */
+export type PromptCommandTarget = "local" | "remote" | "embedded";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
@@ -66,7 +67,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Start a fresh session",
     takesArgument: false,
     build: () => ({ type: "new" }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
   {
     name: "clear",
@@ -75,7 +76,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Clear the session context and keep the session",
     takesArgument: false,
     build: () => ({ type: "clear" }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
   {
     name: "compact",
@@ -84,7 +85,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Compact the current session context",
     takesArgument: false,
     build: () => ({ type: "compact" }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
   {
     name: "cancel",
@@ -93,7 +94,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Cancel the running turn",
     takesArgument: false,
     build: () => ({ type: "cancel" }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
   {
     name: "login",
@@ -144,7 +145,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: true,
     typeahead: { maxArguments: 1, loadingLabel: "log levels" },
     build: (argument) => ({ type: "loglevel", argument }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
   {
     name: "info",
@@ -153,7 +154,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Show application and messaging information",
     takesArgument: false,
     build: () => ({ type: "info" }),
-    targets: ["local"],
+    targets: ["local", "embedded"],
   },
   {
     name: "help",
@@ -162,7 +163,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Show available commands",
     takesArgument: false,
     build: () => ({ type: "help" }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
   {
     name: "exit",
@@ -171,7 +172,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Quit the TUI",
     takesArgument: false,
     build: () => ({ type: "exit" }),
-    targets: ["local", "remote"],
+    targets: ["local", "remote", "embedded"],
   },
 ] satisfies readonly PromptCommandDefinition[];
 

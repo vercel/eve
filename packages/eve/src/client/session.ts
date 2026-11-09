@@ -48,6 +48,8 @@ interface FollowSessionOptions extends SessionStreamOptions {
  */
 export interface ClientSessionContext {
   readonly baseUrl: string;
+  /** The client's `fetch`, which `Client` defaults to the global one. */
+  readonly fetch: typeof fetch;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
@@ -328,6 +330,7 @@ export class ClientSession {
       onCaughtUp: input.onCaughtUp,
       follow: input.follow,
       baseUrl: this.#context.baseUrl,
+      fetch: this.#context.fetch,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
       path: createEveSessionStreamRoutePath(this.#state.sessionId),
       redirect: this.#context.redirect,
@@ -385,7 +388,7 @@ async function postCreateSession(
   const headers = await context.resolveHeaders(options.headers);
   const body = options.stubs === undefined ? undefined : JSON.stringify({ stubs: options.stubs });
   if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
+  const response = await context.fetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
     body,
     headers,
     method: "POST",
@@ -424,7 +427,7 @@ async function postTurn(
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.baseUrl, path), {
+  const response = await context.fetch(createClientUrl(context.baseUrl, path), {
     body: JSON.stringify(body),
     headers,
     method: "POST",

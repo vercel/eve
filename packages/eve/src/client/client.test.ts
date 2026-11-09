@@ -118,6 +118,34 @@ describe("Client request policy", () => {
     }
   });
 
+  it("sends every request through its fetch option, not the global fetch", async () => {
+    const globalFetch = vi.spyOn(globalThis, "fetch");
+    const own = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(AGENT_INFO))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(endedStream());
+    const client = new Client({ baseUrl: "https://eve.test", fetch: own });
+
+    await client.info();
+    await client.health();
+    await client.fetch("/custom");
+    await (await client.sessions.create({ message: "hello" })).delivery.result();
+
+    expect(own.mock.calls.map(([request]) => new URL(String(request)).pathname)).toEqual([
+      "/eve/v1/info",
+      "/eve/v1/health",
+      "/custom",
+      "/eve/v1/session",
+      "/eve/v1/session/session_1/stream",
+    ]);
+    expect(globalFetch).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, "manual", "error"] as const)(
     "enforces redirect policy %s for info, health, raw fetch, and sessions",
     async (redirect) => {

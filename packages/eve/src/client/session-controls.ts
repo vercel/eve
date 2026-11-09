@@ -21,6 +21,7 @@ const paths = {
 export async function prewarmClientSession(input: {
   readonly context: {
     readonly baseUrl: string;
+    readonly fetch: typeof fetch;
     readonly redirect?: ClientRedirectPolicy;
     resolveHeaders(): Promise<Headers>;
   };
@@ -28,7 +29,7 @@ export async function prewarmClientSession(input: {
   readonly signal?: AbortSignal;
 }): Promise<PrewarmSessionResult> {
   // An empty body is the route's preparation request; any field makes it an input delivery.
-  const response = await fetch(
+  const response = await input.context.fetch(
     createClientUrl(input.context.baseUrl, createEveSessionRoutePath(input.sessionId)),
     {
       headers: await input.context.resolveHeaders(),
@@ -53,6 +54,7 @@ export async function prewarmClientSession(input: {
 export async function sendClientControl(input: {
   readonly context: {
     readonly baseUrl: string;
+    readonly fetch: typeof fetch;
     readonly redirect?: ClientRedirectPolicy;
     resolveHeaders(): Promise<Headers>;
   };
@@ -70,7 +72,7 @@ export async function sendClientControl(input: {
   const body = input.kind === "cancel" ? { turnId } : input.kind === "end" ? { reason } : {};
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
-  const response = await fetch(
+  const response = await input.context.fetch(
     createClientUrl(input.context.baseUrl, paths[input.kind](input.sessionId)),
     {
       body: JSON.stringify(body),

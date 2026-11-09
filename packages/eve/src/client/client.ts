@@ -33,6 +33,7 @@ export class Client {
   readonly #headers: HeadersValue | undefined;
   readonly #baseUrl: string;
   readonly #redirect: ClientRedirectPolicy;
+  readonly #fetch: typeof fetch;
   /** Explicit create/attach surface for ID-addressed sessions. */
   readonly sessions: ClientSessions;
 
@@ -41,8 +42,10 @@ export class Client {
     this.#auth = options.auth;
     this.#headers = options.headers;
     this.#redirect = options.redirect ?? "error";
+    this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
     this.sessions = new ClientSessions({
       baseUrl: this.#baseUrl,
+      fetch: this.#fetch,
       redirect: this.#redirect,
       resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
     });
@@ -56,7 +59,7 @@ export class Client {
   async health(): Promise<HealthResult> {
     const url = createClientUrl(this.#baseUrl, EVE_HEALTH_ROUTE_PATH);
     const headers = await this.#resolveHeaders();
-    const response = await fetch(url, withRedirectPolicy({ headers }, this.#redirect));
+    const response = await this.#fetch(url, withRedirectPolicy({ headers }, this.#redirect));
 
     if (!response.ok) {
       const body = await response.text();
@@ -138,7 +141,7 @@ export class Client {
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     const url = createClientUrl(this.#baseUrl, path);
     const headers = await this.#resolveHeaders(headersInitToRecord(init.headers));
-    return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
+    return await this.#fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }
 
   // ---------------------------------------------------------------------------

@@ -11,7 +11,11 @@ afterEach(() => {
 
 function session(resolveHeaders: () => Promise<Headers> = async () => new Headers()) {
   return new ClientSession(
-    { baseUrl: "https://eve.test", resolveHeaders },
+    {
+      baseUrl: "https://eve.test",
+      fetch: (input, init) => globalThis.fetch(input, init),
+      resolveHeaders,
+    },
     { sessionId: "session_1", streamIndex: 0 },
   );
 }
