@@ -13,20 +13,30 @@ export function connectorUid(service: string): string {
   return `${service}/${CONNECTOR_NAME}`;
 }
 
-const CHECK_TTL_MS = 5 * 60_000;
-const checks = new Map<string, { readonly attached: Promise<boolean>; readonly atMs: number }>();
+const ATTACHED_TTL_MS = 5 * 60_000;
+// Shorter, so a newly created connector shows up within a minute.
+const MISSING_TTL_MS = 60_000;
+const checks = new Map<string, { readonly attached: boolean; readonly atMs: number }>();
 
 /**
- * Whether a Vercel Connect connector is attached to this project. Cached for a
- * few minutes, so a newly created connector takes effect without a redeploy.
+ * Whether a Vercel Connect connector is attached to this project. Cached, so a
+ * newly created connector takes effect without a redeploy.
  */
-export function isConnectorAttached(uid: string): Promise<boolean> {
+export async function isConnectorAttached(uid: string): Promise<boolean> {
   const check = checks.get(uid);
-  if (check !== undefined && Date.now() - check.atMs <= CHECK_TTL_MS) return check.attached;
-  const attached = getConnectorMetadata(uid).then(
-    () => true,
-    () => false,
-  );
+  const ttl = check?.attached ? ATTACHED_TTL_MS : MISSING_TTL_MS;
+  if (check !== undefined && Date.now() - check.atMs <= ttl) return check.attached;
+  let attached = false;
+  try {
+    await getConnectorMetadata(uid);
+    attached = true;
+  } catch (error) {
+    // A missing connector is expected until someone sets it up. Anything else,
+    // such as missing OIDC credentials, would otherwise look the same.
+    if (!(error instanceof Error && /not found/i.test(error.message))) {
+      console.warn(`Couldn't check Vercel Connect connector ${uid}`, error);
+    }
+  }
   checks.set(uid, { attached, atMs: Date.now() });
   return attached;
 }
