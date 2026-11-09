@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "The agent recovers from an injected lookup timeout without a follow-up prompt.",
+  description: "The agent follows a requested one-retry policy after an injected lookup timeout.",
   async test(t) {
     const session = await t.session({
       stubs: [
