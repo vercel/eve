@@ -15,11 +15,13 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
     "@vercel/connect": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@opentelemetry/sdk-trace-base": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "typescript-compiler": "npm:typescript@6.0.3"

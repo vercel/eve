@@ -1,3 +1,4 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
@@ -120,30 +121,67 @@ export async function withSandboxLeaseLock<T>(
   run: () => PromiseLike<T>,
   { cleanup, signal }: SandboxLeaseLockOptions = {},
 ): Promise<T> {
-  const deadline = Date.now() + LEASE_WAIT_MS;
-  const command = acquireCommand(owner);
-  for (;;) {
-    signal?.throwIfAborted();
-    const attempt = signal
-      ? await sandbox.run({ command, signal })
-      : await sandbox.run({ command });
-    if (attempt.exitCode === 0) break;
-    if (attempt.exitCode !== BUSY_EXIT_CODE) {
-      throw new Error(
-        `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
-      );
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
-      );
-    }
-    await waitForRetry(signal);
-  }
+  await acquire(sandbox, acquireCommand(owner), signal);
   try {
     return await run();
   } finally {
     await release(sandbox, owner, cleanup);
+  }
+}
+
+/**
+ * How a wait for the lease ended, on the `agent.github.lease.wait` span. The span lasts as long as
+ * the wait, so its duration is how long a command waited for another to release the lease.
+ */
+type LeaseWaitOutcome = "acquired" | "timed_out" | "cancelled" | "failed";
+
+/** Polls for the lock from the host until it is acquired, the wait times out, or `signal` aborts. */
+async function acquire(
+  sandbox: SandboxSession,
+  command: string,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const span = trace.getTracer("eve.git").startSpan("agent.github.lease.wait");
+  const deadline = Date.now() + LEASE_WAIT_MS;
+  let attempts = 0;
+  let outcome: LeaseWaitOutcome = "failed";
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      attempts += 1;
+      const attempt = signal
+        ? await sandbox.run({ command, signal })
+        : await sandbox.run({ command });
+      if (attempt.exitCode === 0) {
+        outcome = "acquired";
+        return;
+      }
+      if (attempt.exitCode !== BUSY_EXIT_CODE) {
+        throw new Error(
+          `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
+        );
+      }
+      if (Date.now() >= deadline) {
+        outcome = "timed_out";
+        throw new Error(
+          "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
+        );
+      }
+      await waitForRetry(signal);
+    }
+  } catch (error) {
+    if (signal?.aborted) outcome = "cancelled";
+    throw error;
+  } finally {
+    span.setAttributes({
+      "agent.github.lease.attempts": attempts,
+      "agent.github.lease.outcome": outcome,
+      "agent.github.lease.waited": attempts > 1,
+    });
+    if (outcome === "timed_out" || outcome === "failed") {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+    }
+    span.end();
   }
 }
 
