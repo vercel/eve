@@ -51,6 +51,7 @@ import jose from "./jose.mjs";
 import jsYaml from "./js-yaml.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
+import justBashBrowser from "./just-bash-browser.mjs";
 import justSecrets from "./just-secrets.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
@@ -80,6 +81,7 @@ export const MODULES = [
   jsYaml,
   jsoncParser,
   jsonSchema,
+  justBashBrowser,
   justSecrets,
   marked,
   mcp,

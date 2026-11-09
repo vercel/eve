@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { codeSandbox, type CodeSandbox } from "#runtime/sandbox/code-sandbox.js";
+import { codeSandbox } from "#runtime/sandbox/code-sandbox.js";
+import { type CodeSandbox } from "#runtime/sandbox/code-sandbox-registry.js";
 import { HostSandbox, type HostSandboxOptions } from "#sandbox/providers/host.js";
 
 /**

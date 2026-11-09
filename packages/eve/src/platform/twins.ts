@@ -11,7 +11,8 @@
 // - platform primitives, with no eve imports: async-storage, deep-equal, delay, env, host-bytes,
 //   host-path, inflate, inspect, posix-path, sha256, uuid;
 // - host features with a browser default, which import upward into eve: compiled-agents,
-//   development-sandboxes, local-gateway, package-info, public-fetch, sandbox-cache.
+//   default-sandbox, development-sandboxes, local-gateway, package-info, public-fetch,
+//   sandbox-cache.
 
 import type * as AsyncStorage from "./async-storage.js";
 import type * as AsyncStorageWeb from "./async-storage.web.js";
@@ -19,6 +20,8 @@ import type * as CompiledAgents from "./compiled-agents.js";
 import type * as CompiledAgentsWeb from "./compiled-agents.web.js";
 import type * as DeepEqual from "./deep-equal.js";
 import type * as DeepEqualWeb from "./deep-equal.web.js";
+import type * as DefaultSandbox from "./default-sandbox.js";
+import type * as DefaultSandboxWeb from "./default-sandbox.web.js";
 import type * as Delay from "./delay.js";
 import type * as DelayWeb from "./delay.web.js";
 import type * as DevelopmentSandboxes from "./development-sandboxes.js";
@@ -55,6 +58,7 @@ export type PlatformTwins = [
   Twin<typeof AsyncStorageWeb, typeof AsyncStorage>,
   Twin<typeof CompiledAgentsWeb, typeof CompiledAgents>,
   Twin<typeof DeepEqualWeb, typeof DeepEqual>,
+  Twin<typeof DefaultSandboxWeb, typeof DefaultSandbox>,
   Twin<typeof DelayWeb, typeof Delay>,
   Twin<typeof DevelopmentSandboxesWeb, typeof DevelopmentSandboxes>,
   Twin<typeof EnvWeb, typeof Env>,
