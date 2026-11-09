@@ -47,7 +47,7 @@ import { createRequire, isBuiltin } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
+import { buildWithRolldown } from "../rolldown.mjs";
 import { onVendoredDependencyLog } from "../../src/internal/bundler/vendored-dependency-log.ts";
 
 const declarationsDir = fileURLToPath(new URL("./declarations/", import.meta.url));
@@ -648,7 +648,7 @@ async function pathExists(path) {
   }
 }
 
-async function findPackageJson(packageName, packageRoot, packageJsonName = packageName) {
+export async function findPackageJson(packageName, packageRoot, packageJsonName = packageName) {
   let currentPath;
   try {
     currentPath = dirname(require.resolve(packageName, { paths: [packageRoot] }));
@@ -778,7 +778,7 @@ async function bundleStandaloneModule({
     );
   }
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     cwd: packageRoot,
     input: entries[0].input,
     external: module.external ?? [],
@@ -836,7 +836,7 @@ async function bundleModuleGroup({
     ),
   ];
 
-  await buildWithNitroRolldown({
+  await buildWithRolldown({
     cwd: packageRoot,
     input: entrypoints,
     external,

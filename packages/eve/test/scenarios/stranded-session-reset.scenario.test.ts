@@ -25,10 +25,15 @@ export default defineAgent({
 });
 `,
     "agent/instructions.md": "Acknowledge each message briefly.\n",
-    "agent/channels/threads.ts": `import { defineChannel, GET, POST, SessionStrandedError } from "eve/channels";
+    "agent/channels/threads.ts": `import { defineChannel, GET, HEAD, POST, SessionStrandedError } from "eve/channels";
+
+const counters = globalThis as { streamRequests?: number };
 
 export default defineChannel({
+  cors: true,
   routes: [
+    HEAD("/threads/:threadId", () => new Response(null, { headers: { "x-thread": "head" } })),
+    GET("/stream-requests", () => Response.json({ count: counters.streamRequests ?? 0 })),
     POST("/threads/:threadId", async (request, { from, params }) => {
       const session = await from(params.threadId!).send(await request.text(), { auth: null });
       return Response.json({ sessionId: session.sessionId });
@@ -46,6 +51,7 @@ export default defineChannel({
       }
     }),
     GET("/sessions/:sessionId/stream", async (_request, { attachSession, params }) => {
+      counters.streamRequests = (counters.streamRequests ?? 0) + 1;
       const events = attachSession(params.sessionId!).stream();
       const ndjson = ReadableStream.from(events)
         .pipeThrough(
@@ -80,6 +86,31 @@ async function request(server: RunningEveStart, path: string, init?: RequestInit
       },
     );
   }
+}
+
+async function streamRequests(server: RunningEveStart): Promise<number> {
+  return ((await (await request(server, "/stream-requests")).json()) as { count: number }).count;
+}
+
+/**
+ * HEAD reaches only routes declared with HEAD(): a GET-only path answers 405
+ * with its methods and CORS headers before its handler runs.
+ */
+async function expectHeadRouting(server: RunningEveStart): Promise<void> {
+  const before = await streamRequests(server);
+  const guarded = await request(server, "/sessions/unknown/stream", {
+    headers: { origin: "https://app.example" },
+    method: "HEAD",
+  });
+  expect(guarded.status, server.stderr()).toBe(405);
+  expect(guarded.headers.get("allow")).toBe("GET, OPTIONS");
+  expect(guarded.headers.get("access-control-allow-origin")).toBe("*");
+  expect(await streamRequests(server)).toBe(before);
+
+  const declared = await request(server, "/threads/alice", { method: "HEAD" });
+  expect(declared.status).toBe(200);
+  expect(declared.headers.get("x-thread")).toBe("head");
+  expect((await request(server, "/", { method: "HEAD" })).status).toBe(200);
 }
 
 async function sendToThread(server: RunningEveStart, message: string): Promise<string> {
@@ -152,8 +183,11 @@ describe("stranded sessions across an eve upgrade", () => {
       let server = await startPackagedEveStart(appRoot);
       let strandedSessionId: string;
       try {
+        await expectHeadRouting(server);
         strandedSessionId = await sendToThread(server, "Alice opens the thread.");
         await waitForTurnCompleted(server, strandedSessionId);
+        // The counter the HEAD check relies on does count stream requests.
+        expect(await streamRequests(server)).toBeGreaterThan(0);
       } finally {
         await server.stop();
       }

@@ -210,7 +210,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
-  if (record.label !== undefined) {
+  // `label: false` hides the tool's calls from activity.
+  if (record.label !== undefined && record.label !== false) {
     const label = expectObjectRecord(record.label, message);
     expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
     expectFunction(label.start, message);

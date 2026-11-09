@@ -1,4 +1,7 @@
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
+
+// Sibling file tools keep write_file's read record current through its own module.
+export { refreshReadFileStamp } from "#execution/sandbox/write-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";

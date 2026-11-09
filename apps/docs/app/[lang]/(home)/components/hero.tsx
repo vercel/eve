@@ -1,4 +1,3 @@
-import { Badge } from "@vercel/geistdocs/components/badge";
 import { cacheLife } from "next/cache";
 import type { JSX } from "react";
 import { InstallSwitcher } from "./install-switcher";
@@ -19,7 +18,7 @@ async function latestVersion(): Promise<string | null> {
   }
 }
 
-/** The line under the install command: the current release, the license, and Beta. */
+/** The line under the install command: the current release and the license. */
 async function ReleaseLabels(): Promise<JSX.Element> {
   const version = await latestVersion();
   return (
@@ -34,12 +33,6 @@ async function ReleaseLabels(): Promise<JSX.Element> {
         </>
       ) : null}
       <span>Apache-2.0</span>
-      <span aria-hidden className="text-gray-700">
-        ·
-      </span>
-      <Badge size="sm" variant="pill">
-        Beta
-      </Badge>
     </div>
   );
 }

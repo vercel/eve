@@ -98,6 +98,9 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | a sign-in without a link shows its instructions | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[15](#note-15)</sup> | ✅ | —<sup>[15](#note-15)</sup> | ✅ | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | ✅ | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[18](#note-18)</sup> | ✅ | —<sup>[15](#note-15)</sup> | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ | ✅ |
 | after signing in, the agent carries on with the request | ✅ | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| completing a sign-in stops showing its link and code | ✅ | ✅ | ❌<sup>[24](#note-24)</sup> | ✅ | ✅ | ❌<sup>[24](#note-24)</sup> | ✅ | ❌<sup>[24](#note-24)</sup> | ✅ | ❌<sup>[16](#note-16)</sup> | ✅ | ❌<sup>[25](#note-25)</sup> | ❌<sup>[25](#note-25)</sup> | ❌<sup>[24](#note-24)</sup> | ✅ | ❌<sup>[24](#note-24)</sup> | ✅ | ❌<sup>[24](#note-24)</sup> | —<sup>[19](#note-19)</sup> | ❌<sup>[24](#note-24)</sup> | ✅ | ❌<sup>[25](#note-25)</sup> | —<sup>[26](#note-26)</sup> |
+| pressing Cancel on a sign-in removes its prompt | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> |  | —<sup>[28](#note-28)</sup> | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[28](#note-28)</sup> |  | ✅ |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> | —<sup>[28](#note-28)</sup> | —<sup>[28](#note-28)</sup> | —<sup>[28](#note-28)</sup> | ✅ | —<sup>[28](#note-28)</sup> |
+| pressing Cancel on a sign-in after the session's run ended removes its prompt | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> |  | —<sup>[28](#note-28)</sup> | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[28](#note-28)</sup> |  | ✅ |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> | —<sup>[28](#note-28)</sup> | —<sup>[28](#note-28)</sup> | —<sup>[28](#note-28)</sup> | ✅ | —<sup>[28](#note-28)</sup> |
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
@@ -112,10 +115,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `discord-gateway` | `discord-gateway-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `discord-gateway-threads` | `github` | `linear` | `photon` | `slack-code-channel` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[24](#note-24)</sup> | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[24](#note-24)</sup> | —<sup>[25](#note-25)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[24](#note-24)</sup> | ✅ | ✅ |  | ✅ | —<sup>[26](#note-26)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[29](#note-29)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[29](#note-29)</sup> | ✅ | ✅ | ✅ | ✅ |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[29](#note-29)</sup> | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[29](#note-29)</sup> | ✅ | ✅ | ✅ | ✅ |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[29](#note-29)</sup> | —<sup>[30](#note-30)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[29](#note-29)</sup> | ✅ | ✅ | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[29](#note-29)</sup> | ✅ | ✅ |  | ✅ | —<sup>[31](#note-31)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[29](#note-29)</sup> | ✅ | ✅ | ✅ | ✅ |
 
 ## Notes
 
@@ -142,6 +145,11 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 21. <a id="note-21"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
 22. <a id="note-22"></a>the sign-in goes privately to the person signing in, so the thread shows nothing to press
 23. <a id="note-23"></a>a public thread gets a status naming who must sign in, since nothing on GitHub is private to them
-24. <a id="note-24"></a>the platform has no files a person can send
-25. <a id="note-25"></a>the browser sends a file's bytes with the message, so there is no download to fail
-26. <a id="note-26"></a>each slash command starts its own session, so no later message shares one with the file
+24. <a id="note-24"></a>the challenge message stays as it was sent after the sign-in completes
+25. <a id="note-25"></a>the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can
+26. <a id="note-26"></a>a sent SMS can't be edited or taken back
+27. <a id="note-27"></a>the platform has no Cancel on its sign-in prompt
+28. <a id="note-28"></a>the platform has no buttons a person can press or Cancel on its sign-in prompt
+29. <a id="note-29"></a>the platform has no files a person can send
+30. <a id="note-30"></a>the browser sends a file's bytes with the message, so there is no download to fail
+31. <a id="note-31"></a>each slash command starts its own session, so no later message shares one with the file

@@ -6,6 +6,7 @@ import {
   normalizeMessage,
   userContentOf,
 } from "#harness/messages.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 
 export async function preserveCancelledTurnMessage(
@@ -16,13 +17,11 @@ export async function preserveCancelledTurnMessage(
   if (message === undefined) return session;
   const content = await stageAttachmentsToSandbox(userContentOf(message));
   const frameworkMessageKind = frameworkMessageKindForStepInput(input);
-  return {
-    ...session,
-    history: [
-      ...session.history,
+  return changeHistory(session, {
+    append: [
       frameworkMessageKind === undefined
         ? createUserMessage("user", content)
         : createFrameworkUserMessage(frameworkMessageKind, content),
     ],
-  };
+  });
 }

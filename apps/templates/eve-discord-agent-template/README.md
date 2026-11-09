@@ -1,6 +1,6 @@
 This is a Discord community agent template for [eve](https://eve.dev). Mention the bot with a question and it answers in a thread, catches latecomers up on what they missed, and stays quiet while people talk.
 
-An experimental [Discord Gateway relay](https://eve.dev/docs/channels/discord#reply-to-dms-and-mentions-experimental) runs as a Vercel Daemon and forwards DMs, mentions, and thread replies to the agent. Credentials go through [Vercel Connect](https://vercel.com/docs), so the bot token stays out of your environment.
+An experimental [Discord Gateway relay](https://eve.dev/docs/channels/discord/reference#reply-to-dms-and-mentions-experimental) runs as a Vercel Daemon and forwards DMs, mentions, and thread replies to the agent. Credentials go through [Vercel Connect](https://vercel.com/docs), so the bot token stays out of your environment.
 
 The agent comes with:
 
@@ -47,7 +47,7 @@ Edit the agent's behavior in `agent/instructions.md`, its tools in `agent/tools/
 
 ## Learn more
 
-This project uses the eve framework's bundled guides. After installing dependencies, see `node_modules/eve/dist/docs/public/`.
+This project uses the eve framework's bundled guides. After installing dependencies, see `node_modules/eve/docs/`.
 
 - [eve documentation](https://eve.dev/docs) - learn about eve features and API.
 - [Discord channel](https://eve.dev/docs/channels/discord) - the channel, the Gateway relay, and their options.

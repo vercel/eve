@@ -51,6 +51,20 @@ describe("dynamic tool approval helpers", () => {
     );
   });
 
+  it("forwards provider options to the decision model", async () => {
+    decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
+
+    await auto({
+      modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+    })(approvalContext());
+
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: { gateway: { zeroDataRetention: true } },
+      }),
+    );
+  });
+
   it("allows classifier instructions and outcome descriptions to be overridden", async () => {
     decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
     const context = approvalContext();

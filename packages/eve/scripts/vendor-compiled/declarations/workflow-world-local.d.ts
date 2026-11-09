@@ -3,6 +3,7 @@ import type { QueuePrefix, World } from "#compiled/@workflow/world/index.js";
 export type LocalWorld = World & {
   clear(): Promise<void>;
   registerHandler(prefix: QueuePrefix, handler: (request: Request) => Promise<Response>): void;
+  releaseOrphanedSteps(runId: string): Promise<void>;
 };
 
 export function createWorld(options?: {

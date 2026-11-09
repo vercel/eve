@@ -33,6 +33,8 @@ export default defineChannel({
 
 A route's `path` is its app URL, without a channel-name prefix. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Give each route a unique method and path outside `/eve/v1/*`, which eve reserves.
 
+A request with a method that its path doesn't declare gets `405 Method Not Allowed`, with an `Allow` header that lists the methods the path declares. `HEAD` works differently: a path answers it only through a route you declare with `HEAD()`. A `HEAD` request to a path that declares `GET` but not `HEAD` gets `405`, and the `GET` handler doesn't run. A `HEAD` request to a path with neither route gets `404`.
+
 Each route handler receives:
 
 - `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `end` to an address: your channel's ID for one conversation, such as a thread ID. See [Continuation tokens](#continuation-tokens).
@@ -41,6 +43,8 @@ Each route handler receives:
 - `to(channel, target).send(message, options)` hands work to another authored channel.
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 - `describe()`, `invokeTool()`, `listSkillFiles()`, and `readSkill()` describe the agent and run its tools without a conversation. See [Describe the agent and run tools directly](#describe-the-agent-and-run-tools-directly).
+
+`params` values are percent-decoded, except `%2F` and `%5C`: those stay encoded, so a parameter never contains a `/` or `\` that the request path didn't have. Decode them in your handler if it expects them.
 
 This fuller version adds commands, a stream route, and an event handler:
 
@@ -138,7 +142,7 @@ A direct call doesn't go through the AI SDK. AI SDK telemetry integrations regis
 
 ## Channel operations and session handles
 
-Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. Without an [idempotency key](#retried-deliveries), a new session's handle can return before the session takes the address. If another send takes it first, eve forwards the message to that session. Call `resolveSession(address)` after startup to get the handle of the session that won.
+Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. When two sends to a new address race, one session takes the address, eve forwards the other message to it, and both handles name that session. If the address keeps changing owners during the race, `create()` or `send()` throws `SessionNotActiveError` with `code: "session_not_ready"` and delivers nothing. Retry the call.
 
 ```ts
 const source = from(threadId);
@@ -196,7 +200,7 @@ const answers = parseAnswers(decodedResponses);
 await source.respond(answers, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](./overview#overlapping-messages). A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
@@ -399,7 +403,7 @@ Before sending:
 
 The supplied `auth` identifies who started the session, and tools and event handlers read it as `session.auth.initiator`.
 
-The destination's `receive` hook defines the target fields and how they map to a session; see [Slack proactive sessions](./slack#proactive-sessions) for Slack's. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+The destination's `receive` hook defines the target fields and how they map to a session; see [Slack proactive sessions](./slack/reference#proactive-sessions) for Slack's. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
 
 `send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, and `turnPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them on to the session.
 
@@ -457,6 +461,8 @@ export default defineChannel({
 ```
 
 `WS()` handlers receive the same `from`, `to`, `attachSession`, `params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The returned hooks, `upgrade`, `open`, `message`, `close`, and `error`, are compatible with Nitro/H3 websocket routing.
+
+A `WS()` route registers for `GET`, the method an upgrade request uses. A path can also declare `GET()`: upgrade requests go to the `WS()` handler and other requests to the `GET()` handler. Both routes must use the same parameter names, or `eve build` fails.
 
 ### Node upgrade server escape hatch
 
@@ -656,7 +662,7 @@ Keep each route's `method` and `path` unless you mean to move the endpoint.
 
 ## What to read next
 
-- [Channels overview](./overview)
+- [Channels overview](/docs/channels)
 - [Dynamic capabilities](../guides/dynamic-capabilities)
 - [Auth & route protection](../guides/auth-and-route-protection)
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn

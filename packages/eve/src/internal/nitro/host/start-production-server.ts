@@ -15,10 +15,10 @@ const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
 // srvx prints this line only after its own listener is bound.
 const LISTENING_URL_PATTERN = /Listening on:?\s+(https?:\/\/\S+)/;
-// Must exceed the server's bounded sandbox shutdown (15s in
-// sandbox-shutdown-plugin.ts) so stopping sandboxes on SIGTERM is not
-// cut short by SIGKILL.
-const TERMINATE_GRACE_MS = 20_000;
+// On SIGTERM, srvx closes the server for up to 5s before Nitro's close hooks
+// run the bounded sandbox shutdown (15s in sandbox-shutdown-plugin.ts). The
+// grace covers both, so SIGKILL does not cut stopping sandboxes short.
+const TERMINATE_GRACE_MS = 25_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
 
 function resolveOutputServerEntry(appRoot: string): string {
@@ -207,8 +207,15 @@ export async function startProductionServer(
     PORT: String(port),
   };
   // srvx hides its listening line when TEST is set, and that line is the only
-  // proof that this child, not another process, owns the port.
+  // proof that this child, not another process, owns the port. With CI or
+  // TEST set, srvx also skips graceful shutdown, so SIGTERM would never run
+  // Nitro's close hooks, and SERVER_SHUTDOWN_TIMEOUT would stretch srvx's
+  // close past TERMINATE_GRACE_MS. A socket path would replace the port eve
+  // waits on.
   delete env.TEST;
+  delete env.CI;
+  delete env.SERVER_SHUTDOWN_TIMEOUT;
+  delete env.NITRO_UNIX_SOCKET;
   if (options.schedules === false) {
     env[EVE_SCHEDULES_DISABLED_ENV] = "1";
   }

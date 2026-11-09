@@ -11,7 +11,7 @@ import {
   useTemporaryAppRoots,
   useTemporaryDirectories,
 } from "#internal/testing/use-temporary-app-roots.js";
-import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
+import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { buildApplication } from "#internal/nitro/host.js";
 
 vi.mock("#internal/nitro/host/vercel-build-prewarm.js", () => ({
@@ -66,6 +66,7 @@ describe("instrumentation before the Nitro entry", () => {
       );
       const applicationPath = join(root, "application.mjs");
       await writeFile(applicationPath, 'import "fixture-driver"; export default () => {};');
+      const entry = createInstrumentationEntry(instrumentationPath);
       const nitro = await createNitro({
         rootDir: root,
         dev: target === "development",
@@ -74,9 +75,10 @@ describe("instrumentation before the Nitro entry", () => {
         logLevel: 0,
         plugins: [applicationPath, instrumentationPath],
         traceDeps: ["fixture-driver"],
-        rollupConfig: { external: ["fixture-driver"] },
+        inlineDynamicImports: entry.inlineDynamicImports,
+        modules: [entry.module],
+        rolldownConfig: { external: ["fixture-driver"], plugins: [entry.plugin] },
       });
-      configureInstrumentationEntry(nitro, instrumentationPath);
 
       try {
         await prepare(nitro);

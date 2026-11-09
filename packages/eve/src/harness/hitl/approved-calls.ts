@@ -18,7 +18,8 @@ import {
 import { isRunnableTool } from "#harness/tools.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { callSettledFrom } from "#harness/call-facts.js";
+import { settleCall } from "#harness/session-machine/calls.js";
+import { commitOf } from "#harness/session-machine/commit.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
@@ -69,18 +70,18 @@ export async function runApprovedCalls(input: {
             ...(refused !== undefined && { retryable: refused.retryable }),
           },
     );
-    if (events.length > 0) await input.publish(events);
+    if (events.length > 0) await input.publish(commitOf(events));
   };
   const executed = await Promise.allSettled(
     input.approvals.map(async (approval): Promise<CallOutcome> => {
-      const { call, interactionId } = approval;
+      const { call } = approval;
       const { callId, toolName } = call;
       const definition = input.tools.get(toolName);
       if (changedSinceOffered(call, definition)) {
         const message = changedToolMessage(toolName);
         const failed = failedCall({ callId, message, toolName });
         await reportSignIns(approval, message);
-        await input.publish(callSettledFrom(failed.result));
+        await input.publish(settleCall(failed.result));
         return { settled: [{ part: failed.part }], toolResults: [] };
       }
       if (isRunnableTool(definition)) {
@@ -89,8 +90,6 @@ export async function runApprovedCalls(input: {
           call,
           {
             ...input,
-            // A call only a sign-in stopped was never cleared by a person.
-            ...(interactionId !== undefined && { clearedBy: { interactionId } }),
             definition,
             ...(responder !== undefined && { responder }),
             beforeResult: (failure) => reportSignIns(approval, failure),
@@ -103,7 +102,7 @@ export async function runApprovedCalls(input: {
       const message = unavailableToolMessage(toolName, searchable);
       const failed = failedCall({ callId, message, toolName });
       await reportSignIns(approval, message);
-      await input.publish(callSettledFrom(failed.result));
+      await input.publish(settleCall(failed.result));
       return { settled: [{ part: failed.part }], toolResults: [] };
     }),
   );

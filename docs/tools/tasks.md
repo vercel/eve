@@ -215,7 +215,7 @@ question is answered or sign-in completes.
 `send(...).result()` waits through task work for the final reply, but stops at a question or sign-in
 with `status: "awaiting-input"`. Answer through `respond()`; see
 [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
-[Slack](/docs/channels/slack#task-card) also shows task activity.
+[Slack](/docs/channels/slack/reference#task-card) also shows task activity.
 
 A steering message from the turn's own caller, sent with `turnPolicy: "steer"` (the default),
 ends an `eve__task_wait`. It also aborts the `abortSignal` of any `execute` call the turn waits on,

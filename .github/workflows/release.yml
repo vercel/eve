@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   GHCR_IMAGE: ghcr.io/vercel/eve
   VCR_IMAGE: vcr.vercel.com/vercel/eve/base
@@ -171,13 +174,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Prereleases publish to npm's `latest` tag but stay GitHub prereleases,
+      # which GitHub cannot mark as the latest release.
       - name: Mark eve as the latest GitHub release
         if: steps.changesets.outputs.published == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.published-packages }}
         run: |
-          version="$(jq -r '.[] | select(.name == "eve") | .version' <<< "$PUBLISHED_PACKAGES")"
+          version="$(jq -r '.[] | select(.name == "eve" and (.version | contains("-") | not)) | .version' <<< "$PUBLISHED_PACKAGES")"
           if [[ -n "$version" ]]; then
             gh release edit "eve@$version" --latest
           fi

@@ -10,7 +10,6 @@ describe("conversation import", () => {
       sessionId: "old",
       continuationToken: "slack:thread",
       history: [{ role: "user", content: "Alice chose blue." }],
-      agent: { system: "old prompt" },
       sandboxState: { session: null },
       state: {
         "app.color": "blue",

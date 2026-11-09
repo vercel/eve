@@ -6,6 +6,7 @@ import { normalizeScheduleCollectionDefinition } from "#internal/authored-defini
 export function compileScheduleCollectionDefinition(
   source: ScheduleSourceRef,
   value: unknown,
+  application: string,
 ): CompiledScheduleCollectionDefinition {
   if (source.sourceKind !== "module") {
     throw new Error(`Schedule collections must be authored as modules: "${source.logicalPath}".`);
@@ -16,6 +17,7 @@ export function compileScheduleCollectionDefinition(
   );
 
   const compiled: CompiledScheduleCollectionDefinition = {
+    application,
     logicalPath: source.logicalPath,
     name: stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, ""),
     providerKind: definition.provider.kind,

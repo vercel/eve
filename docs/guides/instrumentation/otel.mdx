@@ -23,7 +23,7 @@ export default otel({
 });
 ```
 
-`otel({ tracePolicy })` sets the most content any OTel destination can receive. No destination can add back content it excludes. It doesn't affect instrumentation files created with `defineInstrumentation()`. See [Audience](../channels/overview#audience) for how channels classify the conversation passed to this policy.
+`otel({ tracePolicy })` sets the most content any OTel destination can receive. No destination can add back content it excludes. It doesn't affect instrumentation files created with `defineInstrumentation()`. See [Audience](/docs/channels#audience) for how channels classify the conversation passed to this policy.
 
 The same capture decision sets the session's default [Workflow run-data retention](/docs/agent-config#run-data-retention):
 
@@ -105,6 +105,8 @@ For Agent Runs sampling defaults and existing-deployment setup, see
 ## Instrument Node.js dependencies
 
 Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.
+Enable only the instrumentations you use, because each one loads when an instance starts. See
+[Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 For example, install the PostgreSQL instrumentation alongside `pg`:
 
 ```bash
@@ -158,6 +160,8 @@ export default otelIntegration({
 
 The resolver receives the channel, session, final model input, `run: { id, attempt }`, and optional turn. Its input type is `InstrumentationModelStartedInput` from `eve/instrumentation`. Model input content is `unknown`, so narrow provider-specific messages before you read them. Content that `otel({ tracePolicy })` excludes isn't available to the resolver.
 
+`input.session.auth.current` is the turn's caller, with the attributes the channel set for its message. eve calls the resolver synchronously before each model attempt, inside the session, so it can also read [`defineState`](/docs/concepts/state) values, such as a decision a [`turn.started` hook](/docs/guides/hooks#execution-order) made for the turn. Return the values directly: eve ignores a returned Promise. A resolver that throws adds nothing to that attempt; eve logs a warning and the model call runs.
+
 Your values appear under `ai.settings.context.*`, next to `ai.settings.context.eve.environment`. Keys that begin with `eve.` are reserved. Channel, session, step, turn, and version IDs are regular span attributes, not runtime context.
 
 ## Trace topology
@@ -166,9 +170,11 @@ An ordinary agent turn produces this trace:
 
 ```text
 invoke_agent <agent>
-  └── agent.step
-        ├── chat <model>
-        └── execute_tool <tool>
+  ├── agent.step
+  │     ├── chat <model>
+  │     └── execute_tool <tool>
+  │           └── agent.approval
+  └── agent.approval
 ```
 
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.

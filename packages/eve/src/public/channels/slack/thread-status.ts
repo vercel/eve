@@ -25,15 +25,16 @@ export interface SlackThreadStatus {
 }
 
 /**
- * Sets the thread status, unless the same text is already showing. `force`
- * writes it anyway, for moments Slack may have cleared it, and so a long turn
- * keeps it from timing out.
+ * Sets the thread status, unless the same text is already showing or the turn
+ * is quiet because an edit or a deferred message started it. `force` writes it anyway, for moments
+ * Slack may have cleared it, and so a long turn keeps it from timing out.
  */
 export async function showStatus(
   channel: SlackEventContext,
   text: string,
   options?: { readonly force?: boolean },
 ): Promise<void> {
+  if (channel.state.quietStatus === true) return;
   const status = truncateTypingStatus(text);
   const now = Date.now();
   const current = channel.state.threadStatus;

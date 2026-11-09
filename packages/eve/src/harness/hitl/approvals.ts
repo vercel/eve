@@ -1,3 +1,4 @@
+import { transition } from "#harness/session-machine/commit.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 import {
@@ -6,18 +7,18 @@ import {
   rememberDecision,
 } from "#approval/evaluation.js";
 
+import { pendingApprovals } from "./approval-prompt.js";
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import { signInAttemptKey, supersededChallenges, withSignIns } from "./sign-ins.js";
-import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import {
   failedCall,
   resolveApprovalOutcome,
   TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
 } from "#harness/approval-outcome.js";
-import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
+import { coalesceTurnInputs } from "#harness/messages.js";
 import { limitDecision, type LimitAsk } from "#harness/hitl/budget-request.js";
 import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
 import { callSettledFrom } from "#harness/call-facts.js";
@@ -101,7 +102,6 @@ export function askApprovals(
   // Results of work resumed in this step stay ahead of the notice; the rest waits for approval.
   const pendingStart = input.messages.findIndex((message) => message.role !== "tool");
   const committed = pendingStart === -1 ? input.messages : input.messages.slice(0, pendingStart);
-  const snippet = renderPendingApprovalsSnippet(input.requests);
   const turn = suspend(view.turn, {
     event: input.event,
     messages: input.messages.slice(committed.length),
@@ -110,14 +110,13 @@ export function askApprovals(
     responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
     tasks: input.tasks,
   });
-  return {
-    commit: [
-      ...committed,
-      ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
-    ],
+  return transition({
+    // What still waits is told to each later model call from the session, not written into
+    // history, where it would outlive the approval it describes.
+    history: { append: committed },
     events: input.tasks.length > 0 ? [] : input.requests.map((ask) => approvalOpened(ask)),
     turn,
-  };
+  });
 }
 
 /** A step that parked approvals beside its tasks asks for them once the tasks finish. */
@@ -130,16 +129,7 @@ export function openDeferredApprovals(view: SessionView): Transition {
       ? []
       : step.requests.map((ask) => approvalOpened(ask)),
   );
-  return { events, turn: view.turn };
-}
-
-/** The step's approvals nobody has settled: open, or not asked yet. */
-export function pendingApprovals(view: SessionView, step: SuspendedStep): readonly ApprovalAsk[] {
-  const tables = view.projection.view;
-  return step.requests.filter((request) => {
-    const row = tables.interactions[request.interactionId];
-    return row === undefined || row.status === "open";
-  });
+  return transition({ events, turn: view.turn });
 }
 
 /** Approved workflow and agent calls join the runs their requesting steps wait on. */
@@ -154,12 +144,12 @@ export function dispatch(
     const dispatched = withoutApproved(step, new Set(tasks.map((task) => task.callId)));
     return { ...dispatched, tasks: [...step.tasks, ...tasks] };
   });
-  return { events: [], turn: { ...view.turn, suspended } };
+  return transition({ events: [], turn: { ...view.turn, suspended } });
 }
 
 /** Turn input the turn can't take yet waits, unreceived, for a later step. */
 export function queueInput(view: SessionView, input: HarnessStepInput | undefined): Transition {
-  return { events: [], turn: withQueued(view.turn, input) };
+  return transition({ events: [], turn: withQueued(view.turn, input) });
 }
 
 function withQueued(turn: TurnState, queued: HarnessStepInput | undefined): TurnState {
@@ -212,11 +202,11 @@ export function admitAnswers(
       data: { deliveryId, outcome: "refused", reason: refusal },
       type: "delivery.settled",
     }));
-  return {
+  return transition({
     events: [...responses.facts(), ...refused],
     responders: check.weigh,
     turn: view.turn,
-  };
+  });
 }
 
 /** The answer that stands for each open interaction: its latest admitted response. */
@@ -352,12 +342,12 @@ export function settleApprovals(
       (memory, decision) => rememberDecision(memory, decision.request, decision.outcome),
       view.turn.remembered,
     );
-  return {
+  return transition({
     answered,
     approved,
     events: [...responses.facts(), ...events],
     turn: { ...view.turn, remembered, suspended },
-  };
+  });
 }
 
 /**
@@ -368,7 +358,8 @@ export function withdrawUnavailable(
   view: SessionView,
   input: {
     readonly interactionIds: readonly string[];
-    readonly searchable: (request: ApprovalAsk) => boolean;
+    /** The step offers `eve__search`, which an unavailable tool's message points to. */
+    readonly searchable: boolean;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -380,7 +371,7 @@ export function withdrawUnavailable(
     for (const request of pendingApprovals(view, step)) {
       if (!gone.has(request.interactionId)) continue;
       const { callId, toolName } = request.call;
-      const message = unavailableToolMessage(toolName, input.searchable(request));
+      const message = unavailableToolMessage(toolName, input.searchable);
       const failed = failedCall({ callId, message, toolName });
       messages = withResult(messages, failed.part);
       responses.closeOthers(request.interactionId, undefined);
@@ -391,7 +382,10 @@ export function withdrawUnavailable(
     }
     return messages === step.messages ? step : { ...step, messages };
   });
-  return { events: [...responses.facts(), ...events], turn: { ...view.turn, suspended } };
+  return transition({
+    events: [...responses.facts(), ...events],
+    turn: { ...view.turn, suspended },
+  });
 }
 
 export function approvalMemory(view: SessionView): ApprovalMemory {
@@ -430,10 +424,10 @@ export function openLimit(
  */
 export function requestLimit(view: SessionView, ask: LimitAsk): Transition {
   const { turnId } = turnPosition(view.projection);
-  return {
+  return transition({
     events: [interactionOpened({ ...ask, subject: { turnId } })],
     turn: view.turn,
-  };
+  });
 }
 
 /**
@@ -455,16 +449,16 @@ export function settleLimit(view: SessionView): Transition & {
     answer === undefined ||
     response === undefined
   )
-    return { events: [], turn: view.turn };
+    return transition({ events: [], turn: view.turn });
   const responses = responseLedger(tables);
   const granted = limitDecision(response);
   if (granted === undefined) {
     responses.settle(answer.responseId, "refused", INVALID_BUDGET_ANSWER);
-    return { events: responses.facts(), turn: view.turn };
+    return transition({ events: responses.facts(), turn: view.turn });
   }
   responses.settle(answer.responseId, "applied");
   responses.closeOthers(interactionId, answer.responseId);
-  return {
+  return transition({
     events: [
       ...responses.facts(),
       interactionSettled(interactionId, granted.granted ? "accepted" : "declined", {
@@ -474,7 +468,7 @@ export function settleLimit(view: SessionView): Transition & {
     ],
     limit: granted,
     turn: view.turn,
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +498,7 @@ export function withdrawSignIns(view: SessionView, reason: string): Transition {
       failedCall({ callId: call.callId, message: reason, toolName: call.toolName }),
     ),
   });
-  return { ...settled, events: [...events, ...settled.events], signIns: [] };
+  return transition({ ...settled, events: [...events, ...settled.events], signIns: [] });
 }
 
 /**
@@ -560,7 +554,7 @@ export function requireSignIn(
       : turn.suspended.map((step) =>
           awaitSignIns(step, { challenges: input.challenges, stopped: calls }),
         );
-  return { events, signIns, turn: { ...turn, suspended } };
+  return transition({ events, signIns, turn: { ...turn, suspended } });
 }
 
 // ---------------------------------------------------------------------------

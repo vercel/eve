@@ -101,6 +101,18 @@ describe("a sign-in on a channel", () => {
     expect(posting.surface.typing).not.toHaveBeenCalled();
   });
 
+  it("reports a sign-in the runtime withdrew as cancelled, without its reason code", async () => {
+    const view = waitingOnGitHub();
+    const posting = surface({ private: true });
+    await showSignIn(view, "sign-in-1", posting.surface);
+    await settleSignIn(
+      view,
+      { interactionId: "sign-in-1", outcome: "withdrawn", reason: "turn-cancelled" },
+      posting.surface,
+    );
+    expect(posting.posts).toEqual(["Github sign-in cancelled."]);
+  });
+
   it("leaves an approver's sign-in to its approval's prompt", async () => {
     const { surface: dm } = surface({ private: true });
     await showSignIn(waitingOnGitHub("response-1"), "sign-in-1", dm);

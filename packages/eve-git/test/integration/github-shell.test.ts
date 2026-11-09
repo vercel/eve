@@ -234,6 +234,51 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
   assert.equal(runs.length, 5);
 });
 
+test("user tokens cannot satisfy repository allowlists with a declared target", async () => {
+  for (const command of [
+    "gh api repos/acme/private",
+    'gh api graphql -f \'query={repository(owner:"acme",name:"private"){name}}\'',
+    "gh pr view 7 --repo acme/private",
+    "git ls-remote https://github.com/acme/private.git",
+    READ.command,
+  ]) {
+    const requests: Array<string | null> = [];
+    const runs: Parameters<SandboxSession["run"]>[0][] = [];
+    let leases = 0;
+    await assert.rejects(
+      executeGitHubShell(
+        { ...READ, command },
+        {
+          ...CONFIG,
+          principalType: "user",
+          authorize: ({ repository }) => {
+            requests.push(repository);
+            return repository === READ.repository;
+          },
+          async broker() {
+            leases += 1;
+          },
+        },
+        {
+          sessionId: "session-user-allowlist",
+          getToken: async () => ({ token: "user-token" }),
+          requireAuth() {
+            assert.fail("must not request re-authorization");
+          },
+          async getSandbox() {
+            return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+          },
+        },
+      ),
+      /not authorized to run this command/u,
+      command,
+    );
+    assert.deepEqual(requests, [null]);
+    assert.equal(leases, 0);
+    assert.equal(runs.length, 0);
+  }
+});
+
 test("approves the full syntactically valid gh surface", () => {
   for (const command of [
     "gh api repos/vercel/internal-agents",
@@ -382,6 +427,22 @@ test("mints a repository-scoped token only during execution and redacts output",
   assert.match(JSON.stringify(policies[0]), /secret-token/u);
   assert.equal(policies[1], "allow-all");
   assert.equal(output.stdout, "pushed [redacted]");
+});
+
+test("leases the token to uploads.github.com the same way as api.github.com", async () => {
+  const policies: NetworkPolicy[] = [];
+  await executeGitHubShell(READ, CONFIG, {
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, policies);
+    },
+  });
+  const lease = policies[0] as { allow: Record<string, unknown> };
+  assert.match(JSON.stringify(lease.allow["api.github.com"]), /Bearer secret-token/u);
+  assert.deepEqual(lease.allow["uploads.github.com"], lease.allow["api.github.com"]);
 });
 
 test("rewrites SSH GitHub remotes to HTTPS so they carry the credential", async () => {

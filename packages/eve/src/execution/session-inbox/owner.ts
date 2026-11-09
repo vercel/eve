@@ -8,12 +8,16 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
 /**
- * The session's owner was built by another eve version, so this build cannot
- * execute it and ingress refused the command before committing it. Internal:
- * carries the owner run, which never reaches a client.
+ * The session's owner can never execute again: another eve version built it,
+ * or its Vercel deployment was deleted. Ingress refuses a command for an owner
+ * another eve version built before committing it. A deleted deployment shows
+ * only when a read fails, possibly after the owner accepted the command, but
+ * that owner can never replay it. Internal: carries the owner run, which never
+ * reaches a client.
  */
 export class StrandedSessionOwnerError extends Error {
   /** The owner's hook, when ingress looked it up; its metadata names the session. */
@@ -77,7 +81,9 @@ export async function resumeRunnableHook(
  * Throws {@link StrandedSessionOwnerError} when the run holding a physical
  * session inbox token cannot execute. An unheld token passes: resuming it
  * reports the absence. Where the World replays each run on its own
- * deployment, every owner can execute, so nothing is looked up.
+ * deployment, nothing is looked up: an owner whose deployment was deleted
+ * shows only through {@link isOwnerDeploymentDeletedError} on a failed read,
+ * so a healthy owner pays nothing for the check.
  */
 export async function assertRunnableSessionInbox(token: string): Promise<void> {
   const world = await getWorld();
@@ -127,6 +133,23 @@ export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
     if (!DevelopmentRunUnavailableError.is(error)) throw error;
     await assertRunnableOwner(await getWorld(), error.runId);
     throw error;
+  }
+}
+
+/**
+ * `hook`'s owner as {@link StrandedSessionOwnerError} when `error` shows its
+ * deployment was deleted; otherwise, or when the run cannot be read, `error`.
+ * `error` must come from reading or resuming this exact hook: a token may have
+ * moved to a live owner since.
+ */
+export async function strandedIfDeploymentDeleted(error: unknown, hook: Hook): Promise<unknown> {
+  if (!isOwnerDeploymentDeletedError(error)) return error;
+  try {
+    const world = await getWorld();
+    const ownerRun = await world.runs.get(hook.runId, { resolveData: "none" });
+    return new StrandedSessionOwnerError(ownerRun, hook);
+  } catch {
+    return error;
   }
 }
 

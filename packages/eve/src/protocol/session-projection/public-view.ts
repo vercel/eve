@@ -33,6 +33,7 @@ export type { SessionView } from "./session-view.js";
 export type * from "./observations.js";
 export type { ReceivedEvent } from "./fold.js";
 export type { CallState } from "./selectors.js";
+export { showsActivity } from "./selectors.js";
 export type { RequestStatus } from "./request-status.js";
 
 function frozen<T>(value: T): T {
@@ -110,6 +111,7 @@ export function call(view: SessionView, callId: string): CallObservation | undef
     name: row.capability.name,
     kind: row.capability.kind,
     label: selectors.callLabel(row, snapshotState(view).previews.calls[callId]),
+    ...(row.capability.hidden === true && { hidden: true as const }),
     runId: selectors.callRun(tables, row),
     turnId: selectors.callTurn(tables, row),
     taskId: selectors.callTask(tables, row),
@@ -276,13 +278,16 @@ export function runs(
 }
 
 export function part(view: SessionView, partId: string): ContentObservation | undefined {
-  const row = sessionTables(view).parts[partId];
+  const tables = sessionTables(view);
+  const row = tables.parts[partId];
   if (row === undefined) return undefined;
   const { runId, kind, phase, value, valueRef, interrupted, mediaType, fallbackText, startedAt } =
     row;
+  const turnId = selectors.partTurn(tables, row);
   return frozen({
     partId,
-    runId,
+    ...(runId !== undefined && { runId }),
+    ...(turnId !== undefined && { turnId }),
     kind,
     phase,
     value,
@@ -302,7 +307,7 @@ export function parts(
   return frozen(
     Object.values(tables.parts).flatMap((row) => {
       if (filter.runId !== undefined && row.runId !== filter.runId) return [];
-      if (filter.turnId !== undefined && selectors.runTurn(tables, row.runId) !== filter.turnId)
+      if (filter.turnId !== undefined && selectors.partTurn(tables, row) !== filter.turnId)
         return [];
       if (filter.kind !== undefined && row.kind !== filter.kind) return [];
       return part(view, row.partId) ?? [];

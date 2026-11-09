@@ -372,17 +372,9 @@ describe("SessionHandoff", () => {
     expect(sendSessionHandoverPartStepMock).toHaveBeenCalledOnce();
   });
 
-  it("remembers every incompatible target for the rest of the owner run", async () => {
+  it("remembers an incompatible target for the rest of the owner run", async () => {
     const inbox = createInbox();
-    installActivation(
-      { kind: "incompatible", payloads: [], reason: "checkpoint-version" },
-      // A successor older than this protocol cannot take over from an owner that keeps its hooks.
-      {
-        error: { message: "Hook token is already in use", name: "HookConflictError" },
-        kind: "failed",
-        payloads: [],
-      },
-    );
+    installActivation({ kind: "incompatible", payloads: [], reason: "checkpoint-version" });
     startSuccessorStepMock.mockResolvedValue(STARTED);
     const handoff = createHandoff(inbox);
 
@@ -394,25 +386,13 @@ describe("SessionHandoff", () => {
       kind: "retained",
       reason: "known-incompatible",
     });
-    await expect(handoff.tryTransfer(selection("deployment-c"), state())).resolves.toEqual({
-      kind: "retained",
-      reason: "activation-failed",
-    });
-    await expect(handoff.tryTransfer(selection("deployment-c"), state())).resolves.toEqual({
-      kind: "retained",
-      reason: "known-incompatible",
-    });
-    expect(startSuccessorStepMock.mock.calls.map(([start]) => start.attemptKey)).toEqual([
-      "owner-1:0",
-      "owner-1:1",
-    ]);
+    expect(startSuccessorStepMock).toHaveBeenCalledOnce();
     expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
     expect(reportSessionHandoffRetainedStepMock.mock.calls.map(([report]) => report)).toEqual([
       expect.objectContaining({
         reason: "checkpoint-incompatible",
         targetDeploymentId: "deployment-b",
       }),
-      expect.objectContaining({ reason: "activation-failed", targetDeploymentId: "deployment-c" }),
     ]);
   });
 
@@ -569,7 +549,6 @@ function createInbox(
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),
     onInterrupt: vi.fn(() => () => {}),
-    release: vi.fn(async () => []),
     restore: vi.fn(),
   };
 }

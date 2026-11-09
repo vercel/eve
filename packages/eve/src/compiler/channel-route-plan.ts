@@ -61,6 +61,7 @@ export function createCompiledChannelRoutePlan(input: {
     );
   }
 
+  rejectWebSocketParameterMismatches(effective);
   const preflight = derivePreflights(effective);
   return {
     effective: Object.freeze(effective),
@@ -125,6 +126,33 @@ function derivePreflights(
   return preflights;
 }
 
+/**
+ * A WebSocket upgrade arrives as a GET, so a path with both routes is served
+ * by one handler registered at the GET route, whose parameter names the
+ * WebSocket handler then receives.
+ */
+function rejectWebSocketParameterMismatches(effective: readonly CompiledChannelDefinition[]): void {
+  for (const websocket of effective.filter((route) => route.method === "WEBSOCKET")) {
+    const pattern = normalizeRoutePattern(websocket.urlPath);
+    const get = effective.find(
+      (route) => route.method === "GET" && normalizeRoutePattern(route.urlPath) === pattern,
+    );
+    if (get === undefined) continue;
+    const getNames = parameterNames(get.urlPath);
+    const websocketNames = parameterNames(websocket.urlPath);
+    if (getNames.join("/") === websocketNames.join("/")) continue;
+    throw new Error(
+      `compile/channel-websocket-params-mismatch: GET ${get.urlPath} and WS ${websocket.urlPath} match the same requests but name their parameters differently (${getNames.join(", ")} vs ${websocketNames.join(", ")}). One handler serves both, so rename the parameters in one route to match the other.`,
+    );
+  }
+}
+
+function parameterNames(path: string): string[] {
+  return splitRoute(path)
+    .filter(isParameter)
+    .map((segment) => segment.replace(/^:|^\[|\]$/g, ""));
+}
+
 function routesOverlap(
   left: { readonly method: string; readonly urlPath: string },
   right: { readonly method: string; readonly path?: string; readonly urlPath?: string },
@@ -151,7 +179,8 @@ function routePatternsOverlap(left: string, right: string): boolean {
   );
 }
 
-function normalizeRoutePattern(path: string): string {
+/** A route's identity for matching: `/items/:id` and `/items/:itemId` are one route. */
+export function normalizeRoutePattern(path: string): string {
   return splitRoute(path)
     .map((segment) => (isParameter(segment) ? ":" : segment))
     .join("/");

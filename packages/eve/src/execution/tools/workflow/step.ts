@@ -8,7 +8,8 @@ import {
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { signInInteractionId, signInOpened } from "#harness/interaction-facts.js";
+import { signInInteractionId, signInRequest } from "#harness/interaction-facts.js";
+import { relayEvent } from "#channel/relay-event.js";
 import type { RelayedInteractionEvent } from "#channel/types.js";
 import type {
   WorkflowStepAuthorizationResult,
@@ -101,7 +102,7 @@ async function executeAuthorizedStep(
       await collectAuthorizationCallbacks({
         authorizationResults,
         callback,
-        challenges: result.signal.challenges,
+        challenges: result.challenges,
         ctx,
         pending,
         run,
@@ -344,16 +345,16 @@ function runSignIn(
   outcome?: "accepted" | "failed",
 ): RelayedInteractionEvent {
   if (outcome === undefined) {
-    return {
-      data: signInOpened(challenge, {
+    return relayEvent(
+      "interaction.opened",
+      signInRequest(challenge, {
         prompt: `Sign in to ${challenge.name} to continue.`,
         subject: from.taskId === undefined ? { turnId: from.turnId } : { taskId: from.taskId },
-      }).data,
-      type: "interaction.opened",
-    };
+      }),
+    );
   }
-  return {
-    data: { interactionId: signInInteractionId(challenge), outcome },
-    type: "interaction.settled",
-  };
+  return relayEvent("interaction.settled", {
+    interactionId: signInInteractionId(challenge),
+    outcome,
+  });
 }

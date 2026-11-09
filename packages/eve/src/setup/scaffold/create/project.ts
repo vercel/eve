@@ -246,7 +246,6 @@ Add capabilities under \`agent/\`, including tools, connections, channels, skill
 To learn more about eve, explore these resources:
 
 - [eve documentation](https://eve.dev/docs) — learn about eve's features and authoring APIs.
-- [Build an Agent tutorial](https://eve.dev/docs/tutorial/first-agent) — build and deploy an agent step by step.
 - [eve on GitHub](https://github.com/vercel/eve) — view the source and contribute.
 
 ## Deploy on Vercel
@@ -317,6 +316,8 @@ Use a bounded authoring loop:
 3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
 
 Follow links or inspect public types only when the routed page leaves the task unanswered. Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
+
+Keep the bundle small: import SDK clients inside the functions that use them, and keep one version of each dependency. See \`docs/guides/deployment/index.md#keep-the-bundle-small\`.
 
 ## Prefer an existing integration
 

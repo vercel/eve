@@ -31,8 +31,7 @@ export default {
     if (!pulls.has(changeset.commit))
       pulls.set(changeset.commit, pullRequestFor(changeset.commit, changeset.id));
     const pull = await pulls.get(changeset.commit);
-    // Pre-1.0, a minor bump is how a changeset declares a breaking change.
-    let category = type === "major" || type === "minor" ? "breaking" : undefined;
+    let category = type === "major" ? "breaking" : undefined;
     if (!category) {
       try {
         category = classifyTitle(pull.subject);

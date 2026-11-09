@@ -33,7 +33,7 @@ personal-agent-template/
 
 ## eve framework
 
-This project deploys its Nuxt frontend and eve agent as peer Vercel services through `vercel.ts`. Before writing agent code, read the relevant guide in `node_modules/eve/dist/docs/public/`.
+This project deploys its Nuxt frontend and eve agent as peer Vercel services through `vercel.ts`. Before writing agent code, read the relevant guide in `node_modules/eve/docs/`.
 
 ## Internal API Pattern
 

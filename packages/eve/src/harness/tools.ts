@@ -1,3 +1,4 @@
+import { mintClearance, requireClearance, type Clearance } from "#harness/clearance.js";
 import { type ToolSet, tool } from "ai";
 
 import type { ModelProfile } from "#harness/model-profile.js";
@@ -71,10 +72,12 @@ export function invokeTool(
   definition: RunnableTool,
   input: unknown,
   options: ToolExecuteOptions,
+  clearance: Clearance,
 ): Promise<unknown> | AsyncIterable<unknown> {
   const { execute } = definition;
   let output: unknown;
   try {
+    requireClearance(clearance, options.toolCallId);
     output = executeWithToolStub(definition.name, input, options, () => execute(input, options));
   } catch (error) {
     return Promise.reject(error);
@@ -174,21 +177,31 @@ interface ApprovalCall {
   readonly recheck?: boolean;
 }
 
+/** The gate's answer for one call: an approval decision, and the clearance a call that runs gets. */
+export interface GateDecision extends ApprovalDecision {
+  /** Set exactly when the call may run now: neither denied nor waiting on a person. */
+  readonly clearance?: Clearance;
+}
+
 /** Decides whether a call runs, needs a person's approval, or is denied. */
 export async function decideApproval(
   definition: HarnessToolDefinition,
   call: ApprovalCall,
-): Promise<ApprovalDecision> {
-  if (definition.approval === undefined) return { denied: false };
-  return await evaluateApproval(
-    resolveApprovalPolicy(definition.approval),
-    {
-      ...buildCallbackContext(),
-      abortSignal: call.abortSignal ?? new AbortController().signal,
-      callId: call.callId,
-      toolInput: isObject(call.input) ? call.input : undefined,
-      toolName: definition.name,
-    },
-    { memory: call.approvalMemory, recheck: call.recheck },
-  );
+): Promise<GateDecision> {
+  const decision: ApprovalDecision =
+    definition.approval === undefined
+      ? { denied: false }
+      : await evaluateApproval(
+          resolveApprovalPolicy(definition.approval),
+          {
+            ...buildCallbackContext(),
+            abortSignal: call.abortSignal ?? new AbortController().signal,
+            callId: call.callId,
+            toolInput: isObject(call.input) ? call.input : undefined,
+            toolName: definition.name,
+          },
+          { memory: call.approvalMemory, recheck: call.recheck },
+        );
+  if (decision.denied || decision.awaitsPerson === true) return decision;
+  return { ...decision, clearance: mintClearance(call.callId, decision.clearedBy) };
 }

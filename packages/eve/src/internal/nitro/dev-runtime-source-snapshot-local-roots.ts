@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
 import { lstat } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import {
   parseTsConfigObject,
   readTextFileIfExists,
 } from "#internal/application/tsconfig-dependencies.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 /**
  * Resolves the local roots that a tsconfig's path aliases can resolve to.
@@ -107,15 +108,6 @@ export function isAuthoredSourcePath(path: string, sourceRoot: string): boolean 
   const relativePath = relative(sourceRoot, path);
 
   return !relativePath.split(/[\\/]/).includes("node_modules");
-}
-
-export function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }
 
 async function resolveLocalTsConfigPathTargetRoot(input: {

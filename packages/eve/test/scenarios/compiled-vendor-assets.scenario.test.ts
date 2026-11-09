@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
@@ -7,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
-import { parseWithNitroRolldownAst } from "../../src/internal/bundler/nitro-rolldown.js";
+import { parseWithRolldownAst } from "../../src/internal/bundler/rolldown.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
@@ -31,6 +32,23 @@ const BROWSER_ENTRY_FILES = [
   "svelte/index.js",
   "vue/index.js",
 ] as const;
+
+/** The version of `name` that `from` resolves, for packages that do not export their manifest. */
+function installedVersion(name: string, from: string): string {
+  let directory = dirname(createRequire(from).resolve(name));
+  for (;;) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as {
+        name?: string;
+        version: string;
+      };
+      if (manifest.name === name) return manifest.version;
+    } catch {}
+    const parent = dirname(directory);
+    if (parent === directory) throw new Error(`Cannot find the manifest of ${name}.`);
+    directory = parent;
+  }
+}
 const execFileAsync = promisify(execFile);
 const createTemporaryDirectory = useTemporaryDirectories();
 const require = createRequire(import.meta.url);
@@ -197,16 +215,18 @@ type Note = 'request from "./not-an-import"';`,
     expect(schema._zod.bag.validator).toBeUndefined();
   });
 
-  it("stamps the compiler versions that drive vendored output", async () => {
+  it("stamps the tool and bundled server versions that drive vendored output", async () => {
     const stamp = JSON.parse(
       await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
-    ) as { toolVersions?: { rolldown?: string; typescript?: string } };
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
-    const typescriptPackage = require("typescript/package.json") as { version: string };
+    ) as { toolVersions?: Record<string, string> };
+    const envRunnerEntry = require.resolve("env-runner");
 
-    expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
-    expect(stamp.toolVersions?.typescript).toBe(typescriptPackage.version);
+    expect(stamp.toolVersions).toEqual({
+      "env-runner>crossws": installedVersion("crossws", envRunnerEntry),
+      "env-runner>srvx": installedVersion("srvx", envRunnerEntry),
+      rolldown: (require("rolldown/package.json") as { version: string }).version,
+      typescript: (require("typescript/package.json") as { version: string }).version,
+    });
   });
 
   it("copies generated catalog declarations and fingerprints their sources", async () => {
@@ -329,7 +349,7 @@ type Note = 'request from "./not-an-import"';`,
       const path = relative(DIST_SOURCE_ROOT, file);
       if (visited.has(path)) continue;
       visited.add(path);
-      const program = (await parseWithNitroRolldownAst(file, await readFile(file, "utf8"))) as {
+      const program = (await parseWithRolldownAst(file, await readFile(file, "utf8"))) as {
         body: {
           type: string;
           source?: { value: string } | null;
@@ -390,7 +410,9 @@ type Note = 'request from "./not-an-import"';`,
     expect(indexDts).toContain("Core utilities intended for import by user");
     expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(createHookDts).toContain("Creates a {@link Hook}");
-    expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
+    expect(workflowDts).toBe(
+      `export * from "./workflow/index.js";\nexport type { PendingQueueDrain } from "./_workflow-vm.js";\n`,
+    );
     expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
   });

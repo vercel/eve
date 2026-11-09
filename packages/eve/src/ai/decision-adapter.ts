@@ -1,11 +1,37 @@
 import * as aiSdk from "ai";
-import type { DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
+import type { DecisionModel, DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
 import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
 import { localGatewayDecisionModel } from "#internal/model-auth/transport.js";
 
 export const DEFAULT_DECISION_MODEL = "typesafe-ai/jev";
 
 type AiSdkDecide = typeof aiSdk.experimental_decide;
+type AiSdkDecideOptions = Parameters<AiSdkDecide>[0];
+
+/** eve-owned instrumentation passed to the AI SDK; never part of the public options. */
+export type DecisionInstrumentation = Pick<AiSdkDecideOptions, "telemetry">;
+
+/**
+ * Resolves a model ID as the AI SDK would, so a trace names the model that answers. An ID no
+ * provider resolves stays a string, and the AI SDK reports why when it is called.
+ */
+export function resolveDecisionModel(model: DecisionModel): DecisionModel {
+  if (typeof model !== "string") return model;
+  const local = localGatewayDecisionModel(model);
+  if (local !== undefined) return local as DecisionModel;
+  const provider =
+    Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") ?? Reflect.get(aiSdk, "gateway");
+  const factory: unknown =
+    provider == null
+      ? undefined
+      : (Reflect.get(provider, "decisionModel") ?? Reflect.get(provider, "evaluationModel"));
+  if (typeof factory !== "function") return model;
+  try {
+    return (factory.call(provider, model) as DecisionModel | null | undefined) ?? model;
+  } catch {
+    return model;
+  }
+}
 
 /**
  * `ai` is a peer dependency and its decision API is experimental, so a newer release may
@@ -25,16 +51,17 @@ function resolveAiSdkDecide(): AiSdkDecide {
 /** Internal eval diagnostics retain SDK metadata without promising it to applications. */
 export function decideWithMetadata<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
->({
-  model = DEFAULT_DECISION_MODEL,
-  state,
-  questions,
-  maxRetries,
-  signal,
-  providerOptions,
-}: DecisionOptions<Questions> & {
-  readonly providerOptions?: Parameters<AiSdkDecide>[0]["providerOptions"];
-}) {
+>(
+  {
+    model = DEFAULT_DECISION_MODEL,
+    state,
+    questions,
+    maxRetries,
+    signal,
+    providerOptions,
+  }: DecisionOptions<Questions>,
+  instrumentation?: DecisionInstrumentation,
+) {
   const decideWithAiSdk = resolveAiSdkDecide();
   ensureAiSdkWarningLogger();
   if (
@@ -47,13 +74,14 @@ export function decideWithMetadata<
     );
   }
   return decideWithAiSdk({
-    model: (typeof model === "string" && Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") == null
+    model: (typeof model === "string"
       ? (localGatewayDecisionModel(model) ?? model)
-      : model) as Parameters<AiSdkDecide>[0]["model"],
+      : model) as AiSdkDecideOptions["model"],
     state,
     questions,
     maxRetries,
     abortSignal: signal,
     providerOptions,
+    ...instrumentation,
   });
 }
