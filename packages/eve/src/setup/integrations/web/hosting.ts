@@ -54,7 +54,7 @@ export default await withEve({
 `;
 }
 
-/** The `vercel.json` the channel scaffold writes, which carries no settings. */
+/** The settings-free `vercel.json` the web channel scaffold writes (`ensureWebVercelJson`). */
 const SCAFFOLD_VERCEL_JSON = `${JSON.stringify({ $schema: "https://openapi.vercel.sh/vercel.json" }, null, 2)}\n`;
 
 export function runScriptCommand(packageManager: PackageManagerKind, script: string): string {
