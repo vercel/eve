@@ -1761,8 +1761,8 @@ describe("calls that wait on a person as tasks", () => {
         expect(ofType(session.events(), "turn.settled")).toEqual([]);
         await session.control("cancel");
         await session.until("cancelled", (event) => event.type === "turn.settled");
-        await session.answer(approval!, "approve");
-        await session.send("Never mind, how are you?");
+        // One delivery, so the late answer and the message start one turn together.
+        await session.answer(approval!, "approve", ALICE, { message: "Never mind, how are you?" });
         await session.until(
           "next turn",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",

@@ -127,6 +127,8 @@ function callerReleased(
   current: SessionAuthContext | null,
   sender: SessionAuthContext | null,
 ): boolean {
+  // A session with one person never reads the agent's configuration.
+  if (callerSpokeLast({ current, sender })) return true;
   return callerIdentityReleased({
     approved: approvedBy(current),
     confirmation: callerConfirmation(ctx),
