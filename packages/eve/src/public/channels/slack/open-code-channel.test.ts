@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey, SenderAuthKey } from "#context/keys.js";
 import { openCodeChannel } from "#public/channels/slack/open-code-channel.js";
+import { identityRequestOf, withCallIdentity } from "#runtime/connections/caller-confirmation.js";
 import type { SlackChannel } from "#public/channels/slack/slackChannel.js";
 
 const slack = {} as SlackChannel;
@@ -73,6 +76,24 @@ describe("openCodeChannel", () => {
       ),
       status: "unavailable",
     });
+    expect(to).not.toHaveBeenCalled();
+  });
+
+  it("asks the caller after someone else spoke, in a call eve can ask a person about", async () => {
+    const { ctx, to } = toolContext(slackThread, { current: alice, sender: bob });
+    const session = new ContextContainer();
+    session.set(AuthKey, alice);
+    session.set(SenderAuthKey, bob);
+
+    const refusal = await contextStorage
+      .run(session, () =>
+        withCallIdentity({ canAsk: true, confirmed: [] }, () =>
+          openCodeChannel(ctx, slack, "Start by reproducing it."),
+        ),
+      )
+      .catch((error: unknown) => error);
+
+    expect(identityRequestOf(refusal)?.person).toMatchObject({ principalId: "U_ALICE" });
     expect(to).not.toHaveBeenCalled();
   });
 

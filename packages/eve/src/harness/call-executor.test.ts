@@ -5,6 +5,7 @@ import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SenderAuthKey, SessionKey } from "#context/keys.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveConnectionPrincipal } from "#runtime/connections/principal.js";
@@ -372,7 +373,14 @@ it.each([
   },
 );
 
-it("names a call that asks for someone's identity by its tool and real input, never by a model-written label", async () => {
+/**
+ * The prompt eve asks Alice with when a `gh` call needs her identity after Bob spoke, for a call
+ * made with `input` under the agent's `callerConfirmation`.
+ */
+async function identityPrompt(
+  input: Record<string, unknown>,
+  callerConfirmation: "always" | "once" = "always",
+): Promise<string | undefined> {
   const alice = {
     attributes: {},
     authenticator: "test",
@@ -380,6 +388,11 @@ it("names a call that asks for someone's identity by its tool and real input, ne
     principalType: "user",
   };
   const ctx = new ContextContainer();
+  ctx.set(BundleKey, {
+    graph: {
+      nodesByNodeId: new Map([["__root__", { agent: { config: { callerConfirmation } } }]]),
+    },
+  } as never);
   ctx.set(AuthKey, alice);
   ctx.set(SenderAuthKey, { ...alice, principalId: "bob" });
   ctx.set(SessionKey, {
@@ -396,14 +409,7 @@ it("names a call that asks for someone's identity by its tool and real input, ne
       excludedCallIds: new Set(),
       messages: [],
       publish: async () => {},
-      toolCalls: [
-        {
-          input: { command: "gh repo delete acme/app", description: "List open PRs" },
-          toolCallId: "call-1",
-          toolName: "gh",
-          type: "tool-call",
-        },
-      ],
+      toolCalls: [{ input, toolCallId: "call-1", toolName: "gh", type: "tool-call" }],
       tools: new Map([
         [
           "gh",
@@ -422,8 +428,40 @@ it("names a call that asks for someone's identity by its tool and real input, ne
       ]),
     }),
   );
+  return results.approvals[0]?.request.prompt;
+}
 
-  expect(results.approvals[0]?.request.prompt).toBe(
-    'Approve Gh with your identity? It runs with {"command":"gh repo delete acme/app","description":"List open PRs"}.',
+it("names a call that asks for someone's identity by its tool and real input, never by a model-written label", async () => {
+  await expect(
+    identityPrompt({ command: "gh repo delete acme/app", description: "List open PRs" }),
+  ).resolves.toBe(
+    'Approve Gh with your identity? It runs with command: "gh repo delete acme/app", description: "List open PRs".',
   );
 });
+
+it("shows every input field of a call that asks for someone's identity, so a long field can't hide a later one", async () => {
+  const body = "Fixes the flaky retry test. ".repeat(200);
+  const prompt = await identityPrompt({
+    body,
+    command: "gh repo delete acme/app --yes",
+    description: "Open the pull request",
+  });
+
+  expect(prompt).toContain(`body: ${JSON.stringify(body.slice(0, 2_000))}… (`);
+  expect(prompt).toContain(`${String(body.length - 2_000)} more characters not shown)`);
+  expect(prompt).toContain('command: "gh repo delete acme/app --yes"');
+});
+
+it.each([
+  ["once", true],
+  ["always", false],
+] as const)(
+  'tells the caller that approving lets the person who spoke last steer, only under callerConfirmation "%s": %s',
+  async (callerConfirmation, disclosed) => {
+    const prompt = await identityPrompt({ command: "gh pr create" }, callerConfirmation);
+
+    expect(prompt?.includes("Approving also lets bob steer calls that use your identity")).toBe(
+      disclosed,
+    );
+  },
+);

@@ -317,7 +317,7 @@ The caller stays the same for the whole turn; only its claims can change:
 - A message from anyone else joins the turn and sets `auth.sender`; `auth.current` stays the caller. It joins even while the turn waits on an approval, sign-in, or question.
 - Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current` and `auth.sender`.
 
-After someone else's message joins the turn, eve refuses calls that use the caller's identity until the caller speaks again. See [Shared sessions](../concepts/security-model#shared-sessions).
+After someone else's message joins the turn, a call that uses the caller's identity needs the caller's approval. eve asks the caller to approve it, and fails the call only where it can't ask, such as in a workflow tool. See [Shared sessions](../concepts/security-model#shared-sessions).
 
 `auth.current` is whatever `auth` the channel sent the message with. A route handler or channel hook can send with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`; on a continuation, only `auth.current` is. Internal runtime paths, such as subagents, can also have no caller auth.
 
@@ -517,19 +517,19 @@ export default defineTool({
 });
 ```
 
-When `as` names someone other than the caller, the result's `person` is that person as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
+When `as` names someone other than the caller, the result's `principal` is that person as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
 
 eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. `callerConfirmation` doesn't apply to someone who isn't the caller. Naming the caller is the same as omitting `as`.
 
 - eve keeps each person's identity but not their attributes, so a provider that reads `principal.attributes` receives none for a named person.
-- `as` works in tools that run in the session's turn, not in workflow tools, and not in delegated subagent sessions, where no one has spoken.
+- `as` works in tools that run in the session's turn, not in workflow tools. In a local subagent, `as` can also name anyone who had spoken in the session that delegated to it.
 - `as` names a person only for an authored tool's `ctx.getToken` and `ctx.requireAuth`. Connection tools always use the caller's identity.
 
-| What you see                      | What to do                                                                                                                                               |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "person_not_found"`      | No one who has spoken in the session has that `principalId`, or the tool runs outside the session's turn. Name someone from a sender line, or omit `as`. |
-| `reason: "person_ambiguous"`      | Two people who have spoken share that `principalId`, signed in through different channels. Omit `as`, or ask the person to continue in one channel.      |
-| `reason: "confirmation_required"` | The named person didn't speak last, and the session can't ask for input. Ask them to confirm in the conversation, then retry.                            |
+| What you see                      | What to do                                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason: "principal_not_found"`   | No one who has spoken in the conversation has that `principalId`, or the tool runs outside the session's turn. Name someone from a sender line. |
+| `reason: "principal_ambiguous"`   | Two people who have spoken share that `principalId`, signed in through different channels. Ask the person to continue in one channel.           |
+| `reason: "confirmation_required"` | The named person didn't speak last, and the session can't ask for input. Ask them to confirm in the conversation, then retry.                   |
 
 ## What to read next
 

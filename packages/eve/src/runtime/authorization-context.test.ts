@@ -33,7 +33,7 @@ describe("ctx.getToken with as", () => {
 
     expect(refusal).toMatchObject({
       name: "ConnectionAuthorizationFailedError",
-      reason: "person_ambiguous",
+      reason: "principal_ambiguous",
       retryable: false,
     });
   });
@@ -53,6 +53,6 @@ describe("ctx.getToken with as", () => {
       )
       .catch((error: unknown) => error);
 
-    expect(refusal).toMatchObject({ reason: "person_ambiguous" });
+    expect(refusal).toMatchObject({ reason: "principal_ambiguous" });
   });
 });

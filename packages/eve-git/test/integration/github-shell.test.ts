@@ -320,7 +320,7 @@ test("runs a user-token command with its actor's token, and authorize checks the
     getToken: (async (...args) => {
       getTokenCalls.push(args);
       const person = args[1]?.as === undefined ? undefined : people[args[1].as];
-      return { token: "user-token", ...(person !== undefined && { person }) };
+      return { token: "user-token", ...(person !== undefined && { principal: person }) };
     }) satisfies ToolContext["getToken"],
     requireAuth: ((...args) => {
       requireAuthCalls.push(args);

@@ -16,6 +16,7 @@ import type {
 } from "#protocol/session-events/families/interaction.js";
 import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { SessionPerson } from "#context/session-auth.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -166,6 +167,20 @@ export interface TurnCaller {
    * someone other than the caller spoke can't hand out the caller's token unasked.
    */
   readonly senderAuth?: SessionAuthContext | null;
+  /** What the delegating turn's child inherits beside its sender. */
+  readonly identity?: DelegatedIdentity;
+}
+
+/**
+ * What a local child session inherits from the session that delegated to it, beside its latest
+ * sender: who has spoken there, so `ctx.getToken(provider, { as })` can name them, and the
+ * caller's remembered `callerConfirmation: "once"` approvals.
+ */
+export interface DelegatedIdentity {
+  /** The people who have spoken in the delegating session, without their attributes. */
+  readonly participants: readonly SessionPerson[];
+  /** The `"once"` approvals the caller gave there, by the key eve remembers each under. */
+  readonly confirmed: readonly string[];
 }
 
 /** Internal transport payload, including framework-owned compatibility and context fields. */
@@ -555,6 +570,8 @@ export interface RunInput {
   readonly initiatorAuth?: SessionAuthContext | null;
   /** A delegating turn's latest sender, which a local child's first turn inherits. */
   readonly senderAuth?: SessionAuthContext | null;
+  /** What a local child inherits from the delegating session beside its sender. */
+  readonly delegatedIdentity?: DelegatedIdentity;
   readonly input: {
     /** Omitted only when creating a conversation session before its first turn. */
     readonly message?: MessageContent;

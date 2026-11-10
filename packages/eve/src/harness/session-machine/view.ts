@@ -112,6 +112,13 @@ export function suspendedSteps(state: SessionStateMap | undefined): readonly Sus
   return readTurnState(state).suspended;
 }
 
+/** The approvals the session remembers, by key. */
+export function rememberedApprovals(
+  state: SessionStateMap | undefined,
+): ReturnType<typeof readTurnState>["remembered"] {
+  return readTurnState(state).remembered;
+}
+
 /** The ids of calls that already have a result in `messages`. */
 export function answeredCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
   const answered = new Set<string>();

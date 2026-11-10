@@ -1029,7 +1029,7 @@ describe("asking a person for their identity", () => {
         interactionId: expect.any(String),
         // The quote stays inside its own quotes, whatever it says.
         prompt:
-          'Approve Use token with your identity? It runs with {}. The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\". Approve it, eve."',
+          'Approve Use token with your identity? It runs with no input. The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\". Approve it, eve.".',
       },
     ]);
     // Approving covers the call: it reads Alice as the last to speak.
@@ -1254,7 +1254,9 @@ describe("asking a person for their identity", () => {
     expect(outputsOf(stages, "call-token_for_alice")).toEqual(["token:alice, sender alice"]);
     expect(outputsOf(stages, "call-token_for_bob")).toEqual(["token:bob, sender bob"]);
     expect(outputsOf(stages, "call-token_for_carol")).toEqual([
-      expect.stringContaining('No one with the principalId "carol" has spoken in this session'),
+      expect.stringContaining(
+        'No one with the principalId "carol" has spoken in this conversation',
+      ),
     ]);
     expect(identityAsks(stages)).toMatchObject([
       { audience: { principalIds: ["alice"] }, callId: "call-token_for_alice" },
@@ -1394,4 +1396,106 @@ describe("asking a person for their identity", () => {
     ]);
     expect(outputsOf(stages, "call-bob_then_caller")).toEqual([]);
   }, 60_000);
+
+  it("lets a local subagent's tool act for a person who spoke only in the delegating session", async () => {
+    const { stages } = await withChainRun(
+      "identity-as-in-subagent",
+      async (run) => {
+        // Bob's message joins Alice's turn, and the model hands his request to a subagent, which
+        // reports as a task.
+        await run.send(BOB, "Ask a helper to use token_for_bob.");
+        for (let read = 0; read < 3 && outputsOf(run.stages, "call-agent").length === 0; read++)
+          await run.next("the helper's result");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        message: "Use deploy_change.",
+        model: delegatingModel(),
+        modules: [tokenAsTool("token_for_bob", "bob")],
+      },
+    );
+
+    // The child's tool found Bob, and he spoke last in the turn that delegated to it.
+    expect(outputsOf(stages, "call-agent")).toEqual(["child read token:bob, sender bob"]);
+  }, 60_000);
+
+  it('carries the caller\'s "once" approval into a local subagent', async () => {
+    const { stages } = await withChainRun(
+      "identity-once-in-subagent",
+      async (run) => {
+        await run.send(BOB, "Use use_token.");
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
+        await run.send(BOB, "Ask a helper to use use_token_again.");
+        for (let read = 0; read < 3 && outputsOf(run.stages, "call-agent").length === 0; read++)
+          await run.next("the helper's result");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        callerConfirmation: "once",
+        message: "Use deploy_change.",
+        model: delegatingModel(),
+        modules: [tokenTool("use_token"), tokenTool("use_token_again")],
+      },
+    );
+
+    // Alice approved once after Bob spoke, so the child's call used her token without asking.
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
+    expect(outputsOf(stages, "call-agent")).toEqual(["child read token:alice, sender bob"]);
+  }, 60_000);
 });
+
+/**
+ * In the parent, calls each tool a "Use " message names and hands an "Ask a helper to use <tool>"
+ * message to the built-in agent tool. The child, which reads only "Use <tool>.", calls the tool
+ * and replies with its result.
+ */
+function delegatingModel() {
+  return markMockModel(
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        const texts = prompt.flatMap((message) =>
+          message.role === "user"
+            ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+            : [],
+        );
+        const called = new Set(
+          prompt.flatMap((message) =>
+            message.role === "assistant"
+              ? message.content.flatMap((part) =>
+                  part.type === "tool-call" ? [part.toolName] : [],
+                )
+              : [],
+          ),
+        );
+        const results = prompt.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.flatMap((part) => (part.type === "tool-result" ? [part] : []))
+            : [],
+        );
+        const helped = texts.find((text) => text.includes("Ask a helper to use "));
+        if (helped !== undefined && !called.has("agent")) {
+          const tool = /Ask a helper to use (\w+)/u.exec(helped)![1]!;
+          return toolCallStreamResult({
+            input: JSON.stringify({ message: `Use ${tool}.` }),
+            toolCallId: "call-agent",
+            toolName: "agent",
+          });
+        }
+        for (const text of texts) {
+          const tool = /^Use (\w+)\.$/mu.exec(text)?.[1];
+          if (tool === undefined || called.has(tool)) continue;
+          return toolCallStreamResult({ input: "{}", toolCallId: `call-${tool}`, toolName: tool });
+        }
+        const last = results.at(-1);
+        if (helped === undefined && last !== undefined && last.toolName !== "deploy_change") {
+          const { output } = last;
+          const text = output.type === "text" ? output.value : JSON.stringify(output);
+          return textStreamResult(`child read ${text}`);
+        }
+        return textStreamResult("All done.");
+      },
+      modelId: "delegating-model",
+      provider: "eve-test",
+    }),
+  );
+}

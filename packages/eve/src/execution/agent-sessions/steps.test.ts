@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import type { DelegatedIdentity } from "#channel/types.js";
+import { principalOf } from "#context/session-auth.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { agent } from "#public/tools/agent.js";
@@ -345,14 +347,16 @@ describe.each([
   {
     path: "opening a session",
     dispatched: mocks.startRemote,
-    run: (auth: SessionAuth) => openAgentSessionStep({ ...message, auth, name: "reviewer" }),
+    run: (auth: SessionAuth, identity?: DelegatedIdentity) =>
+      openAgentSessionStep({ ...message, auth, identity, name: "reviewer" }),
   },
   {
     path: "a later message",
     dispatched: mocks.continueRemote,
-    run: (auth: SessionAuth) =>
+    run: (auth: SessionAuth, identity?: DelegatedIdentity) =>
       sendAgentSessionMessageStep({
         ...message,
+        identity,
         address: {
           callbackBaseUrl: "https://parent.example.com",
           kind: "remote",
@@ -376,7 +380,7 @@ describe.each([
 
   function registerRemoteAgent(
     forwardPrincipal: boolean | undefined,
-    callerConfirmation?: "never",
+    callerConfirmation?: "never" | "once",
   ): void {
     mocks.targetKind = "remote";
     mocks.bundle = {
@@ -432,4 +436,27 @@ describe.each([
 
     expect(dispatched).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
   });
+
+  it.each([
+    { label: "goes through", remembered: true },
+    { label: "is refused", remembered: false },
+  ])(
+    'with callerConfirmation "once", $label when the caller already approved after Bob spoke',
+    async ({ remembered }) => {
+      registerRemoteAgent(true, "once");
+      const approved = JSON.stringify([
+        "eve.callerConfirmation",
+        principalOf(alice),
+        principalOf(bob),
+      ]);
+
+      const outcome = await run(
+        { current: alice, initiator: alice, sender: bob },
+        { confirmed: remembered ? [approved] : [], participants: [] },
+      ).catch((error: unknown) => error);
+
+      expect(outcome instanceof FatalError).toBe(!remembered);
+      expect(dispatched).toHaveBeenCalledTimes(remembered ? 1 : 0);
+    },
+  );
 });

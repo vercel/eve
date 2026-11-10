@@ -1,13 +1,15 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import {
-  confirmedOnce,
   identityRequestOf,
+  rememberedConfirmations,
   sessionCaller,
   withCallIdentity,
   type IdentityRequest,
 } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { personOf, type SessionPerson } from "#context/session-auth.js";
+import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { sessionParticipants } from "#harness/sender-line.js";
+import type { JsonObject } from "#shared/json.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import {
@@ -225,9 +227,14 @@ export async function executeToolCall(
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
           // Usage the tool records belongs to its call, including while a streaming tool iterates,
-          // and so do the identities of the people who approved the call, and the caller's under
-          // `callerConfirmation: "once"` when they already approved calls after the last speaker.
-          await withCallIdentity({ confirmed, once: confirmedOnce(input.approvalMemory) }, () =>
+          // and so do the identities of the people who approved the call, and the caller's
+          // remembered `callerConfirmation: "once"` approvals.
+          const identityScope = {
+            canAsk: input.canAsk === true,
+            confirmed,
+            remembered: rememberedConfirmations(input.approvalMemory?.remembered),
+          };
+          await withCallIdentity(identityScope, () =>
             withUsageCall(callId, async () => {
               const executed = invokeTool(
                 definition,
@@ -654,9 +661,14 @@ export async function publishDenial(
   return { settled: [{ part }], toolResults: [] };
 }
 
-/** How much of the latest message, and of the call's input, an identity request shows. */
+/**
+ * How much of the latest message, and of the call's input, an identity request shows. Each input
+ * field is shown on its own, so a long early field can't hide a later one.
+ */
 const QUOTE_LIMIT = 280;
-const INPUT_LIMIT = 300;
+const FIELD_LIMIT = 2_000;
+const MIN_FIELD_LIMIT = 80;
+const INPUT_LIMIT = 8_000;
 
 /**
  * What eve asks a person whose identity a call needs: the call, by its tool's title and the input
@@ -684,7 +696,12 @@ function identityApprovalRequest(
   const quote =
     latest === undefined
       ? ""
-      : ` The latest message from someone else, from ${latest.from}, reads: ${JSON.stringify(truncate(latest.text, QUOTE_LIMIT))}`;
+      : ` The latest message from someone else, from ${latest.from}, reads: ${JSON.stringify(truncate(latest.text, QUOTE_LIMIT))}.`;
+  // Under `callerConfirmation: "once"`, the approval is remembered for the person who spoke last.
+  const remembered =
+    identity.steeredBy === undefined
+      ? ""
+      : ` Approving also lets ${identity.steeredBy} steer calls that use your identity for the rest of this conversation.`;
   const { confirmed, responder } = context;
   return {
     call: {
@@ -708,7 +725,7 @@ function identityApprovalRequest(
         { id: "approve", label: "Approve" },
         { id: "deny", label: "Cancel" },
       ],
-      prompt: `Approve ${displayTitle(toolName)} with your identity? It runs with ${truncate(JSON.stringify(input), INPUT_LIMIT)}.${quote}`,
+      prompt: `Approve ${displayTitle(toolName)} with your identity? It runs with ${describeInput(input)}.${quote}${remembered}`,
     },
   };
 }
@@ -723,11 +740,15 @@ function latestMessageFromOthers(
   const projection = liveProjection();
   if (projection === undefined) return undefined;
   const { turnId } = turnPosition(projection);
-  // A delivery names its sender without how they signed in.
+  // A delivery names its sender without how they signed in, so eve compares the people who have
+  // spoken by `principalOf`: a delivery is the person's only when no one else who has spoken
+  // could have sent it.
+  const key = principalOf(personAuth(person));
+  const others = (sessionParticipants() ?? []).filter(
+    (other) => principalOf(personAuth(other)) !== key,
+  );
   const sentBy = (principal: Principal) =>
-    principal.id === person.principalId &&
-    principal.type === person.principalType &&
-    (principal.issuer ?? null) === (person.issuer ?? null);
+    names(principal, person) && !others.some((other) => names(principal, other));
   const latest = Object.values(projection.view.deliveries)
     .flatMap((delivery) =>
       delivery.turnId === turnId &&
@@ -752,9 +773,54 @@ function latestMessageFromOthers(
   return latest === undefined ? undefined : { from: latest.from, text: latest.text };
 }
 
+/** Whether a delivery's principal names `person`, as far as the wire tells. */
+function names(principal: Principal, person: SessionPerson): boolean {
+  return (
+    principal.id === person.principalId &&
+    principal.type === person.principalType &&
+    (principal.issuer ?? null) === (person.issuer ?? null)
+  );
+}
+
 function truncate(text: string, limit: number): string {
   const flat = text.replace(/\s+/gu, " ");
   return flat.length <= limit ? flat : `${flat.slice(0, limit - 1).trimEnd()}…`;
+}
+
+/**
+ * The call's input as an identity request shows it: every top-level field, each cut on its own
+ * with a marker that says how much is hidden. Fields past the overall limit are named.
+ */
+function describeInput(input: JsonObject): string {
+  const entries = Object.entries(input).filter(([, value]) => value !== undefined);
+  if (entries.length === 0) return "no input";
+  const limit = Math.min(
+    FIELD_LIMIT,
+    Math.max(MIN_FIELD_LIMIT, Math.floor(INPUT_LIMIT / entries.length)),
+  );
+  const shown: string[] = [];
+  let length = 0;
+  for (const [index, [name, value]] of entries.entries()) {
+    const field = `${name}: ${describeValue(value, limit)}`;
+    if (shown.length > 0 && length + field.length > INPUT_LIMIT) {
+      const rest = entries.slice(index).map(([other]) => other);
+      shown.push(`and ${String(rest.length)} more fields not shown (${rest.join(", ")})`);
+      break;
+    }
+    shown.push(field);
+    length += field.length;
+  }
+  return shown.join(", ");
+}
+
+/** One input value, JSON-encoded so it stays inside its own quotes, cut at `limit` characters. */
+function describeValue(value: unknown, limit: number): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  if (text.length <= limit) return JSON.stringify(value);
+  const hidden = `(${String(text.length - limit)} more characters not shown)`;
+  return typeof value === "string"
+    ? `${JSON.stringify(text.slice(0, limit))}… ${hidden}`
+    : `${text.slice(0, limit)}… ${hidden}`;
 }
 
 /**

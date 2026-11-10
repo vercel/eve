@@ -12,6 +12,7 @@ import {
   ContinuationHookTokensKey,
   ContinuationTokenKey,
   ConversationIdKey,
+  DelegatedIdentityKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
   OccurrenceIdKey,
@@ -82,6 +83,7 @@ export function buildRunContext(input: {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
   }
   if (run.senderAuth !== undefined) recordSender(ctx, auth, run.senderAuth);
+  if (run.delegatedIdentity !== undefined) ctx.set(DelegatedIdentityKey, run.delegatedIdentity);
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);

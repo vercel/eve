@@ -1,4 +1,7 @@
-import { callerIdentityAvailable } from "#runtime/connections/caller-confirmation.js";
+import {
+  askCallerToConfirm,
+  callerIdentityAvailable,
+} from "#runtime/connections/caller-confirmation.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { SlackChannel, SlackOpenCodeChannelOptions } from "./slackChannel.js";
@@ -23,10 +26,12 @@ export type SlackCodeChannelOpenResult =
  * }
  * ```
  *
- * Returns `unavailable` when the conversation isn't a Slack message, is
- * already a code channel, or someone other than the turn's caller spoke last.
- * When Slack refuses, it throws with Slack's error. A retried call reaches the
- * same code channel and session once.
+ * Returns `unavailable` when the conversation isn't a Slack message or is
+ * already a code channel. When someone other than the turn's caller spoke
+ * last, the call asks the caller to approve it where the session can ask,
+ * and returns `unavailable` where it can't. When Slack refuses, it throws
+ * with Slack's error. A retried call reaches the same code channel and
+ * session once.
  */
 export async function openCodeChannel(
   ctx: Pick<ToolContext, "callId" | "channel" | "messages" | "session" | "to">,
@@ -44,8 +49,10 @@ export async function openCodeChannel(
     return unavailable("This conversation is not a Slack message.");
   }
   // The code channel's session starts as the caller, who counts as the last to speak there:
-  // opening it for someone else's message would hand their requests the caller's identity.
+  // opening it for someone else's message would hand their requests the caller's identity. An
+  // inline call asks the caller, as a call that reads their token does.
   if (!callerIdentityAvailable(ctx.session.auth)) {
+    askCallerToConfirm("slack", "identity to open a Slack code channel");
     return unavailable(
       "Someone else has spoken since the person whose message started this turn, so a code channel can't be opened as them until they confirm it. Ask the person whose message started this turn to clearly confirm opening it. Retry only after a reply from them that plainly confirms it.",
     );

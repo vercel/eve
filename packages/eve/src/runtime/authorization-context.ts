@@ -37,11 +37,11 @@ export function createAuthorizationContext(input: {
     async getToken(
       provider?: ToolAuthProvider,
       options?: ToolAuthOptions,
-    ): Promise<TokenResult & { readonly person?: SessionAuthContext }> {
+    ): Promise<TokenResult & { readonly principal?: SessionAuthContext }> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
       const scoped = resolveFor(provider, options);
       const token = await execution.getToken(scoped);
-      return scoped.named === true ? { ...token, person: scoped.boundResponder } : token;
+      return scoped.named === true ? { ...token, principal: scoped.boundResponder } : token;
     },
     /**
      * The given responder's stored token, resolved through this execution's
@@ -66,8 +66,10 @@ export function createAuthorizationContext(input: {
 }
 
 /**
- * The person `as` names among those who have spoken in the session, or `undefined` for the
- * caller, whose identity a call uses without `as`.
+ * The person `as` names among those who have spoken in the session, or in the session that
+ * delegated to it, or `undefined` for the caller, whose identity a call uses without `as`. A
+ * refusal never suggests omitting `as` to act as someone else: the caller may not be the person
+ * whose request the call carries out.
  */
 function namedPerson(as: string, scope: string): SessionPerson | undefined {
   const ctx = contextStorage.getStore();
@@ -77,8 +79,8 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
   if (participants === undefined && caller?.principalId === as) return undefined;
   if (participants === undefined) {
     throw new ConnectionAuthorizationFailedError(scope, {
-      message: `ctx.getToken can't name "${as}" with "as" here: eve looks a person up among the people who have spoken in the session, and this tool runs outside the session's turn. Omit "as" to use the caller's identity.`,
-      reason: "person_not_found",
+      message: `ctx.getToken can't name "${as}" with "as" here, because this tool runs outside the session's turn. "as" can name a person only from a tool that runs in the turn, and the person must have spoken in this conversation.`,
+      reason: "principal_not_found",
       retryable: false,
     });
   }
@@ -90,15 +92,15 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
   const matches = [...people.values()];
   if (matches.length === 0) {
     throw new ConnectionAuthorizationFailedError(scope, {
-      message: `No one with the principalId "${as}" has spoken in this session, so this action can't act as them. Set "as" to the principalId of a person named in a sender line, or omit it to act as the person whose message started this turn.`,
-      reason: "person_not_found",
+      message: `No one with the principalId "${as}" has spoken in this conversation, so this action can't act as them. The person must have spoken in this conversation: set "as" to the principalId a sender line names them by.`,
+      reason: "principal_not_found",
       retryable: false,
     });
   }
   if (matches.length > 1) {
     throw new ConnectionAuthorizationFailedError(scope, {
-      message: `More than one person who has spoken in this session has the principalId "${as}", signed in different ways, so eve can't tell which one this action should act as. Omit "as" to act as the person whose message started this turn.`,
-      reason: "person_ambiguous",
+      message: `More than one person who has spoken in this conversation has the principalId "${as}", signed in different ways, so eve can't tell which one this action should act as. Ask that person to continue in one place, then retry.`,
+      reason: "principal_ambiguous",
       retryable: false,
     });
   }

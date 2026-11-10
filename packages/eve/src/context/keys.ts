@@ -10,6 +10,7 @@ import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/run
 import type {
   ChannelDeliveryMetadata,
   ChannelInstrumentationProjection,
+  DelegatedIdentity,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -99,6 +100,8 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
  * means the caller spoke last.
  */
 export const SenderAuthKey = new ContextKey<SessionAuthContext | null>("eve.senderAuth");
+/** What a local child session inherits from the session that delegated to it. */
+export const DelegatedIdentityKey = new ContextKey<DelegatedIdentity>("eve.delegatedIdentity");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);

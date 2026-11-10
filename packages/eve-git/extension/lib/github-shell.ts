@@ -225,7 +225,7 @@ export async function executeGitHubShell(
     userAuth = connectUserAuthorization(config.connector);
     const resolved = await dependencies.getToken(userAuth, actingAs);
     token = resolved.token;
-    actor = actorOf(input.actor, auth, resolved.person);
+    actor = actorOf(input.actor, auth, resolved.principal);
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
@@ -434,15 +434,19 @@ function actorOf(
 }
 
 /**
- * Whether two session identities are one person, as eve compares the people in a session.
- * Unauthenticated and anonymous identities are one person.
+ * Whether two session identities are one person. Unauthenticated and anonymous identities are one
+ * person. `personKey` matches eve's internal `principalOf` exactly, so this compares people as
+ * every eve guard does; eve-git keeps its own copy because it may use only eve's public API.
  */
-function isSamePerson(a: SessionAuthContext | null, b: SessionAuthContext | null): boolean {
+function isSamePerson(
+  a: SessionAuthContext | null | undefined,
+  b: SessionAuthContext | null | undefined,
+): boolean {
   return personKey(a) === personKey(b);
 }
 
-function personKey(auth: SessionAuthContext | null): string {
-  if (auth === null || auth.principalType === "anonymous") return "anonymous";
+function personKey(auth: SessionAuthContext | null | undefined): string {
+  if (auth === null || auth === undefined || auth.principalType === "anonymous") return "anonymous";
   return JSON.stringify([
     auth.authenticator,
     auth.issuer ?? null,

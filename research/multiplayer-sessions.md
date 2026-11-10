@@ -87,7 +87,8 @@ export default defineTool({
 ```
 
 `ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`, and `as` adds
-`"person_not_found"` and `"person_ambiguous"`. The git extension's `gh` tool gains an `actor` input.
+`"principal_not_found"` and `"principal_ambiguous"`. With user tokens, the git extension's `gh` tool
+gains an `actor` input.
 Nothing is added to connection or channel definitions, and the approval helpers don't change.
 
 ## Semantics
@@ -137,9 +138,9 @@ call. After someone else's message joins the turn, the call needs the caller's a
   model that someone else has spoken, and to ask the caller to confirm before it retries. The
   caller's next message makes them the last to speak.
 - **Approved.** A call the caller approved runs with their identity, whoever spoke last, and
-  reads the caller as `auth.sender`. The
-  caller approves a call by answering its approval or by completing its sign-in. An approval
-  covers its own call only: it doesn't change `auth.sender`, so the next call is judged on its
+  reads the caller as `auth.sender`. The caller approves a call by answering its approval.
+  Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender
+  it was asked under. An approval covers its own call only: it doesn't change `auth.sender`, so the next call is judged on its
   own. Another person's approval, allowed by a `response` policy, doesn't release the caller's
   identity.
 
@@ -147,12 +148,14 @@ A call that waits on a person runs as it was asked. It keeps the sender it had t
 read while it waited don't change what it gets.
 
 Listing a connection's tools uses the caller's identity even after someone else spoke: it runs
-nothing the model chose. A local subagent inherits the sender of the call that started it. Rule 3
+nothing the model chose. A local subagent inherits the sender of the call that started it, the
+people who had spoken, and the caller's `"once"` approvals. Rule 3
 doesn't cover app-scoped connections or tools that use no credentials. A tool that decides from
 the caller's role reads `auth.sender` as well as `auth.current`. eve's own checks do: `gh` with
 app tokens and deployed self-modification ask `authorize` about both people under every
-`callerConfirmation` value, and `openCodeChannel()`, which opens a session as the caller, is
-unavailable until the caller speaks again unless `callerConfirmation` hands out their identity.
+`callerConfirmation` value. `openCodeChannel()`, which opens a session as the caller, follows rule 3
+as a call that uses the caller's identity does: eve asks the caller, and it returns `unavailable`
+only where eve can't ask.
 
 ### Waiting on a person
 
@@ -174,7 +177,8 @@ Alice approves                    deploy runs as Alice; its result arrives as ta
   conversation is a receipt, and the `[Tasks]` note lists what the task waits on.
 - The request stays open and its card stays usable. Approving runs the call as it was asked, and
   its result arrives in a `task.result` message. A denial arrives the same way.
-- A sign-in stays open too. Once the person connects, the call runs as the person who signed in.
+- A sign-in stays open too. Once the person connects, the call runs as it was asked, with the
+  sender it had then.
 - The model can drop a call the message made unnecessary with `eve__task_cancel`. The request is
   withdrawn and the call doesn't run.
 - The turn can't end while such a task waits, as with any task. Cancelling the turn interrupts
@@ -194,8 +198,10 @@ step, eve asks instead of refusing. The call stops without a result, as it does 
 eve opens an ordinary approval (`request.kind: "approval"`) for the person whose identity the call
 needs, with `audience.principalIds` naming them.
 
-- The prompt names the call by its tool's title and its input, truncated, never by a label the
-  model wrote. It quotes the latest message in the turn from a named sender other than that
+- The prompt names the call by its tool's title and every top-level input field, each long field
+  cut on its own with a note of how much is hidden, never by a label the model wrote. Under
+  `"once"`, it says approving also lets the person who spoke last steer calls that use the
+  caller's identity for the rest of the conversation. It quotes the latest message in the turn from a named sender other than that
   person, truncated and JSON-escaped so it can't pass for eve's text. With no such message, it has
   no quote. It never carries secrets or attributes.
 - Only that person can approve it, checked before any tool `response` policy, which doesn't govern
@@ -226,8 +232,10 @@ needs, with `audience.principalIds` naming them.
 
 `"once"` remembers for the caller and the person until the session ends, in the session's approval
 memory under an eve-owned key. Only approving a request is remembered; a message isn't. Anonymous
-people share one identity, so after an anonymous message eve asks each time. A workflow tool or
-remote agent, which runs outside the session step, doesn't read the memory and keeps refusing.
+people share one identity, so after an anonymous message eve asks each time. Every guard decides
+by one rule. A remote agent that forwards the caller reads the approvals the session remembered
+when the model called it, and a local subagent keeps them. A workflow tool, which runs outside the
+session step, doesn't read the memory and keeps refusing.
 With `"never"`, every identity guard hands out the caller's identity. `callerConfirmation` governs
 identity only: neither value changes `auth.sender`, and eve's own role checks still ask about both
 people. The root agent's value applies in its subagents. A local subagent that sets
@@ -239,13 +247,15 @@ people. The root agent's value applies in its subagents. A local subagent that s
 `as` is a `principalId` from a sender line, so it names someone who has spoken in the session. eve
 records the 50 people who spoke most recently in session state, beside the sender line, keeping
 their `authenticator`, `issuer`, `principalId`, `principalType`, and `subject`, never their
-attributes. A name that matches no one fails with `reason: "person_not_found"`; one that matches
-two people signed in different ways fails with `reason: "person_ambiguous"`. Naming the caller is
-the same as omitting `as`. A provider that reads `principal.attributes` receives none for a named
-person. `as` works only in tools that run in the session step, and a delegated session has no
-participants to name. The record is dropped when the conversation is cleared. For a person other
-than the caller, the `ctx.getToken` result carries `person`: who eve resolved, without attributes,
-so a tool authorizes that identity rather than the name the model passed.
+attributes. A name that matches no one fails with `reason: "principal_not_found"`; one that
+matches two people signed in different ways fails with `reason: "principal_ambiguous"`. Neither
+refusal suggests omitting `as`, because the caller may not be the person who asked for the work.
+Naming the caller is the same as omitting `as`. A provider that reads `principal.attributes`
+receives none for a named person. `as` works only in tools that run in the session step. A local
+subagent can name the people who had spoken in the session that delegated to it, which passes the
+record down with the sender. The record is dropped when the conversation is cleared. For a person
+other than the caller, the `ctx.getToken` result carries `principal`: who eve resolved, without
+attributes, so a tool authorizes that identity rather than the name the model passed.
 
 Rule 3 decides the same way for everyone. The named person's token is handed out when they were
 the last to speak as the model made the call, or when they approved the call. Otherwise eve asks
@@ -255,9 +265,9 @@ them. The sign-in asks the named person, but its callback resumes the turn as it
 responders' tokens, `ctx.approval.responder.getToken`, aren't guarded this way: the answer bound
 them.
 
-The git extension's `gh` tool takes an `actor` input and, with user tokens, passes it as `as` and
+With user tokens, the git extension's `gh` tool takes an `actor` input, passes it as `as`, and
 asks `authorize` about the person eve resolved, failing when eve resolved no one. App tokens act
-for no one, so `actor` doesn't change them. In the incident, the
+for no one, so their `gh` tool has no `actor` input. In the incident, the
 model names Alice, eve asks Alice, and the pull request opens as Alice. If it names Bob, the call
 runs as Bob: he spoke last, and eve can't tell that from "open it".
 
@@ -278,7 +288,7 @@ runs as Bob: he spoke last, and eve can't tell that from "open it".
 eve hands a person's identity to a call in two cases:
 
 - they were the last to speak as the model made the call, or
-- they approved that call: its approval, its sign-in, or eve's request for their identity.
+- they approved that call: its approval, or eve's request for their identity.
 
 An approval of eve's request covers that call only, and doesn't make the person the last to speak.
 

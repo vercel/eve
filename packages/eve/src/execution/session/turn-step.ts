@@ -20,6 +20,7 @@ import {
   ScheduleInstanceKey,
   OccurrenceIdKey,
   InitiatorAuthKey,
+  DelegatedIdentityKey,
   SenderAuthKey,
   SessionTitleKey,
   ParentSessionKey,
@@ -462,6 +463,9 @@ async function runSessionStepBody(
     // A delegating parent passes its own latest sender down with the message it sends.
     if (resolved?.message !== undefined && delivery?.caller?.senderAuth !== undefined) {
       recordSender(ctx, turnAuth, delivery.caller.senderAuth);
+    }
+    if (resolved?.message !== undefined && delivery?.caller?.identity !== undefined) {
+      ctx.set(DelegatedIdentityKey, delivery.caller.identity);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);

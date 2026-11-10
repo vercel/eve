@@ -89,13 +89,13 @@ eve hands the caller's identity to a call when the caller sent the latest messag
 | A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded |
 | A remote agent that forwards the caller                                                        | The caller, forwarded |
 
-Where the session can ask for input, eve asks the caller to approve the call. The request names the call by its tool and input, and quotes the latest message from someone else in the turn. Only the caller can approve it, and anyone signed in can cancel it. Approving runs the tool again from its first line with the caller's identity. See [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
+Where the session can ask for input, eve asks the caller to approve the call. The request names the call by its tool and each input field, and quotes the latest message from someone else in the turn. With `callerConfirmation: "once"`, it also says that approving lets that person steer calls that use the caller's identity for the rest of the conversation. Only the caller can approve it, and anyone signed in can cancel it. Approving runs the tool again from its first line with the caller's identity. See [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
 
 Where eve can't ask, the call fails and eve doesn't retry it. That covers sessions that can't request input, such as scheduled runs, workflow tools, and remote agent calls. A connection or `ctx.getToken()` call fails with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`. A remote agent call fails with a terminal error that isn't a `ConnectionAuthorizationFailedError`. Each message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. The caller's next message makes them the last to speak.
 
 An approval covers only its own call, and it doesn't change `auth.sender`; only a message does. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
 
-`callerConfirmation` on the root agent's `defineAgent` decides when eve hands out the caller's identity without asking. It governs identity only: `auth.sender` always names who spoke last, and role checks see both people under every value. Local subagents and dynamic subagents use the root agent's value:
+`callerConfirmation` on the root agent's `defineAgent` decides when eve hands out the caller's identity without asking. It governs identity only: `auth.sender` always names who spoke last, and role checks see both people under every value. Local subagents and dynamic subagents use the root agent's value, and a local subagent keeps the `"once"` approvals the caller gave in the session that delegated to it:
 
 | Value                | After someone else speaks                                                                                                                                |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,15 +112,17 @@ export default defineAgent({
 });
 ```
 
+A remote agent that forwards the caller follows the same setting. A workflow tool can't ask, so it honors `"never"` but not a `"once"` approval.
+
 `"once"` and `"never"` trust the people your channel admits. Choose them only when everyone who can reach the session may act with the caller's accounts.
 
 A tool can act for someone other than the caller with `ctx.getToken(provider, { as })`, which names a person who has spoken in the session by `principalId`. eve hands out that person's token when they sent the latest message, or when they approve the call. `callerConfirmation` doesn't apply to them. See [Act for another person](../guides/auth-and-route-protection#act-for-another-person).
 
-A call that waits on an approval or sign-in while the turn reads new messages runs as the model made it. Its `auth.sender` is whoever had spoken last when the model made the call, whatever messages arrive before it runs. A call the caller approves, or whose sign-in the caller completes, runs with the caller's identity.
+A call that waits on an approval or sign-in while the turn reads new messages runs as the model made it. Its `auth.sender` is whoever had spoken last when the model made the call, whatever messages arrive before it runs. A call the caller approves runs with the caller's identity. Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender it was asked under.
 
 A session with one person never reaches any of this. Tools that use no credentials aren't covered: a tool that decides from the caller's role must check `auth.sender` as well as `auth.current`.
 
-eve's own role checks cover both people under every `callerConfirmation` value. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` opens a session as the caller, so it follows `callerConfirmation`: it returns `unavailable` until the caller speaks again, unless `"never"` or a remembered `"once"` approval hands out the caller's identity.
+eve's own role checks cover both people under every `callerConfirmation` value. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` opens a session as the caller, so it follows the same rule as a call that uses the caller's identity: eve asks the caller to approve it, and it returns `unavailable` only where eve can't ask.
 
 Another person can still answer a pending request with a button or structured answer. They are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 

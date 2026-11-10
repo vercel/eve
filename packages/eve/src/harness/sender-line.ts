@@ -1,6 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
+import { DelegatedIdentityKey } from "#context/keys.js";
 import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
 import type { SessionStateMap } from "#harness/types.js";
 
@@ -118,11 +119,30 @@ export function enterParticipants(
 
 /**
  * The participants of the session the running step belongs to, or `undefined` outside a session
- * step, such as in a workflow-step tool.
+ * step, such as in a workflow-step tool. A local child session also counts the people who had
+ * spoken in the session that delegated to it.
  */
 export function sessionParticipants(
   ctx: ContextReader | undefined = contextStorage.getStore(),
 ): readonly SessionPerson[] | undefined {
   const state = ctx === undefined ? undefined : liveParticipants.get(ctx);
-  return state === undefined ? undefined : readParticipants(state());
+  return state === undefined ? undefined : participantsOf(state(), ctx);
+}
+
+/**
+ * The people who have spoken in a session, the most recent last: those its state records, after
+ * those who had spoken in the session that delegated to it.
+ */
+export function participantsOf(
+  state: SessionStateMap | undefined,
+  ctx: Pick<ContextReader, "get"> | undefined,
+): readonly SessionPerson[] {
+  const own = readParticipants(state);
+  const inherited = ctx?.get(DelegatedIdentityKey)?.participants ?? [];
+  if (inherited.length === 0) return own;
+  const spoke = new Set(own.map((person) => principalOf(personAuth(person))));
+  return [
+    ...inherited.filter((person) => !spoke.has(principalOf(personAuth(person)))),
+    ...own,
+  ].slice(-MAX_PARTICIPANTS);
 }

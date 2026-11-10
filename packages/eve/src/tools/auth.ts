@@ -50,8 +50,9 @@ export interface ToolAuthOptions {
    *
    * eve keeps a person's identity but not their attributes, so a provider that reads
    * `principal.attributes` receives none for the named person. Fails with
-   * `reason: "person_not_found"` when no one who has spoken has this `principalId`, and with
-   * `reason: "person_ambiguous"` when more than one has. Only a tool's own `ctx.getToken` and
+   * `reason: "principal_not_found"` when no one who has spoken has this `principalId`, and with
+   * `reason: "principal_ambiguous"` when more than one has. A local subagent can name the people
+   * who had spoken in the session that delegated to it. Only a tool's own `ctx.getToken` and
    * `ctx.requireAuth` take it, in a tool that runs in the session's turn.
    */
   readonly as?: string;

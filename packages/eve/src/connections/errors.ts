@@ -92,10 +92,11 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    *   tool. Where eve can ask, it opens an approval for that person instead.
    *   The message asks the model to get the person's clear confirmation.
    *   Terminal for the call.
-   * - `"person_not_found"`: `ctx.getToken(provider, { as })` named a
+   * - `"principal_not_found"`: `ctx.getToken(provider, { as })` named a
    *   `principalId` no one who has spoken in the session has, or the tool ran
-   *   outside the session's turn. Terminal.
-   * - `"person_ambiguous"`: `ctx.getToken(provider, { as })` named a
+   *   outside the session's turn. A local subagent's session counts the people
+   *   who had spoken in the session that delegated to it. Terminal.
+   * - `"principal_ambiguous"`: `ctx.getToken(provider, { as })` named a
    *   `principalId` that more than one person who has spoken has, signed in
    *   different ways. Terminal.
    */

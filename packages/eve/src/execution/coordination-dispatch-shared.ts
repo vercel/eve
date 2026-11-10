@@ -26,12 +26,20 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { assertUniqueCoordinationCallIds } from "#harness/coordination.js";
 import {
   activeTurnId,
+  rememberedApprovals,
   runtimeWait,
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { SessionAuthContext, SessionParent, SessionTraceRoot } from "#channel/types.js";
+import type {
+  DelegatedIdentity,
+  SessionAuthContext,
+  SessionParent,
+  SessionTraceRoot,
+} from "#channel/types.js";
+import { participantsOf } from "#harness/sender-line.js";
+import { rememberedConfirmations } from "#runtime/connections/caller-confirmation.js";
 import { readSender } from "#context/session-auth.js";
 import type { ContextReader } from "#context/key.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
@@ -80,6 +88,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   >[0]["inheritedConversation"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly senderAuth: SessionAuthContext | null;
+  /** What a local child this dispatch starts inherits beside the sender. */
+  readonly delegatedIdentity: DelegatedIdentity;
   /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
@@ -180,6 +190,10 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     inheritedConversation: ctx.get(ConversationContextKey),
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     senderAuth: readSender(ctx, ctx.get(AuthKey) ?? null),
+    delegatedIdentity: {
+      confirmed: rememberedConfirmations(rememberedApprovals(session.state), ctx),
+      participants: participantsOf(session.state, ctx),
+    },
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
     plan,
