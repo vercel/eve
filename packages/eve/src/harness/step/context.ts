@@ -23,6 +23,7 @@ import {
   type Transition,
 } from "#harness/session-machine/commit.js";
 import { recordAppliedSession, type StepProjection } from "#harness/session-machine/current.js";
+import { enterParticipants } from "#harness/sender-line.js";
 import { fail, receive } from "#harness/session-machine/transitions.js";
 import { withClientContext, type Prompt } from "#harness/step/prompt.js";
 import {
@@ -80,6 +81,11 @@ export interface Step {
   apply(change: Transition | Commit, messages?: readonly ModelMessage[]): Promise<void>;
 }
 
+/** Whether the session can ask a person, and so wait on their answer. */
+export function canAskPerson(step: Pick<Step, "config" | "emit">): boolean {
+  return step.emit !== undefined && step.config.capabilities?.requestInput === true;
+}
+
 /** The model the step's call runs. Read only once eve has chosen it for the call. */
 export function stepReference(step: Pick<Step, "model">): RuntimeModelReference {
   if (step.model === undefined) throw new Error("The step read its model before eve chose it.");
@@ -123,6 +129,7 @@ export function createStep(input: {
       if (ctx !== undefined) recordAppliedSession(ctx, step.session);
     },
   };
+  if (ctx !== undefined) enterParticipants(ctx, () => step.session.state);
   return step;
 }
 

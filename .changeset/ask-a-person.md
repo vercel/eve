@@ -1,0 +1,11 @@
+---
+"eve": minor
+---
+
+Ask the caller to approve a call that needs their identity after someone else spoke in a shared session, and let a tool act for another person with `ctx.getToken(provider, { as })`.
+
+Where the session can ask for input, a call that reads the caller's user-scoped token or calls a `forwardPrincipal` connection after someone else spoke stops and opens an ordinary approval for the caller, with `audience.principalIds` naming them. The prompt names the call and quotes the latest message from someone else in the turn. Only the caller can approve it, whatever the tool's `response` policy, and anyone signed in can cancel it, which fails the call. Approving runs the tool again from its first line with the caller's identity, so work it did before asking for the token runs again. On the stream, the call's `call.started` comes before the approval and again when it runs. The approval covers only its own call and doesn't change `ctx.session.auth.sender`. A message that joins the turn leaves the request open, and the call waits as a task. Remote agent calls, workflow tools, and sessions that can't ask for input fail with `confirmation_required` instead.
+
+`defineAgent({ callerConfirmation })` decides when eve asks: `"always"` (the default) before each such call until the caller speaks again, `"once"` once for each person who spoke after the caller, for the session, and `"never"` not at all. With `"never"`, calls, remote agents, and eve's own role checks use the caller's identity whoever spoke last, and calls read the caller as `ctx.session.auth.sender`. Set it on the root agent; a subagent that sets it fails to compile.
+
+`ctx.getToken(provider, { as })` and `ctx.requireAuth(provider, { as })` read the token of another person who has spoken in the session, named by `principalId`. eve hands it out when that person sent the latest message or approves the call, and otherwise asks them, signing them in if they haven't connected. A name that matches no one fails with `reason: "person_not_found"`, and one that matches two people signed in different ways fails with `reason: "person_ambiguous"`. eve keeps a person's identity but not their attributes, so a provider that reads `principal.attributes` receives none for them. The git extension's `gh` tool takes an `actor` input that it passes as `as`.

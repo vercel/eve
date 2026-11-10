@@ -89,6 +89,14 @@ describe("compileAgentManifest source graph", () => {
     ).toThrow('Remove "experimental.workflow.world" from "child".');
   });
 
+  it("keeps callerConfirmation root-only, pointing at the root agent", () => {
+    expect(() =>
+      assertRootOnlyConfig({ callerConfirmation: "once" } as never, false, "child"),
+    ).toThrow(
+      `"callerConfirmation" is only supported on the root agent config; local subagents use the root agent's value. Remove "callerConfirmation" from "child" and set it in the root agent's agent.ts.`,
+    );
+  });
+
   it("freezes source metadata behind an immutable registry map", () => {
     const sourceRegistry = registry([]);
 

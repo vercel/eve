@@ -25,6 +25,11 @@ export interface GitHubShellInput {
   /** The `owner/name` repository the command acts on, an `owner` for discovery, or omitted. */
   readonly repository?: string;
   readonly workingDirectory?: string;
+  /**
+   * The `principalId` of the person whose request the command carries out. With user tokens the
+   * command runs with their token, and `authorize` checks them instead of the caller.
+   */
+  readonly actor?: string;
 }
 
 export interface GitHubShellOutput {
@@ -59,8 +64,9 @@ interface GitHubConfigBase {
 export interface GitHubAppConfig extends GitHubConfigBase {
   /**
    * The only access control: commands run only when it returns `true`. In a shared session it
-   * is asked about the turn's caller and, when someone else spoke last, about that person too.
-   * The command runs only when it returns `true` for both.
+   * is asked about the turn's caller and, when someone else spoke last, about that person too,
+   * and about the command's `actor` when that is someone else again. The command runs only when
+   * it returns `true` for each of them.
    */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
   /**
@@ -71,9 +77,15 @@ export interface GitHubAppConfig extends GitHubConfigBase {
   readonly principalType: "app";
 }
 
-/** Resolves the caller's own token through `ctx.getToken`, signing them in when needed. */
+/**
+ * Resolves the caller's own token through `ctx.getToken`, signing them in when needed, or the
+ * token of the command's `actor` when it names someone else.
+ */
 export interface GitHubUserConfig extends GitHubConfigBase {
-  /** The only access control: commands run only when it returns `true`. */
+  /**
+   * The only access control: commands run only when it returns `true`. It is asked about the
+   * person whose token the command uses: the caller, or the command's `actor`.
+   */
   readonly authorize: GitHubAuthorize<GitHubUserAuthorizeRequest>;
   readonly principalType: "user";
 }
@@ -86,7 +98,9 @@ export interface GitHubUserAuthorizeRequest {
   readonly argv: readonly string[];
   /**
    * The person the command is checked for, or `null` when the session has none: the turn's
-   * caller, and with app tokens also whoever spoke last when that is someone else.
+   * caller, or the command's `actor` with user tokens; with app tokens also whoever spoke last
+   * and the `actor`, when each is someone else. An `actor` who is neither the caller nor the
+   * person who spoke last arrives without attributes.
    */
   readonly auth: SessionAuthContext | null;
   /** Always `null`: user tokens cannot be restricted to the declared repository. Use app tokens for repository allowlists. */
@@ -195,6 +209,10 @@ export async function executeGitHubShell(
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const auth = dependencies.auth ?? null;
+  const sender = dependencies.sender === undefined ? auth : dependencies.sender;
+  const actor = actorOf(input.actor, auth, sender);
+  // eve hands out the actor's own token only when they spoke last or approved the call.
+  const actingAs = input.actor === undefined ? undefined : { as: input.actor };
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
   if (config.principalType === "user") {
@@ -204,7 +222,7 @@ export async function executeGitHubShell(
     // was consented with, and repository details do not narrow user tokens.
     // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
-    ({ token } = await dependencies.getToken(userAuth));
+    ({ token } = await dependencies.getToken(userAuth, actingAs));
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
@@ -228,15 +246,15 @@ export async function executeGitHubShell(
   // Never let it satisfy a repository allowlist for an unrestricted lease.
   const allowed =
     config.principalType === "user"
-      ? await config.authorize({ argv, auth, repository: null, token })
+      ? await config.authorize({ argv, auth: actor, repository: null, token })
       : await config.authorize({ argv, auth, owner: owner!, repository, token });
   if (!allowed) {
     throw new Error(`The current caller is not authorized to run this command${scope}.`);
   }
   // An app token is nobody's own, so `authorize` is the only check on who asks for the command.
-  // Another person's message can ask for it in the caller's turn, so they must pass it too. A
-  // user token is the caller's own: `ctx.getToken` refuses it after someone else spoke.
-  const sender = dependencies.sender === undefined ? auth : dependencies.sender;
+  // Another person's message can ask for it in the caller's turn, so they must pass it too, and
+  // so must the person the command acts for. A user token is its owner's own: `ctx.getToken`
+  // hands it out only once they spoke last or approved the call.
   if (
     config.principalType !== "user" &&
     !isSamePerson(auth, sender) &&
@@ -244,6 +262,16 @@ export async function executeGitHubShell(
   ) {
     throw new Error(
       `The person who spoke last in this turn is not authorized to run this command${scope}. Ask the person whose message started this turn to confirm it, and retry only after a reply from them that plainly confirms it.`,
+    );
+  }
+  if (
+    config.principalType !== "user" &&
+    !isSamePerson(actor, auth) &&
+    !isSamePerson(actor, sender) &&
+    !(await config.authorize({ argv, auth: actor, owner: owner!, repository, token }))
+  ) {
+    throw new Error(
+      `${input.actor} is not authorized to run this command${scope}, so it can't run for them.`,
     );
   }
   const coAuthor =
@@ -304,7 +332,7 @@ export async function executeGitHubShell(
   }
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
     // GitHub rejected the caller's token: evict it and sign the caller in again.
-    dependencies.requireAuth!(userAuth);
+    dependencies.requireAuth!(userAuth, actingAs);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);
@@ -402,6 +430,22 @@ async function leaseCredential<T>(
  * Whether two session identities are one person, as eve compares the people in a session.
  * Unauthenticated and anonymous identities are one person.
  */
+/**
+ * The person `actor` names, as `authorize` sees them: the caller or the person who spoke last when
+ * it names one of them, else someone signed in the caller's way, without attributes.
+ */
+function actorOf(
+  actor: string | undefined,
+  auth: SessionAuthContext | null,
+  sender: SessionAuthContext | null,
+): SessionAuthContext | null {
+  if (actor === undefined || auth?.principalId === actor) return auth;
+  if (sender?.principalId === actor) return sender;
+  if (auth === null) return null;
+  const { subject: _subject, ...caller } = auth;
+  return { ...caller, attributes: {}, principalId: actor };
+}
+
 function isSamePerson(a: SessionAuthContext | null, b: SessionAuthContext | null): boolean {
   return personKey(a) === personKey(b);
 }

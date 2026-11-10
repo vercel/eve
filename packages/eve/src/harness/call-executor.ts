@@ -1,6 +1,14 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
-import { withCallerIdentity } from "#runtime/connections/caller-confirmation.js";
+import {
+  confirmedOnce,
+  identityRequestOf,
+  sessionCaller,
+  withCallerIdentity,
+  withConfirmedPerson,
+  type IdentityRequest,
+} from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import { personAuth, principalOf, type SessionPerson } from "#context/session-auth.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import {
@@ -39,6 +47,9 @@ import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import { toModelSchema } from "#tools/schema.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
+import { liveProjection } from "#harness/session-machine/current.js";
+import { turnPosition } from "#harness/session-machine/view.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 
 // eve runs every local call itself: the AI SDK only calls the model. The calls a model response
 // makes run here as soon as the response ends, and so do the calls a person approved later.
@@ -81,6 +92,8 @@ export interface CallOutcome {
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly awaitsApproval?: true;
   readonly signIn?: ToolSignIn;
+  /** The call stopped for a person's identity: what eve asks them. */
+  readonly identity?: ApprovalAsk;
 }
 
 /**
@@ -106,6 +119,13 @@ export async function executeToolCall(
     readonly responder?: SessionAuthContext;
     /** The caller approved the call, so it runs with their identity whoever spoke last. */
     readonly callerApproved?: boolean;
+    /** The person who approved eve's request for their identity, which the call may then use. */
+    readonly confirmedBy?: SessionPerson;
+    /**
+     * The session can ask a person: a call refused for someone's identity stops and asks them
+     * instead of failing.
+     */
+    readonly canAsk?: boolean;
     /**
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
@@ -180,6 +200,7 @@ export async function executeToolCall(
     let failed = false;
     let failure = "";
     let thrown: Error | undefined;
+    let caught: unknown;
     const telemetry = toolTelemetry(input.telemetry, {
       // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,
@@ -198,41 +219,45 @@ export async function executeToolCall(
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
           // Usage the tool records belongs to its call, including while a streaming tool iterates,
-          // and so does the caller's identity, for a call the caller approved.
-          await withCallerIdentity(input.callerApproved === true, () =>
-            withUsageCall(callId, async () => {
-              const executed = invokeTool(
-                definition,
-                args,
-                {
-                  ...(input.responder !== undefined && {
-                    approval: { responder: input.responder },
-                  }),
-                  abortSignal: input.abortSignal,
-                  messages: [...input.messages],
-                  toolCallId: callId,
-                },
-                clearance,
-              );
-              // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-              // waiting, and whatever the tool returns later is dropped.
-              const abandon = approval === "evaluate" ? input.abortSignal : undefined;
-              if (isAsyncIterable(executed)) {
-                for await (const partial of untilAborted(executed, abandon)) {
-                  output = partial;
-                  const visible = withoutSignInSecrets(partial);
-                  await input.publish(
-                    callProgress(
-                      callId,
-                      visible,
-                      projectToolLabel(definition, "delta", args, visible),
-                    ),
-                  );
+          // and so does the caller's identity, for a call the caller approved or, with
+          // `callerConfirmation: "once"`, already approved for whoever spoke last.
+          const released = input.callerApproved === true || confirmedOnce(input.approvalMemory);
+          await withCallerIdentity(released, () =>
+            withConfirmedPerson(input.confirmedBy, () =>
+              withUsageCall(callId, async () => {
+                const executed = invokeTool(
+                  definition,
+                  args,
+                  {
+                    ...(input.responder !== undefined && {
+                      approval: { responder: input.responder },
+                    }),
+                    abortSignal: input.abortSignal,
+                    messages: [...input.messages],
+                    toolCallId: callId,
+                  },
+                  clearance,
+                );
+                // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
+                // waiting, and whatever the tool returns later is dropped.
+                const abandon = approval === "evaluate" ? input.abortSignal : undefined;
+                if (isAsyncIterable(executed)) {
+                  for await (const partial of untilAborted(executed, abandon)) {
+                    output = partial;
+                    const visible = withoutSignInSecrets(partial);
+                    await input.publish(
+                      callProgress(
+                        callId,
+                        visible,
+                        projectToolLabel(definition, "delta", args, visible),
+                      ),
+                    );
+                  }
+                } else {
+                  output = await raceAbort(Promise.resolve(executed), abandon);
                 }
-              } else {
-                output = await raceAbort(Promise.resolve(executed), abandon);
-              }
-            }),
+              }),
+            ),
           );
         } finally {
           executionMs = performance.now() - startedAt;
@@ -246,9 +271,25 @@ export async function executeToolCall(
       throwIfTurnAborted(input.abortSignal);
       logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;
+      caught = error;
       thrown = toError(error);
       output = thrown.message;
       failure = modelFacingError(error);
+    }
+    // A refusal for someone's identity asks them where the session can, as a sign-in does: the
+    // call stops without a result, and runs again from the top once they approve.
+    const identity = failed && input.canAsk === true ? identityRequestOf(caught) : undefined;
+    if (identity !== undefined) {
+      return {
+        identity: identityApprovalRequest(
+          { callId, input: args, toolName, version: definition.version },
+          definition,
+          identity,
+          input.responder,
+        ),
+        settled,
+        toolResults,
+      };
     }
     if (!failed) {
       await telemetry.ended(
@@ -490,6 +531,8 @@ export async function executeInlineCalls(input: {
   readonly modelCallId?: string;
   /** Runs just before each tool does, so steering no longer interrupts the step. */
   readonly beforeExecute: () => void;
+  /** The session can ask a person, so a call refused for someone's identity asks them. */
+  readonly canAsk?: boolean;
 }): Promise<InlineCallResults> {
   const calls = input.toolCalls.filter(
     (call) =>
@@ -516,7 +559,7 @@ export async function executeInlineCalls(input: {
           const approval =
             executed.awaitsApproval === true
               ? { ...approvalRequest(call, definition), remember: executed.remember }
-              : undefined;
+              : executed.identity;
           return { call, executed, approval };
         } catch (error) {
           throwIfTurnAborted(input.abortSignal);
@@ -607,6 +650,103 @@ export async function publishDenial(
     ),
   );
   return { settled: [{ part }], toolResults: [] };
+}
+
+/** How much of the latest message an identity request quotes. */
+const QUOTE_LIMIT = 280;
+
+/**
+ * What eve asks a person whose identity a call needs: the call, by the label its entry gives it,
+ * and the latest message in the turn from someone else, which they approve along with the call.
+ * Only the person can approve it; anyone signed in can cancel it.
+ */
+function identityApprovalRequest(
+  call: {
+    readonly callId: string;
+    readonly input: unknown;
+    readonly toolName: string;
+    readonly version?: string;
+  },
+  definition: HarnessToolDefinition,
+  identity: IdentityRequest,
+  responder: SessionAuthContext | undefined,
+): ApprovalAsk {
+  const { callId, toolName } = call;
+  const input = resolveToolCallInputObject(call.input, { callId, toolName });
+  const label = projectToolLabel(definition, "start", input) ?? displayTitle(toolName);
+  const latest = latestMessageFromOthers(identity.person);
+  const quote =
+    latest === undefined
+      ? ""
+      : ` The latest message from someone else, from ${latest.from}: "${truncate(latest.text, QUOTE_LIMIT)}"`;
+  return {
+    call: {
+      callId,
+      input,
+      toolName,
+      ...(call.version !== undefined && { version: call.version }),
+    },
+    identity: {
+      person: identity.person,
+      ...(responder !== undefined && { responder }),
+    },
+    interactionId: generateId(),
+    ...(identity.remember !== undefined && { remember: identity.remember }),
+    request: {
+      allowFreeform: false,
+      display: "confirmation",
+      kind: "approval",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Cancel" },
+      ],
+      prompt: `Approve ${label} with your identity?${quote}`,
+    },
+  };
+}
+
+/**
+ * The text of the latest message the turn read from someone other than `person`, and who sent it,
+ * from the deliveries the turn consumed. A delivery without a sender is the caller's.
+ */
+function latestMessageFromOthers(
+  person: SessionPerson,
+): { readonly from: string; readonly text: string } | undefined {
+  const projection = liveProjection();
+  if (projection === undefined) return undefined;
+  const { turnId } = turnPosition(projection);
+  // A delivery names its sender without how they signed in; one without a sender is the caller's.
+  const callerIsPerson = principalOf(sessionCaller()) === principalOf(personAuth(person));
+  const sentBy = (principal: Principal | undefined) =>
+    principal === undefined
+      ? callerIsPerson
+      : principal.id === person.principalId &&
+        principal.type === person.principalType &&
+        (principal.issuer ?? null) === (person.issuer ?? null);
+  const latest = Object.values(projection.view.deliveries)
+    .filter(
+      (delivery) =>
+        delivery.turnId === turnId &&
+        delivery.consumedAt !== undefined &&
+        !sentBy(delivery.principal),
+    )
+    .map((delivery) => ({
+      at: delivery.consumedAt!,
+      from: delivery.principal?.id ?? sessionCaller()?.principalId ?? "someone",
+      text: (delivery.parts ?? [])
+        .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+        .join("\n")
+        .trim(),
+    }))
+    .filter((message) => message.text.length > 0)
+    .sort((a, b) => b.at - a.at)
+    .at(0);
+  return latest === undefined ? undefined : { from: latest.from, text: latest.text };
+}
+
+function truncate(text: string, limit: number): string {
+  const flat = text.replace(/\s+/gu, " ");
+  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1).trimEnd()}…`;
 }
 
 /**

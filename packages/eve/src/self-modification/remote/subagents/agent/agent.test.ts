@@ -1,4 +1,6 @@
+import { ContextContainer, contextStorage } from "#context/container.js";
 import type { SessionAuthContext } from "#context/keys.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { openMemos, type MemoRun } from "#definitions/memos.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,7 +40,21 @@ function memos(kept?: MemoRun): MemoRun {
 }
 
 /** Evaluates the subagent in Alice's turn, after `sender` spoke last. */
-function offerInAliceTurn(sender: SessionAuthContext | null, run = memos()) {
+function offerInAliceTurn(
+  sender: SessionAuthContext | null,
+  run = memos(),
+  callerConfirmation?: "never",
+) {
+  const ctx = new ContextContainer();
+  ctx.set(BundleKey, {
+    graph: {
+      nodesByNodeId: new Map([["__root__", { agent: { config: { callerConfirmation } } }]]),
+    },
+  } as never);
+  return contextStorage.run(ctx, () => evaluate(sender, run));
+}
+
+function evaluate(sender: SessionAuthContext | null, run: MemoRun) {
   return dynamicEvaluate(agent)({
     channel: { kind: "channel:slack", metadata: {} },
     memo: run.memo,
@@ -80,6 +96,12 @@ describe("deployed self-modification agent in a shared session", () => {
     mount(authorized);
 
     await expect(offerInAliceTurn(sender)).resolves.toBeNull();
+  });
+
+  it('is offered to an authorized caller after an unauthorized person spoke when callerConfirmation is "never"', async () => {
+    mount([alice]);
+
+    await expect(offerInAliceTurn(bob, memos(), "never")).resolves.not.toBeNull();
   });
 
   it("asks again within the turn once someone else speaks", async () => {

@@ -26,4 +26,13 @@ export const githubShellInputSchema = z.object({
     .max(1_000)
     .optional()
     .describe("sandbox workspace directory; defaults to the workspace root"),
+  actor: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe(
+      "the principalId of the person whose request this command carries out, as the sender lines name them; omit for the person whose message started this turn",
+    ),
 });

@@ -374,10 +374,15 @@ describe.each([
   const alice = person("alice");
   const bob = person("bob");
 
-  function registerRemoteAgent(forwardPrincipal: boolean | undefined): void {
+  function registerRemoteAgent(
+    forwardPrincipal: boolean | undefined,
+    callerConfirmation?: "never",
+  ): void {
     mocks.targetKind = "remote";
     mocks.bundle = {
-      graph: {},
+      graph: {
+        nodesByNodeId: new Map([["__root__", { agent: { config: { callerConfirmation } } }]]),
+      },
       subagentRegistry: {
         subagentsByNodeId: new Map([
           [
@@ -414,8 +419,14 @@ describe.each([
   it.each([
     { reason: "the caller spoke last", forwardPrincipal: true, sender: { ...alice } },
     { reason: "the agent doesn't forward the caller", forwardPrincipal: undefined, sender: bob },
-  ])("goes through when $reason", async ({ forwardPrincipal, sender }) => {
-    registerRemoteAgent(forwardPrincipal);
+    {
+      reason: 'the agent\'s callerConfirmation is "never"',
+      callerConfirmation: "never" as const,
+      forwardPrincipal: true,
+      sender: bob,
+    },
+  ])("goes through when $reason", async ({ callerConfirmation, forwardPrincipal, sender }) => {
+    registerRemoteAgent(forwardPrincipal, callerConfirmation);
 
     await run({ current: alice, initiator: alice, sender });
 

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { forgetSender, rememberSender, senderLine } from "#harness/sender-line.js";
+import {
+  forgetSender,
+  readParticipants,
+  rememberSender,
+  senderLine,
+} from "#harness/sender-line.js";
 
 function user(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
@@ -47,5 +52,36 @@ describe("senderLine", () => {
     expect(lineAfter([user("alice")], null)).toContain(
       "It is from someone who isn't signed in. The message before it was from alice.",
     );
+  });
+});
+
+describe("participants", () => {
+  it("records who has spoken without their attributes, the most recent last", () => {
+    const slack = {
+      ...user("bob"),
+      attributes: { action_token: "xoxa-secret" },
+      authenticator: "slack",
+      subject: "U_BOB",
+    };
+    const session = [user("alice"), slack, null, user("alice")].reduce(
+      rememberSender,
+      {} as { state?: Record<string, unknown> },
+    );
+
+    expect(readParticipants(session.state)).toEqual([
+      { authenticator: "slack", principalId: "bob", principalType: "user", subject: "U_BOB" },
+      { authenticator: "test", principalId: "alice", principalType: "user" },
+    ]);
+    expect(JSON.stringify(session.state)).not.toContain("xoxa-secret");
+  });
+
+  it("keeps the 50 people who spoke most recently", () => {
+    const people = Array.from({ length: 52 }, (_, index) => user(`person-${index}`));
+    const session = people.reduce(rememberSender, {} as { state?: Record<string, unknown> });
+
+    const kept = readParticipants(session.state).map((person) => person.principalId);
+    expect(kept).toHaveLength(50);
+    expect(kept[0]).toBe("person-2");
+    expect(kept.at(-1)).toBe("person-51");
   });
 });

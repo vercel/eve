@@ -111,12 +111,14 @@ Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in
 
 ### Control access with `authorize`
 
-`github.authorize` is the agent's only access control. A command runs only when it returns `true`; otherwise the token never reaches the sandbox. It runs before every `gh` call and receives the parsed `argv`, the caller's `auth`, `repository`, and the minted `token`. What the token can reach depends on `principalType`: With app tokens in a [shared session](/docs/concepts/security-model#shared-sessions), eve also calls `authorize` for the person who spoke last when that isn't the caller, and the command runs only when both calls return `true`.
+`github.authorize` is the agent's only access control. A command runs only when it returns `true`; otherwise the token never reaches the sandbox. It runs before every `gh` call and receives the parsed `argv`, the caller's `auth`, `repository`, and the minted `token`. What the token can reach depends on `principalType`: With app tokens in a [shared session](/docs/concepts/security-model#shared-sessions), eve also calls `authorize` for the person who spoke last when that isn't the caller, and the command runs only when both calls return `true`. With `callerConfirmation: "never"`, eve calls it for the caller only.
 
 | `principalType` | Token                                                                                                                                                          | `authorize` also receives      |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | `"app"`         | A GitHub App installation token for the declared repository, or for the whole installation when the call declares only an owner.                               | `owner`                        |
 | `"user"`        | The caller's own token, which reaches everything the caller can reach on GitHub. eve asks the caller to sign in when needed and when GitHub rejects the token. | `repository: null`, no `owner` |
+
+In a shared session, each `gh` call takes an optional `actor`: the `principalId` of the person whose request the command carries out, which the model reads in sender lines. With `"user"`, the command runs with the actor's own token, through [`ctx.getToken(provider, { as })`](/docs/guides/auth-and-route-protection#act-for-another-person), and `authorize` receives the actor as `auth`. eve asks the actor to approve the command unless they sent the latest message. With `"app"`, `authorize` also receives the actor when they are neither the caller nor the person who spoke last. An actor who is neither arrives without attributes.
 
 With `"user"`, `authorize` always receives `repository: null`, even when the command declares a repository. Repository allowlists therefore deny user-token calls. Use `"app"` with a full `owner/name` declaration when your policy restricts repository access. Use `"user"` only when your policy permits the caller's full GitHub access, and authorize the caller through `auth`.
 

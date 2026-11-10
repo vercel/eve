@@ -64,6 +64,7 @@ import { selectionModel } from "#models/options.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { callerSpokeLast } from "#context/session-auth.js";
 import { callerConfirmationMessage } from "#runtime/connections/caller-confirmation.js";
+import { resolveCallerConfirmation } from "#execution/effective-agent-config.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 const log = createLogger("execution.agent-sessions");
@@ -305,7 +306,7 @@ export async function sendAgentSessionMessageStep(
   const { address, context } = input;
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
-    requireCallerConfirmationToForward(remote, input.auth);
+    requireCallerConfirmationToForward(remote, input.auth, await loadAgentSessionBundle(context));
     return await continueRemoteAgentSession({
       auth: input.auth.current,
       callback: {
@@ -555,7 +556,7 @@ async function startRemoteSession(
     registry: bundle.subagentRegistry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
-  requireCallerConfirmationToForward(remote, auth);
+  requireCallerConfirmationToForward(remote, auth, bundle);
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
     action,
@@ -659,13 +660,16 @@ function agentDeliveryId(kind: string, sessionId: string): string {
 
 /**
  * A remote agent that forwards the principal acts as the caller, so after someone else spoke it
- * runs only for a call the caller approved, whose dispatch names the caller as the sender.
+ * runs only for a call the caller approved, whose dispatch names the caller as the sender, unless
+ * the agent's `callerConfirmation` is `"never"`.
  */
 function requireCallerConfirmationToForward(
   remote: { readonly forwardPrincipal?: boolean; readonly name: string },
   auth: SessionAuth,
+  bundle: Pick<CompiledBundle, "graph">,
 ): void {
   if (remote.forwardPrincipal !== true || callerSpokeLast(auth)) return;
+  if (resolveCallerConfirmation(bundle) === "never") return;
   // Terminal, where a connection's refusal is a `ConnectionAuthorizationFailedError`: a step
   // retries any other error, and retrying can't change who spoke last. The message reaches the
   // model as the call's error, so it asks the caller instead.

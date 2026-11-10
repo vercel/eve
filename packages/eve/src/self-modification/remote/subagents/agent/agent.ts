@@ -1,6 +1,6 @@
 import { defineAgent, defineDynamic } from "eve";
 
-import { callerSpokeLast } from "#context/session-auth.js";
+import { callerIdentityAvailable } from "#runtime/connections/caller-confirmation.js";
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 
 import { hasGitHubCredential } from "../../../credentials.js";
@@ -44,8 +44,8 @@ export default defineDynamic(async (ctx) => {
   if (config.credentials.kind === "pat" && !hasGitHubCredential()) return null;
   const { current, sender } = ctx.session.auth;
   // Another person's message can ask for the change in the caller's turn, so they must be
-  // authorized too.
-  const principals = callerSpokeLast(ctx.session.auth) ? [current] : [current, sender];
+  // authorized too, unless `callerConfirmation: "never"` lets anyone act as the caller.
+  const principals = callerIdentityAvailable(ctx.session.auth) ? [current] : [current, sender];
   // `authorize` reads the principal's attributes and the channel, so it's asked again each turn.
   const authorized = await ctx.memo(["authorize", principals, ctx.turn?.id ?? null], async () => {
     try {

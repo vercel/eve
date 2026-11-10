@@ -22,6 +22,31 @@ export function principalOf(auth: SessionAuthContext | null | undefined): string
   ]);
 }
 
+/**
+ * A person as eve records them beside the session: who they are, never their attributes, which
+ * can carry a channel's short-lived tokens.
+ */
+export type SessionPerson = Pick<
+  SessionAuthContext,
+  "authenticator" | "issuer" | "principalId" | "principalType" | "subject"
+>;
+
+/** The person `auth` names, without its attributes. */
+export function personOf(auth: SessionAuthContext): SessionPerson {
+  return {
+    authenticator: auth.authenticator,
+    ...(auth.issuer !== undefined && { issuer: auth.issuer }),
+    principalId: auth.principalId,
+    principalType: auth.principalType,
+    ...(auth.subject !== undefined && { subject: auth.subject }),
+  };
+}
+
+/** A recorded person as a session identity, with no attributes. */
+export function personAuth(person: SessionPerson): SessionAuthContext {
+  return { ...person, attributes: {} };
+}
+
 /** `ctx.session.auth` as the session's context holds it; `current` defaults to its caller. */
 export function readSessionAuth(
   ctx: Pick<ContextReader, "get">,

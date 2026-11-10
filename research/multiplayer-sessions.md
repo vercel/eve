@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/pull/6199
-status: in-progress
+status: implemented
 last_updated: "2026-11-10"
 ---
 
@@ -86,8 +86,9 @@ export default defineTool({
 });
 ```
 
-`ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`. Nothing is added to
-connection or channel definitions, and the approval helpers don't change.
+`ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`, and `as` adds
+`"person_not_found"` and `"person_ambiguous"`. The git extension's `gh` tool gains an `actor` input.
+Nothing is added to connection or channel definitions, and the approval helpers don't change.
 
 ## Semantics
 
@@ -128,7 +129,9 @@ caller. By default that person is the caller.
 eve hands out the caller's identity when the caller was the last to speak as the model made the
 call. After someone else's message joins the turn, the call needs the caller's approval:
 
-- **Refused (pull request 1).** The call fails with `ConnectionAuthorizationFailedError`,
+- **Asked.** Where eve can ask, the call stops and eve asks the caller. See
+  [Asking a person](#asking-a-person).
+- **Refused.** Where eve can't ask, the call fails with `ConnectionAuthorizationFailedError`,
   `reason: "confirmation_required"`, `retryable: false`. Nothing pauses. The message tells the
   model that someone else has spoken, and to ask the caller to confirm before it retries. The
   caller's next message makes them the last to speak.
@@ -138,7 +141,6 @@ call. After someone else's message joins the turn, the call needs the caller's a
   covers its own call only: it doesn't change `auth.sender`, so the next call is judged on its
   own. Another person's approval, allowed by a `response` policy, doesn't release the caller's
   identity.
-- **Asked (pull request 3).** See [Asking a person](#asking-a-person).
 
 A call that waits on a person runs as it was asked. It keeps the sender it had then, and messages
 read while it waited don't change what it gets.
@@ -185,18 +187,30 @@ person's text is a message.
 
 ### Asking a person
 
-Where the channel can show a request, eve asks instead of refusing. The call stops as it does for
-a sign-in, and eve opens an approval request for the person whose identity the call needs. Only
-that person can approve it.
+Where the session can request input (`capabilities.requestInput`) and the call runs in the session
+step, eve asks instead of refusing. The call stops without a result, as it does for a sign-in, and
+eve opens an ordinary approval (`request.kind: "approval"`) for the person whose identity the call
+needs, with `audience.principalIds` naming them.
 
-- The request names the call and the people who spoke since the person last did, and quotes the
-  latest message. The person approves what was said, not only the call.
-- Approving runs the call again from the top, as a sign-in does, with that person's identity. When
-  the person is the caller, approving also makes them the last to speak.
-- Cancelling fails the call. The model can also drop it with `eve__task_cancel`.
-- The request doesn't hold the turn. It is a wait like any other, so other people keep steering.
-- Where eve can't ask, such as a channel without requests, the call is refused as in pull
-  request 1.
+- The prompt names the call by its label and quotes the latest message in the turn from someone
+  other than that person, truncated. With no such message, it has no quote. It never carries
+  secrets or attributes.
+- Only that person can approve it, checked before any tool `response` policy, which doesn't govern
+  this request. Anyone the channel admits who is signed in can cancel it. Another person can only
+  press, never type, an answer.
+- Approving runs the call again from the top with that person's identity: the caller's for a call
+  that needed it, else the named person's. Work the tool did before it asked runs again. Approving
+  covers only that call and doesn't change `auth.sender`: only a message does. With `"always"`,
+  each identity-using call after someone else spoke asks until the caller speaks again.
+- The call had started, so a client sees `call.started`, then `interaction.opened` about the same
+  call, then `turn.paused`. Approving emits `call.started` again and one `call.settled`.
+- Cancelling fails the call with a result saying the request was cancelled and that what the call
+  did before then already happened. The model can also drop it with `eve__task_cancel`.
+- The request doesn't hold the turn. It is a wait like any other, so other people keep steering,
+  and a message that joins leaves it open with the call waiting as a task.
+- A delegated child session relays the request to its parent like any approval.
+- Where eve can't ask, the call is refused: sessions without `requestInput`, workflow-step tools,
+  and remote agents, which run outside the session step.
 
 `callerConfirmation` on the agent decides when the caller is asked:
 
@@ -206,21 +220,36 @@ that person can approve it.
 | `"once"`   | Ask the caller once for each person. Approving covers that person's later messages. |
 | `"never"`  | Don't ask. Anyone the channel admits steers the turn with the caller's identity.    |
 
-`"once"` remembers for the caller and the person until the session ends. Only approving a request
-is remembered; a message isn't. The root agent's value applies in its local subagents.
+`"once"` remembers for the caller and the person until the session ends, in the session's approval
+memory under an eve-owned key. Only approving a request is remembered; a message isn't. A workflow
+tool, which runs outside the session step, doesn't read it and keeps refusing. With `"never"`, every
+guard hands out the caller's identity, eve's own role checks look only at the caller, and calls
+read the caller as `auth.sender`, as a call the caller approved does. The root agent's value
+applies in its local subagents, and a subagent that sets `callerConfirmation` fails to compile.
 
 ### Acting for someone else
 
 `ctx.getToken(provider, { as })` reads the token of the person `as` names instead of the caller's.
-`as` is a `principalId` from a sender line, so it names someone who has spoken in the session.
+`as` is a `principalId` from a sender line, so it names someone who has spoken in the session. eve
+records the 50 people who spoke most recently in session state, beside the sender line, keeping
+their `authenticator`, `issuer`, `principalId`, `principalType`, and `subject`, never their
+attributes. A name that matches no one fails with `reason: "person_not_found"`; one that matches
+two people signed in different ways fails with `reason: "person_ambiguous"`. Naming the caller is
+the same as omitting `as`. A provider that reads `principal.attributes` receives none for a named
+person. `as` works only in tools that run in the session step, and a delegated session has no
+participants to name.
 
 Rule 3 decides the same way for everyone. The named person's token is handed out when they were
 the last to speak as the model made the call, or when they approved the call. Otherwise eve asks
 them, signing them in if they haven't connected, or refuses where it can't ask.
 `callerConfirmation` doesn't apply to a person who isn't the caller: their identity always needs
+them. The sign-in asks the named person, but its callback resumes the turn as its caller. Approval
+responders' tokens, `ctx.approval.responder.getToken`, aren't guarded this way: the answer bound
 them.
 
-The git extension's `gh` tool takes an `actor` input and passes it as `as`. In the incident, the
+The git extension's `gh` tool takes an `actor` input and passes it as `as`. With user tokens,
+`authorize` checks the actor; with app tokens, it also checks the actor when they are neither the
+caller nor the person who spoke last. In the incident, the
 model names Alice, eve asks Alice, and the pull request opens as Alice. If it names Bob, the call
 runs as Bob: he spoke last, and eve can't tell that from "open it".
 
@@ -242,6 +271,8 @@ eve hands a person's identity to a call in two cases:
 
 - they were the last to speak as the model made the call, or
 - they approved that call: its approval, its sign-in, or eve's request for their identity.
+
+An approval of eve's request covers that call only, and doesn't make the person the last to speak.
 
 Both are decided from who sent which message and who pressed which button, never from what the
 model said. A sender line a person types into their own message can mislead the model, but it

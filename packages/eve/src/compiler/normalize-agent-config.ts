@@ -90,6 +90,7 @@ export async function compileAgentConfig(
   const compiledConfig: {
     approval?: boolean;
     build?: CompiledAgentDefinition["build"];
+    callerConfirmation?: CompiledAgentDefinition["callerConfirmation"];
     compaction: {
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
@@ -147,6 +148,10 @@ export async function compileAgentConfig(
 
   if (definition.reasoning !== undefined) {
     compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.callerConfirmation !== undefined) {
+    compiledConfig.callerConfirmation = definition.callerConfirmation;
   }
 
   if (definition.tool !== undefined) {

@@ -313,6 +313,21 @@ Traces record both people:
 
 The ids are recorded only when the trace policy records both inputs and outputs, and the conversation is public or runs in development. Otherwise, only the type is recorded.
 
+### Approvals for a person's identity
+
+In a [shared session](/docs/concepts/security-model#shared-sessions), a call that needs the caller's identity after someone else spoke asks the caller first. Such a call reads a user-scoped token, calls a `forwardPrincipal` connection, or names a person with [`ctx.getToken(provider, { as })`](/docs/guides/auth-and-route-protection#act-for-another-person). eve opens an ordinary approval, with `request.kind: "approval"`, for the person whose identity the call needs:
+
+- The prompt names the call and quotes the latest message from someone else in the turn, such as `Approve Deploy with your identity? The latest message from someone else, from bob: "ship it"`.
+- The event's `audience.principalIds` names that person. Only they can approve it, whatever the tool's `response` policy. Anyone signed in can cancel it.
+- Approving runs the tool again from its first line, with that person's identity. Anything the tool did before it asked for the token runs again.
+- Cancelling fails the call. The model reads that the request was cancelled, and that anything the call did before it needed the identity already happened.
+
+The call starts before it asks, so a client sees `call.started`, then the approval's `interaction.opened` about the same `callId`, then `turn.paused`. After the approval, the call emits `call.started` again and ends with one `call.settled`. Cancelling ends it with a failed `call.settled`.
+
+An approval covers only its call and doesn't change `ctx.session.auth.sender`. With the default `callerConfirmation: "always"`, each later call that uses the caller's identity asks again, until the caller speaks. With `"once"`, the caller's approval covers later calls after the same person spoke, for the rest of the session. A call that has the caller's identity reads the caller as `ctx.session.auth.sender`. See [`callerConfirmation`](/docs/agent-config#other-defineagent-fields).
+
+A message that arrives while the request is open leaves it open, like any approval, and the call waits as a task. Where the session can't ask for input, and in workflow tools, the call fails with `reason: "confirmation_required"` instead.
+
 ### Skipping approval for schedule-dispatched turns
 
 Markdown schedules run as the app: `authenticator: "app"`, `principalId: "eve:app"`, and `principalType: "runtime"`. A `run` schedule must pass its `appAuth` to `send(...)` for the child session to run as the app. To skip approval for scheduled turns but still ask a person, match all three fields on `session.auth.current`:
@@ -404,7 +419,7 @@ While the turn waits on an approval or a sign-in it asked for, a message that an
 - The model can drop a waiting call with `eve__task_cancel`. Its approval or sign-in ends as `withdrawn`, and the call doesn't run.
 - The turn doesn't end while a call waits. Cancelling the turn ends the approvals as `interrupted`.
 
-A call that waits runs as the model made it. It reads the person who spoke last before the call as `ctx.session.auth.sender`, whoever spoke since. When the turn's caller approves the call or completes its sign-in, the call runs as the caller. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
+A call that waits runs as the model made it. It reads the person who spoke last before the call as `ctx.session.auth.sender`, whoever spoke since. When the turn's caller approves the call or completes its sign-in, the call runs as the caller. A call that needs the caller's identity asks them first; see [Approvals for a person's identity](#approvals-for-a-persons-identity).
 
 ### Request kinds
 

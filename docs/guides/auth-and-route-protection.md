@@ -309,7 +309,7 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 
 - `auth.current`: the caller on the active inbound turn, whose message started it. A message from a different caller that starts a later turn replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
-- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call that has the caller's identity, because the caller approved it or `callerConfirmation` lets it, reads the caller here.
 
 The caller stays the same for the whole turn; only its claims can change:
 
@@ -494,6 +494,40 @@ Throw `ConnectionAuthorizationRequiredError` from an inline provider's `getToken
 Vercel Connect providers usually supply their own display name for the authorization challenge. To override what users see, set `displayName`, for example `ctx.getToken(customAuth, { displayName: "Salesforce" })`.
 
 Inline providers derive a stable auth key from Vercel Connect metadata when available. Give each custom provider without that metadata an explicit key, for example `ctx.getToken(auth, { authKey: "github" })`. `authKey` sets eve's cache and callback keys; it is not an OAuth scope.
+
+## Act for another person
+
+By default, `ctx.getToken(provider)` reads the turn caller's token. In a shared session, set `as` to the `principalId` of another person who has spoken, as the model reads it in sender lines, to read their token instead:
+
+```ts title="agent/tools/open_pull_request.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+const github = connect("github/myagent");
+
+export default defineTool({
+  description: "Open a pull request for the person who asked for it.",
+  inputSchema: z.object({ branch: z.string(), actor: z.string().optional() }),
+  async execute({ branch, actor }, ctx) {
+    // Omit `as` for the caller's token.
+    const { token } = await ctx.getToken(github, { as: actor });
+    return await openPullRequest(branch, token);
+  },
+});
+```
+
+eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. `callerConfirmation` doesn't apply to someone who isn't the caller. Naming the caller is the same as omitting `as`.
+
+- eve keeps each person's identity but not their attributes, so a provider that reads `principal.attributes` receives none for a named person.
+- `as` works in tools that run in the session's turn, not in workflow tools, and not in delegated subagent sessions, where no one has spoken.
+- `as` names a person only for an authored tool's `ctx.getToken` and `ctx.requireAuth`. Connection tools always use the caller's identity.
+
+| What you see                      | What to do                                                                                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason: "person_not_found"`      | No one who has spoken in the session has that `principalId`, or the tool runs outside the session's turn. Name someone from a sender line, or omit `as`. |
+| `reason: "person_ambiguous"`      | Two people who have spoken share that `principalId`, signed in through different channels. Omit `as`, or ask the person to continue in one channel.      |
+| `reason: "confirmation_required"` | The named person didn't speak last, and the session can't ask for input. Ask them to confirm in the conversation, then retry.                            |
 
 ## What to read next
 

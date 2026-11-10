@@ -21,7 +21,7 @@ export const SAY = {
   bobStatus: "Bob asks for a status update.",
   bobSpeakers: "Bob adds a note and asks who is speaking.",
   bobCallerToken: "Bob adds that the release should go out with Alice's release token.",
-  aliceConfirmsToken: "Alice confirms the release should go out with her release token.",
+  aliceBobToken: "Alice asks for a release with Bob's release token.",
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
   deadline: "Alice adds that the note should mention the deadline.",
@@ -142,10 +142,10 @@ export function respond(request: MockModelRequest): MockModelResponse {
         [call("caller-token", "caller-token")],
         () => `Caller token: ${outcome("caller-token")}.`,
       ),
-    [SAY.aliceConfirmsToken]: () =>
+    [SAY.aliceBobToken]: () =>
       run(
-        [call("caller-token-confirmed", "caller-token")],
-        () => `Caller token: ${outcome("caller-token-confirmed")}.`,
+        [call("named-token", "named-token", { as: "bob" })],
+        () => `Bob's token: ${outcome("named-token")}.`,
       ),
     [SAY.spendBudget]: () => ({
       text: REPLY.summary,

@@ -2314,6 +2314,91 @@ describe("work delegated to a child session", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
+  it("relays a child's request for the caller's identity, which only the caller can approve", async () => {
+    const started = gate();
+    const release = gate();
+    const tokens: string[] = [];
+    const { events } = await withSession(
+      "edge-child-identity",
+      {
+        message: "Prepare, then delegate reading the inbox.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:")) {
+            return called("read_inbox")
+              ? "Child read it."
+              : [{ toolName: "read_inbox", toolCallId: "call_child_inbox" }];
+          }
+          if (!called("prepare")) return [{ toolName: "prepare", toolCallId: "call_prepare" }];
+          if (!called("agent"))
+            return [
+              {
+                input: { message: "CHILD: read the inbox." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          if (!called("eve__task_wait"))
+            return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
+          return "The child is done.";
+        }),
+        tools: [
+          {
+            name: "prepare",
+            execute: async () => {
+              started.open();
+              await release.wait;
+              return "Prepared.";
+            },
+          },
+          {
+            name: "read_inbox",
+            execute: async (_input, ctx) => {
+              const { token } = await ctx.getToken({
+                getToken: async ({ principal }) => ({
+                  token: `token:${principal.type === "user" ? principal.id : "app"}`,
+                }),
+                principalType: "user",
+              });
+              tokens.push(token);
+              return token;
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await started.wait;
+        // Bob speaks before the child starts, so the child inherits him as the last to speak.
+        try {
+          await session.send("Bob's note.", BOB);
+        } finally {
+          release.open();
+        }
+        await session.until("the relayed request", (event) => event.type === "turn.paused");
+        const [relayed] = session.approvals();
+        await session.answer(relayed!, "approve", BOB);
+        await session.until(
+          "Bob's refused press",
+          (event) => event.type === "response.settled" && event.data.outcome === "refused",
+        );
+        await session.answer(relayed!, "approve", ALICE);
+        await session.until("done", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(tokens).toEqual(["token:alice"]);
+    const [relayed] = ofType(events, "interaction.opened");
+    expect(relayed?.data).toMatchObject({
+      audience: { principalIds: ["alice"] },
+      origin: { call: { callId: "call_child_inbox", name: "read_inbox" } },
+      request: { kind: "approval" },
+      subject: { callId: "call_agent" },
+    });
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
   // #5726: Slack sends its responder as `state` with every button answer. That field stays
   // with the parent, and the child still has to admit the answer forwarded to it.
   it("runs the child's call when its relayed approval's answer also carries channel state", async () => {

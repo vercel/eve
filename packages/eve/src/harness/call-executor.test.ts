@@ -4,9 +4,10 @@ import { expect, it, vi } from "vitest";
 import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SenderAuthKey, SessionKey } from "#context/keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 
 it.each([
   [undefined, "run"],
@@ -288,3 +289,85 @@ it("closes a streaming tool when progress publication fails", async () => {
   expect(result.parts[0]?.output).toMatchObject({ type: "error-text" });
   expect(closed).toBe(true);
 });
+
+it.each([
+  [true, "stops and asks the caller"],
+  [false, "fails with the refusal"],
+] as const)(
+  "a call refused the caller's token after someone else spoke, where the session can ask: %s, %s",
+  async (canAsk, _outcome) => {
+    const alice = {
+      attributes: { team: "T01" },
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, alice);
+    ctx.set(SenderAuthKey, { ...alice, principalId: "bob" });
+    ctx.set(SessionKey, {
+      auth: { current: alice, initiator: alice, sender: { ...alice, principalId: "bob" } },
+      sessionId: "session-1",
+      turn: { id: "turn_0", sequence: 0 },
+    });
+    const events: import("#protocol/session-event.js").SessionEvent[] = [];
+    const results = await contextStorage.run(ctx, () =>
+      executeInlineCalls({
+        abortSignal: undefined,
+        approvalMemory: { pending: [], remembered: {} },
+        beforeExecute: () => {},
+        canAsk,
+        excludedCallIds: new Set(),
+        messages: [],
+        publish: async (publication) => {
+          events.push(...eventsOf(publication));
+        },
+        toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "read_inbox", type: "tool-call" }],
+        tools: new Map([
+          [
+            "read_inbox",
+            {
+              name: "read_inbox",
+              description: "Read the caller's inbox.",
+              inputSchema: jsonSchema({ type: "object" }),
+              // What a user-scoped token resolves through before it reaches the provider.
+              execute: () =>
+                resolveConnectionPrincipal("mail", {
+                  getToken: async () => ({ token: "token" }),
+                  principalType: "user",
+                }),
+            },
+          ],
+        ]),
+      }),
+    );
+
+    if (canAsk) {
+      expect(results.parts).toEqual([]);
+      expect(results.approvals).toMatchObject([
+        {
+          call: { callId: "call-1", toolName: "read_inbox" },
+          identity: {
+            person: { authenticator: "test", principalId: "alice", principalType: "user" },
+          },
+          request: {
+            kind: "approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "deny", label: "Cancel" },
+            ],
+          },
+        },
+      ]);
+      expect(results.approvals[0]?.identity?.person).not.toHaveProperty("attributes");
+      expect(events.map((event) => event.type)).toEqual(["call.started"]);
+    } else {
+      expect(results.approvals).toEqual([]);
+      expect(results.parts[0]?.output).toEqual({
+        type: "error-text",
+        value: expect.stringContaining("can't use their mail access until they confirm it"),
+      });
+      expect(events.map((event) => event.type)).toEqual(["call.started", "call.settled"]);
+    }
+  },
+);

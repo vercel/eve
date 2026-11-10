@@ -9,7 +9,7 @@ import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-a
 import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState } from "#harness/session-machine/state.js";
-import type { Step } from "#harness/step/context.js";
+import { canAskPerson, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
@@ -141,7 +141,7 @@ export async function enforceBudget(
   messages: readonly ModelMessage[],
 ): Promise<StepResult | undefined> {
   const limit = checkSessionUsageLimit({
-    canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
+    canAsk: canAskPerson(step),
     limit: step.config.sessionUsageLimit ?? DEFAULT_SESSION_USAGE_LIMIT,
     session: step.session,
     turnSequence: step.position().sequence,
@@ -183,6 +183,8 @@ function responsePolicyRequestIds(
 ): readonly string[] {
   return requests
     .filter((ask) => {
+      // Only the person whose identity a call needs approves eve's request for it.
+      if (ask.identity !== undefined) return false;
       const approval = tools.get(ask.call.toolName)?.approval;
       return (
         approval !== undefined && typeof approval !== "function" && approval.response !== undefined

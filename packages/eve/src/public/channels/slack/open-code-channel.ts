@@ -1,4 +1,4 @@
-import { callerSpokeLast } from "#context/session-auth.js";
+import { callerIdentityAvailable } from "#runtime/connections/caller-confirmation.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { SlackChannel, SlackOpenCodeChannelOptions } from "./slackChannel.js";
@@ -45,7 +45,7 @@ export async function openCodeChannel(
   }
   // The code channel's session starts as the caller, who counts as the last to speak there:
   // opening it for someone else's message would hand their requests the caller's identity.
-  if (!callerSpokeLast(ctx.session.auth)) {
+  if (!callerIdentityAvailable(ctx.session.auth)) {
     return unavailable(
       "Someone else has spoken since the person whose message started this turn, so a code channel can't be opened as them until they confirm it. Ask the person whose message started this turn to clearly confirm opening it. Retry only after a reply from them that plainly confirms it.",
     );

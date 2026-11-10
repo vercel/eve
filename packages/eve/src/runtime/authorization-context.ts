@@ -1,4 +1,9 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import { contextStorage } from "#context/container.js";
+import { AuthKey } from "#context/keys.js";
+import { personAuth, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { sessionParticipants } from "#harness/sender-line.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/definition.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
@@ -17,10 +22,21 @@ export function createAuthorizationContext(input: {
   const inlineAuthState: InlineAuthState = {};
   const resolve = (provider: ToolAuthProvider, options?: ToolAuthOptions) =>
     buildInlineScopedAuthorization({ ...input, inlineAuthState, provider, options });
+  // The person `options.as` names acts through the bound-responder path, guarded as they are.
+  const resolveFor = (provider: ToolAuthProvider, options?: ToolAuthOptions) => {
+    const scoped = resolve(provider, options);
+    if (options?.as === undefined) return scoped;
+    if (input.boundResponder !== undefined)
+      throw new Error(`"as" names a person for a tool's own ctx.getToken, not for an approver.`);
+    const person = namedPerson(options.as, scoped.scope);
+    return person === undefined
+      ? scoped
+      : { ...scoped, boundResponder: personAuth(person), named: true as const };
+  };
   return {
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
-      return await execution.getToken(resolve(provider, options));
+      return await execution.getToken(resolveFor(provider, options));
     },
     /**
      * The given responder's stored token, resolved through this execution's
@@ -38,10 +54,45 @@ export function createAuthorizationContext(input: {
     },
     requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
       if (provider === undefined) throw missingProviderError("ctx.requireAuth");
-      return execution.requireAuth(resolve(provider, options));
+      return execution.requireAuth(resolveFor(provider, options));
     },
     run: execution.run,
   };
+}
+
+/**
+ * The person `as` names among those who have spoken in the session, or `undefined` for the
+ * caller, whose identity a call uses without `as`.
+ */
+function namedPerson(as: string, scope: string): SessionPerson | undefined {
+  const ctx = contextStorage.getStore();
+  const caller = ctx?.get(AuthKey) ?? null;
+  if (caller !== null && caller.principalType !== "anonymous" && caller.principalId === as)
+    return undefined;
+  const participants = sessionParticipants(ctx);
+  if (participants === undefined) {
+    throw new ConnectionAuthorizationFailedError(scope, {
+      message: `ctx.getToken can't name "${as}" with "as" here: eve looks a person up among the people who have spoken in the session, and this tool runs outside the session's turn. Omit "as" to use the caller's identity.`,
+      reason: "person_not_found",
+      retryable: false,
+    });
+  }
+  const matches = participants.filter((person) => person.principalId === as);
+  if (matches.length === 0) {
+    throw new ConnectionAuthorizationFailedError(scope, {
+      message: `No one with the principalId "${as}" has spoken in this session, so this action can't act as them. Set "as" to the principalId of a person named in a sender line, or omit it to act as the person whose message started this turn.`,
+      reason: "person_not_found",
+      retryable: false,
+    });
+  }
+  if (new Set(matches.map((person) => principalOf(personAuth(person)))).size > 1) {
+    throw new ConnectionAuthorizationFailedError(scope, {
+      message: `More than one person who has spoken in this session has the principalId "${as}", signed in different ways, so eve can't tell which one this action should act as. Omit "as" to act as the person whose message started this turn.`,
+      reason: "person_ambiguous",
+      retryable: false,
+    });
+  }
+  return matches[0];
 }
 
 function buildInlineScopedAuthorization(input: {

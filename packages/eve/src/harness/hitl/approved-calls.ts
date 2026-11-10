@@ -21,7 +21,7 @@ import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { settleCall } from "#harness/session-machine/calls.js";
 import { commitOf } from "#harness/session-machine/commit.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import type { ApprovedCall } from "#harness/session-machine/state.js";
+import type { ApprovalAsk, ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -120,9 +120,13 @@ export async function runApprovedCalls(input: {
   readonly view: () => Pick<SessionView, "projection">;
   /** The batch's sign-in reports, shared by every group of calls resumed together. */
   readonly signIns?: SignInReports;
+  /** The session can ask a person, so a call refused for someone's identity asks them. */
+  readonly canAsk?: boolean;
 }): Promise<{
   readonly settled: readonly CallResult[];
   readonly signIns: readonly ToolSignIn[];
+  /** What eve asks the people whose identity calls stopped for. */
+  readonly identities: readonly ApprovalAsk[];
 }> {
   const reportSignIns = (input.signIns ?? signInReports(input)).report;
   const executed = await Promise.allSettled(
@@ -147,6 +151,7 @@ export async function runApprovedCalls(input: {
             definition,
             ...(responder !== undefined && { responder }),
             ...(callerApproved && { callerApproved }),
+            ...(approval.confirmedBy !== undefined && { confirmedBy: approval.confirmedBy }),
             beforeResult: (failure) => reportSignIns(approval, failure),
           },
           "recheck",
@@ -170,5 +175,6 @@ export async function runApprovedCalls(input: {
   return {
     settled: completed.flatMap((call) => call.settled),
     signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
+    identities: completed.flatMap((call) => (call.identity === undefined ? [] : [call.identity])),
   };
 }

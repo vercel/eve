@@ -850,10 +850,12 @@ export function awaitSignIns(
     const earlier = step.approved?.find((approved) => approved.call.callId === call.callId);
     const interactionId = approval?.interactionId ?? earlier?.interactionId;
     const responder = approval?.responder ?? earlier?.responder;
+    const confirmedBy = approval?.confirmedBy ?? earlier?.confirmedBy;
     return {
       call,
       ...(interactionId !== undefined && { interactionId }),
       ...(responder !== undefined && { responder }),
+      ...(confirmedBy !== undefined && { confirmedBy }),
       signIns: [
         ...(earlier?.signIns ?? []),
         ...input.challenges.filter((challenge) => connections.includes(challenge.name)),

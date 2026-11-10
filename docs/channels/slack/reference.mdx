@@ -765,7 +765,7 @@ export default defineTool({
 
 - Slack links the new channel in the original thread and invites the person who asked. A private conversation opens a private code channel.
 - Omit `name` to let Slack name the channel from the message.
-- Outside Slack or inside a code channel, `openCodeChannel()` returns `{ status: "unavailable", reason }` and the model continues in the thread. It also returns `unavailable` after someone other than the turn's caller spoke last, because the code channel opens as the caller.
+- Outside Slack or inside a code channel, `openCodeChannel()` returns `{ status: "unavailable", reason }` and the model continues in the thread. It also returns `unavailable` after someone other than the turn's caller spoke last, because the code channel opens as the caller, unless the agent sets `callerConfirmation: "never"`.
 - When Slack refuses, such as for a Slack Connect conversation, disabled code channels, or a missing scope, it throws Slack's error for the model to relay.
 - Like every [`ctx.to()`](/docs/tools#start-channel-sessions-ctxto), it works only in a tool on the root agent.
 

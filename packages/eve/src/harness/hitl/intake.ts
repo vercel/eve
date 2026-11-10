@@ -1,5 +1,5 @@
 import { approvedClearance, taskClearance, type Clearance } from "#harness/clearance.js";
-import { principalOf } from "#context/session-auth.js";
+import { personAuth, principalOf } from "#context/session-auth.js";
 import { sessionCaller, withAskedSender } from "#runtime/connections/caller-confirmation.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
@@ -15,7 +15,7 @@ import {
 } from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
-import type { Step } from "#harness/step/context.js";
+import { canAskPerson, type Step } from "#harness/step/context.js";
 import { blocked, park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
@@ -24,6 +24,7 @@ import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
+  askForIdentity,
   dispatch,
   approvalMemory,
   openLimit,
@@ -317,7 +318,7 @@ async function runApproved(
   step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
   const groups = await Promise.allSettled(
     local.map(async ({ approvals, sender, tools }) => {
-      if (approvals.length === 0) return { settled: [], signIns: [] };
+      if (approvals.length === 0) return { identities: [], settled: [], signIns: [] };
       const view = step.view().projection.view;
       const call = view.calls[approvals[0]!.call.callId];
       const runId = call === undefined ? undefined : callRun(view, call);
@@ -342,6 +343,7 @@ async function runApproved(
           publish: step.publish,
           responderOf: (approval) => approval.responder,
           callerApprovedOf: (approval) => callerApproved.has(approval.call.callId),
+          canAsk: canAskPerson(step),
           telemetry: attempt?.telemetry,
           signIns,
           tools,
@@ -358,10 +360,17 @@ async function runApproved(
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
+  const identities = executed.flatMap((run) => run.identities);
+  if (identities.length > 0) await step.apply(askForIdentity(step.view(), { asks: identities }));
   const signIn = resolveInlineAuthorizationInterrupt({
     signIns: executed.flatMap((run) => run.signIns),
   });
-  if (signIn === undefined) return undefined;
+  if (signIn === undefined) {
+    // A call that waits as a task waits for its person without holding the turn.
+    return identities.length > 0 && blocked(step.view(), step.session.state)
+      ? park(step)
+      : undefined;
+  }
   // A stopped call keeps the approval it ran on, so it runs on it again after the sign-in.
   const byCallId = new Map(calls.map((approval) => [approval.call.callId, approval]));
   await applyEndingSignIns(
@@ -426,6 +435,9 @@ function hasTurnInput(input: HarnessStepInput | undefined): boolean {
  * who passed the caller's confirmation before the sign-in opened.
  */
 function approvedByCaller(approval: ApprovedCall): boolean {
+  // eve asked a person for their identity: the call has the caller's when the caller approved.
+  if (approval.confirmedBy !== undefined)
+    return principalOf(personAuth(approval.confirmedBy)) === principalOf(sessionCaller());
   if (approval.interactionId === undefined) return false;
   // With no response policy, no responder is named: the requester, who is the caller, answered.
   return (

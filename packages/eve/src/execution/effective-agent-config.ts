@@ -8,6 +8,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type {
   AgentLimitsDefinition,
   AgentReasoningDefinition,
+  CallerConfirmation,
   SessionUsageLimit,
 } from "#shared/agent-definition.js";
 
@@ -58,6 +59,19 @@ export function resolveSessionUsageLimit(
     bundle.resolvedAgent.config?.limits?.sessionUsage ??
     bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage;
   return limit === false ? () => false : limit;
+}
+
+/**
+ * The session's `callerConfirmation`: the root agent's, including in local subagent sessions,
+ * where a subagent can't set its own.
+ */
+export function resolveCallerConfirmation(
+  bundle: Pick<CompiledBundle, "graph"> | undefined,
+): CallerConfirmation {
+  return (
+    bundle?.graph.nodesByNodeId?.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config
+      ?.callerConfirmation ?? "always"
+  );
 }
 
 /**

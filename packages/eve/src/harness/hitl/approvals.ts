@@ -284,7 +284,11 @@ export function settleApprovals(
   const decide = (request: ApprovalAsk, outcome: InteractionOutcome) => {
     const answer = standing.get(request.interactionId);
     if (answer !== undefined) responses.settle(answer.responseId, "applied");
-    if (answer !== undefined && (outcome === "accepted" || outcome === "declined"))
+    // A request for someone's identity remembers only an approval: a cancel asks nothing of later
+    // calls.
+    const remembers =
+      outcome === "accepted" || (outcome === "declined" && request.identity === undefined);
+    if (answer !== undefined && remembers)
       decisions.push({ at: answer.introducedAt, outcome, request });
     responses.closeOthers(request.interactionId, answer?.responseId);
     events.push(
@@ -312,12 +316,15 @@ export function settleApprovals(
       const { callId, toolName } = request.call;
       const { approved: approves, reason, status } = resolveApprovalOutcome(answer);
       if (approves) {
-        const responder = view.responders[standing.get(request.interactionId)?.responseId ?? ""];
+        const responder =
+          view.responders[standing.get(request.interactionId)?.responseId ?? ""]?.responder ??
+          request.identity?.responder;
         approved.push({
           approval: {
             call: request.call,
             interactionId: request.interactionId,
-            ...(responder !== undefined && { responder: responder.responder }),
+            ...(responder !== undefined && { responder }),
+            ...(request.identity !== undefined && { confirmedBy: request.identity.person }),
           },
           step,
         });
@@ -325,6 +332,21 @@ export function settleApprovals(
         continue;
       }
       decide(request, status === "invalid" ? "invalid" : "declined");
+      if (request.identity !== undefined) {
+        // The call already started, so it fails where it needed the person's identity.
+        const failed = failedCall({
+          callId,
+          message: identityCancelledMessage(request.identity.person.principalId),
+          toolName,
+        });
+        messages = withResult(messages, failed.part);
+        const settled = callSettledFrom(failed.result);
+        events.push({
+          ...settled,
+          data: { ...settled.data, cause: { interactionId: request.interactionId } },
+        });
+        continue;
+      }
       messages = withResult(messages, {
         output: { reason, type: "execution-denied" },
         toolCallId: callId,
@@ -368,6 +390,38 @@ export function settleApprovals(
     approved,
     events: [...responses.facts(), ...events],
     turn: { ...view.turn, remembered, suspended },
+  });
+}
+
+/** What the model reads for a call whose request for `person`'s identity was cancelled. */
+function identityCancelledMessage(person: string): string {
+  return (
+    `The request for ${person} to let this call use their identity was cancelled, so the call ` +
+    `stopped where it needed it. Anything it did before then already happened. Make the call ` +
+    `again only if ${person} asks for it.`
+  );
+}
+
+/**
+ * Calls that ran on an approval and stopped again for someone's identity: each waits in its step
+ * on eve's request for it, asked now.
+ */
+export function askForIdentity(
+  view: SessionView,
+  input: { readonly asks: readonly ApprovalAsk[] },
+): Transition {
+  const asks = new Map(input.asks.map((ask) => [ask.call.callId, ask]));
+  const suspended = view.turn.suspended.map((step) => {
+    const ids = [...stepCallIds(step)].filter((callId) => asks.has(callId));
+    if (ids.length === 0) return step;
+    return {
+      ...withoutApproved(step, new Set(ids)),
+      requests: [...step.requests, ...ids.map((callId) => asks.get(callId)!)],
+    };
+  });
+  return transition({
+    events: input.asks.map((ask) => approvalOpened(ask)),
+    turn: { ...view.turn, suspended },
   });
 }
 

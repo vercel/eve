@@ -3,6 +3,7 @@ import type { RememberedApproval, RememberRequest } from "#approval/evaluation.j
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionPerson } from "#context/session-auth.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
@@ -33,6 +34,18 @@ export interface ApprovalAsk {
     readonly version?: string;
   };
   readonly request: InteractionRequest;
+  /** Set when the request asks a person to let the call use their identity. */
+  readonly identity?: IdentityAsk;
+}
+
+/**
+ * A call that stopped because it needs a person's identity: only that person can approve it, and
+ * approving runs the call again, from the top, with their identity.
+ */
+export interface IdentityAsk {
+  readonly person: SessionPerson;
+  /** Who approved the call's own approval; the call still reads them as `ctx.approval`. */
+  readonly responder?: SessionAuthContext;
 }
 
 /**
@@ -50,6 +63,8 @@ export interface ApprovedCall {
    * runs, after the answer, and the responder's record with it, has settled.
    */
   readonly responder?: SessionAuthContext;
+  /** The person who let the call use their identity, by approving eve's request for it. */
+  readonly confirmedBy?: SessionPerson;
 }
 
 /**
