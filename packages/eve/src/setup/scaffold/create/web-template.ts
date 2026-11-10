@@ -130,7 +130,7 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     clsx: "2.1.1",
     "lucide-react": "1.16.0",
     nanoid: "5.1.11",
-    next: "16.3.6",
+    next: "16.4.1",
     "radix-ui": "1.4.3",
     react: "19.2.6",
     "react-dom": "19.2.6",
@@ -140,7 +140,7 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     tailwindcss: "4.3.0",
     "tw-animate-css": "1.4.0",
     "use-stick-to-bottom": "1.1.4",
-    zod: "4.5.4",
+    zod: "4.6.7",
   },
   devDependencies: {
     "@types/node": "26",
