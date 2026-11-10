@@ -27,6 +27,8 @@ Every dynamic function receives:
 | `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
 | `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
 
+Before a model call, `ctx.messages()` includes the task results and `[Tasks]` note that call will receive. A dynamic model can react to a background task's result in the same step, without waiting for another call.
+
 Code outside a memo runs every time eve runs the function. Put a fetch or decision inside a memo when its answer should stay fixed for a key:
 
 ```ts title="agent/tools/query.ts"

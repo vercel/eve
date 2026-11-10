@@ -267,11 +267,17 @@ describe("what eve sends the model", () => {
     );
   });
 
-  it("reports a background task's listing and result", async () => {
+  it("reports a background task's listing and result to the dynamic model and its call", async () => {
+    let dynamicMessages = "";
     const { calls, model } = recordingModel((options) => {
       const all = JSON.stringify(options.prompt.filter((message) => message.role !== "system"));
       if (!all.includes("Did QA pass?")) return textStreamResult("QA passed.");
-      if (all.includes("<task_result id=")) return textStreamResult("QA passed, so we can ship.");
+      if (all.includes("<task_result id=")) {
+        expect(dynamicMessages).toContain("<task_result id=");
+        expect(dynamicMessages).toContain("QA passed.");
+        return textStreamResult("QA passed, so we can ship.");
+      }
+      if (all.includes("[Tasks]")) expect(dynamicMessages).toContain("[Tasks]");
       if (options.prompt.some((message) => message.role === "tool"))
         return textStreamResult("QA is still being checked.");
       return toolCallStreamResult({
@@ -281,7 +287,17 @@ describe("what eve sends the model", () => {
       });
     });
     const test = await createTestRuntime({
-      agent: { definition: dynamicModel(model), name: "layout-tasks" },
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(async (ctx) => {
+            if (ctx.session.parent === undefined) {
+              dynamicMessages = JSON.stringify(await ctx.messages());
+            }
+            return { model, modelContextWindowTokens: 200_000 };
+          }),
+        } as never),
+        name: "layout-tasks",
+      },
       modules: [
         mod(
           "instructions/agent.ts",
