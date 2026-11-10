@@ -7,6 +7,7 @@ import type { ApplicationBuildWorkspace } from "#internal/application/build-work
 import { join } from "node:path";
 import {
   type BuiltInWorkflowWorldTarget,
+  writeCompiledArtifactsData,
   writeCompiledArtifactsFiles,
   writeDevelopmentCompiledArtifactsFiles,
 } from "#internal/application/compiled-artifacts.js";
@@ -145,11 +146,7 @@ export async function refreshProductionCompiledArtifacts(
   host: PreparedApplicationHost,
   outDir: string,
 ): Promise<void> {
-  await writeCompiledArtifactsFiles({
-    compileResult: host.compileResult,
-    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
-    outDir,
-  });
+  await writeCompiledArtifactsData({ compileResult: host.compileResult, outDir });
 }
 
 function createPreparedApplicationHost(input: {

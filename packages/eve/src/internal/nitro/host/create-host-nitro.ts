@@ -174,6 +174,12 @@ function toNitroConfig(
       onLog: onVendoredDependencyLog,
       // Keep dependency filtering out of Rolldown's JS callback bridge.
       output: { sourcemapIgnoreList: /node_modules/ },
+      // ESM output has no CommonJS path globals. Rolldown replaces only free
+      // references, so no chunk code crosses into JS and a module's own
+      // declaration is left alone.
+      transform: {
+        define: { __dirname: "import.meta.dirname", __filename: "import.meta.filename" },
+      },
       tsconfig: spec.authored.tsconfig,
       // Region comments contain invocation-random scratch paths, not runtime inputs.
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),

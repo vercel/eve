@@ -260,7 +260,7 @@ export async function bundleExtensionDistributionGraph(input: {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
     ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
-    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createNodeEsmCompatBannerPlugin(),
     createDistributionPackageBoundaryPlugin({
       packageRoot: input.packageRoot,
       runtimeDependencies: input.runtimeDependencies,

@@ -1,9 +1,19 @@
+import { realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Plugin } from "rolldown";
 
 import { type ParseError, parse as parseJsonc } from "#compiled/jsonc-parser/index.js";
+import { resolvePackageRoot } from "#internal/application/package.js";
 import { isNodeModulesPath } from "#internal/authored-package-boundary.js";
+import {
+  exclude,
+  type FilterExpression,
+  id,
+  importerId,
+  include,
+  packageModulesRegex,
+} from "#internal/bundler/filters.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type PackageTsConfigPaths = {
@@ -36,21 +46,34 @@ export function createAuthoredPackageTsConfigPathsPlugin(input: {
   extensions: readonly string[];
   /** With `authoredSourceOnly`, installed importers to handle anyway. */
   handlesInstalledModule?: (path: string) => boolean;
+  /** With `authoredSourceOnly`, a hook filter that admits every importer the handler accepts. */
+  importerFilter?: FilterExpression;
 }): Plugin {
   const probeStat = createCachedStatProbe();
+  // An installed eve is under `node_modules`, which the importer filter already rejects. A
+  // workspace-linked eve bundles its `src/*.ts` through the `eve-source` condition, and those
+  // imports have nothing to resolve here because eve's own tsconfig has no `paths`.
+  const eveModule =
+    input.authoredSourceOnly === true
+      ? packageModulesRegex(realpathSync.native(resolvePackageRoot()))
+      : undefined;
 
   return {
     name: "eve-package-tsconfig-paths",
     resolveId: {
-      filter: {
-        id: {
-          exclude: NON_PACKAGE_IMPORT_FILTER,
-        },
-      },
+      filter:
+        eveModule === undefined
+          ? { id: { exclude: NON_PACKAGE_IMPORT_FILTER } }
+          : [
+              exclude(id(NON_PACKAGE_IMPORT_FILTER)),
+              exclude(importerId(eveModule)),
+              ...(input.importerFilter === undefined ? [] : [include(input.importerFilter)]),
+            ],
       async handler(source, importer, options) {
         if (
           importer === undefined ||
           !isPackageImport(source) ||
+          eveModule?.test(importer) === true ||
           (input.authoredSourceOnly === true &&
             isNodeModulesPath(importer) &&
             input.handlesInstalledModule?.(importer) !== true)

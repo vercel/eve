@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import { createModulePathMatcher } from "#internal/nitro/host/host-plugins.js";
 
 describe("createModulePathMatcher", () => {
@@ -55,6 +56,69 @@ describe("createModulePathMatcher", () => {
       expect(id, target).not.toBeNull();
       expect(idFilter.test(id!), `${target} resolved to ${id}`).toBe(true);
       expect(idFilter.test(`${id!.toUpperCase()}?v=1`), target).toBe(true);
+    }
+  });
+
+  it("admits every specifier it matches and no path whose last segment names no target", () => {
+    const matchers = {
+      linux: createModulePathMatcher(
+        "/app",
+        [
+          "/app/.eve/workflow/steps.mjs",
+          "/app/.eve-runtime.mjs",
+          "/app/agent/lib",
+          resolveWorkflowModulePath("workflow/errors"),
+        ],
+        "linux",
+      ),
+      win32: createModulePathMatcher(
+        "C:\\app",
+        ["C:\\app\\.eve\\workflow\\steps.mjs", "C:\\app\\agent\\lib"],
+        "win32",
+      ),
+    };
+    const handler = "/app/.eve/workflow/workflows-handler.mjs";
+    const winHandler = "C:\\app\\.eve\\workflow\\workflows-handler.mjs";
+    // Rolldown filters see `/` separators; handlers see the specifier as written.
+    const admitted = (platform: keyof typeof matchers, specifier: string) =>
+      [specifier, specifier.replaceAll("\\", "/")].map((id) =>
+        matchers[platform].specifierFilter.some((pattern) => pattern.test(id)),
+      );
+
+    const matched: [keyof typeof matchers, string, string?][] = [
+      ["linux", "./steps.mjs", handler],
+      ["linux", "/app/.eve/workflow/steps.mjs"],
+      ["linux", "./steps.mjs?v=1", handler],
+      ["linux", "./steps.mjs#hash", handler],
+      ["linux", "../../.eve/workflow/steps.mjs", handler],
+      ["linux", "./workflow\\steps.mjs", "/app/.eve/index.mjs"],
+      ["linux", ".eve-runtime.mjs", "/app/agent.ts"],
+      ["linux", "..", "/app/agent/lib/tools/add.ts"],
+      ["linux", ".", "/app/agent/lib/add.ts"],
+      ["linux", "./lib/", "/app/agent/index.ts"],
+      ["linux", "file:///app/.eve/workflow/st%65ps.mjs"],
+      ["linux", "workflow/errors"],
+      ["win32", ".\\steps.mjs", winHandler],
+      ["win32", "..\\workflow\\steps.mjs?v=1", winHandler],
+      ["win32", "c:/APP/.eve/Workflow/STEPS.MJS"],
+      ["win32", "\\app\\.eve\\workflow\\steps.mjs"],
+      ["win32", "..", "C:\\app\\agent\\lib\\tools\\add.ts"],
+      ["win32", "file:///C:/app/.eve/workflow/st%65ps.mjs?v=1"],
+    ];
+    for (const [platform, specifier, importer] of matched) {
+      expect(matchers[platform].match(specifier, importer), specifier).not.toBeNull();
+      expect(admitted(platform, specifier), specifier).toEqual([true, true]);
+    }
+
+    const unmatched: [keyof typeof matchers, string, string?][] = [
+      ["linux", "./other.mjs", handler],
+      ["linux", "./steps.mjs/other.mjs", handler],
+      ["linux", "/app/.eve/workflow/steps.mjs.map"],
+      ["win32", "C:\\app\\.eve\\workflow\\other.mjs"],
+    ];
+    for (const [platform, specifier, importer] of unmatched) {
+      expect(matchers[platform].match(specifier, importer), specifier).toBeNull();
+      expect(admitted(platform, specifier), specifier).toEqual([false, false]);
     }
   });
 });
