@@ -127,14 +127,17 @@ const CALLER_TOKEN: ToolAuthProvider = {
   }),
 };
 
-/** A tool that returns the caller's token. */
+/** A tool that returns the caller's token and who it reads as the last to speak. */
 function tokenTool(name: string, approval?: Approval) {
   return {
     loadNamespace: async () => ({
       default: defineTool({
         approval,
         description: `Run ${name} with the caller's token.`,
-        execute: async (_input, ctx) => (await ctx.getToken(CALLER_TOKEN)).token,
+        execute: async (_input, ctx) => {
+          const { token } = await ctx.getToken(CALLER_TOKEN);
+          return `${token}, sender ${ctx.session.auth.sender?.principalId}`;
+        },
         inputSchema: {},
       }),
     }),
@@ -401,7 +404,12 @@ describe("approval caller", () => {
   );
 
   it.each([
-    ["hands the caller's token to a call the caller approved", ALICE, always(), "token:alice"],
+    [
+      "hands the caller's token to a call the caller approved, which reads the caller as its sender",
+      ALICE,
+      always(),
+      "token:alice, sender alice",
+    ],
     [
       "withholds it from a call someone else approved",
       BOB,

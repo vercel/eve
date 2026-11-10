@@ -81,19 +81,21 @@ Several people can share one session, such as a Slack thread or a GitHub issue. 
 
 Anyone the channel lets into the session can steer the running turn. Their message changes what the model reads, never whose identity the turn uses. `ctx.session.auth.sender` names who spoke last. When the speaker changes, eve adds a line before the message that names its sender and the previous sender by `principalId`. While the turn waits on an approval, sign-in, or question, other people's messages wait for it to end.
 
-eve hands the caller's identity to a call only while the caller is the last person to have spoken. After someone else's message joins the turn, these calls fail with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`:
+eve hands the caller's identity to a call only while the caller is the last person to have spoken. After someone else's message joins the turn, these calls fail, and eve doesn't retry them:
 
-| Call                                                                                           | Identity it uses      |
-| ---------------------------------------------------------------------------------------------- | --------------------- |
-| A tool of a `principalType: "user"` connection, or `ctx.getToken()` for a user-scoped provider | The caller's token    |
-| A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded |
-| A remote agent that forwards the caller                                                        | The caller, forwarded |
+| Call                                                                                           | Identity it uses      | How it fails                                                                |
+| ---------------------------------------------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------- |
+| A tool of a `principalType: "user"` connection, or `ctx.getToken()` for a user-scoped provider | The caller's token    | `ConnectionAuthorizationFailedError` with `reason: "confirmation_required"` |
+| A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded | `ConnectionAuthorizationFailedError` with `reason: "confirmation_required"` |
+| A remote agent that forwards the caller                                                        | The caller, forwarded | A terminal error that isn't a `ConnectionAuthorizationFailedError`          |
 
-The failed call's message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. eve releases the caller's identity on any later message from the caller, so this relies on the model's judgment.
+Each failed call's message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. eve releases the caller's identity on any later message from the caller, so this relies on the model's judgment.
 
 A call the caller approves runs with their identity, whoever spoke last. The approval covers only that call. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
 
 A session with one person never reaches any of this. Tools that use no credentials aren't covered: a tool that decides from the caller's role must check `auth.sender` as well as `auth.current`.
+
+eve's own role checks cover both people. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` returns `unavailable` until the caller speaks again.
 
 Another person can still answer a pending request with a button or structured answer. They are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 

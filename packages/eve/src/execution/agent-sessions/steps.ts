@@ -666,6 +666,8 @@ function requireCallerConfirmationToForward(
   auth: SessionAuth,
 ): void {
   if (remote.forwardPrincipal !== true || callerSpokeLast(auth)) return;
-  // Retrying can't change who spoke last; the model asks the caller instead.
+  // Terminal, where a connection's refusal is a `ConnectionAuthorizationFailedError`: a step
+  // retries any other error, and retrying can't change who spoke last. The message reaches the
+  // model as the call's error, so it asks the caller instead.
   throw new FatalError(callerConfirmationMessage(`identity with the "${remote.name}" agent`));
 }

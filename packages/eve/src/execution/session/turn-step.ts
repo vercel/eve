@@ -61,6 +61,8 @@ import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
+import { attachInputText } from "#internal/input-text.js";
+import { principalOf } from "#context/session-auth.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
 import { continueTurnAuth, recordSender } from "#execution/session/principal.js";
 import type {
@@ -414,6 +416,23 @@ async function runSessionStepBody(
       resolved = answers;
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
+    // Someone other than the running turn's caller sent this delivery. Their answers are
+    // theirs, whatever the turn's identity is. Only the caller's text answers a request by
+    // text, so theirs is a message; and without a message they only answer: the context and
+    // history they sent never reach the model unattributed.
+    if (
+      resolved !== undefined &&
+      delivery?.auth !== undefined &&
+      !startedBetweenTurns &&
+      principalOf(delivery.auth) !== principalOf(previousAuth)
+    ) {
+      const responder = delivery.auth;
+      const answers = resolved.answers?.map((answer) => ({ ...answer, responder }));
+      resolved =
+        resolved.message === undefined
+          ? answersOnly({ ...resolved, answers })
+          : attachInputText({ ...resolved, answers }, "");
+    }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
     // The adapter saw the incoming caller. A responder's answers, an ignored
@@ -424,8 +443,15 @@ async function runSessionStepBody(
     // step sees one sender: a new turn starts with its caller, and a message joining the turn
     // makes its sender the last to speak, including text the caller types to answer a request.
     // A pressed answer speaks no words: it settles its own request, whoever gave it. A session's
-    // first turn keeps the sender its run started with, such as a delegating parent's.
-    if (startedBetweenTurns && initialEmissionState.sessionStarted) ctx.delete(SenderAuthKey);
+    // first turn keeps the sender its run started with, such as a delegating parent's, and a
+    // turn that a delivery without auth starts, such as a hook's continuation, keeps the last one.
+    if (
+      startedBetweenTurns &&
+      initialEmissionState.sessionStarted &&
+      delivery?.auth !== undefined
+    ) {
+      ctx.delete(SenderAuthKey);
+    }
     if (answers !== undefined || ignoredActiveDelivery) {
       turnAuth = previousAuth;
     } else if (delivery !== undefined && !startedBetweenTurns) {
@@ -806,4 +832,14 @@ function ownSignInAnswer(
   const error = callback.params["error"];
   if (signIn === undefined || (error !== undefined && error !== SIGN_IN_DECLINED)) return undefined;
   return { interactionId, outcome: error === undefined ? "accepted" : "declined", signIn };
+}
+
+/** A delivery's answers alone, without the message, context, or history sent with them. */
+function answersOnly(input: HarnessStepInput): HarnessStepInput {
+  return {
+    ...(input.answers !== undefined && { answers: input.answers }),
+    ...(input.deliveries !== undefined && {
+      deliveries: input.deliveries.map(({ history: _history, ...delivery }) => delivery),
+    }),
+  };
 }

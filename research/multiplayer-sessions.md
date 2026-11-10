@@ -105,7 +105,10 @@ connection or channel definitions, and the approval helpers don't change.
 - Principals are compared by identity, as steering compares them today. Unauthenticated and
   anonymous senders are one person.
 - A delivery without `auth` isn't another person. It acts as the turn's identity and leaves
-  `auth.sender` unchanged, so a channel that admits several people must set `auth`.
+  `auth.sender` unchanged, so a channel that admits several people must set `auth`. A hook's
+  continuation is one: the turn it starts keeps the last sender.
+- Another person's delivery without a message only answers requests. The context and history
+  sent with it don't reach the model.
 
 ### Who is speaking
 
@@ -129,7 +132,8 @@ call. After someone else's message joins the turn, the call needs the caller's a
   `reason: "confirmation_required"`, `retryable: false`. Nothing pauses. The message tells the
   model that someone else has spoken, and to ask the caller to confirm before it retries. The
   caller's next message makes them the last to speak.
-- **Approved.** A call the caller approved runs with their identity, whoever spoke last. The
+- **Approved.** A call the caller approved runs with their identity, whoever spoke last, and
+  reads the caller as `auth.sender`. The
   caller approves a call by answering its approval or by completing its sign-in. An approval
   covers its own call only: it doesn't change `auth.sender`, so the next call is judged on its
   own. Another person's approval, allowed by a `response` policy, doesn't release the caller's
@@ -142,7 +146,9 @@ read while it waited don't change what it gets.
 Listing a connection's tools uses the caller's identity even after someone else spoke: it runs
 nothing the model chose. A local subagent inherits the sender of the call that started it. Rule 3
 doesn't cover app-scoped connections or tools that use no credentials. A tool that decides from
-the caller's role reads `auth.sender` as well as `auth.current`.
+the caller's role reads `auth.sender` as well as `auth.current`. eve's own checks do: `gh` with
+app tokens and deployed self-modification ask `authorize` about both people, and
+`openCodeChannel()` is unavailable until the caller speaks again.
 
 ### Waiting on a person
 

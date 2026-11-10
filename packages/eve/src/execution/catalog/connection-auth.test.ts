@@ -1,7 +1,10 @@
 import { expect, it, vi } from "vitest";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey, SenderAuthKey, type SessionAuthContext } from "#context/keys.js";
 import { listToolMetadata } from "#execution/catalog/connection-auth.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
+import { resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
 
@@ -51,6 +54,34 @@ it.each([
   if (required.remote) vi.mocked(connection.getToolMetadata).mockRejectedValue(error);
   if (required.events) vi.mocked(connection.eventActions!.metadata).mockRejectedValue(error);
   await expect(listToolMetadata(issues, connection)).rejects.toBe(error);
+});
+
+it("lists a user-scoped connection's tools with the caller's credentials after someone else spoke", async () => {
+  const person = (principalId: string): SessionAuthContext => ({
+    attributes: {},
+    authenticator: "slack",
+    principalId,
+    principalType: "user",
+  });
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, person("alice"));
+  ctx.set(SenderAuthKey, person("bob"));
+  const connection = client();
+  // A user-scoped client resolves the caller's credentials each time it reaches its server.
+  vi.mocked(connection.getToolMetadata).mockImplementation(async () => {
+    resolveConnectionPrincipal("issues", {
+      getToken: async () => ({ token: "alice-token" }),
+      principalType: "user",
+    });
+    return [remote];
+  });
+
+  await contextStorage.run(ctx, async () => {
+    await expect(connection.getToolMetadata()).rejects.toMatchObject({
+      reason: "confirmation_required",
+    });
+    expect(await listToolMetadata(issues, connection)).toEqual([remote, management]);
+  });
 });
 
 it("does not let hung event discovery hide responsive MCP tools", async () => {

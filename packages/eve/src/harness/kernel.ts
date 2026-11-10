@@ -4,6 +4,7 @@ import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory } from "#harness/compaction/step.js";
 import { readTaskTable, takeTaskResults, writeTaskTable } from "#execution/tasks/table.js";
 import { runModelStep } from "#harness/model-call/run.js";
+import { forgetSender } from "#harness/sender-line.js";
 import { withUsageSink } from "#harness/usage-sink.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import {
@@ -248,7 +249,7 @@ async function clearContext(step: Step): Promise<StepResult> {
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
   // The clear's transition emptied history; task results it never read go with it.
   const unread = takeTaskResults(readTaskTable(step.session.state)).table;
-  return { next: null, session: writeTaskTable(step.session, unread) };
+  return { next: null, session: forgetSender(writeTaskTable(step.session, unread)) };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

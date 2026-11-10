@@ -52,3 +52,10 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
   if (last?.principal === next.principal) return session;
   return { ...session, state: { ...session.state, [LAST_SENDER_KEY]: next } };
 }
+
+/** Forgets the last sender with the conversation it spoke in, when the context is cleared. */
+export function forgetSender<T extends { readonly state?: SessionStateMap }>(session: T): T {
+  if (session.state?.[LAST_SENDER_KEY] === undefined) return session;
+  const { [LAST_SENDER_KEY]: _last, ...state } = session.state;
+  return { ...session, state };
+}

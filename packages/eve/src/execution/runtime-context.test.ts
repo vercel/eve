@@ -14,6 +14,7 @@ import {
   ScheduleIdKey,
   SessionTitleKey,
 } from "#context/keys.js";
+import { readSessionAuth } from "#context/session-auth.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -200,6 +201,24 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(AuthKey)).toBeNull();
+  });
+
+  it("starts a child session with the delegating turn's sender as the last to speak", () => {
+    const sender: SessionAuthContext = { ...testAuth, principalId: "user-2" };
+    const run = {
+      auth: testAuth,
+      adapter: { kind: "subagent" },
+      input: { message: "Bob asks for a second look at the plan." },
+    };
+
+    const afterSomeoneElseSpoke = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: { ...run, senderAuth: sender },
+    });
+    expect(readSessionAuth(afterSomeoneElseSpoke)).toMatchObject({ current: testAuth, sender });
+
+    const withoutSender = buildRunContext({ bundle: createMinimalBundle(), run });
+    expect(readSessionAuth(withoutSender).sender).toEqual(testAuth);
   });
 
   it("inherits schedule provenance independently from run auth", () => {

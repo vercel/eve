@@ -1024,6 +1024,103 @@ describe("calls in flight", () => {
     expect(answered).toContain("It is from carol. The message before it was from bob.");
   });
 
+  it("reads another person's typed approve as a message, never as the caller's answer", async () => {
+    const { events, ran } = await withSession(
+      "edge-foreign-typed-approve",
+      {
+        message: "Prepare and deploy.",
+        model: scriptedModel(({ results, said }) =>
+          said("Prepare") && results.length === 0
+            ? [
+                { toolName: "prepare", toolCallId: "call_prepare" },
+                { toolName: "deploy", toolCallId: "call_deploy" },
+              ]
+            : "Done.",
+        ),
+        // The approval is asked once the workflow call beside it ends, so the turn waits on
+        // that call, where anyone's message steers.
+        tools: [
+          { name: "prepare", workflow: holdUntilAbortedWorkflow },
+          { approval: true, name: "deploy" },
+        ],
+      },
+      async (session) => {
+        await session.until("started", (event) => event.type === "call.started");
+        await session.send("approve", BOB);
+        await session.until("done", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(ran).not.toContain("deploy");
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "withdrawn",
+    ]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("keeps the last sender through a turn that a hook's continuation starts", async () => {
+    const started = gate();
+    const release = gate();
+    const senders: (string | undefined)[] = [];
+    let continued = false;
+    const { events } = await withSession(
+      "edge-continuation-keeps-sender",
+      {
+        hooks: {
+          keepGoing: defineHook({
+            events: {
+              "turn.settled"(_event, ctx) {
+                if (continued) return;
+                continued = true;
+                ctx.continue("Keep going.");
+              },
+            },
+          }),
+        },
+        message: "Prepare the review.",
+        model: scriptedModel(({ results, said }, raw) => {
+          if (said("Keep going")) return results.length === 0 ? [{ toolName: "who" }] : "Done.";
+          return JSON.stringify(raw).includes("Ready.")
+            ? "Review prepared."
+            : [{ toolName: "prepare_review" }];
+        }),
+        tools: [
+          {
+            name: "prepare_review",
+            execute: async () => {
+              started.open();
+              await release.wait;
+              return "Ready.";
+            },
+          },
+          {
+            name: "who",
+            execute: (_input, ctx) => {
+              senders.push(ctx.session.auth.sender?.principalId);
+              return "Recorded.";
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await started.wait;
+        try {
+          await session.send("Bob's note.", BOB);
+        } finally {
+          release.open();
+        }
+        await session.until(
+          "the continued turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    // The continuation speaks for no one: Bob is still the last person who spoke.
+    expect(senders).toEqual(["bob"]);
+  });
+
   it("steers a model that hasn't started its reply toward the message that arrived", async () => {
     const release = gate();
     const replies: string[] = [];

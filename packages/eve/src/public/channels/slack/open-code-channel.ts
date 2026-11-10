@@ -1,3 +1,4 @@
+import { callerSpokeLast } from "#context/session-auth.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { SlackChannel, SlackOpenCodeChannelOptions } from "./slackChannel.js";
@@ -22,9 +23,10 @@ export type SlackCodeChannelOpenResult =
  * }
  * ```
  *
- * Returns `unavailable` when the conversation isn't a Slack message or is
- * already a code channel. When Slack refuses, it throws with Slack's error. A
- * retried call reaches the same code channel and session once.
+ * Returns `unavailable` when the conversation isn't a Slack message, is
+ * already a code channel, or someone other than the turn's caller spoke last.
+ * When Slack refuses, it throws with Slack's error. A retried call reaches the
+ * same code channel and session once.
  */
 export async function openCodeChannel(
   ctx: Pick<ToolContext, "callId" | "channel" | "messages" | "session" | "to">,
@@ -40,6 +42,13 @@ export async function openCodeChannel(
   if (codeChannel === true) return unavailable("This conversation is already a code channel.");
   if (typeof channelId !== "string" || typeof threadTs !== "string") {
     return unavailable("This conversation is not a Slack message.");
+  }
+  // The code channel's session starts as the caller, who counts as the last to speak there:
+  // opening it for someone else's message would hand their requests the caller's identity.
+  if (!callerSpokeLast(ctx.session.auth)) {
+    return unavailable(
+      "Someone else has spoken since the person whose message started this turn, so a code channel can't be opened as them until they confirm it. Ask the person whose message started this turn to clearly confirm opening it. Retry only after a reply from them that plainly confirms it.",
+    );
   }
 
   const delivery = await ctx

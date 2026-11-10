@@ -150,7 +150,7 @@ export class ActiveTurn {
   }
 
   /**
-   * Steering admitted during this turn, routed to children first and coalesced.
+   * The next person's steering admitted during this turn, routed to children first.
    * The next step reads it as input, so its signal must not interrupt that
    * step; only deliveries still unread re-signal the next generation.
    */
@@ -178,8 +178,9 @@ export class ActiveTurn {
 
   /**
    * Messages still waiting steer the turn now, such as other people's once a
-   * pause ends, so the next step stops before the model runs and the step after
-   * it reads them.
+   * pause ends. Before the turn's first assistant output, the next step stops
+   * before the model runs and the step after it reads them; later, they are read
+   * at the next step boundary.
    */
   steerIfMessagesWaiting(): void {
     if (this.hasSteeringWaiting()) this.steeringController.abort();

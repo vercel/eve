@@ -1,5 +1,6 @@
 import { defineAgent, defineDynamic } from "eve";
 
+import { callerSpokeLast } from "#context/session-auth.js";
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 
 import { hasGitHubCredential } from "../../../credentials.js";
@@ -32,17 +33,26 @@ const description = renderDescription([
   effectiveEdits,
 ]);
 
-/** Offers the deployed self-modification child only to authorized principals outside `eve dev`. */
+/**
+ * Offers the deployed self-modification child outside `eve dev`, only while the turn's caller and
+ * the person who spoke last are both authorized.
+ */
 export default defineDynamic(async (ctx) => {
   if (!isDeployedRuntime()) return null;
   const bound = selfModification.config;
   const config = resolveDeployedSelfModificationConfig(bound);
   if (config.credentials.kind === "pat" && !hasGitHubCredential()) return null;
-  const principal = ctx.session.auth.current;
+  const { current, sender } = ctx.session.auth;
+  // Another person's message can ask for the change in the caller's turn, so they must be
+  // authorized too.
+  const principals = callerSpokeLast(ctx.session.auth) ? [current] : [current, sender];
   // `authorize` reads the principal's attributes and the channel, so it's asked again each turn.
-  const authorized = await ctx.memo(["authorize", principal, ctx.turn?.id ?? null], async () => {
+  const authorized = await ctx.memo(["authorize", principals, ctx.turn?.id ?? null], async () => {
     try {
-      return (await config.authorize({ channel: ctx.channel, principal })) === true;
+      for (const principal of principals) {
+        if ((await config.authorize({ channel: ctx.channel, principal })) !== true) return false;
+      }
+      return true;
     } catch {
       return false;
     }

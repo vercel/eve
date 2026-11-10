@@ -65,7 +65,8 @@ export interface SessionAuth {
    * Who sent the latest message the turn read. Equal to `current` until
    * another person's message joins the turn; the caller's next message makes
    * it `current` again. It changes only between model steps, so every call
-   * in one step sees the same value.
+   * in one step sees the same value. A call the caller approved reads
+   * `current`.
    */
   readonly sender: SessionAuthContext | null;
 }

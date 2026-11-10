@@ -12,7 +12,7 @@ import {
   type AlsContext,
 } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
-import { senderBesidesCaller } from "#context/session-auth.js";
+import { someoneElseSpokeLast } from "#context/session-auth.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 
 const CALLER_IDENTITY = Symbol.for("eve.callerIdentity");
@@ -30,6 +30,11 @@ export function withCallerIdentity<T>(released: boolean, fn: () => T): T {
   return released ? withContextScopeValue(CALLER_IDENTITY, true, fn) : fn();
 }
 
+/** Whether the running call has the caller's identity whoever spoke last. */
+export function hasCallerIdentity(): boolean {
+  return contextScopeValue<boolean>(CALLER_IDENTITY) === true;
+}
+
 /**
  * Throws unless the caller's identity may be handed out for `connectionName`: the caller spoke
  * last, or approved the running call. The failure reaches the model as the call's error, so its
@@ -40,8 +45,8 @@ export function requireCallerConfirmation(
   ctx: AlsContext | undefined,
 ): void {
   if (ctx === undefined) return;
-  if (contextScopeValue<boolean>(CALLER_IDENTITY) === true) return;
-  if (senderBesidesCaller(ctx) === undefined) return;
+  if (hasCallerIdentity()) return;
+  if (!someoneElseSpokeLast(ctx)) return;
   throw new ConnectionAuthorizationFailedError(connectionName, {
     message: callerConfirmationMessage(`${connectionName} access`),
     reason: "confirmation_required",

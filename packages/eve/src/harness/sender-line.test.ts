@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { rememberSender, senderLine } from "#harness/sender-line.js";
+import { forgetSender, rememberSender, senderLine } from "#harness/sender-line.js";
 
 function user(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
@@ -34,6 +34,13 @@ describe("senderLine", () => {
       "The next message is from a different person than the message before it. " +
         "It is from alice. The message before it was from bob.",
     );
+  });
+
+  it("adds nothing after the conversation was cleared", () => {
+    const session = forgetSender(
+      rememberSender({} as { state?: Record<string, unknown> }, user("alice")),
+    );
+    expect(senderLine(session.state, user("bob"))).toBeUndefined();
   });
 
   it("names someone who isn't signed in without an id", () => {

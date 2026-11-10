@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { agent } from "#public/tools/agent.js";
 import {
@@ -12,11 +13,13 @@ import {
 
 const mocks = vi.hoisted(() => ({
   bundle: { graph: {} } as Record<string, unknown>,
+  continueRemote: vi.fn(),
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
   resumeSessionStartHook: vi.fn(),
   resumeHook: vi.fn(),
+  startRemote: vi.fn(),
   startWorkflow: vi.fn(),
   logError: vi.fn(),
   runtimeConfig: undefined as unknown,
@@ -26,7 +29,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getStepMetadata: () => ({ stepId: "step_0" }),
-  getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
+  getWorkflowMetadata: () => ({ url: "https://parent.example.com", workflowRunId: "run_0" }),
+}));
+vi.mock("#execution/agent-sessions/remote.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/agent-sessions/remote.js")>()),
+  continueRemoteAgentSession: mocks.continueRemote,
+  startRemoteAgentSession: mocks.startRemote,
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/workflow-runtime.js")>()),
@@ -62,7 +70,7 @@ vi.mock("#execution/agent-sessions/target.js", () => {
     resolveAgentAction: () => action,
     resolveAgentStartTarget: () =>
       mocks.targetKind === "remote"
-        ? { action, kind: "remote" }
+        ? { action: { ...action, remoteAgentName: "reviewer" }, kind: "remote" }
         : { action, kind: "local", source: { type: "declared" } },
   };
 });
@@ -330,5 +338,87 @@ describe("commands to a session that opened without waiting", () => {
       'Agent "reviewer" can no longer receive messages; its session ended.',
     );
     expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+});
+
+describe.each([
+  {
+    path: "opening a session",
+    dispatched: mocks.startRemote,
+    run: (auth: SessionAuth) => openAgentSessionStep({ ...message, auth, name: "reviewer" }),
+  },
+  {
+    path: "a later message",
+    dispatched: mocks.continueRemote,
+    run: (auth: SessionAuth) =>
+      sendAgentSessionMessageStep({
+        ...message,
+        address: {
+          callbackBaseUrl: "https://parent.example.com",
+          kind: "remote",
+          name: "reviewer",
+          nodeId: "reviewer",
+          sessionId: "remote-1",
+          url: "https://reviewer.example.com",
+        },
+        auth,
+      }),
+  },
+])("$path with a remote agent that forwards the caller", ({ dispatched, run }) => {
+  const person = (principalId: string) => ({
+    attributes: {},
+    authenticator: "slack",
+    principalId,
+    principalType: "user",
+  });
+  const alice = person("alice");
+  const bob = person("bob");
+
+  function registerRemoteAgent(forwardPrincipal: boolean | undefined): void {
+    mocks.targetKind = "remote";
+    mocks.bundle = {
+      graph: {},
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          [
+            "reviewer",
+            {
+              definition: {
+                forwardPrincipal,
+                kind: "remote",
+                name: "reviewer",
+                url: "https://reviewer.example.com",
+              },
+            },
+          ],
+        ]),
+      },
+    };
+    dispatched.mockResolvedValue({ sessionId: "remote-1" });
+  }
+
+  it("is refused without retrying after someone else spoke, telling the model to ask the caller", async () => {
+    registerRemoteAgent(true);
+
+    const refusal = await run({ current: alice, initiator: alice, sender: bob }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(refusal).toBeInstanceOf(FatalError);
+    expect((refusal as Error).message).toContain(
+      `can't use their identity with the "reviewer" agent until they confirm it`,
+    );
+    expect(dispatched).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { reason: "the caller spoke last", forwardPrincipal: true, sender: { ...alice } },
+    { reason: "the agent doesn't forward the caller", forwardPrincipal: undefined, sender: bob },
+  ])("goes through when $reason", async ({ forwardPrincipal, sender }) => {
+    registerRemoteAgent(forwardPrincipal);
+
+    await run({ current: alice, initiator: alice, sender });
+
+    expect(dispatched).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
   });
 });
