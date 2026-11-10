@@ -134,7 +134,7 @@ const DD_TRACE_PACKAGE = "dd-trace";
 const DATASET_PULL_MAX_WAIT_MS = 5_000;
 export const MISSING_DATASET_API_MESSAGE = [
   "The installed 'dd-trace' package does not expose tracer.llmobs.experiments.createDataset() and pullDataset().",
-  "Update to a release compatible with dd-trace@6.13.0.",
+  "Update to a release compatible with dd-trace@6.20.1.",
 ].join("\n");
 
 /** Pulls the named dataset, creating it when Datadog has no dataset with that name. */
@@ -184,7 +184,7 @@ export async function resolveDatadogClient(
     throw new Error(
       [
         "The installed 'dd-trace' package does not expose tracer.llmobs.experiments.startExperiment().",
-        "Update to a release compatible with dd-trace@6.13.0.",
+        "Update to a release compatible with dd-trace@6.20.1.",
       ].join("\n"),
     );
   }
@@ -205,7 +205,7 @@ async function loadDatadogSdk(): Promise<DatadogTraceModule> {
           "The 'dd-trace' package is required for Datadog reporting but was not found.",
           "",
           "Install the tested release with:",
-          "  npm install dd-trace@6.13.0",
+          "  npm install dd-trace@6.20.1",
         ].join("\n"),
       );
     }

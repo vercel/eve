@@ -283,6 +283,45 @@ describe("stateless MCP Streamable HTTP server", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
+  it.each([9_999, 10_000])(
+    "bounds tool input collections with %i entries before dispatch",
+    async (length) => {
+      const call = vi.fn(async () => ({ content: [{ type: "text" as const, text: "Accepted" }] }));
+      const handle = createMcpStreamableHttpServer({
+        authenticate: async () => auth,
+        name: "collection-test",
+        tools: [
+          defineMcpTool({
+            call,
+            definition: { name: "collect", inputSchema: z.object({ values: z.array(z.number()) }) },
+          }),
+        ],
+        version: "0.0.0",
+      });
+      const response = await handle(
+        modernRequest({
+          id: "collection-call",
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "collect", arguments: { values: Array.from({ length }, () => 1) } },
+        }),
+      );
+      const body = await jsonRpcResponse(response);
+      if (length === 9_999) {
+        expect(body).toMatchObject({ result: { content: [{ text: "Accepted" }] } });
+        expect(call).toHaveBeenCalledOnce();
+      } else {
+        expect(body).toMatchObject({
+          result: {
+            isError: true,
+            content: [{ text: expect.stringContaining("maximum of 10000 elements") }],
+          },
+        });
+        expect(call).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it("returns structured operation errors for expected tool failures", async () => {
     const handle = createMcpStreamableHttpServer({
       authenticate: async () => auth,
