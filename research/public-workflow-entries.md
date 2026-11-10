@@ -1,12 +1,12 @@
 ---
 issue: "Maintainer-approved 1.0 API audit; stack #5486"
 status: implemented
-last_updated: "2026-10-29"
+last_updated: "2026-11-09"
 ---
 
 # Public Workflow entries
 
-Authors import durable primitives from `eve/workflow` and run/hook operations
+Authors import durable primitives from `eve/workflow` and hook operations
 from `eve/workflow/api`. No separately installed `workflow` package or ambient
 declaration is needed.
 
@@ -15,18 +15,49 @@ import { createHook, sleep, FatalError } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
 ```
 
-The first entry exposes `createHook`, `createWebhook`, `sleep`, `FatalError`,
-`RetryableError`, and `getWorkflowMetadata`. The API entry exposes `start`, `getRun`, and
-`resumeHook`. The API entry is unavailable inside replayed workflow bodies:
-call it from a route or a `"use step"` function instead.
+The stable entries carry only what a durable tool needs to wait on time or an
+outside event: `createHook`, `createWebhook`, `sleep`, `FatalError`, and
+`RetryableError` in `eve/workflow`, and `resumeHook` in `eve/workflow/api`.
+eve has no native equivalent for these, and `defineWorkflowTool` bodies depend
+on them.
 
-Both entries declare eve-owned types (`WorkflowHook`, `WorkflowWebhook`, `WorkflowMetadata`,
+Run operations are experimental: `getWorkflowMetadata` in
+`eve/experimental/workflow`, and `start` and `getRun` in
+`eve/experimental/workflow/api`. They mostly overlap with `task` and `serve`
+tools, and the Workflow SDK's run and stream model is still moving (for
+example, toward streams not owned by a run), so eve does not pin them for 1.x.
+Promoting them later is additive; moving them out of a stable entry would need
+a major. Importing a moved export from its old entry is a build error that
+names the new entry.
+
+Run streams are experimental too: `getWritable({ namespace })` in
+`eve/experimental/workflow` and `getReadable(runId, { namespace, startIndex })`
+in `eve/experimental/workflow/api`. They let one run publish state that a
+route, step, or another run reads, which no stable eve surface covers. Both
+require a namespace and reject `eve.` and `eve:` prefixes, because a run's
+default stream holds eve's session records and eve's own streams use those
+prefixes. The check runs in the step and server entry and in a body-side shim
+the driver resolves the entry to, so bodies get the same rule. `getReadable` is
+a function rather than a `WorkflowRun` method so `start` and `getRun` keep
+returning the SDK's run handle unwrapped.
+
+`getHookByToken` stays removed: it returned the World's hook storage record, and
+its lookup-then-`start` use raced (atomic `start` with a hook replaced it).
+`getHookRunId(token)` in `eve/experimental/workflow/api` covers the remaining
+need, finding the run that holds a known token so its streams can be read. It
+resolves only the run ID, or `null` when no hook holds the token, and is not a
+way to decide whether to start a run.
+
+Both API entries are unavailable inside replayed workflow bodies: call them
+from a route or a `"use step"` function instead.
+
+All four entries declare eve-owned types (`WorkflowHook`, `WorkflowWebhook`, `WorkflowMetadata`,
 `WorkflowRun`, and their options) over the SDK values, so SDK-only surface stays private: no
 `world`, `deploymentId`, queue namespace, source-string, or encryption options on `start` and
 `resumeHook`, no storage-record `getHookByToken`, and a `WorkflowRun` limited to `runId`, `status`,
 `returnValue`, and `cancel()`. Type tests assert the SDK values satisfy the eve declarations.
 
-Both entries bind to eve's existing vendored SDK. The driver maps body imports
+Every entry binds to eve's existing vendored SDK. The driver maps body imports
 to its existing Workflow-safe shim; server and step imports share the existing
 runtime facade. Do not introduce another SDK or runtime identity.
 

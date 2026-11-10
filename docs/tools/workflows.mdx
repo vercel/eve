@@ -84,8 +84,8 @@ continues, deploys, and returns one tool result.
   randomness, `process.env`, and Node.js APIs in steps. Keep values you need after a wait in local
   variables in the body.
 - Import durable primitives such as `createHook`, `sleep`, and `FatalError` from `eve/workflow` in
-  the body. Call `start`, `getRun`, and `resumeHook` from `eve/workflow/api` in routes or steps, not
-  in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
+  the body. Call `resumeHook` from `eve/workflow/api` in routes or steps, not in the body. Both use
+  eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
 - Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
@@ -118,7 +118,7 @@ step helpers.
 
 ### Workflow imports
 
-Import durable primitives from `eve/workflow`, and run and hook operations from `eve/workflow/api`:
+Import durable primitives from `eve/workflow`, and hook operations from `eve/workflow/api`:
 
 ```ts
 import { createHook, sleep } from "eve/workflow";
@@ -130,17 +130,58 @@ import { resumeHook } from "eve/workflow/api";
 | `createHook<T>({ token?, metadata? })` | `eve/workflow`     | Returns a `WorkflowHook<T>`. Await it for the next payload, or iterate it with `for await`. `metadata` is JSON stored with the hook.                                                     |
 | `createWebhook({ respondWith? })`      | `eve/workflow`     | Returns a `WorkflowWebhook` whose `url` resumes it with the incoming `Request`. With `respondWith: "manual"`, answer each `WorkflowWebhookRequest` with `request.respondWith(response)`. |
 | `sleep(duration)`                      | `eve/workflow`     | Waits for a duration such as `"1h"` or a number of milliseconds, or until a `Date`.                                                                                                      |
-| `getWorkflowMetadata()`                | `eve/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`.                                                                                                       |
 | `FatalError`, `RetryableError`         | `eve/workflow`     | Throw `FatalError` to fail without a retry. Throw `RetryableError`, with an optional `{ retryAfter }`, to retry a step.                                                                  |
-| `start(workflow, args)`                | `eve/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none.                                      |
-| `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
 | `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
 
 A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to `{ runId }` for the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
 
-Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
+Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, and `WorkflowWebhookRequest` from `eve/workflow` for explicit types.
 
 Only these exports are public. A bare `workflow` or `workflow/*` import in an application module fails the build with an error that names these entries.
+
+#### Experimental run operations and streams
+
+Starting and inspecting standalone workflow runs, and writing and reading run streams, are experimental. These exports have [no compatibility promise](/docs/reference/typescript-api#stability-policy) and can change in a minor release:
+
+| Export                                              | Entry                           | What it does                                                                                                                                        |
+| --------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getWorkflowMetadata()`                             | `eve/experimental/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`. Call it in the body.                                             |
+| `getWritable<T>({ namespace })`                     | `eve/experimental/workflow`     | Returns a durable `WritableStream<T>` on the current run. Call it in the body and pass it to a step, or call it in a step.                          |
+| `start(workflow, args)`                             | `eve/experimental/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none. |
+| `getRun(runId)`                                     | `eve/experimental/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                    |
+| `getReadable<T>(runId, { namespace, startIndex? })` | `eve/experimental/workflow/api` | Reads a run's stream from `startIndex` (default `0`; `-1` is the latest chunk) and follows later chunks. Cancel it when you stop reading.           |
+| `getHookRunId(token)`                               | `eve/experimental/workflow/api` | Resolves the ID of the run holding the hook with that `token`, or `null`. Use it to find a run, not to decide whether to start one.                 |
+
+Call `start`, `getRun`, `getReadable`, and `getHookRunId` from routes or steps, not in the body. Import `WorkflowMetadata` and `WorkflowWritableOptions` from `eve/experimental/workflow`, and `WorkflowRun`, `WorkflowRunStatus`, and `WorkflowReadableOptions` from `eve/experimental/workflow/api`. For background work inside a session, prefer a [`task`](#run-calls-as-tasks-task) or [`serve`](#resumable-tasks-serve) tool.
+
+A stream needs a `namespace`, because a run's default stream holds eve's own records. Namespaces starting with `eve.` or `eve:` are reserved, and both functions throw for them. Chunks persist with the run, so the run's [data retention](/docs/agent-config#run-data-retention) applies.
+
+To find a run from another tool or route, give it a hook with a token you can derive, such as one built from `ctx.session.id`, and resolve it with `getHookRunId`. The hook must be registered first, so await `hook.getConflict()` in the body. After the run ends or the hook is disposed, the lookup can resolve `null`. Don't use the lookup to decide whether to start a run, because another caller can start one between the lookup and `start`.
+
+Publish a long-running task's state from a step, and read the latest chunk from a step or route that knows the run ID:
+
+```ts
+import { getWritable } from "eve/experimental/workflow";
+import { getReadable } from "eve/experimental/workflow/api";
+
+async function publish(progress: WritableStream<{ phase: string }>, phase: string) {
+  "use step";
+  const writer = progress.getWriter();
+  await writer.write({ phase });
+  writer.releaseLock();
+}
+
+// In the workflow body:
+await publish(getWritable({ namespace: "coder.progress" }), "testing");
+
+// In a step or route:
+const reader = getReadable<{ phase: string }>(runId, {
+  namespace: "coder.progress",
+  startIndex: -1,
+}).getReader();
+const { value: latest } = await reader.read();
+await reader.cancel();
+```
 
 ## Wait for the result
 

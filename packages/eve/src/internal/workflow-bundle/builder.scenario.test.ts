@@ -448,7 +448,10 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("fails the driver build when a workflow body calls eve/workflow/api", async () => {
+  it.each([
+    ["eve/workflow/api", "resumeHook", 'await resumeHook("token", 1)'],
+    ["eve/experimental/workflow/api", "start", "await start(child, [])"],
+  ])("fails the driver build when a workflow body calls %s", async (entry, name, call) => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-api-in-body-"));
     const outDir = join(tempRoot, "workflow-build");
     const flowFilePath = join(tempRoot, "flow.ts");
@@ -469,14 +472,14 @@ describe("WorkflowBundleBuilder", () => {
         writeFile(
           flowFilePath,
           [
-            'import { start } from "eve/workflow/api";',
+            `import { ${name} } from "${entry}";`,
             "export async function child() {",
             '  "use workflow";',
             "  return 1;",
             "}",
             "export async function parent() {",
             '  "use workflow";',
-            "  return await start(child, []);",
+            `  return ${call};`,
             "}",
             "",
           ].join("\n"),
@@ -495,7 +498,10 @@ describe("WorkflowBundleBuilder", () => {
       );
 
       await expect(builder.build()).rejects.toThrow(
-        /cannot import "eve\/workflow\/api".*not available inside a workflow body.*"use step"/s,
+        new RegExp(
+          `cannot import "${entry.replaceAll("/", "\\/")}".*not available inside a workflow body.*"use step"`,
+          "s",
+        ),
       );
     } finally {
       await rm(tempRoot, { force: true, recursive: true });

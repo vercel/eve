@@ -72,8 +72,15 @@ import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
-import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
-import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
+import { createHook, sleep, createWebhook, FatalError, RetryableError } from "eve/workflow";
+import { resumeHook } from "eve/workflow/api";
+import { getWorkflowMetadata, getWritable } from "eve/experimental/workflow";
+import { start, getRun, getReadable, getHookRunId, type WorkflowRun } from "eve/experimental/workflow/api";
+const holder: Promise<string | null> = getHookRunId("coder:session");
+const progress: WritableStream<{ phase: string }> = getWritable({ namespace: "coder.progress" });
+const latest: ReadableStream<{ phase: string }> = getReadable("run", { namespace: "coder.progress", startIndex: -1 });
+// @ts-expect-error A run's default stream belongs to eve.
+getReadable("run", {});
 import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
 import { vercelOidc } from "eve/channels/auth";
 const stubAuth: EveAuthFn = eveVercelOidc({
@@ -84,6 +91,8 @@ eveChannel({ auth: [vercelOidc(), stubAuth] });
 vercelOidc({ subjects: [{ subject: "eval-runner", allowToolStubs: true }] });
 // @ts-expect-error Hook storage records are not part of eve's Workflow API.
 import { getHookByToken } from "eve/workflow/api";
+// @ts-expect-error Run operations are experimental.
+import { start as stableStart } from "eve/workflow/api";
 // @ts-expect-error Bare Workflow imports are no longer declared by eve.
 import { sleep as bareSleep } from "workflow";
 async function durable() {
@@ -250,7 +259,7 @@ describe("packed public declarations", () => {
           import { dirname, join } from "node:path";
           import { pathToFileURL } from "node:url";
           import { createHook } from "eve/workflow";
-          import { getRun } from "eve/workflow/api";
+          import { getRun } from "eve/experimental/workflow/api";
           const require = createRequire(import.meta.url);
           const eve = dirname(require.resolve("eve/package.json"));
           const internal = (file) => import(pathToFileURL(join(eve, "dist/src/internal/workflow", file)));

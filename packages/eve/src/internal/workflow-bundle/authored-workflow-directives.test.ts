@@ -173,6 +173,45 @@ return inner();
     );
   });
 
+  it.each([
+    [
+      'import { getWorkflowMetadata } from "eve/workflow";',
+      "getWorkflowMetadata",
+      "eve/experimental/workflow",
+    ],
+    [
+      'import { sleep, getWritable } from "eve/workflow";',
+      "getWritable",
+      "eve/experimental/workflow",
+    ],
+    [
+      'import { start, resumeHook } from "eve/workflow/api";',
+      "start",
+      "eve/experimental/workflow/api",
+    ],
+    [
+      'export { getRun as run } from "eve/workflow/api";',
+      "getRun",
+      "eve/experimental/workflow/api",
+    ],
+  ])("points moved exports at their experimental entry: %s", async (source, name, entry) => {
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      `"${name}" moved from`,
+    );
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      `Import it from "${entry}"`,
+    );
+  });
+
+  it("accepts experimental entries and type-only imports of moved names", async () => {
+    const source = `import { getWorkflowMetadata } from "eve/experimental/workflow";
+import { start, getRun } from "eve/experimental/workflow/api";
+import type { start as Start } from "eve/workflow/api";`;
+    await expect(
+      prepareAuthoredWorkflowDirectives({ filePath: FILE, source }),
+    ).resolves.toMatchObject({ hasDirectives: false });
+  });
+
   it("accepts public primitives without mistaking a bare-import string for an import", async () => {
     const source = `import { sleep } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
