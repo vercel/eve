@@ -1,3 +1,4 @@
+import { checkRateLimit } from "@vercel/firewall";
 import { createChatRoute } from "@vercel/geistdocs/routes/chat";
 import {
   analyticsEvents,
@@ -11,12 +12,33 @@ import { geistdocsSource } from "@/lib/geistdocs/source";
 
 export const maxDuration = 800;
 
+// Every accepted request runs paid model inference, so the public route needs
+// a per-client limit. The limit itself is a Vercel Firewall rate limit rule
+// with this ID on the docs project; until that rule exists, checkRateLimit
+// logs a warning and lets requests through.
+const RATE_LIMIT_ID = "ask-ai";
+
 const chatRoute = createChatRoute({
   config,
   sources: [geistdocsSource],
 });
 
+const isRateLimited = async (request: Request) => {
+  try {
+    const { rateLimited } = await checkRateLimit(RATE_LIMIT_ID, { request });
+    return rateLimited;
+  } catch (error) {
+    // Fail open: a Firewall API problem should not take Ask AI down.
+    console.error("[docs chat] rate limit check failed", error);
+    return false;
+  }
+};
+
 export const POST = async (request: Request) => {
+  if (await isRateLimited(request)) {
+    return Response.json({ error: "Too many requests." }, { status: 429 });
+  }
+
   const analyticsRequest = request.clone();
   const response = await chatRoute.POST(request);
   const body: unknown = await analyticsRequest.json().catch(() => null);
