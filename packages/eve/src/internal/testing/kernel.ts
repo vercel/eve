@@ -58,7 +58,12 @@ function agentBundle(agent: TestKernelConfig["agent"]) {
       instructions: [],
       skills: [],
     },
-    subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
+    subagentRegistry: {
+      dynamicResolvers: [],
+      preparedTools: [],
+      subagentsByName: new Map(),
+      subagentsByNodeId: new Map(),
+    },
     toolRegistry: { toolsByName: new Map() },
     turnAgent: {
       compactionModel: agent.compactionModel,

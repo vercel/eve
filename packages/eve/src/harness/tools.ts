@@ -203,5 +203,8 @@ export async function decideApproval(
           { memory: call.approvalMemory, recheck: call.recheck },
         );
   if (decision.denied || decision.awaitsPerson === true) return decision;
-  return { ...decision, clearance: mintClearance(call.callId, decision.clearedBy) };
+  return {
+    ...decision,
+    clearance: mintClearance(call.callId, decision.clearedBy, decision.callerConfirmed === true),
+  };
 }

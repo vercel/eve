@@ -18,6 +18,7 @@ import { ConversationContextKey } from "#shared/conversation-context.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import { readDefinitionsState, sessionIdOf } from "./state.js";
 import { latestTurn } from "./turn.js";
+import { readSender } from "#context/sender.js";
 
 /** The channel the session's latest delivery came through. */
 export function channelOf(ctx: ContextReader): SessionFrame["channel"] {
@@ -50,7 +51,11 @@ export function sessionFrameOf(
     ...(conversation !== undefined && { conversation }),
     now: new Date(at ?? 0),
     session: {
-      auth: { current: ctx.get(AuthKey) ?? null, initiator: ctx.get(InitiatorAuthKey) ?? null },
+      auth: {
+        current: ctx.get(AuthKey) ?? null,
+        initiator: ctx.get(InitiatorAuthKey) ?? null,
+        sender: readSender(ctx, ctx.get(AuthKey) ?? null),
+      },
       id: sessionIdOf(ctx),
       // A root session has no parent; none is made up for it.
       ...(parent !== undefined && { parent }),

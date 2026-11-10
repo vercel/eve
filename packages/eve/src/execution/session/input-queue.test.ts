@@ -74,7 +74,7 @@ describe("SessionInputQueue", () => {
     expect(queue.takeAuthorizations(held)).toBeUndefined();
   });
 
-  it("lets only the turn's own person steer it and keeps another person's message for its own turn", () => {
+  it("lets anyone steer a running turn, but only its own person while it's held", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -98,14 +98,16 @@ describe("SessionInputQueue", () => {
     const queuedByBob = send("Invite the design team too.", bob, "queue");
     const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
 
-    // A delivery without auth acts as the session's current identity, which is the turn's.
-    expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromAlice, unauthenticated]);
-    // A turn held on Alice lets her queued messages steer it, but never Bob's.
-    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })).toBeUndefined();
-    expect(queue.takeNext()).toMatchObject({
-      delivery: { auth: bob },
-      sequences: [fromBob, queuedByBob],
-    });
+    // A turn held on Alice takes only her messages, and a delivery without auth acts as hers.
+    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })?.sequences).toEqual([
+      fromAlice,
+      unauthenticated,
+    ]);
+    // Once the pause ends, Bob's message joins the turn; his queued one waits for it to end.
+    expect(queue.hasSteering(admitted, turn)).toBe(true);
+    expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromBob]);
+    expect(queue.hasSteering(admitted, turn)).toBe(false);
+    expect(queue.takeNext()).toMatchObject({ delivery: { auth: bob }, sequences: [queuedByBob] });
   });
 
   it("lets a queued message steer a held turn only when it arrived after the hold", () => {

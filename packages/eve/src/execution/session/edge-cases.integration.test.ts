@@ -2179,7 +2179,7 @@ describe("work delegated to a child session", () => {
   // #4923: a typed answer to a relayed prompt is a message, so only the turn's
   // own principal may answer it by text; another person's text waits for the
   // turn to end instead of being forwarded to the child under alice's auth.
-  it("keeps another principal's typed answer out of the turn that relays a child's prompt", async () => {
+  it("keeps another principal's typed answer off a relayed prompt, then lets it join the turn", async () => {
     const seen: (readonly [string, string, unknown])[] = [];
     const { events, ran } = await withSession(
       "edge-child-foreign-typed-answer",
@@ -2230,21 +2230,16 @@ describe("work delegated to a child session", () => {
           "Alice's answer runs the child's call",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
         );
-        // Only Alice's text answered; Bob's is still waiting for its own turn.
-        expect(seen).toEqual([
-          ["Delegate the deploy.", "turn_0", "alice"],
-          ["approve", "turn_0", "alice"],
-        ]);
-        await session.next("Bob's turn");
       },
     );
 
     expect(ran).toEqual(["deploy"]);
-    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    // Only Alice's text answered; Bob's joined her turn as a message once the prompt settled.
     expect(seen).toEqual([
       ["Delegate the deploy.", "turn_0", "alice"],
       ["approve", "turn_0", "alice"],
-      ["1", "turn_1", "bob"],
+      ["1", "turn_0", "alice"],
     ]);
   });
 
@@ -2859,8 +2854,8 @@ describe("turns parked on their own prompt", () => {
 
   // A turn waiting on its own tool approval gives way to its person's message,
   // but not to anyone else's: bob's waits for alice's turn to end.
-  it("keeps another principal's message out of a turn waiting on its own approval", async () => {
-    const seen: (readonly [string, string, unknown])[] = [];
+  it("lets another principal's message join a turn once its own approval settles", async () => {
+    const seen: (readonly [string, string, unknown, unknown])[] = [];
     const { events, ran } = await withSession(
       "edge-approval-foreign-message",
       {
@@ -2873,17 +2868,26 @@ describe("turns parked on their own prompt", () => {
                   text ?? "(answer)",
                   event.data.turnId,
                   ctx.session.auth.current?.principalId,
+                  ctx.session.auth.sender?.principalId,
                 ]);
               },
               "turn.settled"(event, ctx) {
-                seen.push([event.type, event.data.turnId, ctx.session.auth.current?.principalId]);
+                seen.push([
+                  event.type,
+                  event.data.turnId,
+                  ctx.session.auth.current?.principalId,
+                  ctx.session.auth.sender?.principalId,
+                ]);
               },
             },
           }),
         },
         message: "Deploy.",
-        model: scriptedModel(({ results }) =>
-          results.length === 0 ? [{ toolName: "deploy", toolCallId: "call_a" }] : "Done.",
+        // Deploys once in the turn, whoever spoke last.
+        model: scriptedModel((_prompt, raw) =>
+          JSON.stringify(raw).includes('"toolName":"deploy"')
+            ? "Done."
+            : [{ toolName: "deploy", toolCallId: "call_a" }],
         ),
         tools: [{ approval: true, name: "deploy" }],
       },
@@ -2896,21 +2900,18 @@ describe("turns parked on their own prompt", () => {
           "the approved turn",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
         );
-        // Bob's message runs as his own turn, which asks for its own approval.
-        await session.until(
-          "Bob's approval",
-          (event) => event.type === "turn.paused" && event.data.turnId === "turn_1",
-        );
       },
     );
 
     expect(ran).toEqual(["deploy"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    // Bob's message waits for Alice's approval, then joins her turn: she stays its caller, and
+    // he is its latest sender.
     expect(seen).toEqual([
-      ["Deploy.", "turn_0", "alice"],
-      ["(answer)", "turn_0", "alice"],
-      ["turn.settled", "turn_0", "alice"],
-      ["bob here", "turn_1", "bob"],
+      ["Deploy.", "turn_0", "alice", "alice"],
+      ["(answer)", "turn_0", "alice", "alice"],
+      ["bob here", "turn_0", "alice", "bob"],
+      ["turn.settled", "turn_0", "alice", "bob"],
     ]);
   });
 });

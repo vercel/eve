@@ -7,7 +7,7 @@ describe("production publish tool", () => {
     expect(
       publicationOperationId({
         session: {
-          auth: { current: null, initiator: null },
+          auth: { current: null, initiator: null, sender: null },
           id: "child-session",
           parent: {
             callId: "delegate-call",
@@ -25,7 +25,7 @@ describe("production publish tool", () => {
     expect(() =>
       publicationOperationId({
         session: {
-          auth: { current: null, initiator: null },
+          auth: { current: null, initiator: null, sender: null },
           id: "root-session",
           turn: { id: "root-turn", sequence: 0 },
         },

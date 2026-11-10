@@ -81,7 +81,7 @@ export function createApprovalContext(): ContextContainer {
   ctx.set(AuthKey, responder);
   ctx.set(SessionIdKey, "generate-approval-resume-session");
   ctx.set(SessionKey, {
-    auth: { current: responder, initiator: null },
+    auth: { current: responder, initiator: null, sender: responder },
     sessionId: "generate-approval-resume-session",
     turn: { id: "turn-1", sequence: 1 },
   });

@@ -22,7 +22,8 @@ import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { isApprovalRecheck, inheritApprovalContext } from "#approval/evaluation.js";
+import { inheritApprovalContext, isApprovalRecheck } from "#approval/evaluation.js";
+import { withCallerConfirmationDefault } from "./caller-confirmation.js";
 import { approvalDecision } from "#approval/status.js";
 import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -84,13 +85,16 @@ export function connectionEntry(
 ): HarnessToolDefinition {
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
   // Wrapped inside the pin, so a call the agent's policy holds is pinned to this instance too.
-  const approval = withAgentApproval(agentApproval, connection.approval);
+  const approval = withCallerConfirmationDefault(
+    withAgentApproval(agentApproval, connection.approval),
+    (context) => actsAsCaller(connection, context),
+  );
   return {
     approval: connectionApproval(registry, connection, toolName, approval),
     deferred: true,
     description: "",
     execute: (input: unknown, options: ToolExecuteOptions) =>
-      callConnectionTool(registry, connection, toolName, input, options, approval !== undefined),
+      callConnectionTool(registry, connection, toolName, input, options),
     // Checked before approval, so no one is asked to approve a call that cannot run.
     inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
@@ -148,12 +152,11 @@ async function callConnectionTool(
   toolName: string,
   rawInput: unknown,
   options: ToolExecuteOptions,
-  gated: boolean,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
   const result = await runConnectionTool(registry, connection, toolName, rawInput, options);
   // The call runs again after the sign-in, and its approval recheck expects a pin.
-  if (gated && isAuthorizationSignal(result)) {
+  if (isAuthorizationSignal(result)) {
     pinApprovedInstance(options.toolCallId, connection);
   }
   return result;
@@ -343,9 +346,8 @@ function connectionApproval(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   toolName: string,
-  approval: Approval | undefined,
-): Approval | undefined {
-  if (approval === undefined) return undefined;
+  approval: Approval,
+): Approval {
   const policy = resolveApprovalPolicy(approval);
   const request = async (context: ApprovalContext) =>
     requestApproval(
@@ -364,6 +366,22 @@ function connectionApproval(
         : (context: ApprovalResponseContext) =>
             authorizeApprovalResponse(connection, response, context),
   };
+}
+
+/** Whether calls to `connection` use the caller's identity. */
+async function actsAsCaller(
+  connection: ResolvedConnectionDefinition,
+  context: ApprovalContext,
+): Promise<boolean> {
+  if (connection.forwardPrincipal === true) return true;
+  const { authorization } = connection;
+  if (typeof authorization !== "function") return authorization?.principalType === "user";
+  try {
+    return (await authorization(context)).principalType === "user";
+  } catch {
+    // The call fails on the same resolver when it runs; until then, assume the caller's identity.
+    return true;
+  }
 }
 
 async function requestApproval(

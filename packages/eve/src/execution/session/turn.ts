@@ -281,9 +281,9 @@ export class SessionExecution {
    * Waits for what a paused turn awaits, and returns the input its next step reads:
    *
    * - an interaction's answer, a sign-in callback, or the turn's own requester steering it, for the
-   *   requests and sign-ins it raised. Anyone else's message queues behind the turn, as does a
-   *   message admitted before the step that raised the request (`heldSince`): it was sent
-   *   before the request existed;
+   *   requests and sign-ins it raised. Anyone else's message waits for the pause to end and then
+   *   steers the turn. A queued message admitted before the step that raised the request
+   *   (`heldSince`) waits too: it was sent before the request existed;
    * - one of its tasks settling. Steering interrupts that wait;
    * - every call's result. Steering interrupts the workflow tool calls, which still report.
    */
@@ -313,9 +313,15 @@ export class SessionExecution {
     while (true) {
       if (pendingInteraction !== undefined) {
         const callbacks = this.input.queue.takeAuthorizations(pendingInteraction.attemptIds);
-        if (callbacks !== undefined) return { delivery: { kind: "deliver", payloads: callbacks } };
+        if (callbacks !== undefined) {
+          turn.steerWithWaitingMessages();
+          return { delivery: { kind: "deliver", payloads: callbacks } };
+        }
         const answer = await turn.takeAnswers(pendingInteraction.requestIds);
-        if (answer !== undefined) return { delivery: answer };
+        if (answer !== undefined) {
+          turn.steerWithWaitingMessages();
+          return { delivery: answer };
+        }
         const steering = await turn.takeSteering({ heldSince });
         if (steering !== undefined) return { delivery: steering };
       }

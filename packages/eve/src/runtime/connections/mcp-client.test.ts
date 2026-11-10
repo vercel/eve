@@ -32,7 +32,7 @@ function ctxWithAuth(current: SessionAuthContext | null): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, current);
   ctx.set(SessionKey, {
-    auth: { current, initiator: current },
+    auth: { current, initiator: current, sender: current },
     sessionId: "session-1",
     turn: { id: "turn-1", sequence: 0 },
   });

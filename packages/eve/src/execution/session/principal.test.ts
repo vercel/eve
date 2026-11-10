@@ -24,9 +24,7 @@ describe("continueTurnAuth", () => {
     ["another principal", { ...alice, principalId: "bob" }],
     ["another issuer", { ...alice, issuer: "https://other.example" }],
     ["an anonymous caller", null],
-  ])("refuses a message from %s", (_, auth) => {
-    expect(() => continueTurnAuth(alice, auth)).toThrow(
-      "A message from another principal cannot join a running turn.",
-    );
+  ])("keeps the caller when a message from %s joins", (_, auth) => {
+    expect(continueTurnAuth(alice, auth)).toBe(alice);
   });
 });

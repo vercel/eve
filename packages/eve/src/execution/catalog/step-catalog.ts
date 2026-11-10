@@ -28,11 +28,12 @@ import type {
 } from "#harness/types.js";
 import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
+import { withCallerConfirmationDefault } from "./caller-confirmation.js";
 import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
 import { createSkillLoader, type CatalogSkill } from "./skills.js";
 
@@ -97,15 +98,18 @@ export function callableOf(input: CatalogInput): Callable {
   const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
   // Only what this session sees, so a delegated session of the same agent doesn't reach or search
   // for root-only entries. Every entry runs under the agent-wide approval policy.
-  const entries = withAgentApprovalOnEntries(
-    new Map(
-      [...input.table.entries]
-        .filter(
-          ([, entry]) => entry.route === undefined && isVisible(entry.definition, input.session),
-        )
-        .map(([name, entry]) => [name, entry.definition]),
+  const entries = withForwardingConfirmation(
+    withAgentApprovalOnEntries(
+      new Map(
+        [...input.table.entries]
+          .filter(
+            ([, entry]) => entry.route === undefined && isVisible(entry.definition, input.session),
+          )
+          .map(([name, entry]) => [name, entry.definition]),
+      ),
+      agentApproval,
     ),
-    agentApproval,
+    bundle,
   );
   const registry = input.ctx.get(ConnectionRegistryKey);
   const versions = dynamicConnectionVersions(input.ctx);
@@ -288,4 +292,27 @@ function connectionEntryNamed(
 
 function failure(path: readonly string[], message: string): StandardSchemaV1.FailureResult {
   return { issues: [{ message, path: [...path] }] };
+}
+
+/**
+ * A remote agent that forwards the caller's principal acts as the caller, so its calls take rule
+ * 3's default ask, as a connection that acts as the caller does.
+ */
+function withForwardingConfirmation(
+  entries: Map<string, HarnessToolDefinition>,
+  bundle: CompiledBundle | undefined,
+): Map<string, HarnessToolDefinition> {
+  if (bundle === undefined) return entries;
+  for (const [name, definition] of entries) {
+    const handling = definition.behavior?.handling;
+    if (handling?.kind !== "dispatch" || handling.target.kind !== "remote-agent-call") continue;
+    const remote = bundle.subagentRegistry.subagentsByNodeId.get(handling.target.nodeId);
+    if (remote?.definition.kind !== "remote" || remote.definition.forwardPrincipal !== true)
+      continue;
+    entries.set(name, {
+      ...definition,
+      approval: withCallerConfirmationDefault(definition.approval, () => true),
+    });
+  }
+  return entries;
 }

@@ -161,6 +161,11 @@ export interface TurnCaller {
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }
     | { readonly kind: "callback"; readonly token: string; readonly url: string };
+  /**
+   * The delegating turn's latest sender. A local child inherits it, so a subagent called after
+   * someone other than the caller spoke can't hand out the caller's token unasked.
+   */
+  readonly sender?: SessionAuthContext | null;
 }
 
 /** Internal transport payload, including framework-owned compatibility and context fields. */
@@ -548,6 +553,8 @@ export interface RunInput {
    * (root session behavior).
    */
   readonly initiatorAuth?: SessionAuthContext | null;
+  /** A delegating turn's latest sender, which a local child's first turn inherits. */
+  readonly senderAuth?: SessionAuthContext | null;
   readonly input: {
     /** Omitted only when creating a conversation session before its first turn. */
     readonly message?: MessageContent;

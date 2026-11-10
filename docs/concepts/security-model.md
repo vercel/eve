@@ -75,9 +75,24 @@ A [channel](/docs/channels) authenticates its own inbound traffic. The built-in 
   signature or token. Never use a `principalId` (or similar) from the request
   body, because a body field is attacker-controlled.
 
-## A turn runs as one principal
+## Shared sessions
 
-A turn's principal (its authenticator, issuer, principal type and id) never changes while the turn runs; only its claims may update. Only that principal's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn, so their text never drives the turn's credentials and the turn never continues under their identity. Another person can still settle a pending request with a button or structured answer; they are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
+Several people can share one session, such as a Slack thread or a GitHub issue. A turn's caller is the person whose message started it, and the caller never changes while the turn runs. Their own messages update only their claims.
+
+Anyone the channel lets into the session can steer the running turn. Their message changes what the model reads, never whose identity the turn uses. `ctx.session.auth.sender` names who spoke last. While the turn waits on an approval, sign-in, or question, other people's messages wait for it to end.
+
+eve hands out the caller's credentials without asking only while the caller is the last person to have spoken. After someone else's message joins the turn:
+
+| Call                                                                                                 | What eve does                                                                                          |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| A tool of a user-scoped or `forwardPrincipal` connection, or a remote agent that forwards the caller | Asks the caller first. Only the caller can approve; anyone can cancel.                                 |
+| `ctx.getToken()` for a user-scoped provider in an authored tool                                      | Fails the call with `ConnectionAuthorizationFailedError` and `reason: "caller_confirmation_required"`. |
+
+The failed call's message tells the model to ask the caller to clearly confirm, and to retry only after a reply that plainly confirms the action. eve releases the token on any later message from the caller, so this relies on the model's judgment. To ask with an approval prompt instead, set `approval: once({ when: "principal-mismatch" })` on the tool or agent-wide in `agent.ts`. See [Mismatch approvals](../human-in-the-loop#ask-when-someone-else-is-involved).
+
+The caller's next message, or their approval of a call, makes them the last to speak again. A session with one person never reaches any of this. Tools that use no credentials aren't covered; give them a mismatch approval when they decide from the caller's role.
+
+Another person can still answer a pending request with a button or structured answer. They are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
 ## Authored markdown is data
 

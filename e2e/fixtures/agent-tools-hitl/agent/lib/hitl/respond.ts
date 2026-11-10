@@ -18,6 +18,13 @@ export const SAY = {
   publish: "Alice asks to publish the draft.",
   hello: "Alice changes her mind and asks for a short hello instead.",
   bobStatus: "Bob asks for a status update.",
+  bobSpeakers: "Bob adds a note and asks who is speaking.",
+  bobCallerToken: "Bob adds that the release should go out with Alice's release token.",
+  aliceConfirmsToken: "Alice confirms the release should go out with her release token.",
+  bobTeamChange: "Bob adds that the team-only change should go in too.",
+  sharedChange: "Alice asks for the shared change.",
+  sharedChangeAgain: "Alice asks for the shared change once more.",
+  actorForBob: "Alice says Bob's change is ready to ship for him.",
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
   deadline: "Alice adds that the note should mention the deadline.",
@@ -124,6 +131,32 @@ export function respond(request: MockModelRequest): MockModelResponse {
       text: allText.includes(SIGN_IN_DROPPED) ? REPLY.helloAfterAuthorization : REPLY.hello,
     }),
     [SAY.bobStatus]: () => ({ text: REPLY.bobStatus }),
+    [SAY.bobSpeakers]: () =>
+      run([call("speakers", "speakers")], () => `Speakers: ${outcome("speakers")}.`),
+    [SAY.bobCallerToken]: () =>
+      run(
+        [call("caller-token", "caller-token")],
+        () => `Caller token: ${outcome("caller-token")}.`,
+      ),
+    [SAY.aliceConfirmsToken]: () =>
+      run(
+        [call("caller-token-confirmed", "caller-token")],
+        () => `Caller token: ${outcome("caller-token-confirmed")}.`,
+      ),
+    [SAY.bobTeamChange]: () =>
+      run([call("team", "team-change")], () => `Team-only change: ${outcome("team")}.`),
+    [SAY.sharedChange]: () =>
+      run([call("shared", "shared-change")], () => `Shared change: ${outcome("shared")}.`),
+    [SAY.sharedChangeAgain]: () =>
+      run(
+        [call("shared-again", "shared-change")],
+        () => `Shared change: ${outcome("shared-again")}.`,
+      ),
+    [SAY.actorForBob]: () =>
+      run(
+        [call("actor", "actor-change", { actor: "bob" })],
+        () => `Bob's change: ${outcome("actor")}.`,
+      ),
     [SAY.spendBudget]: () => ({
       text: REPLY.summary,
       usage: { inputTokens: 1, outputTokens: 1_000_000 },

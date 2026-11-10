@@ -16,6 +16,7 @@ import {
   createScheduleCollectionClient,
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
+import { readSender } from "#context/sender.js";
 
 /** Binds a registered subscription to a scope authorized on every operation. */
 export async function schedules<TPayload, TPrepared = TPayload>(
@@ -44,6 +45,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
       auth: {
         current: context.get(AuthKey) ?? null,
         initiator: context.get(InitiatorAuthKey) ?? null,
+        sender: readSender(context, context.get(AuthKey) ?? null),
       },
     },
     channel: {

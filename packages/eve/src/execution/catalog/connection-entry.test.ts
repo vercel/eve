@@ -6,6 +6,7 @@ import { SessionKey, type SessionAuthContext } from "#context/keys.js";
 import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 import { resolveProvidedArguments } from "#runtime/connections/provided-arguments.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
+import { evaluateApproval, rememberDecision, type ApprovalMemory } from "#approval/evaluation.js";
 import { once } from "#tools/approval/policies.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -70,7 +71,9 @@ function setup(
       abortSignal: new AbortController().signal,
       callId: `call-${toolName}`,
       getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
-      session: {} as ApprovalContext["session"],
+      session: {
+        auth: { current: null, initiator: null, sender: null },
+      } as ApprovalContext["session"],
       toolName: `tracker__${toolName}`,
     };
     return contextStorage.run(new ContextContainer(), () =>
@@ -110,6 +113,103 @@ describe("connection approval context", () => {
     const perTool = once();
     const { request } = setup(undefined, perTool);
     expect(await request("delete_issue")).toBe(await perTool({} as ApprovalContext));
+  });
+});
+
+describe("a connection that acts as the caller, after someone else spoke", () => {
+  const user = (principalId: string): SessionAuthContext => ({
+    attributes: {},
+    authenticator: "test",
+    principalId,
+    principalType: "user",
+  });
+  const [alice, bob] = [user("alice"), user("bob")];
+  const userScoped = { getToken: async () => ({ token: "t" }), principalType: "user" } as const;
+
+  /** Decides one call to Alice's tracker the way the harness does, with `sender` last to speak. */
+  function decide(
+    connection: Partial<ResolvedConnectionDefinition>,
+    sender: SessionAuthContext,
+    memory?: ApprovalMemory,
+  ) {
+    const resolved = {
+      authorization: userScoped,
+      connectionName: "tracker",
+      description: "Issue tracker.",
+      logicalPath: "connections/tracker.ts",
+      protocol: "mcp",
+      sourceId: "tracker",
+      sourceKind: "module",
+      url: "https://tracker.example.com/mcp",
+      ...connection,
+    } as ResolvedConnectionDefinition;
+    const client: ConnectionClient = {
+      close: async () => {},
+      connect: async () => undefined,
+      executeTool: async () => {
+        throw new Error("Approval never runs the tool.");
+      },
+      getToolMetadata: async () => tools,
+    };
+    const registry: ConnectionRegistry = {
+      dispose: async () => {},
+      getClient: () => client,
+      getConnectionApproval: () => undefined,
+      getConnectionNames: () => ["tracker"],
+      getConnections: () => [resolved],
+    };
+    const approval = connectionEntry(registry, resolved, "list_issues").approval!;
+    const context: ApprovalContext = {
+      abortSignal: new AbortController().signal,
+      callId: "call-list",
+      getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
+      session: { auth: { current: alice, initiator: alice, sender } } as ApprovalContext["session"],
+      toolName: "tracker__list_issues",
+    };
+    return contextStorage.run(new ContextContainer(), () =>
+      evaluateApproval(resolveApprovalPolicy(approval), context, { memory }),
+    );
+  }
+
+  it("asks the caller, and only the caller can approve", async () => {
+    expect(await decide({}, bob)).toEqual({
+      awaitsPerson: true,
+      callerApproves: true,
+      denied: false,
+    });
+  });
+
+  it.each([
+    ["the caller spoke last", {}, alice],
+    [
+      "the connection uses the agent's own credentials",
+      { authorization: { ...userScoped, principalType: "app" as const } },
+      bob,
+    ],
+  ])("doesn't ask when %s", async (_, connection, sender) => {
+    expect(await decide(connection, sender)).toEqual({ denied: false });
+  });
+
+  it("still asks after a policy's own clearance, and keeps its denial", async () => {
+    expect(await decide({ approval: () => "approved" }, bob)).toMatchObject({ awaitsPerson: true });
+    expect(await decide({ approval: () => "denied" }, bob)).toMatchObject({ denied: true });
+  });
+
+  it("runs on a mismatch helper's remembered approval, cleared for the caller's token", async () => {
+    const approval = once({ when: "principal-mismatch" });
+    const asked = await decide({ approval }, bob);
+    const memory = {
+      pending: [],
+      remembered: rememberDecision(
+        {},
+        { interactionId: "approval-1", remember: asked.remember },
+        "accepted",
+      ),
+    };
+    expect(await decide({ approval }, bob, memory)).toMatchObject({
+      callerConfirmed: true,
+      denied: false,
+    });
   });
 });
 
@@ -190,7 +290,7 @@ describe("connection tool call", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: user("alice"), initiator: user("alice") },
+      auth: { current: user("alice"), initiator: user("alice"), sender: user("alice") },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });

@@ -35,6 +35,10 @@ export function normalizeApprovalStatus(value: unknown): NormalizedApprovalStatu
 
 export interface ApprovalDecision {
   readonly remember?: RememberRequest;
+  /** Only the caller can approve the request; anyone can deny it. */
+  readonly callerApproves?: true;
+  /** A mismatch helper cleared the call, so it gets the caller's token. */
+  readonly callerConfirmed?: true;
   readonly clearedBy?: ClearedBy;
   readonly denied: boolean;
   readonly awaitsPerson?: true;

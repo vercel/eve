@@ -120,7 +120,7 @@ function createSessionSandboxHarness() {
     async open(sessionId: string) {
       const context = new ContextContainer();
       context.set(SessionKey, {
-        auth: { current: null, initiator: null },
+        auth: { current: null, initiator: null, sender: null },
         sessionId,
         turn: { id: "turn_0", sequence: 0 },
       });

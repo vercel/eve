@@ -61,7 +61,7 @@ export function createSandboxEnvironmentHarness<
       kind: isToolSessionId(sandboxName) ? "tool-session" : "session",
       resolveProjectPath: (path) => resolve(appRoot, path),
       session: {
-        auth: { current: null, initiator: null },
+        auth: { current: null, initiator: null, sender: null },
         id: sandboxName,
         turn: { id: "test-turn", sequence: 0 },
       },

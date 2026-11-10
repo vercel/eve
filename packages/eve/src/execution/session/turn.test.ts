@@ -582,7 +582,7 @@ describe("SessionExecution checkpoints", () => {
 
   // #4923: another person's answer can resume a parked turn; the turn stays
   // its owner's, so only the owner's text steers it.
-  it("keeps a resumed turn's owner when someone else's answer resumes it", async () => {
+  it("lets another person's message interrupt generation in a turn someone else's answer resumed", async () => {
     const alice: SessionAuthContext = {
       attributes: {},
       authenticator: "test",
@@ -639,7 +639,7 @@ describe("SessionExecution checkpoints", () => {
         payloads: [{ answers: [{ interactionId: "limit-1", optionId: "continue" }] }],
       },
     });
-    expect(steered).toEqual([false, true]);
+    expect(steered).toEqual([true, true]);
   });
 
   it.each([
@@ -1662,7 +1662,7 @@ describe("SessionExecution checkpoints", () => {
     });
   });
 
-  it("keeps another principal's message out of a turn held on its task until the task reports", async () => {
+  it("lets another principal's message steer a turn held on its task", async () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -1750,10 +1750,9 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "park", settled: { output: "Here is the research." } });
 
-    // Alice's turn resumes only once her task reported, with no new delivery, so it keeps her auth.
-    expect(resumed).toEqual([{ input: undefined, reportedTaskIds: [created.taskId] }]);
-    // Bob's message waits for a turn of its own, which carries his auth.
-    expect(queue.takeNext()).toMatchObject({ delivery: bobsMessage, kind: "turn" });
+    // Bob's message interrupts the wait and joins Alice's turn, as hers would.
+    expect(resumed).toMatchObject([{ input: { delivery: bobsMessage } }]);
+    expect(queue.takeNext()).toBeUndefined();
   });
 
   it("cancels the tasks still working when a turn ends anyway, so none outlives it", async () => {

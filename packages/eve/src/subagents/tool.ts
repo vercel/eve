@@ -70,6 +70,8 @@ export function buildSubagentRunInput(input: {
   /** Parent's immutable conversation classification. */
   readonly inheritedConversation?: ConversationContext;
   readonly initiatorAuth: SessionAuthContext | null;
+  /** The delegating turn's latest sender, which the child's first turn inherits. */
+  readonly senderAuth?: SessionAuthContext | null;
   /**
    * Runtime graph used to detect whether this declared child selected the
    * dispatching parent's sandbox. Absence means no inheritance.
@@ -124,6 +126,7 @@ export function buildSubagentRunInput(input: {
     inheritedConversation,
     continuationToken: childContinuationToken,
     initiatorAuth,
+    ...(input.senderAuth !== undefined && { senderAuth: input.senderAuth }),
     input: {
       message: formatSubagentCallInputMessage({
         action,

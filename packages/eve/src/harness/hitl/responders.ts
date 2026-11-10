@@ -36,6 +36,8 @@ const UNAUTHENTICATED_FEEDBACK = "Authentication is required to respond to this 
 const INVALID_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const REQUESTER_ONLY_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
+const CALLER_ONLY_APPROVAL_FEEDBACK =
+  "Only the person who requested this action can approve it, because it runs as them.";
 const UNAVAILABLE_REASON =
   "The tool this approval was for is no longer available, so the call won't run.";
 const TEMPORARILY_UNAVAILABLE_REASON =
@@ -99,16 +101,23 @@ export function checkResponders(
       continue;
     }
     const gated = step.responseAuthRequiredRequestIds?.includes(request.interactionId) === true;
+    const requester = step.requester ?? null;
     if (!gated) {
       // An answer attributed to nobody stays nobody's; only an unattributed one is the caller's.
       const responder = auth !== undefined ? auth : currentResponder();
-      const requester = step.requester ?? null;
+      // A request about the caller's own identity takes anyone's Cancel, and only their Approve.
+      if (request.callerApproves === true && decision === "deny") {
+        if (responseId !== undefined) admit.push(responseId);
+        continue;
+      }
       if (requester !== null && responder === null) {
         refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
         continue;
       }
       if (requester !== null && responder !== null && !sameResponder(requester, responder)) {
-        refused.push({ reason: REQUESTER_ONLY_FEEDBACK, responseId });
+        const reason =
+          request.callerApproves === true ? CALLER_ONLY_APPROVAL_FEEDBACK : REQUESTER_ONLY_FEEDBACK;
+        refused.push({ reason, responseId });
         continue;
       }
       if (responseId !== undefined) admit.push(responseId);
@@ -120,6 +129,15 @@ export function checkResponders(
     const responder = auth !== undefined ? auth : buildCallbackContext().session.auth.current;
     if (responder === null) {
       refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
+      continue;
+    }
+    if (
+      request.callerApproves === true &&
+      decision === "approve" &&
+      requester !== null &&
+      !sameResponder(requester, responder)
+    ) {
+      refused.push({ reason: CALLER_ONLY_APPROVAL_FEEDBACK, responseId });
       continue;
     }
     weigh[responseId] = { expiresAt: now + RESPONSE_TTL_MS, responder };

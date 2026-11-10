@@ -68,7 +68,7 @@ const input = {
   entry: { entryPoint: "execute" as const },
   input: {},
   session: {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     id: "session-1",
     turn: { id: "turn-1", sequence: 0 },
   },

@@ -179,7 +179,7 @@ describe("OpenApiConnectionClient", () => {
     const ctx = new ContextContainer();
     ctx.set(AuthKey, null);
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
@@ -382,7 +382,7 @@ describe("OpenApiConnectionClient", () => {
     const ctx = new ContextContainer();
     ctx.set(AuthKey, current);
     ctx.set(SessionKey, {
-      auth: { current, initiator: current },
+      auth: { current, initiator: current, sender: current },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });

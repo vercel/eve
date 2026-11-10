@@ -22,6 +22,12 @@ const callContext: ScheduleBoundCallContext = {
         principalType: "user",
       },
       initiator: null,
+      sender: {
+        attributes: { secret: "not-persisted" },
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user",
+      },
     },
   },
 };
@@ -116,6 +122,7 @@ describe("schedule subscription client", () => {
         auth: {
           current: { ...callContext.session.auth.current!, principalId: "bob" },
           initiator: null,
+          sender: { ...callContext.session.auth.current!, principalId: "bob" },
         },
       },
     });

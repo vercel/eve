@@ -15,6 +15,7 @@
   "ApprovalStatus",
   "AutoApprovalOptions",
   "ConnectionToolAnnotations",
+  "MismatchApprovalOptions",
   "always",
   "auto",
   "never",

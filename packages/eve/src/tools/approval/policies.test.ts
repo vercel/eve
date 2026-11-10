@@ -4,6 +4,8 @@ const decide = vi.hoisted(() => vi.fn());
 vi.mock("#ai/decide.js", () => ({ decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
+import { evaluateApproval, rememberDecision } from "#approval/evaluation.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
 
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
@@ -12,7 +14,7 @@ function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalCont
     callId: "call-1",
     getSandbox: vi.fn(),
     session: {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     },
@@ -139,6 +141,72 @@ describe("dynamic tool approval helpers", () => {
     expect(() => {
       // @ts-expect-error once() remembers the tool, not a selected input scope.
       once({ key: (input: { environment: string }) => input.environment });
-    }).toThrow("once() does not accept options");
+    }).toThrow('once() accepts only { when: "principal-mismatch" }');
+  });
+});
+
+describe('approval helpers with { when: "principal-mismatch" }', () => {
+  const user = (principalId: string): SessionAuthContext => ({
+    attributes: {},
+    authenticator: "slack",
+    principalId,
+    principalType: "user",
+  });
+  const [alice, bob, carol] = [user("alice"), user("bob"), user("carol")];
+  const when = "principal-mismatch" as const;
+  const turn = (
+    current: SessionAuthContext,
+    sender: SessionAuthContext,
+    initiator: SessionAuthContext,
+  ) =>
+    approvalContext({
+      session: { ...approvalContext().session, auth: { current, initiator, sender } },
+    });
+
+  it.each([
+    ["always", always({ when })],
+    ["once", once({ when })],
+  ] as const)(
+    "%s doesn't ask while caller, sender, and initiator are one person",
+    async (_, policy) => {
+      expect(await evaluateApproval(policy, turn(alice, alice, alice))).toEqual({ denied: false });
+    },
+  );
+
+  it("always asks after someone else speaks, and only the caller can approve", async () => {
+    expect(await evaluateApproval(always({ when }), turn(alice, bob, alice))).toEqual({
+      awaitsPerson: true,
+      callerApproves: true,
+      denied: false,
+    });
+  });
+
+  it("once remembers the caller's approval for its combination and the one approving leads to", async () => {
+    const policy = once({ when });
+    // Carol started the session, Bob is the caller, and Alice spoke last.
+    const asked = await evaluateApproval(policy, turn(bob, alice, carol));
+    expect(asked).toMatchObject({ awaitsPerson: true, callerApproves: true });
+    const memory = {
+      pending: [],
+      remembered: rememberDecision(
+        {},
+        { interactionId: "approval-1", remember: asked.remember },
+        "accepted",
+      ),
+    };
+
+    // Alice steering Bob again, and Bob's next call once he is the sender, run on his approval
+    // and get his token.
+    for (const context of [turn(bob, alice, carol), turn(bob, bob, carol)]) {
+      expect(await evaluateApproval(policy, context, { memory })).toEqual({
+        callerConfirmed: true,
+        clearedBy: { policy: "approval" },
+        denied: false,
+      });
+    }
+    // Dave speaking is a new combination, so Bob is asked again.
+    expect(
+      await evaluateApproval(policy, turn(bob, user("dave"), carol), { memory }),
+    ).toMatchObject({ awaitsPerson: true });
   });
 });

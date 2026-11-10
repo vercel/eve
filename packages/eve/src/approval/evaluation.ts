@@ -13,6 +13,8 @@ export interface RememberedApproval {
 /** Where a request's settlement is remembered, with the state the policy attached. */
 export interface RememberRequest {
   readonly key: string;
+  /** Further keys the same decision is remembered under. */
+  readonly alsoKeys?: readonly string[];
   readonly state?: JsonValue;
 }
 
@@ -20,6 +22,12 @@ export interface RememberRequest {
 export interface ApprovalMemory {
   readonly remembered: Readonly<Record<string, RememberedApproval>>;
   readonly pending: readonly string[];
+}
+
+/** How a person is asked. */
+export interface AskOptions {
+  /** Only the caller can approve, because the call runs on their identity; anyone can deny. */
+  readonly callerApproves?: boolean;
 }
 
 const NO_MEMORY: ApprovalMemory = { pending: [], remembered: {} };
@@ -36,7 +44,15 @@ export interface ApprovalEvaluation {
     readonly pending: boolean;
   };
   /** Asks a person; their decision is remembered under `remember.key` when it settles. */
-  readonly ask: (remember: RememberRequest) => ApprovalStatus;
+  readonly ask: (remember?: RememberRequest, options?: AskOptions) => ApprovalStatus;
+  /**
+   * Clears the call for the caller's credentials, as a mismatch helper does from a remembered
+   * approval: the caller approved it, so their token is released even while someone else spoke
+   * last.
+   */
+  readonly confirmCaller: () => ApprovalStatus;
+  /** Whether a mismatch helper cleared the call for the caller during this evaluation. */
+  readonly callerConfirmed: () => boolean;
 }
 
 // Bundles may load eve's policies and the harness from separate copies of this module. The global
@@ -57,13 +73,31 @@ export async function evaluateApproval(
 ): Promise<ApprovalDecision> {
   const { memory = NO_MEMORY, recheck = false } = input;
   // Only the exact result `ask` issued remembers its settlement, not a discarded or copied one.
-  const asked = new WeakMap<object, RememberRequest>();
+  const asked = new WeakMap<
+    object,
+    { readonly remember?: RememberRequest; readonly callerApproves?: true }
+  >();
+  let confirmed = false;
   const scoped = (key: string) => JSON.stringify([context.toolName, key]);
   const evaluation: ApprovalEvaluation = Object.freeze({
-    ask: (remember: RememberRequest) => {
+    ask: (remember?: RememberRequest, options?: AskOptions) => {
       const status = Object.freeze({ type: "user-approval" as const });
-      asked.set(status, { ...remember, key: scoped(remember.key) });
+      asked.set(status, {
+        ...(remember !== undefined && {
+          remember: {
+            ...remember,
+            key: scoped(remember.key),
+            ...(remember.alsoKeys !== undefined && { alsoKeys: remember.alsoKeys.map(scoped) }),
+          },
+        }),
+        ...(options?.callerApproves === true && { callerApproves: true as const }),
+      });
       return status;
+    },
+    callerConfirmed: () => confirmed,
+    confirmCaller: () => {
+      confirmed = true;
+      return "approved" as const;
     },
     read: (key: string) => ({
       entry: memory.remembered[scoped(key)],
@@ -74,13 +108,15 @@ export async function evaluateApproval(
   const evaluated: EvaluatedContext = { ...context, [evaluationKey]: evaluation };
   const status = await policy(evaluated);
   const decision = approvalDecision(status);
-  if (decision.awaitsPerson !== true) return decision;
+  if (decision.awaitsPerson !== true) {
+    return confirmed && !decision.denied ? { ...decision, callerConfirmed: true } : decision;
+  }
   if (recheck) return { denied: false };
-  const remember = typeof status === "object" && status !== null ? asked.get(status) : undefined;
-  return remember === undefined ? decision : { ...decision, remember };
+  const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
+  return ask === undefined ? decision : { ...decision, ...ask };
 }
 
-/** Remembers a person's decision under the key its request named, replacing an earlier one. */
+/** Remembers a person's decision under the keys its request named, replacing earlier ones. */
 export function rememberDecision(
   remembered: Readonly<Record<string, RememberedApproval>>,
   request: { readonly interactionId: string; readonly remember?: RememberRequest },
@@ -88,14 +124,13 @@ export function rememberDecision(
 ): Readonly<Record<string, RememberedApproval>> {
   const { remember } = request;
   if (remember === undefined) return remembered;
-  return {
-    ...remembered,
-    [remember.key]: {
-      interactionId: request.interactionId,
-      outcome,
-      ...(remember.state !== undefined && { state: remember.state }),
-    },
+  const decision: RememberedApproval = {
+    interactionId: request.interactionId,
+    outcome,
+    ...(remember.state !== undefined && { state: remember.state }),
   };
+  const keys = [remember.key, ...(remember.alsoKeys ?? [])];
+  return { ...remembered, ...Object.fromEntries(keys.map((key) => [key, decision])) };
 }
 
 export function inheritApprovalContext<T extends ApprovalContext>(

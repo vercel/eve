@@ -61,6 +61,14 @@ export type { SessionPredecessor } from "#protocol/session-events/families/sessi
 export interface SessionAuth {
   readonly current: SessionAuthContext | null;
   readonly initiator: SessionAuthContext | null;
+  /**
+   * Who last sent a message into the turn. Equal to `current` until another
+   * person's message joins the turn; the caller's next message, or their
+   * answer to one of the turn's approvals, makes it `current` again. It
+   * changes only between model steps, so every call in one step sees the
+   * same value.
+   */
+  readonly sender: SessionAuthContext | null;
 }
 
 /**
@@ -86,6 +94,11 @@ export interface Session {
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
+/**
+ * The turn's latest sender, set only while they aren't its caller. Absent
+ * means the caller spoke last.
+ */
+export const SenderAuthKey = new ContextKey<SessionAuthContext | null>("eve.senderAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);

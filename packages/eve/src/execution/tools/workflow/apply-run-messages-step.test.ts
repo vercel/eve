@@ -25,7 +25,7 @@ it("records a dynamic remote child's opening binding for the parent's stream pro
     channel: { kind: "unknown", metadata: {} },
     memos: { "tenant-digest": "acme" },
     position: 3,
-    session: { auth: { current: null, initiator: null }, id: "parent" },
+    session: { auth: { current: null, initiator: null, sender: null }, id: "parent" },
   };
   await applyRunMessagesStep({
     messages: [

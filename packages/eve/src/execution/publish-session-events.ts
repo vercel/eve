@@ -65,6 +65,7 @@ import type { ControlSettlement } from "#harness/facts.js";
 import { endSession } from "#harness/session-machine/deliveries.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { readSender } from "#context/sender.js";
 
 const log = createLogger("execution.publish-session-events");
 
@@ -766,7 +767,11 @@ export async function publishTerminalSessionEvent(input: {
   // resets, or closes before its first message has no turn yet: `turn_0`.
   const auth = ctx.get(AuthKey) ?? null;
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },
+    auth: {
+      current: auth,
+      initiator: ctx.get(InitiatorAuthKey) ?? auth,
+      sender: readSender(ctx, auth),
+    },
     parent: ctx.get(ParentSessionKey),
     sessionId,
     turn: input.turn ?? { id: "turn_0", sequence: 0 },

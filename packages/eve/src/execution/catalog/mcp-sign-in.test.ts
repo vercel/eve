@@ -185,7 +185,9 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
         abortSignal: new AbortController().signal,
         callId: options.toolCallId,
         getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
-        session: {} as ApprovalContext["session"],
+        session: {
+          auth: { current: null, initiator: null, sender: null },
+        } as ApprovalContext["session"],
         toolInput: {},
         toolName: definition.name,
       };

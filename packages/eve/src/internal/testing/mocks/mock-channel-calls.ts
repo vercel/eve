@@ -37,7 +37,7 @@ export function stubSessionAccessor(): ContextAccessor {
 const sessionContext = (() => {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "test-session",
     turn: { id: "test-turn", sequence: 0 },
   });

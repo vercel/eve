@@ -37,6 +37,8 @@ export default defineTool({
 | `always()` | Require approval before every call.                                          |
 | `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
 
+`once()` and `always()` also take `{ when: "principal-mismatch" }` to ask only when someone other than the caller is involved in a shared session. See [Ask when someone else is involved](#ask-when-someone-else-is-involved).
+
 Rules:
 
 - A call that waits for approval hasn't started, and a denied call never runs.
@@ -198,9 +200,74 @@ eve remembers only prompts that `once()`'s own status asked for. It remembers no
 
 A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions.
 
+### Ask when someone else is involved
+
+In a [shared session](/docs/concepts/security-model#shared-sessions), pass `{ when: "principal-mismatch" }` to `always()` or `once()`. They then ask only while the turn's caller, the person who spoke last, and the person who started the session aren't all one person. In a session with one person, they never ask.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { once } from "eve/tools/approval";
+
+export default defineAgent({
+  approval: once({ when: "principal-mismatch" }), // one line covers every tool
+});
+```
+
+| Helper                                   | When Bob speaks in Alice's turn                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `always({ when: "principal-mismatch" })` | Asks Alice before each call, until her approval or next message makes her the last to speak. |
+| `once({ when: "principal-mismatch" })`   | Asks Alice once for Bob speaking. Her approval covers Bob speaking again, but not Carol.     |
+
+- Only the caller can approve, because the call runs as them. Anyone can cancel. A tool's `response` policy still applies.
+- Both also ask when the caller didn't start the session. `always()` then asks on every call, and `once()` asks once.
+- A call they clear gets the caller's token, even while someone else spoke last. Without one, eve asks before a connection that acts as the caller, and refuses `ctx.getToken()` for a user-scoped provider until the caller replies.
+- Wrap them in your own policy as you would `once()`: pass the context through and return their status unchanged.
+
+Use these on the agent for multiplayer channels such as Slack threads and GitHub issues, so the caller gets an approval prompt instead of a refused call.
+
+### Act for the person who asked
+
+In a shared session, the caller isn't always the person whose request a call carries out. Give a tool that acts as a person an `actor` input, and ask the person it names:
+
+```ts title="agent/tools/gh.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineTool } from "eve/tools";
+import { once } from "eve/tools/approval";
+import { z } from "zod";
+
+const github = connect("github/my-agent"); // a user-scoped provider
+const onMismatch = once({ when: "principal-mismatch" });
+
+export default defineTool({
+  description:
+    "Run one gh command. Set actor to the id of the person whose request it carries out.",
+  inputSchema: z.object({ command: z.string(), actor: z.string() }),
+  approval: {
+    // For the caller, ask only when someone else is involved. For anyone else, always ask.
+    request: (ctx) =>
+      ctx.toolInput?.actor === ctx.session.auth.current?.principalId
+        ? onMismatch(ctx)
+        : "user-approval",
+    response: ({ request, response }) => {
+      if (response.decision === "deny") return { status: "allowed" };
+      return response.principal.principalId === request.toolInput?.actor
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "Only the person this command is for can approve it." };
+    },
+  },
+  async execute({ command }, ctx) {
+    // The approver is the actor. Without an approval, the actor is the caller.
+    const { token } = await (ctx.approval?.responder ?? ctx).getToken(github);
+    return runGh(command, token);
+  },
+});
+```
+
+The `actor` field is in the schema from the first turn, so the prompt cache is unaffected. The model still decides whom to name, so this makes acting for the wrong person less likely without ruling it out.
+
 ### Authorizing approval responses
 
-By default, only the person whose turn requested a call can approve or cancel it.
+By default, only the person whose turn requested a call can approve or cancel it. A [mismatch approval](#ask-when-someone-else-is-involved) also takes anyone's Cancel.
 
 Define a `response` policy to change who can answer, such as a list of designated approvers. The policy replaces the default entirely, so return `{ status: "allowed" }` to accept any responder:
 
@@ -398,7 +465,7 @@ For approvals, a follow-up message that matches no option steers the turn, even 
 
 - eve withdraws every unanswered approval. The request ends as `withdrawn`, its call ends as `rejected` without running, and the model reads the message next.
 - Approvals that already have an answer use that answer, so approved calls still run.
-- A message from anyone other than the person the turn serves waits until the turn ends.
+- A message from anyone other than the person the turn serves waits until the approvals end, then joins the turn.
 
 ### Request kinds
 

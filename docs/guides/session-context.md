@@ -45,10 +45,11 @@ Public fields include:
 - `turn.sequence`: the turn's position in the session.
 - `auth.current`: the caller for the active inbound turn.
 - `auth.initiator`: the caller that started the session.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn.
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
 - `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) to read its earlier conversation.
 
-Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Sessions that a top-level schedule starts use eve's app identity (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
+Unprotected agents expose `auth.current`, `auth.initiator`, and `auth.sender` as `null`. Sessions that a top-level schedule starts use eve's app identity (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
 
 ## `ctx.getSandbox()`
 

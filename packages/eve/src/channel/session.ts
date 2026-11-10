@@ -36,6 +36,7 @@ import type { JsonObject } from "#shared/json.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { readSender } from "#context/sender.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session extends SessionReader {
@@ -294,6 +295,7 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
         return {
           current: accessor.get(AuthKey) ?? null,
           initiator: accessor.get(InitiatorAuthKey) ?? null,
+          sender: readSender(accessor, accessor.get(AuthKey) ?? null),
         };
       },
     },

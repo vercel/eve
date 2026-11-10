@@ -1,6 +1,6 @@
 ---
 issue: "None (maintainer proposal)"
-status: proposed
+status: implemented
 last_updated: "2026-11-10"
 ---
 
@@ -54,8 +54,9 @@ interface SessionAuth {
   readonly initiator: SessionAuthContext | null; // who started the session
   readonly current: SessionAuthContext | null; // the turn's caller
   /**
-   * Who last sent a message into the turn or answered one of its approvals.
-   * Equal to `current` until another person's message joins the turn.
+   * Who last sent a message into the turn. Equal to `current` until another
+   * person's message joins the turn; the caller's next message or approval
+   * answer makes it `current` again.
    */
   readonly sender: SessionAuthContext | null;
 }
@@ -100,7 +101,10 @@ member is a minor change under the stability policy.
 
 The caller is the last to speak while `auth.sender` is the caller: from the start of their turn
 until someone else's message joins it. Sending a message, or answering one of the turn's
-approvals, makes them the last to speak again.
+approvals, makes them the last to speak again. Another person's answer to an approval doesn't
+make them the last to speak: it settles a request the model made for the caller and puts no
+words in front of the model. So an approved call that reads both the caller's token and the
+approver's, such as a grant on the caller's behalf, keeps working.
 
 ### Mismatch approvals
 
@@ -153,7 +157,7 @@ for a sign-in. While the caller isn't the last to speak, `ctx.getToken()` for a 
 provider fails with `ConnectionAuthorizationFailedError`,
 `reason: "caller_confirmation_required"`, `retryable: false`. It reaches the model as a failed
 tool result, like other authorization failures, and nothing pauses: no approval is opened. The
-message tells the model who spoke since, and that it must ask the caller to clearly confirm the
+message tells the model that another person spoke since, and that it must ask the caller to clearly confirm the
 action before retrying. eve unlocks the token on any later message from the caller, because
 rule 3 tracks who spoke last, not what they said, so the message leaves the judgment to the
 model: only a reply that plainly confirms this action counts. A reply such as "lol", one about
@@ -201,6 +205,8 @@ A session with one person never reaches any of this.
   these.
 - A turn's first calls. The caller started the turn, so they are the last to speak. This is
   the incident, and the practice below is what narrows it.
+- Listing a `forwardPrincipal` connection's tools. Listing still forwards the caller's identity
+  after someone else spoke; only calls ask first.
 
 ### Paused turns
 
@@ -220,8 +226,8 @@ change and the remote agent never needs to know who spoke.
 ### Stream and traces
 
 `delivery.admitted` already records each message's sender. A confirmation is an approval
-request on the stream, a refusal is a failed call, and traces record the latest sender on each tool call beside the turn's
-caller.
+request on the stream, and a refusal is a failed call whose trace records
+`agent.connection.authorization.reason: "caller_confirmation_required"`.
 
 ## Recommended practice: name the actor
 
@@ -344,6 +350,8 @@ completes.
 - Letting another person's message steer a turn that is paused on an approval or sign-in.
   Rule 3 pauses turns more often, so this is the first follow-up.
 - Covering tools that use no credentials by default.
+- Recording the latest sender on each tool call's trace beside the turn's caller. The stream
+  doesn't carry the sender per call yet.
 - Adopting `actor` in the git extension's `gh` tool. It needs an identifier the model sees on
   every channel, has to combine with the tool's existing input-based approval, and resolves
   its token per request, so a refusal can come mid-command.

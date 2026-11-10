@@ -397,7 +397,7 @@ function toolsContext(): MemoryToolsContext {
     channel: { kind: "http", metadata: {} },
     memory: operationContext().memory,
     session: {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       id: "session-1",
     },
   };
@@ -416,7 +416,7 @@ function operationContext() {
     messages: [],
     operationId: "memop-1",
     session: {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 1 },
     },

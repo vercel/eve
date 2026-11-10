@@ -152,6 +152,8 @@ export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
     clearedBy: clearedBySchema.optional(),
+    /** The caller confirmed the call, so its run gets their token after someone else spoke. */
+    callerConfirmed: z.literal(true).optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,

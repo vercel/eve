@@ -65,7 +65,7 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** Who alone steers the turn: its principal, or its delegated caller. */
+  /** The turn's principal, who alone steers it while it's held, and its delegated caller. */
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
@@ -125,6 +125,11 @@ export class ActiveTurn {
     this.unsubscribeDelivery();
   }
 
+  /** A child's prompt waits on this turn's person, so the turn is held on it. */
+  private get relaysPrompt(): boolean {
+    return this.input.cursor.sessionState.hasProxyInputRequests;
+  }
+
   get steeringSignal(): AbortSignal {
     return this.steeringController.signal;
   }
@@ -152,7 +157,10 @@ export class ActiveTurn {
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, {
+        ...options,
+        held: this.relaysPrompt,
+      });
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
@@ -167,6 +175,15 @@ export class ActiveTurn {
     const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
     if (delivery.caller !== undefined) this.caller = delivery.caller;
     return delivery;
+  }
+
+  /**
+   * A pause just ended. Messages from other people that waited behind it steer
+   * the turn now, so the step that reads the answer stops before the model runs
+   * and the next step reads them.
+   */
+  steerWithWaitingMessages(): void {
+    if (this.input.queue.hasSteering(this.admitted, this.identity)) this.steeringController.abort();
   }
 
   /**
@@ -257,8 +274,8 @@ export class ActiveTurn {
       }
       this.admitted.delete(sequence);
       // Someone else's answers settle the paused turn's request, but the rest of their
-      // delivery waits for the turn to end, as their messages do.
-      const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
+      // delivery waits for the pause to end, as their messages do.
+      const split = isSteeringDelivery(delivery, this.identity, { held: true, heldOnPerson: true })
         ? undefined
         : splitAnswers(delivery);
       this.input.queue.replaceDelivery(sequence, split?.rest);
@@ -359,7 +376,8 @@ export class ActiveTurn {
         this.admitted.delete(sequence);
         continue;
       }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
+      if (isSteeringMessage(routed.remainder, this.identity, { held: this.relaysPrompt }))
+        steered = true;
     }
     return steered;
   }

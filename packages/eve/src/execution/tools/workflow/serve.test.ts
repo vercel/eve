@@ -78,6 +78,12 @@ function alice(role: string): SessionAuth {
       principalType: "user",
     },
     initiator: null,
+    sender: {
+      attributes: { role },
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    },
   };
 }
 

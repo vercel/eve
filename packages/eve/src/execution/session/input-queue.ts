@@ -188,6 +188,7 @@ export class SessionInputQueue {
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
         isSteeringDelivery(entry.delivery, turn, {
+          held: options?.held === true || options?.heldSince !== undefined,
           heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
         }),
     );
@@ -199,6 +200,16 @@ export class SessionInputQueue {
       kind: "turn",
       sequences: steering.map(({ sequence }) => sequence),
     };
+  }
+
+  /** Whether an admitted delivery would steer the running turn once it isn't held. */
+  hasSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): boolean {
+    return this.entries.some(
+      (entry) =>
+        entry.kind === "delivery" &&
+        admitted.has(entry.sequence) &&
+        isSteeringDelivery(entry.delivery, turn),
+    );
   }
 
   /**
@@ -274,6 +285,8 @@ export interface SteeringTurn {
 }
 
 export interface SteeringOptions {
+  /** The turn waits on a question, such as a child's prompt it relays, so only its person steers. */
+  readonly held?: boolean;
   /**
    * The turn waits on its own person for a sign-in or approval, held since
    * this admission sequence. Their later messages steer even with
@@ -285,27 +298,35 @@ export interface SteeringOptions {
 }
 
 /**
- * Only the turn's own principal steers it; another principal's message waits
- * for the turn to end. A delivery without auth acts as the session's current
- * identity, which is the turn's. `heldOnPerson` lets a queued message steer a
- * turn that waits on its person.
+ * Anyone the channel admits steers a running turn; their message changes what
+ * the model reads, never who the caller is. While the turn is `held` on an
+ * approval, sign-in, or question, only its own principal steers it, and anyone
+ * else's message waits for the pause to end. A delivery without auth acts as
+ * the session's current identity, which is the turn's. `heldOnPerson` lets a
+ * queued message steer a turn that waits on its person.
  */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
-  options?: { readonly heldOnPerson?: boolean },
+  options?: { readonly held?: boolean; readonly heldOnPerson?: boolean },
 ): boolean {
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
-    (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
+    (options?.held !== true ||
+      delivery.auth === undefined ||
+      principalOf(delivery.auth) === turn.principal)
   );
 }
 
 /** A steering delivery with a message for the model, not only answers to requests. */
-export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
+export function isSteeringMessage(
+  delivery: DeliverHookPayload,
+  turn: SteeringTurn,
+  options?: { readonly held?: boolean },
+): boolean {
   return (
-    isSteeringDelivery(delivery, turn) &&
+    isSteeringDelivery(delivery, turn, options) &&
     delivery.payloads.some(
       (payload) => payload.message !== undefined && payload.answers === undefined,
     )

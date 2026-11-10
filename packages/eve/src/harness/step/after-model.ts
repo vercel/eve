@@ -1,3 +1,4 @@
+import { taskClearance } from "#harness/clearance.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
@@ -136,7 +137,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       messages: answerCallsThatWontRun(responseMessages, result),
       tasks: dispatched.workflowRequests.map((task) => ({
         ...task,
-        clearedBy: result.policyApprovals?.[task.callId]?.clearedBy,
+        ...taskClearance(result.policyApprovals?.[task.callId]),
       })),
     };
     if (approvalRequests.length > 0) {

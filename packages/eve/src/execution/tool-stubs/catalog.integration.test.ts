@@ -88,7 +88,7 @@ describe("tool stubs through eve__tool", () => {
           ],
         });
         ctx.set(SessionKey, {
-          auth: { current: null, initiator: null },
+          auth: { current: null, initiator: null, sender: null },
           sessionId: run.runId,
           turn: { id: "turn-0", sequence: 0 },
         });

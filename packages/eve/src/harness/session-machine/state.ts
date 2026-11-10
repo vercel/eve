@@ -24,6 +24,8 @@ export interface StepCoordinates {
 /** A call that needs a person's approval, and what they're asked. */
 export interface ApprovalAsk {
   readonly remember?: RememberRequest;
+  /** Only the caller can approve; anyone can deny. */
+  readonly callerApproves?: true;
   readonly interactionId: string;
   readonly call: {
     readonly callId: string;

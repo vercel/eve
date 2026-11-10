@@ -24,7 +24,7 @@ it.each([
   const execute = vi.fn(() => "saved");
   const ctx = new ContextContainer();
   ctx.set(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "session-1",
     turn: { id: "turn_0", sequence: 0 },
   });
@@ -81,7 +81,7 @@ it.each([null, "allow", { type: "approved", reason: 123 }])(
     const execute = vi.fn();
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn_0", sequence: 0 },
     });
@@ -126,7 +126,7 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   };
   const ctx = new ContextContainer();
   ctx.set(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "session-1",
     turn: { id: "turn_0", sequence: 0 },
   });

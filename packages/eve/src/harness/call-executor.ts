@@ -1,4 +1,9 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
+import {
+  approvedByCaller,
+  withCallerConfirmation,
+} from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -73,6 +78,8 @@ export interface ToolSignIn {
 /** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
   readonly remember?: RememberRequest;
+  /** Only the caller can approve the call's request; anyone can deny it. */
+  readonly callerApproves?: true;
   /** What cleared a call the runtime runs outside the step, such as a workflow tool's. */
   readonly clearance?: Clearance;
   readonly settled: readonly CallResult[];
@@ -158,7 +165,7 @@ export async function executeToolCall(
       recheck: approval === "recheck",
     });
     if (decision.awaitsPerson === true)
-      return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
+      return { ...askedBy(decision), awaitsApproval: true, settled, toolResults };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
@@ -170,7 +177,7 @@ export async function executeToolCall(
     // A call a person approved runs on their acceptance; the recheck only confirms it still may.
     const clearance =
       (approval === "recheck" && input.view !== undefined
-        ? approvedClearance(input.view().projection.view, callId)
+        ? approvedClearance(input.view().projection.view, callId, approvedByCaller(input.responder))
         : undefined) ?? decision.clearance;
     if (clearance === undefined) throw new Error(`Call "${callId}" has no clearance to run.`);
     let output: unknown;
@@ -194,38 +201,43 @@ export async function executeToolCall(
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
-          // Usage the tool records belongs to its call, including while a streaming tool iterates.
-          await withUsageCall(callId, async () => {
-            const executed = invokeTool(
-              definition,
-              args,
-              {
-                ...(input.responder !== undefined && { approval: { responder: input.responder } }),
-                abortSignal: input.abortSignal,
-                messages: [...input.messages],
-                toolCallId: callId,
-              },
-              clearance,
-            );
-            // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-            // waiting, and whatever the tool returns later is dropped.
-            const abandon = approval === "evaluate" ? input.abortSignal : undefined;
-            if (isAsyncIterable(executed)) {
-              for await (const partial of untilAborted(executed, abandon)) {
-                output = partial;
-                const visible = withoutSignInSecrets(partial);
-                await input.publish(
-                  callProgress(
-                    callId,
-                    visible,
-                    projectToolLabel(definition, "delta", args, visible),
-                  ),
-                );
+          // Usage the tool records belongs to its call, including while a streaming tool iterates,
+          // and so does the caller's confirmation.
+          await withCallerConfirmation(clearance.callerConfirmed === true, () =>
+            withUsageCall(callId, async () => {
+              const executed = invokeTool(
+                definition,
+                args,
+                {
+                  ...(input.responder !== undefined && {
+                    approval: { responder: input.responder },
+                  }),
+                  abortSignal: input.abortSignal,
+                  messages: [...input.messages],
+                  toolCallId: callId,
+                },
+                clearance,
+              );
+              // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
+              // waiting, and whatever the tool returns later is dropped.
+              const abandon = approval === "evaluate" ? input.abortSignal : undefined;
+              if (isAsyncIterable(executed)) {
+                for await (const partial of untilAborted(executed, abandon)) {
+                  output = partial;
+                  const visible = withoutSignInSecrets(partial);
+                  await input.publish(
+                    callProgress(
+                      callId,
+                      visible,
+                      projectToolLabel(definition, "delta", args, visible),
+                    ),
+                  );
+                }
+              } else {
+                output = await raceAbort(Promise.resolve(executed), abandon);
               }
-            } else {
-              output = await raceAbort(Promise.resolve(executed), abandon);
-            }
-          });
+            }),
+          );
         } finally {
           executionMs = performance.now() - startedAt;
         }
@@ -507,7 +519,11 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? { ...approvalRequest(call, definition), remember: executed.remember }
+              ? {
+                  ...approvalRequest(call, definition),
+                  remember: executed.remember,
+                  ...(executed.callerApproves && { callerApproves: true as const }),
+                }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -555,7 +571,7 @@ async function decideDeferredCall(
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
+    return { ...askedBy(decision), awaitsApproval: true, settled: [], toolResults: [] };
   if (!decision.denied)
     return {
       settled: [],
@@ -650,4 +666,12 @@ function authoredApprovalPrompt(
     throw new Error(`Tool "${call.toolName}" approval prompt must return a string.`);
   }
   return prompt;
+}
+
+/** How a call waiting on a person asks: what to remember, and who may approve. */
+function askedBy(decision: ApprovalDecision): Pick<CallOutcome, "callerApproves" | "remember"> {
+  return {
+    remember: decision.remember,
+    ...(decision.callerApproves && { callerApproves: true }),
+  };
 }

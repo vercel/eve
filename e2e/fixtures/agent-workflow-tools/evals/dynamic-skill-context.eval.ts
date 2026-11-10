@@ -106,6 +106,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
             auth: {
               current: expectedAuth(actor),
               initiator: expectedAuth("alice"),
+              sender: expectedAuth(actor),
             },
             predecessor: null,
             // The parent agent's skill runs in the root session, which has no parent.
