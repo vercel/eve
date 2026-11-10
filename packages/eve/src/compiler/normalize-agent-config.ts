@@ -225,15 +225,13 @@ async function normalizeAuthoredModelReference(input: {
   if (typeof input.value === "string") {
     const routing = classifyModelRouting(input.value, input.providerOptions);
     rejectGatewayPromptCache(input, routing);
-    return await withCompiledRuntimeModelLimits(
-      {
-        id: formatLanguageModelGatewayId(input.value),
-        ...(input.promptCache === undefined ? {} : { promptCache: input.promptCache }),
-        providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing,
-      },
-      input,
-    );
+    const reference: CompiledRuntimeModelReference = {
+      id: formatLanguageModelGatewayId(input.value),
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing,
+    };
+    if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    return await withCompiledRuntimeModelLimits(reference, input);
   }
 
   const source = input.source;

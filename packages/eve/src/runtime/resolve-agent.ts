@@ -305,7 +305,7 @@ function createResolvedAgentConfig(
         ? {
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
-            ...(model.promptCache === undefined ? {} : { promptCache: model.promptCache }),
+            promptCache: model.promptCache,
             providerOptions: model.providerOptions,
           }
         : {
