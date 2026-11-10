@@ -133,7 +133,7 @@ Vercel Schedules is in beta and must be enabled for your Vercel team.
 
 When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, each agent builds as a Vercel service, and Vercel attaches each schedule to the service that built it. These schedule names start with the agent's name, so the agents in one project never share a name.
 
-When you run `vercel build` locally, use a Vercel CLI release that accepts schedules from a service's build output. Older releases fail the build for `withEve` projects, and releases before 62.7.0 drop schedules from the output without an error.
+When you run `vercel build` locally, use Vercel CLI 65.14.0 or later. Older releases fail the build for `withEve` projects, and releases before 62.7.0 drop schedules from the output without an error.
 
 Find run history and per-run logs under **Observability → Logs**.
 
