@@ -88,8 +88,13 @@ token. The helpers bring it, and the initiator, to tools that use no credentials
 
 Another person's message joins the running turn at the same points a caller's own message does
 today. `auth.current`, the turn's memory scope, its hooks, and its dynamic functions stay the
-caller's. `auth.sender` changes when the model step that reads the message starts, so every
-call the model makes in one step sees the same value.
+caller's. `auth.sender` changes only between model steps: when the step that reads a message
+starts, or the step after an approval is answered. Every call the model makes in one step sees
+the same value, and an approval of one call doesn't change what its siblings see.
+
+`sender` is always set. eve fills it wherever it builds `ctx.session.auth`, so code never falls
+back to `current`. `SessionAuth` is passed into authored code, never taken from it, so a new
+member is a minor change under the stability policy.
 
 ### The last to speak
 
@@ -108,11 +113,22 @@ initiator are one person, which is every call in a session with one person. Othe
 | Caller isn't the initiator | Alice's turn in a session Bob started | Asks Alice on every call                  | Asks Alice once                         |
 
 - Only the caller can approve, because the call runs on their identity. Anyone can deny. A
-  tool's own `response` policy still applies.
+  tool's own `response` policy still applies. Today, without a `response` policy, only the
+  requester can answer at all, so letting anyone deny is new for these requests.
 - `once` remembers for the tool and for that combination of caller, sender, and initiator,
   until the session ends. Bob's approval after Alice steers covers Alice steering Bob again. It
-  doesn't cover Carol.
-- Principals that are absent or anonymous on all three sides are the same person.
+  doesn't cover Carol. Approving makes Bob the sender, so the approval also covers the same
+  combination with Bob as sender: he approved with more people involved. Without that, in a
+  session Carol started, Bob would be asked again on the very next call.
+- The `always` cell for a sender mismatch assumes the caller started the session. Otherwise
+  the caller-isn't-initiator row also holds, and `always` asks on every call.
+- Principals are compared by identity, as steering compares them today: unauthenticated and
+  anonymous principals are one person, and an anonymous person steering an authenticated
+  caller's turn is a mismatch.
+- A delivery without `auth` isn't another person. As today, it acts as the turn's identity and
+  leaves `auth.sender` unchanged. Rule 3 can tell apart only the people a channel identifies,
+  so a channel that admits several people must set `auth`. A server-side `send()` without
+  `auth` is the author speaking as the session.
 
 A request policy can't say who may answer today: only `approval.response` can. eve's helpers
 already tell the harness what to remember through a channel private to them
@@ -126,10 +142,11 @@ resolved while it runs.
 
 **Connection tools.** eve knows a connection is user-scoped before its tools run. While the
 caller isn't the last to speak, eve asks the caller before each call, as
-`always({ when: "principal-mismatch" })` does for the caller and sender. It joins the
-connection's and the agent's `approval` in the step catalog, where those already join
-(`execution/catalog/connection-entry.ts`). Approving makes the caller the last to speak, so
-later calls run until another message joins.
+`always({ when: "principal-mismatch" })` does for the caller and sender. eve applies it after
+the connection's and the agent's `approval` are evaluated, not as one more policy in their
+strictest-wins join (`approval/agent.ts`), where an ask would outrank any clearance. A denial
+stays a denial, and any other result becomes an ask unless a mismatch helper cleared the call.
+Approving makes the caller the last to speak, so later calls run until another message joins.
 
 **Authored tools.** A tool resolves its provider inside `execute`, where a call can stop only
 for a sign-in. While the caller isn't the last to speak, `ctx.getToken()` for a user-scoped
@@ -139,8 +156,14 @@ the caller can confirm by replying. A tool that wants a prompt sets a mismatch h
 `approval`.
 
 A mismatch helper on the tool, the connection, or the agent replaces the default for the calls
-it covers. A call it cleared, by asking or from `once`'s memory, gets the caller's token. So
-one line in `agent.ts` chooses how the whole agent asks:
+it clears, including when an author's own policy calls it. The helper's own evaluation signals
+the clearance through the private evaluation channel. Any other `"approved"`, such as from
+`auto()` or a custom policy, still gets the default: only the caller's approval releases their
+token. A call a helper cleared, by asking or from `once`'s memory, gets the caller's token,
+even while `auth.sender` is still someone else. A
+sibling call in the same step that wasn't cleared is still refused, and the model can retry it
+in the next step, once the caller's approval has made them the last to speak. So one line in
+`agent.ts` chooses how the whole agent asks:
 
 ```ts
 export default defineAgent({
@@ -168,8 +191,11 @@ where today they wait for the turn to end.
 ### Delegation
 
 Handing the caller to another agent uses their identity. A local subagent's session inherits
-whether its caller is the last to speak. A `forwardPrincipal` connection and a remote agent
-that forwards the principal ask the caller first, like a connection tool.
+the parent's `auth.sender` with its caller and initiator, so a subagent called after someone
+else spoke can't hand out the caller's token unasked. A `forwardPrincipal` connection and a
+remote agent that forwards the principal ask the caller first, like a user-scoped connection
+tool. The parent asks before anything is sent, so the forwarded-principal format doesn't
+change and the remote agent never needs to know who spoke.
 
 ### Stream and traces
 
@@ -219,8 +245,8 @@ export default defineTool({
 ```
 
 The field is the author's, it is in the schema from the first turn, and it never changes, so
-the prompt cache is unaffected. eve documents the pattern, and the git extension's `gh` tool
-adopts it.
+the prompt cache is unaffected. eve documents the pattern. The git extension's `gh` tool adopts
+it in a follow-up: rule 3 already guards its token.
 
 In the incident, the model would most likely have named Bob. Bob is asked, and the pull request
 opens as Bob. If it names Alice, the call runs as Alice.
@@ -269,7 +295,8 @@ default. They use the approval helpers, or read `auth.sender` in their own polic
 ## Compatibility and validation
 
 - **Steering.** Another person's message now joins the running turn on every channel.
-  `turnPolicy: "queue"` is the way to make messages wait.
+  `turnPolicy: "queue"` is the way to make messages wait. Steering and rule 3 ship in the same
+  release: steering alone would let other people's words spend the caller's credentials.
 - **Confirmation.** In a turn someone else has joined, a user-scoped connection tool asks the
   caller, and an authored tool's `ctx.getToken()` for a user-scoped provider is refused unless
   a mismatch helper covers the call. Sessions with one person don't change.
@@ -285,16 +312,20 @@ user-scoped connection call asks Alice once, refuses Bob's answer, and the calls
 an authored tool's token is refused with `caller_confirmation_required` until Alice replies; a
 tool reads Bob as `auth.sender`; `always({ when })` asks Alice after Bob speaks and refuses Bob's
 approval; `once({ when })` asks Alice once in a session Bob started; a session with one person
-is never asked; a `gh` tool with an
-`actor` field asks Bob in Alice's turn and runs with Bob's token. The existing
-`other-person-message-waits` eval changes: Bob's message joins Alice's turn once her approval
-settles.
+is never asked; a local subagent called after Bob speaks is refused Alice's token; a fixture
+tool with an `actor` field asks Bob in Alice's turn and runs with Bob's token. Existing evals
+change: in `other-person-message-waits`, Bob's message joins Alice's turn once her approval
+settles, and in `authorization-principal-after-other-speaker`, it joins once her sign-in
+completes.
 
 ## Out of scope
 
 - Letting another person's message steer a turn that is paused on an approval or sign-in.
   Rule 3 pauses turns more often, so this is the first follow-up.
 - Covering tools that use no credentials by default.
+- Adopting `actor` in the git extension's `gh` tool. It needs an identifier the model sees on
+  every channel, has to combine with the tool's existing input-based approval, and resolves
+  its token per request, so a refusal can come mid-command.
 - Whether plain `once()` should remember for each caller. Today it remembers for the tool, so
   Bob's approval covers Alice's later calls in the same session.
 - Whether the default should also ask when the caller isn't the initiator. As drafted it
