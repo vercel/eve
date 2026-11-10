@@ -145,7 +145,7 @@ export function createVercelSandbox(
         });
       }
     },
-    async resume(context, artifact, stateValue) {
+    async resume(_context, artifact, stateValue) {
       requirePreparedVercelTemplate(artifact);
       const state = requireVercelSessionState(stateValue);
       const sandboxModule = await loadSandboxModule();
@@ -163,7 +163,7 @@ export function createVercelSandbox(
         await ensureVercelSandboxBaseRuntime(sandbox);
       } catch (error) {
         // A stopped sandbox whose snapshot expired lost its filesystem; `start()` replaces it.
-        if (snapshotExpired(context)(error)) {
+        if (isVercelSnapshotNotFoundError(error)) {
           throw new SandboxSessionGoneError(
             `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
           );
@@ -216,7 +216,7 @@ export function createVercelSandbox(
     };
     try {
       const session = await ensureUsableSession({
-        expired: snapshotExpired(context),
+        expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         inheritsBaseRuntime:
           artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,
         input: ensureSessionInput,
@@ -246,13 +246,6 @@ export function createVercelSandbox(
  */
 function vercelSessionName(sessionId: string): string {
   return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;
-}
-
-// Only an expired snapshot gives a tool session a fresh sandbox.
-function snapshotExpired(context: SandboxSessionContext): (error: unknown) => boolean {
-  return context.kind === "tool-session"
-    ? isVercelSnapshotNotFoundError
-    : isVercelSnapshotUnavailableError;
 }
 
 function vercelIdentityOptions(options: object | undefined): object | undefined {

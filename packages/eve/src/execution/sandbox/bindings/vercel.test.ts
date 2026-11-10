@@ -322,6 +322,13 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  // What the Sandbox API answers a resume whose snapshot expired or was deleted.
+  const snapshotNotFound = () =>
+    Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
+      json: { error: { code: "snapshot_not_found" } },
+      response: { status: 410 },
+    });
+
   it("creates a session from the prepared snapshot artifact without looking up the template sandbox", async () => {
     const sessionSandbox = createMockSandbox({ name: "session-key" });
     const sandboxModule = {
@@ -955,12 +962,6 @@ describe("createVercelSandbox", () => {
 
   describe("tool sessions", () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
-    // What the Sandbox API answers a resume whose snapshot expired or was deleted.
-    const snapshotNotFound = () =>
-      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
-        json: { error: { code: "snapshot_not_found" } },
-        response: { status: 410 },
-      });
     const nameTaken = () =>
       Object.assign(new Error("A sandbox with the name already exists"), {
         response: { status: 400 },
@@ -1123,11 +1124,6 @@ describe("createVercelSandbox", () => {
 
   describe("resuming recorded state", () => {
     const sandboxName = "eve-sbx-vercel-recorded";
-    const snapshotNotFound = () =>
-      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
-        json: { error: { code: "snapshot_not_found" } },
-        response: { status: 410 },
-      });
 
     // A stopped sandbox that fails to resume with `error`.
     function resumeFailing(error: Error, sessionId: string) {
@@ -1145,20 +1141,20 @@ describe("createVercelSandbox", () => {
       });
     }
 
-    it.each(["session_abc", "tool_session_abc"])(
-      "reports %s gone when its sandbox's snapshot expired",
-      async (sessionId) => {
-        const error = await resumeFailing(snapshotNotFound(), sessionId).catch((e: unknown) => e);
-        expect(SandboxSessionGoneError.is(error)).toBe(true);
-      },
-    );
+    it("reports a session gone when its sandbox's snapshot expired", async () => {
+      const error = await resumeFailing(snapshotNotFound(), "session_abc").catch((e: unknown) => e);
+      expect(SandboxSessionGoneError.is(error)).toBe(true);
+    });
 
-    it("surfaces other resume failures unchanged", async () => {
-      const error = await resumeFailing(
-        Object.assign(new Error("Internal error"), { response: { status: 500 } }),
-        "session_abc",
-      ).catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(Error);
+    it.each([
+      ["a stopped sandbox", 410],
+      ["an internal error", 500],
+    ])("surfaces %s unchanged instead of reporting the session gone", async (_, status) => {
+      const original = Object.assign(new Error("Cannot resume sandbox"), {
+        response: { status },
+      });
+      const error = await resumeFailing(original, "session_abc").catch((e: unknown) => e);
+      expect(error).toBe(original);
       expect(SandboxSessionGoneError.is(error)).toBe(false);
     });
   });
