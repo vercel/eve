@@ -3,7 +3,7 @@ title: "Dynamic Schedules"
 description: "Create and manage creator-owned recurring or one-time schedules at runtime."
 ---
 
-`defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it. Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](../schedules) instead.
+`defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it unless you set [`id`](#keep-a-stable-identity). Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](../schedules) instead.
 
 The definition gives the model tools to manage schedules, and gives you a `run` callback that runs each time a schedule fires. Each firing is an occurrence. This API is experimental and may change. Import it from `eve/experimental/schedules`.
 
@@ -52,6 +52,7 @@ export default defineDynamicSchedules({
 | `inputSchema`    | Required                   | Validates the payload from the model or client.                                                                                   |
 | `auth`           | Required                   | Resolves the creator to current access. See [Revalidate creator identity](#revalidate-creator-identity).                          |
 | `run`            | Required                   | Runs each time a schedule fires. See [Handle occurrences and retries](#handle-occurrences-and-retries).                           |
+| `id`             | Name from the file path    | Names the definition and the schedules stored under it. See [Keep a stable identity](#keep-a-stable-identity).                    |
 | `description`    | None                       | Text added to each management tool's description.                                                                                 |
 | `scope`          | `byPrincipal`              | Decides which caller can manage which schedules.                                                                                  |
 | `provider`       | `vercelScheduleProvider()` | Stores schedules and fires them. See [Choose a provider and test locally](#choose-a-provider-and-test-locally).                   |
@@ -62,9 +63,26 @@ export default defineDynamicSchedules({
 
 `scope` decides who can manage a schedule. `byPrincipal` limits each caller to their own schedules, keyed by identity type, authenticator, issuer, and ID, plus the application and definition. A custom `scope` function must authorize each operation before it returns a namespace. Return `null` to deny.
 
+### Keep a stable identity
+
+A definition's name comes from its path under `agent/schedules/`: `agent/schedules/billing/requests.ts` is `billing/requests`. eve stores each schedule under that name, and uses it in the management tool names, `occurrence.collection`, and `ctx.session.schedule.definition`. Renaming or moving the file changes the name, so schedules created under the old name are no longer listed or run.
+
+Set `id` to fix the name whatever the path. To move a file and keep its schedules, set `id` to the old name:
+
+```ts title="agent/schedules/workflows.ts"
+export default defineDynamicSchedules({
+  id: "billing/requests",
+  // ...
+});
+```
+
+An `id` has up to 64 ASCII letters, digits, `_`, and `-`, with `/` allowed between segments. The build fails when two definitions in one agent have the same name, whether it comes from `id` or the path.
+
+In an [extension](../extensions), a path-derived name takes the mount's prefix, such as `crm__requests`, so it changes with the mount filename. eve uses an `id` as written, without the prefix, so the extension's schedules keep one name in every agent that mounts it. Mounting that extension twice in one agent fails the build.
+
 ## Expose management tools
 
-Each definition adds one tool for each operation: `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`. Each tool has its own schema, approval policy, and action label. For example, `agent/schedules/billing/requests.ts` generates `schedule__billing-requests__create`, `schedule__billing-requests__update`, and so on.
+Each definition adds one tool for each operation: `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`. Each tool has its own schema, approval policy, and action label. For example, `agent/schedules/billing/requests.ts` generates `schedule__billing-requests__create`, `schedule__billing-requests__update`, and so on. With an `id`, the tool names use it instead of the path.
 
 | Tool                 | Input                                                                       |
 | -------------------- | --------------------------------------------------------------------------- |

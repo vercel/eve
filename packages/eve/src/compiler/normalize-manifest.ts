@@ -52,7 +52,10 @@ import { compileHookEntry, compileMemoryDefinition } from "#compiler/normalize-d
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
-import { compileScheduleCollectionDefinition } from "#compiler/normalize-schedule-collection.js";
+import {
+  assertScheduleCollectionNameAvailable,
+  compileScheduleCollectionDefinition,
+} from "#compiler/normalize-schedule-collection.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
 import { assertSkillNameAvailable, compileSkillSource } from "#compiler/normalize-skill.js";
 import {
@@ -467,7 +470,13 @@ class AgentGraphCompiler {
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
-    for (const candidate of state.orderedCandidates) {
+    const isSchedule = (candidate: AgentSourceCandidate) =>
+      state.sourcesBySourceId.get(candidate.sourceId)?.kind === "schedule";
+    // Schedules compile first: a tool file disables a collection's tools by the collection's name.
+    for (const candidate of [
+      ...state.orderedCandidates.filter(isSchedule),
+      ...state.orderedCandidates.filter((candidate) => !isSchedule(candidate)),
+    ]) {
       if (!selectedSourceIds.has(candidate.sourceId)) continue;
       const entry = state.sourcesBySourceId.get(candidate.sourceId);
       if (entry === undefined) continue;
@@ -556,9 +565,13 @@ class AgentGraphCompiler {
                 })
               : entry.source.definition;
           if (isScheduleCollectionDefinition(value)) {
-            scheduleCollections.push(
-              compileScheduleCollectionDefinition(entry.source, value, input.manifest.agentId),
+            const collection = compileScheduleCollectionDefinition(
+              entry.source,
+              value,
+              input.manifest.agentId,
             );
+            assertScheduleCollectionNameAvailable(scheduleCollections, collection);
+            scheduleCollections.push(collection);
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
             break;
           }
@@ -592,7 +605,11 @@ class AgentGraphCompiler {
           });
           if (result.kind === "disabled") {
             state.composed = disableComposedCandidate({
-              allowUnmatched: canDisableToolWithoutSelectedSource(state, result.name),
+              allowUnmatched: canDisableToolWithoutSelectedSource(
+                state,
+                result.name,
+                scheduleCollections,
+              ),
               candidate,
               composed: state.composed,
             });

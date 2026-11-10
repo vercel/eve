@@ -25,7 +25,9 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
-import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules, type ScheduleProvider } from "#public/schedules/subscription.js";
+import { createScheduleCollectionClient } from "#runtime/schedules/collection-client.js";
+import { readScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -66,6 +68,18 @@ function registry(modules: readonly ProgrammaticAgentModule[]) {
       }),
     },
   ]);
+}
+
+function scheduleCollection(
+  options: { readonly id?: string; readonly provider?: ScheduleProvider } = {},
+) {
+  return defineDynamicSchedules({
+    provider: inMemoryScheduleProvider(),
+    inputSchema: z.object({ task: z.string() }),
+    auth: () => null,
+    run: async () => {},
+    ...options,
+  });
 }
 
 describe("compileAgentManifest source graph", () => {
@@ -489,6 +503,129 @@ describe("compileAgentManifest source graph", () => {
         name: "daily-digest",
       }),
     ).toBe("Delete schedule: daily-digest");
+  });
+
+  it("names a collection by its explicit id wherever the path-derived name went", async () => {
+    const collection = scheduleCollection({ id: "requests" });
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/workflows/native.ts",
+        loadNamespace: async () => ({ default: collection }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.scheduleCollections).toEqual([
+      expect.objectContaining({ logicalPath: "schedules/workflows/native.ts", name: "requests" }),
+    ]);
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    expect(declared(resolved, "schedules")).toEqual([
+      expect.objectContaining({ name: "requests", offersTools: true }),
+    ]);
+    expect(readScheduleCollectionSource(collection)).toMatchObject({
+      collection: "requests",
+      logicalPath: "schedules/workflows/native.ts",
+    });
+    expect(Object.keys(scheduleCollectionTools(collection, "requests")!)).toContain(
+      "schedule__requests__create",
+    );
+  });
+
+  it("keeps a moved collection's stored namespace when its id is the old path-derived name", async () => {
+    const namespaceOf = async (logicalPath: string, id?: string) => {
+      const provider = inMemoryScheduleProvider();
+      const create = vi.spyOn(provider, "create");
+      const collection = scheduleCollection({ provider, ...(id !== undefined && { id }) });
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [
+          registry([{ logicalPath, loadNamespace: async () => ({ default: collection }) }]),
+        ],
+      });
+      const { application, name } = compiled.scheduleCollections[0]!;
+      await createScheduleCollectionClient(collection, {
+        abortSignal: new AbortController().signal,
+        application,
+        channel: { kind: "unknown", metadata: {} },
+        collection: name,
+        session: {
+          auth: {
+            current: {
+              attributes: {},
+              authenticator: "test",
+              principalId: "alice",
+              principalType: "user",
+            },
+            initiator: null,
+          },
+          id: "session-alice",
+        },
+      }).create({
+        expression: { type: "delay", minutes: 5 },
+        name: "report",
+        payload: { task: "Summarize the week." },
+      });
+      return create.mock.calls[0]![0].namespace;
+    };
+
+    const original = await namespaceOf("schedules/billing/requests.ts");
+    expect(await namespaceOf("schedules/workflows.ts", "billing/requests")).toBe(original);
+    expect(await namespaceOf("schedules/workflows.ts")).not.toBe(original);
+    expect(await namespaceOf("schedules/billing/requests.ts", "invoices")).not.toBe(original);
+  });
+
+  it.each([
+    ["a path-derived name", undefined, "requests"],
+    ["another explicit id", "shared", "shared"],
+  ])("rejects an explicit collection id that matches %s", async (_label, id, name) => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/requests.ts",
+        loadNamespace: async () => ({
+          default: scheduleCollection(id === undefined ? {} : { id }),
+        }),
+      },
+      {
+        logicalPath: "schedules/workflows.ts",
+        loadNamespace: async () => ({ default: scheduleCollection({ id: name }) }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      `Schedule collections "schedules/requests.ts" and "schedules/workflows.ts" both resolve to the name "${name}".`,
+    );
+  });
+
+  it("disables a collection's tools through the tool file named for its explicit id", async () => {
+    const compileWithToolFile = async (logicalPath: string) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: "schedules/native.ts",
+          loadNamespace: async () => ({ default: scheduleCollection({ id: "requests" }) }),
+        },
+        { logicalPath, loadNamespace: async () => ({ default: disableTool() }) },
+      ]);
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+      const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+        frameworkAgentSourceRegistry,
+        sourceRegistry,
+      ]);
+      return declared(await resolveAgent({ manifest: compiled, moduleMap }), "schedules");
+    };
+
+    expect(await compileWithToolFile("tools/schedule__requests.ts")).toEqual([
+      expect.not.objectContaining({ offersTools: true }),
+    ]);
+    await expect(compileWithToolFile("tools/schedule__native.ts")).rejects.toThrow(
+      'Source "tools/schedule__native.ts" disables a slot with no lower-precedence source.',
+    );
   });
 
   it("classifies compile and runtime usage from normalized authored semantics", async () => {

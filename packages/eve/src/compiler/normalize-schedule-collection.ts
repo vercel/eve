@@ -19,7 +19,8 @@ export function compileScheduleCollectionDefinition(
   const compiled: CompiledScheduleCollectionDefinition = {
     application,
     logicalPath: source.logicalPath,
-    name: stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, ""),
+    name:
+      definition.id ?? stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, ""),
     providerKind: definition.provider.kind,
     sourceId: source.sourceId,
     sourceKind: "module",
@@ -27,4 +28,17 @@ export function compileScheduleCollectionDefinition(
   if (definition.description !== undefined) compiled.description = definition.description;
   if (definition.tool !== undefined) compiled.tools = definition.tool;
   return compiled;
+}
+
+/** Throws when two collections would share stored schedules, tools, and deliveries. */
+export function assertScheduleCollectionNameAvailable(
+  compiled: readonly CompiledScheduleCollectionDefinition[],
+  collection: CompiledScheduleCollectionDefinition,
+): void {
+  const existing = compiled.find((entry) => entry.name === collection.name);
+  if (existing !== undefined) {
+    throw new Error(
+      `Schedule collections "${existing.logicalPath}" and "${collection.logicalPath}" both resolve to the name "${collection.name}". Set a different "id" on one of them, or rename its file.`,
+    );
+  }
 }

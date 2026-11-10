@@ -248,6 +248,8 @@ export interface DynamicSchedulesDefinition<
   TSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,
   TPrepared = TPayload,
 > {
+  /** Stable collection name that overrides the one derived from the module path. */
+  readonly id?: string;
   readonly description?: string;
   /** Model-facing payload schema. Destination intent may be resolved by `run`. */
   readonly inputSchema: TSchema;
@@ -335,8 +337,8 @@ type DynamicSchedulesOptions<
 
 /**
  * Defines a dynamic schedule subscription. Export it from `agent/schedules/`;
- * identity comes from the module path. inputSchema validates caller input,
- * while eve captures creator identity separately and re-resolves it on every attempt.
+ * identity comes from `id`, or the module path when omitted. inputSchema validates
+ * caller input, while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
  * Provider defaults to vercelScheduleProvider(); pass provider explicitly to select another backend.
  * The default supports Vercel deployments and eve dev, not self-hosted scheduling.
