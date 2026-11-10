@@ -1,8 +1,8 @@
-import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 import {
   mayContainWorkflowDirective,
   readWorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
+import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-source-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
 // Built when an error needs it: the first `Intl` formatter in a process loads locale data, which
@@ -82,7 +82,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
-  const program = (await parseWithRolldownAst(parsePath, input.source)) as AstProgram;
+  const program = (await parseWorkflowSourceAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];
   visit(program as AstNode, (node) => {
     const specifier =

@@ -4,7 +4,7 @@ import {
   mayContainWorkflowDirective,
   type WorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
-import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
+import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-source-ast.js";
 
 import type { WorkflowManifest } from "./workflow-builders.js";
 
@@ -244,7 +244,7 @@ export async function transformWorkflowDirectives(input: {
 }
 
 async function parseWorkflowSource(filename: string, source: string): Promise<AstProgram> {
-  return (await parseWithRolldownAst(filename, source)) as AstProgram;
+  return (await parseWorkflowSourceAst(filename, source)) as AstProgram;
 }
 
 function createWorkflowStepProxySource(
