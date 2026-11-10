@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
+import { createChannelOperations } from "#channel/channel-operations.js";
+import type { Runtime } from "#channel/types.js";
 import {
+  handleInteractionPost,
   parseBlockActionsPayload,
   parseShortcutPayload,
 } from "#public/channels/slack/interactions.js";
+import { SIGN_IN_CONNECT_ACTION_ID } from "#public/channels/slack/sign-in-cancel.js";
+import type { SlackChannelConfig, SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 function makePayload(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -157,5 +162,82 @@ describe("parseBlockActionsPayload", () => {
         name: "jane.doe",
       },
     });
+  });
+});
+
+describe("handleInteractionPost", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("records a sign-in prompt's Connect click in its session instead of onInteraction", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const dispatchContinuation = vi
+      .fn()
+      .mockResolvedValue({ sessionId: "s_1", status: "accepted" });
+    const runtime: Runtime = {
+      createSession: vi.fn(),
+      dispatchContinuation,
+      dispatchSession: vi.fn(),
+      getEventStream: vi.fn(),
+      getLineStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
+      resolveContinuation: vi.fn(),
+    };
+    const { from, resolveSession } = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+    const onInteraction = vi.fn();
+    const tasks: Promise<unknown>[] = [];
+    const payload = makePayload({
+      actions: [
+        {
+          action_id: SIGN_IN_CONNECT_ACTION_ID,
+          type: "button",
+          url: "https://idp.example/authorize",
+          value: JSON.stringify({
+            channelId: "C0123456789",
+            interactionId: "int_linear",
+            name: "linear",
+            threadTs: "1700000000.000000",
+            userId: "U0123456789",
+          }),
+        },
+      ],
+      container: { type: "message", is_ephemeral: true },
+      message: undefined,
+      response_url: "https://hooks.slack.com/actions/T1/1/abc",
+      type: "block_actions",
+    });
+
+    const response = await handleInteractionPost(
+      new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
+      { from, resolveSession, waitUntil: (task) => tasks.push(task) },
+      {
+        api: undefined,
+        config: { onInteraction } as unknown as SlackChannelConfig,
+        onAnswers: vi.fn(),
+      },
+    );
+    await Promise.all(tasks);
+
+    expect(response.status).toBe(200);
+    expect(onInteraction).not.toHaveBeenCalled();
+    expect(dispatchContinuation).toHaveBeenCalledWith({
+      command: {
+        deliveryId: expect.any(String),
+        kind: "channel-state",
+        state: {
+          signInPrompts: {
+            int_linear: { responseUrl: "https://hooks.slack.com/actions/T1/1/abc" },
+          },
+        },
+      },
+      continuationToken: expect.stringContaining("C0123456789"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

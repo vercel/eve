@@ -10,9 +10,8 @@ const log = createLogger("slack.interactions");
 export const SIGN_IN_CANCEL_ACTION_ID = "eve_sign_in:cancel";
 
 /**
- * `action_id` of the sign-in prompt's Connect link button. Slack opens the link
- * and also sends a `block_actions` click, whose `response_url` is the only way
- * to remove an ephemeral prompt.
+ * `action_id` of the sign-in prompt's Connect button. The button opens the sign-in URL; its click
+ * also gives eve the prompt's `response_url`, the only way to remove an ephemeral prompt later.
  */
 export const SIGN_IN_CONNECT_ACTION_ID = "eve_sign_in:connect";
 
@@ -21,18 +20,116 @@ export type SignInCancelTarget = SlackSessionTarget & { readonly turnId: string 
 
 /** Reads a Cancel click's target from a sign-in prompt's button value. */
 export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | undefined {
-  if (typeof value !== "string") return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  const { channelId, codeChannel, threadTs, turnId } = parsed as Record<string, unknown>;
+  const parsed = parseObject(value);
+  if (parsed === undefined) return undefined;
+  const { channelId, codeChannel, threadTs, turnId } = parsed;
   if (typeof channelId !== "string" || typeof turnId !== "string") return undefined;
   if (codeChannel === true) return { channelId, codeChannel, turnId };
   return typeof threadTs === "string" ? { channelId, threadTs, turnId } : undefined;
+}
+
+/**
+ * The session a sign-in prompt's Connect button belongs to, the sign-in interaction it answers,
+ * the connection it signs in to, and the one Slack user the prompt was shown to.
+ */
+export type SignInConnectTarget = SlackSessionTarget & {
+  readonly interactionId: string;
+  readonly name: string;
+  readonly userId: string;
+};
+
+/** Reads a Connect click's target from a sign-in prompt's button value. */
+export function parseSignInConnectTarget(value: unknown): SignInConnectTarget | undefined {
+  const parsed = parseObject(value);
+  if (parsed === undefined) return undefined;
+  const { channelId, codeChannel, interactionId, name, threadTs, userId } = parsed;
+  if (
+    typeof channelId !== "string" ||
+    typeof interactionId !== "string" ||
+    typeof name !== "string" ||
+    typeof userId !== "string"
+  ) {
+    return undefined;
+  }
+  if (codeChannel === true) return { channelId, codeChannel, interactionId, name, userId };
+  return typeof threadTs === "string"
+    ? { channelId, interactionId, name, threadTs, userId }
+    : undefined;
+}
+
+/**
+ * Handles a click on a sign-in prompt's Connect button. Slack opens the sign-in URL itself, and
+ * the prompt stays as it is, link and Cancel included, so the person can come back to it. The
+ * click's `response_url` is the only way to remove an ephemeral prompt later, so eve records it in
+ * the session's channel state under the sign-in's interaction, and the prompt goes once the
+ * sign-in ends, in whichever order the click and the ending reach the session. A prompt that
+ * carries no session is removed at once. Only the person the prompt was shown to counts. Returns
+ * false for any other interaction.
+ */
+export function dispatchSignInConnect(
+  raw: Record<string, unknown>,
+  ctx: {
+    readonly from: ChannelFrom<SlackChannelState>;
+    readonly waitUntil: (task: Promise<unknown>) => void;
+  },
+): boolean {
+  const action = findAction(raw, SIGN_IN_CONNECT_ACTION_ID);
+  if (action === undefined) return false;
+  const responseUrl = raw.response_url;
+  if (typeof responseUrl !== "string") return true;
+  const target = parseSignInConnectTarget(action.value);
+  if (target === undefined) {
+    ctx.waitUntil(removeSignInPrompt(responseUrl));
+    return true;
+  }
+  const user = isObjectRecord(raw.user) ? raw.user : undefined;
+  if (user?.id !== target.userId) return true;
+  ctx.waitUntil(recordSignInPrompt(target, responseUrl, ctx));
+  return true;
+}
+
+/**
+ * Records the click's `response_url` so the prompt can be removed when its sign-in ends. A session
+ * that can't record it leaves the prompt on screen, which is still usable, and logs the failure.
+ */
+async function recordSignInPrompt(
+  target: SignInConnectTarget,
+  responseUrl: string,
+  ctx: { readonly from: ChannelFrom<SlackChannelState> },
+): Promise<void> {
+  try {
+    await ctx.from(slackSessionToken(target)).patchState({
+      signInPrompts: { [target.interactionId]: { responseUrl } },
+    });
+  } catch (error) {
+    log.warn("failed to record the sign-in prompt for removal", { error, name: target.name });
+  }
+}
+
+/**
+ * Removes a sign-in prompt through the `response_url` of a click on it. Best effort: Slack keeps
+ * the URL for 30 minutes and five uses, and a prompt it can't remove stays on screen.
+ */
+export async function removeSignInPrompt(responseUrl: string): Promise<void> {
+  await postToPrompt(responseUrl, { delete_original: true });
+}
+
+async function postToPrompt(responseUrl: string, body: Record<string, unknown>): Promise<void> {
+  try {
+    const response = await fetch(responseUrl, {
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    if (!response.ok) {
+      log.warn("Slack refused to change the sign-in prompt", {
+        body: await response.text(),
+        status: response.status,
+      });
+    }
+  } catch (error) {
+    log.warn("failed to change the sign-in prompt", { error });
+  }
 }
 
 /**
@@ -52,24 +149,6 @@ export function dispatchSignInCancel(
   return true;
 }
 
-/**
- * Removes the private sign-in prompt in the background once its Connect button
- * is clicked; the sign-in finishes in the browser tab Slack opened, and the
- * public status shows how it ended. Returns false for any other interaction.
- */
-export function dispatchSignInConnect(
-  raw: Record<string, unknown>,
-  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
-): boolean {
-  const actions = Array.isArray(raw.actions) ? (raw.actions as unknown[]) : [];
-  const clicked = actions.some(
-    (entry) => isObjectRecord(entry) && entry.action_id === SIGN_IN_CONNECT_ACTION_ID,
-  );
-  if (!clicked) return false;
-  if (typeof raw.response_url === "string") ctx.waitUntil(removePrompt(raw.response_url));
-  return true;
-}
-
 interface SignInCancel {
   readonly responseUrl: string | undefined;
   readonly target: SignInCancelTarget;
@@ -80,12 +159,7 @@ interface SignInCancel {
  * so the payload has no message; its target rides on the button value.
  */
 function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefined {
-  const actions = Array.isArray(raw.actions) ? (raw.actions as unknown[]) : [];
-  const action = actions.find(
-    (entry): entry is Record<string, unknown> =>
-      isObjectRecord(entry) && entry.action_id === SIGN_IN_CANCEL_ACTION_ID,
-  );
-  const target = parseSignInCancelTarget(action?.value);
+  const target = parseSignInCancelTarget(findAction(raw, SIGN_IN_CANCEL_ACTION_ID)?.value);
   if (target === undefined) return undefined;
   return {
     responseUrl: typeof raw.response_url === "string" ? raw.response_url : undefined,
@@ -103,7 +177,8 @@ async function cancelHeldSignIn(
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
 ): Promise<void> {
   const { turnId } = cancel.target;
-  const removed = cancel.responseUrl === undefined ? undefined : removePrompt(cancel.responseUrl);
+  const removed =
+    cancel.responseUrl === undefined ? undefined : removeSignInPrompt(cancel.responseUrl);
   try {
     await ctx.from(slackSessionToken(cancel.target)).cancel({ turnId });
   } catch (error) {
@@ -114,22 +189,26 @@ async function cancelHeldSignIn(
   await removed;
 }
 
-async function removePrompt(responseUrl: string): Promise<void> {
+function findAction(
+  raw: Record<string, unknown>,
+  actionId: string,
+): Record<string, unknown> | undefined {
+  const actions = Array.isArray(raw.actions) ? (raw.actions as unknown[]) : [];
+  return actions.find(
+    (entry): entry is Record<string, unknown> =>
+      isObjectRecord(entry) && entry.action_id === actionId,
+  );
+}
+
+function parseObject(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "string") return undefined;
+  let parsed: unknown;
   try {
-    const response = await fetch(responseUrl, {
-      body: JSON.stringify({ delete_original: true }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-    if (!response.ok) {
-      log.warn("Slack refused to remove the sign-in prompt", {
-        body: await response.text(),
-        status: response.status,
-      });
-    }
-  } catch (error) {
-    log.warn("failed to remove the sign-in prompt", { error });
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
   }
+  return isObjectRecord(parsed) ? parsed : undefined;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

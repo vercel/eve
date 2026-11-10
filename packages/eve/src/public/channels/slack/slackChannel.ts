@@ -66,6 +66,7 @@ import {
 import {
   defaultEvents,
   defaultInteractionEvents,
+  removeSettledSignInPrompts,
   defaultOnMessage,
   defaultOnMessageEdited,
   defaultReceived,
@@ -249,6 +250,11 @@ export interface SlackInteractionCardRecord {
   readonly requests: readonly SlackInteractionCardRequest[];
 }
 
+/** What the session knows of one private sign-in prompt; see {@link SlackChannelState.signInPrompts}. */
+export interface SlackSignInPrompt {
+  readonly responseUrl: string;
+}
+
 /**
  * JSON-serializable per-session state, stored verbatim across workflow
  * step boundaries. Anything written here must round-trip through
@@ -329,6 +335,14 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * @internal
    */
   pendingAuthMessageTs?: Record<string, string>;
+  /**
+   * Sign-in interaction id to its private prompt's `response_url`, recorded by its Connect click.
+   * Slack removes an ephemeral message only through such a URL. The click and the settlement reach
+   * the session in either order: the settlement removes a recorded prompt, and a click recorded
+   * once the session view shows the sign-in settled removes it on `delivery.settled`.
+   * @internal
+   */
+  signInPrompts?: Record<string, SlackSignInPrompt>;
   /**
    * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
@@ -1113,6 +1127,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const renderTurnStarted = rendering.events["turn.started"];
   const renderCallSettled = rendering.events["call.settled"];
   const renderTurnSettled = rendering.events["turn.settled"];
+  const renderDeliverySettled = rendering.events["delivery.settled"];
   const events = withTaskCards(
     {
       ...rendering.events,
@@ -1131,6 +1146,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         channel.state.quietStatus = channel.state.pendingQuietTurn === true;
         channel.state.pendingQuietTurn = null;
         await renderTurnStarted?.(event, ctx);
+      },
+      async "delivery.settled"(event, ctx) {
+        // A Connect click's channel-state control may land after its sign-in settled.
+        await removeSettledSignInPrompts(ctx.channel, ctx.view);
+        await renderDeliverySettled?.(event, ctx);
       },
       async "call.settled"(event, ctx) {
         // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first. A call
@@ -1172,6 +1192,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       triggeringMessageTs: null,
       pendingToolCallMessage: null,
       pendingAuthMessageTs: {},
+      signInPrompts: {},
       interactionCards: [],
       slackUsersByPrincipal: {},
     },

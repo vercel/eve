@@ -1,6 +1,7 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
+import { patchChannelStateStep } from "#execution/session/channel-state-step.js";
 
 import type {
   RuntimeActionResultHookPayload,
@@ -90,6 +91,14 @@ export async function admitSessionInboxPayload(
     case "compact":
       input.queue.enqueueControl("compact", controlOrigin(command));
       return { kind: "consumed" };
+    case "channel-state": {
+      // Admission runs between steps, never during one, so the patch cannot race a step's state.
+      const control = controlDeliveryOf(controlOrigin(command));
+      await input.cursor.advance((state) =>
+        patchChannelStateStep({ ...state, control, patch: command.state }),
+      );
+      return { kind: "consumed" };
+    }
     case "session-timeout":
       // A previous owner's timer may fire after handoff; only this owner's deadline counts.
       if (command.ownerRunId === getWorkflowMetadata().workflowRunId) {

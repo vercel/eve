@@ -32,6 +32,20 @@ interface BaseChannelRespondOptions<TState = undefined> {
   readonly state?: Partial<TState>;
 }
 
+/**
+ * A JSON merge patch (RFC 7386) of a channel's state: objects merge key by key, `null` removes a
+ * key, and other values replace it. A channel with no declared state takes any JSON object.
+ */
+export type ChannelStatePatch<TState = undefined> = [TState] extends [undefined]
+  ? Record<string, unknown>
+  : MergePatch<TState>;
+
+type MergePatch<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T]?: MergePatch<T[K]> | null }
+    : T;
+
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
@@ -65,6 +79,12 @@ export interface ChannelSource<TState = undefined> {
   cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   /** Queues context compaction without creating a session. */
   compact(options?: SessionControlOptions): Promise<Delivery>;
+  /**
+   * Merges `state` into the session's channel state as a JSON merge patch, without creating a session or
+   * running a turn, even while a turn waits on input. The state must be JSON. The delivery
+   * settles once the state changed, or fails on an owner that predates this control.
+   */
+  patchState(state: ChannelStatePatch<TState>, options?: SessionControlOptions): Promise<Delivery>;
   /** Cancels a running turn and every working task, then clears model-message history in place. */
   clear(options?: SessionControlOptions): Promise<Delivery>;
   /** Retires the current owner without creating a replacement. */
@@ -137,6 +157,9 @@ export function createChannelOperations<TState = undefined>(input: {
         },
         async compact(options) {
           return await bound.compact(options);
+        },
+        async patchState(state, options) {
+          return await bound.patchState(state, options);
         },
         async clear(options) {
           return await bound.clear(options);

@@ -5,6 +5,7 @@ import type {
 } from "#channel/types.js";
 import { withoutPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
+import { parseJsonObject } from "#shared/json.js";
 
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 
@@ -12,7 +13,10 @@ type DecodedSessionInbox =
   | SessionPrewarmPayload
   | DeliverHookPayload
   | SessionTimeoutHookPayload
-  | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
+  | Extract<
+      SessionCommand,
+      { readonly kind: "cancel" | "channel-state" | "clear" | "compact" | "reset" }
+    >;
 
 /** Invalid current-generation inbox payload. Historical wire shapes are not accepted. */
 export class SessionInboxPayloadError extends Error {
@@ -72,11 +76,23 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         throw new SessionInboxPayloadError("Invalid session prewarm hint.");
       return value as SessionPrewarmPayload;
     case "cancel":
+    case "channel-state":
     case "clear":
     case "compact":
     case "reset":
       if (typeof payload.deliveryId !== "string" || payload.deliveryId.length === 0) {
         throw new SessionInboxPayloadError("Session controls require a nonempty deliveryId.");
+      }
+      if (payload.kind === "channel-state") {
+        let state;
+        try {
+          state = parseJsonObject(payload.state);
+        } catch {
+          throw new SessionInboxPayloadError(
+            "A channel-state control requires a JSON object state.",
+          );
+        }
+        return { ...(value as Extract<SessionCommand, { kind: "channel-state" }>), state };
       }
       return value as DecodedSessionInbox;
     case "session-timeout":

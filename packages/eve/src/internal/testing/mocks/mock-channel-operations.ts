@@ -42,6 +42,9 @@ export function mockChannelContext<TState = undefined>(
         async compact() {
           return { status: "no_active_session" } as never;
         },
+        async patchState() {
+          return { status: "no_active_session" } as never;
+        },
         async clear() {
           return { status: "no_active_session" } as never;
         },

@@ -8,6 +8,7 @@ import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
+import type { ChannelStatePatch } from "#channel/channel-operations.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
@@ -26,6 +27,7 @@ import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import { contextStorage } from "#context/container.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
+import { parseJsonObject } from "#shared/json.js";
 import { validateSessionHistory } from "#shared/session-history.js";
 
 interface BaseChannelAddressCreateOptions {
@@ -80,6 +82,7 @@ interface ChannelAddress<TState = undefined> {
   ): Promise<Delivery>;
   cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   compact(options?: SessionControlOptions): Promise<Delivery>;
+  patchState(state: ChannelStatePatch<TState>, options?: SessionControlOptions): Promise<Delivery>;
   clear(options?: SessionControlOptions): Promise<Delivery>;
   end(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
   resolveSession(): Promise<Session | undefined>;
@@ -242,6 +245,17 @@ export function createChannelAddress<TState = undefined>(input: {
     },
     async compact(options) {
       const command = controlCommand({ kind: "compact" as const }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
+        continuationToken: namespacedToken,
+      });
+      return commandDelivery(input.runtime, result, command.deliveryId);
+    },
+    async patchState(state, options) {
+      const command = controlCommand(
+        { kind: "channel-state" as const, state: parseJsonObject(state) },
+        options,
+      );
       const result = await input.runtime.dispatchContinuation({
         command,
         continuationToken: namespacedToken,

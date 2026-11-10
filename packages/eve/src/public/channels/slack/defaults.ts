@@ -1,4 +1,4 @@
-import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import { errorHintOf } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -14,6 +14,7 @@ import {
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
 import { slackSessionTargetOf } from "#public/channels/slack/api.js";
+import { removeSignInPrompt } from "#public/channels/slack/sign-in-cancel.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -272,17 +273,27 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   // the shared thread.
   const { instructions } = event;
   if (recipientUserId && (challengeUrl || instructions)) {
-    // The turn's own sign-in holds it, so the prompt can cancel that turn.
+    // The turn's own sign-in holds it, so the prompt can cancel that turn, and its Connect click
+    // can tell the session where the prompt is.
     const target = slackSessionTargetOf(channel.slack);
-    const cancel =
-      event.responseId === undefined &&
-      target.channelId &&
-      (target.codeChannel || target.threadTs) &&
-      event.turnId
-        ? { ...target, turnId: event.turnId }
+    const session =
+      event.responseId === undefined && target.channelId && (target.codeChannel || target.threadTs)
+        ? target
         : undefined;
+    const cancel =
+      session !== undefined && event.turnId ? { ...session, turnId: event.turnId } : undefined;
+    const connect =
+      session === undefined
+        ? undefined
+        : {
+            ...session,
+            interactionId: event.interactionId,
+            name: event.name,
+            userId: recipientUserId,
+          };
     const prompt = {
       cancel,
+      connect,
       displayName,
       instructions,
       url: challengeUrl,
@@ -312,6 +323,8 @@ async function settleSlackSignIn(
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
+  await settleSlackSignInPrompt(event.interactionId, channel);
+
   const pending = channel.state.pendingAuthMessageTs ?? {};
   const ts = pending[event.name];
   if (ts === undefined) return;
@@ -338,6 +351,43 @@ async function settleSlackSignIn(
   const next = { ...pending };
   delete next[event.name];
   channel.state.pendingAuthMessageTs = next;
+}
+
+/**
+ * Removes the sign-in's private prompt if its Connect click is recorded. A click that lands later
+ * finds the sign-in settled in the session view, in {@link removeSettledSignInPrompts}.
+ */
+async function settleSlackSignInPrompt(
+  interactionId: string,
+  channel: SlackEventContext,
+): Promise<void> {
+  const prompts = channel.state.signInPrompts ?? {};
+  const responseUrl = prompts[interactionId]?.responseUrl;
+  if (responseUrl === undefined) return;
+  const next = { ...prompts };
+  delete next[interactionId];
+  channel.state.signInPrompts = next;
+  await removeSignInPrompt(responseUrl);
+}
+
+/**
+ * Removes every recorded private sign-in prompt whose sign-in is no longer open in `view`, and
+ * forgets it. A Connect click's channel-state control can land after its sign-in settled.
+ */
+export async function removeSettledSignInPrompts(
+  channel: { state: SlackChannelState },
+  view: SessionView,
+): Promise<void> {
+  const prompts = channel.state.signInPrompts ?? {};
+  const { interactions } = sessionTables(view);
+  const late = Object.entries(prompts).filter(
+    ([interactionId]) => interactions[interactionId]?.status !== "open",
+  );
+  if (late.length === 0) return;
+  const next = { ...prompts };
+  for (const [interactionId] of late) delete next[interactionId];
+  channel.state.signInPrompts = next;
+  await Promise.all(late.map(([, prompt]) => removeSignInPrompt(prompt.responseUrl)));
 }
 
 /**
