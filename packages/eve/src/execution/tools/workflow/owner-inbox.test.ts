@@ -16,7 +16,7 @@ const from = {
   turnId: "turn-1",
 };
 
-it("keeps the authored question heading in the relayed interaction", () => {
+it("keeps the authored question heading and preselected option in the relayed interaction", () => {
   const payload = workflowAskPayload({
     from,
     replyTo: "question-1",
@@ -26,7 +26,12 @@ it("keeps the authored question heading in the relayed interaction", () => {
       request: {
         title: "Deployment review",
         prompt: "Which environment should Alice use?",
-        options: [{ id: "staging", label: "Staging" }],
+        display: "select",
+        options: [
+          { id: "staging", label: "Staging" },
+          { id: "production", label: "Production" },
+        ],
+        initialOptionId: "staging",
       },
     },
   });
@@ -39,43 +44,11 @@ it("keeps the authored question heading in the relayed interaction", () => {
           kind: "question",
           title: "Deployment review",
           prompt: "Which environment should Alice use?",
+          initialOptionId: "staging",
         },
       },
     },
   ]);
-});
-
-describe("a question's preselected option", () => {
-  const ask = (initialOptionId: string) =>
-    workflowAskPayload({
-      from,
-      replyTo: "question-1",
-      request: {
-        kind: "ask",
-        control: "run-control",
-        request: {
-          prompt: "Which team should Alice notify?",
-          display: "select",
-          options: [
-            { id: "billing", label: "Billing" },
-            { id: "platform", label: "Platform" },
-          ],
-          initialOptionId,
-        },
-      },
-    });
-
-  it("keeps an id that matches an option", () => {
-    expect(ask("platform").events).toMatchObject([
-      { data: { request: { display: "select", initialOptionId: "platform" } } },
-    ]);
-  });
-
-  it("refuses an id that matches no option", () => {
-    expect(() => ask("security")).toThrow(
-      'A workflow tool run request\'s `initialOptionId` "security" must match one of its `options` ids.',
-    );
-  });
 });
 
 describe("workflow-tool task outcomes", () => {

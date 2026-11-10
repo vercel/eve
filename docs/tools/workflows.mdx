@@ -355,8 +355,8 @@ const answer = await ctx.ask({
 });
 ```
 
-`initialOptionId` must match one of the `options` ids, or eve rejects the question with a
-`TypeError`. Only `display: "select"` uses it. Slack, Discord, Microsoft Teams, and the `eve dev`
+Only `display: "select"` uses `initialOptionId`, and there it must match one of the `options` ids,
+or `ctx.ask` throws a `TypeError` before it asks anyone. Slack, Discord, Microsoft Teams, and the `eve dev`
 terminal UI preselect the option, and ACP clients receive it as the form field's `default`. Other
 channels show the options without a preselection.
 On Slack and Discord, a **Use** button submits the preselected option, because those platforms send

@@ -19,6 +19,23 @@ describe("ask", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("refuses a select's initialOptionId that matches no option before sending it", () => {
+    const { ctx, send } = runContext({ requestInput: true });
+    const question = {
+      prompt: "Which team should Alice notify?",
+      options: [{ id: "billing", label: "Billing" }],
+      initialOptionId: "security",
+    };
+
+    expect(() => ask(ctx, { ...question, display: "select" })).toThrow(
+      'ctx.ask(): `initialOptionId` "security" must match one of the question\'s `options` ids.',
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    void ask(ctx, { ...question, display: "confirmation" });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
   it("removes its abort listeners once answered", async () => {
     const call = new AbortController();
     const caller = new AbortController();
