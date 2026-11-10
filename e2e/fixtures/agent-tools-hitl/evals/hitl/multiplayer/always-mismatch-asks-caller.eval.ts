@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { SAY, aliceSession, answers, approvalFor, asAlice, asBob } from "../helpers.ts";
+import { SAY, aliceSession, answers, approvalFor, asAlice, asBob, bobSteers } from "../helpers.ts";
 
 /**
  * Bob's note joins Alice's turn and asks for the team-only change, whose approval is
@@ -15,7 +15,7 @@ export default defineEval({
     const session = await aliceSession(t);
     const change = approvalFor(await session.send(SAY.changeA, asAlice), "change-a");
 
-    await session.start(SAY.bobTeamChange, asBob);
+    await session.start(SAY.bobTeamChange, bobSteers);
     const asked = await session.respond(answers("approve", change), asAlice);
     const team = approvalFor(asked, "team-change");
 

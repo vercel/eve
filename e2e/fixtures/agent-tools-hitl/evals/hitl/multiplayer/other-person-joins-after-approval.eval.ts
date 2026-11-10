@@ -7,7 +7,7 @@ import {
   answers,
   approvalFor,
   asAlice,
-  asBob,
+  bobSteers,
   expectResolved,
 } from "../helpers.ts";
 
@@ -24,7 +24,7 @@ export default defineEval({
     const session = await aliceSession(t);
     const request = approvalFor(await session.send(SAY.changeA, asAlice), "change-a");
 
-    await session.start(SAY.bobStatus, asBob);
+    await session.start(SAY.bobStatus, bobSteers);
     const approved = (await session.respond(answers("approve", request), asAlice)).expectOk();
     expectResolved(approved, request, "accepted");
     approved.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });

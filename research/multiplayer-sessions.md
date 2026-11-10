@@ -91,7 +91,9 @@ Another person's message joins the running turn at the same points a caller's ow
 today. `auth.current`, the turn's memory scope, its hooks, and its dynamic functions stay the
 caller's. `auth.sender` changes only between model steps: when the step that reads a message
 starts, or the step after an approval is answered. Every call the model makes in one step sees
-the same value, and an approval of one call doesn't change what its siblings see.
+the same value, and an approval of one call doesn't change what its siblings see. A step reads
+one person's messages at a time, so each is recorded as its sender's; if the turn ends before it
+reads the next person's, those start the next turn.
 
 `sender` is always set. eve fills it wherever it builds `ctx.session.auth`, so code never falls
 back to `current`. `SessionAuth` is passed into authored code, never taken from it, so a new

@@ -172,8 +172,6 @@ export class ActiveTurn {
     }
     this.resetSteering();
     if (delivery === undefined) return undefined;
-    // A step reads one person's messages; the next person's steer the step after it.
-    this.steerWithWaitingMessages();
     if (delivery.caller !== undefined) this.caller = delivery.caller;
     return delivery;
   }

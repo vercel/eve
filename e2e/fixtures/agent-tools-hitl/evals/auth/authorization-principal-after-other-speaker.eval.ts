@@ -33,7 +33,8 @@ export default defineEval({
       throw new Error("Expected Alice's sign-in challenge URL.");
 
     const resumed = t.target.attach(session.id, { startIndex: session.state?.streamIndex }).watch();
-    await session.start(BOB_MESSAGE, as(BOB));
+    // Bob sends as a channel does by default, so his message joins the running turn.
+    await session.start(BOB_MESSAGE, { ...as(BOB), turnPolicy: "steer" });
     const callbackUrl = new URL(url);
     const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok) throw new Error(`Fixture sign-in callback failed (${callback.status}).`);

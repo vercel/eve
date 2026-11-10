@@ -89,6 +89,7 @@ describe("authored tool execution", () => {
       auth: {
         current: null,
         initiator: null,
+        sender: null,
       },
       id: "session_async_session",
       turn: {
@@ -125,6 +126,7 @@ describe("authored tool execution", () => {
       auth: {
         current: null,
         initiator: null,
+        sender: null,
       },
       parent: {
         callId: "call_parent_001",

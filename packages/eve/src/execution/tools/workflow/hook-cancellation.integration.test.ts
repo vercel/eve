@@ -385,7 +385,7 @@ describe("workflow typed answers", () => {
   );
 
   // #4923: a turn's principal is fixed. Another person's typed text must not
-  // answer the turn's question; it waits and runs as their own turn.
+  // answer the turn's question; it waits for the question to end and then joins the turn.
   it.each([
     {
       answers: { alice: "Deploy", bob: "Cancel" },
@@ -478,12 +478,11 @@ describe("workflow typed answers", () => {
             (event) => event.data.callId === callId,
           );
           expect(result?.data.output).toEqual(output);
-          await stream.nextTurn();
+          // Bob's text joins Alice's turn as a message once her answer ends the question.
           expect(seen).toEqual([
             ["delivery.consumed", "alice"],
+            ["delivery.consumed", "alice"],
             ["turn.settled", "alice"],
-            ["delivery.consumed", "bob"],
-            ["turn.settled", "bob"],
           ]);
         } finally {
           stream.dispose();

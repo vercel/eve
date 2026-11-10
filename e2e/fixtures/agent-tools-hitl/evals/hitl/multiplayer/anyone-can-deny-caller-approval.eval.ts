@@ -7,6 +7,7 @@ import {
   approvalFor,
   asAlice,
   asBob,
+  bobSteers,
   expectNotRun,
 } from "../helpers.ts";
 
@@ -23,7 +24,7 @@ export default defineEval({
     const session = await aliceSession(t);
     const change = approvalFor(await session.send(SAY.changeA, asAlice), "change-a");
 
-    await session.start(SAY.bobTeamChange, asBob);
+    await session.start(SAY.bobTeamChange, bobSteers);
     const asked = await session.respond(answers("approve", change), asAlice);
     const team = approvalFor(asked, "team-change");
 
