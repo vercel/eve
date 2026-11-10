@@ -6,6 +6,10 @@ const SHELL_INSTRUCTIONS = `# GitHub
 Use the \`gh\` and \`git\` CLIs in \`bash\` for GitHub operations: cloning, fetching, pushing, issues, pull requests, reviews, and CI. They authenticate with the credentials already configured in the shell. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
 `;
 
+/** How user tokens' `actor` picks the person a `gh` command acts for, in its tool and instructions. */
+export const GH_ACTOR_GUIDANCE =
+  "When several people talk in the conversation, set `actor` to the `principalId` of the person whose request the command carries out, as the sender lines name them, and the command runs with that person's own GitHub token. Omit it for the person whose message started this turn. A person who didn't send the latest message is asked to approve the command first, so name the person who asked for the work, not whoever spoke last.";
+
 const TOKEN_SCOPE = {
   repository: {
     token:
@@ -19,8 +23,7 @@ const TOKEN_SCOPE = {
       "Connect resolves the caller's own GitHub token for each command. It carries the caller's GitHub permissions, so access is limited to what the caller can reach on GitHub.",
     repository:
       "Set `repository` to the `owner/name` the command acts on, or omit it for commands that act on no single repository, such as `gh repo list <owner>`, `gh search repos`, or `gh api user/repos`.",
-    actor:
-      "When several people talk in the conversation, set `actor` to the `principalId` of the person whose request the command carries out, as the sender lines name them, and the command runs with that person's own GitHub token. Omit it for the person whose message started this turn. A person who didn't send the latest message is asked to approve the command first, so name the person who asked for the work, not whoever spoke last.",
+    actor: GH_ACTOR_GUIDANCE,
   },
 } as const;
 
