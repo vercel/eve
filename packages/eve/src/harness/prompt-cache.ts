@@ -17,9 +17,10 @@ import type { ModelProfile } from "#harness/model-profile.js";
  * A provider ignores namespaces it does not own, so carrying both is safe on
  * every request regardless of which provider serves it.
  *
- * Every breakpoint in a request carries the same TTL, because Anthropic rejects
- * a 1-hour breakpoint that follows a 5-minute one. The 5-minute marker omits the
- * TTL, which is the providers' default.
+ * Anthropic rejects a 1-hour breakpoint that follows a 5-minute one, so the tools
+ * and system breakpoints, which come first in the request, never use a shorter TTL
+ * than the conversation breakpoints after them. The 5-minute marker omits the TTL,
+ * which is the providers' default.
  */
 const ANTHROPIC_CACHE_MARKERS = Object.freeze({
   "5m": Object.freeze({
@@ -158,6 +159,10 @@ export function applySystemCacheBreakpoint(
  * one, so cache lookups always find the previous prefix even when a step
  * appends more content blocks than Anthropic's backward boundary scan
  * covers.
+ *
+ * These breakpoints use `conversationTtl`, which is shorter than `ttl` for a Gateway model that
+ * caches its system prompt for an hour: the system prompt is shared across sessions and rarely
+ * changes, while each conversation prefix is rewritten on every step.
  */
 export function applyConversationCacheControl(
   messages: readonly ModelMessage[],
@@ -178,7 +183,7 @@ export function applyConversationCacheControl(
       ...message,
       providerOptions: {
         ...message.providerOptions,
-        ...ANTHROPIC_CACHE_MARKERS[cache.ttl],
+        ...ANTHROPIC_CACHE_MARKERS[cache.conversationTtl],
       },
     };
   };

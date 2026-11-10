@@ -228,6 +228,7 @@ async function normalizeAuthoredModelReference(input: {
     return await withCompiledRuntimeModelLimits(
       {
         id: formatLanguageModelGatewayId(input.value),
+        ...(input.promptCache === undefined ? {} : { promptCache: input.promptCache }),
         providerOptions: parseProviderOptionsRecord(input.providerOptions),
         routing,
       },
@@ -331,8 +332,9 @@ function rejectGatewayPromptCache(
   routing: ModelRouting,
 ): void {
   if (input.promptCache === undefined || routing.kind !== "gateway") return;
+  if (routing.target === "anthropic") return;
   throw new Error(
-    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies only to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
+    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies to Anthropic models and to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
   );
 }
 

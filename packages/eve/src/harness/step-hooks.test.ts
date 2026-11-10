@@ -146,6 +146,47 @@ describe("buildStepHooks", () => {
     });
   });
 
+  it("gives a Gateway Anthropic model a 1-hour system cache and no automatic caching", async () => {
+    const hooks = buildStepHooks({
+      model: {
+        id: "anthropic/claude-sonnet-4-5",
+        providerOptions: { gateway: { order: ["anthropic"] } },
+      },
+      profile: resolveModelProfile("anthropic/claude-sonnet-4-5", { anthropic: { ttl: "1h" } }),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [
+        { content: "a", role: "user" },
+        { content: "b", role: "assistant" },
+        { content: "c", role: "user" },
+      ],
+      model: "anthropic/claude-sonnet-4-5",
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.providerOptions).toEqual({
+      gateway: { order: ["anthropic"], sessionId: "session-test" },
+    });
+    const fiveMinutes = {
+      anthropic: { cacheControl: { type: "ephemeral" } },
+      bedrock: { cachePoint: { type: "default" } },
+    };
+    expect(prepared?.messages?.map((message) => message.providerOptions)).toEqual([
+      undefined,
+      fiveMinutes,
+      fiveMinutes,
+    ]);
+  });
+
   it("marks an opaque Bedrock profile with the authored Anthropic cache TTL", async () => {
     const model = new MockLanguageModelV3({
       modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",

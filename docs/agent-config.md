@@ -195,9 +195,10 @@ Run `eve set model --reasoning high` to update this field from the command line.
 ## Prompt caching
 
 eve caches prompts automatically for AI Gateway models and for Anthropic models
-it recognizes by provider or model id. On a directly called model, set
-`modelOptions.promptCache` to use a 1-hour cache. It also marks an unrecognized
-model as Anthropic, such as a Bedrock application inference profile:
+it recognizes by provider or model id. Set `modelOptions.promptCache` to cache
+the system prompt for 1 hour instead of 5 minutes, on a directly called model or
+on an Anthropic model through Gateway. It also marks an unrecognized model as
+Anthropic, such as a Bedrock application inference profile:
 
 ```ts title="agent/agent.ts"
 import { bedrock } from "@ai-sdk/amazon-bedrock";
@@ -212,10 +213,17 @@ export default defineAgent({
 });
 ```
 
-Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on
-Gateway models; use `providerOptions.gateway.caching` instead. For Anthropic
-models on Gateway, eve also sets `providerOptions.gateway.cacheAnchorMessageIndex`
-to `0`, so sessions that share a system prompt share its cache.
+Not every Claude model supports a 1-hour cache. A 1-hour write costs 2x the
+base input price, against 1.25x for 5 minutes, so it pays off only when the
+system prompt is read again after the 5-minute cache has expired.
+
+On an Anthropic model through Gateway, the default `5m` keeps Gateway's
+automatic caching, and eve sets `providerOptions.gateway.cacheAnchorMessageIndex`
+to `0` so sessions that share a system prompt share its cache. With `1h`, eve
+turns Gateway's automatic caching off, because Gateway ignores a 1-hour TTL under
+it, and places its own breakpoints: the tools and the system prompt for 1 hour,
+and the last two messages for 5 minutes. eve rejects `promptCache` on other
+Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 

@@ -167,7 +167,8 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       providerOptions: input.model.providerOptions,
       session,
     });
-    if (profile.gateway) {
+    // A Gateway model with eve's own breakpoints (`anthropicCache`) must not get `caching: "auto"`.
+    if (profile.gateway && profile.anthropicCache === undefined) {
       stepResult.providerOptions = mergeGatewayAutoCaching(
         providerOptions,
         profile.provider,

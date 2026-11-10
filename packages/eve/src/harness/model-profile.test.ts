@@ -32,17 +32,21 @@ describe("resolveModelProfile", () => {
     [
       "direct Anthropic",
       model("anthropic.messages"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "anthropic" },
+      { ...direct, anthropicCache: { conversationTtl: "5m", ttl: "5m" }, provider: "anthropic" },
     ],
     [
       "Vertex Anthropic",
       model("vertex.anthropic"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "vertex" },
+      { ...direct, anthropicCache: { conversationTtl: "5m", ttl: "5m" }, provider: "vertex" },
     ],
     [
       "Bedrock Converse with an Anthropic model id",
       model("amazon-bedrock", "ANTHROPIC.claude-3-5-sonnet-20241022-v2:0"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "amazon-bedrock" },
+      {
+        ...direct,
+        anthropicCache: { conversationTtl: "5m", ttl: "5m" },
+        provider: "amazon-bedrock",
+      },
     ],
     [
       "Bedrock Converse with another model id",
@@ -75,20 +79,35 @@ describe("resolveModelProfile", () => {
     [
       "an opaque Bedrock inference profile declared as Anthropic",
       model("amazon-bedrock", "arn:aws:bedrock:us-east-1:123:application-inference-profile/abc"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "amazon-bedrock" },
+      {
+        ...direct,
+        anthropicCache: { conversationTtl: "5m", ttl: "5m" },
+        provider: "amazon-bedrock",
+      },
       { anthropic: {} },
     ],
     [
       "direct Anthropic with a 1-hour cache",
       model("anthropic.messages"),
-      { ...direct, anthropicCache: { ttl: "1h" }, provider: "anthropic" },
+      { ...direct, anthropicCache: { conversationTtl: "1h", ttl: "1h" }, provider: "anthropic" },
       { anthropic: { ttl: "1h" } },
     ],
     [
-      "a Gateway model, which caches on its own",
+      "a Gateway Anthropic model with a 1-hour system cache, whose conversation stays on 5 minutes",
+      "anthropic/claude-opus-5",
+      {
+        ...direct,
+        anthropicCache: { conversationTtl: "5m", ttl: "1h" },
+        gateway: true,
+        provider: "anthropic",
+      },
+      { anthropic: { ttl: "1h" } },
+    ],
+    [
+      "a Gateway Anthropic model with the default 5-minute cache, which stays on Gateway's automatic caching",
       "anthropic/claude-opus-5",
       { ...direct, gateway: true, provider: "anthropic" },
-      { anthropic: { ttl: "1h" } },
+      { anthropic: {} },
     ],
   ])("describes %s", (_, input, expected, promptCache) => {
     expect(resolveModelProfile(input, promptCache)).toEqual(expected);

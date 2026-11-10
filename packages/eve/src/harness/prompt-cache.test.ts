@@ -8,7 +8,7 @@ import {
   mergeGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
-const fiveMinutes = { ttl: "5m" } as const;
+const fiveMinutes = { conversationTtl: "5m", ttl: "5m" } as const;
 const marker = {
   anthropic: { cacheControl: { type: "ephemeral" } },
   bedrock: { cachePoint: { type: "default" } },
@@ -16,7 +16,7 @@ const marker = {
 
 describe("Anthropic cache breakpoints with a 1-hour TTL", () => {
   it("carry the TTL on every breakpoint in both provider namespaces", () => {
-    const oneHour = { ttl: "1h" } as const;
+    const oneHour = { conversationTtl: "1h", ttl: "1h" } as const;
     const hourMarker = {
       anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
       bedrock: { cachePoint: { type: "default", ttl: "1h" } },
@@ -42,6 +42,33 @@ describe("Anthropic cache breakpoints with a 1-hour TTL", () => {
       hourMarker,
       hourMarker,
     ]);
+  });
+});
+
+describe("Anthropic cache breakpoints with a 1-hour system cache and a 5-minute conversation", () => {
+  it("keep the tools and system at 1 hour and the conversation at 5 minutes", () => {
+    const cache = { conversationTtl: "5m", ttl: "1h" } as const;
+    const hourMarker = {
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+      bedrock: { cachePoint: { type: "default", ttl: "1h" } },
+    };
+    const tools = applyLastToolCacheBreakpoint(
+      { only: { description: "one" } } as unknown as ToolSet,
+      cache,
+    ) as Record<string, { providerOptions?: unknown }>;
+    const system = applySystemCacheBreakpoint([{ role: "system", content: "rules" }], cache);
+    const messages = applyConversationCacheControl(
+      [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "yo" },
+        { role: "user", content: "hi2" },
+      ],
+      cache,
+    );
+
+    expect(tools.only?.providerOptions).toEqual(hourMarker);
+    expect(system[0]?.providerOptions).toEqual(hourMarker);
+    expect(messages.map((message) => message.providerOptions)).toEqual([undefined, marker, marker]);
   });
 });
 
