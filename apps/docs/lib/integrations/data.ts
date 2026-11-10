@@ -1300,11 +1300,10 @@ The registry also writes \`agent/schedules/gmail-maintenance.ts\`, which calls \
 From your linked Vercel project:
 
 \`\`\`bash
-vercel crons list
-vercel crons run <maintenance-job-path>
+vercel schedules invoke eve.gmail-maintenance
 \`\`\`
 
-Replace \`<maintenance-job-path>\` with the Gmail maintenance route listed by the first command. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
+For an agent added with \`withEve\`, the schedule name includes the agent's name, such as \`eve.support.gmail-maintenance\`. Run \`vercel schedules list\` to find it. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
 
 **Existing labelled mail is not imported on first setup.** The first successful \`watch()\` initializes the cursor at registration time. Send a new message from another account and apply the handoff label after initialization. Later watch renewals preserve the existing cursor. See the [Gmail adapter setup guide](https://chat-sdk.dev/adapters/official/gmail#setup) for Google Cloud, Pub/Sub, OAuth scopes, and watch-renewal requirements.`,
   },
@@ -2153,6 +2152,37 @@ WAYDOCK_MCP_KEY=wdmcp_your_key_here
 \`\`\`
 
 The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "unlisted link", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/stacktree.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/stacktree.ts
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://api.stacktr.ee/mcp",
+  description:
+    "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
+  approval: always(),
+  headers: () => ({
+    authorization: \`Bearer \${process.env.STACKTREE_API_KEY!}\`,
+  }),
+});
+\`\`\`
+
+eve requires approval for every Stacktree tool call because the server can publish, change access, and delete pages.`,
+    configureNote:
+      "Create an API key in the [Stacktree dashboard](https://app.stacktr.ee/api-keys). eve sends it as an Authorization Bearer token. Pages are unlisted, so anyone with the link can view them. Use Stacktree's optional passcode or email gate when access must be restricted.",
   },
   agentcard: {
     logo: "agentcard",

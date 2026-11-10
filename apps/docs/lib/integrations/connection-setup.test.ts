@@ -59,6 +59,17 @@ describe("Firecrawl connection setup", () => {
   });
 });
 
+describe("Stacktree connection setup", () => {
+  it("keeps the installed approval and Bearer authorization policy in the gallery", () => {
+    const integration = getIntegration("stacktree")!;
+    const quickStart = integration.quickStart!;
+
+    expect(quickStart).toContain("authorization: `Bearer ${process.env.STACKTREE_API_KEY!}`");
+    expect(quickStart).toContain('import { always } from "eve/tools/approval"');
+    expect(quickStart).toContain("approval: always()");
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;

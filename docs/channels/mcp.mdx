@@ -73,6 +73,8 @@ A tool result with `isError: true` means eve rejected the call, so fix the call.
 
 Limits: the MCP request body is 1 MiB, `message` 64 KiB, each response `text` 16 KiB (both in UTF-8 bytes), and one `agent_update` 64 responses. Oversized bodies get a JSON-RPC `413`, and oversized fields fail input validation before any work starts.
 
+Tool arguments may contain at most 10,000 array elements and object members in total, including nested collections. Larger inputs return `isError: true` before the tool runs.
+
 ### Durability guarantees
 
 - Once `agent_start` returns, the work survives restarts and redeploys. Only `agent_cancel` stops it. A dropped connection, client restart, or closed MCP session doesn't.

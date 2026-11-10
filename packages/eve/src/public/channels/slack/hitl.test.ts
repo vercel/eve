@@ -451,6 +451,34 @@ describe("renderInteractionBlocks", () => {
     expect(widget.options).toHaveLength(8);
   });
 
+  it.each([
+    ["radio_buttons", 2],
+    ["static_select", 8],
+  ])("preselects initialOptionId on %s and adds a button that submits it", (type, count) => {
+    const options = Array.from({ length: count }, (_, i) => ({
+      id: `team_${i}`,
+      label: `Team ${i}`,
+    }));
+    const blocks = renderInteractionBlocks(
+      makeRequest({ display: "select", options, initialOptionId: "team_1" }),
+    );
+
+    const [widget, button] = (
+      blocks[1] as {
+        elements: [
+          { type: string; initial_option: unknown; options: unknown[] },
+          { action_id: string; style: string; text: { text: string }; value: string },
+        ];
+      }
+    ).elements;
+    expect(widget.type).toBe(type);
+    expect(widget.initial_option).toEqual(widget.options[1]);
+    expect(button).toMatchObject({ style: "primary", text: { text: "Use Team 1" } });
+    expect(answerFromSlackAction({ actionId: button.action_id, value: button.value })).toEqual({
+      response: { interactionId: "call_abc123", optionId: "team_1" },
+    });
+  });
+
   it("renders a 'Type your answer' freeform button when the request has no options", () => {
     const blocks = renderInteractionBlocks(makeRequest({ prompt: "What's the date range?" }));
 

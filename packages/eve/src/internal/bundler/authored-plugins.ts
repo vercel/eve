@@ -7,7 +7,19 @@ import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import
 import { RESOLVE_EXTENSIONS } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
-import { createInstalledPackageScope } from "#internal/installed-packages.js";
+import {
+  type FilterExpression,
+  importerId,
+  not,
+  or,
+  pathSource,
+} from "#internal/bundler/filters.js";
+import {
+  createInstalledPackageScope,
+  type InstalledPackageScope,
+} from "#internal/installed-packages.js";
+
+const NODE_MODULES = /[\\/]node_modules[\\/]/;
 
 export interface AuthoredPluginsInput {
   /** The authored package: asset imports stay inside it, and its tsconfig resolves aliases. */
@@ -35,26 +47,56 @@ export interface AuthoredPluginsInput {
 export function createAuthoredPlugins(input: AuthoredPluginsInput): Plugin[] {
   const authoredSourceOnly = input.authoredSourceOnly ?? false;
   const extensions = input.extensions ?? RESOLVE_EXTENSIONS;
-  const handlesInstalledModule = createInstalledPackageScope(input.hostBundledPackageRoots ?? []);
+  const scope = createInstalledPackageScope(input.hostBundledPackageRoots ?? []);
+  const handlesInstalledModule = scope.includes;
+  const importerFilter = authoredSourceOnly ? createAuthoredImporterFilter(scope) : undefined;
   return [
     // First, so no other resolver claims an asset import before its package-root check.
     createAuthoredAssetImportPlugin({
       authoredSourceOnly,
       handlesInstalledModule,
+      importerFilter,
       packageRoot: input.packageRoot,
     }),
     createAuthoredRelativeExtensionResolverPlugin({
       authoredSourceOnly,
       extensions,
       handlesInstalledModule,
+      importerFilter,
     }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: input.packageRoot,
       authoredSourceOnly,
       extensions,
       handlesInstalledModule,
+      importerFilter,
     }),
   ];
+}
+
+/**
+ * Admits every importer an `authoredSourceOnly` resolver accepts: those outside `node_modules`,
+ * and those in a host-bundled package's directory. That is the package's directory below
+ * `node_modules`, or its root when the package sits outside `node_modules`. The handlers still
+ * make the exact checks. This only spares the call into JavaScript, which a specifier filter
+ * alone makes for nearly every import of every dependency module.
+ */
+function createAuthoredImporterFilter(scope: InstalledPackageScope): FilterExpression {
+  const outsideNodeModules = not(importerId(NODE_MODULES));
+  const hostBundled = [
+    ...importerInside(NODE_MODULES.source, scope.nodeModulesDirectories()),
+    ...importerInside("^", scope.rootsOutsideNodeModules()),
+  ];
+  return hostBundled.length === 0 ? outsideNodeModules : or(outsideNodeModules, ...hostBundled);
+}
+
+/** Matches importers inside any of `directories`, each written after `prefix`. */
+function importerInside(prefix: string, directories: readonly string[]): FilterExpression[] {
+  // An empty group matches the empty string, which after `^` admits every POSIX path.
+  if (directories.length === 0) return [];
+  const alternatives = directories.map(pathSource).join("|");
+  // Ignores case: on a case-insensitive filesystem an import can spell a directory its own way.
+  return [importerId(new RegExp(String.raw`${prefix}(?:${alternatives})[\\/]`, "i"))];
 }
 
 /**

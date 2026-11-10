@@ -8,6 +8,7 @@ import {
   findAuthoredPackageRoot,
   isAuthoredSourcePath,
 } from "#internal/authored-package-boundary.js";
+import { type FilterExpression, resolveIdFilter } from "#internal/bundler/filters.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
@@ -44,6 +45,8 @@ export function createAuthoredAssetImportPlugin(input: {
   readonly authoredSourceOnly?: boolean;
   /** With `authoredSourceOnly`, installed modules to handle anyway. */
   readonly handlesInstalledModule?: (path: string) => boolean;
+  /** With `authoredSourceOnly`, a hook filter that admits every importer the handler accepts. */
+  readonly importerFilter?: FilterExpression;
 }): Plugin {
   const packageRoot = toCanonicalPath(input.packageRoot);
   // Built here rather than at module scope: runtime modules import this file.
@@ -62,7 +65,7 @@ export function createAuthoredAssetImportPlugin(input: {
   return {
     name: "eve-authored-asset-import",
     resolveId: {
-      filter: { id: RESOLVE_FILTER },
+      filter: resolveIdFilter(RESOLVE_FILTER, input.importerFilter),
       handler(source: string, importer: string | undefined) {
         if (
           !isPotentialAuthoredAssetImport(source) ||

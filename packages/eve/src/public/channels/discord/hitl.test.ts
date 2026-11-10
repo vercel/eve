@@ -70,6 +70,43 @@ describe("renderInteractionComponents", () => {
     ).toEqual([{ optionId: "weekly", interactionId: "call_1" }]);
   });
 
+  it("preselects initialOptionId and adds a button that submits it while its id fits", () => {
+    const render = (id: string) =>
+      renderInteractionComponents(
+        request({
+          display: "select",
+          options: [
+            { id: "billing", label: "Billing" },
+            { id, label: "Platform" },
+          ],
+          initialOptionId: id,
+        }),
+      ) as Array<{ components: Array<Record<string, unknown>> }>;
+
+    const [select, use] = render("platform");
+    expect(select!.components[0]!.options).toEqual([
+      { label: "Billing", value: "billing" },
+      { default: true, label: "Platform", value: "platform" },
+    ]);
+    expect(use!.components[0]).toMatchObject({ label: "Use Platform", style: 1 });
+    expect(
+      deriveComponentAnswers({
+        ...BASE_COMPONENT,
+        componentType: 2,
+        customId: use!.components[0]!.custom_id as string,
+        messageId: "M01",
+        type: 3,
+        values: [],
+      }),
+    ).toEqual([{ optionId: "platform", interactionId: "call_1" }]);
+
+    const long = render("x".repeat(100));
+    expect(long).toHaveLength(1);
+    expect(long[0]!.components[0]!.options).toContainEqual(
+      expect.objectContaining({ default: true }),
+    );
+  });
+
   it("refuses a select option id that Discord would truncate", () => {
     const render = (id: string) =>
       renderInteractionComponents(

@@ -164,7 +164,7 @@ export default git({
 });
 ```
 
-For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected. When the command's own input is refused before it runs, such as shell syntax, a `workingDirectory` outside the workspace, a `gh-signed-commit` directory that is not a repository root, or a missing `--body-file`, `executeGitHubShell` throws `GitHubCommandInputError`; detect it with `isGitHubCommandInputError(error)` to tell the agent's mistakes apart from configuration, Connect, and sandbox failures.
 
 ## Prepare the sandbox
 

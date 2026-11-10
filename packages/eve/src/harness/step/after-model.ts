@@ -98,6 +98,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   step.session = {
     ...step.session,
     compaction: withPromptMeasurement(step.session.compaction, {
+      promptMessages,
       inputTokens: result.usage?.inputTokens,
       promptMessageCount: input.durableModelPromptMessageCount,
       requestEnvelopeTokens: input.requestEnvelopeTokens,

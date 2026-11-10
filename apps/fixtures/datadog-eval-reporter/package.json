@@ -9,7 +9,7 @@
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
     "@workflow/world-postgres": "catalog:",
-    "dd-trace": "6.13.0",
+    "dd-trace": "6.20.1",
     "eve": "workspace:*"
   }
 }

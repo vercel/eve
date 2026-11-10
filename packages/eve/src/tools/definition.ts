@@ -124,7 +124,7 @@ export interface InternalToolDefinitionWithExecuteFn<
  */
 export type ToolQuestion = Pick<
   InteractionRequest,
-  "prompt" | "title" | "options" | "allowFreeform" | "display"
+  "prompt" | "title" | "options" | "allowFreeform" | "display" | "initialOptionId"
 >;
 
 /**

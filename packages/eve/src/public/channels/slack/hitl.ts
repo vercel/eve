@@ -210,6 +210,8 @@ function encodeHitlActionId(request: Interaction, route?: SlackHitlRoute): strin
  *   visible.
  * - `display === "select"` with more options → `static_select`
  *   dropdown so the picker stays scrollable.
+ * - Either select with an `initialOptionId` starts on that option and adds
+ *   a "Use <label>" button that submits it.
  * - Anything else with options → Slack `card` blocks with action
  *   buttons. Best for visually distinct choices (allow / cancel /
  *   cancel).
@@ -236,7 +238,7 @@ export function renderInteractionBlocks(
     request.request.allowFreeform === true || !options || options.length === 0;
 
   if (options && options.length > 0 && request.request.display === "select") {
-    const widget =
+    const widget: Record<string, unknown> =
       options.length <= RADIO_SELECT_OPTION_LIMIT
         ? { type: "radio_buttons", action_id: actionId, options: options.map(buildOption) }
         : {
@@ -245,7 +247,16 @@ export function renderInteractionBlocks(
             options: options.map(buildOption),
             placeholder: { type: "plain_text", text: "Choose an option" },
           };
-    return [prompt, ...details, { type: "actions", elements: [widget] }];
+    const initial = options.find((option) => option.id === request.request.initialOptionId);
+    if (initial === undefined) return [prompt, ...details, { type: "actions", elements: [widget] }];
+    widget.initial_option = buildOption(initial);
+    // Slack sends no action when the person keeps the preselected option, so a button submits it.
+    const use = buildCardButton(
+      { id: initial.id, label: `Use ${initial.label}`, style: "primary" },
+      actionId,
+      0,
+    );
+    return [prompt, ...details, { type: "actions", elements: [widget, use] }];
   }
 
   if (options && options.length > 0) {

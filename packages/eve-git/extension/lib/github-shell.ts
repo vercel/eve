@@ -170,6 +170,28 @@ const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
 /** How `gh` and `git` report a rejected token. */
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
 
+/**
+ * Thrown when a GitHub command's own input is refused before it runs, such as
+ * shell syntax, a working directory outside the workspace, or a missing body
+ * file. The agent can fix these by changing the call.
+ */
+export class GitHubCommandInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitHubCommandInputError";
+  }
+}
+
+/**
+ * Type guard for {@link GitHubCommandInputError}.
+ *
+ * Uses `err.name` rather than `instanceof` because consumers and eve can end
+ * up with different class identities after bundling.
+ */
+export function isGitHubCommandInputError(err: unknown): err is GitHubCommandInputError {
+  return err instanceof Error && err.name === "GitHubCommandInputError";
+}
+
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
   try {
@@ -194,7 +216,7 @@ export async function executeGitHubShell(
     target: { owner, repository, name },
   } = validateGitHubShellInput(input);
   if (config.principalType === "user" ? owner && !repository : !owner) {
-    throw new Error(
+    throw new GitHubCommandInputError(
       config.principalType === "user"
         ? "Set repository to owner/name or omit it; user tokens are not scoped to an owner."
         : "App tokens need repository set to an owner or owner/name.",
@@ -203,7 +225,9 @@ export async function executeGitHubShell(
   const sandbox = await dependencies.getSandbox();
   let workingDirectory = resolveWorkingDirectory(sandbox, input.workingDirectory);
   if (argv[0] === "gh-signed-commit") {
-    workingDirectory = await validateRepositoryRoot(sandbox, workingDirectory);
+    const repositoryRoot = await validateRepositoryRoot(sandbox, workingDirectory);
+    if ("refused" in repositoryRoot) throw new GitHubCommandInputError(repositoryRoot.refused);
+    workingDirectory = repositoryRoot.root;
   }
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
@@ -274,6 +298,11 @@ export async function executeGitHubShell(
   const commandArgv = coAuthor
     ? await attributeCommand(argv, coAuthorTrailer(coAuthor), sandbox, workingDirectory, bodyFile)
     : argv;
+  if (!Array.isArray(commandArgv)) {
+    throw new GitHubCommandInputError(
+      `Pull request body file ${JSON.stringify(commandArgv.missingBodyFile)} not found.`,
+    );
+  }
 
   const executable = executablePath(commandArgv[0]!);
   const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
@@ -457,7 +486,7 @@ function personKey(auth: SessionAuthContext | null | undefined): string {
 
 export function parseCommand(command: string): string[] {
   const value = command.trim();
-  if (!value) throw new Error("GitHub command must not be empty.");
+  if (!value) throw new GitHubCommandInputError("GitHub command must not be empty.");
   const argv: string[] = [];
   let token = "";
   let quote: "single" | "double" | null = null;
@@ -505,9 +534,11 @@ export function parseCommand(command: string): string[] {
       started = true;
     }
   }
-  if (escaped || quote) throw new Error("GitHub command contains an unfinished quote or escape.");
+  if (escaped || quote) {
+    throw new GitHubCommandInputError("GitHub command contains an unfinished quote or escape.");
+  }
   if (started) argv.push(token);
-  if (argv.length === 0) throw new Error("GitHub command must not be empty.");
+  if (argv.length === 0) throw new GitHubCommandInputError("GitHub command must not be empty.");
   return argv;
 }
 
@@ -516,13 +547,17 @@ function validateGitHubShellInput(input: GitHubShellInput): {
   target: ReturnType<typeof declaredTarget>;
 } {
   const argv = parseCommand(input.command);
-  if (!input.description.trim()) throw new Error("description must describe the intended result.");
+  if (!input.description.trim()) {
+    throw new GitHubCommandInputError("description must describe the intended result.");
+  }
   // The credential lease is wired only into these executables: gh reads the
   // placeholder GH_TOKEN and git sends the placeholder header.
   if (!EXECUTABLES.has(argv[0]!)) {
-    throw new Error("GitHub commands must use gh, git, or gh-signed-commit.");
+    throw new GitHubCommandInputError("GitHub commands must use gh, git, or gh-signed-commit.");
   }
-  if (argv.length < 2) throw new Error(`A ${argv[0]} subcommand or argument is required.`);
+  if (argv.length < 2) {
+    throw new GitHubCommandInputError(`A ${argv[0]} subcommand or argument is required.`);
+  }
   return { argv, target: declaredTarget(input.repository) };
 }
 
@@ -534,7 +569,11 @@ function declaredTarget(value: string | undefined): {
   const declared = value?.trim();
   if (!declared) return { owner: null, repository: null, name: null };
   const match = GITHUB_TARGET.exec(declared.replace(/\.git$/iu, ""));
-  if (!match) throw new Error(`Invalid GitHub repository or owner ${JSON.stringify(value)}.`);
+  if (!match) {
+    throw new GitHubCommandInputError(
+      `Invalid GitHub repository or owner ${JSON.stringify(value)}.`,
+    );
+  }
   const [, owner, name] = match;
   return { owner: owner!, repository: name ? `${owner}/${name}` : null, name: name ?? null };
 }
@@ -552,7 +591,9 @@ function resolveWorkingDirectory(
   const workspace = posix.resolve("/", sandbox.resolvePath(""));
   const resolved = posix.resolve("/", sandbox.resolvePath(workingDirectory?.trim() || ""));
   if (resolved !== workspace && !resolved.startsWith(`${workspace}/`)) {
-    throw new Error("GitHub command workingDirectory must stay inside the sandbox workspace.");
+    throw new GitHubCommandInputError(
+      "GitHub command workingDirectory must stay inside the sandbox workspace.",
+    );
   }
   return resolved;
 }
@@ -570,8 +611,8 @@ function sanitizeOutput(
   };
 }
 
-function unsupportedSyntax(): Error {
-  return new Error(
+function unsupportedSyntax(): GitHubCommandInputError {
+  return new GitHubCommandInputError(
     "GitHub commands support argv syntax only, not pipes, redirects, substitutions, or shell operators.",
   );
 }

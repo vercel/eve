@@ -23,10 +23,23 @@ import type { SessionHistoryMessage } from "#shared/session-history.js";
 /** Authored-key → opaque-value map stored on `session.state`. */
 export type SessionStateMap = Readonly<Record<string, unknown>>;
 
+/**
+ * Where a compaction ended: the summary with the recent tail verbatim, with only its text, or
+ * the summary alone (clipped, and the request cut, when even that is over the threshold).
+ */
+export type CompactionStage = "summary-only" | "tail" | "text-tail";
+
 /** Prompt observations that survive rebuilding the agent's settings on each turn. */
 export interface CompactionState {
+  /**
+   * Provider input tokens per estimated token, from the last measured call. It describes the
+   * session's content, not one prompt, so it survives a compaction.
+   */
+  readonly estimateRatio?: number;
   readonly lastKnownInputTokens?: number;
   readonly lastKnownPromptMessageCount?: number;
+  /** The stage the last compaction ended at, kept through the first measured call after it. */
+  readonly lastStage?: CompactionStage;
   /** The previous request's non-history estimate, also used before the next request is built. */
   readonly requestEnvelopeTokens?: number;
 }
@@ -34,6 +47,8 @@ export interface CompactionState {
 /** How one model call's history compacts: the session's observations, and the model's limit. */
 export interface CompactionConfig extends CompactionState {
   readonly recentWindowSize: number;
+  /** The input tokens, on the provider's ruler, a compaction's tail stages must reach. */
+  readonly target: number;
   readonly threshold: number;
   readonly thresholdPercent?: number;
 }

@@ -246,18 +246,19 @@ function renderInputs(request: Interaction): readonly Record<string, unknown>[] 
     request.request.options &&
     request.request.options.length > 0
   ) {
-    return [
-      {
-        choices: request.request.options.map((option) => ({
-          title: truncate(option.label, TEAMS_ADAPTIVE_CARD_CHOICE_TITLE_MAX_LENGTH),
-          value: option.id,
-        })),
-        id: TEAMS_HITL_CHOICE_INPUT_ID,
-        isMultiSelect: false,
-        style: "compact",
-        type: "Input.ChoiceSet",
-      },
-    ];
+    const { initialOptionId, options } = request.request;
+    const choiceSet: Record<string, unknown> = {
+      choices: options.map((option) => ({
+        title: truncate(option.label, TEAMS_ADAPTIVE_CARD_CHOICE_TITLE_MAX_LENGTH),
+        value: option.id,
+      })),
+      id: TEAMS_HITL_CHOICE_INPUT_ID,
+      isMultiSelect: false,
+      style: "compact",
+      type: "Input.ChoiceSet",
+    };
+    if (options.some((option) => option.id === initialOptionId)) choiceSet.value = initialOptionId;
+    return [choiceSet];
   }
 
   if (

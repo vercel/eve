@@ -86,6 +86,27 @@ describe("Teams HITL helpers", () => {
     }
   });
 
+  it("preselects initialOptionId in a select's choice set", () => {
+    const body = renderInteractionMessage({
+      ...request(),
+      request: {
+        display: "select",
+        initialOptionId: "platform",
+        kind: "question",
+        options: [
+          { id: "billing", label: "Billing" },
+          { id: "platform", label: "Platform" },
+        ],
+        prompt: "Which team should Alice notify?",
+      },
+    });
+    const card = body.attachments?.[0]?.content as { body?: Array<Record<string, unknown>> };
+
+    expect(card.body).toContainEqual(
+      expect.objectContaining({ type: "Input.ChoiceSet", value: "platform" }),
+    );
+  });
+
   it("decodes message and invoke submission values", () => {
     const message = parseTeamsActivity(
       activityWithValue({

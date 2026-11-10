@@ -163,6 +163,8 @@ export type AgentTUIInputQuestion = {
   prompt: string;
   display: "select" | "text";
   options?: ReadonlyArray<AgentTUIInputOption>;
+  /** The option the cursor starts on. */
+  initialOptionId?: string;
   allowFreeform?: boolean;
   context?: AgentTUIInputContext;
 };
@@ -1799,6 +1801,9 @@ function toAgentTUIInputQuestion(
     });
   }
 
+  if (request.request.display === "select" && request.request.initialOptionId !== undefined) {
+    question.initialOptionId = request.request.initialOptionId;
+  }
   if (request.request.allowFreeform !== undefined) {
     question.allowFreeform = request.request.allowFreeform;
   }

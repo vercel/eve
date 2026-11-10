@@ -40,6 +40,11 @@ export interface InteractionRequest {
   readonly options?: readonly InteractionOption[];
   readonly allowFreeform?: boolean;
   readonly display?: InteractionDisplay;
+  /**
+   * The `id` of the option to preselect when `display` is `"select"`. It must match one of
+   * `options`. Other displays ignore it, and so do channels that can't preselect an option.
+   */
+  readonly initialOptionId?: string;
   readonly link?: { readonly url: string; readonly label?: string };
   /** A sign-in's challenge. */
   readonly signIn?: SignInChallenge;
@@ -129,6 +134,7 @@ export const interactionRequestSchema = conforming<InteractionRequest>()(
   z.object({
     allowFreeform: z.boolean().optional(),
     display: known<InteractionDisplay>().optional(),
+    initialOptionId: z.string().optional(),
     kind: known<InteractionKind>(),
     link: z.object({ label: z.string().optional(), url: z.string() }).optional(),
     options: z
