@@ -216,9 +216,10 @@ export class WorkflowBundleBuilder {
                 projectRoot: this.transformProjectRoot,
                 workingDir: this.config.workingDir,
               },
-              async (graphPlugin) => await this.#buildDriverChunk(layer, graphPlugin),
+              async (graphPlugin) =>
+                await this.#buildDriverChunk({ ...layer, authoredTsConfig: false, graphPlugin }),
             )
-          : await this.#buildDriverChunk(layer),
+          : await this.#buildDriverChunk({ ...layer, authoredTsConfig: true }),
     );
     for (const chunk of chunks) mergeWorkflowManifest(manifest, chunk.manifest);
     const workflowCode = composeWorkflowDriverCode(chunks.map((chunk) => chunk.code));
@@ -237,17 +238,16 @@ export class WorkflowBundleBuilder {
    * One driver layer, without registry banner or entrypoint wrapper so
    * `composeWorkflowDriverCode` can concatenate layers. `""` when the layer has
    * nothing to bundle, the common case for an app with no workflow tools.
-   * `installedGraphPlugin` marks an installed eve's framework layer, which
-   * {@link reuseFrameworkDriverChunk} reuses across builds.
    */
-  async #buildDriverChunk(
-    options: {
-      label: string;
-      serdeFiles: readonly string[];
-      workflowFiles: readonly string[];
-    },
-    installedGraphPlugin?: Plugin,
-  ): Promise<DriverChunk> {
+  async #buildDriverChunk(options: {
+    /** An installed eve ships compiled JavaScript, which the app's tsconfig must not reshape. */
+    authoredTsConfig: boolean;
+    /** Lets {@link reuseFrameworkDriverChunk} record the layer's build graph. */
+    graphPlugin?: Plugin;
+    label: string;
+    serdeFiles: readonly string[];
+    workflowFiles: readonly string[];
+  }): Promise<DriverChunk> {
     const manifest: WorkflowManifest = {};
     const workflowFiles = [...options.workflowFiles].sort();
     const workflowFileSet = new Set(workflowFiles);
@@ -289,18 +289,16 @@ export class WorkflowBundleBuilder {
         }),
         // After the transform, so stubbed step bodies' node:* imports are already gone.
         createWorkflowNodeBuiltinGuardPlugin(),
-        installedGraphPlugin,
+        options.graphPlugin,
       ],
       resolve: {
         conditionNames: ["eve-source", "workflow"],
         extensions: [...WORKFLOW_SOURCE_EXTENSIONS],
         mainFields: ["module", "main"],
       },
-      // An installed eve ships compiled JavaScript, which the app's tsconfig must not reshape.
-      tsconfig:
-        installedGraphPlugin === undefined
-          ? resolveAuthoredTsConfigPath(this.authoredPackageRoot)
-          : false,
+      tsconfig: options.authoredTsConfig
+        ? resolveAuthoredTsConfigPath(this.authoredPackageRoot)
+        : false,
       output: {
         comments: false,
         format: "cjs",

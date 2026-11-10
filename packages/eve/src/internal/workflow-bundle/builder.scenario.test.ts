@@ -894,7 +894,7 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("reuses an installed eve's framework driver until a module or option changes", async () => {
+  it("reuses an installed eve's framework driver per app until its code or options change", async () => {
     const app = await scenarioApp({
       files: {},
       installDependencies: true,
@@ -903,7 +903,7 @@ describe("WorkflowBundleBuilder", () => {
     const eveRoot = await realpath(join(app.appRoot, "node_modules", "eve"));
     const cacheDirectory = join(app.appRoot, "node_modules", ".cache", "eve", "workflow-driver");
     const outDir = join(app.appRoot, "workflow-build");
-    const build = async (inlineSourcemap: boolean) => {
+    const build = async (inlineSourcemap: boolean, appRoot = app.appRoot) => {
       await runFile(
         process.execPath,
         [
@@ -911,7 +911,7 @@ describe("WorkflowBundleBuilder", () => {
           "--eval",
           INSTALLED_BUILD_SCRIPT,
           eveRoot,
-          app.appRoot,
+          appRoot,
           outDir,
           String(inlineSourcemap),
         ],
@@ -922,6 +922,12 @@ describe("WorkflowBundleBuilder", () => {
         manifest: JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8")),
       };
     };
+    // Replaced rather than written through, which would edit pnpm's shared store.
+    const editInstalledEve = async (distPath: string, appended: string) => {
+      const path = join(eveRoot, "dist", "src", distPath);
+      await writeFile(`${path}.edit`, `${await readFile(path, "utf8")}\n${appended}\n`);
+      await rename(`${path}.edit`, path);
+    };
 
     const cold = await build(true);
     expect(cold.code).toContain("sourceMappingURL=data:");
@@ -931,13 +937,18 @@ describe("WorkflowBundleBuilder", () => {
     await expect(build(true)).resolves.toEqual(cold);
     expect((await stat(mappedEntryPath)).mtimeMs).toBe(mtimeMs);
 
-    // Replaced rather than written through, which would edit pnpm's shared store.
-    const modulePath = join(eveRoot, "dist", "src", "tools", "provided", "sleep-workflow.js");
-    await writeFile(
-      `${modulePath}.edit`,
-      `${await readFile(modulePath, "utf8")}\nglobalThis.eveDriverProbe = "patched in place";\n`,
+    // The transform is not in the layer's graph, so only the key notices it changed.
+    await editInstalledEve(
+      "internal/workflow-bundle/workflow-transformer.js",
+      "// edited in place",
     );
-    await rename(`${modulePath}.edit`, modulePath);
+    await build(true);
+    expect((await stat(mappedEntryPath)).mtimeMs).not.toBe(mtimeMs);
+
+    await editInstalledEve(
+      "tools/provided/sleep-workflow.js",
+      `globalThis.eveDriverProbe = "patched in place";`,
+    );
     const patched = await build(true);
     expect(patched.code).toContain("patched in place");
 
@@ -945,6 +956,12 @@ describe("WorkflowBundleBuilder", () => {
     expect(unmapped.code).toContain("patched in place");
     expect(unmapped.code).not.toContain("sourceMappingURL");
     expect(await readdir(cacheDirectory)).toHaveLength(2);
+
+    // A second agent in the same package gets its own entry rather than evicting this one.
+    const secondAppRoot = join(app.appRoot, "agents", "second");
+    await mkdir(secondAppRoot, { recursive: true });
+    await build(true, secondAppRoot);
+    expect(await readdir(cacheDirectory)).toHaveLength(3);
 
     await truncate(mappedEntryPath, Math.floor((await stat(mappedEntryPath)).size / 2));
     await expect(build(true)).resolves.toEqual(patched);

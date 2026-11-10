@@ -18,36 +18,36 @@ function formatEntryPointMethods(): string {
 const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
 type AstNode = {
-  async?: boolean;
-  generator?: boolean;
-  body?: AstNode | AstNode[] | null;
-  computed?: boolean;
-  declaration?: AstNode | null;
-  declarations?: AstNode[];
-  directive?: string;
-  end?: number;
-  expression?: AstNode | boolean | null;
-  id?: AstNode | null;
-  imported?: AstNode | null;
-  key?: AstNode | null;
-  kind?: string;
-  local?: AstNode | null;
-  method?: boolean;
-  name?: string;
-  params?: AstNode[];
-  properties?: AstNode[];
-  returnType?: AstNode | null;
-  specifiers?: AstNode[];
-  start?: number;
-  type?: string;
-  typeParameters?: AstNode | null;
-  value?: unknown;
-  arguments?: AstNode[];
-  callee?: AstNode;
-  source?: AstNode;
+  readonly async?: boolean;
+  readonly generator?: boolean;
+  readonly body?: AstNode | readonly AstNode[] | null;
+  readonly computed?: boolean;
+  readonly declaration?: AstNode | null;
+  readonly declarations?: readonly AstNode[];
+  readonly directive?: string;
+  readonly end?: number;
+  readonly expression?: AstNode | boolean | null;
+  readonly id?: AstNode | null;
+  readonly imported?: AstNode | null;
+  readonly key?: AstNode | null;
+  readonly kind?: string;
+  readonly local?: AstNode | null;
+  readonly method?: boolean;
+  readonly name?: string;
+  readonly params?: readonly AstNode[];
+  readonly properties?: readonly AstNode[];
+  readonly returnType?: AstNode | null;
+  readonly specifiers?: readonly AstNode[];
+  readonly start?: number;
+  readonly type?: string;
+  readonly typeParameters?: AstNode | null;
+  readonly value?: unknown;
+  readonly arguments?: readonly AstNode[];
+  readonly callee?: AstNode;
+  readonly source?: AstNode;
 };
 
-type AstProgram = { body?: AstNode[] };
+type AstProgram = { readonly body?: readonly AstNode[] };
 
 interface DirectiveFunctionNode {
   readonly directive: string;

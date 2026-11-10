@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, sep } from "node:path";
 
 import type { Plugin } from "rolldown";
@@ -12,6 +12,21 @@ import { atomicWriteFile } from "#shared/atomic-write-file.js";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
 const CACHE_DIRECTORY_PATH = join("node_modules", ".cache", "eve", "workflow-driver");
+
+// eve's code that builds the layer is not in the layer's graph: the workflow transform and bundler
+// setup, and the modules outside them that the transform imports to emit code and ids.
+const BUILD_CODE_DIRECTORIES = ["internal/workflow-bundle", "internal/bundler"];
+const BUILD_CODE_FILES = [
+  "execution/stable-workflow-names.js",
+  "execution/workflow-registry.js",
+  "internal/application/import-specifier.js",
+  "internal/application/package.js",
+  "internal/package-name.js",
+  "runtime/subagents/workflow-reference.js",
+  "tools/workflow-entry-point.js",
+];
+
+const buildCodeHashes = new Map<string, Promise<Record<string, string>>>();
 
 export interface DriverChunk {
   readonly code: string;
@@ -36,9 +51,13 @@ export function resolveInstalledEveRoot(): string | undefined {
 
 /**
  * Returns the framework driver chunk an earlier build of the same installed eve
- * stored under `packageRoot`, or builds and stores it. Each entry records the
- * modules of its build graph with a content hash, so a package edited in place,
- * for example by `patch-package`, rebuilds. Cache failures never fail the build.
+ * stored under `packageRoot` for this app, or builds and stores it. The key
+ * covers eve's package.json and root, Rolldown's version, the build options, and
+ * a content hash of eve's workflow-bundle and bundler code plus the modules the
+ * transform imports. Each entry also records a content hash of every module in
+ * its build graph. So eve edited in place, for example by `patch-package`,
+ * rebuilds, unless the edit only touches another module those import, such as a
+ * resolution helper of the authored plugins. Cache failures never fail the build.
  */
 export async function reuseFrameworkDriverChunk(
   input: {
@@ -51,11 +70,16 @@ export async function reuseFrameworkDriverChunk(
   },
   build: (graphPlugin: Plugin) => Promise<DriverChunk>,
 ): Promise<DriverChunk> {
-  // One entry per option set, replaced when stale, so the directory cannot grow.
+  // One entry per app and sourcemap setting, replaced when stale, so agents sharing a package do
+  // not evict each other and the directory grows only with the package's apps.
+  const app = createHash("sha256")
+    .update(JSON.stringify([input.projectRoot, input.workingDir]))
+    .digest("hex")
+    .slice(0, 16);
   const path = join(
     input.packageRoot,
     CACHE_DIRECTORY_PATH,
-    input.inlineSourcemap ? "framework-mapped.json" : "framework.json",
+    `framework-${app}${input.inlineSourcemap ? "-mapped" : ""}.json`,
   );
   const key = await createKey(input).catch(() => undefined);
   const cached = key === undefined ? undefined : await readEntry(path, key).catch(() => undefined);
@@ -84,15 +108,17 @@ async function createKey(input: {
   readonly projectRoot: string;
   readonly workingDir: string;
 }): Promise<string> {
-  const [evePackageJson, rolldownPackageJson] = await Promise.all([
+  const [evePackageJson, rolldownPackageJson, buildCode] = await Promise.all([
     readFile(join(input.eveRoot, "package.json"), "utf8"),
     readFile(join(resolveRolldownPackageDir(), "package.json"), "utf8"),
+    hashBuildCode(input.eveRoot),
   ]);
   return createHash("sha256")
     .update(
       JSON.stringify([
         evePackageJson,
         rolldownPackageJson,
+        buildCode,
         input.eveRoot,
         input.inlineSourcemap,
         [...input.inputFiles].sort(),
@@ -101,6 +127,30 @@ async function createKey(input: {
       ]),
     )
     .digest("hex");
+}
+
+/** Once per process: an installed eve's code does not change under a running build. */
+function hashBuildCode(eveRoot: string): Promise<Record<string, string>> {
+  let hashes = buildCodeHashes.get(eveRoot);
+  if (hashes === undefined) {
+    hashes = listBuildCode(join(eveRoot, "dist", "src")).then(hashModules);
+    buildCodeHashes.set(eveRoot, hashes);
+  }
+  return hashes;
+}
+
+async function listBuildCode(distRoot: string): Promise<string[]> {
+  const entries = await Promise.all(
+    BUILD_CODE_DIRECTORIES.map((directory) =>
+      readdir(join(distRoot, directory), { recursive: true, withFileTypes: true }),
+    ),
+  );
+  return [
+    ...entries
+      .flat()
+      .flatMap((entry) => (entry.isFile() ? [join(entry.parentPath, entry.name)] : [])),
+    ...BUILD_CODE_FILES.map((file) => join(distRoot, file)),
+  ].sort();
 }
 
 async function readEntry(path: string, key: string): Promise<DriverChunk | undefined> {
