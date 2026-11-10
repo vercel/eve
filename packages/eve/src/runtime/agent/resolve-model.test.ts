@@ -91,19 +91,32 @@ describe("dynamic runtime model resolution", () => {
     expect(result.reference.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
-  it("rejects prompt cache options on an AI Gateway selection", async () => {
+  it("rejects prompt cache options on a non-Anthropic AI Gateway selection", async () => {
     const modelMetadata = metadataSource();
     await expect(
       resolveRuntimeModelSelection({
         modelMetadata,
         selection: {
-          model: "anthropic/claude-opus-5",
+          model: "openai/gpt-5.5",
           modelOptions: { promptCache: { anthropic: {} } },
         },
         durability: "durable",
       }),
-    ).rejects.toThrow('modelOptions.promptCache for "anthropic/claude-opus-5"');
+    ).rejects.toThrow('modelOptions.promptCache for "openai/gpt-5.5"');
     expect(modelMetadata).not.toHaveBeenCalled();
+  });
+
+  it("carries prompt cache options on an Anthropic AI Gateway selection", async () => {
+    const result = await resolveRuntimeModelSelection({
+      selection: {
+        model: "anthropic/claude-opus-5",
+        modelContextWindowTokens: 200_000,
+        modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+      },
+      durability: "durable",
+      modelMetadata: metadataSource(),
+    });
+    expect(result.reference.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
   afterEach(() => {
