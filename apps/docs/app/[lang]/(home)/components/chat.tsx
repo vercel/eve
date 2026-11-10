@@ -1,4 +1,5 @@
 import { Button } from "@vercel/geistdocs/components/button";
+import { Badge } from "@vercel/geistdocs/components/badge";
 import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -31,11 +32,19 @@ export function Mention({ children }: { children: string }) {
 }
 
 export function AgentBadge() {
-  return <span className="rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900">Agent</span>;
+  return (
+    <Badge
+      asChild
+      className="h-auto rounded bg-gray-alpha-200 px-1 text-label-12 text-gray-900 leading-[inherit]"
+      variant="gray"
+    >
+      <span>Agent</span>
+    </Badge>
+  );
 }
 
 /** A link preview under a message: an icon, a title, and a line of detail. */
-export function Card({
+export function MessageCard({
   icon,
   title,
   meta,

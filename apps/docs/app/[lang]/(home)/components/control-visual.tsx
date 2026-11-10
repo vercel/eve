@@ -1,4 +1,5 @@
 import { IconChevronRightSmall } from "@vercel/geistdocs/assets/icons";
+import { Badge } from "@vercel/geistdocs/components/badge";
 import Link from "next/link";
 import type { JSX, ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -74,13 +75,33 @@ export function LimitLine({ id, x, y1, y2 }: { id: string; x: number; y1: number
   );
 }
 
-/** Geist's small gray low-contrast badge, in `em` so it scales with the frame. */
-export function GrayBadge({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
+/**
+ * Geist's small gray low-contrast badge, in `em` so it scales with the frame. `inverted` draws
+ * it black, as the visual's one accent.
+ */
+export function VisualBadge({
+  children,
+  className,
+  icon,
+  inverted,
+}: {
+  children: ReactNode;
+  className?: string;
+  icon?: ReactNode;
+  inverted?: boolean;
+}) {
   return (
-    <span className="inline-flex h-[1.75em] shrink-0 items-center gap-[0.375em] rounded-full bg-gray-200 px-[0.75em] font-medium text-[0.625em] text-gray-1000 tracking-[0.2px] [&>svg]:size-[1.1em]">
-      {icon}
+    <Badge
+      className={cn(
+        "h-[1.75em] gap-[0.375em] bg-gray-200 px-[0.75em] text-[0.625em] text-gray-1000 leading-none tracking-[0.2px] [&_[data-slot=icon]]:size-[1.1em]",
+        inverted && "bg-gray-1000 text-background-100",
+        className,
+      )}
+      icon={icon}
+      variant={inverted ? "inverted" : "gray"}
+    >
       {children}
-    </span>
+    </Badge>
   );
 }
 

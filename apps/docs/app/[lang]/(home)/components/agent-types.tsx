@@ -24,7 +24,7 @@ import { templateGalleryUrl } from "@/lib/templates/links";
 import { cn } from "@/lib/utils";
 import {
   type Author,
-  Card,
+  MessageCard,
   DemoButton,
   Mention,
   Reaction,
@@ -132,7 +132,7 @@ function SoftwareFactoryPreview({ stage }: { stage?: number }) {
           time="10:02 AM"
         >
           <p>Created Linear ticket and picked it up.</p>
-          <Card
+          <MessageCard
             icon={logos.linear({ "aria-hidden": true })}
             meta={`From user feedback · ${status}`}
             title="ENG-142 Saved carts disappear after sign-in"
@@ -145,7 +145,7 @@ function SoftwareFactoryPreview({ stage }: { stage?: number }) {
           />
           {shown >= FACTORY_PR ? (
             <div className={cn(demo && fadeIn)}>
-              <Card
+              <MessageCard
                 icon={closed ? <IconGitMerge /> : <IconGitPullRequest />}
                 meta={`acme/storefront#318 · ${closed ? "merged" : "draft, ready for review"}`}
                 title="fix(cart): keep guest items after sign-in"

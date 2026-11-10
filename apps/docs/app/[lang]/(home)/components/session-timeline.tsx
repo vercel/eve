@@ -14,6 +14,7 @@ import {
   IconWarning,
 } from "@vercel/geistdocs/assets/icons";
 import { LogoIconMicrosoftTeamsSvg } from "@vercel/geistdocs/assets/logos/logo-icon-microsoft-teams-svg";
+import { Button } from "@vercel/geistdocs/components/button";
 import { type JSX, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SiWhatsapp } from "@icons-pack/react-simple-icons";
 import { logos } from "@/lib/integrations/logos";
@@ -21,7 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   AgentBadge,
   type Author,
-  Card,
+  MessageCard,
   ChatAvatar,
   DemoButton,
   Mention,
@@ -67,16 +68,14 @@ type Beat =
 
 function ChatButton({ children, primary }: { children: string; primary?: boolean }) {
   return (
-    <span
-      className={cn(
-        "inline-flex h-8 items-center justify-center rounded-md px-3 font-medium text-label-13",
-        primary
-          ? "bg-gray-1000 text-background-100"
-          : "bg-background-100 text-gray-1000 shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
-      )}
+    <Button
+      className={cn("text-label-13", !primary && "shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]")}
+      Component="span"
+      size="small"
+      variant={primary ? "default" : "secondary"}
     >
       {children}
-    </span>
+    </Button>
   );
 }
 
@@ -126,7 +125,7 @@ const SLACK_BEATS: Beat[] = [
     time: "10:02 AM",
     body: "Picked up a P1 bug and reproduced it in a sandbox.",
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconTarget />}
         meta="acme/storefront#412 · opened by Dana"
         title="Saved carts disappear after sign-in"
@@ -144,7 +143,7 @@ const SLACK_BEATS: Beat[] = [
       </>
     ),
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconGitPullRequest />}
         meta="acme/storefront#418 · +84 −12 · 6 checks passed"
         title="fix(cart): keep guest items after sign-in"
@@ -162,7 +161,7 @@ const SLACK_BEATS: Beat[] = [
       </>
     ),
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconWarning />}
         meta="cart/session.ts:42 · could pull another guest's cart into an account"
         title="Guest cart ID is trusted from the cookie"
@@ -188,7 +187,7 @@ const SLACK_BEATS: Beat[] = [
     time: "10:41 AM",
     body: "Verified the fix. Security pass is clean, approving.",
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconShieldCheck />}
         meta="acme/storefront#418 · approved by Reviewer"
         title="fix(cart): keep guest items after sign-in"
@@ -201,7 +200,7 @@ const SLACK_BEATS: Beat[] = [
             </li>
           ))}
         </ul>
-      </Card>
+      </MessageCard>
     ),
     delay: 2200,
   },
@@ -211,7 +210,7 @@ const SLACK_BEATS: Beat[] = [
     time: "10:42 AM",
     body: "Merged and closed the issue. It goes out with the next deploy.",
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconGitMerge />}
         meta="acme/storefront#418 · merged into main · closed #412"
         title="fix(cart): keep guest items after sign-in"
@@ -233,7 +232,7 @@ const TEAMS_BEATS: Beat[] = [
     time: "2:14 PM",
     body: "Checkout p95 latency is up 4x since the 2:05 PM deploy.",
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconChartActivity />}
         meta="storefront · p95 2.4s · started 2:06 PM"
         title="Checkout latency is degraded"
@@ -272,7 +271,7 @@ const TEAMS_BEATS: Beat[] = [
     time: "2:18 PM",
     body: "Rolled back. p95 is at 610 ms and holding. I opened an issue to fix the query.",
     attachment: (
-      <Card
+      <MessageCard
         icon={<IconTarget />}
         meta="acme/storefront#424 · assigned to Coder"
         title="perf(cart): index guest cart lookups"
@@ -568,7 +567,7 @@ function BubbleReaction({
 
   useEffect(() => {
     if (!demo || !pill.current || !glyph.current) return;
-    const delay = 500;
+    const delay = 1100;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       pill.current.animate([{ opacity: 0 }, { opacity: 1 }], {
         delay,

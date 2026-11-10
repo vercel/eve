@@ -24,11 +24,11 @@ import { logos } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
 import {
   FeatureCard,
-  GrayBadge,
   RuledList,
   monochromeLogo,
   ruledRow,
   Visual,
+  VisualBadge,
   pct,
   view,
 } from "./control-visual";
@@ -206,7 +206,7 @@ function TenantCapabilities() {
               {name}
             </span>
             {capabilities.map((capability) => (
-              <GrayBadge key={capability}>{capability}</GrayBadge>
+              <VisualBadge key={capability}>{capability}</VisualBadge>
             ))}
           </li>
         ))}
