@@ -33,9 +33,14 @@ export async function getVercelSandboxCredentials(
 
   // Never send `VERCEL_OIDC_TOKEN` as-is: it can expire before it is used, for
   // example when a build starts long after its environment was issued. The
-  // helper rejects an expired token, refreshing it where it can.
+  // helper uses the SDK's five-minute refresh buffer so near-expiry tokens
+  // fall back before template builds, not during SDK requests.
   try {
-    const oidcToken = await getVercelOidcToken({ project: projectId, team: teamId });
+    const oidcToken = await getVercelOidcToken({
+      project: projectId,
+      team: teamId,
+      expirationBufferMs: 5 * 60_000,
+    });
     return withIds(oidcToken) ?? getVercelSandboxCredentialsFromOidcToken(oidcToken);
   } catch (error) {
     if (accessToken) {

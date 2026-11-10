@@ -1,8 +1,14 @@
+import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getVercelSandboxCredentials } from "#execution/sandbox/bindings/vercel-credentials.js";
+import {
+  getVercelSandboxCredentials,
+  resolveVercelSandboxCredentials,
+} from "#execution/sandbox/bindings/vercel-credentials.js";
 
-const oidc = vi.hoisted(() => ({ getVercelOidcToken: vi.fn<() => Promise<string>>() }));
+const oidc = vi.hoisted(() => ({
+  getVercelOidcToken: vi.fn<typeof import("#compiled/@vercel/oidc/index.js").getVercelOidcToken>(),
+}));
 vi.mock("#compiled/@vercel/oidc/index.js", () => oidc);
 
 function oidcToken(claims: { readonly exp: number }): string {
@@ -24,6 +30,8 @@ describe("getVercelSandboxCredentials", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("uses an explicit token without consulting OIDC", async () => {
@@ -45,7 +53,6 @@ describe("getVercelSandboxCredentials", () => {
       teamId: "team_env",
       token: fresh,
     });
-    expect(oidc.getVercelOidcToken).toHaveBeenCalledWith({ project: "prj_env", team: "team_env" });
   });
 
   it("keeps explicit IDs ahead of environment IDs and fresh OIDC claims", async () => {
@@ -86,11 +93,39 @@ describe("getVercelSandboxCredentials", () => {
     });
   });
 
-  it("surfaces the OIDC failure when no other credential is configured", async () => {
+  it.each([
+    { secondsLeft: 299, useAccessToken: true },
+    { secondsLeft: 301, useAccessToken: false },
+  ])(
+    "resolves credentials with $secondsLeft seconds left on the ambient OIDC token",
+    async ({ secondsLeft, useAccessToken }) => {
+      const actual = await vi.importActual<typeof import("#compiled/@vercel/oidc/index.js")>(
+        "#compiled/@vercel/oidc/index.js",
+      );
+      oidc.getVercelOidcToken.mockImplementation(actual.getVercelOidcToken);
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      // Model CI without cached OIDC tokens or a Vercel CLI login. Keep the
+      // vendored helper's expiry check and refresh/failure handling real.
+      vi.spyOn(fs, "existsSync").mockReturnValue(false);
+      vi.spyOn(fs, "readFileSync").mockReturnValue("{}");
+      const ambient = oidcToken({ exp: nowSeconds() + secondsLeft });
+      vi.stubEnv("VERCEL_OIDC_TOKEN", ambient);
+      vi.stubEnv("VERCEL_TOKEN", "token_env");
+
+      await expect(resolveVercelSandboxCredentials({})).resolves.toEqual({
+        projectId: "prj_env",
+        teamId: "team_env",
+        token: useAccessToken ? "token_env" : ambient,
+      });
+    },
+  );
+
+  it("defers to SDK credential lookup when OIDC fails without a fallback credential", async () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken({ exp: nowSeconds() - 60 }));
     oidc.getVercelOidcToken.mockRejectedValue(new Error("Failed to refresh OIDC token"));
 
-    await expect(getVercelSandboxCredentials({})).rejects.toThrow("Failed to refresh OIDC token");
+    await expect(resolveVercelSandboxCredentials({})).resolves.toEqual({});
   });
 
   it("uses VERCEL_TOKEN without consulting OIDC when no OIDC token is present", async () => {
