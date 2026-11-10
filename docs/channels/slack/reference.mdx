@@ -655,6 +655,8 @@ The plan title summarizes the turn, from `Working on 2 tasks` and `1 of 2 tasks 
 
 Approvals and questions show as Slack buttons and selects, and **Type your answer** opens a modal. Answers pass through `onAnswers` before the session resumes. Approval cards pair **Deny** with a primary **Approve** button.
 
+A `display: "select"` question shows radio buttons for up to 6 options and a dropdown for more. Picking an option answers it. When the question sets `initialOptionId`, that option starts selected, and a primary **Use** button labeled with the option submits it, because Slack sends nothing when a person keeps the current selection. The button is one of eve's controls, so a custom [`interactionCard`](#restyle-approval-and-question-cards) must keep it.
+
 Set `approvalChannel` to choose where each request appears, including tool approvals and `ctx.ask()` questions. Return `"direct-message"` to show it only to the Slack user who triggered the turn, or `"thread"` for the shared thread:
 
 ```ts title="agent/channels/slack.ts"

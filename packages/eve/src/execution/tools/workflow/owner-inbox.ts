@@ -84,6 +84,14 @@ export function workflowAskPayload(
   if (authored.display !== undefined) request.display = authored.display;
   if (authored.title !== undefined) request.title = authored.title;
   if (authored.options !== undefined) request.options = [...authored.options];
+  if (authored.initialOptionId !== undefined) {
+    if (!authored.options?.some((option) => option.id === authored.initialOptionId)) {
+      throw new TypeError(
+        `A workflow tool run request's \`initialOptionId\` ${JSON.stringify(authored.initialOptionId)} must match one of its \`options\` ids.`,
+      );
+    }
+    request.initialOptionId = authored.initialOptionId;
+  }
   return {
     callId: from.callId,
     childSessionId: from.runId,

@@ -45,6 +45,39 @@ it("keeps the authored question heading in the relayed interaction", () => {
   ]);
 });
 
+describe("a question's preselected option", () => {
+  const ask = (initialOptionId: string) =>
+    workflowAskPayload({
+      from,
+      replyTo: "question-1",
+      request: {
+        kind: "ask",
+        control: "run-control",
+        request: {
+          prompt: "Which team should Alice notify?",
+          display: "select",
+          options: [
+            { id: "billing", label: "Billing" },
+            { id: "platform", label: "Platform" },
+          ],
+          initialOptionId,
+        },
+      },
+    });
+
+  it("keeps an id that matches an option", () => {
+    expect(ask("platform").events).toMatchObject([
+      { data: { request: { display: "select", initialOptionId: "platform" } } },
+    ]);
+  });
+
+  it("refuses an id that matches no option", () => {
+    expect(() => ask("security")).toThrow(
+      'A workflow tool run request\'s `initialOptionId` "security" must match one of its `options` ids.',
+    );
+  });
+});
+
 describe("workflow-tool task outcomes", () => {
   it("keeps a structured workflow failure as task failure data", () => {
     expect(

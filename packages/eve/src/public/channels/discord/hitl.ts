@@ -58,14 +58,16 @@ export function renderInteractionComponents(
     request.request.allowFreeform === true || !options || options.length === 0;
 
   if (options && options.length > 0 && request.request.display === "select") {
-    return [
+    const shown = options.slice(0, DISCORD_SELECT_OPTION_LIMIT);
+    const initial = shown.find((option) => option.id === request.request.initialOptionId);
+    const rows: Record<string, unknown>[] = [
       {
         components: [
           {
             custom_id: encodeHitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
               requestId: request.interactionId,
             }),
-            options: options.slice(0, DISCORD_SELECT_OPTION_LIMIT).map((option) => {
+            options: shown.map((option) => {
               const result: Record<string, unknown> = {
                 label: truncate(option.label, DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH),
                 value: selectOptionValue(option.id),
@@ -76,6 +78,7 @@ export function renderInteractionComponents(
                   DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH,
                 );
               }
+              if (option === initial) result.default = true;
               return result;
             }),
             placeholder: "Choose an option",
@@ -85,6 +88,33 @@ export function renderInteractionComponents(
         type: DISCORD_COMPONENT_TYPE.ACTION_ROW,
       },
     ];
+    // Discord sends nothing when the person keeps the preselected option, so a button submits it.
+    // Its id also carries the option id; past Discord's limit, the preselection alone remains.
+    const useId =
+      initial === undefined
+        ? undefined
+        : hitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
+            optionId: initial.id,
+            requestId: request.interactionId,
+          });
+    if (
+      initial !== undefined &&
+      useId !== undefined &&
+      useId.length <= DISCORD_CUSTOM_ID_MAX_LENGTH
+    ) {
+      rows.push({
+        components: [
+          {
+            custom_id: useId,
+            label: truncate(`Use ${initial.label}`, DISCORD_LABEL_MAX_LENGTH),
+            style: toDiscordButtonStyle("primary"),
+            type: DISCORD_COMPONENT_TYPE.BUTTON,
+          },
+        ],
+        type: DISCORD_COMPONENT_TYPE.ACTION_ROW,
+      });
+    }
+    return rows;
   }
 
   if (options && options.length > 0) {
@@ -210,13 +240,17 @@ export function deriveModalAnswers(
  * ids such as a session-limit prompt's `<sessionId>:<turn>:limit:input:<tokens>`.
  */
 function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
-  const fields =
-    payload.optionId === undefined ? [payload.requestId] : [payload.requestId, payload.optionId];
-  const customId = `${prefix}${JSON.stringify(fields)}`;
+  const customId = hitlCustomId(prefix, payload);
   if (customId.length > DISCORD_CUSTOM_ID_MAX_LENGTH) {
     throw new Error("discordChannel: HITL custom_id exceeded Discord's 100-character limit.");
   }
   return customId;
+}
+
+function hitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
+  const fields =
+    payload.optionId === undefined ? [payload.requestId] : [payload.requestId, payload.optionId];
+  return `${prefix}${JSON.stringify(fields)}`;
 }
 
 function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPayload | null {
