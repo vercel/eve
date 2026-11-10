@@ -1,6 +1,13 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SandboxKey,
+  SessionIdKey,
+  SessionKey,
+  WorkflowStepKey,
+} from "#context/keys.js";
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -47,6 +54,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
+    context.setVirtualContext(WorkflowStepKey, true);
 
     const loadAgent = stepAgentLoader(input);
     const sandbox = openStepSandbox(input, loadAgent);

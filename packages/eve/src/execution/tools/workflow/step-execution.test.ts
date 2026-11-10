@@ -15,6 +15,7 @@ import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { defineState } from "#public/definitions/state.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
@@ -262,6 +263,21 @@ describe("workflow step authorization", () => {
       ),
     });
     expect(starts).toEqual([]);
+  });
+
+  it("fails defineState() reads and writes without retrying the step", async () => {
+    const notes = defineState("step-test.notes", () => ["initial"]);
+    for (const access of [
+      () => notes.get(),
+      () => notes.update((current) => [...current, "step"]),
+    ]) {
+      await expect(runStep(access)).rejects.toMatchObject({
+        fatal: true,
+        message: expect.stringContaining(
+          'defineState() get() and update() are unavailable inside a "use step" function.',
+        ),
+      });
+    }
   });
 
   it("accepts its own copy of the session's environment and leaves stopping and deleting to the session", async () => {
