@@ -234,12 +234,25 @@ export type ScheduleApprovals<TPrepared> = Partial<
   readonly update?: SchedulePayloadApproval<TPrepared | undefined>;
 };
 
+/** What `auth` returns: the creator's current attributes, a full context for the creator, or `null`. */
+type ScheduleAuthResult = SessionAuthContext | Pick<SessionAuthContext, "attributes"> | null;
+
 /** Execution context; `to` starts fresh, unattended sessions as the resolved creator. */
 export interface DynamicSchedulesRunArgs<TPayload> extends Pick<ScheduleHandlerArgs, "waitUntil"> {
   readonly to: DynamicSchedulesToFn;
   readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly auth: SessionAuthContext;
+  /**
+   * The schedule that fired this occurrence. Acts without calling `scope`, which authorizes
+   * callers, because an occurrence has none.
+   */
+  readonly schedule: {
+    /** Pauses future runs of the schedule that fired this occurrence. */
+    disable(): Promise<void>;
+    /** Deletes the schedule that fired this occurrence. */
+    delete(): Promise<void>;
+  };
 }
 
 /** Defines dynamically created schedules whose occurrences invoke authored code. */
@@ -287,18 +300,23 @@ export interface DynamicSchedulesDefinition<
   readonly scope?: (
     context: ScheduleScopeContext & { readonly operation: ScheduleOperation },
   ) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>;
-  /** Resolves the captured creator to current execution auth; return `null` to deny. */
+  /**
+   * Resolves the captured creator to current execution auth. Return `{ attributes }` to run as
+   * the stored creator with those attributes, or a full `SessionAuthContext`, whose identity
+   * fields must equal the stored creator's. Return `null` to deny: the occurrence fails without
+   * a retry. Throw to let the provider retry.
+   */
   readonly auth: (context: {
     readonly principal: SchedulePrincipalReference;
     readonly payload: NoInfer<TPrepared>;
     readonly occurrence: ScheduleOccurrenceIdentity;
-  }) => SessionAuthContext | null | Promise<SessionAuthContext | null>;
+  }) => ScheduleAuthResult | Promise<ScheduleAuthResult>;
   /** May repeat on provider retries. Key external effects on the occurrence identity. */
   readonly run: (args: DynamicSchedulesRunArgs<NoInfer<TPrepared>>) => void | Promise<void>;
   readonly events?: {
     /** After `run` and registered `waitUntil` work succeed; may repeat on retries. */
     readonly "occurrence.dispatched"?: ScheduleOccurrenceEventHandler<NoInfer<TPrepared>>;
-    /** On a permanent provider failure or after its retry budget is exhausted. */
+    /** On a permanent failure, such as `auth` returning `null`, or after the provider's retry budget is exhausted. */
     readonly "occurrence.failed"?: ScheduleOccurrenceEventHandler<NoInfer<TPrepared>>;
   };
   /** Expose operation tools directly (default true), defer them to the catalog, or disable them. */

@@ -15,8 +15,8 @@ The model supplies a payload that matches `inputSchema`. eve records who created
 import { byPrincipal, defineDynamicSchedules } from "eve/experimental/schedules";
 import { z } from "zod";
 import slack from "../channels/slack";
-// Application code: look up users and destinations.
-import { resolveCurrentUser } from "../lib/identity";
+// Application code: look up accounts and destinations.
+import { findActiveAccount } from "../lib/identity";
 import { resolveCreatorDm, resolveAuthorizedTeamChannel } from "../lib/schedule-policy";
 
 export default defineDynamicSchedules({
@@ -30,8 +30,12 @@ export default defineDynamicSchedules({
     .strict(),
   // Optional: byPrincipal is the default.
   scope: byPrincipal,
-  // Required: resolve the creator's current access before each run.
-  auth: ({ principal }) => resolveCurrentUser(principal),
+  // Required: check the creator's current access before each run.
+  async auth({ principal }) {
+    const account = await findActiveAccount(principal.principalId);
+    // null denies the run. Otherwise the run uses the creator's identity with these attributes.
+    return account === null ? null : { attributes: { team: account.team } };
+  },
   // Required: runs each time the schedule fires.
   async run({ payload, occurrence, to, auth }) {
     const target =
@@ -177,19 +181,43 @@ Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to conf
 
 ## Handle occurrences and retries
 
-`run` receives `payload`, `occurrence`, `auth`, `to`, and `waitUntil`. It can start any number of sessions or do application work directly.
+`run` receives `payload`, `occurrence`, `auth`, `schedule`, `to`, and `waitUntil`. It can start any number of sessions or do application work directly.
 
 `to(channel, target).send(message, options)` runs as the resolved creator and takes no auth argument. `options` takes `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off). It takes no `turnPolicy`, because a send only reaches sessions the schedule started. It always starts a new session with no one present, through one of your channels, even when the target names an existing thread. Those sessions can't wait for approvals or questions, so configure tools to match.
 
+`schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish.
+
+```ts
+async run({ payload, schedule, to }) {
+  // isStillNeeded is application code.
+  if (!(await isStillNeeded(payload))) {
+    await schedule.disable();
+    return;
+  }
+  await to(slack, payload.target).send(payload.task);
+},
+```
+
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
-Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply. `occurrence.failed` reports a permanent provider failure or a provider that ran out of retries.
+Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+
+`occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 
 ## Revalidate creator identity
 
-`auth({ principal, payload, occurrence })` turns the stored creator reference into current access. `principal` identifies the creator; it holds no credentials or permissions. Look up current account status and permissions instead of replaying credentials or roles captured at creation. Return `null` to deny. A thrown error lets the provider retry.
+`auth({ principal, payload, occurrence })` turns the stored creator reference into current access. `principal` identifies the creator; it holds no credentials or permissions. Look up current account status and permissions instead of replaying credentials or roles captured at creation.
 
-The returned identity type, authenticator, issuer, ID, and subject must match the creator reference. eve never falls back to app identity. Manual `invoke` runs as the creator, not the caller. Tool and connection authorization still applies during the run.
+| `auth` result               | What happens                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ attributes }`            | The run uses the stored creator's identity with these attributes.                                                                     |
+| A full `SessionAuthContext` | The run uses it. Its identity type, authenticator, issuer, ID, and subject must match the creator reference, or the occurrence fails. |
+| `null`                      | The occurrence fails without a retry, and `run` isn't called.                                                                         |
+| A thrown error              | The provider retries the occurrence. Throw when a lookup fails, so an outage doesn't read as a denial.                                |
+
+A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead.
+
+eve never falls back to app identity. Manual `invoke` runs as the creator, not the caller. Tool and connection authorization still applies during the run.
 
 ## Prepare payloads and destinations
 
@@ -224,10 +252,12 @@ eve doesn't save the conversation that created a schedule. To reply in that thre
 
 ## Troubleshooting
 
-| What you see                                                                     | What to do                                                                  |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `vercelScheduleProvider() requires a Vercel deployment or eve dev.`              | Run under `eve dev` or a Vercel deployment, or pass a different `provider`. |
-| `Prepared schedule write exceeds the 64 KB limit, including timing and payload.` | Store stable references instead of large data in the payload.               |
+| What you see                                                                                  | What to do                                                                                         |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `vercelScheduleProvider() requires a Vercel deployment or eve dev.`                           | Run under `eve dev` or a Vercel deployment, or pass a different `provider`.                        |
+| `Prepared schedule write exceeds the 64 KB limit, including timing and payload.`              | Store stable references instead of large data in the payload.                                      |
+| `Scheduled execution is no longer authorized: "auth" returned null for the schedule creator.` | `auth` denied the creator. Restore their access, or delete the schedule.                           |
+| `Scheduled execution auth must resolve the schedule creator.`                                 | Return `{ attributes }` from `auth`, or a `SessionAuthContext` whose identity matches `principal`. |
 
 ## What to read next
 

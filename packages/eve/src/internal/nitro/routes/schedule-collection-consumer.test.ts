@@ -6,7 +6,9 @@ import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.
 
 const mocks = vi.hoisted(() => ({
   admit: vi.fn(),
+  auth: vi.fn(),
   failed: vi.fn(),
+  run: vi.fn(),
 }));
 vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
   resolveNitroCompiledArtifactsSource: () => ({}),
@@ -15,7 +17,7 @@ vi.mock("#runtime/schedules/dispatch-occurrence.js", () => ({
   dispatchScheduledOccurrence: mocks.admit,
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
-  getCompiledRuntimeAgentBundle: async () => ({}),
+  getCompiledRuntimeAgentBundle: async () => ({ graph: { root: { channels: [] } } }),
 }));
 vi.mock("#runtime/loaders/manifest.js", () => ({
   loadCompiledManifest: async () => ({ config: { name: "fixture" } }),
@@ -24,8 +26,25 @@ vi.mock("#runtime/schedules/load-collection.js", () => ({
   ScheduleCollectionNotDeployedError: class extends Error {},
   loadScheduleCollectionDefinition: async () => ({
     provider: {},
+    preparePayload: (value: unknown) => value,
+    auth: mocks.auth,
+    run: mocks.run,
     events: { "occurrence.failed": mocks.failed },
   }),
+}));
+vi.mock("#compiled/@vercel/schedules/index.js", () => ({
+  SchedulesApiError: class extends Error {},
+  SchedulesClient: class {
+    async get({ name, namespace }: { name: string; namespace: string }) {
+      return {
+        name,
+        namespace,
+        scheduleId: "sch-1",
+        source: "dynamic",
+        target: { type: "queue", topic: deriveEveScheduleQueueTopic("fixture") },
+      };
+    }
+  },
 }));
 
 const { createScheduleCollectionConsumer } =
@@ -33,6 +52,9 @@ const { createScheduleCollectionConsumer } =
 const { EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES } =
   await import("#internal/schedules/consumer-route.js");
 const { PermanentScheduleMessageError } = await import("#internal/schedules/verify-delivery.js");
+const { dispatchScheduledOccurrence } = await vi.importActual<
+  typeof import("#runtime/schedules/dispatch-occurrence.js")
+>("#runtime/schedules/dispatch-occurrence.js");
 
 const payload = createScheduleCollectionPayload({
   application: "fixture",
@@ -117,4 +139,34 @@ describe("schedule collection consumer", () => {
         });
     },
   );
+
+  it("acknowledges an occurrence its auth denies and reports it failed once", async () => {
+    mocks.failed.mockClear();
+    mocks.admit.mockImplementationOnce(dispatchScheduledOccurrence);
+    mocks.auth.mockResolvedValueOnce(null);
+
+    const result = await deliver(1);
+
+    expect(result.directive).toEqual({ acknowledge: true });
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(mocks.failed).toHaveBeenCalledTimes(1);
+    expect(mocks.failed.mock.calls[0]![0] as ScheduleOccurrenceEvent).toMatchObject({
+      executionId: "exec-1",
+      reason: expect.stringContaining("no longer authorized"),
+      type: "occurrence.failed",
+    });
+  });
+
+  it("retries an occurrence whose auth throws", async () => {
+    mocks.failed.mockClear();
+    mocks.admit.mockImplementationOnce(dispatchScheduledOccurrence);
+    const failure = new Error("identity service unavailable");
+    mocks.auth.mockRejectedValueOnce(failure);
+
+    const result = await deliver(1);
+
+    expect(result.thrown).toBe(failure);
+    expect(result.directive).toBeUndefined();
+    expect(mocks.failed).not.toHaveBeenCalled();
+  });
 });
