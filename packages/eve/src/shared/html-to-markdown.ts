@@ -23,7 +23,7 @@ interface ElementNode {
 type Node = ElementNode | string;
 
 /** Deeper elements are flattened into their ancestor at the cap. */
-const MAX_DEPTH = 256;
+const MAX_DEPTH = 128;
 
 const VOID_ELEMENTS = new Set([
   "area",
