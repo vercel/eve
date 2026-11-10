@@ -187,7 +187,10 @@ describe("workflowEntry sign-ins", () => {
           // The call ran with the caller's credentials, though someone else may have spoken since.
           expect(filterEventsByType(resumed, "call.settled")).toMatchObject([
             {
-              data: { outcome: "completed", output: { summary: "authorized with weather-token" } },
+              data: {
+                outcome: "completed",
+                output: { summary: "authorized with weather-token:user-1" },
+              },
             },
           ]);
           expect(executions()).toEqual([{ city: "Lisbon" }]);
@@ -295,7 +298,7 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
         resume: { nonce: "weather-nonce" },
       };
     },
-    async completeAuthorization({ callback, resume }): Promise<TokenResult> {
+    async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
       completeCalls += 1;
       if (callback.params.error === "access_denied") {
         throw new ConnectionAuthorizationFailedError("weather", {
@@ -305,7 +308,8 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
       }
       expect(callback.params.code).toBe("oauth-code");
       expect(resume).toEqual({ nonce: "weather-nonce" });
-      return { token: "weather-token" };
+      // The token names whose it is, so a call's result shows whose credentials it ran with.
+      return { token: `weather-token:${principal.type === "user" ? principal.id : "app"}` };
     },
   };
   // Both tools sign in to the same connection, so one callback serves a step that calls both.
