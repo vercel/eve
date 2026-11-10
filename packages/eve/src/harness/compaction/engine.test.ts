@@ -697,12 +697,23 @@ describe("compactMessages: target and estimate ratio", () => {
 
 describe("compaction state: prompt measurement", () => {
   it("sets the estimate ratio from the provider's count over the estimate", () => {
+    const promptMessages = [{ role: "user" as const, content: "x".repeat(4_000) }];
+    const envelope = 100_000;
     const next = withPromptMeasurement(
       {},
-      { estimatedTokens: 143_077, inputTokens: 186_000, promptMessageCount: 10 },
+      {
+        inputTokens: 186_000,
+        promptMessageCount: 10,
+        promptMessages,
+        requestEnvelopeTokens: envelope,
+      },
     );
 
-    expect(next.estimateRatio).toBeCloseTo(1.3, 3);
+    expect(next.estimateRatio).toBeCloseTo(
+      186_000 / (estimateTokens(promptMessages) + envelope),
+      6,
+    );
+    expect(next.requestEnvelopeTokens).toBe(envelope);
     expect(next.lastKnownInputTokens).toBe(186_000);
     expect(next.lastKnownPromptMessageCount).toBe(10);
   });
@@ -739,14 +750,19 @@ describe("compaction state: prompt measurement", () => {
       lastKnownPromptMessageCount: 40,
       lastStage: "tail",
     });
-    const measurement = { estimatedTokens: 100_000, inputTokens: 130_000, promptMessageCount: 6 };
+    const measurement = {
+      inputTokens: 130_000,
+      promptMessageCount: 6,
+      promptMessages: [],
+      requestEnvelopeTokens: 100_000,
+    };
 
     const first = withPromptMeasurement(rewritten, measurement);
     expect(first.lastStage).toBe("tail");
 
     const second = withPromptMeasurement(first, { ...measurement, promptMessageCount: 8 });
     expect(second.lastStage).toBeUndefined();
-    expect(second.estimateRatio).toBe(1.3);
+    expect(second.estimateRatio).toBeCloseTo(1.3, 3);
   });
 
   it("drops the last stage when the first call after a rewrite reports no input tokens", () => {

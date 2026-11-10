@@ -34,7 +34,6 @@ import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js"
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
-import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("harness.tool-loop");
@@ -98,7 +97,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   step.session = {
     ...step.session,
     compaction: withPromptMeasurement(step.session.compaction, {
-      estimatedTokens: estimateTokens(promptMessages) + (input.requestEnvelopeTokens ?? 0),
+      promptMessages,
       inputTokens: result.usage?.inputTokens,
       promptMessageCount: input.durableModelPromptMessageCount,
       requestEnvelopeTokens: input.requestEnvelopeTokens,

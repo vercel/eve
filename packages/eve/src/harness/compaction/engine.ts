@@ -97,16 +97,21 @@ export function withoutPromptMeasurement(config: CompactionState): CompactionSta
 export function withPromptMeasurement(
   config: CompactionState,
   measured: {
-    /** The character estimate of the request the provider counted: its history and envelope. */
-    readonly estimatedTokens?: number;
+    /** The history of the request the provider counted. */
+    readonly promptMessages?: readonly ModelMessage[];
     readonly inputTokens?: number;
     readonly promptMessageCount?: number;
+    /** The rest of that request: instructions, tools and framing. */
     readonly requestEnvelopeTokens?: number;
   },
 ): CompactionState {
   const { lastStage, requestEnvelopeTokens: _envelope, ...rest } = withoutPromptMeasurement(config);
   if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return rest;
-  const { estimatedTokens, inputTokens } = measured;
+  const { inputTokens } = measured;
+  const estimatedTokens =
+    measured.promptMessages === undefined
+      ? undefined
+      : estimateTokens(measured.promptMessages) + (measured.requestEnvelopeTokens ?? 0);
   return {
     ...rest,
     ...(lastStage !== undefined && config.lastKnownInputTokens === undefined && { lastStage }),
