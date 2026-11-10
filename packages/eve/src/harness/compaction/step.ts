@@ -103,7 +103,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       messages,
       model: resolvedModel.model,
       promptMessages: messages,
-      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
+      requestEnvelopeTokens: compactionConfig(step).requestEnvelopeTokens,
     });
   } catch (error) {
     outcome = "failed";

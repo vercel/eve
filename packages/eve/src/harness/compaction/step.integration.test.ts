@@ -11,6 +11,7 @@ import { createTestKernel } from "#internal/testing/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
@@ -95,9 +96,10 @@ function userTexts(prompt: Prompt): string[] {
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+  measurement: HarnessSession["compaction"] = {},
 ) {
   const session: HarnessSession = {
-    compaction: {},
+    compaction: measurement,
     continuationToken: "http:compaction-session",
     history: [
       { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
@@ -375,6 +377,41 @@ describe("compaction summary call", () => {
       inputTokens: 0,
       outputTokens: 0,
     });
+  });
+
+  it("reserves the selected model's envelope when manually compacting after a model switch", async () => {
+    const summary = "Alice prepared the quarterly report. ".repeat(2_000);
+    const model = new MockLanguageModelV3({
+      doStream: async () =>
+        streamOf([
+          { type: "stream-start", warnings: [] },
+          { id: "summary", type: "text-start" },
+          { delta: summary, id: "summary", type: "text-delta" },
+          { id: "summary", type: "text-end" },
+          finish("stop"),
+        ]),
+    });
+    let measurement = compaction.withPromptMeasurement(
+      {},
+      {
+        inputTokens: 90_040,
+        modelId: "summary-model",
+        promptMessageCount: 3,
+        requestEnvelopeTokens: 90_000,
+      },
+    );
+    measurement = compaction.withPromptMeasurement(measurement, {
+      inputTokens: 41,
+      modelId: "other-model",
+      promptMessageCount: 3,
+      requestEnvelopeTokens: 1,
+    });
+
+    const result = await compactWith(model, undefined, measurement);
+
+    expect(result.session.history[1]).toMatchObject({ role: "assistant" });
+    expect(JSON.stringify(result.session.history)).toContain("Alice prepared");
+    expect(estimateTokens(result.session.history)).toBeLessThanOrEqual(10_000);
   });
 
   it("retries a transient stream failure like a model step", async () => {
