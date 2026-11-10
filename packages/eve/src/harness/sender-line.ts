@@ -20,13 +20,11 @@ const MAX_PARTICIPANTS = 50;
 const MAX_DELEGATED_MESSAGES = 10;
 const DELEGATED_MESSAGE_LIMIT = 1_000;
 
-/** A message a turn read, with its sender as the delivery names them. */
 export interface TurnMessage {
   readonly from: Principal;
   readonly text: string;
 }
 
-/** The person whose message the model read last, as a sender line names them. */
 interface Sender {
   /** Their `principalId`; absent for someone who isn't signed in. */
   readonly id?: string;
@@ -106,7 +104,6 @@ export function forgetSender<T extends { readonly state?: SessionStateMap }>(ses
   return { ...session, state };
 }
 
-/** The signed-in people who have spoken in the session, the most recent last. */
 export function readParticipants(state: SessionStateMap | undefined): readonly SessionPerson[] {
   return (state?.[PARTICIPANTS_KEY] as readonly SessionPerson[] | undefined) ?? [];
 }
@@ -141,7 +138,6 @@ export function sessionParticipants(
   return state === undefined ? undefined : participantsOf(state(), ctx);
 }
 
-/** The text messages the current turn read, oldest first, from deliveries that name a sender. */
 export function turnMessages(projection: SessionProjection): readonly TurnMessage[] {
   const { turnId } = turnPosition(projection);
   return Object.values(projection.view.deliveries)

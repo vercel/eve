@@ -36,15 +36,11 @@ const IDENTITY_REQUEST = Symbol.for("eve.identityRequest");
 
 /** Whose identity the running call has, whoever spoke last. */
 interface CallIdentity {
-  /** The people who approved the call, by `principalOf`. */
   readonly confirmed: ReadonlySet<string>;
-  /** The caller's remembered `callerConfirmation: "once"` approvals, by key. */
   readonly remembered: ReadonlySet<string>;
-  /** Whether eve can ask a person for the call: it runs in a session step that can ask. */
   readonly canAsk: boolean;
 }
 
-/** The running turn's caller. */
 export function sessionCaller(): SessionAuthContext | null {
   return contextStorage.getStore()?.get(AuthKey) ?? null;
 }
@@ -87,7 +83,6 @@ function callIdentity(): CallIdentity | undefined {
   return contextScopeValue<CallIdentity>(CALL_IDENTITY);
 }
 
-/** Whether `person` approved the running call. */
 function approvedBy(person: SessionPerson | null): boolean {
   return person !== null && callIdentity()?.confirmed.has(principalOf(person)) === true;
 }

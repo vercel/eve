@@ -63,7 +63,6 @@ export function readSender(
   return sender === undefined ? current : sender;
 }
 
-/** Whether the caller is the last person to have spoken in the turn. */
 export function callerSpokeLast(auth: {
   readonly current: SessionAuthContext | null | undefined;
   readonly sender: SessionAuthContext | null | undefined;

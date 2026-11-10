@@ -24,12 +24,8 @@ const KEY_LIMIT = 80;
 const INPUT_LIMIT = 8_000;
 
 /**
- * What eve asks a person whose identity a call needs: what is asked and of whom, what a
- * remembered approval lets someone else do, the latest message in the turn from someone else,
- * which they approve along with the call, and then the input the call runs with. The short parts
- * come first, so a channel that cuts a long prompt still shows them. Nothing the model wrote
- * names the call. Only the person can approve it; anyone
- * signed in can cancel it.
+ * What eve asks a person whose identity a call needs. The short parts come first, so a channel that
+ * cuts a long prompt still shows them, and nothing the model wrote names the call.
  */
 export function identityApprovalRequest(
   call: {
