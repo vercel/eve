@@ -41,11 +41,37 @@ describe("getVercelSandboxCredentials", () => {
     oidc.getVercelOidcToken.mockResolvedValue(fresh);
 
     await expect(getVercelSandboxCredentials({})).resolves.toEqual({
+      projectId: "prj_env",
+      teamId: "team_env",
+      token: fresh,
+    });
+    expect(oidc.getVercelOidcToken).toHaveBeenCalledWith({ project: "prj_env", team: "team_env" });
+  });
+
+  it("keeps explicit IDs ahead of environment IDs and fresh OIDC claims", async () => {
+    const fresh = oidcToken({ exp: nowSeconds() + 3600 });
+    vi.stubEnv("VERCEL_OIDC_TOKEN", fresh);
+    oidc.getVercelOidcToken.mockResolvedValue(fresh);
+
+    await expect(
+      getVercelSandboxCredentials({ projectId: "prj_explicit", teamId: "team_explicit" }),
+    ).resolves.toEqual({
+      projectId: "prj_explicit",
+      teamId: "team_explicit",
+      token: fresh,
+    });
+  });
+
+  it("reads IDs from OIDC claims when configured IDs are incomplete", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", undefined);
+    const fresh = oidcToken({ exp: nowSeconds() + 3600 });
+    oidc.getVercelOidcToken.mockResolvedValue(fresh);
+
+    await expect(getVercelSandboxCredentials({})).resolves.toEqual({
       projectId: "prj_claims",
       teamId: "team_claims",
       token: fresh,
     });
-    expect(oidc.getVercelOidcToken).toHaveBeenCalledWith({ project: "prj_env", team: "team_env" });
   });
 
   it("falls back to VERCEL_TOKEN when the ambient OIDC token cannot be used", async () => {

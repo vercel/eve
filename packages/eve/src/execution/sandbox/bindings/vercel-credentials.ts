@@ -36,7 +36,7 @@ export async function getVercelSandboxCredentials(
   // helper rejects an expired token, refreshing it where it can.
   try {
     const oidcToken = await getVercelOidcToken({ project: projectId, team: teamId });
-    return getVercelSandboxCredentialsFromOidcToken(oidcToken);
+    return withIds(oidcToken) ?? getVercelSandboxCredentialsFromOidcToken(oidcToken);
   } catch (error) {
     if (accessToken) {
       return accessToken;
