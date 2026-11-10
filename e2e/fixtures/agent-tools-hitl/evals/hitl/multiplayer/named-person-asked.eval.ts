@@ -38,7 +38,8 @@ export default defineEval({
     await refused.waitForEvent("response.settled", {
       data: { outcome: "refused", reason: (reason) => reason?.startsWith("Only bob") ?? false },
     });
-    (await refused.result()).expectOk();
+    // A press its sender may not give settles its delivery as refused.
+    (await refused.result()).event("delivery.settled", { count: 1, data: { outcome: "refused" } });
 
     const approved = (await session.respond(answers("approve", identity), asBob)).expectOk();
     approved.calledTool("named-token", {

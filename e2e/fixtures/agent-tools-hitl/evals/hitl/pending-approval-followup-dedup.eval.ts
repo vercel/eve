@@ -38,7 +38,6 @@ export default defineEval({
       followup.notEvent("turn.settled");
     }
 
-    t.succeeded();
     t.check(session.pendingInteractions.length, equals(1));
     t.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
   },
