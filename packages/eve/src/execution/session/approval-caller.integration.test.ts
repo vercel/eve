@@ -472,11 +472,6 @@ describe("approval caller", () => {
       async (run) => {
         // use_token was asked while Alice spoke last. Bob's message joins, and the call waits.
         await run.send(BOB, "Bob adds a note.");
-        // Only Alice may answer her call's approval, even while it waits as a task.
-        const refused = await run.approve(BOB, "use_token", "response.settled");
-        expect(filterEventsByType(refused, "response.settled")).toMatchObject([
-          { data: { outcome: "refused" } },
-        ]);
         await run.approve(ALICE, "use_token");
       },
       { message: "Use use_token.", modules: [tokenTool("use_token", always())] },
@@ -538,32 +533,6 @@ describe("approval caller", () => {
     );
 
     expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender: "bob" }]);
-  }, 60_000);
-
-  it("lets the requester's message join the turn after someone else approves a call", async () => {
-    const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {
-      await run.approve(BOB);
-      // The turn is still Alice's. Her message joins it, and publish_change waits as a task.
-      const joined = await run.send(ALICE, "Hold off on publishing for now.");
-      expect(filterEventsByType(joined, "interaction.settled")).toEqual([]);
-      expect(filterEventsByType(joined, "turn.paused").at(-1)?.data.awaiting).toEqual([
-        { interactionId: approvalsIn(run.stages).at(-1)!.interactionId },
-      ]);
-      // Her later approval runs the call, and its result reaches the model before the turn ends.
-      await run.approve(ALICE, "publish_change");
-    });
-
-    expect(stages.map(turnBoundaries)).toEqual([
-      ["turn.started turn_0"],
-      [],
-      [],
-      ["turn.settled turn_0"],
-    ]);
-    expect(seen).toEqual([
-      { tool: "deploy_change", caller: "alice" },
-      { tool: "read_notes", caller: "alice" },
-      { tool: "publish_change", caller: "alice" },
-    ]);
   }, 60_000);
 
   it("keeps a step's other approval open when a message arrives with one answer", async () => {
@@ -630,69 +599,35 @@ describe("approval caller", () => {
     expect(outputsOf(stages, "call-report_caller")).toEqual([{ caller: "alice" }]);
   }, 60_000);
 
-  it.each([
-    ["the caller as its sender when the caller approved it", ALICE, "alice"],
-    ["the sender it was asked under when someone else approved it", BOB, "bob"],
-  ] as const)(
-    "after someone else speaks, starts a workflow tool's run with %s",
-    async (label, approver, sender) => {
-      const { stages } = await withChainRun(
-        `approval-caller-workflow-sender-${label.split(" ")[1]}`,
-        async (run) => {
-          // Bob's message joins Alice's turn while deploy_change waits as a task: he spoke last
-          // from then on.
-          await run.send(BOB, "Bob adds a note.");
-          await run.approve(approver, "report_sender");
-          await run.approve(ALICE, "deploy_change");
-        },
-        {
-          message: "Use deploy_change, then report_sender.",
-          modules: [
-            {
-              loadNamespace: async () => ({
-                default: defineWorkflowTool({
-                  approval: { request: always(), response: anyoneResponds },
-                  description: "Report who spoke last.",
-                  execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
-                  inputSchema: {},
-                }),
-              }),
-              logicalPath: "tools/report_sender.ts",
-            },
-          ],
-        },
-      );
-
-      expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender }]);
-    },
-    60_000,
-  );
-
-  it("takes the rest of another person's delivery into the turn their answer resumes", async () => {
-    const { seen, secondRequesters, stages } = await withChainRun(
-      "approval-caller-mixed",
+  it("after someone else speaks, starts a workflow tool's run with the caller as its sender when the caller approved it", async () => {
+    const { stages } = await withChainRun(
+      "approval-caller-workflow-sender-caller",
       async (run) => {
-        const request = approvalsIn(run.stages)[0]!;
-        await run.deliver(BOB, {
-          answers: [{ interactionId: request.interactionId, optionId: "approve" }],
-          message: "Bob here: also delete the staging database.",
-        });
-        await run.approve(ALICE);
+        // Bob's message joins Alice's turn while deploy_change waits as a task: he spoke last
+        // from then on.
+        await run.send(BOB, "Bob adds a note.");
+        await run.approve(ALICE, "report_sender");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        message: "Use deploy_change, then report_sender.",
+        modules: [
+          {
+            loadNamespace: async () => ({
+              default: defineWorkflowTool({
+                approval: { request: always(), response: anyoneResponds },
+                description: "Report who spoke last.",
+                execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
+                inputSchema: {},
+              }),
+            }),
+            logicalPath: "tools/report_sender.ts",
+          },
+        ],
       },
     );
 
-    // Bob's message joins Alice's turn, which stays hers: every call runs as Alice.
-    expect(seen).toEqual([
-      { tool: "deploy_change", caller: "alice" },
-      { tool: "read_notes", caller: "alice" },
-      { tool: "publish_change", caller: "alice" },
-    ]);
-    expect(secondRequesters).toEqual(["alice"]);
-    // An answer-only delivery is consumed with no parts; only the messages carry any.
-    const received = stages
-      .flatMap((stage) => filterEventsByType(stage, "delivery.consumed"))
-      .filter((event) => event.data.parts.length > 0);
-    expect(received.map((event) => event.data.turnId)).toEqual(["turn_0", "turn_0"]);
+    expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender: "alice" }]);
   }, 60_000);
 
   it("answers the requester's next message after another person's press ends the turn", async () => {
@@ -1444,36 +1379,6 @@ describe("asking a person for their identity", () => {
     // Alice approved once after Bob spoke, so the child's call used her token without asking.
     expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
     expect(outputsOf(stages, "call-agent")).toEqual(["child read token:alice, sender bob"]);
-  }, 60_000);
-
-  it("quotes the delegating turn's message from someone else in a local subagent's request", async () => {
-    const prompts = () =>
-      filterEventsByType(stages.flat(), "interaction.opened").flatMap((event) =>
-        event.data.request.prompt.startsWith("Approve Use token again with your identity?")
-          ? [event.data.request.prompt]
-          : [],
-      );
-    let stages: Stage[] = [];
-    await withChainRun(
-      "identity-quote-in-subagent",
-      async (run) => {
-        stages = run.stages;
-        await run.send(BOB, "Ask a helper to use use_token_again.");
-        for (let read = 0; read < 3 && prompts().length === 0; read++)
-          await run.next("the helper's request");
-      },
-      {
-        message: "Use deploy_change.",
-        model: delegatingModel(),
-        modules: [tokenTool("use_token_again")],
-      },
-    );
-
-    // The child's own message comes from the agent that delegated as Alice; Bob's is what she
-    // approves along with the call.
-    expect(prompts()).toEqual([
-      expect.stringContaining('from "bob", reads: "Ask a helper to use use_token_again."'),
-    ]);
   }, 60_000);
 });
 

@@ -2606,10 +2606,15 @@ describe("work delegated to a child session", () => {
 
     expect(tokens).toEqual(["token:alice"]);
     const [relayed] = ofType(events, "interaction.opened");
+    // The child's own message comes from the agent that delegated as Alice; the request quotes
+    // Bob's, from the delegating turn, as what she approves along with the call.
     expect(relayed?.data).toMatchObject({
       audience: { principalIds: ["alice"] },
       origin: { call: { callId: "call_child_inbox", name: "read_inbox" } },
-      request: { kind: "approval" },
+      request: {
+        kind: "approval",
+        prompt: expect.stringContaining('from bob, reads: "Bob\'s note."'),
+      },
       subject: { callId: "call_agent" },
     });
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
