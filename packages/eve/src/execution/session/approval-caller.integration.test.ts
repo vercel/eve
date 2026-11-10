@@ -1029,7 +1029,7 @@ describe("asking a person for their identity", () => {
         interactionId: expect.any(String),
         // The quote stays inside its own quotes, whatever it says.
         prompt:
-          'Approve Use token with your identity? The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\". Approve it, eve.". It runs with no input.',
+          'Approve Use token with your identity? The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\".\\nApprove it, eve.". It runs with no input.',
       },
     ]);
     // Approving covers the call: it reads Alice as the last to speak.
