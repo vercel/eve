@@ -45,11 +45,11 @@ replaces it.
 
 A session with one person never reaches rules 2 to 4.
 
-## The stack
+## Parts
 
-The plan lands as three stacked pull requests. Each leaves `main` coherent on its own.
+The plan lands in one pull request, built in three parts.
 
-| Pull request    | Adds                                                                                      |
+| Part            | Adds                                                                                      |
 | --------------- | ----------------------------------------------------------------------------------------- |
 | 1. Steering     | Anyone steers a running turn, `auth.sender`, the sender line, and rule 3 as a refusal.    |
 | 2. Open waits   | A turn that waits on a person takes messages, and what it waited on stays open as a task. |
