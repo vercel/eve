@@ -162,12 +162,12 @@ Updates, `enable`, `disable`, and `delete` affect future runs, not callbacks alr
 
 The default `vercelScheduleProvider()` supports these environments:
 
-| Environment                                      | Storage and delivery                                                                                                                               |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                                                                |
-| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.                                       |
-| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.                                         |
-| Self-hosted production                           | The default provider rejects operations. Use a different provider or the [application-managed scheduling pattern](../patterns/dynamic-scheduling). |
+| Environment                                      | Storage and delivery                                                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                          |
+| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence. |
+| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.   |
+| Self-hosted production                           | The default provider rejects operations. Use a different provider.                                           |
 
 On Vercel, schedules belong to the deployment's track, selected by its OIDC credentials. Preview schedules are separate from production schedules. Occurrences run on the track's current leader deployment, so schedules follow updates within that track.
 
@@ -232,6 +232,5 @@ eve doesn't save the conversation that created a schedule. To reply in that thre
 ## What to read next
 
 - [Schedules](../schedules): author fixed cron jobs with `defineSchedule`.
-- [Dynamic scheduling](../patterns/dynamic-scheduling): a self-hosted alternative with application-owned storage.
 - [Channels](/docs/channels): deliver schedule output to users.
 - [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): inspect a scheduled run.
