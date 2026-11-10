@@ -7,7 +7,7 @@ import {
 } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionPerson } from "#context/session-auth.js";
-import { identityApprovalRequest } from "#harness/hitl/identity-prompt.js";
+import { identityApprovalRequest } from "#harness/identity-prompt.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import {
