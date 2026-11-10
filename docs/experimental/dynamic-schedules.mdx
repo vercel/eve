@@ -160,20 +160,38 @@ Updates, `enable`, `disable`, and `delete` affect future runs, not callbacks alr
 
 ## Choose a provider and test locally
 
-The default `vercelScheduleProvider()` supports these environments:
+The built-in `vercelScheduleProvider()` uses Vercel Schedules in production and supports local development:
 
-| Environment                                      | Storage and delivery                                                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                          |
-| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence. |
-| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.   |
-| Self-hosted production                           | The default provider rejects operations. Use a different provider.                                           |
+| Environment                                      | Storage and delivery                                                                                           |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                            |
+| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.   |
+| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.     |
+| Self-hosted production                           | [Create a provider](#create-a-provider-for-your-use-case) for your application's storage and scheduling needs. |
 
 On Vercel, schedules belong to the deployment's track, selected by its OIDC credentials. Preview schedules are separate from production schedules. Occurrences run on the track's current leader deployment, so schedules follow updates within that track.
 
 Under `vc dev`, local queue errors appear in the dev server logs and retry after five seconds.
 
 Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to configure the Vercel endpoint explicitly. Import the in-memory provider from `eve/experimental/schedules/testing` for code-driven tests.
+
+### Create a provider for your use case
+
+Create a provider when your application needs a different scheduling backend, storage system, or deployment environment. Implement `ScheduleProvider` from `eve/experimental/schedules` and pass it as `provider` to `defineDynamicSchedules`.
+
+Your provider owns schedule storage, timing, and occurrence delivery. eve handles payload validation, management authorization, approvals, and creator revalidation.
+
+| Part of the contract | What your provider implements                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                       |
+| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                            |
+| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`. |
+| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                 |
+| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.    |
+
+`ScheduleProviderContext` is also exported from `eve/experimental/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
+
+For fixed cron jobs without runtime management, use [Schedules](../schedules).
 
 ## Handle occurrences and retries
 
@@ -224,10 +242,10 @@ eve doesn't save the conversation that created a schedule. To reply in that thre
 
 ## Troubleshooting
 
-| What you see                                                                     | What to do                                                                  |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `vercelScheduleProvider() requires a Vercel deployment or eve dev.`              | Run under `eve dev` or a Vercel deployment, or pass a different `provider`. |
-| `Prepared schedule write exceeds the 64 KB limit, including timing and payload.` | Store stable references instead of large data in the payload.               |
+| What you see                                                                     | What to do                                                                                                                               |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `vercelScheduleProvider() requires a Vercel deployment or eve dev.`              | Use `eve dev` or a Vercel deployment with this provider, or [create a provider for your use case](#create-a-provider-for-your-use-case). |
+| `Prepared schedule write exceeds the 64 KB limit, including timing and payload.` | Store stable references instead of large data in the payload.                                                                            |
 
 ## What to read next
 
