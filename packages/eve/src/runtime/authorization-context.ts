@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
-import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import { sessionParticipants } from "#harness/sender-line.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/definition.js";
@@ -31,7 +31,7 @@ export function createAuthorizationContext(input: {
     const person = namedPerson(options.as, scoped.scope);
     return person === undefined
       ? scoped
-      : { ...scoped, boundResponder: personAuth(person), named: true as const };
+      : { ...scoped, boundResponder: { ...person, attributes: {} }, named: true as const };
   };
   return {
     async getToken(
@@ -87,7 +87,7 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
   const people = new Map(
     [...participants, ...(caller === undefined ? [] : [caller])]
       .filter((person) => person.principalId === as)
-      .map((person) => [principalOf(personAuth(person)), person]),
+      .map((person) => [principalOf(person), person]),
   );
   const matches = [...people.values()];
   if (matches.length === 0) {
@@ -105,10 +105,7 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
     });
   }
   const [person] = matches;
-  return caller !== undefined &&
-    principalOf(personAuth(caller)) === principalOf(personAuth(person!))
-    ? undefined
-    : person;
+  return caller !== undefined && principalOf(caller) === principalOf(person!) ? undefined : person;
 }
 
 function buildInlineScopedAuthorization(input: {

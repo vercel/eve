@@ -7,18 +7,18 @@ import { AuthKey, InitiatorAuthKey, SenderAuthKey, type SessionAuth } from "#con
 export const ANONYMOUS_PRINCIPAL = "anonymous";
 
 /**
- * Stable key for the person a session identity acts as. Unauthenticated and anonymous identities
- * are one person.
+ * Stable key for the person a session identity or a recorded person names. Unauthenticated and
+ * anonymous identities are one person.
  */
-export function principalOf(auth: SessionAuthContext | null | undefined): string {
-  if (auth === null || auth === undefined || auth.principalType === "anonymous") {
+export function principalOf(person: SessionPerson | null | undefined): string {
+  if (person === null || person === undefined || person.principalType === "anonymous") {
     return ANONYMOUS_PRINCIPAL;
   }
   return JSON.stringify([
-    auth.authenticator,
-    auth.issuer ?? null,
-    auth.principalType,
-    auth.principalId,
+    person.authenticator,
+    person.issuer ?? null,
+    person.principalType,
+    person.principalId,
   ]);
 }
 
@@ -40,11 +40,6 @@ export function personOf(auth: SessionAuthContext): SessionPerson {
     principalType: auth.principalType,
     ...(auth.subject !== undefined && { subject: auth.subject }),
   };
-}
-
-/** A recorded person as a session identity, with no attributes. */
-export function personAuth(person: SessionPerson): SessionAuthContext {
-  return { ...person, attributes: {} };
 }
 
 /** `ctx.session.auth` as the session's context holds it; `current` defaults to its caller. */

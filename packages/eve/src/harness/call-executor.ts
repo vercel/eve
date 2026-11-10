@@ -6,7 +6,7 @@ import {
   type IdentityRequest,
 } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { personAuth, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { principalOf, type SessionPerson } from "#context/session-auth.js";
 import { delegatedMessages, sessionParticipants, turnMessages } from "#harness/sender-line.js";
 import type { JsonObject } from "#shared/json.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
@@ -742,10 +742,8 @@ function latestMessageFromOthers(
   // A delivery names its sender without how they signed in, so eve compares the people who have
   // spoken by `principalOf`: a delivery is the person's only when no one else who has spoken
   // could have sent it.
-  const key = principalOf(personAuth(person));
-  const others = (sessionParticipants() ?? []).filter(
-    (other) => principalOf(personAuth(other)) !== key,
-  );
+  const key = principalOf(person);
+  const others = (sessionParticipants() ?? []).filter((other) => principalOf(other) !== key);
   const sentBy = (principal: Principal) =>
     names(principal, person) && !others.some((other) => names(principal, other));
   // A local child's own messages come from the agent that delegated to it, so the messages its

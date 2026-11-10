@@ -17,7 +17,6 @@ import {
 import { AuthKey, DelegatedIdentityKey } from "#context/keys.js";
 import {
   callerSpokeLast,
-  personAuth,
   personOf,
   principalOf,
   readSender,
@@ -76,7 +75,7 @@ export function withCallIdentity<T>(
     return fn();
   const value: CallIdentity = {
     canAsk: identity.canAsk === true,
-    confirmed: new Set(identity.confirmed.map((person) => principalOf(personAuth(person)))),
+    confirmed: new Set(identity.confirmed.map(principalOf)),
     remembered: new Set(remembered),
   };
   return withContextScopeValue(CALL_IDENTITY, value, fn);
@@ -88,9 +87,7 @@ export function withCallIdentity<T>(
  */
 export function withCallerIdentity<T>(released: boolean, fn: () => T): T {
   const caller = sessionCaller();
-  return released && caller !== null
-    ? withCallIdentity({ confirmed: [personOf(caller)] }, fn)
-    : fn();
+  return released && caller !== null ? withCallIdentity({ confirmed: [caller] }, fn) : fn();
 }
 
 function callIdentity(): CallIdentity | undefined {
@@ -98,7 +95,7 @@ function callIdentity(): CallIdentity | undefined {
 }
 
 /** Whether `person` approved the running call. */
-function approvedBy(person: SessionAuthContext | null): boolean {
+function approvedBy(person: SessionPerson | null): boolean {
   return person !== null && callIdentity()?.confirmed.has(principalOf(person)) === true;
 }
 
@@ -294,9 +291,8 @@ export function requirePersonConfirmation(
   connectionName: string,
   ctx: AlsContext | undefined,
 ): void {
-  const named = personAuth(person);
-  if (approvedBy(named)) return;
-  if (principalOf(spokeLast(ctx, ctx?.get(AuthKey) ?? null)) === principalOf(named)) return;
+  if (approvedBy(person)) return;
+  if (principalOf(spokeLast(ctx, ctx?.get(AuthKey) ?? null)) === principalOf(person)) return;
   throw confirmationRequired(
     connectionName,
     `${person.principalId} didn't send the latest message and hasn't approved this action, so it ` +

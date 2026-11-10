@@ -1,5 +1,5 @@
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
-import { personAuth, principalOf } from "#context/session-auth.js";
+import { principalOf } from "#context/session-auth.js";
 import { sessionCaller, withAskedSender } from "#runtime/connections/caller-confirmation.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
@@ -439,7 +439,7 @@ function approvedByCaller(approval: ApprovedCall): boolean {
   // eve asked a person for their identity: the call has the caller's when the caller approved.
   if (approval.confirmedBy !== undefined)
     return approval.confirmedBy.some(
-      (person) => principalOf(personAuth(person)) === principalOf(sessionCaller()),
+      (person) => principalOf(person) === principalOf(sessionCaller()),
     );
   if (approval.interactionId === undefined) return false;
   // With no response policy, no responder is named: the requester, who is the caller, answered.

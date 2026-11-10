@@ -3,7 +3,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
-import { personAuth, principalOf } from "#context/session-auth.js";
+import { principalOf } from "#context/session-auth.js";
 import {
   buildApprovalResponseAuth,
   handleApprovalResponsePolicyError,
@@ -112,7 +112,7 @@ export function checkResponders(
         continue;
       }
       const { person } = request.identity;
-      if (decision === "approve" && principalOf(personAuth(person)) !== principalOf(responder)) {
+      if (decision === "approve" && principalOf(person) !== principalOf(responder)) {
         refused.push({ reason: identityOnlyFeedback(person.principalId), responseId });
         continue;
       }

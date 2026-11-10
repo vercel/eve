@@ -2,7 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { DelegatedIdentityKey } from "#context/keys.js";
-import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { turnPosition } from "#harness/session-machine/view.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
@@ -72,13 +72,12 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
   const next = senderOf(auth);
   const last = session.state?.[LAST_SENDER_KEY] as Sender | undefined;
   const recorded = readParticipants(session.state);
-  const known =
-    recorded.at(-1) !== undefined && principalOf(personAuth(recorded.at(-1)!)) === next.principal;
+  const known = recorded.at(-1) !== undefined && principalOf(recorded.at(-1)!) === next.principal;
   const participants =
     next.id === undefined || auth === null || known
       ? undefined
       : [
-          ...recorded.filter((person) => principalOf(personAuth(person)) !== next.principal),
+          ...recorded.filter((person) => principalOf(person) !== next.principal),
           personOf(auth),
         ].slice(-MAX_PARTICIPANTS);
   if (last?.principal === next.principal && participants === undefined) return session;
@@ -193,9 +192,8 @@ export function participantsOf(
   const own = readParticipants(state);
   const inherited = ctx?.get(DelegatedIdentityKey)?.participants ?? [];
   if (inherited.length === 0) return own;
-  const spoke = new Set(own.map((person) => principalOf(personAuth(person))));
-  return [
-    ...inherited.filter((person) => !spoke.has(principalOf(personAuth(person)))),
-    ...own,
-  ].slice(-MAX_PARTICIPANTS);
+  const spoke = new Set(own.map(principalOf));
+  return [...inherited.filter((person) => !spoke.has(principalOf(person))), ...own].slice(
+    -MAX_PARTICIPANTS,
+  );
 }
