@@ -773,13 +773,13 @@ describe("compileAgentManifest source graph", () => {
     }
   });
 
-  it("rejects prompt cache options on an AI Gateway model", async () => {
+  it("rejects prompt cache options on a non-Anthropic AI Gateway model", async () => {
     const sourceRegistry = registry([
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
           default: defineAgent({
-            model: "anthropic/claude-opus-5",
+            model: "openai/gpt-5.5",
             modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
           }),
         }),
@@ -789,8 +789,36 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
-      'modelOptions.promptCache applies only to models eve calls directly, but "anthropic/claude-opus-5" routes through AI Gateway',
+      'modelOptions.promptCache applies to Anthropic models and to models eve calls directly, but "openai/gpt-5.5" routes through AI Gateway',
     );
+  });
+
+  it("keeps prompt cache options on an Anthropic AI Gateway model", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: "anthropic/claude-opus-5",
+            modelContextWindowTokens: 200_000,
+            modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({
+      manifest: compiledAgentManifestSchema.parse(compiled),
+      moduleMap,
+    });
+    expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
   it("classifies extension mount initialization as runtime-only", async () => {

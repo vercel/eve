@@ -254,7 +254,8 @@ export interface AnchoredEntry {
 
 /**
  * The system prompt the sections make: the `base` sections joined, then each `own` section. With
- * no `own` section, the base alone, as a string; with no `base` section, the `own` parts alone.
+ * no `own` section, the base alone, as a string. Otherwise the base is the first part, empty if no
+ * `base` section exists.
  */
 export function renderSystem(sections: readonly Section[]): string | readonly string[] {
   const sorted = sections
@@ -263,7 +264,6 @@ export function renderSystem(sections: readonly Section[]): string | readonly st
     .map(({ section }) => section);
   const base = sorted.filter((section) => section.part === "base");
   const own = sorted.filter((section) => section.part === "own").map((section) => section.text);
-  if (base.length === 0) return own;
   const joined = base
     .map((section) => section.text)
     .filter((text) => text !== "")
