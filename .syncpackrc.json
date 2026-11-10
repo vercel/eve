@@ -22,6 +22,7 @@
         "eve-code",
         "@eve/agent-desktop",
         "@eve/agent-browser",
+        "@eve/json-render",
         "gadget-extension",
         "gizmo-extension",
         "js-only-extension",

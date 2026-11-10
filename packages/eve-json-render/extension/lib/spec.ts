@@ -20,6 +20,9 @@ export const CARD_LIMITS: CardLimits = {
   tables: 1,
 };
 
+/** The blocks one Slack message holds. Slack drops the rest, so the tool rejects a longer card. */
+export const CARD_MAX_BLOCKS = 50;
+
 type ComponentName = keyof typeof standardComponentDefinitions;
 
 // Nothing on a card reaches the agent, so cards offer link buttons but no action buttons.

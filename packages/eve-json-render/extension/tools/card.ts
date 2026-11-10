@@ -2,7 +2,13 @@ import { CardSpecError, toCard } from "@json-render/chat";
 import { cardToFallbackText, type CardElement } from "eve/channels/slack";
 import { defineTool } from "eve/tools";
 
-import { CARD_LIMITS, CARD_MEDIA_TYPE, cardComponents, cardSpecSchema } from "../lib/spec";
+import {
+  CARD_LIMITS,
+  CARD_MAX_BLOCKS,
+  CARD_MEDIA_TYPE,
+  cardComponents,
+  cardSpecSchema,
+} from "../lib/spec";
 
 export default defineTool({
   description: [
@@ -21,19 +27,40 @@ export default defineTool({
     mediaType: CARD_MEDIA_TYPE,
     streamInput: true,
     build(spec) {
+      let card: CardElement;
       try {
-        const card = toCard(spec, { components: cardComponents, limits: CARD_LIMITS });
         // json-render types cards with Chat SDK's declarations; eve declares its own copy.
-        return { fallbackText: cardToFallbackText(card as CardElement), value: spec };
+        card = toCard(spec, { components: cardComponents, limits: CARD_LIMITS }) as CardElement;
       } catch (error) {
         if (!(error instanceof CardSpecError)) throw error;
-        throw new Error(
-          `Invalid card spec. Fix these and call again:\n- ${error.issues.join("\n- ")}`,
-        );
+        throw invalidSpec(error.issues);
       }
+      // Past its limit, eve's Slack blocks drop the card's end without an error.
+      const blocks = blockCount(card);
+      if (blocks > CARD_MAX_BLOCKS) {
+        throw invalidSpec([
+          `the card makes ${blocks} Slack blocks, and a message holds at most ${CARD_MAX_BLOCKS}; merge Text elements or trim the card`,
+        ]);
+      }
+      return { fallbackText: cardToFallbackText(card), value: spec };
     },
   },
   async execute() {
     return { shown: true };
   },
 });
+
+/** The Slack blocks `card` makes: one each for its header parts and children, with sections flattened. */
+function blockCount(card: CardElement): number {
+  const header = [card.title, card.subtitle, card.imageUrl].filter(Boolean).length;
+  const count = (children: CardElement["children"]): number =>
+    children.reduce(
+      (total, child) => total + (child.type === "section" ? count(child.children) : 1),
+      0,
+    );
+  return header + count(card.children);
+}
+
+function invalidSpec(issues: readonly string[]): Error {
+  return new Error(`Invalid card spec. Fix these and call again:\n- ${issues.join("\n- ")}`);
+}
