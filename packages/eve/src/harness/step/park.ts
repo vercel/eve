@@ -126,8 +126,17 @@ export function nothingToRead(step: Step, input: { readonly hasInput: boolean })
   return (
     !input.hasInput &&
     last?.role === "assistant" &&
+    !endsOnProviderResult(last) &&
     !awaitsProviderToolResult(step.session.history) &&
     tasksWithResults(readTaskTable(step.session.state)).length === 0 &&
     workingTaskIds(step.session).length > 0
+  );
+}
+
+/** The response ended on a provider-run call's result, which the model hasn't read yet. */
+function endsOnProviderResult(message: { readonly content: unknown }): boolean {
+  return (
+    Array.isArray(message.content) &&
+    (message.content.at(-1) as { readonly type?: string } | undefined)?.type === "tool-result"
   );
 }

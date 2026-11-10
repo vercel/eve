@@ -1928,6 +1928,97 @@ describe("calls that wait on a person as tasks", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
+  it("runs an older approval's waiting call while a newer approval holds the turn, and pauses again", async () => {
+    let modelCalls = 0;
+    const { ran } = await withSession(
+      "edge-wait-older-approval",
+      {
+        message: "Deploy it.",
+        model: scriptedModel(({ said }) => {
+          modelCalls += 1;
+          if (said("Also publish")) return [{ toolName: "publish", toolCallId: "call_publish" }];
+          return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+        }),
+        tools: [
+          { approval: true, name: "deploy" },
+          { approval: true, name: "publish" },
+        ],
+      },
+      async (session) => {
+        await session.next("asks to deploy");
+        await session.send("Also publish.");
+        await session.until("asks to publish", (event) => event.type === "turn.paused");
+        const [deploy] = session.approvals();
+        const answered = await session.answer(deploy!, "approve");
+        const stage = await session.until(
+          "the answer settles",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === answered,
+        );
+        // Publish's approval still holds the turn, so the model reads deploy's result later.
+        expect(
+          stage.flatMap((event) => {
+            if (event.type === "call.settled")
+              return [`${event.data.callId}:${event.data.outcome}`];
+            if (event.type === "delivery.settled" && event.data.deliveryId === answered)
+              return [`delivery.settled:${event.data.outcome}`];
+            return event.type === "turn.paused" || event.type === "model.requested"
+              ? [event.type]
+              : [];
+          }),
+        ).toEqual(["call_deploy:completed", "turn.paused", "delivery.settled:awaiting-input"]);
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(modelCalls).toBe(2);
+  });
+
+  it("reads a provider-run call's result while a call waits as a task", async () => {
+    const lookup: StreamResult = {
+      stream: simulateReadableStream({
+        chunks: [
+          { type: "stream-start", warnings: [] },
+          {
+            input: "{}",
+            providerExecuted: true,
+            toolCallId: "srvtoolu_lookup",
+            toolName: "web_search",
+            type: "tool-call",
+          },
+          {
+            result: { status: "provider-ready" },
+            toolCallId: "srvtoolu_lookup",
+            toolName: "web_search",
+            type: "tool-result",
+          },
+          { finishReason: { raw: undefined, unified: "tool-calls" }, type: "finish", usage },
+        ],
+      }) as StreamResult["stream"],
+    };
+    const { events } = await withSession(
+      "edge-wait-provider-result",
+      {
+        message: "Deploy it.",
+        model: scriptedModel(({ said }, raw) => {
+          if (!said("Look it up")) return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+          return JSON.stringify(raw).includes("provider-ready") ? "The draft is ready." : lookup;
+        }),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("asks");
+        await session.send("Look it up with the provider.");
+        await session.until("the reply", (event) => event.type === "turn.paused");
+      },
+    );
+
+    expect(
+      ofType(events, "content.completed").flatMap((event) =>
+        event.data.phase === "reply" ? [event.data.value] : [],
+      ),
+    ).toEqual(["The draft is ready."]);
+  });
+
   it("keeps offering the task tools in later turns once a call waited on a person", async () => {
     const offered: (readonly string[])[] = [];
     await withSession(

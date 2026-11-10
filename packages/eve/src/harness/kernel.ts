@@ -30,7 +30,7 @@ import {
   controlled,
   join,
 } from "#harness/session-machine/transitions.js";
-import { turnPosition } from "#harness/session-machine/view.js";
+import { turnPosition, waitsAsTasks } from "#harness/session-machine/view.js";
 import { createStep, failTurnForEffect, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
@@ -208,9 +208,17 @@ async function answers(
     input = withoutTurnInput(input);
     message = undefined;
   }
-  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+  // Answers that only let calls waiting as tasks run, while a request still holds the turn, give
+  // the model nothing to read yet: those calls run, and the delivery waits unreceived, as one
+  // answer of a batch does, until the turn goes on.
+  if (
+    decided.approved.every(({ step: parked }) => waitsAsTasks(parked)) &&
+    blocked(step.view(), step.session.state)
+  ) {
     await step.apply(queueInput(step.view(), compactInput(input)));
-    return { ended: await park(step) } as Ended;
+    const stopped =
+      decided.approved.length === 0 ? undefined : await applyHumanDecisions(step, decided);
+    return { ended: stopped ?? (await park(step)) } as Ended;
   }
   return { decided, input, intake, message };
 }
