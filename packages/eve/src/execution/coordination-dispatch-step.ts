@@ -99,14 +99,8 @@ async function dispatchCoordination(
       auth: {
         current: prepared.auth,
         initiator: prepared.initiatorAuth,
-        // A call the caller approved runs with the caller as its sender, whoever spoke last, and
-        // a call that waited on a person with the sender it was asked under.
-        sender:
-          task.callerApproved === true
-            ? prepared.auth
-            : task.sender !== undefined
-              ? task.sender
-              : prepared.senderAuth,
+        // A call that waited on a person keeps the sender its approval gave it.
+        sender: task.sender === undefined ? prepared.senderAuth : task.sender,
       },
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,

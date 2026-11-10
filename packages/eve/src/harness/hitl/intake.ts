@@ -1,4 +1,4 @@
-import { approvedClearance, taskClearance, type Clearance } from "#harness/clearance.js";
+import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import { personAuth, principalOf } from "#context/session-auth.js";
 import { sessionCaller, withAskedSender } from "#runtime/connections/caller-confirmation.js";
 import { transition } from "#harness/session-machine/commit.js";
@@ -264,11 +264,7 @@ async function runApproved(
       } else {
         // A person's acceptance clears the call; the recheck only confirms it still may run.
         const clearance =
-          approvedClearance(
-            step.view().projection.view,
-            approval.call.callId,
-            callerApproved.has(approval.call.callId),
-          ) ?? recheck.clearance;
+          approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
         workflows.set(approval.call.callId, { approval, clearance });
       }
     }
@@ -292,11 +288,16 @@ async function runApproved(
     });
     step.session = dispatched.session;
     tasks.push(
-      ...dispatched.workflowRequests.map((task) => ({
-        ...task,
-        ...taskClearance(workflows.get(task.callId)?.clearance),
-        ...(parked.sender !== undefined && { sender: parked.sender }),
-      })),
+      ...dispatched.workflowRequests.map((task) => {
+        // A call the caller approved runs with the caller as its sender, whoever spoke last, and
+        // a call that waited on a person with the sender it was asked under.
+        const sender = callerApproved.has(task.callId) ? sessionCaller() : parked.sender;
+        return {
+          ...task,
+          clearedBy: workflows.get(task.callId)?.clearance?.clearedBy,
+          ...(sender !== undefined && { sender }),
+        };
+      }),
     );
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));

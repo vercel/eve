@@ -152,11 +152,10 @@ export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
     clearedBy: clearedBySchema.optional(),
-    /** The caller approved the call, so its run has the caller as its `auth.sender`. */
-    callerApproved: z.literal(true).optional(),
     /**
-     * Who had spoken last when the model made a call that then waited on a person: its run reads
-     * them as `auth.sender`, whoever spoke since. `null` for someone who isn't signed in.
+     * Whom the run of a call that waited on a person reads as `auth.sender`, whoever spoke since:
+     * the caller when they approved it, else who had spoken last when the model made it. `null`
+     * for someone who isn't signed in.
      */
     sender: z
       .object({

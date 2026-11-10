@@ -2,12 +2,11 @@ import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import {
   identityRequestOf,
   rememberedConfirmations,
-  sessionCaller,
   withCallIdentity,
   type IdentityRequest,
 } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { personAuth, principalOf, type SessionPerson } from "#context/session-auth.js";
 import { delegatedMessages, sessionParticipants, turnMessages } from "#harness/sender-line.js";
 import type { JsonObject } from "#shared/json.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
@@ -117,9 +116,11 @@ export async function executeToolCall(
     readonly view?: () => Pick<SessionView, "projection">;
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
-    /** The caller approved the call, so it runs with their identity whoever spoke last. */
-    readonly callerApproved?: boolean;
-    /** The people who approved eve's requests for their identity, which the call may then use. */
+    /**
+     * The people who approved the call, whose identities it may use whoever spoke last: the caller
+     * for their approval of the call itself, and whoever approved eve's requests for their
+     * identity. A later request keeps them all.
+     */
     readonly confirmedBy?: readonly SessionPerson[];
     /**
      * The session can ask a person: a call refused for someone's identity stops and asks them
@@ -193,7 +194,7 @@ export async function executeToolCall(
     // A call a person approved runs on their acceptance; the recheck only confirms it still may.
     const clearance =
       (approval === "recheck" && input.view !== undefined
-        ? approvedClearance(input.view().projection.view, callId, input.callerApproved === true)
+        ? approvedClearance(input.view().projection.view, callId)
         : undefined) ?? decision.clearance;
     if (clearance === undefined) throw new Error(`Call "${callId}" has no clearance to run.`);
     let output: unknown;
@@ -201,13 +202,7 @@ export async function executeToolCall(
     let failure = "";
     let thrown: Error | undefined;
     let identity: IdentityRequest | undefined;
-    // The people who approved the call: the caller, for their approval of the call itself, and
-    // whoever approved eve's requests for their identity. A later request keeps them all.
-    const caller = sessionCaller();
-    const confirmed = [
-      ...(input.callerApproved === true && caller !== null ? [personOf(caller)] : []),
-      ...(input.confirmedBy ?? []),
-    ];
+    const confirmed = input.confirmedBy ?? [];
     const telemetry = toolTelemetry(input.telemetry, {
       // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,

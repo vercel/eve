@@ -2,6 +2,8 @@ import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage, TelemetryOptions } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { personOf } from "#context/session-auth.js";
+import { sessionCaller } from "#runtime/connections/caller-confirmation.js";
 
 import {
   type CallOutcome,
@@ -114,7 +116,7 @@ export async function runApprovedCalls(input: {
   readonly telemetry?: TelemetryOptions;
   /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
   readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
-  /** Whether the caller approved each call; see `executeToolCall`'s `callerApproved`. */
+  /** Whether the caller approved each call, which then runs with their identity. */
   readonly callerApprovedOf?: (approval: ApprovedCall) => boolean;
   /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
@@ -143,15 +145,20 @@ export async function runApprovedCalls(input: {
       }
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
-        const callerApproved = input.callerApprovedOf?.(approval) === true;
+        const caller = sessionCaller();
+        const confirmedBy = [
+          ...(input.callerApprovedOf?.(approval) === true && caller !== null
+            ? [personOf(caller)]
+            : []),
+          ...(approval.confirmedBy ?? []),
+        ];
         return await executeToolCall(
           call,
           {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
-            ...(callerApproved && { callerApproved }),
-            ...(approval.confirmedBy !== undefined && { confirmedBy: approval.confirmedBy }),
+            confirmedBy,
             beforeResult: (failure) => reportSignIns(approval, failure),
           },
           "recheck",

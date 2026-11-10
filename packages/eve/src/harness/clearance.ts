@@ -12,34 +12,19 @@ declare const clearanceBrand: unique symbol;
 export interface Clearance {
   readonly callId: string;
   readonly clearedBy?: ClearedBy;
-  /** The caller approved the call, so it runs with their identity whoever spoke last. */
-  readonly callerApproved?: true;
   readonly [clearanceBrand]: true;
 }
 
 /** Only the gate calls this: the call may run, cleared by `clearedBy` when it needed clearing. */
-export function mintClearance(
-  callId: string,
-  clearedBy?: ClearedBy,
-  callerApproved = false,
-): Clearance {
-  return {
-    callId,
-    ...(clearedBy !== undefined && { clearedBy }),
-    ...(callerApproved && { callerApproved: true }),
-  } as Clearance;
+export function mintClearance(callId: string, clearedBy?: ClearedBy): Clearance {
+  return (clearedBy === undefined ? { callId } : { callId, clearedBy }) as Clearance;
 }
 
 /**
  * The clearance a person's approval gives a call: the latest of its own approvals, accepted.
- * `undefined` when no one was asked, or the latest answer wasn't an acceptance. The call is
- * `callerApproved` when the caller is the one who approved it.
+ * `undefined` when no one was asked, or the latest answer wasn't an acceptance.
  */
-export function approvedClearance(
-  view: SessionView,
-  callId: string,
-  callerApproved = false,
-): Clearance | undefined {
+export function approvedClearance(view: SessionView, callId: string): Clearance | undefined {
   const latest = Object.values(view.interactions)
     .filter(
       (row) =>
@@ -51,25 +36,11 @@ export function approvedClearance(
     .sort((a, b) => a.introducedAt - b.introducedAt)
     .at(-1);
   if (latest?.status !== "settled" || latest.outcome !== "accepted") return undefined;
-  return mintClearance(callId, { interactionId: latest.interactionId }, callerApproved);
+  return mintClearance(callId, { interactionId: latest.interactionId });
 }
 
 /** Throws unless `clearance` clears the call about to run. */
 export function requireClearance(clearance: Clearance, callId: string): void {
   if (clearance.callId !== callId)
     throw new Error(`Call "${callId}" can't run on the clearance of call "${clearance.callId}".`);
-}
-
-/**
- * What a workflow task the runtime runs outside the step keeps of its call's clearance: what
- * cleared it, and whether the caller approved the call.
- */
-export function taskClearance(clearance: Clearance | undefined): {
-  readonly clearedBy?: ClearedBy;
-  readonly callerApproved?: true;
-} {
-  return {
-    ...(clearance?.clearedBy !== undefined && { clearedBy: clearance.clearedBy }),
-    ...(clearance?.callerApproved === true && { callerApproved: true }),
-  };
 }
