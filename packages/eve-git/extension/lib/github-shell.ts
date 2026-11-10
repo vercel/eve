@@ -13,7 +13,7 @@ import {
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
-import { GITHUB_TARGET, GitHubCommandInputError } from "./github-shell-schema.ts";
+import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
@@ -147,6 +147,28 @@ const leaseQueues = new Map<string, Promise<void>>();
 const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
 /** How `gh` and `git` report a rejected token. */
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
+
+/**
+ * Thrown when a GitHub command's own input is refused before it runs, such as
+ * shell syntax, a working directory outside the workspace, or a missing body
+ * file. The agent can fix these by changing the call.
+ */
+export class GitHubCommandInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitHubCommandInputError";
+  }
+}
+
+/**
+ * Type guard for {@link GitHubCommandInputError}.
+ *
+ * Uses `err.name` rather than `instanceof` because consumers and eve can end
+ * up with different class identities after bundling.
+ */
+export function isGitHubCommandInputError(err: unknown): err is GitHubCommandInputError {
+  return err instanceof Error && err.name === "GitHubCommandInputError";
+}
 
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;

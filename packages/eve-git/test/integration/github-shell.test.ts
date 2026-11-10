@@ -16,12 +16,12 @@ type NetworkPolicySandboxSession = SandboxSession & {
 import {
   executeGitHubShell,
   githubShellApproval,
+  isGitHubCommandInputError,
   parseCommand,
   type GitHubAppAuthorizeRequest,
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
-import { isGitHubCommandInputError } from "../../extension/lib/github-shell-schema.ts";
 import { LEASE_LOCK_PATH, withSandboxLeaseLock } from "../../extension/lib/sandbox-lease-lock.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
