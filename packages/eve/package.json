@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.0.0-rc.5",
+  "version": "1.0.0-rc.8",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -112,6 +112,11 @@
       "types": "./dist/src/public/tanstack/index.d.ts",
       "import": "./dist/src/public/tanstack/index.js",
       "default": "./dist/src/public/tanstack/index.js"
+    },
+    "./vite": {
+      "types": "./dist/src/public/vite/index.d.ts",
+      "import": "./dist/src/public/vite/index.js",
+      "default": "./dist/src/public/vite/index.js"
     },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
@@ -642,7 +647,7 @@
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
-    "@vercel/schedules": "0.0.0-alpha.19",
+    "@vercel/schedules": "0.0.3",
     "@vercel/sdk": "1.28.8",
     "@workflow/core": "5.4.0",
     "@workflow/errors": "5.1.0",

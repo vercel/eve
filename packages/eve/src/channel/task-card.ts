@@ -2,7 +2,11 @@
 // task controls and calls a tool makes on the model's behalf left out; a renderer reads each
 // call's row with the same selectors every reader uses (`callState`, `callLabel`, `openInteractions`).
 
-import { callTurn, openInteractions } from "#protocol/session-projection/selectors.js";
+import {
+  callTurn,
+  openInteractions,
+  showsActivity,
+} from "#protocol/session-projection/selectors.js";
 import type { CallRow, SessionView as SessionTables } from "#protocol/session-projection/tables.js";
 import { snapshotOf, type SessionView } from "#protocol/session-projection/session-view.js";
 import { call, type CallObservation } from "#protocol/session-projection/public-view.js";
@@ -94,9 +98,7 @@ function turnCalls(view: SessionTables, turnId: string): readonly CallRow[] {
   return Object.values(view.calls)
     .filter(
       (row) =>
-        row.capability.kind !== "control" &&
-        !("callId" in row.owner) &&
-        callTurn(view, row) === turnId,
+        showsActivity(row.capability) && !("callId" in row.owner) && callTurn(view, row) === turnId,
     )
     .sort((a, b) => a.introducedAt - b.introducedAt);
 }

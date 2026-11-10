@@ -33,6 +33,7 @@ import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import { authorizationReasonCode } from "#tracing/eve/connection-authorization.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly deliveryInput?: DeliverHookPayload;
@@ -385,6 +386,7 @@ function instrumentationEventsOf(
           interactionId: row.interactionId,
           kind: row.request.kind,
           outcome: event.data.outcome,
+          reason: authorizationReasonCode(event.data.reason),
           responder: responderSummary(line.view!, event.data.cause, line.capturesPrincipalIds),
           scope,
           type: "interaction.settled",

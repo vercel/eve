@@ -56,8 +56,9 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   });
   const { content, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
+  assert.ok(tool.label);
   assert.equal(
-    tool.label?.start({
+    tool.label.start({
       command: "gh -R vercel/eve pr view 123 --comments",
       description: "Read review comments on PR 123",
       repository: "vercel/eve",

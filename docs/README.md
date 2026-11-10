@@ -32,6 +32,7 @@ Important naming note:
 | Build a coding agent, or compare eve-code benchmarks     | [Code Extension](./code-extension.mdx)                                           |
 | Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                               |
 | Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/index.md)                                       |
+| Keep the deployed bundle small and cold starts fast      | [Keep the bundle small](./guides/deployment/index.md#keep-the-bundle-small)      |
 | Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                          |
 | Build a web UI, or stream a session to a client          | [Client SDK](./guides/client/index.mdx), [Frontend](./guides/frontend/index.mdx) |
 | Test the agent's behavior                                | [Evals](./evals/index.mdx)                                                       |

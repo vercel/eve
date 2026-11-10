@@ -1,6 +1,21 @@
+import { context as apiContext } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it } from "vitest";
 
-import { accumulate, memoryToolsDefinition } from "./definition.js";
+import { createAgentRun, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
+import { defineTool } from "#tools/definition.js";
+
+import {
+  accumulate,
+  memoryTools,
+  memoryToolsDefinition,
+  resolveMemoryScope,
+} from "./definition.js";
 
 const recalled = (turnId: string, overrides: { cleared?: number; scope?: string } = {}) => ({
   cleared: overrides.cleared ?? null,
@@ -79,5 +94,67 @@ describe("memoryToolsDefinition", () => {
     } as never);
 
     expect(definition.id).toBe("tool::profile");
+  });
+});
+
+describe("memoryTools", () => {
+  it("names the turn's memory store on the span of each provider tool call", async () => {
+    const memory = {
+      logicalPath: "memory/profile.ts",
+      provider: {
+        recall: {},
+        tools: async () => ({
+          save: defineTool({
+            description: "Save a note.",
+            execute: async () => "saved",
+            inputSchema: {},
+          }),
+        }),
+      },
+      scope: "alice",
+      slot: "profile",
+    };
+    const ctx = {
+      abortSignal: new AbortController().signal,
+      channel: undefined,
+      ctx: { get: () => undefined },
+      memo: (_key: unknown, compute: () => unknown) => compute(),
+      session: { auth: { current: null, initiator: null }, id: "session-1" },
+    };
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const manager = new AsyncLocalStorageContextManager().enable();
+    apiContext.setGlobalContextManager(manager);
+    const tracing = createAgentRun({ telemetry: otelTelemetry({ provider }) });
+    try {
+      const tools = await memoryTools(memory as never, ctx as never);
+      const scope = await resolveMemoryScope(memory as never, ctx as never);
+      const turn = await tracing.turn({
+        agentName: "support",
+        capture: { emit: true, recordInputs: false, recordOutputs: false },
+        identity: { conversationId: "c", runId: "r", turnId: "turn_0" },
+        sequence: 0,
+      });
+      const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+      const call = await attempt.tool({ callId: "call-1", name: "profile__save" });
+
+      const result = await call.run(() => tools!.profile__save!.execute({}, {} as never));
+      await call.complete();
+      await attempt.complete();
+      await turn.complete();
+
+      expect(result).toBe("saved");
+      const span = exporter.getFinishedSpans().find((next) => next.name.includes("profile__save"));
+      expect(span?.attributes).toMatchObject({
+        "agent.memory.slot": "profile",
+        "gen_ai.memory.store.id": scope!.key,
+      });
+    } finally {
+      apiContext.disable();
+      manager.disable();
+      await tracing.shutdown();
+    }
   });
 });

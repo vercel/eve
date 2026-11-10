@@ -35,6 +35,8 @@ export type CallObservation = ObservationTiming & {
   readonly name: string;
   readonly kind: CapabilityKind;
   readonly label: string;
+  /** Its tool set `label: false`, so readers showing activity leave it out. */
+  readonly hidden?: true;
   readonly runId?: string;
   readonly turnId?: string;
   readonly taskId?: string;

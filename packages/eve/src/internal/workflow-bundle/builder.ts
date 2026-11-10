@@ -59,6 +59,7 @@ export class WorkflowBundleBuilder {
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
   readonly #queueNamespace: string;
+  readonly #inlineSourcemap: boolean;
   protected readonly config: WorkflowBundleBuilderConfig;
 
   constructor(options: WorkflowBundleBuilderOptions) {
@@ -86,6 +87,7 @@ export class WorkflowBundleBuilder {
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
+    this.#inlineSourcemap = options.inlineSourcemap ?? true;
   }
 
   async build(): Promise<WorkflowArtifacts> {
@@ -279,7 +281,7 @@ export class WorkflowBundleBuilder {
       output: {
         comments: false,
         format: "cjs",
-        sourcemap: "inline",
+        sourcemap: this.#inlineSourcemap ? "inline" : false,
       },
     });
     return interimBundle.code;

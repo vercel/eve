@@ -118,7 +118,16 @@ test("instructions name only tools the extension ships", () => {
   const text = readFileSync(new URL("../../extension/instructions.md", import.meta.url), "utf8");
   for (const [, name] of text.matchAll(/`([a-z_]+)`/g)) {
     if (
-      ["eve__search", "root", "skeleton", "return", "mouse_"].includes(name) ||
+      [
+        "eve__search",
+        "root",
+        "skeleton",
+        "return",
+        "mouse_",
+        // agent-desktop error kinds (`error.details.kind`), not tools.
+        "identity_not_unique",
+        "saved_ref_ambiguous",
+      ].includes(name) ||
       name.endsWith("_")
     )
       continue;
@@ -301,6 +310,32 @@ test("structured errors keep the code, suggestion and retry disposition", async 
     (err) => {
       assert.match(err.message, /STALE_REF: @s1:e7 not found/);
       assert.match(err.message, /Suggestion: Re-run a snapshot/);
+      assert.match(err.message, /retry: safe\.$/);
+      return true;
+    },
+  );
+});
+
+test("a non-retryable refusal names its kind and warns that the same call fails again", async () => {
+  resetConfig();
+  const error = {
+    code: "AMBIGUOUS_TARGET",
+    message: "@s1:e7 was not unique when captured",
+    details: { kind: "identity_not_unique", retryable: false },
+    disposition: { delivery: "not_delivered", retry: "safe" },
+  };
+  const sandbox = fakeSandbox({
+    respond: () => ({
+      exitCode: 1,
+      stdout: JSON.stringify({ version: "2.6", ok: false, command: "click", error }),
+    }),
+  });
+  await assert.rejects(
+    () => tools.click.execute({ ref: "@s1:e7" }, ctx(sandbox)),
+    (err) => {
+      assert.match(err.message, /AMBIGUOUS_TARGET: @s1:e7 was not unique when captured/);
+      assert.match(err.message, /Kind: identity_not_unique\./);
+      assert.match(err.message, /Repeating the same call returns the same refusal/);
       assert.match(err.message, /retry: safe\.$/);
       return true;
     },

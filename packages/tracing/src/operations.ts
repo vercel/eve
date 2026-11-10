@@ -98,6 +98,7 @@ export interface ToolOperation extends Operation {
 export type ModelOperation = Operation;
 export type ApprovalOperation = Operation;
 export type MemoryOperation = Operation;
+export type DecisionOperation = Operation;
 export interface ModelCallReturn<T> extends ModelResult {
   readonly result: T;
 }

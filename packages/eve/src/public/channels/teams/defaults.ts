@@ -88,7 +88,7 @@ async function showTeamsRequest(channel: TeamsHandlerChannel, request: Interacti
   };
 }
 
-/** Retires a request's card with its answer; a pressed approval's names who pressed it. */
+/** Retires a request's card with its answer and, when known, who gave it. */
 async function settleTeamsRequest(
   channel: TeamsHandlerChannel,
   settlement: RequestSettlement,
@@ -96,20 +96,19 @@ async function settleTeamsRequest(
   const { [settlement.interactionId]: card, ...rest } = channel.state.pendingPromptCards ?? {};
   if (card === undefined) return;
   const { kind, outcome, responder } = settlement;
-  const pressed =
-    kind === "approval" &&
-    responder !== undefined &&
-    (outcome === "accepted" || outcome === "declined");
+  const decided = outcome === "accepted" || outcome === "declined";
+  const account =
+    !decided || responder === undefined
+      ? undefined
+      : channel.state.approvalResponderAccounts?.[responder.id];
+  const actor = account?.name ?? account?.id;
   let label = resolvedPromptAnswer(settlement, card.options);
-  if (pressed) {
-    const account = channel.state.approvalResponderAccounts?.[responder.id];
-    const actor = account?.name ?? account?.id;
-    const decided = outcome === "accepted" ? "Approved" : "Cancelled";
-    label = actor === undefined ? decided : `${decided} by ${actor}`;
-  }
+  let by: string | undefined;
+  if (kind === "approval" && actor !== undefined) label = `${label} by ${actor}`;
+  else by = actor;
   await channel.thread.update(
     card.activityId,
-    renderAnsweredInteractionMessage({ includeText: false, label, prompt: card.prompt }),
+    renderAnsweredInteractionMessage({ by, includeText: false, label, prompt: card.prompt }),
   );
   channel.state.pendingPromptCards = rest;
 }

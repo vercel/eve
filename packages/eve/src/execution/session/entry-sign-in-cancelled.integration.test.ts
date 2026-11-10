@@ -155,7 +155,9 @@ describe("workflowEntry cancelled sign-in", () => {
           (event) => event.data.callId === retried,
         );
         expect(refused?.data.outcome).toBe("failed");
-        expect(JSON.stringify(refused?.data)).toContain("ended without being completed in this turn");
+        expect(JSON.stringify(refused?.data)).toContain(
+          "ended without being completed in this turn",
+        );
 
         // The next turn may ask once, because the user's follow-up can still need it.
         await send(run.runId, "Try again, I'll sign in.");

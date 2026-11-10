@@ -131,6 +131,20 @@ describe("parseAppMentionEvent", () => {
     expect(message?.markdown).toBe("Hello @U02 see [the docs](https://example.com)");
   });
 
+  it("reads Slack's action token, top-level or nested under assistant_thread", () => {
+    const mention = (event: Record<string, unknown>) =>
+      parseAppMentionEvent({
+        type: "event_callback",
+        team_id: "T01",
+        event: { type: "app_mention", user: "U01", channel: "C01", ts: "1.0", ...event },
+      });
+
+    expect(mention({ action_token: "top" })?.actionToken).toBe("top");
+    expect(mention({ assistant_thread: { action_token: "nested" } })?.actionToken).toBe("nested");
+    expect(mention({})).not.toHaveProperty("actionToken");
+    expect(mention({ action_token: " " })).not.toHaveProperty("actionToken");
+  });
+
   it("returns null for non-app_mention events", () => {
     const message = parseAppMentionEvent({
       type: "event_callback",
@@ -491,6 +505,7 @@ describe("parseDirectMessageEvent", () => {
           text: "here is a file",
           channel: "D01",
           ts: "1700000000.000100",
+          assistant_thread: { action_token: "action-token" },
           files: [
             {
               id: "F01",
@@ -518,6 +533,7 @@ describe("parseDirectMessageEvent", () => {
     const message = slackMessageFromWebhookPayload(payload);
 
     expect(message?.channelId).toBe("D01");
+    expect(message?.actionToken).toBe("action-token");
     expect(message?.attachments).toEqual([
       {
         id: "F01",

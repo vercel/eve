@@ -138,6 +138,7 @@ import {
 } from "#public/channels/undelivered-reply.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -328,6 +329,13 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * @internal
    */
   pendingAuthMessageTs?: Record<string, string>;
+  /**
+   * Sign-in interaction id to the prompt the default sign-in `interaction.opened` handler sent as
+   * a direct message, because the session had no thread to hold a public status. The matching
+   * sign-in `interaction.settled` handler edits it in place to surface the resolution outcome.
+   * @internal
+   */
+  pendingAuthDirectMessages?: Record<string, { readonly channelId: string; readonly ts: string }>;
   /**
    * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
@@ -1132,8 +1140,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         await renderTurnStarted?.(event, ctx);
       },
       async "call.settled"(event, ctx) {
-        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first.
-        ctx.channel.state.quietStatus = null;
+        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first. A call
+        // whose tool set `label: false` isn't work to show, so the turn stays quiet. Task controls
+        // still end the quiet, as they always have, so this reads `hidden`, not `showsActivity`.
+        const settled = sessionTables(ctx.view).calls[event.data.callId];
+        if (settled === undefined || settled.capability.hidden !== true) {
+          ctx.channel.state.quietStatus = null;
+        }
         await renderCallSettled?.(event, ctx);
       },
       async "turn.settled"(event, ctx) {

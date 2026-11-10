@@ -230,6 +230,11 @@ export interface InstrumentationInteractionSettledEvent {
   readonly kind: InstrumentationInteractionKind;
   readonly interactionId: string;
   readonly outcome: InstrumentationInteractionOutcome;
+  /**
+   * Why it ended, as a machine-readable code such as a failed sign-in's `access_denied`. Absent
+   * when `interaction.settled` gave none or gave free text, which can carry an error's message.
+   */
+  readonly reason?: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly answer?: InstrumentationAnswer;
   /**

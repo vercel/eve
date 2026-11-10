@@ -1,6 +1,6 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { signInEndedText, signInOf } from "#channel/sign-in.js";
-import { callLabel } from "#protocol/session-projection/selectors.js";
+import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueue } from "#channel/prompt-queue.js";
@@ -113,8 +113,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         );
         return;
       }
-      // eve's own task controls stay out of view.
-      if (data.capability.kind === "control") return;
+      // eve's own task controls, and tools that set `label: false`, stay out of view.
+      if (!showsActivity(data.capability)) return;
       await postActivity(
         channel,
         options,
@@ -133,7 +133,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       const event = signInOf(sessionTables(ctx.view), data.interactionId);
-      if (event === undefined) return;
+      // One waiting on a card already shown completes with that card's answer.
+      if (event === undefined || event.waitsOn !== undefined) return;
       const { displayName, url } = event;
       const userId = linearUserId(ctx);
       let authSignal: Parameters<typeof postActivity>[3];
@@ -163,7 +164,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       const event = signInOf(sessionTables(ctx.view), data.interactionId);
-      if (event === undefined) return;
+      if (event === undefined || event.waitsOn !== undefined) return;
       const { displayName } = event;
       if (data.outcome === "accepted") {
         await postActivity(

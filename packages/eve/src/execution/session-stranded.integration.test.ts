@@ -7,6 +7,7 @@ import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
 import {
   EVE_SESSION_ATTRIBUTE,
+  EVE_TYPE_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { signalSessionTimeoutStep } from "#execution/session/timeout-steps.js";
@@ -73,6 +74,33 @@ async function parkStrandedSuccessor(continuationToken: string) {
   );
   await waitForHook(owner, { token: sessionInboxHookToken(continuationToken) });
   return { anchor, owner };
+}
+
+/**
+ * Makes the World answer the way Vercel does once the deployment that started
+ * `runId` is deleted: looking up the run's payload key fails with a 404.
+ * Returns a function that restores the World.
+ */
+async function deleteOwnerDeployment(runId: string): Promise<() => void> {
+  const world = await getWorld();
+  const original = world.getEncryptionKeyForRun;
+  const getKey = async (run: string | { readonly runId: string }, context?: object) => {
+    if ((typeof run === "string" ? run : run.runId) === runId) {
+      const error = new Error(
+        `Failed to fetch run key for ${runId} (deployment dpl_deleted): HTTP 404 Not Found — {"error":{"code":"not_found","message":"Deployment not found."}}`,
+      );
+      error.name = "RunKeyFetchError";
+      throw Object.assign(error, { status: 404 });
+    }
+    return await (
+      original as ((...args: unknown[]) => Promise<Uint8Array | undefined>) | undefined
+    )?.call(world, run, context);
+  };
+  world.getEncryptionKeyForRun = getKey as NonNullable<typeof original>;
+  return () => {
+    if (original === undefined) delete world.getEncryptionKeyForRun;
+    else world.getEncryptionKeyForRun = original;
+  };
 }
 
 async function listEventIds(runId: string): Promise<string[]> {
@@ -620,6 +648,54 @@ describe("stranded sessions", () => {
         await expect(owner.status).resolves.toBe("running");
       } finally {
         await cancelIfActive(owner);
+      }
+    });
+  });
+
+  it("replaces a session whose deployment was deleted on a channel delivery", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-deleted" } });
+    await test.run(async () => {
+      const continuationToken = "http:stranded-session-deleted";
+      // The running eve version built it, so only its deleted deployment strands it.
+      const owner = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
+        allowReservedAttributes: true,
+        attributes: {
+          [EVE_TYPE_ATTRIBUTE]: "session",
+          [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+        },
+      });
+      await waitForHook(owner, { token: sessionInboxHookToken(continuationToken) });
+      const restoreWorld = await deleteOwnerDeployment(owner.runId);
+      const runtime = channelRuntime();
+      let freshSessionId: string | undefined;
+      try {
+        // A channel checking the thread still finds its session; only a new message replaces it.
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
+          sessionId: owner.runId,
+        });
+        await expect(
+          runtime.resolveContinuation(continuationToken, { runnable: true }),
+        ).rejects.toBeInstanceOf(SessionStrandedError);
+
+        const fresh = await httpAddress(runtime, "stranded-session-deleted").send(
+          "Alice asks for the deploy checklist again.",
+          { auth: null },
+        );
+        freshSessionId = fresh.sessionId;
+
+        expect(fresh.sessionId).not.toBe(owner.runId);
+        expect(runtime.createSession).not.toHaveBeenCalled();
+        await expect(owner.status).resolves.toBe("cancelled");
+        await expect(
+          waitForReceivedMessages(fresh.sessionId, ["Alice asks for the deploy checklist again."]),
+        ).resolves.toEqual([]);
+        await expect(readSessionStarted(fresh.sessionId)).resolves.toMatchObject({
+          data: { predecessor: { sessionId: owner.runId } },
+        });
+      } finally {
+        restoreWorld();
+        await cancelIfActive(owner);
+        await resetSession(runtime, freshSessionId);
       }
     });
   });

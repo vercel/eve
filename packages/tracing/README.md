@@ -127,6 +127,26 @@ The completion promise supplies finish reason, usage, and optional content. It
 must settle on success, failure, or cancellation. The library returns the stream
 unchanged and never consumes it. Parent completion waits for that promise.
 
+## Decisions
+
+`run.decision(data)` records one `decision <model>` call to a decision model,
+such as choosing a model for a turn. It belongs to the active operation. When no
+operation is active, it uses `parent`, for example a turn's reserved span while
+the turn's model is chosen. A host span inside that operation's trace becomes
+the parent instead; a host span from another trace, such as a workflow step,
+does not. Without an operation or `parent`, the decision nests under the active
+span, if any. An unsampled parent records nothing, and work run through the
+handle is suppressed.
+
+```ts
+const decision = await run.decision({ modelId: "jev", provider: "typesafe-ai", parent });
+const answer = await decision.run(() => decide());
+await decision.complete({ usage: { inputTokens: 42, outputTokens: 3 } });
+```
+
+Omit `identity` for a decision made outside any run. Decision usage isn't added
+to the turn's totals.
+
 ## AI SDK
 
 `aiSdkTelemetry` is an AI SDK telemetry integration. It records each
@@ -204,8 +224,8 @@ await approval.complete({ outcome: "approved" });
 ```
 
 Turns are keyed by `runId` and `turnId`; attempts by step index
-and attempt; tool calls by `callId`; approvals by `requestId`. Model calls and
-memory finish within one process and are not resumed. `run.resume({ identity })`
+and attempt; tool calls by `callId`; approvals by `requestId`. Model calls,
+decisions, and memory finish within one process and are not resumed. `run.resume({ identity })`
 returns a saved turn without starting one, for example to finish a tool call
 after its turn has completed. `turn.findTool(callId)`, `turn.findAttempt()`, and
 `tool.findApproval()` return open operations, or `undefined` once they have

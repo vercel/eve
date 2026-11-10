@@ -5,7 +5,13 @@ import { createScopes, type LiveOperation } from "./core/scopes.js";
 import { currentAgentHandoff } from "./core/delegation.js";
 import { intersectCapture } from "./core/activation.js";
 import { traceSnapshot } from "./core/snapshot.js";
-import { operationHandle, wrappedOperation, type TurnOperation } from "./operations.js";
+import {
+  operationHandle,
+  wrappedOperation,
+  type DecisionOperation,
+  type TurnOperation,
+  type WrappedOperation,
+} from "./operations.js";
 import type {
   AgentTelemetry,
   Attributes,
@@ -87,11 +93,29 @@ interface MemoryInput<T> {
   };
 }
 
+/** One call to a decision model, such as choosing a model for a turn or reviewing an action. */
+export interface DecisionInput {
+  readonly modelId: string;
+  readonly provider?: string;
+  /** Omit for a decision made outside any run. */
+  readonly identity?: RunIdentity;
+  readonly agentName?: string;
+  /** Defaults to the active operation's capture, or metadata only. */
+  readonly capture?: CaptureDecision;
+  /**
+   * Parent used when no operation is active, such as a turn's reserved span while its model is
+   * chosen. The active span is the parent instead when it belongs to the same trace.
+   */
+  readonly parent?: TraceReference;
+  readonly context?: ExecutionContext;
+}
+
 export interface AgentRun {
-  turn: import("./operations.js").WrappedOperation<TurnInput, TurnOperation>;
+  turn: WrappedOperation<TurnInput, TurnOperation>;
   /** Returns a saved durable turn, without starting one. */
   resume(input: ResumeInput): Promise<TurnOperation | undefined>;
   memory: AgentMemoryTracing;
+  decision: WrappedOperation<DecisionInput, DecisionOperation>;
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -101,6 +125,7 @@ export interface AgentMemoryTracing {
 }
 
 const METADATA_ONLY: CaptureDecision = { emit: true, recordInputs: false, recordOutputs: false };
+const NOT_SAMPLED: CaptureDecision = { emit: false, recordInputs: false, recordOutputs: false };
 const LIVE_TURNS = 1000;
 
 interface LiveTurn {
@@ -353,8 +378,35 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return value;
   }
 
+  /**
+   * The active operation owns the decision. A span the host started inside it, in the same
+   * trace, nests the decision further; a span from another trace, such as a workflow step,
+   * does not.
+   */
+  async function decision(data: DecisionInput): Promise<DecisionOperation> {
+    const active = telemetry.active();
+    const owner = active?.reference ?? data.parent;
+    const span = telemetry.activeSpan?.(data.context);
+    const parent = owner === undefined || span?.traceId === owner.traceId ? span : owner;
+    // A decision joins its parent's sampling decision whatever sampler the provider uses.
+    const sampled = parent === undefined || (parent.traceFlags & 1) !== 0;
+    const live = await scopes.start({
+      identity: {
+        ...(data.identity ?? { conversationId: "", runId: "", turnId: "" }),
+        agentName: data.agentName,
+      },
+      key: `decision:${randomUUID()}`,
+      capture: sampled ? (data.capture ?? active?.capture ?? METADATA_ONLY) : NOT_SAMPLED,
+      parent,
+      context: data.context,
+      data: { type: "decision", options: { modelId: data.modelId, provider: data.provider } },
+    });
+    return operationHandle(live, live.record().data, input.onError);
+  }
+
   return {
     turn: wrappedOperation(turnOperation, undefined, input.onError),
+    decision: wrappedOperation(decision, undefined, input.onError),
     resume,
     memory: {
       search: (data, execute) => memory("search_memory", data, execute),

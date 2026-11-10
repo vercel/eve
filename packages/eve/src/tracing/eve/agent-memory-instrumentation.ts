@@ -17,6 +17,14 @@ import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import { type AgentRun } from "#compiled/@vercel/agent-runs/index.js";
 import { activeTraceOperation } from "#compiled/@vercel/agent-runs/otel.js";
 
+/**
+ * Names the memory store on the tool span a memory provider tool runs in, so a trace reader can
+ * find the tool calls that read or wrote one scope the same way it finds recall and capture.
+ */
+export function recordMemoryToolStore(storeId: string, slot: string): void {
+  activeTraceOperation()?.memory?.store({ storeId, slot });
+}
+
 export function createAgentMemoryInstrumentation(input: {
   tracing: AgentRun;
   environment: ConversationEnvironment;

@@ -470,6 +470,59 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
+  it("writes the multi-agent summary index Vercel uploads for the dashboard", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    await Promise.all([
+      mkdir(join(appRoot, "agents", "support", "agent"), { recursive: true }),
+      mkdir(join(appRoot, "agents", "research", "agent"), { recursive: true }),
+      writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
+    ]);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    await withEve<TestConfig>({})("phase-production-build", { defaultConfig: {} });
+
+    expect(await readJsonFile(join(appRoot, ".eve", "agent-summary.json"))).toMatchObject({
+      agents: [
+        {
+          name: "research",
+          routePrefix: "/eve/research",
+          summaryPath: "agents/research/.eve/agent-summary.json",
+        },
+        {
+          name: "support",
+          routePrefix: "/eve/support",
+          summaryPath: "agents/support/.eve/agent-summary.json",
+        },
+      ],
+      kind: "vercel-eve-multi-agent-summary",
+      schemaVersion: 1,
+    });
+  });
+
+  it("leaves a standalone root's summary alone when it also has an agents/ directory", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    const summaryPath = join(appRoot, ".eve", "agent-summary.json");
+    const standaloneSummary = '{"kind":"vercel-eve-agent-summary"}\n';
+    await Promise.all([
+      mkdir(join(appRoot, "agent"), { recursive: true }),
+      mkdir(join(appRoot, "agents", "support", "agent"), { recursive: true }),
+      mkdir(join(appRoot, ".eve"), { recursive: true }),
+      writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
+    ]);
+    await writeFile(summaryPath, standaloneSummary);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    await withEve<TestConfig>({})("phase-production-build", { defaultConfig: {} });
+
+    expect(await readFile(summaryPath, "utf8")).toBe(standaloneSummary);
+  });
+
   it("discovers a peer workspace through eveRoot", async () => {
     const workspaceRoot = await createTempAppRoot();
     const nextRoot = join(workspaceRoot, "apps", "web");

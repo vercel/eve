@@ -13,7 +13,7 @@ import {
   refOf,
   rowOf,
 } from "#protocol/session-projection/tree.js";
-import type { CallOwner } from "#protocol/session-events/families/call.js";
+import type { CallOwner, Capability } from "#protocol/session-events/families/call.js";
 import type { InteractionSubject } from "#protocol/session-events/families/interaction.js";
 import type {
   CallRow,
@@ -335,10 +335,12 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   // forwarded to the child that asked it, doesn't wait on an answer. A request relayed from a
   // task this turn's call started belongs to the task, but the turn still waits on its interaction.
   // A question about a call that already ended, such as a cancelled stretch's before its run
-  // withdraws it, holds nothing.
+  // withdraws it, holds nothing. A sign-in that waited on a card already settled has its answer:
+  // its asker heard back with that card and settles it as it resumes.
   const interactionsWaiting = openInteractions(view).filter(
     (entry) =>
       !answered.has(entry.interactionId) &&
+      !heardBack(view, entry) &&
       !("callId" in entry.subject && view.calls[entry.subject.callId]?.status === "settled") &&
       (interactionOwner(view, entry).turnId === turnId || subjectTurn(view, entry) === turnId),
   );
@@ -356,6 +358,12 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     };
   }
   return { on: "session" };
+}
+
+/** Whether `row` is a sign-in that waited on another's card (`waitsOn`), and that card settled. */
+function heardBack(view: SessionView, row: InteractionRow): boolean {
+  const shown = row.request.signIn?.waitsOn;
+  return shown !== undefined && view.interactions[shown]?.status === "settled";
 }
 
 /** The approval this session asked about a call itself, not one relayed from elsewhere. */
@@ -434,6 +442,14 @@ export function callLabel(
   );
 }
 
+/**
+ * Whether readers showing activity show a call, from its capability or observation: not eve's task
+ * controls, and not a call whose tool set `label: false`.
+ */
+export function showsActivity(call: Pick<Capability, "kind" | "hidden">): boolean {
+  return call.kind !== "control" && call.hidden !== true;
+}
+
 /** What the session is doing right now, for status lines. */
 export type Activity =
   | { readonly kind: "idle" }
@@ -459,12 +475,14 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   if (waits?.on === "interaction")
     return { interactions: waits.interactions, kind: "waiting-on-interaction" };
   if (waits?.on === "work") {
-    const working = waits.tasks;
+    const working = waits.tasks.filter((task) => {
+      const starter = view.calls[task.startedBy.callId];
+      return starter === undefined || showsActivity(starter.capability);
+    });
     if (working.length > 0) return { kind: "waiting-on-tasks", tasks: working };
-    return {
-      kind: "calling",
-      names: waits.calls.map((entry) => callLabel(entry)),
-    };
+    const shown = waits.calls.filter((entry) => showsActivity(entry.capability));
+    if (shown.length === 0 && waits.calls.length > 0) return { kind: "thinking" };
+    return { kind: "calling", names: shown.map((entry) => callLabel(entry)) };
   }
   // A run stays open while the calls it made run in its step: a started call no task serves is
   // the turn's activity. A call only requested, such as an agent call before its task starts or
@@ -472,7 +490,7 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   const running = Object.values(view.calls).filter(
     (entry) =>
       entry.status === "running" &&
-      entry.capability.kind !== "control" &&
+      showsActivity(entry.capability) &&
       callTask(view, entry) === undefined &&
       callTurn(view, entry) === row.turnId,
   );

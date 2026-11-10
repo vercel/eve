@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "The agent recovers from an injected lookup timeout without a follow-up prompt.",
+  description: "The agent follows a requested one-retry policy after an injected lookup timeout.",
   async test(t) {
     const session = await t.session({
       stubs: [
@@ -18,7 +18,7 @@ export default defineEval({
     });
     const input = { filter: { status: "open", owner: "alice" }, query: "milk", tags: [], limit: 1 };
     const turn = await session.send(
-      `Alice asks: what is the marker for my open milk record? Lookup input: ${JSON.stringify(input)}`,
+      `Alice asks: what is the marker for my open milk record? If lookup_record returns a TimeoutError, retry it exactly once with the same input before answering. Include the recovered marker in your reply. Lookup input: ${JSON.stringify(input)}`,
     );
     turn.expectOk();
     turn.calledTool("lookup_record", { input, status: "failed", count: 1 });

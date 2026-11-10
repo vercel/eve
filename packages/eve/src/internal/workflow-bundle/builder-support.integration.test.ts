@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +9,7 @@ import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import { bundleFinalWorkflowOutput } from "./builder-support.js";
 
 describe("bundleFinalWorkflowOutput", () => {
-  it("writes the final wrapper with encoded code and resolved runtime imports", async () => {
+  it("writes the driver code as a text asset beside a wrapper with resolved runtime imports", async () => {
     const dir = await mkdtemp(join(tmpdir(), "eve-workflow-runtime-facade-"));
     const target = join(dir, "workflows.mjs");
     const workflowCode = [
@@ -30,23 +29,19 @@ describe("bundleFinalWorkflowOutput", () => {
       const runtimeSpecifier = normalizeEsmImportSpecifier(
         resolveWorkflowModulePath("workflow/runtime"),
       );
+      const codePath = join(dir, "workflows.code.txt");
       expect(source).toContain(`from ${JSON.stringify(runtimeSpecifier)}`);
-      expect(source).toContain('Buffer.from(["');
-      expect(source).not.toContain("const workflowCode = `");
+      expect(source).toContain(
+        `import workflowCode from ${JSON.stringify(`text:${codePath.replaceAll("\\", "/")}`)};`,
+      );
+      expect(source).not.toContain("globalThis.__private_workflows");
       expect(source).toContain('workflowEntrypoint(workflowCode, { namespace: "evetest" })');
       expect(source).toContain(
         'import { __steps_registered as __eveWorkflowStepsRegistered } from "./steps.mjs";',
       );
       expect(source).toContain("void __eveWorkflowStepsRegistered;");
       expect(source).not.toContain('from "workflow/runtime"');
-
-      const encodedChunksMatch = source.match(
-        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-      );
-      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
-      expect(Buffer.from(encodedChunks.join(""), "base64").toString("utf8")).toBe(
-        `${workflowCode}\n`,
-      );
+      expect(await readFile(codePath, "utf8")).toBe(`${workflowCode}\n`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

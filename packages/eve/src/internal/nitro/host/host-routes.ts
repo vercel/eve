@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
@@ -235,13 +235,19 @@ export async function renderHostRoutes(
   const virtual: Record<string, string> = {
     [ROUTE_CONFIG_ID]: renderRouteConfigModule({ configPath: input.artifactsConfigPath }),
   };
+  // The bundler types a module by its id's extension, and names embed authored
+  // route paths (`/agent-card.json`), so every id ends in `.mjs` (#5742).
+  const addVirtualModule = (name: string, source: string): string => {
+    const id = `#eve/${name}.mjs`;
+    virtual[id] = source;
+    return id;
+  };
   const addVirtualHandler = (
-    id: string,
+    name: string,
     source: string,
     registration: Omit<NitroEventHandler, "handler">,
   ) => {
-    virtual[id] = source;
-    handlers.push({ handler: id, ...registration });
+    handlers.push({ handler: addVirtualModule(name, source), ...registration });
   };
 
   // A WebSocket upgrade arrives as a GET, so a path with both routes gets one
@@ -263,21 +269,25 @@ export async function renderHostRoutes(
     switch (route.kind) {
       case "channel": {
         const routeKey = `${route.method} ${route.path}`;
-        const id = `#eve/channel/${routeKey}`;
+        const name = `channel/${routeKey}`;
         const pattern = normalizeRoutePattern(route.path);
         if (route.method === "WEBSOCKET") {
           if (!httpGetPatterns.has(pattern)) {
-            addVirtualHandler(id, renderChannelWebSocketHandler({ allow: route.allow, routeKey }), {
-              method: "GET",
-              route: route.path,
-            });
+            addVirtualHandler(
+              name,
+              renderChannelWebSocketHandler({ allow: route.allow, routeKey }),
+              {
+                method: "GET",
+                route: route.path,
+              },
+            );
           }
           break;
         }
         const websocketRouteKey =
           route.method === "GET" ? websocketRouteKeys.get(pattern) : undefined;
         addVirtualHandler(
-          id,
+          name,
           renderChannelHandler({
             allow: route.allow,
             cors: route.cors,
@@ -290,14 +300,14 @@ export async function renderHostRoutes(
       }
       case "channel-preflight":
         addVirtualHandler(
-          `#eve/channel/OPTIONS ${route.path}`,
+          `channel/OPTIONS ${route.path}`,
           renderChannelPreflightHandler({ cors: route.cors }),
           { method: "OPTIONS", route: route.path },
         );
         break;
       case "connection-event":
         addVirtualHandler(
-          `#eve/route${route.path}`,
+          `route${route.path}`,
           renderHostHandler({
             context: { connectionName: route.connectionName },
             handlerExport: "handleConnectionEventRequest",
@@ -311,7 +321,7 @@ export async function renderHostRoutes(
         // module-map loader from inside the bundled dev server can land on the
         // authored app instead of the installed eve package (vercel/eve#311).
         addVirtualHandler(
-          `#eve/route${route.path}`,
+          `route${route.path}`,
           renderHostHandler({
             handlerExport: "handleDevScheduleDispatchRequest",
             modulePath: "src/internal/nitro/routes/dev-schedule-dispatch.ts",
@@ -321,7 +331,7 @@ export async function renderHostRoutes(
         break;
       case "schedule-consumer":
         addVirtualHandler(
-          `#eve/route${route.path}`,
+          `route${route.path}`,
           renderHostHandler({
             handlerExport: "handleScheduleCollectionConsumer",
             modulePath: "src/internal/nitro/routes/schedule-collection-consumer.ts",
@@ -341,9 +351,14 @@ export async function renderHostRoutes(
   const tasks: HostNitroRoutes["tasks"] = {};
   const scheduledTasks: Record<string, string[]> = {};
   for (const task of table.scheduleTasks) {
-    const id = `#eve/schedule-task/${task.taskName}`;
-    virtual[id] = renderScheduleTaskModule({ description: task.description });
-    tasks[task.taskName] = { description: task.description, handler: id };
+    // The id's basename becomes the chunk filename, and a task name encodes its
+    // whole source path, so a digest keeps the filename short.
+    const digest = createHash("sha256").update(task.taskName).digest("hex").slice(0, 16);
+    const handler = addVirtualModule(
+      `schedule-task/${digest}`,
+      renderScheduleTaskModule({ description: task.description }),
+    );
+    tasks[task.taskName] = { description: task.description, handler };
     const cronTasks = (scheduledTasks[task.cron] ??= []);
     if (!cronTasks.includes(task.taskName)) cronTasks.push(task.taskName);
   }

@@ -21,9 +21,15 @@ import {
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { assertRunnableSessionOwner, resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import {
+  assertRunnableSessionOwner,
+  findSessionHookHolder,
+  resumeRunnableHook,
+  strandedIfDeploymentDeleted,
+} from "#execution/session-inbox/owner.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
-import { getHookByToken, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
+import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 export interface ResumedSessionInboxHook {
@@ -56,7 +62,7 @@ export async function resumeSessionInbox(
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
   let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
   try {
-    hook = await resumeRunnableHook(
+    hook = await resumeCurrentOwner(
       sessionInboxHookToken(token),
       command,
       typeof address === "string" ? undefined : address.inbox,
@@ -85,12 +91,43 @@ export async function resumeSessionInbox(
         try {
           return knownSessionId ?? requireSessionId(await hook.metadata);
         } catch (cause) {
-          // A failed identity read must never cause a second delivery.
-          throw new AcceptedSessionIdentityError(cause);
+          // A failed identity read must never cause a second delivery. An owner whose
+          // deployment was deleted can never replay what it accepted, so replacing it
+          // delivers the command once.
+          const stranded = await strandedIfDeploymentDeleted(cause, hook);
+          throw stranded === cause ? new AcceptedSessionIdentityError(cause) : stranded;
         }
       })());
     },
   };
+}
+
+/**
+ * Resumes the token's owner. A run without a public key needs its deployment's
+ * key to accept anything, so a deleted deployment fails the resume itself. A
+ * concurrent delivery may have replaced that owner since: the current holder
+ * is stranded only when its own key lookup fails too, and a live one gets the
+ * command by token, because a cached inbox handle names the dead owner.
+ */
+async function resumeCurrentOwner(
+  token: string,
+  command: unknown,
+  inbox: string | undefined,
+): Promise<Awaited<ReturnType<typeof resumeRunnableHook>>> {
+  try {
+    return await resumeRunnableHook(token, command, inbox);
+  } catch (error) {
+    if (!isOwnerDeploymentDeletedError(error)) throw error;
+    const holder = await findSessionHookHolder(token);
+    if (holder?.hook === undefined) throw error;
+    const readFailure = await holder.hook.metadata.then(
+      () => undefined,
+      (cause: unknown) => cause ?? error,
+    );
+    if (readFailure === undefined) return await resumeRunnableHook(token, command);
+    const stranded = await strandedIfDeploymentDeleted(readFailure, holder.hook);
+    throw stranded === readFailure ? error : stranded;
+  }
 }
 
 export class AcceptedSessionIdentityError extends Error {
@@ -107,11 +144,20 @@ export function requireSessionId(metadata: unknown): string {
   return value;
 }
 
+/**
+ * The session holding a logical token. Throws `StrandedSessionOwnerError` when
+ * its owner's deployment was deleted, which hides the session ID.
+ */
 export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
+  let hook: Hook | undefined;
   try {
-    const hook = await getHookByToken(sessionInboxHookToken(token));
+    hook = await getHookByToken(sessionInboxHookToken(token));
     return { sessionId: requireSessionId(await hook.metadata) };
   } catch (error) {
+    if (hook !== undefined) {
+      const stranded = await strandedIfDeploymentDeleted(error, hook);
+      if (stranded !== error) throw stranded;
+    }
     if (!HookNotFoundError.is(error)) throw error;
     const target = await resolveLegacyInbox(token);
     return { sessionId: target.sessionId };

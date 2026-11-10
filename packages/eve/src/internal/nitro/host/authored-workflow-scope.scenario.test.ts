@@ -18,13 +18,9 @@ const ALIAS_MARKER = "workflow-alias-resolved";
 const WORKFLOW_ASSET_MARKER = "workflow-raw-asset-embedded";
 const STEP_ASSET_MARKER = "step-raw-asset-embedded";
 
-function workflowCode(source: string): string {
-  const match = source.match(
-    /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
-  );
-  return Buffer.from((JSON.parse(match?.[1] ?? "[]") as string[]).join(""), "base64").toString(
-    "utf8",
-  );
+/** The driver code the workflow build writes beside its entrypoint. */
+function readWorkflowCode(buildDir: string): Promise<string> {
+  return readFile(join(buildDir, "workflows.code.txt"), "utf8");
 }
 
 describe("authored workflow scope", () => {
@@ -82,9 +78,7 @@ export async function deliver() {
           authoredWorkflowModules: host.compiledArtifacts.authoredWorkflowModules,
         });
         await builder.build();
-        const code = workflowCode(
-          await readFile(join(workspace.workflow.buildDir, "workflows.mjs"), "utf8"),
-        );
+        const code = await readWorkflowCode(workspace.workflow.buildDir);
         expect(code).toContain(ALIAS_MARKER);
         expect(code).not.toContain('require("@/lib/describe")');
         await buildApplication(appRoot, { skipSandboxPrewarm: false });
@@ -143,9 +137,7 @@ export async function deliver() {
       });
       await builder.build();
       const steps = await readFile(join(workspace.workflow.buildDir, "steps.mjs"), "utf8");
-      const code = workflowCode(
-        await readFile(join(workspace.workflow.buildDir, "workflows.mjs"), "utf8"),
-      );
+      const code = await readWorkflowCode(workspace.workflow.buildDir);
       expect(steps).toContain("lib/step.ts");
       expect(code).toContain("workflow//./lib/run//run");
       expect(code).toContain("step//./lib/step//readMarker");
@@ -187,8 +179,42 @@ export async function deliver() {
         .map((file) => readFile(join(outputDir, "server", file), "utf8")),
     );
     expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
-    expect(serverCode.some((code) => workflowCode(code).includes(WORKFLOW_ASSET_MARKER))).toBe(
-      true,
+    // The host bundles the driver code as a plain string, so the marker appears in the output.
+    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
+  });
+
+  // The host and workflow bundles leave dependency imports to the host bundler,
+  // but an authored import of an installed package's file is still authored.
+  it("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
+    const app = await scenarioApp({
+      name: "workflow-dependency-raw-assets",
+      installDependencies: true,
+      dependencies: { "raw-assets": "file:./vendor/raw-assets" },
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "Call the probe tool.",
+        "agent/tools/probe.ts":
+          'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+        "lib/run.ts":
+          'import header from "../node_modules/raw-assets/workflow.txt?raw"; import { readPrompt } from "./step"; export async function run() { "use workflow"; return header + (await readPrompt()); }',
+        "lib/step.ts":
+          'import prompt from "../node_modules/raw-assets/step.md?raw"; export async function readPrompt() { "use step"; return prompt; }',
+        "vendor/raw-assets/package.json": JSON.stringify({ name: "raw-assets", version: "1.0.0" }),
+        "vendor/raw-assets/workflow.txt": WORKFLOW_ASSET_MARKER,
+        "vendor/raw-assets/step.md": STEP_ASSET_MARKER,
+      },
+    });
+    const outputDir = await buildApplication(await realpath(app.appRoot), {
+      skipSandboxPrewarm: false,
+    });
+    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
+    const serverCode = await Promise.all(
+      serverFiles
+        .filter((file) => file.endsWith(".mjs"))
+        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
     );
+    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
+    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
   });
 });

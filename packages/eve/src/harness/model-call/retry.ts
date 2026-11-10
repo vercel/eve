@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { createLogger } from "#internal/logging.js";
 import { classifyModelCallError } from "#harness/model-call/errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { decide, type Policy, type Restriction } from "#shared/restriction.js";
 
 const log = createLogger("harness.tool-loop");
@@ -13,6 +14,12 @@ const log = createLogger("harness.tool-loop");
  * use case (429 / 502) clears quickly or not at all.
  */
 const MODEL_CALL_MAX_ATTEMPTS = 3;
+
+/**
+ * Max attempts for a stream AI Gateway cut at its maximum duration. Each attempt runs the full
+ * duration again, so one retry covers a slow upstream without paying for the failure three times.
+ */
+const GATEWAY_STREAM_TIMEOUT_MAX_ATTEMPTS = 2;
 
 /**
  * Base delay (ms) between model-call retries. Doubled each attempt,
@@ -49,6 +56,11 @@ const retryLaw: Restriction<RetryDecision> = {
 const BUILT_IN: readonly RetryPolicy[] = [
   ({ error }) => (classifyModelCallError(error) === "retry" ? ALLOW_RETRY : STOP_RETRY),
   ({ attempt }) => (attempt < MODEL_CALL_MAX_ATTEMPTS ? ALLOW_RETRY : STOP_RETRY),
+  ({ attempt, error }) =>
+    attempt >= GATEWAY_STREAM_TIMEOUT_MAX_ATTEMPTS &&
+    summarizeKnownError(error)?.id === "gateway-stream-timeout"
+      ? STOP_RETRY
+      : ALLOW_RETRY,
   ({ attempt }) => ({
     delayMs: MODEL_CALL_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 250),
     retry: true,

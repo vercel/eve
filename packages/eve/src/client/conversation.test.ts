@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { call, interaction, reply, turn } from "#protocol/session-projection/public-view.js";
+import {
+  call,
+  interaction,
+  reply,
+  showsActivity,
+  turn,
+} from "#protocol/session-projection/public-view.js";
 import { Conversation, conversationOf } from "#client/conversation.js";
 import type { EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -224,6 +230,25 @@ describe("the conversation", () => {
       output: { done: 2 },
       state: "completed",
     });
+  });
+
+  it("marks a call whose tool set label: false, so showsActivity leaves its part out", () => {
+    const hidden = observe([
+      ...started,
+      {
+        data: {
+          callId: "call_0",
+          capability: { hidden: true, kind: "tool", name: "react" },
+          input: { emoji: "eyes" },
+          owner: { runId },
+        },
+        scope,
+        type: "call.requested",
+      },
+    ]);
+    expect(tool(hidden)).toMatchObject({ hidden: true, name: "react" });
+    expect(showsActivity(tool(hidden)!)).toBe(false);
+    expect(tool(observe([...started, requested]))).not.toHaveProperty("hidden");
   });
 
   it("leaves out a call a retry replaced", () => {

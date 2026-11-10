@@ -45,6 +45,8 @@ const FIREFOX_USER_JS = [
   'user_pref("browser.urlbar.maxRichResults", 0);',
   'user_pref("browser.newtabpage.activity-stream.feeds.topsites", false);',
   'user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);',
+  // Firefox opens a modal Terms of Use dialog over the first page; WebDriver sets this pref too.
+  'user_pref("termsofuse.bypassNotification", true);',
 ].join("\n");
 const FIREFOX_USER_CHROME = `
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
@@ -63,11 +65,14 @@ const FIREFOX_USER_CHROME = `
 #nav-bar-overflow-button,
 #identity-box,
 #tracking-protection-icon-container,
+#trust-icon-container,
 #page-action-buttons {
   display: none !important;
 }
 
-#main-window {
+/* browser.xhtml's root is an HTML <html id="main-window">, so it needs *|* to
+   escape the XUL default namespace above, like the address bar's HTML elements. */
+*|*#main-window {
   background: #000 !important;
 }
 
@@ -96,15 +101,20 @@ const FIREFOX_USER_CHROME = `
   overflow: hidden !important;
 }
 
-#urlbar-background {
+/* The address bar's HTML elements need *|* too: #urlbar-input, #urlbar-scheme,
+   and ESR 153's background. ESR 140 draws the background with a XUL
+   #urlbar-background; ESR 153 uses an HTML .urlbar-background inside an HTML
+   #urlbar. */
+#urlbar-background,
+*|*#urlbar > *|*.urlbar-background {
   background: #1a1a1a !important;
   border: 1px solid #333 !important;
   border-radius: 6px !important;
   box-shadow: none !important;
 }
 
-#urlbar-input,
-#urlbar-scheme {
+*|*#urlbar-input,
+*|*#urlbar-scheme {
   color: #ededed !important;
 }
 

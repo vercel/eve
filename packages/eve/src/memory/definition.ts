@@ -41,6 +41,7 @@ import { createFrameworkUserMessage } from "#harness/messages.js";
 import { toolsDefinition } from "#definitions/tools.js";
 import type { MemoryToolsContext } from "#public/memory/index.js";
 import { isBrandedToolEntry } from "#tools/dynamic.js";
+import { recordMemoryToolStore } from "#tracing/eve/agent-memory-instrumentation.js";
 
 const log = createLogger("memory");
 
@@ -437,7 +438,7 @@ export function memoryToolsDefinition(memory: ResolvedMemoryDefinition): Definit
   );
 }
 
-async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContext) {
+export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContext) {
   const { provider, slot } = memory;
   if (provider.tools === undefined) return null;
   // The scope is the data the tools are made from: resolved once per turn and principal, as recall
@@ -469,7 +470,17 @@ async function memoryTools(memory: ResolvedMemoryDefinition, ctx: InternalContex
         memory.description === undefined
           ? tool.description
           : `${memory.description}\n\n${tool.description}`;
-      return [name, { ...tool, description }];
+      return [
+        name,
+        {
+          ...tool,
+          description,
+          execute(input: unknown, toolContext: Parameters<typeof tool.execute>[1]) {
+            recordMemoryToolStore(scope.key, slot);
+            return tool.execute(input, toolContext);
+          },
+        },
+      ];
     }),
   );
 }

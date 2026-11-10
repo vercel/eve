@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer-requested migration plan)"
 status: in-progress
-last_updated: "2026-11-03"
+last_updated: "2026-11-09"
 ---
 
 # Nitro 3 RC migration and host foundation
@@ -167,7 +167,9 @@ These hold after the migration, and review and `guard:invariants` enforce them:
    - Nothing patches a third-party plugin or rewrites Nitro's generated modules.
 4. **Generated code carries data through `text:` or `bytes:` imports,** never as inlined JS
    literals, so Nitro's `replace` can't touch it.
-5. **Every eve-owned Nitro id uses `#eve/`.** No `#nitro/` ids, no ad hoc prefixes.
+5. **Every eve-owned Nitro id uses `#eve/`.** No `#nitro/` ids, no ad hoc prefixes. Route and task
+   virtual module ids end in `.mjs`, because the bundler infers module type from the id's
+   extension and an id can embed an authored route path (#5742).
 6. **eve never lets Nitro resolve or install a dependency.** Rolldown comes through `deps.paths`.
    Storage and database runtimes are rejected in authored code.
 7. **Post-build output rewriting is a named, shrinking list.** Each entry is tied to an upstream

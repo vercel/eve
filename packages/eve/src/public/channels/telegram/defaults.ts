@@ -2,6 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { RequestSettlement } from "#channel/interaction-prompts.js";
 import { postedIn, type SignInSurface } from "#channel/sign-in.js";
 import { surfaceEvents } from "#channel/surface.js";
+import { responderName } from "#channel/resolved-prompt.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 
 import { createLogger } from "#internal/logging.js";
@@ -149,7 +150,11 @@ async function editTelegramResolvedPrompt(
   channel: TelegramEventChannel,
   resolution: RequestSettlement,
 ): Promise<void> {
-  const edit = takeTelegramResolvedPrompt(channel.state, resolution);
+  const edit = takeTelegramResolvedPrompt(
+    channel.state,
+    resolution,
+    responderName(channel.state.namesByPrincipal, resolution),
+  );
   if (edit === undefined) return;
   try {
     await channel.telegram.editMessageText({

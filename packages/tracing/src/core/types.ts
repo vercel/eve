@@ -22,6 +22,7 @@ export type SpanType =
   | "tool"
   | "approval"
   | "memory"
+  | "decision"
   | "channelRequest"
   | "mcp";
 export type SpanKind = "INTERNAL" | "CLIENT" | "SERVER" | "PRODUCER" | "CONSUMER";
@@ -85,6 +86,11 @@ export interface AgentTelemetry {
   ): SpanWriter;
   /** Returns the operation active in the current execution context. */
   active(): ActiveOperation | undefined;
+  /**
+   * Returns the span active in `context`, or the current execution context, including spans
+   * the host started itself. Lets a decision nest under the host's span inside an operation.
+   */
+  activeSpan?(context?: ExecutionContext): TraceReference | undefined;
   /** Runs `execute` with `operation` as the active trace context. */
   run<T>(operation: ActiveOperation, execute: () => T, context?: ExecutionContext): T;
   /** Runs `execute` without creating spans. */
@@ -112,6 +118,7 @@ export interface ActiveOperation {
   readonly reference: TraceReference;
   readonly capture: CaptureDecision;
   readonly mcp?: import("./mcp.js").McpLifecycle;
+  readonly memory?: import("./memory.js").MemoryToolLifecycle;
 }
 
 export interface MappingContext {
@@ -196,6 +203,10 @@ export interface ModelOptions {
   readonly tools?: unknown;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
 }
+export interface DecisionOptions {
+  readonly provider?: string;
+  readonly modelId: string;
+}
 export interface ToolOptions {
   readonly callId: string;
   readonly name: string;
@@ -222,6 +233,7 @@ export type ScopeData =
   | { readonly type: "model"; readonly options: ModelOptions }
   | { readonly type: "tool"; readonly options: ToolOptions }
   | { readonly type: "approval"; readonly options: ApprovalOptions }
+  | { readonly type: "decision"; readonly options: DecisionOptions }
   | {
       readonly type: "memory";
       readonly options: {
