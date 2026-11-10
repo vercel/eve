@@ -33,7 +33,6 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | A typed reply naming an option answers                                                 | [typed-approve-answers](./approvals/typed-approve-answers.eval.ts)                                                      |
 | A typed reply answers only what it matches                                             | [typed-reply-answers-only-what-matches](./approvals/typed-reply-answers-only-what-matches.eval.ts)                      |
 | A message keeps unanswered approvals open; their calls run once approved               | [message-keeps-unanswered-open](./approvals/message-keeps-unanswered-open.eval.ts)                                      |
-| Denying a waiting call after a message reports a failed task result                    | [deny-after-message-reports-not-run](./approvals/deny-after-message-reports-not-run.eval.ts)                            |
 | The model drops a waiting call with `eve__task_cancel`                                 | [model-drops-waiting-call](./approvals/model-drops-waiting-call.eval.ts)                                                |
 | Someone else's message joins the turn while its approval waits                         | [other-person-joins-while-approval-waits](./multiplayer/other-person-joins-while-approval-waits.eval.ts)                |
 | A tool reads the turn's caller and its latest sender                                   | [sender-is-latest-speaker](./multiplayer/sender-is-latest-speaker.eval.ts)                                              |
