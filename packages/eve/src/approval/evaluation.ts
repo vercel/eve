@@ -83,9 +83,13 @@ export async function evaluateApproval(
     { readonly remember?: RememberRequest; readonly callerApproves?: true }
   >();
   let confirmed = false;
+  // Any policy that asks only the caller keeps the request caller-only, even when another policy's
+  // ask wins the strictest-wins join, such as an agent-wide mismatch approval beside a tool's own.
+  let callerOnly = false;
   const scoped = (key: string) => JSON.stringify([context.toolName, key]);
   const evaluation: ApprovalEvaluation = Object.freeze({
     ask: (remember?: RememberRequest, options?: AskOptions) => {
+      if (options?.callerApproves === true) callerOnly = true;
       const status = Object.freeze({ type: "user-approval" as const });
       asked.set(status, {
         ...(remember !== undefined && {
@@ -103,6 +107,7 @@ export async function evaluateApproval(
     requireCaller: (status: ApprovalStatus) => {
       const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
       if (ask === undefined) return evaluation.ask(undefined, { callerApproves: true });
+      callerOnly = true;
       asked.set(status as object, { ...ask, callerApproves: true });
       return status;
     },
@@ -124,7 +129,11 @@ export async function evaluateApproval(
   }
   if (recheck) return { denied: false };
   const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
-  return ask === undefined ? decision : { ...decision, ...ask };
+  return {
+    ...decision,
+    ...(ask ?? {}),
+    ...(callerOnly ? { callerApproves: true as const } : {}),
+  };
 }
 
 /** Remembers a person's decision under the keys its request named, replacing earlier ones. */

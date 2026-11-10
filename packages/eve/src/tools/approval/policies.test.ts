@@ -4,6 +4,7 @@ const decide = vi.hoisted(() => vi.fn());
 vi.mock("#ai/decide.js", () => ({ decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
+import { strictestApproval } from "#approval/agent.js";
 import { evaluateApproval, rememberDecision } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
@@ -179,6 +180,14 @@ describe('approval helpers with { when: "principal-mismatch" }', () => {
       callerApproves: true,
       denied: false,
     });
+  });
+
+  it("keeps the request caller-only when a tool's own policy also asks", async () => {
+    const agentWide = always({ when });
+    const toolOwn = always();
+    expect(
+      await evaluateApproval(strictestApproval([agentWide, toolOwn]), turn(alice, bob, alice)),
+    ).toEqual({ awaitsPerson: true, callerApproves: true, denied: false });
   });
 
   it("once remembers the caller's approval for its combination and the one approving leads to", async () => {
