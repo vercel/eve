@@ -84,16 +84,6 @@ describe("eve-discord-agent-template", () => {
         }
         expected = `${JSON.stringify(manifest, null, 2)}\n`;
       }
-      if (path === "daemon/main.ts") {
-        // The template pins published eve, which only has the old gateway entry. Drop this
-        // mapping when the template bumps to the eve release that ships the experimental entry.
-        expected = expected
-          .replace(
-            'import { runDiscordGatewayRelay } from "eve/experimental/channels/discord/gateway";',
-            'import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";',
-          )
-          .replace("await runDiscordGatewayRelay(", "await experimental_runDiscordGatewayRelay(");
-      }
       expect(await readTemplateFile(path), path).toBe(expected);
     }
     // Setup doesn't rewrite the tool, so it has to name the same connector.
