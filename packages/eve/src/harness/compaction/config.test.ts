@@ -67,13 +67,49 @@ describe("compactionConfig", () => {
       session: { compaction },
     });
 
-    expect(shouldCompact(messages, compactionConfig(on("provider/model-b")))).toBe(false);
-    expect(shouldCompact(messages, compactionConfig(on("provider/model-a")))).toBe(true);
+    const prompt = { messages, requestEnvelopeTokens: 0 };
+    expect(shouldCompact(messages, compactionConfig(on("provider/model-b"), prompt))).toBe(false);
+    expect(shouldCompact(messages, compactionConfig(on("provider/model-a"), prompt))).toBe(true);
     // A model that never measured this history keeps the latest measurement.
     expect(compactionConfig(on("provider/model-c"))).toMatchObject({
       lastKnownInputTokens: 145_000,
       lastKnownPromptMessageCount: 6,
     });
+  });
+
+  it("compares complete baselines with their own envelope before selecting the larger count", () => {
+    const messages = [{ content: "Alice's report.", role: "user" as const }];
+    let compaction = withPromptMeasurement(
+      {},
+      {
+        inputTokens: 190_000,
+        modelId: "model-a",
+        promptMessageCount: 1,
+        requestEnvelopeTokens: 90_000,
+      },
+    );
+    compaction = withPromptMeasurement(compaction, {
+      inputTokens: 145_000,
+      modelId: "model-b",
+      promptMessageCount: 1,
+      requestEnvelopeTokens: 1_000,
+    });
+    const config = compactionConfig(
+      {
+        ctx: agentContext(undefined),
+        model: { reference: { contextWindowTokens: 250_000, id: "model-a" } },
+        session: { compaction },
+      },
+      { messages, requestEnvelopeTokens: 100_000 },
+    );
+
+    // A's larger raw count grows to 200k, but B's smaller envelope leaves a 244k count.
+    expect(config).toMatchObject({
+      lastKnownInputTokens: 145_000,
+      lastKnownPromptMessageCount: 1,
+      requestEnvelopeTokens: 1_000,
+    });
+    expect(shouldCompact(messages, config, 100_000, config.requestEnvelopeTokens)).toBe(true);
   });
 });
 

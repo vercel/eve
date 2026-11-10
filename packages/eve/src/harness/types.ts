@@ -50,8 +50,8 @@ export interface CompactionState {
   /** The previous request's non-history estimate, also used before the next request is built. */
   readonly requestEnvelopeTokens?: number;
   /**
-   * Each model's latest measurement of the current history, by model ID. Tokenizers differ, so
-   * after a model switch a call is judged by its own model's count, not the last model's.
+   * Each model's latest measurement of the current history, by model ID. Before a call, use
+   * whichever counts higher: its own model's measurement or the latest baseline.
    */
   readonly measurementsByModel?: Readonly<Record<string, PromptMeasurement>>;
 }

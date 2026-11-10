@@ -379,6 +379,84 @@ describe("compaction summary call", () => {
     });
   });
 
+  it("compacts before switching back when the model's stale measurement undercounts appended JSON", async () => {
+    const history: HarnessModelMessage[] = [
+      { content: "Alice requested a report.", kind: "user", role: "user" },
+      { content: "I will collect the records.", role: "assistant" },
+      { content: "Please include Bob's records.", kind: "user", role: "user" },
+      { content: "I will include them.", role: "assistant" },
+      ...Array.from({ length: 10 }, (_, index): HarnessModelMessage[] => [
+        {
+          content: [
+            { type: "tool-call", toolCallId: `records-${index}`, toolName: "lookup", input: {} },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: `records-${index}`,
+              toolName: "lookup",
+              output: { type: "json", value: { records: '{"id":123,"value":456},'.repeat(1_500) } },
+            },
+          ],
+          role: "tool",
+        },
+      ]).flat(),
+    ];
+    let measurement = compaction.withPromptMeasurement(
+      {},
+      {
+        inputTokens: 10_000,
+        modelId: "model-a",
+        promptMessageCount: 4,
+      },
+    );
+    measurement = compaction.withPromptMeasurement(measurement, {
+      inputTokens: 185_000,
+      modelId: "model-b",
+      promptMessageCount: 24,
+    });
+    expect(estimateTokens(history.slice(4))).toBeGreaterThan(90_000);
+    expect(estimateTokens(history.slice(4))).toBeLessThan(110_000);
+    const events: SessionEvent[] = [];
+    let compactedBeforeCall = false;
+    const turnCalls = vi.fn(async () => {
+      compactedBeforeCall = events.some(
+        (event) => event.type === "context.settled" && event.data.outcome === "completed",
+      );
+      return answer();
+    });
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        return system.includes("CONTEXT CHECKPOINT COMPACTION") ? summaryStream() : turnCalls();
+      },
+    });
+
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 200_000, id: "model-a" } },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", lookupTool]]),
+    })(
+      {
+        compaction: measurement,
+        continuationToken: "http:stale-model-measurement",
+        history,
+        sessionId: "stale-model-measurement",
+      },
+      { message: "Please summarize Alice and Bob's records." },
+    );
+
+    const change = events.find((event) => event.type === "context.started");
+    expect(change?.data.trigger?.inputTokens).toBeGreaterThanOrEqual(185_000);
+    expect(compactedBeforeCall).toBe(true);
+    expect(turnCalls).toHaveBeenCalledOnce();
+    expect(estimateTokens(result.session.history)).toBeLessThan(estimateTokens(history));
+  });
+
   it("reserves the selected model's envelope when manually compacting after a model switch", async () => {
     const summary = "Alice prepared the quarterly report. ".repeat(2_000);
     const model = new MockLanguageModelV3({

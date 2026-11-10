@@ -96,8 +96,9 @@ export function withoutPromptMeasurement(config: CompactionState): CompactionSta
 }
 
 /**
- * The settings with a model-reported prompt measurement and the envelope around it. Without a
- * usable measurement, the next count is an estimate, and no envelope baseline applies.
+ * The settings with a model-reported prompt measurement and the envelope around it. Missing
+ * usage clears the latest baseline but retains earlier per-model measurements. A model without
+ * a retained measurement falls back to a character estimate, with no envelope baseline.
  *
  * The measurement also sets the session's estimate ratio: the provider's count over the estimate
  * of the same request. The last compaction's stage is kept only when the first call after it is
@@ -111,7 +112,7 @@ export function withPromptMeasurement(
     readonly promptMessages?: readonly ModelMessage[];
     readonly inputTokens?: number;
     /** The model that counted the prompt. Other models' measurements of the history are kept. */
-    readonly modelId?: string;
+    readonly modelId: string;
     readonly promptMessageCount?: number;
     /** The rest of that request: instructions, tools and framing. */
     readonly requestEnvelopeTokens?: number;
@@ -145,24 +146,27 @@ export function withPromptMeasurement(
     ...(measurement.requestEnvelopeTokens !== undefined && {
       requestEnvelopeTokens: measurement.requestEnvelopeTokens,
     }),
-    ...(measured.modelId !== undefined && {
-      measurementsByModel: { ...measurementsByModel, [measured.modelId]: measurement },
-    }),
+    measurementsByModel: { ...measurementsByModel, [measured.modelId]: measurement },
   };
 }
 
 /**
- * The settings measured by `modelId` when it has counted the history: a count from another
- * model's tokenizer can sit far from this model's. Otherwise the latest measurement stands.
+ * The settings measured by `modelId`, falling back to the latest measurement. Before a call,
+ * compare both complete baselines: estimating appended messages from an older own measurement
+ * can undercount JSON-heavy history, so never compact later than the latest baseline would.
  */
 export function withModelPromptMeasurement(
   config: CompactionState,
   modelId: string,
+  prompt?: {
+    readonly messages: readonly ModelMessage[];
+    readonly requestEnvelopeTokens: number;
+  },
 ): CompactionState {
   const own = config.measurementsByModel?.[modelId];
   if (own === undefined) return config;
   const { requestEnvelopeTokens: _envelope, ...rest } = config;
-  return {
+  const selected = {
     ...rest,
     lastKnownInputTokens: own.inputTokens,
     lastKnownPromptMessageCount: own.promptMessageCount,
@@ -170,6 +174,22 @@ export function withModelPromptMeasurement(
       requestEnvelopeTokens: own.requestEnvelopeTokens,
     }),
   };
+  if (prompt !== undefined) {
+    const ownTokens = getInputTokenCount(
+      prompt.messages,
+      selected,
+      prompt.requestEnvelopeTokens,
+      own.requestEnvelopeTokens,
+    );
+    const latestTokens = getInputTokenCount(
+      prompt.messages,
+      config,
+      prompt.requestEnvelopeTokens,
+      config.requestEnvelopeTokens,
+    );
+    if (latestTokens > ownTokens) return config;
+  }
+  return selected;
 }
 
 /**

@@ -58,7 +58,9 @@ See [Dynamic capabilities](../guides/dynamic-capabilities) for the context, memo
 
 ## Compaction and clear
 
-Before each model call, eve measures the history together with the system instructions and advertised tool schemas against the compaction threshold. When the selected model has measured the current history, eve starts from that model's last reported input usage and estimates any messages added since. After a model switch, this avoids relying on another model's tokenizer. A model that hasn't measured the current history uses the latest available measurement instead, so its first call can still reveal that compaction is needed before the next step. Rewriting history clears these measurements.
+Before each model call, eve measures the history together with the system instructions and advertised tool schemas against the compaction threshold. When switching back to a model, eve compares counts based on that model's last reported usage and the latest available measurement. Both counts include estimates for messages added since their measurement and any increase in instructions or tools. eve uses the larger count to avoid delaying compaction when an older measurement underestimates added messages.
+
+A model without a measurement of the current history uses the latest available measurement instead. Its first call can still reveal that compaction is needed before the next step. Rewriting history clears these measurements.
 
 Compaction reserves space for those instructions and tools and reduces only conversation history. It can't shrink the instructions or tool catalog, so keep them within the selected model's context window.
 

@@ -14,7 +14,7 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import { failTurnForEffect, type Step } from "#harness/step/context.js";
+import { failTurnForEffect, type Step, stepReference } from "#harness/step/context.js";
 import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
@@ -99,7 +99,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     compaction: withPromptMeasurement(step.session.compaction, {
       promptMessages,
       inputTokens: result.usage?.inputTokens,
-      modelId: step.model?.reference.id,
+      modelId: stepReference(step).id,
       promptMessageCount: input.durableModelPromptMessageCount,
       requestEnvelopeTokens: input.requestEnvelopeTokens,
     }),
