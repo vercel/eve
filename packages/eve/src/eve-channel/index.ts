@@ -1,4 +1,5 @@
 import { InvalidToolStubTargetError } from "#tool-stubs/validate-targets.js";
+import { checkSessionAccess } from "#eve-channel/session-access.js";
 import { readStubFailure, readMatchedStubRules } from "#execution/tool-stubs/steps.js";
 import { getRun } from "#internal/workflow/runtime.js";
 import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
@@ -408,6 +409,9 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                         token: crypto.randomUUID(),
                       },
                 auth: messageResult.auth,
+                ...(input.authorizeSession !== undefined && {
+                  sessionCreator: forwarded.accepted ? forwarded.initiatorAuth : messageResult.auth,
+                }),
                 capabilities:
                   earlierCallerProtocol === undefined
                     ? (body.capabilities ?? { requestInput: true })
@@ -466,6 +470,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
 
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         const payload = await parseOptionalJsonRequest(req);
         if (payload instanceof Response) return payload;
         if (Object.keys(payload).length === 0) {
@@ -562,6 +568,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         const body = await parseCancelTurnBody(req);
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
@@ -587,6 +595,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         const body = await parseSessionControlBody(req);
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["compact"]>>;
@@ -611,6 +621,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         const body = await parseSessionControlBody(req);
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["clear"]>>;
@@ -636,6 +648,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           if (authResult instanceof Response) return authResult;
           const sessionId = requireSessionId(params);
           if (sessionId instanceof Response) return sessionId;
+          const denied = await checkSessionAccess(input, req, authResult, sessionId);
+          if (denied !== undefined) return denied;
           const body = await parseResetBody(req);
           if (body instanceof Response) return body;
           let result: Awaited<ReturnType<Session["end"]>>;
@@ -668,6 +682,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         }
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         try {
           if (!(await getRun(sessionId).exists)) {
             return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
@@ -695,6 +711,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         return await createSessionStreamResponse(req, attachSession(sessionId));
       }),
 
@@ -703,6 +721,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(args.params);
         if (sessionId instanceof Response) return sessionId;
+        const denied = await checkSessionAccess(input, req, authResult, sessionId);
+        if (denied !== undefined) return denied;
         return descendantStreamResponse({
           request: req,
           root: args.attachSession(sessionId),
@@ -724,6 +744,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
             { status: 400 },
           );
         }
+        const denied = await checkSessionAccess(input, req, authResult, parentSessionId);
+        if (denied !== undefined) return denied;
 
         const startIndex = parseStartIndex(req);
         if (startIndex instanceof Response) return startIndex;

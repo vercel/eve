@@ -30,6 +30,8 @@ export default eveChannel({
 });
 ```
 
+Authentication identifies a caller. Use [`eveChannel({ authorizeSession })`](../channels/eve#session-authorization) to decide whether that caller may read or control a specific session. Its creator lookup is available before the first turn; application policies can also use their own membership records.
+
 `vercelOidc()` is a convenience for Vercel-hosted agents and Vercel-to-Vercel callers, not a requirement. If your app already has users, sessions, API keys, or an identity provider, put a custom `AuthFn` for it in the `auth` walk instead.
 
 ## The ordered auth walk

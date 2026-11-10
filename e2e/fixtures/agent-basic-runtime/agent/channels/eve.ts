@@ -45,6 +45,11 @@ export default eveChannel({
     authenticateRetentionCheck,
     authenticateEvalDriver,
   ],
+  async authorizeSession({ caller, getCreator }) {
+    if (caller.issuer !== "issuer-a" && caller.issuer !== "issuer-b") return true;
+    const creator = await getCreator();
+    return creator?.issuer === caller.issuer && creator?.principalId === caller.principalId;
+  },
   onMessage(ctx) {
     const auth = defaultEveAuth(ctx);
     const { clientContext } = ctx.eve;

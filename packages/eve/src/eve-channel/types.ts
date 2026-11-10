@@ -36,6 +36,21 @@ export interface EveAuthResult extends AuthResult {
 /** An eve-channel authenticator; ordinary identity-only authenticators also satisfy this type. */
 export type EveAuthFn = AuthFn<Request, EveAuthResult>;
 
+/** Authorization context for an existing session's HTTP operations. */
+export interface EveSessionAccessContext {
+  /** Verified transport identity, before any forwarded-principal projection. */
+  readonly caller: SessionAuthContext;
+  readonly request: Request;
+  /** Router-matched session ID; parent ID for descendant and remote-child streams. */
+  readonly sessionId: string;
+  /**
+   * Reads the identity recorded at creation, independent of subsequent callers.
+   * `null` means anonymous; `undefined` means no creator record exists.
+   * Available before the first turn for sessions created with this hook configured.
+   */
+  getCreator(): Promise<SessionAuthContext | null | undefined>;
+}
+
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
  * has no platform-specific state, so handlers receive optional continuation routing here and the
@@ -122,6 +137,13 @@ export interface EveChannelConfig {
    * override who reads `GET /eve/v1/info`.
    */
   readonly auth: EveAuthFn | readonly EveAuthFn[];
+  /**
+   * Authorizes every existing-session read or mutation after authentication and
+   * route matching. Only `true` admits the request; denial or failure returns 403.
+   * Omit to retain authentication-only access. Creation uses `auth` and records
+   * its effective creator when this hook is configured.
+   */
+  readonly authorizeSession?: (context: EveSessionAccessContext) => boolean | Promise<boolean>;
   /**
    * Conversation audience classification, fixed when the session is created.
    *

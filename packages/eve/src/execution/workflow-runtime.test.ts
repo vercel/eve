@@ -589,6 +589,70 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
+  it("persists the creator before accepting a message-free session", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    const records: unknown[] = [];
+    getRunMock.mockReturnValue({
+      getWritable: () =>
+        new WritableStream({
+          async write(value) {
+            writeStarted.resolve();
+            await finishWrite.promise;
+            records.push(value);
+          },
+        }),
+    });
+    const creator = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    let accepted = false;
+    const creation = buildRuntime(compiledArtifactsSource)
+      .createSession({
+        adapter,
+        auth: creator,
+        sessionCreator: creator,
+        input: {},
+      })
+      .then((handle) => {
+        accepted = true;
+        return handle;
+      });
+    await writeStarted.promise;
+    expect(accepted).toBe(false);
+    finishWrite.resolve();
+    await expect(creation).resolves.toMatchObject({ sessionId: OWNER_RUN_ID });
+    expect(records).toEqual([creator]);
+  });
+
+  it("does not accept creation when the creator record cannot be persisted", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
+    getRunMock.mockReturnValue({
+      getWritable: () =>
+        new WritableStream({
+          write() {
+            throw new Error("creator storage unavailable");
+          },
+        }),
+    });
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        sessionCreator: null,
+        input: {},
+      }),
+    ).rejects.toThrow("creator storage unavailable");
+  });
+
   it("returns without waiting for the stable command inbox", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);

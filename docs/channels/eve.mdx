@@ -190,6 +190,36 @@ Neither admits browser users or external clients in production. For a public app
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
+### Session authorization
+
+Set `authorizeSession` to apply application policy to every existing-session read and control:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { appSession } from "../lib/auth";
+
+export default eveChannel({
+  auth: appSession(),
+  async authorizeSession({ caller, getCreator }) {
+    const creator = await getCreator();
+    return (
+      creator != null &&
+      caller.authenticator === creator.authenticator &&
+      caller.issuer === creator.issuer &&
+      caller.principalId === creator.principalId
+    );
+  },
+});
+```
+
+The hook receives `caller`, `request`, the matched `sessionId`, and `getCreator()`. It runs after authentication, before follow-up messages, preparation, cancellation, compaction, clearing, ending, stub inspection, and streams. Descendant and remote-child streams pass the parent session ID; child-binding checks still apply. Only `true` admits the request. A denial or thrown error returns a generic 403.
+
+When the hook is configured, creation records the effective creator before returning the session ID. The creator is available before the first turn and does not change when another caller sends a message or the session moves between deployments. Accepted forwarded identity is preserved. `getCreator()` reads private session storage only when called; it does not expose identity in the public event stream. Normal stream retention still applies.
+
+A `null` creator means anonymous creation. `undefined` means no creator record exists, including sessions created without this hook. Choose an explicit policy for those sessions, such as checking an existing application permission record. The example denies both cases. This creation identity is separate from execution-time `session.auth.initiator`.
+
+Omitting `authorizeSession` preserves authentication-only access. Session creation itself uses `auth`; apply service or environment admission there. Policies can admit trusted services without calling `getCreator()`.
+
 ## Web Chat with Sign in with Vercel
 
 To let your team sign in to a browser chat, run `eve add channel/web` or select **Web Chat** from the terminal UI's channel picker. Then choose **Next.js**, a hosting layout, and **Sign in with Vercel**. Sign in with Vercel is available only for the Next.js Web Chat app. Setup creates a Vercel App on the linked project that only members of the project's team can sign in to.
