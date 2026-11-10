@@ -118,6 +118,7 @@ export interface ActiveOperation {
   readonly reference: TraceReference;
   readonly capture: CaptureDecision;
   readonly mcp?: import("./mcp.js").McpLifecycle;
+  readonly memory?: import("./memory.js").MemoryToolLifecycle;
 }
 
 export interface MappingContext {

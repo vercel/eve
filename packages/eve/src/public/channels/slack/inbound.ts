@@ -87,6 +87,13 @@ export interface SlackMessage {
   readonly author: SlackAuthor | undefined;
   /** File / image attachments on the inbound message. */
   readonly attachments: readonly SlackAttachment[];
+  /**
+   * Slack's `action_token` for this message, when Slack sent one. The Real-time
+   * Search API (`assistant.search.context`) needs it to search for the
+   * message's author with a bot token. `defaultSlackAuth` copies it to
+   * the `action_token` auth attribute, where tools read it.
+   */
+  readonly actionToken?: string;
   /** Raw inbound event payload from Slack. */
   readonly raw: Record<string, unknown>;
 }
@@ -373,6 +380,7 @@ export function slackMessageFromWebhookPayload(
     installationTeamId,
     author: parsePayloadAuthor(payload),
     attachments: parsePayloadAttachments(payload.files),
+    ...withActionToken(payload.raw),
     raw: payload.raw,
   };
 }
@@ -401,8 +409,18 @@ function buildSlackMessage(
     installationTeamId,
     author: parseAuthor(event),
     attachments: parseAttachments(event.files),
+    ...withActionToken(event),
     raw: event as Record<string, unknown>,
   };
+}
+
+function withActionToken(raw: Record<string, unknown>): { actionToken?: string } {
+  // Slack nests the token under `assistant_thread` in app threads, not at the top level its docs show.
+  const nested = isObject(raw.assistant_thread) ? raw.assistant_thread.action_token : undefined;
+  const token = [raw.action_token, nested].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  return token === undefined ? {} : { actionToken: token.trim() };
 }
 
 function parseAuthor(event: SlackAppMentionEvent | SlackMessageEvent): SlackAuthor | undefined {

@@ -1210,7 +1210,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // prompt, and the server records the still-parked request as `ignored`
     // when the user's next message resumes the turn.
     let mode: "select" | "text" = hasOptions ? "select" : "text";
-    let cursorIndex = 0;
+    let cursorIndex = Math.max(
+      0,
+      optionList.findIndex((option) => option.id === question.initialOptionId),
+    );
     let editor = EMPTY_LINE;
 
     const isOnFreeformRow = () => hasFreeformRow && cursorIndex === optionList.length;

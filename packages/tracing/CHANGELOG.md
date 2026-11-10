@@ -1,5 +1,28 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.5
+
+Released 2026-11-10 · [Compare with 1.0.0-rc.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.4...%40vercel%2Fagent-runs%401.0.0-rc.5)
+
+### Bug Fixes
+
+- Name the memory store on memory provider tool calls, so a trace query by `gen_ai.memory.store.id` finds a scope's tool reads and writes as well as its recall and capture.
+  The `execute_tool` span of a memory provider tool, such as `profile__save`, now carries `gen_ai.memory.store.id` and `agent.memory.slot`, matching the `search_memory` and `upsert_memory` spans of the same slot. The store ID is the slot's opaque scope key, so it is recorded whatever the trace policy captures. `@vercel/agent-runs` adds an optional `memory` lifecycle to `ActiveOperation` on tool operations to record it. ([#6147](https://github.com/vercel/eve/pull/6147))
+
+## 1.0.0-rc.4
+
+Released 2026-11-09 · [Compare with 1.0.0-rc.3](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.3...%40vercel%2Fagent-runs%401.0.0-rc.4)
+
+### Features
+
+- Add `decision <model>` OpenTelemetry spans for `decide`, automatic model selection, and tool approvals, with policy-aware model, usage, cost, and failure metadata that distinguishes refusals from request failures.
+  A decision sits under the operation it runs in, or under the turn when model routing runs before the turn's first step. `@vercel/agent-runs` adds `AgentRun.decision` and an optional `AgentTelemetry.activeSpan`, so a decision nests under a host span inside its operation but not under a host span from another trace, such as a workflow step. ([#5349](https://github.com/vercel/eve/pull/5349))
+
+### Bug Fixes
+
+- Make connection sign-ins countable in traces: each sign-in span names its agent, a failed sign-in records its reason, and a call a connection refused records which connection and why.
+  `agent.approval` spans now carry `gen_ai.agent.name` and `agent.name`, so a query scoped to one agent no longer drops its sign-in prompts. A sign-in that fails with a reason code such as `access_denied` records it as `agent.connection.authorization.reason`; a sign-in that ends any other way, such as one a new message withdrew, records none. A tool call that fails with `ConnectionAuthorizationFailedError`, including one that never asked anyone to sign in, such as `principal_required` or `sign_in_unavailable` in a turn a schedule started, records `eve.connection.name` and `agent.connection.authorization.reason` on its `execute_tool` span. Only reason codes are recorded: a free-text reason or error message stays off the span whatever the trace policy records. ([#6078](https://github.com/vercel/eve/pull/6078))
+
 ## 1.0.0-rc.3
 
 Released 2026-11-05 · [Compare with 1.0.0-rc.2](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.2...%40vercel%2Fagent-runs%401.0.0-rc.3)

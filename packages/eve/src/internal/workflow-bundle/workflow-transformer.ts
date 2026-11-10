@@ -166,7 +166,9 @@ export async function transformWorkflowDirectives(input: {
 
         if (input.mode === "step") {
           hasStepRegistration = true;
-          suffixes.push(`registerStepFunction(${JSON.stringify(stepId)}, ${fn.name});`);
+          const plain =
+            authorizationStepId === undefined ? fn.name : `withWorkflowStepScope(${fn.name})`;
+          suffixes.push(`registerStepFunction(${JSON.stringify(stepId)}, ${plain});`);
           if (authorizationStepId !== undefined) {
             suffixes.push(
               `registerStepFunction(${JSON.stringify(authorizationStepId)}, withWorkflowStepAuthorization(${fn.name}));`,
@@ -214,7 +216,7 @@ export async function transformWorkflowDirectives(input: {
     imports.push(`import { workflowToolStep } from ${JSON.stringify(workflowStepImport)};`);
   } else if (hasAuthorizationSteps && hasStepRegistration) {
     imports.push(
-      `import { withWorkflowStepAuthorization } from ${JSON.stringify(stepExecutionImport)};`,
+      `import { withWorkflowStepAuthorization, withWorkflowStepScope } from ${JSON.stringify(stepExecutionImport)};`,
     );
   }
   const prefix = [...imports, manifestComment].join("\n");

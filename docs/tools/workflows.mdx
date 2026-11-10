@@ -110,7 +110,9 @@ The context depends on where your code runs:
 
 Call `ctx.agent()` and `ctx.ask()` and read `ctx.agents` in the workflow body. Pass a step only the
 serializable values it needs. Call `getSandbox`, `getToken`, `requireAuth`, and `to` in a step, because
-the workflow body throws when it calls them. Ordinary tools, channel handlers, and schedule handlers
+the workflow body throws when it calls them. A step can't read or update
+[`defineState`](/docs/concepts/state#update-state-from-a-workflow-tool) state; return the value and
+save it from a `call.settled` hook. Ordinary tools, channel handlers, and schedule handlers
 don't receive `agent`, `agents`, or `ask`. Import `WorkflowStepToolContext` from `eve/tools` to type
 step helpers.
 
@@ -323,6 +325,7 @@ const answer = await ctx.ask(
     title?: string,
     display?: "confirmation" | "select" | "text",
     options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
+    initialOptionId?: string, // preselects this option when display is "select"
     allowFreeform?: boolean,
   },
   { signal?: AbortSignal },
@@ -341,6 +344,25 @@ on `ctx.ask`.
 | `answered`    | The person picked an option (`optionId`) or typed a reply (`text`).                                                                                                                                                                  |
 | `cancelled`   | The question was withdrawn before anyone answered, because `signal` or the call's `abortSignal` aborted or a `serve` body replied to the call. The stream reports `interaction.settled` as `withdrawn`, so clients stop offering it. |
 | `unavailable` | The session cannot ask for input, such as a scheduled run. `ctx.ask` returns this immediately.                                                                                                                                       |
+
+Set `initialOptionId` to preselect an option you already expect, such as the team inferred from the
+thread:
+
+```ts
+const answer = await ctx.ask({
+  prompt: "Which team owns this incident?",
+  display: "select",
+  options: teams.map((team) => ({ id: team.id, label: team.name })),
+  initialOptionId: inferredTeam.id,
+});
+```
+
+Only `display: "select"` uses `initialOptionId`, and there it must match one of the `options` ids,
+or `ctx.ask` throws a `TypeError` before it asks anyone. Slack, Discord, Microsoft Teams, and the `eve dev`
+terminal UI preselect the option, and ACP clients receive it as the form field's `default`. Other
+channels show the options without a preselection.
+On Slack and Discord, a **Use** button submits the preselected option, because those platforms send
+nothing when a person keeps the current selection.
 
 A plain follow-up message answers the question when it is the only one open. The message must match
 an option, or the question must allow free text. Answer a question from a subagent with a structured

@@ -84,6 +84,7 @@ export function workflowAskPayload(
   if (authored.display !== undefined) request.display = authored.display;
   if (authored.title !== undefined) request.title = authored.title;
   if (authored.options !== undefined) request.options = [...authored.options];
+  if (authored.initialOptionId !== undefined) request.initialOptionId = authored.initialOptionId;
   return {
     callId: from.callId,
     childSessionId: from.runId,

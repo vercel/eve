@@ -150,6 +150,8 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     // not the body `type` the rule above reads, so it needs its own match.
     when: codeIs("gateway_stream_timeout"),
     message: "AI Gateway ended the model stream before the response finished.",
-    hint: "Retries are automatic. If it persists, split the task into smaller turns or switch models with `/model` in `eve dev`.",
+    // Users see this only after eve's retries ran out. Each retry repeats a full-length stream,
+    // so the retry loop (harness/model-call/retry.ts) allows only one.
+    hint: "eve already retried the request. Split the task into smaller turns, or switch models with `/model` in `eve dev`.",
   },
 ];

@@ -1,9 +1,11 @@
 [
   "GitHubCoAuthor",
+  "GitHubCommandInputError",
   "GitHubConfig",
   "GitHubLeaseRule",
   "GitHubShellInput",
   "GitHubShellOutput",
   "executeGitHubShell",
-  "githubShellApproval"
+  "githubShellApproval",
+  "isGitHubCommandInputError"
 ]

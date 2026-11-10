@@ -10,6 +10,7 @@ import {
   applyAttributes,
 } from "./span-kinds.js";
 import { mcpLifecycle, type McpLifecycle } from "./mcp.js";
+import { memoryToolLifecycle, type MemoryToolLifecycle } from "./memory.js";
 import { intersectCapture } from "./activation.js";
 import { snapshotRecord, traceSnapshot, validSnapshot, boundedSerializer } from "./snapshot.js";
 import { withAgentHandoff } from "./delegation.js";
@@ -68,6 +69,8 @@ export interface LiveOperation extends Operation {
   readonly settled: boolean;
   readonly callId?: string;
   readonly mcp: McpLifecycle;
+  /** Present on tool operations only. */
+  readonly memory?: MemoryToolLifecycle;
   record(): ScopeRecord;
 }
 
@@ -303,6 +306,12 @@ export function createScopes(input: {
     /** Content arriving now is held to any narrower run ceiling in force. */
     function current(): CaptureDecision {
       return intersectCapture(actualCapture, telemetry.active()?.capture);
+    }
+
+    function enrich(attributes: Attributes): void {
+      const permitted = (withoutDeclinedContent(attributes, current()) ?? attributes) as Attributes;
+      Object.assign(enrichment, permitted);
+      if (operation !== undefined) applyAttributes(operation, permitted);
     }
 
     async function child(
@@ -572,16 +581,12 @@ export function createScopes(input: {
       mcp: mcpLifecycle({
         serializer,
         ...actualCapture,
-        write(attributes) {
-          const permitted = (withoutDeclinedContent(attributes, current()) ??
-            attributes) as Attributes;
-          Object.assign(enrichment, permitted);
-          if (operation !== undefined) applyAttributes(operation, permitted);
-        },
+        write: enrich,
         error(error, type) {
           runtime.error(error, type);
         },
       }),
+      memory: actualData.type === "tool" ? memoryToolLifecycle(enrich) : undefined,
       get finished() {
         return finished;
       },
@@ -618,7 +623,13 @@ export function createScopes(input: {
                 );
         return runTraceContext(
           telemetry,
-          { type: runtime.type, reference: retainedReference, capture: scoped, mcp: runtime.mcp },
+          {
+            type: runtime.type,
+            reference: retainedReference,
+            capture: scoped,
+            mcp: runtime.mcp,
+            memory: runtime.memory,
+          },
           callback,
           host,
         );

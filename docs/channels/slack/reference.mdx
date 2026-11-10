@@ -348,6 +348,26 @@ While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a 
 
 Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` in a sensitive tool before it changes anything.
 
+#### Use Slack's action token
+
+Slack sends an `action_token` with mentions and DMs. The [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api) needs it to search for the person who wrote the message with a bot token. eve reads it into `message.actionToken`, including the copy Slack nests under `assistant_thread`, and `defaultSlackAuth` adds it to the turn's auth as the `action_token` attribute. With the default hooks, or a hook that returns `defaultSlackAuth`, a tool reads it without any channel code:
+
+```ts title="agent/tools/search_slack.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Search public Slack channels for the person asking.",
+  inputSchema: z.object({ query: z.string() }),
+  async execute({ query }, ctx) {
+    const actionToken = ctx.session.auth.current?.attributes.action_token;
+    // Pass `actionToken` and `query` to `assistant.search.context` with the bot token.
+  },
+});
+```
+
+Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded principal can't search with it.
+
 #### Continue conversations without repeated mentions
 
 Use `onMessage` to answer mentions, code channel messages, and DMs, and to follow threads that already have an eve session:
@@ -635,6 +655,8 @@ The plan title summarizes the turn, from `Working on 2 tasks` and `1 of 2 tasks 
 
 Approvals and questions show as Slack buttons and selects, and **Type your answer** opens a modal. Answers pass through `onAnswers` before the session resumes. Approval cards pair **Deny** with a primary **Approve** button.
 
+A `display: "select"` question shows radio buttons for up to 6 options and a dropdown for more. Picking an option answers it. When the question sets `initialOptionId`, that option starts selected, and a primary **Use** button labeled with the option submits it, because Slack sends nothing when a person keeps the current selection. The button is one of eve's controls, so a custom [`interactionCard`](#restyle-approval-and-question-cards) must keep it.
+
 Set `approvalChannel` to choose where each request appears, including tool approvals and `ctx.ask()` questions. Return `"direct-message"` to show it only to the Slack user who triggered the turn, or `"thread"` for the shared thread:
 
 ```ts title="agent/channels/slack.ts"
@@ -660,7 +682,7 @@ Each approval, question, and budget prompt card updates as its request changes:
 
 To change how these cards look, use [`interactionCard`](#restyle-approval-and-question-cards).
 
-A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
+A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. When the session has no thread and isn't a code channel, a public status would post top-level in the channel, so eve sends the prompt to the person's DM instead, names the channel it's for, and edits the DM when the sign-in ends. If the DM can't be sent, eve posts in the channel as usual. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
 
 ## Audience
 

@@ -192,7 +192,10 @@ describe("applyWorkflowTransform", () => {
       },
     });
     expect(transformed.code).toContain(
-      'import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";',
+      'import { withWorkflowStepAuthorization, withWorkflowStepScope } from "#execution/tools/workflow/step-execution.js";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./src/internal/testing/ping//ping", withWorkflowStepScope(ping));',
     );
     expect(transformed.code).toContain(
       'registerStepFunction("step//./src/internal/testing/ping//ping:eve-authorization", withWorkflowStepAuthorization(ping));',
@@ -473,7 +476,10 @@ describe("applyWorkflowTransform for authored application modules", () => {
 
     // Step registrations are bundled by the app, which resolves eve's package export.
     expect(transformed.code).toContain(
-      'import { withWorkflowStepAuthorization } from "eve/internal/workflow-step-execution";',
+      'import { withWorkflowStepAuthorization, withWorkflowStepScope } from "eve/internal/workflow-step-execution";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./agent/tools/deploy//planDeploy", withWorkflowStepScope(planDeploy));',
     );
     expect(transformed.code).toContain(
       'registerStepFunction("step//./agent/tools/deploy//planDeploy:eve-authorization", withWorkflowStepAuthorization(planDeploy));',

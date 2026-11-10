@@ -8,6 +8,7 @@ import {
 } from "#execution/publish-session-events.js";
 import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { SIGN_IN_DECLINED, sameRelayedSignIn } from "#harness/hitl/sign-ins.js";
 import {
@@ -79,6 +80,7 @@ export async function emitProxiedSubagentEvent(
       relay(view, {
         callsBack: own === undefined ? undefined : callsBackFor(own),
         payload: hookPayload,
+        relays: readHitlState(input.durableSession.state).relays,
         runId,
         workflowAsk,
       }),

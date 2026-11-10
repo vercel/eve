@@ -2,6 +2,7 @@
   "title": "Patterns",
   "defaultOpen": false,
   "pages": [
+    "ambient-listening",
     "durable-cross-channel-notifications",
     "fork-conversations-into-new-threads",
     "multi-tenant-auth",

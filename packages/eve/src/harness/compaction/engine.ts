@@ -15,7 +15,7 @@ import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/mes
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { CompactionConfig, CompactionState } from "#harness/types.js";
+import type { CompactionConfig, CompactionStage, CompactionState } from "#harness/types.js";
 
 /**
  * Most of the conversation kept word for word next to a compaction summary.
@@ -25,6 +25,14 @@ import type { CompactionConfig, CompactionState } from "#harness/types.js";
  * text), so the next compaction is far off.
  */
 const KEPT_TAIL_TOKENS = 20_000;
+
+/** Provider tokens per estimated token before a call is measured: the worst case above. */
+const DEFAULT_ESTIMATE_RATIO = 1.6;
+
+/** Provider tokens per estimated token in this session, from its last measured call. */
+export function estimateRatio(config: CompactionState): number {
+  return config.estimateRatio ?? DEFAULT_ESTIMATE_RATIO;
+}
 
 /**
  * Element type of a non-string `ModelMessage.content` array.
@@ -80,19 +88,36 @@ export function withoutPromptMeasurement(config: CompactionState): CompactionSta
 /**
  * The settings with a model-reported prompt measurement and the envelope around it. Without a
  * usable measurement, the next count is an estimate, and no envelope baseline applies.
+ *
+ * The measurement also sets the session's estimate ratio: the provider's count over the estimate
+ * of the same request. The last compaction's stage is kept only when the first call after it is
+ * measured, so a compaction that measurement already triggers starts at the next stage. Any
+ * later call, or an unmeasured first one, drops it.
  */
 export function withPromptMeasurement(
   config: CompactionState,
   measured: {
+    /** The history of the request the provider counted. */
+    readonly promptMessages?: readonly ModelMessage[];
     readonly inputTokens?: number;
     readonly promptMessageCount?: number;
+    /** The rest of that request: instructions, tools and framing. */
     readonly requestEnvelopeTokens?: number;
   },
 ): CompactionState {
-  const { requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
-  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return next;
+  const { lastStage, requestEnvelopeTokens: _envelope, ...rest } = withoutPromptMeasurement(config);
+  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return rest;
+  const { inputTokens } = measured;
+  const estimatedTokens =
+    measured.promptMessages === undefined
+      ? undefined
+      : estimateTokens(measured.promptMessages) + (measured.requestEnvelopeTokens ?? 0);
   return {
-    ...next,
+    ...rest,
+    ...(lastStage !== undefined && config.lastKnownInputTokens === undefined && { lastStage }),
+    ...(estimatedTokens !== undefined &&
+      estimatedTokens > 0 &&
+      inputTokens > 0 && { estimateRatio: inputTokens / estimatedTokens }),
     lastKnownInputTokens: measured.inputTokens,
     lastKnownPromptMessageCount: measured.promptMessageCount,
     ...(measured.requestEnvelopeTokens !== undefined && {
@@ -125,107 +150,106 @@ export type CompactionSummarizer = (prompt: {
   readonly system: string;
 }) => Promise<string>;
 
-/** Conversation regions and config handed to each compaction heuristic. */
-interface CompactionHeuristicInput {
-  readonly config: CompactionConfig;
-  readonly older: readonly ModelMessage[];
-  readonly previousCheckpoint: string | undefined;
-  readonly recent: readonly ModelMessage[];
-  readonly replay: ModelMessage | undefined;
-  readonly resume: boolean;
-  readonly tokenEstimateAdjustment: number;
-}
-
 /**
- * A heuristic either produces a complete replacement history that fits the
- * threshold, or signals that the next strategy must run. Heuristics have no
- * failure channel — anything exceptional throws.
- */
-type CompactionHeuristicOutcome =
-  | { readonly messages: ModelMessage[]; readonly type: "within-limit" }
-  | { readonly type: "insufficient" };
-
-type CompactionHeuristic = (input: CompactionHeuristicInput) => CompactionHeuristicOutcome;
-
-/**
- * Model-free heuristics tried in order before falling back to LLM
- * summarization. Each is a pure transformation of the split conversation;
- * composing a new strategy (pruning variants, protect-lists) means adding an
- * entry here.
- */
-const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeuristic];
-
-/**
- * Caps oversized tool-result outputs in the older region while every message
- * — including its tool calls and the recent tail — stays structurally
- * verbatim. Most history bulk is a handful of large tool outputs, so this
- * usually suffices with no model call and no rewriting.
- */
-function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
-  const checkpointHead: ModelMessage[] =
-    input.previousCheckpoint === undefined
-      ? []
-      : [
-          createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
-          { content: input.previousCheckpoint, role: "assistant" },
-        ];
-  const kept = [...checkpointHead, ...capToolResults(input.older), ...input.recent];
-  const capped = input.resume ? resumeAfter(kept, input.replay, input.config.threshold) : kept;
-
-  // Evaluate on the same ruler shouldCompact uses (envelope included):
-  // capping can be a near no-op when the older region holds few large
-  // results, and accepting one on a looser ruler would let shouldCompact
-  // re-fire every step without compaction ever making progress.
-  const evaluation = evaluateThreshold(
-    capped,
-    input.config,
-    "should-compact",
-    input.tokenEstimateAdjustment,
-  );
-  return evaluation.type === "within-limit"
-    ? { messages: capped, type: "within-limit" }
-    : { type: "insufficient" };
-}
-
-/**
- * Measures a candidate history against the compaction threshold.
- * The "should-compact" ruler includes the fixed prompt-envelope overhead that
- * {@link shouldCompact} adds, so a history accepted on it cannot immediately
- * re-trigger compaction; "estimate" is the bare history size.
+ * Measures a candidate history against the compaction threshold on the bare
+ * character estimate: the limit the fallbacks must fit before the call is sent.
  */
 function evaluateThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
-  ruler: "estimate" | "should-compact",
-  tokenEstimateAdjustment = 0,
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
-  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
+  const estimatedTokens = estimateTokens(messages);
   return {
     estimatedTokens,
     type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
   };
 }
 
+/** The stage a compaction starts at: the one after a stage whose result was over the trigger. */
+function startStage(lastStage: CompactionStage | undefined): CompactionStage {
+  if (lastStage === undefined) return "tail";
+  return lastStage === "tail" ? "text-tail" : "summary-only";
+}
+
+/** Conversation regions, config and summarizer handed to each compaction heuristic. */
+interface CompactionHeuristicInput {
+  readonly config: CompactionConfig;
+  readonly conversation: readonly ModelMessage[];
+  readonly forceSummary: boolean;
+  readonly previousCheckpoint: string | undefined;
+  readonly resume: boolean;
+  readonly summarize: CompactionSummarizer;
+}
+
 /**
- * Compacts messages by escalation: try each {@link CompactionHeuristic} in
- * order, then fall back to summarizing the older region with the compaction
- * model — keeping the recent tail verbatim when it fits, degrading it to
- * text-only, then shrinking the window.
+ * A heuristic either produces a complete replacement history and the stage it ended at, or
+ * signals that the next heuristic must run. Anything exceptional throws.
+ */
+type CompactionHeuristicOutcome =
+  | {
+      readonly messages: ModelMessage[];
+      readonly stage: CompactionStage;
+      readonly type: "compacted";
+    }
+  | { readonly type: "insufficient" };
+
+type CompactionHeuristic = (input: CompactionHeuristicInput) => Promise<CompactionHeuristicOutcome>;
+
+/**
+ * Heuristics tried in order. Composing a new strategy (pruning variants, protect-lists) means
+ * adding an entry here.
+ */
+const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [fixedTailHeuristic];
+
+/**
+ * Compacts messages with the first {@link CompactionHeuristic} that produces a history. Returns
+ * the history and the stage it ended at.
  */
 export async function compactMessages(
   messages: ModelMessage[],
   config: CompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary = false,
-  historyInputTokenCount?: number,
   /**
    * Whether a request is waiting on the next model call. Between turns every request has its
    * answer, and the next turn's input follows the summary: nothing is replayed or prompted.
    */
   resume = true,
-): Promise<ModelMessage[]> {
+): Promise<{ readonly messages: ModelMessage[]; readonly stage: CompactionStage }> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  for (const heuristic of COMPACTION_HEURISTICS) {
+    const outcome = await heuristic({
+      config,
+      conversation,
+      forceSummary,
+      previousCheckpoint,
+      resume,
+      summarize,
+    });
+    if (outcome.type === "compacted") {
+      return { messages: outcome.messages, stage: outcome.stage };
+    }
+  }
+  throw new CompactionOverLimitError(
+    `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
+  );
+}
+
+/**
+ * Summarizes the conversation with the compaction model and keeps a fixed recent tail, with
+ * oversized tool results capped. The tail stays verbatim when the result reaches the target,
+ * degrades to text-only, then drops; the summary is clipped and the request cut until it fits
+ * the threshold. A compaction whose result was already over the trigger on the next call starts
+ * at the stage after the one it ended at.
+ */
+async function fixedTailHeuristic({
+  config,
+  conversation,
+  forceSummary,
+  previousCheckpoint,
+  resume,
+  summarize,
+}: CompactionHeuristicInput): Promise<CompactionHeuristicOutcome> {
   const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
     resume ? resumeAfter(kept, replay, threshold) : kept;
   const budget = keptTailBudget(config);
@@ -250,38 +274,12 @@ export async function compactMessages(
     return { currentIndex: index, fit, keep, replay };
   };
 
-  const first = planTail(conversation);
-  if (!forceSummary && first.fit === undefined) {
-    const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
-    if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent);
-    }
+  const start = startStage(config.lastStage);
 
-    // Capping preserves most of the measured prompt. Retain any known
-    // underestimate while crediting only the estimated tokens it removes.
-    // A new summary replaces that prompt, so it uses its own estimate below.
-    const tokenEstimateAdjustment = Math.max(
-      0,
-      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
-    );
-    for (const heuristic of COMPACTION_HEURISTICS) {
-      const outcome = heuristic({
-        config,
-        older,
-        previousCheckpoint,
-        recent,
-        replay: first.replay,
-        resume,
-        tokenEstimateAdjustment,
-      });
-      if (outcome.type === "within-limit") {
-        return outcome.messages;
-      }
-    }
-  }
-
-  // Tool results in the kept tail are shortened on this path only: one large
-  // file read would otherwise take the whole tail budget.
+  // Every compaction summarizes: capping and stripping only shape the tail kept beside the
+  // summary, never stand in for it.
+  // Oversized tool results are capped: one large file read would otherwise take the whole tail
+  // budget.
   const cappedConversation = capToolResults(conversation);
   const summaryPlan = planTail(cappedConversation);
   const { currentIndex, fit, keep, replay } = summaryPlan;
@@ -297,19 +295,21 @@ export async function compactMessages(
       ? floorCut
       : noFiles;
   const floor = withResumptionGuard(checkpointHead(""), floorRequest, Number.POSITIVE_INFINITY);
-  if (evaluateThreshold(floor, config, "estimate").type === "over-limit") {
+  if (evaluateThreshold(floor, config).type === "over-limit") {
     throw new CompactionOverLimitError(
       `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
     );
   }
 
-  const { older, recent } = splitMessagesForCompaction(cappedConversation, keep);
+  const { recent } = splitMessagesForCompaction(cappedConversation, keep);
 
+  // The summary reads the tail too: the target can drop its tool results or all of it, and
+  // what is dropped must survive in the summary.
   const summaryPrompt = createCompactionPrompt({
     messages:
       fit === undefined
-        ? older
-        : older.map((message, index) => (index === currentIndex ? fit.cut : message)),
+        ? cappedConversation
+        : cappedConversation.map((message, index) => (index === currentIndex ? fit.cut : message)),
     previousCheckpoint,
     transcriptBudgetTokens: config.threshold,
   });
@@ -320,34 +320,43 @@ export async function compactMessages(
   });
 
   const fits = (candidate: readonly ModelMessage[]) =>
-    evaluateThreshold(candidate, config, "estimate").type === "within-limit";
+    evaluateThreshold(candidate, config).type === "within-limit";
+  // The tail stages must reach the target on the provider's ruler, far enough under the trigger
+  // that the next steps' output doesn't compact again at once.
+  const ratio = estimateRatio(config);
+  const reachesTarget = (candidate: readonly ModelMessage[]) =>
+    Math.ceil(estimateTokens(candidate) * ratio) <= config.target;
 
   // Prefer keeping the recent tail verbatim — surviving tool results are the
   // model's evidence that work already ran. Degrade to text-only, then drop
   // the tail, then clip the summary, then cut the request: never summarize
   // again, since a smaller tail does not make the summary smaller.
-  const verbatim = withResumptionGuard(
-    [...checkpointHead(summary), ...recent],
-    replay,
-    config.threshold,
-  );
-  if (fits(verbatim)) {
-    return verbatim;
+  if (start === "tail") {
+    const verbatim = withResumptionGuard(
+      [...checkpointHead(summary), ...recent],
+      replay,
+      config.threshold,
+    );
+    if (reachesTarget(verbatim)) {
+      return { messages: verbatim, stage: "tail", type: "compacted" };
+    }
   }
 
-  const textTail = keepNonToolResultMessages(recent);
-  const stripped = withResumptionGuard(
-    [...checkpointHead(summary), ...textTail],
-    replay,
-    config.threshold,
-  );
-  if (fits(stripped)) {
-    return stripped;
+  if (start !== "summary-only") {
+    const textTail = keepNonToolResultMessages(recent);
+    const stripped = withResumptionGuard(
+      [...checkpointHead(summary), ...textTail],
+      replay,
+      config.threshold,
+    );
+    if (reachesTarget(stripped)) {
+      return { messages: stripped, stage: "text-tail", type: "compacted" };
+    }
   }
 
   const noTail = withResumptionGuard(checkpointHead(summary), replay, config.threshold);
   if (fits(noTail)) {
-    return noTail;
+    return { messages: noTail, stage: "summary-only", type: "compacted" };
   }
 
   // Last, the summary is clipped to the largest piece that fits beside the
@@ -381,7 +390,7 @@ export async function compactMessages(
 
   const clipped = withClippedSummary(replay);
   if (clipped !== undefined) {
-    return clipped;
+    return { messages: clipped, stage: "summary-only", type: "compacted" };
   }
 
   // The request itself is over: a file it carries gives way to a note first,
@@ -399,7 +408,7 @@ export async function compactMessages(
       `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
     );
   }
-  return cutRequest;
+  return { messages: cutRequest, stage: "summary-only", type: "compacted" };
 }
 
 const CAPPED_RESULT_ANNOTATION =

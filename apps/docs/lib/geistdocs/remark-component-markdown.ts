@@ -4,6 +4,7 @@ import { renderBenchmarkMarkdown } from "../evals/eve-code-format";
 import { eveCodeBenchmark } from "../evals/eve-code-results";
 import { templateManifest } from "../templates/manifest";
 import { renderAgentRuntimeDiagramMarkdown } from "./agent-runtime-diagram";
+import { renderAmbientListeningFlowMarkdown } from "./ambient-listening-flow";
 
 type CardProps = Partial<Record<string, string>>;
 
@@ -47,6 +48,7 @@ export function remarkComponentMarkdown(this: { data(): unknown }): void {
     handlers: {
       mdxJsxFlowElement(node: MdxJsxFlowElement, parent, state, info) {
         if (node.name === "AgentRuntimeDiagram") return renderAgentRuntimeDiagramMarkdown();
+        if (node.name === "AmbientListeningFlow") return renderAmbientListeningFlowMarkdown();
         if (node.name === "EveCodeBenchmark") {
           const dataset = node.attributes.find(
             (attribute) => attribute.type === "mdxJsxAttribute" && attribute.name === "dataset",
