@@ -50,22 +50,41 @@ function acquireCommand(owner: string): string {
   ].join("\n");
 }
 
+/** How long a finishing command gets to clear its credential before another can take over its lock. */
+const RELEASE_MARGIN_SECONDS = 60;
 /**
- * Starts a release: takes the guard (briefly retrying) so no waiter can break the lock while the
- * holder clears its credential, then prints `<guarded> <held>`, where `held` says whether `owner`
- * still holds the lock. Only breakers and releases take the guard, so when it stays busy for the
- * whole short wait it was left behind and releasing without it is safe.
+ * A finishing command whose lock is younger than this may clear its credential without the guard.
+ * Another command takes over a lock only once it is older than {@link STALE_AFTER_SECONDS}, so the
+ * finishing command has at least {@link RELEASE_MARGIN_SECONDS} to clear it. The code doesn't time
+ * out that Sandbox API call, so a call slower than the margin can still overlap a takeover.
+ */
+const FRESH_BELOW_SECONDS = STALE_AFTER_SECONDS - RELEASE_MARGIN_SECONDS;
+
+/**
+ * Starts a release. It tries briefly to take the guard, removing one a stopped sandbox left behind,
+ * then prints three flags: `guarded` (this release holds the guard), `held` (`owner` still holds
+ * the lock) and `fresh` (the lock is too young for another command to take over).
  */
 function beginReleaseCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
   const id = shellQuote(owner);
   return [
+    `age() { now=$(date +%s); echo $(( now - $(date -r "$1" +%s 2>/dev/null || echo "$now") )); }`,
     `guarded=0`,
-    `for _ in $(seq 20); do if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi; sleep 0.1; done`,
+    `for _ in $(seq 20); do`,
+    `  if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi`,
+    `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
+    `  sleep 0.1`,
+    `done`,
+    // First read how old the lock is, then read which command owns it. A lock young enough to
+    // skip the guard can't be taken over between the two reads. If another command takes it over
+    // after the first read, the lock already counted as too old, so cleanup is skipped.
+    `fresh=0`,
+    `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
     `held=0`,
     `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
-    `printf '%s %s' "$guarded" "$held"`,
+    `printf '%s %s %s' "$guarded" "$held" "$fresh"`,
   ].join("\n");
 }
 
@@ -152,20 +171,26 @@ async function release(
   owner: string,
   cleanup: (() => PromiseLike<void>) | undefined,
 ): Promise<void> {
-  // When the sandbox can't say who holds the lock, clean up anyway: leaving a credential leased
-  // is worse than clearing a successor's.
   let guarded = false;
-  let held = true;
+  let held: boolean | undefined;
+  let fresh = false;
   try {
     const begun = await sandbox.run({ command: beginReleaseCommand(owner) });
-    const [guard, holder] = begun.stdout.trim().split(" ");
-    if (begun.exitCode === 0 && holder !== undefined) {
+    const [guard, holder, young] = begun.stdout.trim().split(" ");
+    if (begun.exitCode === 0 && young !== undefined) {
       guarded = guard === "1";
       held = holder === "1";
+      fresh = young === "1";
     }
   } catch {}
+  // Without the guard, another command can take over an old lock at any moment. Clearing the
+  // policy or removing the lock could then remove that command's credential or lock, so this
+  // release leaves both alone. The command that takes over sets its own credential.
+  if (held !== undefined && !guarded && !fresh) return;
   try {
-    if (held) await cleanup?.();
+    // If the sandbox can't report who holds the lock, clear the credential anyway. Leaving it usable
+    // after the command ends is worse than clearing the next command's.
+    if (held === undefined || held) await cleanup?.();
   } finally {
     // A failed release must not replace the command's result; the lock goes stale instead.
     await Promise.resolve(sandbox.run({ command: finishReleaseCommand(owner, guarded) })).catch(

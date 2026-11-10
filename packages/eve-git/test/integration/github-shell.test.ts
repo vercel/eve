@@ -928,6 +928,86 @@ test("a lease waits on the host and stops when its call is cancelled", async () 
   }
 });
 
+test("a stale lock's release that can't take the guard leaves the policy to the next holder", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    // Another command holds the guard while it takes over this command's old lock.
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    let cleaned = false;
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    });
+    // The command taking over sets its own credential, so clearing the policy here could clear it,
+    // and the lock is left for that command to take over.
+    assert.equal(cleaned, false);
+    assert.equal(
+      execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }),
+      "lease.lock\nlease.lock.guard\n",
+    );
+    assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a fresh lock's release cleans up even when the guard is busy", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    // Another command's release holds the guard, and no command can take over a lock this young.
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    let cleaned = false;
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    });
+    assert.equal(cleaned, true);
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock.guard\n");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test("a release breaks a guard a stopped sandbox left behind", async () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(lockRoot, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", `${lockPath}.guard`]);
+    let cleanedWhileHeld = "";
+    await withSandboxLeaseLock(heldLockSandbox(lockPath), "holder", async () => undefined, {
+      cleanup: async () => {
+        cleanedWhileHeld = execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" });
+      },
+    });
+    assert.equal(cleanedWhileHeld, "holder");
+    assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+/** A sandbox whose holder already owns the lock at `lockPath`, so only its release runs. */
+function heldLockSandbox(lockPath: string): SandboxSession {
+  let calls = 0;
+  const sandbox: Pick<SandboxSession, "run"> = {
+    async run(input: Parameters<SandboxSession["run"]>[0]) {
+      calls += 1;
+      if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
+      return runLockCommand(input.command, lockPath);
+    },
+  };
+  return sandbox as SandboxSession;
+}
+
 /** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */
 async function runLockCommand(
   command: string,
