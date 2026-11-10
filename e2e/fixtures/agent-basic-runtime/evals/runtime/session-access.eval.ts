@@ -28,6 +28,13 @@ export default defineEval({
       const prepared = await t.target.fetch(sessionPath, { method: "POST", headers: alice });
       await t.require(prepared.ok, equals(true));
       await prepared.body?.cancel();
+      const turn = await t.target
+        .attach(sessionId)
+        .send("Alice has prepared her private chat. Reply with a brief greeting.");
+      turn.expectOk();
+      const retained = await t.target.fetch(sessionPath, { method: "POST", headers: alice });
+      await t.require(retained.ok, equals(true));
+      await retained.body?.cancel();
     } finally {
       const ended = await t.target.fetch(`${sessionPath}/end`, { method: "POST", headers: alice });
       await ended.body?.cancel();
