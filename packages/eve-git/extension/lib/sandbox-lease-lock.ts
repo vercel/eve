@@ -1,3 +1,4 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
@@ -141,23 +142,46 @@ export async function withSandboxLeaseLock<T>(
 ): Promise<T> {
   const deadline = Date.now() + LEASE_WAIT_MS;
   const command = acquireCommand(owner);
-  for (;;) {
-    signal?.throwIfAborted();
-    const attempt = signal
-      ? await sandbox.run({ command, signal })
-      : await sandbox.run({ command });
-    if (attempt.exitCode === 0) break;
-    if (attempt.exitCode !== BUSY_EXIT_CODE) {
-      throw new Error(
-        `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
-      );
+  // Lasts as long as the command waits for the lock.
+  const span = trace.getTracer("eve.git").startSpan("agent.github.lease.wait");
+  let attempts = 0;
+  let outcome: "acquired" | "timed_out" | "cancelled" | "failed" = "failed";
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      attempts += 1;
+      const attempt = signal
+        ? await sandbox.run({ command, signal })
+        : await sandbox.run({ command });
+      if (attempt.exitCode === 0) {
+        outcome = "acquired";
+        break;
+      }
+      if (attempt.exitCode !== BUSY_EXIT_CODE) {
+        throw new Error(
+          `Could not lock this sandbox's GitHub credentials: ${attempt.stderr.trim() || `exit code ${attempt.exitCode}`}.`,
+        );
+      }
+      if (Date.now() >= deadline) {
+        outcome = "timed_out";
+        throw new Error(
+          "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
+        );
+      }
+      await waitForRetry(signal);
     }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        "Another GitHub command in this sandbox is still using its credentials. Try again shortly.",
-      );
+  } catch (error) {
+    if (signal?.aborted) outcome = "cancelled";
+    throw error;
+  } finally {
+    span.setAttributes({
+      "agent.github.lease.attempts": attempts,
+      "agent.github.lease.outcome": outcome,
+    });
+    if (outcome === "timed_out" || outcome === "failed") {
+      span.setStatus({ code: SpanStatusCode.ERROR });
     }
-    await waitForRetry(signal);
+    span.end();
   }
   try {
     return await run();
