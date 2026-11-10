@@ -24,7 +24,7 @@ import {
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 import { relay, relayedMirror } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { workflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
@@ -103,13 +103,6 @@ export interface SignInAnswer {
   readonly interactionId: string;
   readonly signIn: SignInChallenge;
   readonly outcome: "accepted" | "declined";
-}
-
-/** This workflow's callback base URL, or `undefined` outside a workflow. */
-async function workflowCallbackBaseUrl(): Promise<string | undefined> {
-  const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-  const url = getWorkflowMetadata().url;
-  return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
 }
 
 /** The answers in a child's relayed events to sign-ins this session mirrors for that child. */

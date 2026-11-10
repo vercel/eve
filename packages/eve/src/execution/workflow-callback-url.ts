@@ -48,6 +48,13 @@ export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
   return publicRoutePrefix === undefined ? baseUrl : `${baseUrl}${publicRoutePrefix}`;
 }
 
+/** This workflow's callback base URL, or `undefined` outside a workflow. */
+export async function workflowCallbackBaseUrl(): Promise<string | undefined> {
+  const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
+  const url = getWorkflowMetadata().url;
+  return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
+}
+
 /**
  * Builds a framework-owned callback URL that a browser or third party sees,
  * such as the connection sign-in redirect handed to an IdP.

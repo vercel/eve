@@ -228,6 +228,7 @@ export {
   ResumeSignInKey,
   settleSignIns,
   signInsEnded,
+  signInsEndedBy,
   type AnsweredSignIn,
   type OwnCallbacks,
   type ResumeSignIn,

@@ -88,16 +88,24 @@ export async function applyEndingSignIns(
 ): Promise<void> {
   const own = stepCallbacks(step);
   if (own !== undefined) {
-    const tables = step.view().projection.view;
-    const ended = change.events.flatMap((event) => {
-      if (event.type !== "interaction.settled") return [];
-      const { interactionId, outcome, reason } = event.data;
-      if (outcome === "accepted" || outcome === "declined") return [];
-      return signInsEnded(tables, { interactionId, reason: reason ?? outcome }, own);
-    });
+    const ended = signInsEndedBy(step.view().projection.view, change, own);
     if (ended.length > 0) await settleSignIns(step.ctx.require(ResumeSignInKey), ended);
   }
   await step.apply(change, messages);
+}
+
+/** The open sign-ins that wait on a card `change` ends without an answer (`signInsEnded`). */
+export function signInsEndedBy(
+  tables: SessionView,
+  change: Transition,
+  own: OwnCallbacks,
+): readonly AnsweredSignIn[] {
+  return change.events.flatMap((event) => {
+    if (event.type !== "interaction.settled") return [];
+    const { interactionId, outcome, reason } = event.data;
+    if (outcome === "accepted" || outcome === "declined") return [];
+    return signInsEnded(tables, { interactionId, reason: reason ?? outcome }, own);
+  });
 }
 
 /** An open sign-in to settle with the answer another sign-in for the same grant got. */

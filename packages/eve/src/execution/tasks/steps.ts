@@ -39,8 +39,16 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { readHitlState, withdrawWaitingCalls } from "#harness/hitl/index.js";
-import type { Transition } from "#harness/session-machine/commit.js";
+import {
+  ownCallbacks,
+  readHitlState,
+  settleSignIns,
+  signInsEndedBy,
+  withdrawWaitingCalls,
+} from "#harness/hitl/index.js";
+import { sessionView, type Transition } from "#harness/session-machine/commit.js";
+import { workflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
@@ -236,22 +244,29 @@ async function cancelTasks(
 
 /**
  * The model dropped tasks whose calls wait on a person: their requests are withdrawn and the
- * calls end without running, in a commit of their own. A cancelled or ended turn withdraws them
- * itself as it settles.
+ * calls end without running, in a commit of their own. The sign-ins that waited on a withdrawn
+ * card hear first that it ended, so none waits on a card nobody sees. A cancelled or ended turn
+ * withdraws them itself as it settles.
  */
 async function dropWaitingCalls(
   input: SessionStepState & TaskCancellationInput,
 ): Promise<PublishedSessionEvents | undefined> {
   if (input.reason !== "task-cancel") return undefined;
-  const table = readTaskTable(readDurableSession(input.sessionState).state);
+  const session = readDurableSession(input.sessionState);
+  const table = readTaskTable(session.state);
   const callIds = input.taskIds.flatMap((taskId) => {
     const record = findTask(table, taskId);
     return record?.awaitsPerson === true ? record.calls.map(({ callId }) => callId) : [];
   });
   if (callIds.length === 0) return undefined;
-  return await commitSessionStep(input, (view) => [withdrawWaitingCalls(view, { callIds })], {
-    origin: "own",
-  });
+  const view = sessionView(storedProjection(session.state), session.state);
+  const change = withdrawWaitingCalls(view, { callIds });
+  const baseUrl = await workflowCallbackBaseUrl();
+  if (baseUrl !== undefined) {
+    const own = ownCallbacks(session.sessionId, baseUrl);
+    await settleSignIns(resumeSignInCallback, signInsEndedBy(view.projection.view, change, own));
+  }
+  return await commitSessionStep(input, () => [change], { origin: "own" });
 }
 
 /** A transition a task step decides against the session it commits to. */

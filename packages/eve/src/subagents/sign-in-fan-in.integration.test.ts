@@ -376,7 +376,7 @@ describe("one sign-in answer for parallel children", () => {
     });
   });
 
-  it("ends the children's sign-ins when a message withdraws the parent's card they wait on", async () => {
+  it("ends the children's sign-ins when the model drops the parent's call whose card they wait on", async () => {
     const app = await createApp("sign-in-fan-in-parent-withdrawn", {
       grant: "oauth/weather",
       parentAsks: "first",
@@ -653,8 +653,9 @@ type Prompt = LanguageModelV4CallOptions["prompt"];
  * The parent starts `children` children in one step and waits for their reports. A child, whose
  * conversation starts with the parent's message, checks the weather and reports; with `again`,
  * child 0 then checks Porto's under another scope of the same grant. With `parentAsks`, the
- * parent checks Lisbon's weather itself while the children run. With `retry`, a child calls
- * `get_weather` once more after its first call's result, and `retry` hears that second result.
+ * parent checks Lisbon's weather itself while the children run, and drops that call once told
+ * never mind. With `retry`, a child calls `get_weather` once more after its first call's result,
+ * and `retry` hears that second result.
  */
 function scriptedModel(
   children: number,
@@ -712,6 +713,19 @@ function scriptedModel(
               toolName: "agent",
             })),
           );
+        const waiting = /Started task ([\w-]+)\. It waits for a person to sign in/u.exec(raw);
+        if (
+          raw.includes("Never mind the parent's weather.") &&
+          waiting !== null &&
+          !called("eve__task_cancel")
+        )
+          return toolCallsStreamResult([
+            {
+              input: JSON.stringify({ taskId: waiting[1] }),
+              toolCallId: "call_cancel_parent",
+              toolName: "eve__task_cancel",
+            },
+          ]);
         if (parentAsks !== false && !called("get_weather"))
           return toolCallsStreamResult([
             {
