@@ -146,7 +146,7 @@ describe("buildStepHooks", () => {
     });
   });
 
-  it("gives a Gateway Anthropic model a 1-hour system cache and no automatic caching", async () => {
+  it("gives a Gateway Anthropic model a 1-hour cache on every breakpoint and no automatic caching", async () => {
     const hooks = buildStepHooks({
       model: {
         id: "anthropic/claude-sonnet-4-5",
@@ -176,14 +176,14 @@ describe("buildStepHooks", () => {
     expect(prepared?.providerOptions).toEqual({
       gateway: { order: ["anthropic"], sessionId: "session-test" },
     });
-    const fiveMinutes = {
-      anthropic: { cacheControl: { type: "ephemeral" } },
-      bedrock: { cachePoint: { type: "default" } },
+    const oneHour = {
+      anthropic: { cacheControl: { ttl: "1h", type: "ephemeral" } },
+      bedrock: { cachePoint: { ttl: "1h", type: "default" } },
     };
     expect(prepared?.messages?.map((message) => message.providerOptions)).toEqual([
       undefined,
-      fiveMinutes,
-      fiveMinutes,
+      oneHour,
+      oneHour,
     ]);
   });
 

@@ -32,19 +32,19 @@ describe("resolveModelProfile", () => {
     [
       "direct Anthropic",
       model("anthropic.messages"),
-      { ...direct, anthropicCache: { conversationTtl: "5m", ttl: "5m" }, provider: "anthropic" },
+      { ...direct, anthropicCache: { ttl: "5m" }, provider: "anthropic" },
     ],
     [
       "Vertex Anthropic",
       model("vertex.anthropic"),
-      { ...direct, anthropicCache: { conversationTtl: "5m", ttl: "5m" }, provider: "vertex" },
+      { ...direct, anthropicCache: { ttl: "5m" }, provider: "vertex" },
     ],
     [
       "Bedrock Converse with an Anthropic model id",
       model("amazon-bedrock", "ANTHROPIC.claude-3-5-sonnet-20241022-v2:0"),
       {
         ...direct,
-        anthropicCache: { conversationTtl: "5m", ttl: "5m" },
+        anthropicCache: { ttl: "5m" },
         provider: "amazon-bedrock",
       },
     ],
@@ -81,7 +81,7 @@ describe("resolveModelProfile", () => {
       model("amazon-bedrock", "arn:aws:bedrock:us-east-1:123:application-inference-profile/abc"),
       {
         ...direct,
-        anthropicCache: { conversationTtl: "5m", ttl: "5m" },
+        anthropicCache: { ttl: "5m" },
         provider: "amazon-bedrock",
       },
       { anthropic: {} },
@@ -89,15 +89,15 @@ describe("resolveModelProfile", () => {
     [
       "direct Anthropic with a 1-hour cache",
       model("anthropic.messages"),
-      { ...direct, anthropicCache: { conversationTtl: "1h", ttl: "1h" }, provider: "anthropic" },
+      { ...direct, anthropicCache: { ttl: "1h" }, provider: "anthropic" },
       { anthropic: { ttl: "1h" } },
     ],
     [
-      "a Gateway Anthropic model with a 1-hour system cache, whose conversation stays on 5 minutes",
+      "a Gateway Anthropic model with a 1-hour cache, which takes eve's own breakpoints",
       "anthropic/claude-opus-5",
       {
         ...direct,
-        anthropicCache: { conversationTtl: "5m", ttl: "1h" },
+        anthropicCache: { ttl: "1h" },
         gateway: true,
         provider: "anthropic",
       },

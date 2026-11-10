@@ -22,16 +22,10 @@ export interface ModelProfile {
    */
   readonly provider: string;
   /**
-   * Takes Anthropic prompt-cache breakpoints that eve places itself: the tools and system prompt
-   * live for `ttl`, the conversation for `conversationTtl`. Undefined for a Gateway model on
-   * Gateway's automatic caching.
+   * Takes Anthropic prompt-cache breakpoints that eve places itself, which live for `ttl`.
+   * Undefined for a Gateway model on Gateway's automatic caching.
    */
-  readonly anthropicCache:
-    | {
-        readonly ttl: AnthropicPromptCacheTtl;
-        readonly conversationTtl: AnthropicPromptCacheTtl;
-      }
-    | undefined;
+  readonly anthropicCache: { readonly ttl: AnthropicPromptCacheTtl } | undefined;
   /** Chat Completions APIs can't carry files in tool results, so they move to user messages. */
   readonly filesOutsideToolResults: boolean;
   /**
@@ -54,12 +48,12 @@ export function resolveModelProfile(
   const topLevelProvider = provider.split(".")[0]!;
   if (topLevelProvider === "gateway") {
     const vendor = modelId.split("/")[0]!;
-    // Gateway ignores a 1-hour `ttl` while `gateway.caching` is `auto`, so a 1-hour system prompt
-    // takes eve's own breakpoints instead. Every other Gateway model, and `5m`, keeps Gateway's
+    // Gateway ignores a 1-hour `ttl` while `gateway.caching` is `auto`, so a 1-hour cache takes
+    // eve's own breakpoints instead. Every other Gateway model, and `5m`, keeps Gateway's
     // automatic caching.
-    const oneHourSystem = vendor === "anthropic" && promptCache?.anthropic?.ttl === "1h";
+    const oneHour = vendor === "anthropic" && promptCache?.anthropic?.ttl === "1h";
     return {
-      anthropicCache: oneHourSystem ? { conversationTtl: "5m", ttl: "1h" } : undefined,
+      anthropicCache: oneHour ? { ttl: "1h" } : undefined,
       filesOutsideToolResults: false,
       gateway: true,
       googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
@@ -73,12 +67,7 @@ export function resolveModelProfile(
     provider.includes("anthropic") ||
     (provider.includes("bedrock") && modelId.includes("anthropic"));
   return {
-    anthropicCache: anthropic
-      ? {
-          conversationTtl: promptCache?.anthropic?.ttl ?? "5m",
-          ttl: promptCache?.anthropic?.ttl ?? "5m",
-        }
-      : undefined,
+    anthropicCache: anthropic ? { ttl: promptCache?.anthropic?.ttl ?? "5m" } : undefined,
     filesOutsideToolResults: provider.endsWith(".chat"),
     gateway: false,
     googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),

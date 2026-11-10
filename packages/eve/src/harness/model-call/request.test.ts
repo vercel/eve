@@ -16,7 +16,7 @@ describe("modelInstructions", () => {
     expect(
       modelInstructions({
         instructions: "rules",
-        anthropicCache: { ttl: "1h", conversationTtl: "5m" },
+        anthropicCache: { ttl: "1h" },
       }),
     ).toEqual({ role: "system", content: "rules", providerOptions: marker("1h") });
   });
@@ -25,7 +25,7 @@ describe("modelInstructions", () => {
     expect(
       modelInstructions({
         instructions: "rules",
-        anthropicCache: { ttl: "5m", conversationTtl: "5m" },
+        anthropicCache: { ttl: "5m" },
       }),
     ).toEqual({ role: "system", content: "rules", providerOptions: marker("5m") });
   });
@@ -34,7 +34,7 @@ describe("modelInstructions", () => {
     expect(
       modelInstructions({
         instructions: ["a", "", "b"],
-        anthropicCache: { ttl: "1h", conversationTtl: "5m" },
+        anthropicCache: { ttl: "1h" },
         extraSystemNote: "note",
       }),
     ).toEqual({ role: "system", content: "note\n\na\n\nb", providerOptions: marker("1h") });
