@@ -6,7 +6,7 @@ import {
   ConnectionAuthorizationFailedError,
   isConnectionAuthorizationFailedError,
 } from "#connections/errors.js";
-import { withCallerConfirmation } from "#runtime/connections/caller-confirmation.js";
+import { withCallerToken } from "#runtime/connections/caller-confirmation.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 
@@ -290,7 +290,7 @@ describe("resolveConnectionPrincipal after someone other than the caller spoke",
 
   it("resolves them for a call the caller confirmed", () => {
     const principal = contextStorage.run(ctx(), () =>
-      withCallerConfirmation(true, () => resolveConnectionPrincipal("github", userAuthDef)),
+      withCallerToken("release", () => resolveConnectionPrincipal("github", userAuthDef)),
     );
     expect(principal).toMatchObject({ id: "alice", type: "user" });
   });

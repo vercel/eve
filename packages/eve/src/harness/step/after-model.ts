@@ -1,3 +1,4 @@
+import { sessionCaller } from "#runtime/connections/caller-confirmation.js";
 import { taskClearance } from "#harness/clearance.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
@@ -137,7 +138,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       messages: answerCallsThatWontRun(responseMessages, result),
       tasks: dispatched.workflowRequests.map((task) => ({
         ...task,
-        ...taskClearance(result.policyApprovals?.[task.callId]),
+        ...taskClearance(result.policyApprovals?.[task.callId], sessionCaller()),
       })),
     };
     if (approvalRequests.length > 0) {

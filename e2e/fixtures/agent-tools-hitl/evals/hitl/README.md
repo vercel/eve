@@ -38,7 +38,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | The caller's token is refused after someone else speaks, until the caller replies  | [caller-token-needs-confirmation](./multiplayer/caller-token-needs-confirmation.eval.ts)                                |
 | `always({ when })` asks the caller after someone else speaks; only they approve    | [always-mismatch-asks-caller](./multiplayer/always-mismatch-asks-caller.eval.ts)                                        |
 | Anyone can cancel an approval only the caller can give                             | [anyone-can-deny-caller-approval](./multiplayer/anyone-can-deny-caller-approval.eval.ts)                                |
-| `once({ when })` asks the caller once in a session someone else started            | [once-mismatch-in-session-bob-started](./multiplayer/once-mismatch-in-session-bob-started.eval.ts)                      |
+| `once({ when })` asks the caller once for each person who spoke last               | [once-mismatch-remembers-each-sender](./multiplayer/once-mismatch-remembers-each-sender.eval.ts)                        |
 | A session with one person is never asked                                           | [one-person-never-asked](./multiplayer/one-person-never-asked.eval.ts)                                                  |
 | A tool's `actor` input asks the person it names and runs with their token          | [actor-asks-the-named-person](./multiplayer/actor-asks-the-named-person.eval.ts)                                        |
 | An answer to a request that is not open authorizes nothing                         | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |

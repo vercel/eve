@@ -13,8 +13,6 @@ export interface RememberedApproval {
 /** Where a request's settlement is remembered, with the state the policy attached. */
 export interface RememberRequest {
   readonly key: string;
-  /** Further keys the same decision is remembered under. */
-  readonly alsoKeys?: readonly string[];
   readonly state?: JsonValue;
 }
 
@@ -46,18 +44,17 @@ export interface ApprovalEvaluation {
   /** Asks a person; their decision is remembered under `remember.key` when it settles. */
   readonly ask: (remember?: RememberRequest, options?: AskOptions) => ApprovalStatus;
   /**
-   * Clears the call for the caller's credentials, as a mismatch helper does from a remembered
-   * approval: the caller approved it, so their token is released even while someone else spoke
-   * last.
+   * Approves the call as the caller confirmed it, as a mismatch helper does from the caller's
+   * remembered approval: the call gets their token even while someone else spoke last.
    */
-  readonly confirmCaller: () => ApprovalStatus;
-  /** Whether a mismatch helper cleared the call for the caller during this evaluation. */
+  readonly approveForCaller: () => ApprovalStatus;
+  /** Whether a policy approved the call for the caller during this evaluation. */
   readonly callerConfirmed: () => boolean;
   /**
-   * Makes a status that asks a person ask only the caller to approve, keeping what an ask from
+   * Makes `status`, which asks a person, ask only the caller to approve, keeping what an ask from
    * `ask` remembers. Any other ask becomes a new caller-only ask.
    */
-  readonly requireCaller: (status: ApprovalStatus) => ApprovalStatus;
+  readonly askCaller: (status: ApprovalStatus) => ApprovalStatus;
 }
 
 // Bundles may load eve's policies and the harness from separate copies of this module. The global
@@ -83,35 +80,24 @@ export async function evaluateApproval(
     { readonly remember?: RememberRequest; readonly callerApproves?: true }
   >();
   let confirmed = false;
-  // Any policy that asks only the caller keeps the request caller-only, even when another policy's
-  // ask wins the strictest-wins join, such as an agent-wide mismatch approval beside a tool's own.
-  let callerOnly = false;
   const scoped = (key: string) => JSON.stringify([context.toolName, key]);
   const evaluation: ApprovalEvaluation = Object.freeze({
     ask: (remember?: RememberRequest, options?: AskOptions) => {
-      if (options?.callerApproves === true) callerOnly = true;
       const status = Object.freeze({ type: "user-approval" as const });
       asked.set(status, {
-        ...(remember !== undefined && {
-          remember: {
-            ...remember,
-            key: scoped(remember.key),
-            ...(remember.alsoKeys !== undefined && { alsoKeys: remember.alsoKeys.map(scoped) }),
-          },
-        }),
+        ...(remember !== undefined && { remember: { ...remember, key: scoped(remember.key) } }),
         ...(options?.callerApproves === true && { callerApproves: true as const }),
       });
       return status;
     },
     callerConfirmed: () => confirmed,
-    requireCaller: (status: ApprovalStatus) => {
+    askCaller: (status: ApprovalStatus) => {
       const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
       if (ask === undefined) return evaluation.ask(undefined, { callerApproves: true });
-      callerOnly = true;
       asked.set(status as object, { ...ask, callerApproves: true });
       return status;
     },
-    confirmCaller: () => {
+    approveForCaller: () => {
       confirmed = true;
       return "approved" as const;
     },
@@ -129,11 +115,10 @@ export async function evaluateApproval(
   }
   if (recheck) return { denied: false };
   const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
-  const asking: ApprovalDecision = { ...decision, ...ask };
-  return callerOnly ? { ...asking, callerApproves: true } : asking;
+  return { ...decision, ...ask };
 }
 
-/** Remembers a person's decision under the keys its request named, replacing earlier ones. */
+/** Remembers a person's decision under the key its request named, replacing an earlier one. */
 export function rememberDecision(
   remembered: Readonly<Record<string, RememberedApproval>>,
   request: { readonly interactionId: string; readonly remember?: RememberRequest },
@@ -141,13 +126,14 @@ export function rememberDecision(
 ): Readonly<Record<string, RememberedApproval>> {
   const { remember } = request;
   if (remember === undefined) return remembered;
-  const decision: RememberedApproval = {
-    interactionId: request.interactionId,
-    outcome,
-    ...(remember.state !== undefined && { state: remember.state }),
+  return {
+    ...remembered,
+    [remember.key]: {
+      interactionId: request.interactionId,
+      outcome,
+      ...(remember.state !== undefined && { state: remember.state }),
+    },
   };
-  const keys = [remember.key, ...(remember.alsoKeys ?? [])];
-  return { ...remembered, ...Object.fromEntries(keys.map((key) => [key, decision])) };
 }
 
 export function inheritApprovalContext<T extends ApprovalContext>(

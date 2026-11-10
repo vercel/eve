@@ -32,7 +32,7 @@ import {
 } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionAuthContext, SessionParent, SessionTraceRoot } from "#channel/types.js";
-import { readSender } from "#context/sender.js";
+import { readSender } from "#context/session-auth.js";
 import type { ContextReader } from "#context/key.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";

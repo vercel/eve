@@ -62,10 +62,8 @@ import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
 import { readAgentToolModels } from "#tools/agent-models.js";
 import { selectionModel } from "#models/options.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
-import {
-  callerConfirmationMessage,
-  callerSpokeLast,
-} from "#runtime/connections/caller-confirmation.js";
+import { callerSpokeLast } from "#context/session-auth.js";
+import { callerConfirmationMessage } from "#runtime/connections/caller-confirmation.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 const log = createLogger("execution.agent-sessions");
@@ -307,7 +305,7 @@ export async function sendAgentSessionMessageStep(
   const { address, context } = input;
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
-    requireForwardingConfirmation(remote, input.auth);
+    requireCallerConfirmationToForward(remote, input.auth);
     return await continueRemoteAgentSession({
       auth: input.auth.current,
       callback: {
@@ -337,7 +335,7 @@ export async function sendAgentSessionMessageStep(
       caller: {
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
-        sender: input.auth.sender,
+        senderAuth: input.auth.sender,
         subagentName: address.name,
       },
       kind: "send",
@@ -557,7 +555,7 @@ async function startRemoteSession(
     registry: bundle.subagentRegistry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
-  requireForwardingConfirmation(remote, auth);
+  requireCallerConfirmationToForward(remote, auth);
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
     action,
@@ -663,7 +661,7 @@ function agentDeliveryId(kind: string, sessionId: string): string {
  * A remote agent that forwards the principal acts as the caller, so after someone else spoke it
  * runs only for a call the caller confirmed, whose dispatch names the caller as the sender.
  */
-function requireForwardingConfirmation(
+function requireCallerConfirmationToForward(
   remote: { readonly forwardPrincipal?: boolean; readonly name: string },
   auth: SessionAuth,
 ): void {

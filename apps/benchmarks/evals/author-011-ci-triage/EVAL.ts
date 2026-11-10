@@ -130,7 +130,11 @@ test("gives each sandbox 4 vCPUs", async () => {
     return recordingSandbox();
   };
   await module.default({
-    session: { auth: { current: null, initiator: null }, id: "session-1", turn: { id: "turn-1" } },
+    session: {
+      auth: { current: null, initiator: null, sender: null },
+      id: "session-1",
+      turn: { id: "turn-1" },
+    },
   });
   expect(opened).toHaveLength(1);
   // Either place works: session sandboxes get the environment's options, overridden by `open()`'s.
@@ -480,7 +484,7 @@ async function settleTurn() {
   const ctx = {
     agent: { name: "mender" },
     channel: { kind: await githubChannelKind() },
-    session: { id: "session-1", auth: { current: null, initiator: null } },
+    session: { id: "session-1", auth: { current: null, initiator: null, sender: null } },
     position: { line: 7, index: 0 },
     view: await settledTurnView(),
     turn: { id: "turn-1" },

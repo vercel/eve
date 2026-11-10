@@ -1,7 +1,7 @@
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
 import { createHash } from "node:crypto";
 import {

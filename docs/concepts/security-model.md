@@ -85,7 +85,7 @@ eve hands out the caller's credentials without asking only while the caller is t
 
 | Call                                                                                                 | What eve does                                                                                          |
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| A tool of a user-scoped or `forwardPrincipal` connection, or a remote agent that forwards the caller | Asks the caller first. Only the caller can approve; anyone can cancel.                                 |
+| A tool of a user-scoped or `forwardPrincipal` connection, or a remote agent that forwards the caller | Asks the caller first. Only the caller can approve; anyone signed in can cancel.                       |
 | `ctx.getToken()` for a user-scoped provider in an authored tool                                      | Fails the call with `ConnectionAuthorizationFailedError` and `reason: "caller_confirmation_required"`. |
 
 The failed call's message tells the model to ask the caller to clearly confirm, and to retry only after a reply that plainly confirms the action. eve releases the token on any later message from the caller, so this relies on the model's judgment. To ask with an approval prompt instead, set `approval: once({ when: "principal-mismatch" })` on the tool or agent-wide in `agent.ts`. See [Mismatch approvals](../human-in-the-loop#ask-when-someone-else-is-involved).

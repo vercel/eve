@@ -165,7 +165,7 @@ export interface TurnCaller {
    * The delegating turn's latest sender. A local child inherits it, so a subagent called after
    * someone other than the caller spoke can't hand out the caller's token unasked.
    */
-  readonly sender?: SessionAuthContext | null;
+  readonly senderAuth?: SessionAuthContext | null;
 }
 
 /** Internal transport payload, including framework-owned compatibility and context fields. */

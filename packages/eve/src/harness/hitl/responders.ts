@@ -37,7 +37,7 @@ const INVALID_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const REQUESTER_ONLY_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
 const CALLER_ONLY_APPROVAL_FEEDBACK =
-  "Only the person who requested this action can approve it, because it runs as them.";
+  "Only the person whose message started this turn can approve this action, because it runs as them.";
 const UNAVAILABLE_REASON =
   "The tool this approval was for is no longer available, so the call won't run.";
 const TEMPORARILY_UNAVAILABLE_REASON =
@@ -105,13 +105,13 @@ export function checkResponders(
     if (!gated) {
       // An answer attributed to nobody stays nobody's; only an unattributed one is the caller's.
       const responder = auth !== undefined ? auth : currentResponder();
+      if (requester !== null && responder === null) {
+        refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
+        continue;
+      }
       // A request about the caller's own identity takes anyone's Cancel, and only their Approve.
       if (request.callerApproves === true && decision === "deny") {
         if (responseId !== undefined) admit.push(responseId);
-        continue;
-      }
-      if (requester !== null && responder === null) {
-        refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
         continue;
       }
       if (requester !== null && responder !== null && !sameResponder(requester, responder)) {
@@ -131,15 +131,8 @@ export function checkResponders(
       refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
       continue;
     }
-    if (
-      request.callerApproves === true &&
-      decision === "approve" &&
-      requester !== null &&
-      !sameResponder(requester, responder)
-    ) {
-      refused.push({ reason: CALLER_ONLY_APPROVAL_FEEDBACK, responseId });
-      continue;
-    }
+    // An authored response policy decides who approves, even a request that asks the caller: the
+    // caller's token still goes only to a call the caller approved.
     weigh[responseId] = { expiresAt: now + RESPONSE_TTL_MS, responder };
   }
   return { admit, refused, weigh };

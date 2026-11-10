@@ -41,7 +41,7 @@ Linear uses its native sign-in prompt. A sign-in that an approval's responder ne
 
 ## Overlapping messages
 
-Channels default to `turnPolicy: "steer"`, which adds a new message to the running turn. The turn ID stays the same. A message from anyone the channel lets in joins, and the turn keeps its caller. In a shared thread, eve asks the caller before it uses their identity again; see [Shared sessions](/docs/concepts/security-model#shared-sessions).
+Channels default to `turnPolicy: "steer"`, which adds a new message to the running turn. The turn ID stays the same. A message from anyone the channel lets in joins, and the turn keeps its caller. In a shared thread, eve asks the caller before it uses their identity again; see [Shared sessions](/docs/concepts/security-model#shared-sessions). For channels where several people talk to the agent, such as Slack threads and GitHub issues, set `approval: once({ when: "principal-mismatch" })` in `agent.ts`, so the caller gets an approval prompt instead of a refused call. See [Ask when someone else is involved](/docs/human-in-the-loop#ask-when-someone-else-is-involved).
 
 - Before assistant answer output or local tool execution begins, the message interrupts pending model generation and the turn continues with the correction.
 - Executing tools finish and keep their results before steering reaches the next model call.

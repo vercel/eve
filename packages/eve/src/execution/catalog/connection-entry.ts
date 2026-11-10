@@ -23,7 +23,7 @@ import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { inheritApprovalContext, isApprovalRecheck } from "#approval/evaluation.js";
-import { withCallerConfirmationDefault } from "./caller-confirmation.js";
+import { withCallerConfirmationDefault } from "./caller-confirmation-default.js";
 import { approvalDecision } from "#approval/status.js";
 import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";

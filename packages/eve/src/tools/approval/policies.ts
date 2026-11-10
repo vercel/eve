@@ -3,7 +3,7 @@ import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import { decide } from "#ai/decide.js";
 import { approvalEvaluation } from "#approval/evaluation.js";
-import { principalOf } from "#execution/session/principal.js";
+import { callerSpokeLast, principalOf } from "#context/session-auth.js";
 import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
@@ -77,26 +77,34 @@ export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): Appro
   return (context) => autoApproval(decisionModel, options, context as ApprovalContext);
 }
 
-/** When `always()` and `once()` ask. */
-export interface MismatchApprovalOptions {
+/** Options for `always()`. */
+export interface AlwaysApprovalOptions {
   /**
-   * `"principal-mismatch"` asks only while the turn's caller, its latest sender, and the
-   * session's initiator aren't all the same person. Only the caller can approve; anyone can deny.
+   * `"principal-mismatch"` asks only while someone other than the turn's caller spoke last, and
+   * only the caller can approve; anyone can deny.
+   */
+  readonly when: "principal-mismatch";
+}
+
+/** Options for `once()`. */
+export interface OnceApprovalOptions {
+  /**
+   * `"principal-mismatch"` asks only while someone other than the turn's caller spoke last, and
+   * only the caller can approve; anyone can deny. The caller's approval is remembered for each
+   * person who spoke last.
    */
   readonly when: "principal-mismatch";
 }
 
 /**
  * Returns an `approval` callback that always requires user approval. With
- * `{ when: "principal-mismatch" }`, it asks only while someone other than the caller is involved.
+ * `{ when: "principal-mismatch" }`, it asks only while someone other than the caller spoke last.
  */
-export function always<TInput = unknown>(
-  options?: MismatchApprovalOptions,
-): ApprovalPolicy<TInput> {
+export function always<TInput = unknown>(options?: AlwaysApprovalOptions): ApprovalPolicy<TInput> {
   if (mismatchOption(options, "always") === undefined) return () => "user-approval";
   return (context) => {
-    const principals = mismatch(context as ApprovalContext);
-    if (principals === undefined) return "not-applicable";
+    const { auth } = (context as ApprovalContext).session;
+    if (callerSpokeLast(auth)) return "not-applicable";
     const evaluation = approvalEvaluation(context as ApprovalContext);
     return evaluation === undefined
       ? "user-approval"
@@ -111,10 +119,10 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
 
 /**
  * Remembers a person's approval for this tool for the rest of the session. With
- * `{ when: "principal-mismatch" }`, it asks once for each combination of caller, sender, and
- * initiator, and only while they aren't all the same person.
+ * `{ when: "principal-mismatch" }`, it asks only while someone other than the caller spoke last,
+ * once for each caller and person who spoke last.
  */
-export function once<TInput = unknown>(options?: MismatchApprovalOptions): ApprovalPolicy<TInput> {
+export function once<TInput = unknown>(options?: OnceApprovalOptions): ApprovalPolicy<TInput> {
   if (
     arguments.length > 1 ||
     (arguments.length === 1 && mismatchOption(options, "once") === undefined)
@@ -135,33 +143,21 @@ export function once<TInput = unknown>(options?: MismatchApprovalOptions): Appro
     };
   }
   return (context) => {
-    const principals = mismatch(context as ApprovalContext);
-    if (principals === undefined) return "not-applicable";
+    const { auth } = (context as ApprovalContext).session;
+    if (callerSpokeLast(auth)) return "not-applicable";
     const evaluation = approvalEvaluation(context as ApprovalContext);
     if (evaluation === undefined) return "user-approval";
-    const key = onceKey(principals);
+    const key = JSON.stringify(["once", principalOf(auth.current), principalOf(auth.sender)]);
     const { entry, pending } = evaluation.read(key);
-    if (entry?.outcome === "accepted" && !pending) return evaluation.confirmCaller();
-    // Approving makes the caller the sender, so the decision also covers the narrower
-    // combination that follows it; otherwise the very next call would ask again.
-    const narrower = onceKey({ ...principals, sender: principals.current });
-    return evaluation.ask(
-      { key, ...(narrower !== key && { alsoKeys: [narrower] }) },
-      { callerApproves: true },
-    );
+    if (entry?.outcome === "accepted" && !pending) return evaluation.approveForCaller();
+    return evaluation.ask({ key }, { callerApproves: true });
   };
 }
 
-interface Principals {
-  readonly current: string;
-  readonly initiator: string;
-  readonly sender: string;
-}
-
 function mismatchOption(
-  options: MismatchApprovalOptions | undefined,
+  options: AlwaysApprovalOptions | OnceApprovalOptions | undefined,
   helper: "always" | "once",
-): MismatchApprovalOptions | undefined {
+): AlwaysApprovalOptions | OnceApprovalOptions | undefined {
   if (options === undefined) return undefined;
   if (
     typeof options !== "object" ||
@@ -172,21 +168,4 @@ function mismatchOption(
     throw new TypeError(`${helper}() accepts only { when: "principal-mismatch" }.`);
   }
   return options;
-}
-
-/** The three principals while they aren't all one person; `undefined` when they are. */
-function mismatch(context: ApprovalContext): Principals | undefined {
-  const { auth } = context.session;
-  const principals = {
-    current: principalOf(auth.current),
-    initiator: principalOf(auth.initiator),
-    sender: principalOf(auth.sender),
-  };
-  return principals.current === principals.sender && principals.current === principals.initiator
-    ? undefined
-    : principals;
-}
-
-function onceKey(principals: Principals): string {
-  return JSON.stringify(["once", principals.current, principals.sender, principals.initiator]);
 }

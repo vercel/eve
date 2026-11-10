@@ -21,7 +21,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { always } from "#tools/approval/policies.js";
+import { always, never, once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
@@ -141,6 +141,8 @@ interface ChainRun {
     until?: "response.settled",
   ) => Promise<Stage>;
   readonly send: (auth: User, message: string) => Promise<Stage>;
+  /** Sends `message` without reading, for one that waits for the turn's pause to end. */
+  readonly post: (auth: User, message: string) => Promise<void>;
   readonly stages: Stage[];
 }
 
@@ -152,7 +154,9 @@ async function withChainRun(
   name: string,
   body: (run: ChainRun) => Promise<void>,
   options: {
+    readonly agentApproval?: NonNullable<Parameters<typeof defineAgent>[0]["approval"]>;
     readonly firstApproval?: Approval;
+    readonly secondApproval?: Approval;
     readonly message?: string;
     readonly stubs?: readonly ToolStub[];
     readonly model?: MockLanguageModelV4;
@@ -163,7 +167,7 @@ async function withChainRun(
   const approvedBy: Array<{ tool: string; responder: string }> = [];
   const log: string[] = [];
   const secondRequesters: Array<string | null> = [];
-  const secondApproval: Approval = {
+  const secondApproval: Approval = options.secondApproval ?? {
     request: always(),
     response: ({ request }) => {
       secondRequesters.push(request.principal?.principalId ?? null);
@@ -173,6 +177,7 @@ async function withChainRun(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
+        ...(options.agentApproval !== undefined && { approval: options.agentApproval }),
         model: defineDynamic(() => ({
           model: options.model ?? scriptedModel,
           modelContextWindowTokens: 200_000,
@@ -275,6 +280,14 @@ async function withChainRun(
           });
           return await next("message");
         },
+        async post(auth, message) {
+          await resumeHook(sessionInboxHookToken(continuationToken), {
+            auth,
+            kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload: { message },
+          });
+        },
       });
     } finally {
       stream.dispose();
@@ -359,6 +372,51 @@ describe("approval caller", () => {
       expect(approvedBy).toEqual([
         { tool: "deploy_change", responder: "bob" },
         { tool: "publish_change", responder: "alice" },
+      ]);
+    },
+    60_000,
+  );
+
+  it.each([
+    ["asks too", always()],
+    ["doesn't ask", never()],
+  ] as const)(
+    "lets a tool's response policy name who approves beside an agent-wide mismatch approval when the tool's own policy %s",
+    async (label, request) => {
+      const { approvedBy, seen } = await withChainRun(
+        `approval-caller-actor-${label.replaceAll(" ", "-").replace("'", "")}`,
+        async (run) => {
+          // Bob's message waits for Alice's approval, then joins her turn, so publish_change is
+          // asked while he spoke last.
+          await run.post(BOB, "Publish it for me once it's deployed.");
+          await run.approve(ALICE, "deploy_change");
+          const refused = await run.approve(ALICE, "publish_change", "response.settled");
+          expect(
+            filterEventsByType(refused, "response.settled").map((event) => event.data.outcome),
+          ).toEqual(["refused"]);
+          await run.next("the refused answer's pause");
+          await run.approve(BOB, "publish_change");
+        },
+        {
+          agentApproval: once({ when: "principal-mismatch" }),
+          message: "Use deploy_change, then publish_change.",
+          secondApproval: {
+            request,
+            response: ({ response }) =>
+              response.principal.principalId === "bob"
+                ? { status: "allowed" }
+                : { status: "rejected", reason: "Only Bob can approve publishing." },
+          },
+        },
+      );
+
+      expect(seen).toEqual([
+        { tool: "deploy_change", caller: "alice" },
+        { tool: "publish_change", caller: "alice" },
+      ]);
+      expect(approvedBy).toEqual([
+        { tool: "deploy_change", responder: "alice" },
+        { tool: "publish_change", responder: "bob" },
       ]);
     },
     60_000,

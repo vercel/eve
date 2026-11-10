@@ -1,5 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 import { openRequests } from "#protocol/session-projection/reader.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";

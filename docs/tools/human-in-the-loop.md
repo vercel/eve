@@ -37,7 +37,7 @@ export default defineTool({
 | `always()` | Require approval before every call.                                          |
 | `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
 
-`once()` and `always()` also take `{ when: "principal-mismatch" }` to ask only when someone other than the caller is involved in a shared session. See [Ask when someone else is involved](#ask-when-someone-else-is-involved).
+`once()` and `always()` also take `{ when: "principal-mismatch" }` to ask only while someone other than the caller spoke last in a shared session. See [Ask when someone else is involved](#ask-when-someone-else-is-involved).
 
 Rules:
 
@@ -202,7 +202,7 @@ A remembered approval is consent, not authorization. Authorize the current calle
 
 ### Ask when someone else is involved
 
-In a [shared session](/docs/concepts/security-model#shared-sessions), pass `{ when: "principal-mismatch" }` to `always()` or `once()`. They then ask only while the turn's caller, the person who spoke last, and the person who started the session aren't all one person. In a session with one person, they never ask.
+In a [shared session](/docs/concepts/security-model#shared-sessions), pass `{ when: "principal-mismatch" }` to `always()` or `once()`. They then ask only while someone other than the turn's caller spoke last. While the caller spoke last, including in a session with one person, they never ask.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -218,8 +218,8 @@ export default defineAgent({
 | `always({ when: "principal-mismatch" })` | Asks Alice before each call, until her approval or next message makes her the last to speak. |
 | `once({ when: "principal-mismatch" })`   | Asks Alice once for Bob speaking. Her approval covers Bob speaking again, but not Carol.     |
 
-- Only the caller can approve, because the call runs as them. Anyone can cancel. A tool's `response` policy still applies.
-- Both also ask when the caller didn't start the session. `always()` then asks on every call, and `once()` asks once.
+- Only the caller can approve, because the call runs as them. Anyone signed in can cancel.
+- When the tool has a `response` policy, it decides who can approve instead, as in [Act for the person who asked](#act-for-the-person-who-asked). The caller's token still goes only to a call the caller approved.
 - A call they clear gets the caller's token, even while someone else spoke last. Without one, eve asks before a connection that acts as the caller, and refuses `ctx.getToken()` for a user-scoped provider until the caller replies.
 - Wrap them in your own policy as you would `once()`: pass the context through and return their status unchanged.
 - `once()` remembers for the rest of the session. After Alice approves once for Bob speaking, Bob's later messages can steer her turn into another call of the same tool without asking her. Use `always({ when: "principal-mismatch" })` for tools where each action needs fresh consent.
@@ -249,11 +249,16 @@ export default defineTool({
       ctx.toolInput?.actor === ctx.session.auth.current?.principalId
         ? onMismatch(ctx)
         : "user-approval",
-    response: ({ request, response }) => {
+    response: async ({ request, response, auth }) => {
       if (response.decision === "deny") return { status: "allowed" };
-      return response.principal.principalId === request.toolInput?.actor
-        ? { status: "allowed" }
-        : { status: "rejected", reason: "Only the person this command is for can approve it." };
+      if (response.principal.principalId !== request.toolInput?.actor) {
+        return {
+          status: "rejected",
+          reason: "Only the person this command is for can approve it.",
+        };
+      }
+      await auth.getToken(github); // signs the actor in if they haven't connected
+      return { status: "allowed" };
     },
   },
   async execute({ command }, ctx) {
@@ -268,7 +273,7 @@ The `actor` field is in the schema from the first turn, so the prompt cache is u
 
 ### Authorizing approval responses
 
-By default, only the person whose turn requested a call can approve or cancel it. A [mismatch approval](#ask-when-someone-else-is-involved) also takes anyone's Cancel.
+By default, only the person whose turn requested a call can approve or cancel it. A [mismatch approval](#ask-when-someone-else-is-involved) also takes a Cancel from anyone signed in.
 
 Define a `response` policy to change who can answer, such as a list of designated approvers. The policy replaces the default entirely, so return `{ status: "allowed" }` to accept any responder:
 

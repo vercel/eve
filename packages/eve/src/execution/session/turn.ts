@@ -314,12 +314,12 @@ export class SessionExecution {
       if (pendingInteraction !== undefined) {
         const callbacks = this.input.queue.takeAuthorizations(pendingInteraction.attemptIds);
         if (callbacks !== undefined) {
-          turn.steerWithWaitingMessages();
+          turn.steerIfMessagesWaiting();
           return { delivery: { kind: "deliver", payloads: callbacks } };
         }
         const answer = await turn.takeAnswers(pendingInteraction.requestIds);
         if (answer !== undefined) {
-          turn.steerWithWaitingMessages();
+          turn.steerIfMessagesWaiting();
           return { delivery: answer };
         }
         const steering = await turn.takeSteering({ heldSince });

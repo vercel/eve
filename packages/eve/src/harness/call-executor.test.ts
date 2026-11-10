@@ -292,12 +292,12 @@ it("closes a streaming tool when progress publication fails", async () => {
 
 it.each([
   [
-    "refuses the caller's token when the caller didn't confirm, though they spoke last",
-    false,
+    "refuses the caller's token when it withholds it, though the caller spoke last",
+    "withhold",
     "alice",
   ],
-  ["releases it when the caller confirmed, though someone else spoke last", true, "bob"],
-] as const)("an approved call %s", async (_, callerConfirmed, lastSpeaker) => {
+  ["releases it when it releases it, though someone else spoke last", "release", "bob"],
+] as const)("an approved call %s", async (_, callerToken, lastSpeaker) => {
   const user = (principalId: string): SessionAuthContext => ({
     attributes: {},
     authenticator: "test",
@@ -317,7 +317,7 @@ it.each([
       { callId: "call-1", input: {}, toolName: "release" },
       {
         abortSignal: undefined,
-        callerConfirmed,
+        callerToken,
         definition: {
           approval: () => "user-approval",
           description: "Release with the caller's token.",
@@ -336,8 +336,8 @@ it.each([
     ),
   );
   expect(outcome.settled[0]?.part.output).toMatchObject(
-    callerConfirmed
+    callerToken === "release"
       ? { type: "json", value: { id: "alice", type: "user" } }
-      : { type: "error-text", value: expect.stringContaining("needs their confirmation") },
+      : { type: "error-text", value: expect.stringContaining("until they confirm it") },
   );
 });

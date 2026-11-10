@@ -95,7 +95,7 @@ async function routeProxiedDeliver(
     isSteeringDelivery(
       sourceDelivery,
       { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },
-      { held: true, heldOnPerson: true },
+      "awaiting-caller",
     );
   // Every payload routes against the same state, so a request a `ctx.ask()`
   // answer or typed reply resolved in an earlier payload is hidden from later

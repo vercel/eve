@@ -25,7 +25,7 @@ export default defineEval({
       data: {
         outcome: "refused",
         reason:
-          "Only the person who requested this action can approve it, because it runs as them.",
+          "Only the person whose message started this turn can approve this action, because it runs as them.",
       },
     });
     refused.notEvent("interaction.settled");

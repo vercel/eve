@@ -3,6 +3,7 @@ import type { MockModelRequest, MockModelResponse, MockModelToolCall } from "eve
 /** What people say in the hitl evals. Each sentence selects one script below. */
 export const SAY = {
   changeA: "Alice asks for change A.",
+  changeAAgain: "Alice asks for change A once more.",
   changesAB: "Alice asks for changes A and B together.",
   changeAAndAuthorized: "Alice asks for change A and an authorized change together.",
   authorized: "Alice asks for an authorized change.",
@@ -23,7 +24,8 @@ export const SAY = {
   aliceConfirmsToken: "Alice confirms the release should go out with her release token.",
   bobTeamChange: "Bob adds that the team-only change should go in too.",
   sharedChange: "Alice asks for the shared change.",
-  sharedChangeAgain: "Alice asks for the shared change once more.",
+  bobSharedChange: "Bob adds that the shared change should go in too.",
+  bobSharedChangeAgain: "Bob adds that the shared change should go in once more.",
   actorForBob: "Alice says Bob's change is ready to ship for him.",
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
@@ -74,6 +76,8 @@ export function respond(request: MockModelRequest): MockModelResponse {
 
   const scripts: Record<string, () => MockModelResponse> = {
     [SAY.changeA]: () => run([call("a", "change-a")], () => `Change A: ${outcome("a")}.`),
+    [SAY.changeAAgain]: () =>
+      run([call("a-again", "change-a")], () => `Change A: ${outcome("a-again")}.`),
     [SAY.changesAB]: () =>
       run(
         [call("a", "change-a"), call("b", "change-b")],
@@ -147,10 +151,12 @@ export function respond(request: MockModelRequest): MockModelResponse {
       run([call("team", "team-change")], () => `Team-only change: ${outcome("team")}.`),
     [SAY.sharedChange]: () =>
       run([call("shared", "shared-change")], () => `Shared change: ${outcome("shared")}.`),
-    [SAY.sharedChangeAgain]: () =>
+    [SAY.bobSharedChange]: () =>
+      run([call("bob-shared", "shared-change")], () => `Shared change: ${outcome("bob-shared")}.`),
+    [SAY.bobSharedChangeAgain]: () =>
       run(
-        [call("shared-again", "shared-change")],
-        () => `Shared change: ${outcome("shared-again")}.`,
+        [call("bob-shared-again", "shared-change")],
+        () => `Shared change: ${outcome("bob-shared-again")}.`,
       ),
     [SAY.actorForBob]: () =>
       run(

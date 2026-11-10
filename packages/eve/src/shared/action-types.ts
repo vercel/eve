@@ -137,6 +137,8 @@ const workflowToolCallEntrySchema = z.discriminatedUnion("entryPoint", [
   z.object({ entryPoint: z.literal("receive"), taskId: z.string() }).strict(),
 ]);
 
+// Open on values like `SessionAuthContext`, unlike the strict forwarded-principal wire schema: a
+// task carries back an identity eve already accepted from a channel.
 const senderSchema = z
   .object({
     attributes: z.record(z.string(), z.union([z.string(), z.array(z.string()).readonly()])),
@@ -163,9 +165,10 @@ export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
     clearedBy: clearedBySchema.optional(),
-    /** The caller confirmed the call, so its run gets their token after someone else spoke. */
-    callerConfirmed: z.literal(true).optional(),
-    /** Who spoke last when an unconfirmed call was asked, so its run never gets the caller's token. */
+    /**
+     * The run's `auth.sender` when it isn't the turn's latest sender: the caller, for a call they
+     * confirmed, or who spoke last when a call they didn't confirm was asked.
+     */
     sender: senderSchema.optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),

@@ -2,7 +2,7 @@ import { defineTool } from "eve/tools";
 import { once } from "eve/tools/approval";
 import { z } from "zod";
 
-/** A change the caller approves once for each mix of caller, sender, and initiator. */
+/** A change the caller approves once for each person who speaks in their turn. */
 export default defineTool({
   description: "Make the shared change.",
   inputSchema: z.object({}),

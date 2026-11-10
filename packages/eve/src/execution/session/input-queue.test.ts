@@ -2,7 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 
 function signInCallback(attemptId: string) {
   return {

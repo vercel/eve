@@ -85,6 +85,10 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    *   Terminal for the turn.
    * - `"sign_in_unavailable"`: a turn a schedule started needed a sign-in.
    *   Scheduled turns never ask for one. Terminal.
+   * - `"caller_confirmation_required"`: a `principalType: "user"` token was
+   *   requested while someone other than the turn's caller spoke last, for a
+   *   call the caller didn't confirm. The message asks the model to get the
+   *   caller's clear confirmation. Terminal for the call.
    */
   readonly reason?: string;
 

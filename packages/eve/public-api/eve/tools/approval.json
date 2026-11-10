@@ -1,4 +1,5 @@
 [
+  "AlwaysApprovalOptions",
   "Approval",
   "ApprovalConfiguration",
   "ApprovalContext",
@@ -15,7 +16,7 @@
   "ApprovalStatus",
   "AutoApprovalOptions",
   "ConnectionToolAnnotations",
-  "MismatchApprovalOptions",
+  "OnceApprovalOptions",
   "always",
   "auto",
   "never",

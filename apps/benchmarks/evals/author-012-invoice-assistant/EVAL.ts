@@ -462,7 +462,7 @@ async function toolContext(
   } = {
     session: {
       id: sessionId,
-      auth: { current, initiator: current },
+      auth: { current, initiator: current, sender: current },
       turn: { id: "turn-1", sequence: 0 },
     },
     // eve gives every call its own ID; a tool may key idempotent writes on it.

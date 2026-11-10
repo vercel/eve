@@ -1,6 +1,5 @@
 import {
   AuthKey,
-  InitiatorAuthKey,
   ParentSessionKey,
   type Session,
   SessionIdKey,
@@ -8,7 +7,7 @@ import {
   SessionPredecessorKey,
 } from "#context/keys.js";
 import type { ContextReader } from "#context/key.js";
-import { readSender } from "#context/sender.js";
+import { readSessionAuth } from "#context/session-auth.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
@@ -23,11 +22,7 @@ export const sessionProvider = {
 
     return {
       value: Object.freeze({
-        auth: {
-          current: currentAuth,
-          initiator: ctx.get(InitiatorAuthKey) ?? currentAuth,
-          sender: readSender(ctx, currentAuth),
-        },
+        auth: readSessionAuth(ctx, currentAuth),
         parent: ctx.get(ParentSessionKey),
         predecessor: ctx.get(SessionPredecessorKey),
         sessionId: ctx.require(SessionIdKey),

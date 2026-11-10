@@ -1,9 +1,8 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
-import {
-  senderBesidesCaller,
-  withCallerConfirmation,
-} from "#runtime/connections/caller-confirmation.js";
+import { contextStorage } from "#context/container.js";
+import { senderBesidesCaller } from "#context/session-auth.js";
+import { withCallerToken, type CallerToken } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -111,10 +110,10 @@ export async function executeToolCall(
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
     /**
-     * Whether an approved call gets the caller's token, decided when its approval settled. A call
-     * that only stopped for a sign-in leaves it to who spoke last.
+     * What an approved call does with the caller's token, decided when its approval settled. A
+     * call that only stopped for a sign-in leaves it to who spoke last.
      */
-    readonly callerConfirmed?: boolean;
+    readonly callerToken?: CallerToken;
     /**
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
@@ -182,7 +181,7 @@ export async function executeToolCall(
     // A call a person approved runs on their acceptance; the recheck only confirms it still may.
     const clearance =
       (approval === "recheck" && input.view !== undefined
-        ? approvedClearance(input.view().projection.view, callId, input.callerConfirmed === true)
+        ? approvedClearance(input.view().projection.view, callId, input.callerToken === "release")
         : undefined) ?? decision.clearance;
     if (clearance === undefined) throw new Error(`Call "${callId}" has no clearance to run.`);
     let output: unknown;
@@ -207,9 +206,9 @@ export async function executeToolCall(
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
           // Usage the tool records belongs to its call, including while a streaming tool iterates,
-          // and so does the caller's confirmation.
-          await withCallerConfirmation(
-            input.callerConfirmed ?? (clearance.callerConfirmed === true ? true : undefined),
+          // and so does what it does with the caller's token.
+          await withCallerToken(
+            input.callerToken ?? (clearance.callerConfirmed === true ? "release" : undefined),
             () =>
               withUsageCall(callId, async () => {
                 const executed = invokeTool(
@@ -530,7 +529,7 @@ export async function executeInlineCalls(input: {
                   ...approvalRequest(call, definition),
                   remember: executed.remember,
                   ...(executed.callerApproves && { callerApproves: true as const }),
-                  ...senderBesidesCaller(),
+                  ...senderBesidesCaller(contextStorage.getStore()),
                 }
               : undefined;
           return { call, executed, approval };

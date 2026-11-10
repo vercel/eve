@@ -64,24 +64,25 @@ interface SessionAuth {
 
 ### Approval helpers
 
-`always()` and `once()` take a `when` option. With `when: "principal-mismatch"`, they ask only
-while `auth.current`, `auth.sender`, and `auth.initiator` aren't all the same person:
+`always()` and `once()` take a `when` option, typed `AlwaysApprovalOptions` and
+`OnceApprovalOptions` after `AutoApprovalOptions`. With `when: "principal-mismatch"`, they ask
+only while `auth.sender` isn't `auth.current`:
 
 ```ts
 import { always, once } from "eve/tools/approval";
 
-// Ask on every call while someone other than the caller is involved.
+// Ask on every call while someone other than the caller spoke last.
 approval: always({ when: "principal-mismatch" }),
 
-// Ask once for each combination of caller, sender, and initiator.
+// Ask once for each person who speaks in the caller's turn.
 approval: once({ when: "principal-mismatch" }),
 ```
 
 Both stay plain request policies, so they work on a tool, on a connection, as the `request` of
 an approval configuration, and as the agent-wide `approval` in `agent.ts`, where one line
-covers every tool. Rule 3 is
-the caller-and-sender half of the same check, applied by eve wherever it hands out the caller's
-token. The helpers bring it, and the initiator, to tools that use no credentials.
+covers every tool. They make the same comparison rule 3 makes wherever eve hands out the
+caller's token, so tools that use no credentials can ask on the same terms. The initiator isn't
+compared: a caller who spoke last in a session someone else started isn't asked.
 
 ## Semantics
 
@@ -110,24 +111,18 @@ approver's, such as a grant on the caller's behalf, keeps working.
 
 ### Mismatch approvals
 
-With `when: "principal-mismatch"`, a helper returns `"not-applicable"` when caller, sender, and
-initiator are one person, which is every call in a session with one person. Otherwise:
+With `when: "principal-mismatch"`, a helper returns `"not-applicable"` while the caller spoke
+last, which is every call in a session with one person. When Alice comments during Bob's turn,
+`always` asks Bob, and again after each time she speaks; `once` asks Bob once for Alice, and
+not again.
 
-| Mismatch                   | Example                               | `always`                                  | `once`                                  |
-| -------------------------- | ------------------------------------- | ----------------------------------------- | --------------------------------------- |
-| Sender isn't the caller    | Alice comments during Bob's turn      | Asks Bob once, then again when she speaks | Asks Bob once for Alice, then not again |
-| Caller isn't the initiator | Alice's turn in a session Bob started | Asks Alice on every call                  | Asks Alice once                         |
-
-- Only the caller can approve, because the call runs on their identity. Anyone can deny. A
-  tool's own `response` policy still applies. Today, without a `response` policy, only the
-  requester can answer at all, so letting anyone deny is new for these requests.
-- `once` remembers for the tool and for that combination of caller, sender, and initiator,
-  until the session ends. Bob's approval after Alice steers covers Alice steering Bob again. It
-  doesn't cover Carol. Approving makes Bob the sender, so the approval also covers the same
-  combination with Bob as sender: he approved with more people involved. Without that, in a
-  session Carol started, Bob would be asked again on the very next call.
-- The `always` cell for a sender mismatch assumes the caller started the session. Otherwise
-  the caller-isn't-initiator row also holds, and `always` asks on every call.
+- Only the caller can approve, because the call runs on their identity. Anyone signed in can
+  deny. Today, without a `response` policy, only the requester can answer at all, so letting
+  others deny is new for these requests.
+- A tool's own `response` policy, when it has one, decides who can approve instead, as the
+  `actor` pattern below needs. The caller's token still goes only to a call the caller approved.
+- `once` remembers for the tool and for that caller and sender until the session ends. Bob's
+  approval after Alice steers covers Alice steering Bob again. It doesn't cover Carol.
 - Principals are compared by identity, as steering compares them today: unauthenticated and
   anonymous principals are one person, and an anonymous person steering an authenticated
   caller's turn is a mismatch.
@@ -166,13 +161,14 @@ model: only a reply that plainly confirms this action counts. A reply such as "l
 something else, or anything ambiguous doesn't confirm it, and the model asks again instead of
 retrying. For example:
 
-> Alice spoke after Bob started this request, so using Bob's GitHub access needs his
-> confirmation. Ask Bob to clearly confirm this action. Retry only after a reply from Bob that
-> plainly confirms it. If his reply is unclear or about something else, ask again instead of
-> retrying.
+> Someone else has spoken since the person whose message started this turn, so this action
+> can't use their github access until they confirm it. Ask the person whose message started
+> this turn to clearly confirm this action. Retry only after a reply from them that plainly
+> confirms it. If their reply is unclear or about something else, ask again instead of retrying.
 
-This leans on the model's judgment and isn't a guarantee. Traces record the reason, never the
-names. A tool that wants a
+The message names roles, not people: channels don't give every person a display name, and the
+model already sees who said what. This leans on the model's judgment and isn't a guarantee.
+Traces record the reason, never the names. A tool that wants a
 prompt sets a mismatch helper as its `approval`, and the docs recommend one agent-wide, below.
 Pausing `execute` for an approval, as a sign-in does, would re-run every authored tool from the
 top after the answer, so eve doesn't.
@@ -193,8 +189,8 @@ export default defineAgent({
 });
 ```
 
-The docs and templates for multiplayer channels recommend this line, so the caller gets an
-approval prompt rather than a refused call. The refusal stays the default for agents without
+The channel and human-in-the-loop docs recommend this line for multiplayer channels, so the
+caller gets an approval prompt rather than a refused call. The refusal stays the default for agents without
 it.
 
 An approved call gets the caller's token when the caller approved it, or when the caller was
@@ -336,8 +332,8 @@ default. They use the approval helpers, or read `auth.sender` in their own polic
 - **Role checks.** A tool that decides from `auth.current` alone doesn't see who else is
   steering. The auth and human-in-the-loop docs show the approval helpers for it.
 - **Docs.** "A turn runs as one principal" is restated: the caller is fixed, and other people's
-  messages can join. The multiplayer channel docs and templates recommend
-  `approval: once({ when: "principal-mismatch" })` in `agent.ts`.
+  messages can join. The channel docs recommend
+  `approval: once({ when: "principal-mismatch" })` in `agent.ts` for multiplayer channels.
 - **Additive API.** `SessionAuth.sender`, the `when` option on `always()` and `once()`, and the
   `caller_confirmation_required` reason.
 
@@ -345,10 +341,12 @@ E2E evals, in `agent-tools-hitl/evals/hitl/multiplayer`: Bob's message joins Ali
 her approval settles (replacing `other-person-message-waits`); a tool reads Bob as
 `auth.sender`; an authored tool's token is refused with `caller_confirmation_required` until
 Alice replies; `always({ when })` asks Alice after Bob speaks and refuses Bob's approval; anyone
-can cancel that approval; `once({ when })` asks Alice once in a session Bob started; a session
+signed in can cancel that approval; `once({ when })` asks Alice once for Bob and not when he
+speaks again; a session
 with one person is never asked; a fixture tool with an `actor` field asks Bob and runs with his
 token. In `authorization-principal-after-other-speaker`, Bob's message now joins once Alice's
-sign-in completes. The fixtures start no external services, so the connection default, the
+sign-in completes. An integration test covers a tool's `response` policy naming the approver
+beside the agent-wide line. The fixtures start no external services, so the connection default, the
 local-subagent inheritance, and the per-call confirmation of approved calls are covered by unit
 and integration tests instead.
 
@@ -368,7 +366,4 @@ and integration tests instead.
   its token per request, so a refusal can come mid-command.
 - Whether plain `once()` should remember for each caller. Today it remembers for the tool, so
   Bob's approval covers Alice's later calls in the same session.
-- Whether the default should also ask when the caller isn't the initiator. As drafted it
-  compares only the caller and the sender, so the incident runs as Alice unless a helper or the
-  actor practice covers the tool.
 - A per-session access list. Channels still decide who reaches a session.

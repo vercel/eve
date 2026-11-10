@@ -1,3 +1,4 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
@@ -60,13 +61,16 @@ export function requireClearance(clearance: Clearance, callId: string): void {
     throw new Error(`Call "${callId}" can't run on the clearance of call "${clearance.callId}".`);
 }
 
-/** What a workflow task the runtime runs outside the step keeps of its call's clearance. */
-export function taskClearance(clearance: Clearance | undefined): {
-  readonly clearedBy?: ClearedBy;
-  readonly callerConfirmed?: true;
-} {
+/**
+ * What a workflow task the runtime runs outside the step keeps of its call's clearance: what
+ * cleared it, and the caller as its run's sender when they confirmed the call.
+ */
+export function taskClearance(
+  clearance: Clearance | undefined,
+  caller: SessionAuthContext | null,
+): { readonly clearedBy?: ClearedBy; readonly sender?: SessionAuthContext | null } {
   return {
     ...(clearance?.clearedBy !== undefined && { clearedBy: clearance.clearedBy }),
-    ...(clearance?.callerConfirmed === true && { callerConfirmed: true }),
+    ...(clearance?.callerConfirmed === true && { sender: caller }),
   };
 }

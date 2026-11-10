@@ -19,5 +19,9 @@ export type {
   ApprovalStatus,
   ConnectionToolAnnotations,
 } from "#public/definitions/approval.js";
-export type { AutoApprovalOptions, MismatchApprovalOptions } from "#tools/approval/policies.js";
+export type {
+  AlwaysApprovalOptions,
+  AutoApprovalOptions,
+  OnceApprovalOptions,
+} from "#tools/approval/policies.js";
 export { always, auto, never, once } from "#tools/approval/policies.js";

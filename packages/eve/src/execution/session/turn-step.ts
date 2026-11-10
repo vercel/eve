@@ -62,7 +62,8 @@ import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import { continueTurnAuth, principalOf, recordSender } from "#execution/session/principal.js";
+import { continueTurnAuth, recordSender } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -424,7 +425,7 @@ async function runSessionStepBody(
     // step sees one sender: a new turn starts with its caller, a message joining the turn makes
     // its sender the last to speak, and the caller answering an approval makes them so again.
     // Someone else's answer settles a request the model made for the caller; it speaks no words.
-    // A session's first turn keeps the sender its run seeded, as a delegating parent's.
+    // A session's first turn keeps the sender its run started with, such as a delegating parent's.
     if (startedBetweenTurns && initialEmissionState.sessionStarted) ctx.delete(SenderAuthKey);
     if (answers !== undefined || ignoredActiveDelivery) {
       turnAuth = previousAuth;
@@ -437,8 +438,8 @@ async function runSessionStepBody(
       if (resolved?.message !== undefined) recordSender(ctx, previousAuth, delivery.auth);
     }
     // A delegating parent passes its own latest sender down with the message it sends.
-    if (resolved?.message !== undefined && delivery?.caller?.sender !== undefined) {
-      recordSender(ctx, turnAuth, delivery.caller.sender);
+    if (resolved?.message !== undefined && delivery?.caller?.senderAuth !== undefined) {
+      recordSender(ctx, turnAuth, delivery.caller.senderAuth);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);

@@ -168,9 +168,9 @@ describe('approval helpers with { when: "principal-mismatch" }', () => {
     ["always", always({ when })],
     ["once", once({ when })],
   ] as const)(
-    "%s doesn't ask while caller, sender, and initiator are one person",
+    "%s doesn't ask while the caller spoke last, even in a session someone else started",
     async (_, policy) => {
-      expect(await evaluateApproval(policy, turn(alice, alice, alice))).toEqual({ denied: false });
+      expect(await evaluateApproval(policy, turn(alice, alice, bob))).toEqual({ denied: false });
     },
   );
 
@@ -182,15 +182,15 @@ describe('approval helpers with { when: "principal-mismatch" }', () => {
     });
   });
 
-  it("keeps the request caller-only when a tool's own policy also asks", async () => {
+  it("lets a tool's own ask decide who approves when it also asks", async () => {
     const agentWide = always({ when });
     const toolOwn = always();
     expect(
       await evaluateApproval(strictestApproval([agentWide, toolOwn]), turn(alice, bob, alice)),
-    ).toEqual({ awaitsPerson: true, callerApproves: true, denied: false });
+    ).toEqual({ awaitsPerson: true, denied: false });
   });
 
-  it("once remembers the caller's approval for its combination and the one approving leads to", async () => {
+  it("once remembers the caller's approval for each person who spoke last", async () => {
     const policy = once({ when });
     // Carol started the session, Bob is the caller, and Alice spoke last.
     const asked = await evaluateApproval(policy, turn(bob, alice, carol));
@@ -204,16 +204,13 @@ describe('approval helpers with { when: "principal-mismatch" }', () => {
       ),
     };
 
-    // Alice steering Bob again, and Bob's next call once he is the sender, run on his approval
-    // and get his token.
-    for (const context of [turn(bob, alice, carol), turn(bob, bob, carol)]) {
-      expect(await evaluateApproval(policy, context, { memory })).toEqual({
-        callerConfirmed: true,
-        clearedBy: { policy: "approval" },
-        denied: false,
-      });
-    }
-    // Dave speaking is a new combination, so Bob is asked again.
+    // Alice steering Bob again runs on his approval and gets his token.
+    expect(await evaluateApproval(policy, turn(bob, alice, carol), { memory })).toEqual({
+      callerConfirmed: true,
+      clearedBy: { policy: "approval" },
+      denied: false,
+    });
+    // Dave speaking is someone new, so Bob is asked again.
     expect(
       await evaluateApproval(policy, turn(bob, user("dave"), carol), { memory }),
     ).toMatchObject({ awaitsPerson: true });

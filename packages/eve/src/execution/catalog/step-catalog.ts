@@ -33,7 +33,7 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
-import { withCallerConfirmationDefault } from "./caller-confirmation.js";
+import { withCallerConfirmationDefault } from "./caller-confirmation-default.js";
 import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
 import { createSkillLoader, type CatalogSkill } from "./skills.js";
 
@@ -98,7 +98,7 @@ export function callableOf(input: CatalogInput): Callable {
   const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
   // Only what this session sees, so a delegated session of the same agent doesn't reach or search
   // for root-only entries. Every entry runs under the agent-wide approval policy.
-  const entries = withForwardingConfirmation(
+  const entries = withCallerConfirmationDefaultForRemoteAgents(
     withAgentApprovalOnEntries(
       new Map(
         [...input.table.entries]
@@ -295,10 +295,10 @@ function failure(path: readonly string[], message: string): StandardSchemaV1.Fai
 }
 
 /**
- * A remote agent that forwards the caller's principal acts as the caller, so its calls take rule
- * 3's default ask, as a connection that acts as the caller does.
+ * A remote agent that forwards the caller's principal acts as the caller, so its calls take the
+ * caller-confirmation default, as a connection that acts as the caller does.
  */
-function withForwardingConfirmation(
+function withCallerConfirmationDefaultForRemoteAgents(
   entries: Map<string, HarnessToolDefinition>,
   bundle: CompiledBundle | undefined,
 ): Map<string, HarnessToolDefinition> {

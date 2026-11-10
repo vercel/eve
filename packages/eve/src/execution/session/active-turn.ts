@@ -181,8 +181,14 @@ export class ActiveTurn {
    * pause ends, so the next step stops before the model runs and the step after
    * it reads them.
    */
-  steerWithWaitingMessages(): void {
-    if (this.input.queue.hasSteering(this.admitted, this.identity, { held: this.relaysPrompt }))
+  steerIfMessagesWaiting(): void {
+    if (
+      this.input.queue.hasSteering(
+        this.admitted,
+        this.identity,
+        this.relaysPrompt ? "paused" : undefined,
+      )
+    )
       this.steeringController.abort();
   }
 
@@ -275,7 +281,7 @@ export class ActiveTurn {
       this.admitted.delete(sequence);
       // Someone else's answers settle the paused turn's request, but the rest of their
       // delivery waits for the pause to end, as their messages do.
-      const split = isSteeringDelivery(delivery, this.identity, { held: true, heldOnPerson: true })
+      const split = isSteeringDelivery(delivery, this.identity, "awaiting-caller")
         ? undefined
         : splitAnswers(delivery);
       this.input.queue.replaceDelivery(sequence, split?.rest);
@@ -376,7 +382,9 @@ export class ActiveTurn {
         this.admitted.delete(sequence);
         continue;
       }
-      if (isSteeringMessage(routed.remainder, this.identity, { held: this.relaysPrompt }))
+      if (
+        isSteeringMessage(routed.remainder, this.identity, this.relaysPrompt ? "paused" : undefined)
+      )
         steered = true;
     }
     return steered;

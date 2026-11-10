@@ -7,7 +7,8 @@ import { SAY, aliceSession, asAlice } from "../helpers.ts";
  * out without confirmation.
  */
 export default defineEval({
-  description: "A session with one person is never asked by mismatch approvals or rule 3.",
+  description:
+    "A session with one person is never asked by mismatch approvals or the caller-confirmation default.",
   tags: ["hitl", "approval", "multiplayer"],
   timeoutMs: 60_000,
   async test(t) {

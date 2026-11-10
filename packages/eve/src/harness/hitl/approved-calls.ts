@@ -1,4 +1,5 @@
 import type { ApprovalMemory } from "#approval/evaluation.js";
+import type { CallerToken } from "#runtime/connections/caller-confirmation.js";
 import type { ModelMessage, TelemetryOptions } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -114,8 +115,8 @@ export async function runApprovedCalls(input: {
   readonly telemetry?: TelemetryOptions;
   /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
   readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
-  /** Whether each call gets the caller's token; see `executeToolCall`'s `callerConfirmed`. */
-  readonly confirmationOf?: (approval: ApprovedCall) => boolean | undefined;
+  /** What each call does with the caller's token; see `executeToolCall`'s `callerToken`. */
+  readonly callerTokenOf?: (approval: ApprovedCall) => CallerToken | undefined;
   /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
   /** The batch's sign-in reports, shared by every group of calls resumed together. */
@@ -139,14 +140,14 @@ export async function runApprovedCalls(input: {
       }
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
-        const callerConfirmed = input.confirmationOf?.(approval);
+        const callerToken = input.callerTokenOf?.(approval);
         return await executeToolCall(
           call,
           {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
-            ...(callerConfirmed !== undefined && { callerConfirmed }),
+            ...(callerToken !== undefined && { callerToken }),
             beforeResult: (failure) => reportSignIns(approval, failure),
           },
           "recheck",

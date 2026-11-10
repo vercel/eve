@@ -98,14 +98,8 @@ async function dispatchCoordination(
       auth: {
         current: prepared.auth,
         initiator: prepared.initiatorAuth,
-        // A run the caller confirmed acts as though they spoke last, as the call would in the step.
         // `null` is a sender too: an anonymous person who spoke last.
-        sender:
-          task.callerConfirmed === true
-            ? prepared.auth
-            : task.sender !== undefined
-              ? task.sender
-              : prepared.senderAuth,
+        sender: task.sender !== undefined ? task.sender : prepared.senderAuth,
       },
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,
