@@ -59,6 +59,21 @@ const LEGACY_NEXT_PEER_SERVICE_VERCEL_CONFIG = NEXT_PEER_SERVICE_VERCEL_CONFIG.r
   '    web: { framework: "nextjs", root: "apps/web" },',
 );
 
+/**
+ * Next.js hosting from apps/web. Without it, Vercel detects the root `next`
+ * dependency, runs the root `build` script (`eve build`), and finds no `.next`.
+ */
+const NEXT_HOSTED_VERCEL_JSON = `${JSON.stringify(
+  {
+    $schema: "https://openapi.vercel.sh/vercel.json",
+    framework: "nextjs",
+    buildCommand: "node node_modules/next/dist/bin/next build apps/web",
+    outputDirectory: "apps/web/.next",
+  },
+  null,
+  2,
+)}\n`;
+
 const TANSTACK_REGISTRY_VITE_CONFIG = WEB_APP_TANSTACK_TEMPLATE_FILES["vite.config.ts"];
 const TANSTACK_HOSTED_VITE_CONFIG = `import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
@@ -226,6 +241,9 @@ export async function applyWebSetup(
         vercelConfig,
         ...INSTALLER_VERCEL_CONFIGS.filter((config) => config !== vercelConfig),
       ],
+      vercelJson:
+        plan.framework === "next" && !plan.rootWebChat ? NEXT_HOSTED_VERCEL_JSON : undefined,
+      vercelJsons: [NEXT_HOSTED_VERCEL_JSON],
     },
     deps,
   );

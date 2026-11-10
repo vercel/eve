@@ -46,6 +46,7 @@ project/
 │   │   └── s/                # conversation pages
 │   └── next.config.ts
 ├── package.json              # dependencies and scripts
+├── vercel.json               # Next.js hosting only
 └── vercel.ts                 # Vercel services only
 ```
 
@@ -353,10 +354,12 @@ eve deploy
 
 The app and each agent deploy together as one Vercel project. With Next.js hosting and an `agents/` workspace, `next build` also writes `.eve/agent-summary.json` in the `eveRoot` directory, which Vercel uses to show each agent's tools, schedules, and connections on the project overview. See [Deploy to Vercel](../deployment/vercel) for credentials and sandboxes.
 
-<Callout type="warning" title="Next.js hosting from apps/web">
-  When the installer puts a Next.js-hosted app in `apps/web/`, Vercel doesn't build it by default.
-  In your Vercel project settings, set the Build Command to `npm run build:web` and the Output
-  Directory to `apps/web/.next`.
+<Callout type="info" title="Next.js hosting from apps/web">
+  Vercel looks for a Next.js app at the project root. When the installer puts a Next.js-hosted app
+  in `apps/web/`, it writes a root `vercel.json` that builds `apps/web` and serves `apps/web/.next`.
+  If the project already has a `vercel.json` or `vercel.ts`, the installer leaves it alone: set
+  `buildCommand` to `node node_modules/next/dist/bin/next build apps/web` and `outputDirectory` to
+  `apps/web/.next` yourself.
 </Callout>
 
 ### Run a production build locally
@@ -383,7 +386,7 @@ With several agents, a root `eve build` doesn't build them for `next start`. Run
 | You see                                                        | Fix                                                                                                                        |
 | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `401` "Production auth is not configured"                      | Replace `placeholderAuth()`. See [Authenticate users](#authenticate-users)                                                 |
-| "The Next.js output directory `.next` was not found" on deploy | Set the Build Command and Output Directory. See [Deploy to Vercel](#deploy-to-vercel)                                      |
+| "The Next.js output directory `.next` was not found" on deploy | Point the build at `apps/web`. See [Deploy to Vercel](#deploy-to-vercel)                                                   |
 | The reply stops after the first message                        | Change the URL with `History.prototype.replaceState`. See [Give each conversation a URL](#give-each-conversation-a-url)    |
 | Messages repeat or vanish after a reload                       | Save `session` from `onSessionChange` as is                                                                                |
 | `next dev` times out waiting for the agent                     | Raise `devServerTimeoutMs`                                                                                                 |

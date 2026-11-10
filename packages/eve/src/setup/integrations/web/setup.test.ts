@@ -75,6 +75,18 @@ export default await withEve({
 });
 `;
 
+const NEXT_HOSTED_VERCEL_JSON = `{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "node node_modules/next/dist/bin/next build apps/web",
+  "outputDirectory": "apps/web/.next"
+}
+`;
+const SCAFFOLD_VERCEL_JSON = `{
+  "$schema": "https://openapi.vercel.sh/vercel.json"
+}
+`;
+
 describe("Web setup", () => {
   it("presents the hosting topology with concise guidance", async () => {
     const effects = deps();
@@ -371,6 +383,94 @@ describe("Web setup", () => {
       expect(effects.removeFile).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ["no vercel.json", {}],
+    ["the scaffold's vercel.json", { "/project/vercel.json": SCAFFOLD_VERCEL_JSON }],
+  ])("points Vercel at the apps/web build for Next.js hosting over %s", async (_label, files) => {
+    const effects = withFiles(deps(), files);
+
+    await applyWebSetup(
+      { framework: "next", hosting: "next", packageManager: "pnpm" },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/vercel.json",
+      NEXT_HOSTED_VERCEL_JSON,
+      { force: true },
+    );
+  });
+
+  it("needs no vercel.json for a root Next.js app", async () => {
+    const effects = deps();
+
+    await applyWebSetup(
+      { framework: "next", hosting: "next", packageManager: "pnpm", rootWebChat: true },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.writeTextFile).not.toHaveBeenCalledWith(
+      "/project/vercel.json",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ["vercel.json", { "/project/vercel.json": '{ "crons": [] }\n' }],
+    ["vercel.ts", { "/project/vercel.ts": "export default {};\n" }],
+  ])("leaves the build settings to an authored %s for Next.js hosting", async (_label, files) => {
+    const effects = withFiles(deps(), files);
+
+    await applyWebSetup(
+      { framework: "next", hosting: "next", packageManager: "pnpm" },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.writeTextFile).not.toHaveBeenCalledWith(
+      "/project/vercel.json",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("replaces the Next.js hosting vercel.json when switching to Vercel services", async () => {
+    const effects = withFiles(deps(), {
+      "/project/vercel.json": NEXT_HOSTED_VERCEL_JSON,
+      "/project/package.json": '{"scripts":{"dev":"eve dev"}}\n',
+    });
+
+    await applyWebSetup(
+      { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.removeFile).toHaveBeenCalledWith("/project/vercel.json");
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      SERVICES_VERCEL_CONFIG,
+      { force: true },
+    );
+  });
+
+  it("refuses Vercel services over an authored vercel.json before writing anything", async () => {
+    const effects = withFiles(deps(), { "/project/vercel.json": '{ "crons": [] }\n' });
+
+    await expect(
+      applyWebSetup(
+        { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+        contexts().apply,
+        effects,
+      ),
+    ).rejects.toThrow("/project/vercel.json already exists");
+    expect(effects.writeTextFile).not.toHaveBeenCalled();
+    expect(effects.removeFile).not.toHaveBeenCalled();
+  });
 
   it("leaves an authored vercel.ts alone for Next.js hosting", async () => {
     const effects = withFiles(deps(), { "/project/vercel.ts": "export default {};\n" });
