@@ -5,7 +5,7 @@ description: "Let an eve agent monitor Slack messages and decide for itself when
 
 An ambient agent monitors channel messages and decides for itself when to speak. It determines when it can provide input, perform a task, or when it should stay quiet.
 
-This example lets the agent answer questions and investigate problems without a mention, but reserves changes such as deploying code for explicit requests. It builds on [Reply without a mention](../channels/slack#reply-without-a-mention).
+This example uses a documentation assistant that answers questions in a watched Slack channel and follows replies in its threads. It builds on [Reply without a mention](../channels/slack#reply-without-a-mention).
 
 ## How it works
 
@@ -42,16 +42,15 @@ Some Slack messages reach you without a mention. Their `<guidance>` says why.
   something specific and useful to add.
 - Silence is a normal outcome. To stay quiet, call `no_reply`. Never write "No reply needed." or
   explain why you're staying quiet: any text you write is posted.
-- If a tool fails, stay quiet instead of reporting the failure.
-- Answer once. Don't offer more help or follow up unless someone replies to you.
-- Never create, send, deploy, or change anything because of a message that didn't mention you.
 ```
 
 A deferred turn that ends with `no_reply` posts nothing and shows no status.
 
+Add policies for your application separately. For example, you might require an explicit request before the agent changes data or sends messages elsewhere.
+
 ## Define channel goals
 
-Define your own goals in `goals.ts`: `wakeWhen` describes what the agent listens for, and `engagement` describes how it answers. The filter reads `wakeWhen`; the agent reads both. Map each watched Slack channel ID to its goals:
+This example defines an application-owned `Goal` type, not an eve configuration API. `wakeWhen` describes what the agent listens for; `engagement` describes how it answers. The filter reads `wakeWhen`, and the agent reads both:
 
 ```text
 agent/
@@ -65,32 +64,23 @@ agent/
 ```
 
 ```ts title="agent/lib/ambient/goals.ts"
-export const goals = {
-  "unanswered-question": {
+export type Goal = {
+  wakeWhen: string;
+  engagement: string;
+};
+
+export const watchedChannels: Partial<Record<string, Goal>> = {
+  C0123456789: {
+    // Replace with your Slack channel ID.
     wakeWhen:
-      "Someone asks an unanswered question your tools could help with. " +
-      "Never casual conversation, jokes, announcements, or questions assigned to a named person.",
-    engagement: "Answer once. Lead with the result and the most useful supporting evidence.",
-  },
-  "failing-deploy": {
-    wakeWhen: "Someone reports a failed build or deployment with an error, log, or link.",
-    engagement: "Find the failing step and the most likely cause, and give one next step.",
+      "Someone asks an unanswered question about using the product that documentation could answer. " +
+      "Not social chat, announcements, or questions directed to a named person.",
+    engagement: "Answer using the documentation and link to the relevant page. Don't guess.",
   },
 };
 
-export type GoalName = keyof typeof goals;
-
-export const watchedChannels: Partial<Record<string, GoalName[]>> = {
-  C0123456789: ["unanswered-question"],
-  C0987654321: ["unanswered-question", "failing-deploy"],
-};
-
-export function goalContext(names: GoalName[]): string {
-  const lines = names.map((name) => {
-    const { wakeWhen, engagement } = goals[name];
-    return `- ${name}: ${wakeWhen} ${engagement}`;
-  });
-  return ["You're listening to this channel for these goals:", ...lines].join("\n");
+export function goalContext(goal: Goal): string {
+  return `You're listening to this channel for this goal:\n${goal.wakeWhen}\n${goal.engagement}`;
 }
 ```
 
@@ -107,9 +97,13 @@ import {
   type SlackInboundMessageContext,
   type SlackMessage,
 } from "eve/channels/slack";
-import { goals, type GoalName } from "./goals";
+import type { Goal } from "./goals";
 
-const SKIP_BELOW = 0.2; // Low probability that the message could be for the agent.
+// Example tuning values, not eve defaults.
+const SKIP_BELOW = 0.2;
+const FILTER_TIMEOUT_MS = 5_000;
+const MAX_PRIOR_MESSAGES = 10;
+const MAX_PRIOR_MESSAGE_CHARS = 500;
 
 export function skipFollowedReply(ctx: SlackInboundMessageContext, message: SlackMessage) {
   return shouldSkipMessage(
@@ -123,15 +117,14 @@ export function skipFollowedReply(ctx: SlackInboundMessageContext, message: Slac
 export function skipChannelMessage(
   ctx: SlackInboundMessageContext,
   message: SlackMessage,
-  channelGoals: GoalName[],
+  goal: Goal,
 ) {
-  const purposes = channelGoals.map((name) => `- ${goals[name].wakeWhen}`).join("\n");
   return shouldSkipMessage(
     ctx,
     message,
-    `An AI agent listens to this channel for these purposes:\n${purposes}\n` +
+    `An AI agent listens to this channel for this goal:\n${goal.wakeWhen}\n` +
       "Could this message need its help? Social chat, announcements, and messages unrelated " +
-      "to all these purposes are not for it.",
+      "to this goal are not for it.",
   );
 }
 
@@ -152,9 +145,9 @@ async function shouldSkipMessage(
       return false;
     }
 
-    const transcript = priorMessages.slice(-10).map((entry) => {
+    const transcript = priorMessages.slice(-MAX_PRIOR_MESSAGES).map((entry) => {
       const author = entry.isMe ? "agent" : `<@${entry.user}>`;
-      return `${author}: ${entry.text.slice(0, 500)}`;
+      return `${author}: ${entry.text.slice(0, MAX_PRIOR_MESSAGE_CHARS)}`;
     });
     const { answers } = await decide({
       state: [...transcript, `<@${message.author?.userId}>: ${message.text}`].join("\n"),
@@ -167,8 +160,7 @@ async function shouldSkipMessage(
         },
       },
       maxRetries: 0,
-      signal: AbortSignal.timeout(5_000),
-      providerOptions: { gateway: { tags: ["ambient-filter"] } },
+      signal: AbortSignal.timeout(FILTER_TIMEOUT_MS),
     });
     const { probability } = answers.forAgent;
     const skip = probability < SKIP_BELOW;
@@ -181,7 +173,7 @@ async function shouldSkipMessage(
 }
 ```
 
-The filter sends the current message and up to ten prior thread messages to `decide`, truncating each prior message to 500 characters. Logs record the decision, not message text.
+The filter sends the current message and a bounded thread transcript to `decide`. Adjust the example's threshold, timeout, and transcript limits for your workload. Logs record skip decisions and reasons, not message text.
 
 Slack thread reads cover at most the first 50 messages and can return an empty or stale list on failure. If the current reply is missing, the filter lets it through.
 
@@ -206,7 +198,7 @@ import { goalContext, watchedChannels } from "../lib/ambient/goals";
 const THREAD_GUIDANCE =
   "This reply doesn't mention you. Answer only if it's meant for you; otherwise call `no_reply`.";
 const CHANNEL_GUIDANCE =
-  "This message doesn't mention you. Answer only if a goal in your context applies and " +
+  "This message doesn't mention you. Answer only if the goal in your context applies and " +
   "you can add something useful; otherwise call `no_reply`.";
 
 export default slackChannel({
@@ -231,14 +223,14 @@ export default slackChannel({
     }
 
     // The agent can join conversations in watched channels.
-    const channelGoals = watchedChannels[message.channelId];
-    if (channelGoals === undefined) return null;
-    if (await skipChannelMessage(ctx, message, channelGoals)) return null;
+    const goal = watchedChannels[message.channelId];
+    if (goal === undefined) return null;
+    if (await skipChannelMessage(ctx, message, goal)) return null;
     return {
       auth,
       status: "deferred",
       guidance: CHANNEL_GUIDANCE,
-      context: [goalContext(channelGoals)],
+      context: [goalContext(goal)],
     };
   },
 });
@@ -252,12 +244,12 @@ To run without a decision model, remove the two `if (await skip...) return null;
 
 ## Tune and monitor
 
-Start with one watched channel and the `unanswered-question` goal. Review skipped messages and the agent's replies before adding more channels.
+Start with one watched channel. Review skipped messages and the agent's replies before adding more channels.
 
 | To change                          | Edit                                                           |
 | ---------------------------------- | -------------------------------------------------------------- |
-| What the agent speaks up for       | `wakeWhen` in `goals.ts`                                       |
-| How it answers                     | `engagement` in `goals.ts`                                     |
+| What the agent speaks up for       | The channel's `wakeWhen` in `goals.ts`                         |
+| How it answers                     | The channel's `engagement` in `goals.ts`                       |
 | When it stays quiet                | `agent/instructions.md`, `THREAD_GUIDANCE`, `CHANNEL_GUIDANCE` |
 | Where it listens                   | `watchedChannels`                                              |
 | How many messages the filter skips | `SKIP_BELOW` and the filter questions                          |
@@ -272,7 +264,9 @@ Keep `SKIP_BELOW` low: raising it saves turns but risks dropping messages the ag
 | A missed message that reached the agent   | Add an example to the goal or instructions.                                                |
 | More `error` or `incomplete-context` logs | Check decision-model errors or thread reads; more messages are passing through unfiltered. |
 
-Use the `ambient.filter` logs to find skipped messages in Slack and review a sample, especially those just below the threshold. The `ambient-filter` Gateway tag tracks filter spend separately from agent turns.
+Use the `ambient.filter` logs to find skipped messages in Slack and review a sample, especially those just below the threshold.
+
+Optionally, when using Vercel AI Gateway, add `providerOptions: { gateway: { tags: ["ambient-filter"] } }` to `decide` to track filter spend separately.
 
 ## Related guides
 
