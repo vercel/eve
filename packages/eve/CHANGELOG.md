@@ -1,5 +1,33 @@
 # eve
 
+## 1.0.0-rc.8
+
+Released 2026-11-10 · [Compare with 1.0.0-rc.7](https://github.com/vercel/eve/compare/eve%401.0.0-rc.7...eve%401.0.0-rc.8)
+
+### Features
+
+- Add Slack's `action_token` to `defaultSlackAuth` as the `action_token` attribute, so tools can call the Real-time Search API without channel code.
+  eve also exposes the token as `message.actionToken`, read from the top level of the event or from `assistant_thread`, where Slack sends it in app threads. ([#6088](https://github.com/vercel/eve/pull/6088))
+- Chat SDK, Discord, Telegram, and Teams now say who answered a question or approval when they edit its prompt, as Slack already does: `Approved by Alice` or `Answered by Alice: Saturday`.
+  Each channel records the person behind a principal when that principal sends a message or presses a button, then names them from the settlement's responder. Discord shows a mention, which doesn't notify anyone because the edit allows no mentions. Teams already named who pressed Approve; it now also names people who approve by text or answer questions. A prompt withdrawn without an answer, or answered by someone the channel never saw, reads as before. ([#6110](https://github.com/vercel/eve/pull/6110))
+
+### Bug Fixes
+
+- Computer use recordings show the dark address bar again on Firefox ESR 153, which renders the address-bar background as an HTML element that the old style rule missed. ([#6161](https://github.com/vercel/eve/pull/6161))
+- Fixed a parent session crediting or refusing the wrong person's answer when several people answer a subagent's approval before the subagent settles it, including for remote and protocol 2 subagents. ([#6165](https://github.com/vercel/eve/pull/6165))
+- When AI Gateway cuts a model stream at its maximum duration, eve now retries it once instead of up to three times.
+  The error hint now says that eve already retried the request and suggests smaller turns or another model. ([#6159](https://github.com/vercel/eve/pull/6159))
+- Subagents that share a sandbox no longer trigger spurious GitHub sign-ins when they run `gh` commands at the same time.
+  The `gh` tool's credential lease replaces the sandbox's network policy for the duration of one command. Leases were serialized per session, so sessions sharing a sandbox, such as parallel subagents, could replace or clear each other's credential mid-command; the stranded command got a 401 from GitHub, which asked the user to sign in again even though their grant was valid. Leases are now serialized per sandbox by a lock inside the sandbox, which works across processes. A command waits up to a minute for another to finish, then fails with a retryable error. ([#6029](https://github.com/vercel/eve/pull/6029))
+- Name the memory store on memory provider tool calls, so a trace query by `gen_ai.memory.store.id` finds a scope's tool reads and writes as well as its recall and capture.
+  The `execute_tool` span of a memory provider tool, such as `profile__save`, now carries `gen_ai.memory.store.id` and `agent.memory.slot`, matching the `search_memory` and `upsert_memory` spans of the same slot. The store ID is the slot's opaque scope key, so it is recorded whatever the trace policy captures. `@vercel/agent-runs` adds an optional `memory` lifecycle to `ActiveOperation` on tool operations to record it. ([#6147](https://github.com/vercel/eve/pull/6147))
+- Agent builds now build a workspace extension that only another workspace extension mounts or depends on, instead of failing with a missing compatibility manifest on a clean checkout. ([#6160](https://github.com/vercel/eve/pull/6160))
+- The Vercel project overview card now shows the agents' tools, schedules, and connections for a Next.js app that hosts an `agents/` workspace through `withEve` from `eve/next`.
+  During `next build`, `withEve` now writes the workspace's `.eve/agent-summary.json` index, the same index that `withEve` from `eve/vercel` writes since #5710. Standalone agents and agents configured with the `agents` option do not change. ([#6163](https://github.com/vercel/eve/pull/6163))
+- Send a Slack sign-in prompt to the person's DM when the session has no thread, instead of posting a status top-level in the channel.
+  The DM names the channel the request came from, is edited in place with the outcome, and needs no Slack scope beyond `chat:write`. If the DM can't be sent, eve posts in the channel as before. Threaded sessions and code channels are unchanged. ([#6007](https://github.com/vercel/eve/pull/6007))
+- `eve__task_wait` now waits at most 30 minutes when a call omits `timeoutSeconds`, so a task that never reports can't hold a turn open indefinitely. ([#5300](https://github.com/vercel/eve/pull/5300))
+
 ## 1.0.0-rc.7
 
 Released 2026-11-09 · [Compare with 1.0.0-rc.6](https://github.com/vercel/eve/compare/eve%401.0.0-rc.6...eve%401.0.0-rc.7)
