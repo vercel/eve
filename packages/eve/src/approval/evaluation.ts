@@ -129,11 +129,8 @@ export async function evaluateApproval(
   }
   if (recheck) return { denied: false };
   const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
-  return {
-    ...decision,
-    ...(ask ?? {}),
-    ...(callerOnly ? { callerApproves: true as const } : {}),
-  };
+  const asking: ApprovalDecision = { ...decision, ...ask };
+  return callerOnly ? { ...asking, callerApproves: true } : asking;
 }
 
 /** Remembers a person's decision under the keys its request named, replacing earlier ones. */
