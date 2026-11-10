@@ -29,6 +29,8 @@ Every dynamic function receives:
 
 Before a model call, `ctx.messages()` includes the task results and `[Tasks]` note that call will receive. A dynamic model can react to a background task's result in the same step, without waiting for another call.
 
+For each call, eve prepares task results once with the tool definitions available before dynamic functions run. Those functions configure the upcoming model and tools without changing the prepared task results. If a dynamic function fails, pending results remain available for a later call.
+
 Code outside a memo runs every time eve runs the function. Put a fetch or decision inside a memo when its answer should stay fixed for a key:
 
 ```ts title="agent/tools/query.ts"

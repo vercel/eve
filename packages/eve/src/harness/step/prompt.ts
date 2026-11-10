@@ -73,6 +73,7 @@ async function settleHistory(
     const taskContext = await appendTaskContext({
       messages,
       session,
+      // Dynamic values can read these results, so use the tools kept before evaluating them.
       tools: await stepCatalog(step),
     });
     session = taskContext.session;
@@ -88,16 +89,17 @@ async function settleHistory(
 }
 
 /**
- * The turn's input joins history before the model call, so a call that fails leaves it there, and
- * the prompt the call reads. The client's context keeps the position it takes here.
+ * Commits the prepared prompt only after dynamic evaluation succeeds, without projecting task
+ * results again. A model call that fails leaves the turn's input in history.
  */
-export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prompt> {
-  const settled = await settleHistory(step, turn);
-  step.session = settled.session;
-  const messages = placeTurnInput(step, settled.messages, settled.turn);
-  step.session = changeHistory(step.session, { extend: messages });
+export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
+  step.session = prepared.session;
+  if (prepared.clientContext !== undefined) {
+    step.session = setTurnClientContextState(step.session, prepared.clientContext);
+  }
+  step.session = changeHistory(step.session, { extend: prepared.messages });
   return {
-    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
+    clientContext: getTurnClientContextState(step.session.state, prepared.turn.turnId),
     messages: [...step.session.history],
   };
 }
@@ -106,29 +108,19 @@ export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prom
  * The prompt the session's dynamic values are evaluated with: the one the model call reads, with
  * the task results it delivers, without committing the turn's input or the delivery.
  */
-export async function previewPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
+export async function previewPrompt(step: Step, turn: TurnInput): Promise<PreparedPrompt> {
   const settled = await settleHistory(step, turn);
   const messages = validateHarnessModelMessages(settled.messages);
   return {
+    ...settled,
     clientContext: turnClientContext(messages, settled.turn),
     messages: withTurnInput(messages, settled.turn),
   };
 }
 
-/**
- * The turn's input after `messages`, past a tool-result boundary when they end in tool results.
- * The client's context takes its position here, and never joins the messages.
- */
-function placeTurnInput(
-  step: Step,
-  messages: readonly HarnessModelMessage[],
-  turn: TurnInput,
-): HarnessModelMessage[] {
-  const clientContext = turnClientContext(messages, turn);
-  if (clientContext !== undefined) {
-    step.session = setTurnClientContextState(step.session, clientContext);
-  }
-  return withTurnInput(messages, turn);
+interface PreparedPrompt extends Prompt {
+  readonly session: Step["session"];
+  readonly turn: TurnInput;
 }
 
 function turnClientContext(
