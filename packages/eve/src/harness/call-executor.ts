@@ -8,7 +8,7 @@ import {
 } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
-import { sessionParticipants } from "#harness/sender-line.js";
+import { delegatedMessages, sessionParticipants, turnMessages } from "#harness/sender-line.js";
 import type { JsonObject } from "#shared/json.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -49,7 +49,6 @@ import { toModelSchema } from "#tools/schema.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 import { liveProjection } from "#harness/session-machine/current.js";
-import { turnPosition } from "#harness/session-machine/view.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 
 // eve runs every local call itself: the AI SDK only calls the model. The calls a model response
@@ -662,18 +661,24 @@ export async function publishDenial(
 }
 
 /**
- * How much of the latest message, and of the call's input, an identity request shows. Each input
- * field is shown on its own, so a long early field can't hide a later one.
+ * How much of the latest message, and of the call's input, an identity request shows, counted as
+ * shown, after escaping. Each input field, and each item inside one, is cut on its own, so a long
+ * early value can't hide a later one.
  */
 const QUOTE_LIMIT = 280;
 const FIELD_LIMIT = 2_000;
 const MIN_FIELD_LIMIT = 80;
+const MIN_ITEM_LIMIT = 40;
+const KEY_LIMIT = 80;
 const INPUT_LIMIT = 8_000;
+const HIDDEN_NAMES_LIMIT = 5;
 
 /**
- * What eve asks a person whose identity a call needs: the call, by its tool's title and the input
- * it runs with, and the latest message in the turn from someone else, which they approve along
- * with the call. Nothing the model wrote names the call. Only the person can approve it; anyone
+ * What eve asks a person whose identity a call needs: what is asked and of whom, what a
+ * remembered approval lets someone else do, the latest message in the turn from someone else,
+ * which they approve along with the call, and then the input the call runs with. The short parts
+ * come first, so a channel that cuts a long prompt still shows them. Nothing the model wrote
+ * names the call. Only the person can approve it; anyone
  * signed in can cancel it.
  */
 function identityApprovalRequest(
@@ -725,7 +730,7 @@ function identityApprovalRequest(
         { id: "approve", label: "Approve" },
         { id: "deny", label: "Cancel" },
       ],
-      prompt: `Approve ${displayTitle(toolName)} with your identity? It runs with ${describeInput(input)}.${quote}${remembered}`,
+      prompt: `Approve ${displayTitle(toolName)} with your identity?${remembered}${quote} It runs with ${describeInput(input)}.`,
     },
   };
 }
@@ -739,7 +744,6 @@ function latestMessageFromOthers(
 ): { readonly from: string; readonly text: string } | undefined {
   const projection = liveProjection();
   if (projection === undefined) return undefined;
-  const { turnId } = turnPosition(projection);
   // A delivery names its sender without how they signed in, so eve compares the people who have
   // spoken by `principalOf`: a delivery is the person's only when no one else who has spoken
   // could have sent it.
@@ -749,28 +753,12 @@ function latestMessageFromOthers(
   );
   const sentBy = (principal: Principal) =>
     names(principal, person) && !others.some((other) => names(principal, other));
-  const latest = Object.values(projection.view.deliveries)
-    .flatMap((delivery) =>
-      delivery.turnId === turnId &&
-      delivery.consumedAt !== undefined &&
-      delivery.principal !== undefined &&
-      !sentBy(delivery.principal)
-        ? [
-            {
-              at: delivery.consumedAt,
-              from: delivery.principal.id,
-              text: (delivery.parts ?? [])
-                .flatMap((part) => (part.kind === "text" ? [part.text] : []))
-                .join(" ")
-                .trim(),
-            },
-          ]
-        : [],
-    )
-    .filter((message) => message.text.length > 0)
-    .sort((a, b) => b.at - a.at)
-    .at(0);
-  return latest === undefined ? undefined : { from: latest.from, text: latest.text };
+  // A local child's own messages come from the agent that delegated to it, so the messages its
+  // parent's turn read count too, before the child's own.
+  const latest = [...(delegatedMessages() ?? []), ...turnMessages(projection)]
+    .filter((message) => !sentBy(message.from))
+    .at(-1);
+  return latest === undefined ? undefined : { from: latest.from.id, text: latest.text };
 }
 
 /** Whether a delivery's principal names `person`, as far as the wire tells. */
@@ -798,29 +786,74 @@ function describeInput(input: JsonObject): string {
     FIELD_LIMIT,
     Math.max(MIN_FIELD_LIMIT, Math.floor(INPUT_LIMIT / entries.length)),
   );
+  return describeEntries(entries, limit, INPUT_LIMIT, "fields");
+}
+
+/**
+ * `key: value` pairs, each value cut at `limit` shown characters, until `total` is spent. The rest
+ * are counted, and the first few named.
+ */
+function describeEntries(
+  entries: readonly (readonly [string | undefined, unknown])[],
+  limit: number,
+  total: number,
+  noun: "fields" | "items",
+): string {
   const shown: string[] = [];
   let length = 0;
   for (const [index, [name, value]] of entries.entries()) {
-    const field = `${name}: ${describeValue(value, limit)}`;
-    if (shown.length > 0 && length + field.length > INPUT_LIMIT) {
-      const rest = entries.slice(index).map(([other]) => other);
-      shown.push(`and ${String(rest.length)} more fields not shown (${rest.join(", ")})`);
+    const key = name === undefined ? "" : `${encodeText(name, KEY_LIMIT)}: `;
+    const entry = `${key}${describeValue(value, limit)}`;
+    if (shown.length > 0 && length + entry.length > total) {
+      const rest = entries.slice(index).flatMap(([other]) => (other === undefined ? [] : [other]));
+      const named = rest.slice(0, HIDDEN_NAMES_LIMIT).map((other) => encodeText(other, KEY_LIMIT));
+      const more =
+        rest.length > named.length ? `, and ${String(rest.length - named.length)} more` : "";
+      const names = named.length === 0 ? "" : ` (${named.join(", ")}${more})`;
+      shown.push(`and ${String(entries.length - index)} more ${noun} not shown${names}`);
       break;
     }
-    shown.push(field);
-    length += field.length;
+    shown.push(entry);
+    length += entry.length;
   }
   return shown.join(", ");
 }
 
-/** One input value, JSON-encoded so it stays inside its own quotes, cut at `limit` characters. */
+/**
+ * One input value as JSON, at most about `limit` characters as shown. A string is cut after
+ * escaping; an array or object shares `limit` among its items, so a later item stays visible.
+ */
 function describeValue(value: unknown, limit: number): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  if (text.length <= limit) return JSON.stringify(value);
-  const hidden = `(${String(text.length - limit)} more characters not shown)`;
-  return typeof value === "string"
-    ? `${JSON.stringify(text.slice(0, limit))}… ${hidden}`
-    : `${text.slice(0, limit)}… ${hidden}`;
+  if (typeof value === "string") return encodeText(value, limit);
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  const isArray = Array.isArray(value);
+  const entries: (readonly [string | undefined, unknown])[] = isArray
+    ? value.map((item: unknown) => [undefined, item] as const)
+    : Object.entries(value);
+  if (entries.length === 0) return isArray ? "[]" : "{}";
+  const share = Math.max(MIN_ITEM_LIMIT, Math.floor(limit / entries.length));
+  const inner = describeEntries(entries, share, limit, "items");
+  return isArray ? `[${inner}]` : `{${inner}}`;
+}
+
+/**
+ * `text` as a JSON string, cut once its escaped form reaches `limit` characters, with a marker
+ * outside the quotes that says how many characters are hidden.
+ */
+function encodeText(text: string, limit: number): string {
+  const encoded = JSON.stringify(text);
+  if (encoded.length <= limit) return encoded;
+  let head = "";
+  let length = 2;
+  let used = 0;
+  for (const character of text) {
+    const escaped = JSON.stringify(character).slice(1, -1);
+    if (length + escaped.length > limit) break;
+    head += escaped;
+    length += escaped.length;
+    used += character.length;
+  }
+  return `"${head}"… (${String(text.length - used)} more characters not shown)`;
 }
 
 /**

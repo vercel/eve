@@ -130,6 +130,8 @@ export interface Interaction {
     readonly signIn?: Omit<SignInChallenge, "callbackUrl">;
   };
   readonly call?: AskedCall;
+  /** Who may answer it, when eve names them, as for an approval of a person's identity. */
+  readonly audience?: { readonly principalIds: readonly string[] };
   readonly status: "open" | "settled";
   readonly outcome?: InteractionOutcome;
   readonly reason?: string;
@@ -153,6 +155,7 @@ export function interaction(view: SessionView, interactionId: string): Interacti
   };
   const call = askedCall(view, row);
   if (call !== undefined) shown.call = call;
+  if (row.audience !== undefined) shown.audience = row.audience;
   if (row.outcome !== undefined) shown.outcome = row.outcome;
   if (row.reason !== undefined) shown.reason = row.reason;
   let answer = decidingAnswer(row);

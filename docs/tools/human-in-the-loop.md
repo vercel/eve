@@ -317,9 +317,11 @@ The ids are recorded only when the trace policy records both inputs and outputs,
 
 In a [shared session](/docs/concepts/security-model#shared-sessions), a call that needs the caller's identity after someone else spoke asks the caller first. Such a call reads a user-scoped token, calls a `forwardPrincipal` connection, or names a person with [`ctx.getToken(provider, { as })`](/docs/guides/auth-and-route-protection#act-for-another-person). eve opens an ordinary approval, with `request.kind: "approval"`, for the person whose identity the call needs:
 
-- The prompt names the call by its tool's title and the input it runs with, never by text the model wrote, and quotes the latest message from someone else in the turn: `Approve Deploy with your identity? It runs with env: "prod". The latest message from someone else, from bob, reads: "ship it".` The quote is JSON-escaped and shortened, so it can't pass for eve's text.
-- The prompt shows every top-level input field. A long value is cut on its own, with a note of how many characters are hidden, so it can't hide the fields after it.
-- With `callerConfirmation: "once"`, the prompt adds that approving also lets the person who spoke last steer calls that use the caller's identity for the rest of the conversation.
+- The prompt names the call by its tool's title, never by text the model wrote. It quotes the latest message from someone else in the turn, then lists the input the call runs with: `Approve Deploy with your identity? The latest message from someone else, from bob, reads: "ship it". It runs with "env": "prod".` The quote, input keys, and values are JSON-escaped and shortened, so they can't pass for eve's text.
+- With `callerConfirmation: "once"`, the prompt says, before the quote, that approving also lets the person who spoke last steer calls that use the caller's identity for the rest of the conversation.
+- The prompt shows every top-level input field. A long value is cut on its own, and inside an array or object each item is cut on its own, with a note of how many characters are hidden, so it can't hide what comes after it.
+- In a local subagent, the quote can come from the turn that delegated to it, since the subagent's own messages come from the delegating agent.
+- Slack shows the whole prompt beside the approval card, whose body holds only its start.
 - The event's `audience.principalIds` names that person. Only they can approve it, whatever the tool's `response` policy. Anyone signed in can cancel it.
 - Approving runs the tool again from its first line, with that person's identity. Anything the tool did before it asked for the token runs again.
 - Cancelling fails the call. The model reads that the request was cancelled, and that anything the call did before it needed the identity already happened.

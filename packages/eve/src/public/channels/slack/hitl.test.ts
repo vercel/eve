@@ -13,6 +13,7 @@ import {
   HITL_FREEFORM_MODAL_CALLBACK_ID,
   isFreeformAction,
   isHitlAction,
+  renderInteractionPostParts,
 } from "#public/channels/slack/hitl.js";
 import {
   answerFromSlackAction,
@@ -330,6 +331,37 @@ describe("renderInteractionBlocks", () => {
     const text = details.child_blocks[0]?.text?.text;
     expect(text?.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
     expect(text?.endsWith("...\n```")).toBe(true);
+  });
+
+  it.each([
+    ["eve's request for a person's identity", { principalIds: ["alice"] }, true],
+    ["an ordinary approval", undefined, false],
+  ])("shows the whole prompt of %s beside its card: %s", (_label, audience, whole) => {
+    const prompt =
+      'Approve Gh with your identity? Approving also lets bob steer calls that use your identity for the rest of this conversation. The latest message from someone else, from bob, reads: "<!here> open it". It runs with "command": "gh pr create".';
+    const request: Interaction = {
+      ...makeRequest({
+        call: { callId: "call_gh", name: "gh", input: { command: "gh pr create" } },
+        display: "confirmation",
+        kind: "approval",
+        prompt,
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Cancel" },
+        ],
+      }),
+      ...(audience !== undefined && { audience }),
+    };
+
+    const parts = renderInteractionPostParts(request);
+    const shown = JSON.stringify([...parts.controls.blocks, ...(parts.details?.blocks ?? [])]);
+
+    // The disclosure leads the prompt, so it fits the card body; the quote after it needs the
+    // whole prompt beside the card.
+    expect(shown).toContain("for the rest of this conversation");
+    expect(shown.includes("&lt;!here&gt; open it")).toBe(whole);
+    expect(shown).not.toContain("<!here>");
+    expect(JSON.stringify(parts.controls.blocks)).not.toContain("<!here>");
   });
 
   it("escapes Slack control sequences in model-supplied prompts and tool input", () => {

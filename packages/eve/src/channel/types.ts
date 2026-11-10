@@ -181,6 +181,11 @@ export interface DelegatedIdentity {
   readonly participants: readonly SessionPerson[];
   /** The `"once"` approvals the caller gave there, by the key eve remembers each under. */
   readonly confirmed: readonly string[];
+  /** The latest message from each sender the delegating turn read, which a request can quote. */
+  readonly messages?: readonly {
+    readonly from: { readonly id: string; readonly type: string; readonly issuer?: string };
+    readonly text: string;
+  }[];
 }
 
 /** Internal transport payload, including framework-owned compatibility and context fields. */

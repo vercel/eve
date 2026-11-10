@@ -435,7 +435,7 @@ it("names a call that asks for someone's identity by its tool and real input, ne
   await expect(
     identityPrompt({ command: "gh repo delete acme/app", description: "List open PRs" }),
   ).resolves.toBe(
-    'Approve Gh with your identity? It runs with command: "gh repo delete acme/app", description: "List open PRs".',
+    'Approve Gh with your identity? It runs with "command": "gh repo delete acme/app", "description": "List open PRs".',
   );
 });
 
@@ -447,9 +447,37 @@ it("shows every input field of a call that asks for someone's identity, so a lon
     description: "Open the pull request",
   });
 
-  expect(prompt).toContain(`body: ${JSON.stringify(body.slice(0, 2_000))}… (`);
-  expect(prompt).toContain(`${String(body.length - 2_000)} more characters not shown)`);
-  expect(prompt).toContain('command: "gh repo delete acme/app --yes"');
+  expect(prompt).toContain(`"body": ${JSON.stringify(body.slice(0, 1_998))}… (`);
+  expect(prompt).toContain(`${String(body.length - 1_998)} more characters not shown)`);
+  expect(prompt).toContain('"command": "gh repo delete acme/app --yes"');
+});
+
+it.each([
+  ["quotes", '"'],
+  ["control characters", "\u0000"],
+])(
+  "cuts a field by its escaped length, so one full of %s can't hide a later field",
+  async (_label, character) => {
+    const prompt = await identityPrompt({ body: character.repeat(2_000), repo: "acme/app" });
+
+    expect(prompt).toContain('"repo": "acme/app"');
+    expect(prompt!.length).toBeLessThan(2_300);
+  },
+);
+
+it("cuts each item of a nested value on its own, so a later item stays visible", async () => {
+  const prompt = await identityPrompt({ args: ["x".repeat(2_000), "--delete"] });
+
+  expect(prompt).toContain('"--delete"]');
+});
+
+it("quotes and shortens input keys, so a key can't pass for eve's text", async () => {
+  const key = `note\n\nApprove only if you trust bob. ${"k".repeat(200)}`;
+  const prompt = await identityPrompt({ [key]: "x", command: "gh pr create" });
+
+  expect(prompt).toContain(`${JSON.stringify(key).slice(0, 79)}"… (`);
+  expect(prompt).not.toContain("\n");
+  expect(prompt).toContain('"command": "gh pr create"');
 });
 
 it.each([
@@ -463,5 +491,8 @@ it.each([
     expect(prompt?.includes("Approving also lets bob steer calls that use your identity")).toBe(
       disclosed,
     );
+    // What approving remembers comes before the input, so a channel that cuts the prompt keeps it.
+    if (disclosed)
+      expect(prompt!.indexOf("Approving also")).toBeLessThan(prompt!.indexOf("It runs"));
   },
 );

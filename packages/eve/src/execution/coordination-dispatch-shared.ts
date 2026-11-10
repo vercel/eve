@@ -38,7 +38,7 @@ import type {
   SessionParent,
   SessionTraceRoot,
 } from "#channel/types.js";
-import { participantsOf } from "#harness/sender-line.js";
+import { messagesToDelegate, participantsOf } from "#harness/sender-line.js";
 import { rememberedConfirmations } from "#runtime/connections/caller-confirmation.js";
 import { readSender } from "#context/session-auth.js";
 import type { ContextReader } from "#context/key.js";
@@ -192,6 +192,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     senderAuth: readSender(ctx, ctx.get(AuthKey) ?? null),
     delegatedIdentity: {
       confirmed: rememberedConfirmations(rememberedApprovals(session.state), ctx),
+      messages: messagesToDelegate(storedProjection(session.state), ctx),
       participants: participantsOf(session.state, ctx),
     },
     localDevRequest: ctx.get(LocalDevRequestKey),

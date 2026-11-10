@@ -251,7 +251,10 @@ export function renderInteractionBlocks(
   if (options && options.length > 0) {
     const card = renderInteractionCardBlock(request, actionId);
     const details = renderToolInputContainerBlock(request);
-    return details === undefined ? [card] : [card, details];
+    // The card body holds 200 characters. eve's request for a person's identity says who else
+    // spoke and what approving remembers after that, so its whole prompt goes beside the card.
+    const fullPrompt = isIdentityRequest(request) ? [prompt] : [];
+    return [card, ...fullPrompt, ...(details === undefined ? [] : [details])];
   }
 
   if (acceptsFreeform) {
@@ -551,4 +554,9 @@ function isBlockType(value: unknown, type: string): boolean {
 
 function isApprovalRequest(request: Interaction): boolean {
   return request.request.kind === "approval";
+}
+
+/** eve's request for a person's identity: an approval only the person it names may give. */
+function isIdentityRequest(request: Interaction): boolean {
+  return isApprovalRequest(request) && request.audience !== undefined;
 }

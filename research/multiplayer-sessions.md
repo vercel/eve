@@ -198,12 +198,14 @@ step, eve asks instead of refusing. The call stops without a result, as it does 
 eve opens an ordinary approval (`request.kind: "approval"`) for the person whose identity the call
 needs, with `audience.principalIds` naming them.
 
-- The prompt names the call by its tool's title and every top-level input field, each long field
-  cut on its own with a note of how much is hidden, never by a label the model wrote. Under
-  `"once"`, it says approving also lets the person who spoke last steer calls that use the
-  caller's identity for the rest of the conversation. It quotes the latest message in the turn from a named sender other than that
-  person, truncated and JSON-escaped so it can't pass for eve's text. With no such message, it has
-  no quote. It never carries secrets or attributes.
+- The prompt names the call by its tool's title, never by a label the model wrote. In order, it
+  says what is asked and of whom; under `"once"`, that approving also lets the person who spoke
+  last steer calls that use the caller's identity for the rest of the conversation; the latest
+  message in the turn from a named sender other than that person, or in a local child from the
+  turn that delegated to it; and every top-level input field. Each value, and each item inside
+  one, is cut on its own after escaping, with a note of how much is hidden; keys are quoted.
+  Quote and input are JSON-escaped so they can't pass for eve's text. With no such message, it has
+  no quote. It never carries secrets or attributes. Slack shows the whole prompt beside the card.
 - Only that person can approve it, checked before any tool `response` policy, which doesn't govern
   this request. Anyone the channel admits who is signed in can cancel it. Another person can only
   press, never type, an answer.

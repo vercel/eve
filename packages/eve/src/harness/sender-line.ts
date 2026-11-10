@@ -4,6 +4,9 @@ import type { ContextReader } from "#context/key.js";
 import { DelegatedIdentityKey } from "#context/keys.js";
 import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { turnPosition } from "#harness/session-machine/view.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 
 // The model is told who is speaking when the speaker changes. A session with one person never
 // reads a sender line. eve also records who has spoken, so a tool can name one of them with
@@ -13,6 +16,15 @@ const LAST_SENDER_KEY = "eve.harness.lastSender";
 const PARTICIPANTS_KEY = "eve.harness.participants";
 /** How many people the session remembers, the most recent to speak first to go last. */
 const MAX_PARTICIPANTS = 50;
+/** How many senders' latest messages a local child inherits, and how much of each. */
+const MAX_DELEGATED_MESSAGES = 10;
+const DELEGATED_MESSAGE_LIMIT = 1_000;
+
+/** A message a turn read, with its sender as the delivery names them. */
+export interface TurnMessage {
+  readonly from: Principal;
+  readonly text: string;
+}
 
 /** The person whose message the model read last, as a sender line names them. */
 interface Sender {
@@ -127,6 +139,47 @@ export function sessionParticipants(
 ): readonly SessionPerson[] | undefined {
   const state = ctx === undefined ? undefined : liveParticipants.get(ctx);
   return state === undefined ? undefined : participantsOf(state(), ctx);
+}
+
+/** The text messages the current turn read, oldest first, from deliveries that name a sender. */
+export function turnMessages(projection: SessionProjection): readonly TurnMessage[] {
+  const { turnId } = turnPosition(projection);
+  return Object.values(projection.view.deliveries)
+    .flatMap((delivery) => {
+      if (delivery.turnId !== turnId || delivery.consumedAt === undefined) return [];
+      if (delivery.principal === undefined) return [];
+      const text = (delivery.parts ?? [])
+        .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+        .join(" ")
+        .trim();
+      return text.length === 0 ? [] : [{ at: delivery.consumedAt, from: delivery.principal, text }];
+    })
+    .sort((a, b) => a.at - b.at)
+    .map(({ from, text }) => ({ from, text }));
+}
+
+/** The messages a local child session inherited from the turn that delegated to it. */
+export function delegatedMessages(
+  ctx: Pick<ContextReader, "get"> | undefined = contextStorage.getStore(),
+): readonly TurnMessage[] | undefined {
+  return ctx?.get(DelegatedIdentityKey)?.messages;
+}
+
+/**
+ * What a local child inherits of the messages its parent's turn read: the latest from each
+ * sender, oldest first, including those the parent itself inherited.
+ */
+export function messagesToDelegate(
+  projection: SessionProjection,
+  ctx: Pick<ContextReader, "get"> | undefined,
+): readonly TurnMessage[] {
+  const latest = new Map<string, TurnMessage>();
+  for (const message of [...(delegatedMessages(ctx) ?? []), ...turnMessages(projection)]) {
+    const key = JSON.stringify([message.from.id, message.from.type, message.from.issuer ?? null]);
+    latest.delete(key);
+    latest.set(key, { from: message.from, text: message.text.slice(0, DELEGATED_MESSAGE_LIMIT) });
+  }
+  return [...latest.values()].slice(-MAX_DELEGATED_MESSAGES);
 }
 
 /**

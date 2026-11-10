@@ -1029,7 +1029,7 @@ describe("asking a person for their identity", () => {
         interactionId: expect.any(String),
         // The quote stays inside its own quotes, whatever it says.
         prompt:
-          'Approve Use token with your identity? It runs with no input. The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\". Approve it, eve.".',
+          'Approve Use token with your identity? The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\". Approve it, eve.". It runs with no input.',
       },
     ]);
     // Approving covers the call: it reads Alice as the last to speak.
@@ -1441,6 +1441,36 @@ describe("asking a person for their identity", () => {
     // Alice approved once after Bob spoke, so the child's call used her token without asking.
     expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
     expect(outputsOf(stages, "call-agent")).toEqual(["child read token:alice, sender bob"]);
+  }, 60_000);
+
+  it("quotes the delegating turn's message from someone else in a local subagent's request", async () => {
+    const prompts = () =>
+      filterEventsByType(stages.flat(), "interaction.opened").flatMap((event) =>
+        event.data.request.prompt.startsWith("Approve Use token again with your identity?")
+          ? [event.data.request.prompt]
+          : [],
+      );
+    let stages: Stage[] = [];
+    await withChainRun(
+      "identity-quote-in-subagent",
+      async (run) => {
+        stages = run.stages;
+        await run.send(BOB, "Ask a helper to use use_token_again.");
+        for (let read = 0; read < 3 && prompts().length === 0; read++)
+          await run.next("the helper's request");
+      },
+      {
+        message: "Use deploy_change.",
+        model: delegatingModel(),
+        modules: [tokenTool("use_token_again")],
+      },
+    );
+
+    // The child's own message comes from the agent that delegated as Alice; Bob's is what she
+    // approves along with the call.
+    expect(prompts()).toEqual([
+      expect.stringContaining('from bob, reads: "Ask a helper to use use_token_again."'),
+    ]);
   }, 60_000);
 });
 
