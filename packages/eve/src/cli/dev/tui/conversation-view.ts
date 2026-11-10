@@ -13,7 +13,7 @@ export interface TokenUsage {
 }
 
 /** What the terminal shows beyond the conversation's messages, read from the same tables. */
-export interface TuiSessionData {
+interface TuiSessionData {
   readonly view: SessionView;
   /** Usage summed across the session; the renderer subtracts a turn baseline. */
   readonly usage: TokenUsage;

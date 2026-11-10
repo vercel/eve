@@ -44,14 +44,11 @@ import {
   type TaskRecord,
   type ToolState,
 } from "./transcript-parts.js";
-import type { SubagentDisplayMode, TerminalPartDisplayMode } from "./types.js";
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 
 export interface TranscriptOptions {
-  readonly tools: TerminalPartDisplayMode;
-  readonly reasoning: TerminalPartDisplayMode;
-  readonly subagents: SubagentDisplayMode;
-  readonly connectionAuth: TerminalPartDisplayMode;
+  /** Shows tool input/output, reasoning, and each finished subagent message and tool call. */
+  readonly verbose: boolean;
   /** Names of the agent's local subagents, whose tools read as delegations. */
   readonly subagentNames?: readonly string[];
   /** Where full failure detail is recorded, shown instead of the raw dump. */
@@ -61,17 +58,15 @@ export interface TranscriptOptions {
 }
 
 /**
- * A block written when it first appeared rather than where its part sits: a task's end line, or
- * an agent's own finished row. It stays after the blocks that preceded it then, as `main`'s
- * append-only transcript would have written it.
+ * One projection: the conversation's blocks in order, and the blocks that
+ * appeared since the last projection where the transcript had reached by then
+ * (a task's end line, an agent's own finished row). Arrivals are reported
+ * once; the renderer appends them at the live edge.
  */
-interface PlacedBlock {
-  readonly block: Block;
-  /** The blocks it followed, newest last; the newest still projected anchors it. */
-  readonly after: readonly string[];
+interface TranscriptProjection {
+  readonly blocks: Block[];
+  readonly arrivals: Block[];
 }
-
-const PLACEMENT_ANCHORS = 8;
 
 /**
  * Projects one session's conversation into transcript blocks. Each block's
@@ -89,8 +84,7 @@ export class ConversationTranscript {
   /** Server user messages that confirmed an optimistic message keep its block. */
   readonly #tasks = new TaskRecords();
   readonly #nestedTasks = new Map<string, TaskRecord>();
-  #placed: PlacedBlock[] = [];
-  readonly #placedIds = new Set<string>();
+  readonly #arrived = new Set<string>();
   #working: readonly TaskEntry[] = [];
 
   reset(): void {
@@ -98,8 +92,7 @@ export class ConversationTranscript {
     this.#fileContents.clear();
     this.#tasks.clear();
     this.#nestedTasks.clear();
-    this.#placed = [];
-    this.#placedIds.clear();
+    this.#arrived.clear();
     this.#working = [];
   }
 
@@ -141,7 +134,7 @@ export class ConversationTranscript {
     return lines;
   }
 
-  project(view: AgentTUIConversationView, options: TranscriptOptions): Block[] {
+  project(view: AgentTUIConversationView, options: TranscriptOptions): TranscriptProjection {
     const { conversation, working } = view;
     const now = Date.now();
     const blocks: Block[] = [];
@@ -194,24 +187,17 @@ export class ConversationTranscript {
           if (block !== undefined) blocks.push(block);
         } else if (part.type === "interaction") {
           // A sign-in shows where it was asked; the composer asks the rest.
-          if (part.request.signIn !== undefined && options.connectionAuth !== "hidden")
+          if (part.request.signIn !== undefined)
             blocks.push(this.#signInBlock(part, part.request.signIn));
         } else if (part.type === "tool") {
           const taskCall = taskCalls.get(part.callId);
           if (taskCall !== undefined) {
-            const start = this.#taskStartLine(
-              part,
-              taskCall.task,
-              labels,
-              options,
-              now,
-              view.data.view,
-            );
+            const start = this.#taskStartLine(part, taskCall.task, labels, now, view.data.view);
             if (start !== undefined) blocks.push(start);
             continue;
           }
           const state = states.get(part);
-          if (state === undefined || options.tools === "hidden") continue;
+          if (state === undefined) continue;
           const toolLabels = labels(part.callId);
           blocks.push(
             this.#toolBlock(part, state, activeSteps.has(part.stepIndex), toolLabels, options),
@@ -246,32 +232,9 @@ export class ConversationTranscript {
       blocks.push(this.#failureBlock(id, failure, options));
     }
 
-    const placed = this.#placeBlocks(blocks);
     const arrivals = this.#taskActivity(view, taskCalls, options, now);
-    for (const block of arrivals) {
-      const after = placed.slice(-PLACEMENT_ANCHORS).map((candidate) => candidate.id!);
-      this.#placed.push({ block, after });
-      this.#placedIds.add(block.id!);
-      placed.push(block);
-    }
-    return placed;
-  }
-
-  /** Interleaves placed blocks after the blocks they first followed. */
-  #placeBlocks(blocks: readonly Block[]): Block[] {
-    const placed = [...blocks];
-    for (const { block, after } of this.#placed) {
-      let index = placed.length;
-      for (let anchor = after.length - 1; anchor >= 0; anchor -= 1) {
-        const found = placed.findIndex((candidate) => candidate.id === after[anchor]);
-        if (found !== -1) {
-          index = found + 1;
-          break;
-        }
-      }
-      placed.splice(index, 0, block);
-    }
-    return placed;
+    for (const block of arrivals) this.#arrived.add(block.id!);
+    return { blocks, arrivals };
   }
 
   /** A call became a task: its row is now the task's start line, or a message to a working one. */
@@ -279,13 +242,9 @@ export class ConversationTranscript {
     part: EveToolPart,
     task: TaskRow,
     labels: (callId: string) => ToolLabels | undefined,
-    options: TranscriptOptions,
     now: number,
     view: SessionView,
   ): Block | undefined {
-    const visible =
-      task.kind === "agent" ? options.subagents !== "hidden" : options.tools !== "hidden";
-    if (!visible) return undefined;
     const label = labels(part.callId)?.start;
     const record = this.#tasks.record(part, task, label, now, view);
     return record.callId === part.callId
@@ -297,7 +256,7 @@ export class ConversationTranscript {
 
   /**
    * Updates the working tasks and returns the blocks that appeared since the last projection:
-   * `--show-subagents full` rows as an agent finishes each, and end lines as tasks end.
+   * `--verbose` rows as an agent finishes each, and end lines as tasks end.
    */
   #taskActivity(
     view: AgentTUIConversationView,
@@ -327,9 +286,9 @@ export class ConversationTranscript {
       // The last call carries the task's latest outcome; one reply settles every call it answered.
       const call = calls.at(-1)!;
       const activity = this.#agentActivity(record, task, calls, conversation, options, traversal);
-      if (options.subagents === "full") {
+      if (options.verbose) {
         for (const row of activity.rows) {
-          if (!this.#placedIds.has(row.id!)) arrivals.push(row);
+          if (!this.#arrived.has(row.id!)) arrivals.push(row);
         }
       }
       const settled = calls.every((candidate) => candidate.status === "settled");
@@ -441,11 +400,7 @@ export class ConversationTranscript {
             live: false,
           };
         });
-        const childVisible =
-          childTask?.task.kind === "agent"
-            ? options.subagents !== "hidden"
-            : options.tools !== "hidden";
-        if (childTask !== undefined && childTask.call.status !== "settled" && childVisible) {
+        if (childTask !== undefined && childTask.call.status !== "settled") {
           if (shownChildTasks.has(childTask.task.taskId)) continue;
           shownChildTasks.add(childTask.task.taskId);
           if (depth >= 8 || traversal.remaining <= 0) {
@@ -544,7 +499,7 @@ export class ConversationTranscript {
   ): Block | undefined {
     const part = message.parts[index];
     if (part?.type !== "text" && part?.type !== "reasoning") return undefined;
-    if (part.type === "reasoning" && options.reasoning !== "full") return undefined;
+    if (part.type === "reasoning" && !options.verbose) return undefined;
     const body = stripTerminalControls(part.text).trim();
     if (body.length === 0) return undefined;
     const live = part.state === "streaming" && working;
@@ -584,7 +539,7 @@ export class ConversationTranscript {
         part,
         state.status,
         live,
-        options.tools,
+        options.verbose,
         options.subagentNames,
         labels?.start,
         labels?.complete,
@@ -598,7 +553,7 @@ export class ConversationTranscript {
           ...toolBlock(part, state, context),
           kind: "tool",
           live,
-          expanded: options.tools === "full",
+          expanded: options.verbose,
         };
       },
     );

@@ -2,7 +2,7 @@
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 
 /** A user interrupt is a clean exit, never a failure. */
-export class InterruptedError extends Error {
+class InterruptedError extends Error {
   constructor() {
     super("Interrupted");
     this.name = "InterruptedError";

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
-import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
+import type { PromptCommandHandlerContext } from "./runner.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
 vi.mock("#setup/flows/model.js", () => ({
@@ -36,11 +36,8 @@ const WORKSPACE_TARGET = {
   agentRoot: WORKSPACE_AGENT_ROOT,
 } as const;
 
-function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandlerContext {
-  return {
-    renderer: { ...renderer },
-    title: "Weather Agent",
-  };
+function context(overrides: { setupFlow?: SetupFlowRenderer } = {}): PromptCommandHandlerContext {
+  return { setupFlow: overrides.setupFlow ?? setupFlowRenderer(), title: "Weather Agent" };
 }
 
 function setupFlowRenderer() {
@@ -129,19 +126,14 @@ describe("createPromptCommandHandler", () => {
 
   it("requires the inline drawer to complete a bare /model", async () => {
     const applyModel = vi.fn(async () => ({ kind: "rejected", message: "unused" }) as const);
-    const readInputQuestion = vi.fn(async () => ({ optionId: "openai/gpt-5" }));
     const handler = createPromptCommandHandler({
       target: LOCAL_TARGET,
       applyModel,
     });
 
     await expect(
-      handler.handle(
-        { type: "extension", name: "model", argument: "" },
-        context({ readInputQuestion }),
-      ),
+      handler.handle({ type: "extension", name: "model", argument: "" }, context()),
     ).resolves.toEqual({ message: "Choose a model from the inline /model suggestions." });
-    expect(readInputQuestion).not.toHaveBeenCalled();
     expect(applyModel).not.toHaveBeenCalled();
   });
 

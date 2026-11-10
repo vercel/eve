@@ -54,7 +54,7 @@ export interface TraceViewerState {
  * to the selection's region — absolute conversation lines for the cards,
  * absolute detail lines (and panel-content columns) for the drawer.
  */
-export interface TextSelectionPoint {
+interface TextSelectionPoint {
   readonly line: number;
   readonly column: number;
 }

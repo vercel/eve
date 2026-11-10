@@ -8,12 +8,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { conversationView, tuiSessionData } from "./conversation-view.js";
 import { ConversationTranscript } from "./transcript.js";
 
-const OPTIONS = {
-  connectionAuth: "full",
-  reasoning: "full",
-  subagents: "full",
-  tools: "full",
-} as const;
+const OPTIONS = { verbose: true } as const;
 
 function project(events: readonly SessionEvent[]) {
   const conversation = new Conversation();
@@ -28,7 +23,7 @@ function project(events: readonly SessionEvent[]) {
   const view = conversationView(snapshot, tuiSessionData(conversation.state));
   return new ConversationTranscript()
     .project(view, OPTIONS)
-    .map((block) =>
+    .blocks.map((block) =>
       block.kind === "tool"
         ? `tool: ${block.title} ${block.status}`
         : `${block.kind}: ${block.body ?? ""}`,

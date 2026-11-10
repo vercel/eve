@@ -18,7 +18,7 @@ import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
 import { renderTool, renderToolHeader } from "./tool-rows.js";
 import { truncate } from "./tool-format.js";
-import { elisionText, TOOL_COLUMN_LEAD } from "./rail.js";
+import { TOOL_COLUMN_LEAD } from "./rail.js";
 import {
   clipVisible,
   sliceVisible,
@@ -71,8 +71,6 @@ export interface Block {
   subtitle?: string;
   /** Main multi-line content (markdown for prose, plain for logs). */
   body?: string;
-  /** User blocks only: steered messages use a yellow gutter. */
-  promptOrigin?: "steer" | "queue";
   /** Reasoning trace shown above `body` (subagent steps). */
   reasoning?: string;
   /** One-line summarized result shown after a tool resolves. */
@@ -103,8 +101,6 @@ export interface Block {
   collapsed?: boolean;
   /** When true, expand tool input/output instead of summarizing. */
   expanded?: boolean;
-  /** Captured-log visibility used for concise-vs-raw diagnostic replay. */
-  logVisibility?: "summary" | "all-only";
   logLevel?: "error" | "warn" | "info" | "debug";
   /** Raw tool input / output for the expanded view. */
   toolInput?: unknown;
@@ -123,12 +119,6 @@ export interface Block {
   agentName?: string;
   /** Task lines only: whether an agent or a tool does the work. */
   taskKind?: TaskKind;
-  /**
-   * Monotonic activity stamp, bumped on every push and in-place update.
-   * Recency windows key on it so a parallel-announced call that just
-   * settled counts as newer than a later-announced one still idle.
-   */
-  updateSeq?: number;
 }
 
 /**
@@ -141,8 +131,6 @@ export interface Block {
 export interface DisplayBlock extends Block {
   /** Items listed when equivalent tool calls are coalesced into one row. */
   toolGroupItems?: readonly ToolGroupItem[];
-  /** Earlier captured writes merged into this log section; renders as `… +N more`. */
-  elided?: number;
 }
 
 /** One coalesced call's row beneath an aggregated tool header. */
@@ -255,8 +243,7 @@ function renderBody(
 }
 
 function renderUser(block: Block, width: number, theme: Theme): string[] {
-  const bar =
-    block.promptOrigin === "steer" ? theme.colors.yellow(theme.glyph.user) : theme.glyph.user;
+  const bar = theme.glyph.user;
   const lines = wrap(block.body ?? "", width - 2);
   return lines.map((line) => `${bar} ${theme.colors.bold(line)}`);
 }
@@ -514,14 +501,7 @@ function renderSandbox(
 
 /**
  * Renders captured server output: a `○ stderr` (or `○ stdout`) header with
- * body lines — wrapped continuations included — behind a `│` rail. The rail
- * stays open (no closing corner): a process stream is continuous, and the
- * next write may extend it. A lone write shows its full body; a coalesced
- * run (contiguous writes merged by the display grouping) arrives
- * pre-windowed to its newest lines with the older count on `elided`,
- * rendered as an `… (N more)` row under the header. Whether a source
- * renders at all is the renderer's `LogDisplayMode` filter — this function
- * only ever sees visible blocks.
+ * body lines, wrapped continuations included, behind a `│` rail.
  */
 function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
   const color =
@@ -534,9 +514,6 @@ function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
   const source = block.logLevel ?? block.title ?? "stdout";
 
   const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
-  if (block.elided !== undefined && block.elided > 0) {
-    rows.push(`${rule} ${elisionText(block.elided, theme)}`);
-  }
   for (const raw of (block.body ?? "").split("\n")) {
     for (const line of wrapVisibleLine(raw, Math.max(1, width - 2))) {
       rows.push(`${rule} ${theme.colors.dim(color(line))}`);

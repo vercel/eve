@@ -241,19 +241,3 @@ export function promptCommandSpec(
 export function isPromptControlCommand(prompt: string): boolean {
   return parsePromptCommand(prompt) !== null;
 }
-
-/**
- * The table `/help` prints: one line per command — slash name, argument
- * hint, and aliases padded into a column, description after.
- */
-export function formatPromptCommandHelp(
-  commands: readonly PromptCommandSpec[] = PROMPT_COMMANDS,
-): string {
-  const entries = commands.map((spec) => {
-    const hint = spec.argumentHint === undefined ? "" : ` ${spec.argumentHint}`;
-    const aliases = spec.aliases.map((alias) => ` (/${alias})`).join("");
-    return { invocation: `/${spec.name}${hint}${aliases}`, description: spec.description };
-  });
-  const column = Math.max(...entries.map((entry) => entry.invocation.length)) + 2;
-  return entries.map((entry) => entry.invocation.padEnd(column) + entry.description).join("\n");
-}

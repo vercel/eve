@@ -1,10 +1,7 @@
 /**
  * Pure helpers shared by the terminal renderer: key parsing and status-text
- * formatting. Kept apart from the renderer so the presentation class stays
- * focused on painting.
+ * formatting.
  */
-
-import type { AssistantResponseStatsMode } from "./types.js";
 
 export type TerminalKey =
   | {
@@ -335,43 +332,6 @@ export function parseKey(chunk: Buffer): TerminalKey {
   }
 }
 
-interface AssistantResponseStats {
-  totalTokens: number | undefined;
-  outputTokens: number | undefined;
-  tokensPerSecond: number | undefined;
-}
-
-export async function* takeUntil<T>(
-  source: AsyncIterable<T>,
-  stop: Promise<void>,
-): AsyncIterable<T> {
-  const iterator = source[Symbol.asyncIterator]();
-  const stopped = stop.then(
-    () => ({ done: true, value: undefined as T }) satisfies IteratorResult<T>,
-  );
-
-  try {
-    while (true) {
-      const next = iterator.next();
-      // When `stop` wins the race, this in-flight pull settles later — e.g.
-      // rejecting once the caller aborts the underlying stream. Absorb that
-      // so it cannot surface as an unhandled rejection after we stopped.
-      void next.catch(() => {});
-      const nextValue = await Promise.race([next, stopped]);
-      if (nextValue.done) break;
-      yield nextValue.value;
-    }
-  } finally {
-    // Release the source iterator on every exit path (stop, consumer break,
-    // error) so abandoned generators run their cleanup — e.g. the client
-    // event stream advancing its session cursor. For generator sources this
-    // resolves only once the pending pull settles, so callers that stop
-    // mid-pull must also abort the underlying stream (a lifecycle interrupt
-    // path fires `result.abort()` for exactly this reason).
-    void iterator.return?.()?.catch(() => {});
-  }
-}
-
 /** `394.4K`-style compact count: plain below 1000, then K/M with one trimmed decimal. */
 export function formatCompactTokenCount(count: number): string {
   if (count < 1000) return `${count}`;
@@ -398,50 +358,13 @@ export function formatTurnDuration(elapsedMs: number): string {
 
 /**
  * The turn bar and coda's token-flow segment: `↑ 394.4K ↓ 4.3K`, input
- * (prompt) tokens up, output tokens down. A known `--context-size` appends
- * the context-fill percentage of the input side.
+ * (prompt) tokens up, output tokens down.
  */
 export function formatTokenFlow(
-  flow: { inputTokens: number; outputTokens: number; contextSize?: number },
+  flow: { inputTokens: number; outputTokens: number },
   glyph: { arrowUp: string; arrowDown: string },
 ): string {
   const up = formatCompactTokenCount(flow.inputTokens);
   const down = formatCompactTokenCount(flow.outputTokens);
-  const base = `${glyph.arrowUp} ${up} ${glyph.arrowDown} ${down}`;
-  const percentage = formatContextPercentage(flow.inputTokens, flow.contextSize);
-  return percentage == null ? base : `${base} ${percentage}`;
-}
-
-function formatContextPercentage(
-  tokens: number,
-  contextSize: number | undefined,
-): string | undefined {
-  if (contextSize == null || contextSize <= 0 || !Number.isFinite(contextSize)) {
-    return undefined;
-  }
-  return `${Math.round((tokens / contextSize) * 100).toLocaleString()}%`;
-}
-
-export function formatAssistantResponseStats(
-  stats: AssistantResponseStats,
-  mode: AssistantResponseStatsMode,
-): string | undefined {
-  if (mode === "tokensPerSecond") {
-    return formatTokensPerSecond(stats.tokensPerSecond);
-  }
-  // Label output tokens explicitly — the persistent status line below this
-  // row already shows the total token count.
-  if (stats.outputTokens == null) return undefined;
-  return `${stats.outputTokens.toLocaleString()} output tokens`;
-}
-
-function formatTokensPerSecond(tokensPerSecond: number | undefined): string | undefined {
-  if (tokensPerSecond == null) return undefined;
-  return `${formatNumber(tokensPerSecond)} tok/s`;
-}
-
-function formatNumber(value: number): string {
-  return Number.isInteger(value)
-    ? value.toLocaleString()
-    : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  return `${glyph.arrowUp} ${up} ${glyph.arrowDown} ${down}`;
 }
