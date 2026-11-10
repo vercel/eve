@@ -1,6 +1,7 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import { runInWorkflowStep } from "#context/workflow-step.js";
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -95,11 +96,13 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
       });
       let output: unknown;
       try {
-        output = await auth.run(() =>
-          Reflect.apply(
-            execute,
-            this,
-            args.map((arg, index) => (invocation.contextIndexes.includes(index) ? ctx : arg)),
+        output = await runInWorkflowStep(() =>
+          auth.run(() =>
+            Reflect.apply(
+              execute,
+              this,
+              args.map((arg, index) => (invocation.contextIndexes.includes(index) ? ctx : arg)),
+            ),
           ),
         );
       } catch (error) {
@@ -123,6 +126,15 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     });
   };
   // The SDK reads retry policy from the registered function at execution time.
+  Object.defineProperty(wrapped, "maxRetries", { get: () => Reflect.get(execute, "maxRetries") });
+  return wrapped;
+}
+
+/** Runs a workflow tool's `"use step"` function that its caller invoked without the tool context. */
+export function withWorkflowStepScope(execute: (...args: never[]) => unknown) {
+  const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+    return runInWorkflowStep(() => Reflect.apply(execute, this, args));
+  };
   Object.defineProperty(wrapped, "maxRetries", { get: () => Reflect.get(execute, "maxRetries") });
   return wrapped;
 }

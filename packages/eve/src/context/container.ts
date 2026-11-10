@@ -171,7 +171,7 @@ export function loadContext(): AlsContext {
   if (ctx === undefined) {
     throw new Error(
       "No active eve context. " +
-        "Call this function only from authored runtime code such as tools, steps, and model callbacks.",
+        "Call this function only from code eve runs, such as tools, hooks, channel handlers, and model callbacks.",
     );
   }
   return ctx;
