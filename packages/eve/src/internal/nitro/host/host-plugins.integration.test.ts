@@ -109,7 +109,7 @@ describe("createHostPlugins", () => {
       await bundleThroughPlugins({ files: { [id]: STEP_SOURCE }, plugins: list, reexports: [id] });
 
     expect(await bundle(authoredStep)).toContain(
-      'registerStepFunction("step//./agent/steps/add//add", add)',
+      'registerStepFunction("step//./agent/steps/add//add", withWorkflowStepScope(add))',
     );
     expect(await bundle(distStep)).toContain(
       'registerStepFunction("step//./src/execution/fixture-step//add", add)',

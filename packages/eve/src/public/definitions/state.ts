@@ -1,6 +1,6 @@
 import { ContextKey } from "#context/key.js";
 import { type AlsContext, loadContext } from "#context/container.js";
-import { WorkflowStepKey } from "#context/keys.js";
+import { isInWorkflowStep } from "#context/workflow-step.js";
 
 /**
  * Typed handle returned by {@link defineState}. Reads and updates a
@@ -83,8 +83,7 @@ function createStateHandle<T>(name: string, initial: () => T): StateHandle<T> {
 }
 
 function loadStateContext(): AlsContext {
-  const ctx = loadContext();
-  if (ctx.has(WorkflowStepKey)) {
+  if (isInWorkflowStep()) {
     // A step's context is never saved to the session, so a read would see
     // `initial()` and a write would be lost. `fatal` stops the Workflow SDK
     // from retrying a misuse that would fail the same way.
@@ -97,5 +96,5 @@ function loadStateContext(): AlsContext {
       { fatal: true },
     );
   }
-  return ctx;
+  return loadContext();
 }

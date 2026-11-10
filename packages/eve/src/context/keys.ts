@@ -186,8 +186,6 @@ export const SandboxTerminalCleanupKey = new ContextKey<
   (reason: SandboxSessionEndReason) => Promise<void>
 >("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
-/** Marks a workflow tool's `"use step"` function, whose context never carries session state. */
-export const WorkflowStepKey = new ContextKey<true>("eve.internal.workflowStep");
 /** A tool's `ctx.channel` and `ctx.to()`, which the turn running the tool provides. */
 export const ToolChannelKey = new ContextKey<{
   readonly channel: InstrumentationChannel;
