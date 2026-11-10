@@ -601,6 +601,23 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
+  it("rejects collections whose different names produce the same tool names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/billing-requests.ts",
+        loadNamespace: async () => ({ default: scheduleCollection() }),
+      },
+      {
+        logicalPath: "schedules/workflows.ts",
+        loadNamespace: async () => ({ default: scheduleCollection({ id: "billing/requests" }) }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow('both name their tools "schedule__billing-requests"');
+  });
+
   it("disables a collection's tools through the tool file named for its explicit id", async () => {
     const compileWithToolFile = async (logicalPath: string) => {
       const sourceRegistry = registry([

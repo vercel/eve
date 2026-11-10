@@ -1,6 +1,7 @@
 import type { CompiledScheduleCollectionDefinition } from "#compiler/manifest.js";
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ScheduleSourceRef } from "#discover/manifest.js";
+import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 
 export function compileScheduleCollectionDefinition(
@@ -35,10 +36,17 @@ export function assertScheduleCollectionNameAvailable(
   compiled: readonly CompiledScheduleCollectionDefinition[],
   collection: CompiledScheduleCollectionDefinition,
 ): void {
-  const existing = compiled.find((entry) => entry.name === collection.name);
-  if (existing !== undefined) {
-    throw new Error(
-      `Schedule collections "${existing.logicalPath}" and "${collection.logicalPath}" both resolve to the name "${collection.name}". Set a different "id" on one of them, or rename its file.`,
-    );
+  for (const existing of compiled) {
+    if (existing.name === collection.name) {
+      throw new Error(
+        `Schedule collections "${existing.logicalPath}" and "${collection.logicalPath}" both resolve to the name "${collection.name}". Set a different "id" on one of them, or rename its file.`,
+      );
+    }
+    const toolPrefix = scheduleCollectionToolPrefix(collection.name);
+    if (scheduleCollectionToolPrefix(existing.name) === toolPrefix) {
+      throw new Error(
+        `Schedule collections "${existing.logicalPath}" ("${existing.name}") and "${collection.logicalPath}" ("${collection.name}") both name their tools "${toolPrefix}". Set a different "id" on one of them, or rename its file.`,
+      );
+    }
   }
 }
