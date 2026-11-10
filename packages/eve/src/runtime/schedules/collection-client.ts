@@ -11,7 +11,7 @@ import type {
   SchedulePatch,
   DynamicSchedulesDefinition,
   ScheduleEnvelope,
-  SchedulePageResult,
+  SchedulePage,
   SchedulePrincipalReference,
   ScheduleScopeContext,
   ScheduleScopeValue,
@@ -259,7 +259,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       const { provider } = await resolveNamespace("invoke", normalized);
       await definition.provider.invoke(provider, normalized);
     },
-    async list(input = {}): Promise<SchedulePageResult> {
+    async list(input = {}): Promise<SchedulePage> {
       const limit = validateScheduleListLimit(input.limit);
       const { provider } = await resolveNamespace("list");
       const query: { cursor?: string; limit?: number } = {};

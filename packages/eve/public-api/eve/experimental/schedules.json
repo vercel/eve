@@ -19,6 +19,7 @@
   "ScheduleOperation",
   "SchedulePage",
   "SchedulePatch",
+  "SchedulePreparePayloadContext",
   "SchedulePrincipalReference",
   "ScheduleProvider",
   "ScheduleProviderContext",

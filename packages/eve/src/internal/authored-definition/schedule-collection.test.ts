@@ -34,7 +34,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
     ],
     ["the removed capture hook", { resolvePayload: () => ({}) }, "resolvePayload"],
     ["the removed deliveries", { deliveries: {} }, "deliveries"],
-  ])("rejects a subscription with %s", (_label, override, message) => {
+  ])("rejects a definition with %s", (_label, override, message) => {
     const definition = defineDynamicSchedules({ ...valid, ...override } as never);
     expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(message);
   });
