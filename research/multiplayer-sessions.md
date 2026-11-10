@@ -332,7 +332,7 @@ What remains:
 - **Additive API.** `SessionAuth.sender`, `callerConfirmation`, the `as` option, and the
   `confirmation_required` reason.
 
-Each pull request carries its own evals under `agent-tools-hitl/evals/hitl/multiplayer`, with unit
+Each part carries its own evals under `agent-tools-hitl/evals/hitl/multiplayer`, with unit
 and integration tests for what the fixtures can't reach:
 
 1. Another person's message joins a running turn; a tool reads `auth.sender`; messages from two
