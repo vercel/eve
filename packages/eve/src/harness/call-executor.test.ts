@@ -488,7 +488,7 @@ it.each([
   async (callerConfirmation, disclosed) => {
     const prompt = await identityPrompt({ command: "gh pr create" }, callerConfirmation);
 
-    expect(prompt?.includes("Approving also lets bob steer calls that use your identity")).toBe(
+    expect(prompt?.includes('Approving also lets "bob" steer calls that use your identity')).toBe(
       disclosed,
     );
     // What approving remembers comes before the input, so a channel that cuts the prompt keeps it.

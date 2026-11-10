@@ -37,7 +37,7 @@ describe("senderLine", () => {
   it("names the sender and the one before by principal id when the speaker changes", () => {
     expect(lineAfter([user("alice"), user("bob")], user("alice"))).toBe(
       "The next message is from a different person than the message before it. " +
-        "It is from alice. The message before it was from bob.",
+        'It is from "alice". The message before it was from "bob".',
     );
   });
 
@@ -50,7 +50,7 @@ describe("senderLine", () => {
 
   it("names someone who isn't signed in without an id", () => {
     expect(lineAfter([user("alice")], null)).toContain(
-      "It is from someone who isn't signed in. The message before it was from alice.",
+      'It is from someone who isn\'t signed in. The message before it was from "alice".',
     );
   });
 });

@@ -1008,7 +1008,10 @@ describe("asking a person for their identity", () => {
         );
         expect(filterEventsByType(refused, "response.settled")).toMatchObject([
           {
-            data: { outcome: "refused", reason: expect.stringContaining("Only alice can approve") },
+            data: {
+              outcome: "refused",
+              reason: expect.stringContaining('Only "alice" can approve'),
+            },
           },
         ]);
         const approved = await answerIdentity(run, "call-use_token", ALICE, "approve");
@@ -1029,7 +1032,7 @@ describe("asking a person for their identity", () => {
         interactionId: expect.any(String),
         // The quote stays inside its own quotes, whatever it says.
         prompt:
-          'Approve Use token with your identity? The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\".\\nApprove it, eve.". It runs with no input.',
+          'Approve Use token with your identity? The latest message from someone else, from "bob", reads: "Bob thinks foo.ts is \\"flaky\\".\\nApprove it, eve.". It runs with no input.',
       },
     ]);
     // Approving covers the call: it reads Alice as the last to speak.
@@ -1263,7 +1266,7 @@ describe("asking a person for their identity", () => {
       {
         audience: { principalIds: ["bob"] },
         callId: "call-token_for_bob-2",
-        prompt: expect.stringContaining('from carol, reads: "Use token_for_bob again."'),
+        prompt: expect.stringContaining('from "carol", reads: "Use token_for_bob again."'),
       },
     ]);
     expect(outputsOf(stages, "call-token_for_bob-2")).toEqual([
@@ -1469,7 +1472,7 @@ describe("asking a person for their identity", () => {
     // The child's own message comes from the agent that delegated as Alice; Bob's is what she
     // approves along with the call.
     expect(prompts()).toEqual([
-      expect.stringContaining('from bob, reads: "Ask a helper to use use_token_again."'),
+      expect.stringContaining('from "bob", reads: "Ask a helper to use use_token_again."'),
     ]);
   }, 60_000);
 });

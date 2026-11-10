@@ -275,11 +275,12 @@ export function requirePersonConfirmation(
 ): void {
   const sender = spokeLast(readSender(ctx, ctx?.get(AuthKey) ?? null));
   if (approvedBy(person) || principalOf(sender) === principalOf(person)) return;
+  const name = JSON.stringify(person.principalId);
   throw confirmationRequired(
     connectionName,
-    `${person.principalId} didn't send the latest message and hasn't approved this action, so it ` +
-      `can't use their ${connectionName} access. Ask ${person.principalId} to clearly confirm ` +
-      `this action. Retry only after a reply from them that plainly confirms it.`,
+    `${name} didn't send the latest message and hasn't approved this action, so it can't use ` +
+      `their ${connectionName} access. Ask ${name} to clearly confirm this action. Retry only ` +
+      `after a reply from them that plainly confirms it.`,
     { person },
   );
 }

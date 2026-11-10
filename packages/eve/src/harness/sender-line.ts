@@ -40,8 +40,9 @@ function senderOf(auth: SessionAuthContext | null): Sender {
     : { id: auth.principalId, principal };
 }
 
+// A channel can carry any id, so it is JSON-quoted to keep it from passing for eve's words.
 function nameOf(sender: Sender): string {
-  return sender.id ?? "someone who isn't signed in";
+  return sender.id === undefined ? "someone who isn't signed in" : JSON.stringify(sender.id);
 }
 
 /**

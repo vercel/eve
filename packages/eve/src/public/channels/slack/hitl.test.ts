@@ -338,7 +338,7 @@ describe("renderInteractionBlocks", () => {
     ["an ordinary approval", undefined, false],
   ])("shows the whole prompt of %s beside its card: %s", (_label, audience, whole) => {
     const prompt =
-      'Approve Gh with your identity? Approving also lets bob steer calls that use your identity for the rest of this conversation. The latest message from someone else, from bob, reads: "<!here> open it". It runs with "command": "gh pr create".';
+      'Approve Gh with your identity? Approving also lets "bob" steer calls that use your identity for the rest of this conversation. The latest message from someone else, from "bob", reads: "<!here> open it". It runs with "command": "gh pr create".';
     const request: Interaction = {
       ...makeRequest({
         call: { callId: "call_gh", name: "gh", input: { command: "gh pr create" } },

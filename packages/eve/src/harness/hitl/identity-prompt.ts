@@ -47,16 +47,17 @@ export function identityApprovalRequest(
   const { callId, toolName } = call;
   const input = resolveToolCallInputObject(call.input, { callId, toolName });
   const latest = latestMessageFromOthers(identity.person);
-  // JSON keeps the quoted text inside its own quotes, so it can't pass for eve's words.
+  // JSON keeps the quoted text and the ids a channel chose inside their own quotes, so they can't
+  // pass for eve's words.
   const quote =
     latest === undefined
       ? ""
-      : ` The latest message from someone else, from ${latest.from}, reads: ${encodeText(latest.text, QUOTE_LIMIT)}.`;
+      : ` The latest message from someone else, from ${JSON.stringify(latest.from)}, reads: ${encodeText(latest.text, QUOTE_LIMIT)}.`;
   // Under `callerConfirmation: "once"`, the approval is remembered for the person who spoke last.
   const remembered =
     identity.steeredBy === undefined
       ? ""
-      : ` Approving also lets ${identity.steeredBy} steer calls that use your identity for the rest of this conversation.`;
+      : ` Approving also lets ${JSON.stringify(identity.steeredBy)} steer calls that use your identity for the rest of this conversation.`;
   const { confirmed, responder } = context;
   return {
     call: {

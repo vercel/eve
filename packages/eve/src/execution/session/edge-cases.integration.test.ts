@@ -1096,8 +1096,13 @@ describe("calls in flight", () => {
     const [, answered] = prompts;
     expect(answered).toContain("Bob's note.");
     expect(answered).toContain("Carol's note.");
-    expect(answered).toContain("It is from bob. The message before it was from alice.");
-    expect(answered).toContain("It is from carol. The message before it was from bob.");
+    // The prompt is serialized as JSON, so the quotes around each id arrive escaped.
+    expect(answered).toContain(
+      String.raw`It is from \"bob\". The message before it was from \"alice\".`,
+    );
+    expect(answered).toContain(
+      String.raw`It is from \"carol\". The message before it was from \"bob\".`,
+    );
   });
 
   it("reads another person's typed approve as a message, never as the caller's answer", async () => {

@@ -39,7 +39,7 @@ const REQUESTER_ONLY_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
 /** Why someone other than the person whose identity a call needs can't approve it. */
 function identityOnlyFeedback(person: string): string {
-  return `Only ${person} can approve this, because the action uses their identity. Anyone signed in can cancel it.`;
+  return `Only ${JSON.stringify(person)} can approve this, because the action uses their identity. Anyone signed in can cancel it.`;
 }
 const UNAVAILABLE_REASON =
   "The tool this approval was for is no longer available, so the call won't run.";
