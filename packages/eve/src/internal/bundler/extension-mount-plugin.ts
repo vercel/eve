@@ -3,6 +3,8 @@ import { dirname, join, resolve, sep } from "node:path";
 
 import type { Plugin } from "rolldown";
 
+import { escapeRegex } from "#internal/bundler/filters.js";
+
 const MOUNT_QUERY = "?eve-mount=";
 
 /** Directory beside an extension distribution's source root that holds its shared chunks. */
@@ -173,23 +175,26 @@ export function createExtensionMountPlugin(
         ? { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(owners[0]!.mountId)}` }
         : undefined;
     },
-    load(id: string) {
-      const query = id.indexOf(MOUNT_QUERY);
-      if (query < 0) return undefined;
-      const path = id.slice(0, query);
-      if (!/\.(?:[cm]?[jt]sx?|json)$/.test(path)) return undefined;
-      const extension = path.slice(path.lastIndexOf(".") + 1);
-      const moduleType =
-        extension === "json"
-          ? "json"
-          : extension === "tsx"
-            ? "tsx"
-            : extension === "jsx"
-              ? "jsx"
-              : ["ts", "mts", "cts"].includes(extension)
-                ? "ts"
-                : "js";
-      return { code: readFileSync(path, "utf8"), moduleType };
+    load: {
+      filter: { id: new RegExp(escapeRegex(MOUNT_QUERY)) },
+      handler(id: string) {
+        const query = id.indexOf(MOUNT_QUERY);
+        if (query < 0) return undefined;
+        const path = id.slice(0, query);
+        if (!/\.(?:[cm]?[jt]sx?|json)$/.test(path)) return undefined;
+        const extension = path.slice(path.lastIndexOf(".") + 1);
+        const moduleType =
+          extension === "json"
+            ? "json"
+            : extension === "tsx"
+              ? "tsx"
+              : extension === "jsx"
+                ? "jsx"
+                : ["ts", "mts", "cts"].includes(extension)
+                  ? "ts"
+                  : "js";
+        return { code: readFileSync(path, "utf8"), moduleType };
+      },
     },
   };
 }
