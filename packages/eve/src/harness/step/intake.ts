@@ -51,9 +51,11 @@ export async function settleRuntimeWork(
     results: input?.runtimeActionResults ?? [],
   });
   if (ready === undefined) {
-    if (input === undefined) return undefined;
+    // A sign-in's callback leaves the step no input, yet the call that stopped for it runs now.
+    const signedIn = (step.config.signInCompletions?.length ?? 0) > 0;
+    if (input === undefined) return signedIn ? { input, waited: true } : undefined;
     const { delegatedUsage: _usage, runtimeActionResults: _results, ...action } = input;
-    return isEmptyInput(action) ? undefined : { input: action, waited: true };
+    return isEmptyInput(action) && !signedIn ? undefined : { input: action, waited: true };
   }
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;

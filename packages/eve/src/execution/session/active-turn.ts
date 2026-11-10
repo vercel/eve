@@ -67,6 +67,11 @@ export class ActiveTurn {
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
+  /**
+   * How a wait admitted the messages `takeSteering` takes one person at a time, while some still
+   * wait: they joined together, so the rest join as the first did, even once the wait is over.
+   */
+  private admittedWith: SteeringOptions | undefined;
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
   /** A step of this turn compacted the history. */
@@ -146,7 +151,7 @@ export class ActiveTurn {
    * The next step reads it as input, so its signal must not interrupt that
    * step; only deliveries still unread re-signal the next generation.
    */
-  async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
+  async takeSteering(options = this.admittedWith): Promise<DeliverHookPayload | undefined> {
     let delivery: DeliverHookPayload | undefined;
     while (delivery === undefined) {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
@@ -159,6 +164,8 @@ export class ActiveTurn {
       }
       if (routed.kind === "turn") delivery = routed.delivery;
     }
+    this.admittedWith =
+      delivery !== undefined && this.hasSteeringWaiting(options) ? options : undefined;
     this.resetSteering();
     if (delivery === undefined) return undefined;
     if (delivery.caller !== undefined) this.caller = delivery.caller;
@@ -169,7 +176,7 @@ export class ActiveTurn {
    * Whether a message still waits to steer the turn after `takeSteering`, which takes one
    * person's messages at a time: the model runs once the turn has read them all.
    */
-  hasSteeringWaiting(options?: SteeringOptions): boolean {
+  hasSteeringWaiting(options = this.admittedWith): boolean {
     return this.input.queue.hasSteering(this.admitted, this.identity, options);
   }
 

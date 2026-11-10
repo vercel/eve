@@ -44,7 +44,13 @@ import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { DENY_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
-import { defineTool, disableTool, type ToolContext } from "#tools/definition.js";
+import {
+  defineTool,
+  disableTool,
+  type ToolAuthProvider,
+  type ToolContext,
+} from "#tools/definition.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { z } from "zod";
 import {
   defineWorkflowTool,
@@ -265,6 +271,33 @@ function heldReply(text: string, release: Promise<void>, before?: string): Strea
   };
 }
 
+/** A tool behind a sign-in of its own, named after it: it runs once its callback arrives. */
+function signedInTool(name: string, approval?: true): ToolSpec {
+  let connected = false;
+  const auth: ToolAuthProvider = {
+    principalType: "user",
+    async getToken() {
+      if (!connected) throw new ConnectionAuthorizationRequiredError(name);
+      return { token: `${name}-token` };
+    },
+    async startAuthorization({ callbackUrl }) {
+      return { challenge: { url: `https://idp.example/authorize?callback=${callbackUrl}` } };
+    },
+    async completeAuthorization() {
+      connected = true;
+      return { token: `${name}-token` };
+    },
+  };
+  return {
+    approval,
+    execute: async (_input, ctx) => {
+      await ctx.getToken(auth, { authKey: name });
+      return { ran: name };
+    },
+    name,
+  };
+}
+
 interface ToolSpec {
   readonly name: string;
   readonly approval?: boolean;
@@ -299,6 +332,8 @@ interface Session {
     fields?: Omit<DeliverPayload, "answers">,
   ) => Promise<string>;
   readonly answerAndSend: (interactionId: string, message: string) => Promise<string>;
+  /** Completes the sign-ins `interactionIds` in one callback delivery, as their providers do. */
+  readonly signIn: (interactionIds: readonly string[]) => Promise<void>;
   readonly control: (
     kind: "cancel" | "clear" | "compact" | "reset",
     extra?: object,
@@ -501,6 +536,24 @@ async function withSession(
           });
         },
         next: (label) => read(label, stream.nextTurn()),
+        async signIn(interactionIds) {
+          const connections = new Map(
+            ofType(events, "interaction.opened").map((event) => [
+              event.data.interactionId,
+              event.data.request.signIn?.name,
+            ]),
+          );
+          await resumeHook(commandInbox, {
+            kind: "authorization-callback",
+            payloads: interactionIds.map((attemptId) => ({
+              authorizationCallback: {
+                attemptId,
+                callback: { method: "GET", params: { code: "oauth-code" } },
+                connectionName: connections.get(attemptId),
+              },
+            })),
+          });
+        },
         async send(message, auth = ALICE, turnPolicy) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
             auth,
@@ -1805,6 +1858,73 @@ describe("calls that wait on a person as tasks", () => {
       "applied",
     ]);
     expect(ran).toEqual(["deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("runs each call that waits on its own sign-in as a task when both callbacks arrive together", async () => {
+    const { events } = await withSession(
+      "edge-wait-two-sign-ins",
+      {
+        message: "Read both calendars.",
+        model: scriptedModel(({ said }) =>
+          said("Read both calendars.")
+            ? [
+                { toolName: "read_work", toolCallId: "call_work" },
+                { toolName: "read_home", toolCallId: "call_home" },
+              ]
+            : "Done.",
+        ),
+        tools: [signedInTool("read_work"), signedInTool("read_home")],
+      },
+      async (session) => {
+        const asked = await session.next("asks for both sign-ins");
+        const signIns = ofType(asked, "interaction.opened").map(
+          (event) => event.data.interactionId,
+        );
+        expect(signIns).toHaveLength(2);
+        await session.send("I'll sign in to both.");
+        await session.until("the calls wait as tasks", (event) => event.type === "turn.paused");
+        await session.signIn(signIns);
+        await session.until("settled", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(settlements(events).sort()).toEqual(["call_home:completed", "call_work:completed"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("runs a call approved while the model waits once the sign-in it then stops for completes", async () => {
+    const { events } = await withSession(
+      "edge-wait-approved-sign-in",
+      {
+        message: "Deploy it.",
+        model: scriptedModel(({ said }, raw) => {
+          if (readsTaskResult(raw)) return "Deployed.";
+          if (said("Wait for it")) return [{ toolName: "eve__task_wait", toolCallId: "call_wait" }];
+          return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+        }),
+        tools: [signedInTool("deploy", true)],
+      },
+      async (session) => {
+        await session.next("asks");
+        const [approval] = session.approvals();
+        await session.send("Wait for it.");
+        await session.until(
+          "the model waits",
+          (event) =>
+            event.type === "call.requested" && event.data.capability.name === "eve__task_wait",
+        );
+        await session.answer(approval!, "approve");
+        const asked = await session.until(
+          "the approved call's sign-in",
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+        );
+        await session.signIn([ofType(asked, "interaction.opened").at(-1)!.data.interactionId]);
+        await session.until("settled", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(settlements(events)).toEqual(["call_deploy:completed", "call_wait:completed"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 

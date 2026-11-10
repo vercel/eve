@@ -334,7 +334,7 @@ export class SessionExecution {
     ) {
       throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
     }
-    const person = personWake(paused);
+    let person = personWake(paused);
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
     let interrupted = false;
     while (true) {
@@ -361,6 +361,8 @@ export class SessionExecution {
               ? runtimeWait(this.input.cursor.sessionState.snapshot.session.state)
               : undefined;
           if (waiting === undefined) return { ran };
+          // A call the action let run can stop again, as for a sign-in, and that wakes the turn next.
+          if (ran.action === "paused") person = personWake(ran);
           // A call the action let run that needs a run of its own, as an approved workflow
           // tool's does, starts now, and the turn waits on it with the rest.
           const started = waiting.callIds.filter((callId) => !calls.waitsOn(callId));
@@ -413,11 +415,11 @@ export class SessionExecution {
     person: PersonWake,
   ): Promise<TurnStepPayload["delivery"]> {
     const { queue } = this.input;
-    const callbacks =
-      queue.takeAuthorizations(person.attemptIds) ??
-      person.taskAttemptIds
-        .map((attemptId) => queue.takeAuthorizations(new Set([attemptId])))
-        .find((taken) => taken !== undefined);
+    let callbacks = queue.takeAuthorizations(person.attemptIds);
+    // Taking a callback removes it from the queue, so take one only: the rest wake the turn next.
+    for (const attemptId of person.taskAttemptIds) {
+      callbacks ??= queue.takeAuthorizations(new Set([attemptId]));
+    }
     if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
     return person.requestIds.size === 0 ? undefined : await turn.takeAnswers(person.requestIds);
   }
