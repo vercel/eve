@@ -207,7 +207,13 @@ eve add channel/web
 
 The generated Next.js app signs users in with Better Auth. The agent's eve channel accepts the same sign-in, and still accepts Vercel OIDC and local development requests. In an agent workspace, setup configures only the selected agent.
 
-Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel validates callbacks against the project's deployment domains. The app uses the `authorization_code` grant, `client_secret_post` authentication, and the `openid`, `email`, and `profile` scopes. Setup writes `VERCEL_APP_CLIENT_ID`, `VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview as sensitive values, and never prints them or writes them to source. Run `eve deploy` after setup to publish the app. Local development runs without browser sign-in.
+Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel validates callbacks against the project's deployment domains. The app uses the `authorization_code` grant and the `openid`, `email`, and `profile` scopes.
+
+New setups authenticate the app with the project's Vercel OIDC identity (`oidc_token`), so no OAuth client secret is created. Setup trusts only the project's OIDC issuer, audience, team, project, and `production`/`preview` environments. It writes `VERCEL_APP_CLIENT_ID`, `VERCEL_APP_AUTH_METHOD=oidc_token`, and a sensitive `BETTER_AUTH_SECRET` to production and preview, and never prints them or writes them to source. At each code exchange, the server sends its current workload OIDC token through the Better Auth Vercel provider's `tokenEndpointAuth` option.
+
+Retries keep existing session secrets and fill in only missing environment settings. Existing client-secret setups keep `client_secret_post` and their `VERCEL_APP_CLIENT_SECRET`; setup doesn't migrate or revoke deployed credentials. Changed OIDC trust is reported as a conflict rather than overwritten.
+
+Run `eve deploy` after setup to publish the app. Local development runs without browser sign-in.
 
 For automation, supply the setup answers explicitly:
 
