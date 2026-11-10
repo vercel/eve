@@ -10,8 +10,10 @@ import {
   TASK_SYSTEM_BLOCK,
   TASKS_NOTE_LABEL,
   type ListedTask,
+  type PersonWait,
   type TaskResultBlock,
 } from "#execution/tasks/render.js";
+import { suspendedSteps } from "#harness/session-machine/view.js";
 import {
   createTask,
   idleTasks,
@@ -184,7 +186,11 @@ async function toResultBlock(
   if (result.status === "failed") return { ...base, body: result.error, status: "failed" };
   return {
     ...base,
-    body: await projectOutput(record.name, result, definition),
+    // A call that waited on a person ran in the session, which shaped its output then.
+    body:
+      record.awaitsPerson === true
+        ? renderModelOutputText(result.output)
+        : await projectOutput(record.name, result, definition),
     status: "completed",
   };
 }
@@ -213,7 +219,11 @@ function resolveTasksNote(input: {
   readonly session: HarnessSession;
 }): string | undefined {
   const table = readTaskTable(input.session.state);
-  const working = workingTasks(table).map(toListedTask);
+  const awaiting = personWaits(input.session);
+  const working = workingTasks(table).map((record) => ({
+    ...toListedTask(record),
+    ...(awaiting.has(record.id) && { awaiting: awaiting.get(record.id) }),
+  }));
   const idle = idleTasks(table).map(toListedTask);
   const latest = input.messages.findLast(isTasksNote);
   if (latest === undefined && working.length === 0 && idle.length === 0) return undefined;
@@ -223,6 +233,26 @@ function resolveTasksNote(input: {
 
 function toListedTask(record: TaskRecord): ListedTask {
   return { id: record.id, tool: record.name };
+}
+
+/**
+ * What each task whose call waits on a person waits for: a sign-in it stopped on, or else its
+ * approval while it has one to wait for. One that runs waits on nobody.
+ */
+function personWaits(session: HarnessSession): ReadonlyMap<string, PersonWait> {
+  const waits = new Map<string, PersonWait>();
+  for (const step of suspendedSteps(session.state)) {
+    for (const [callId, taskId] of Object.entries(step.taskIds ?? {})) {
+      if (step.approved?.some(({ call }) => call.callId === callId) === true)
+        waits.set(taskId, "sign-in");
+      else if (
+        !step.tasks.some((task) => task.callId === callId) &&
+        step.requests.some(({ call }) => call.callId === callId)
+      )
+        waits.set(taskId, "approval");
+    }
+  }
+  return waits;
 }
 
 function isTasksNote(message: ModelMessage): boolean {

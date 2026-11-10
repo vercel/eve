@@ -6,7 +6,8 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
  * How a turn step's decision disagrees with what the tables say the turn waits on, if it does. A
  * step that pauses on calls only requested, which the next durable step dispatches or, for task
  * tool calls, answers, is the one known disagreement, `dispatch-deferred`: the tables say the
- * session has work, and it does.
+ * session has work, and it does. A step that waits on work while a call that waits as a task
+ * waits on a person agrees with tables that say the turn waits on that person.
  */
 export function stepDisagreement(result: DurableStepResult, view: SessionView): string | undefined {
   if (result.action === "done" || result.action === "cancelled") return undefined;
@@ -21,6 +22,10 @@ export function stepDisagreement(result: DurableStepResult, view: SessionView): 
   const agrees =
     (step === "interaction" && tables === "interaction") ||
     (step === "work" && tables === "work") ||
+    (result.action === "paused" &&
+      result.on !== "interaction" &&
+      (result.taskRequestIds?.length ?? 0) > 0 &&
+      tables === "interaction") ||
     (step === "continue" && tables === "session") ||
     (step === "parked" && (tables === "no-turn" || tables === "interaction"));
   if (agrees) return undefined;

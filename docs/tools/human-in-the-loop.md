@@ -394,11 +394,17 @@ For `ctx.ask()` questions and prompts passed up from subagents, a follow-up mess
 
 A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call that the turn waits on. A question from such a call, such as `ask_question`'s, ends as `withdrawn`. The model reads the message after those calls finish.
 
-For approvals, a follow-up message that matches no option steers the turn, even with `turnPolicy: "queue"`, because the turn can't end until the person acts:
+Only the person the turn serves answers a request by text. Text from anyone else that matches an option is an ordinary message.
 
-- eve withdraws every unanswered approval. The request ends as `withdrawn`, its call ends as `rejected` without running, and the model reads the message next.
-- Approvals that already have an answer use that answer, so approved calls still run.
-- A message from anyone other than the person the turn serves waits until the approvals end, then joins the turn.
+While the turn waits on an approval or a sign-in it asked for, a message that answers nothing joins the turn, even with `turnPolicy: "queue"`, because the turn can't end until the person acts. The message joins whoever sends it, as long as the channel lets them into the session:
+
+- Approvals that already have an answer use that answer, so approved calls run before the model reads the message.
+- Each unanswered approval and each sign-in stays open, and its card keeps working. The call that waits on it becomes a [task](/docs/tools/tasks#calls-that-wait-on-a-person). The model reads a receipt as the call's result, beside the results of the step's other calls, and then reads the message.
+- When the person approves or completes the sign-in, the call runs, and its result reaches the model as a `task.result` message. A denial reaches the model the same way and says the call didn't run.
+- The model can drop a waiting call with `eve__task_cancel`. Its approval or sign-in ends as `withdrawn`, and the call doesn't run.
+- The turn doesn't end while a call waits. Cancelling the turn ends the approvals as `interrupted`.
+
+A call that waits runs as the model made it. It reads the person who spoke last before the call as `ctx.session.auth.sender`, whoever spoke since. When the turn's caller approves the call or completes its sign-in, the call runs as the caller. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
 
 ### Request kinds
 
@@ -414,7 +420,7 @@ When a subagent asks for input, its parent session passes the request on as its 
 
 A message from the parent agent never answers a subagent's tool approval or session-limit request, even when its text matches an option. Only a person's structured answer, sent through the parent session, answers these requests. The subagent receives the parent's message as an ordinary message:
 
-- The message steers the turn past a waiting approval, which ends as `withdrawn`.
+- The message joins the turn, and a waiting approval stays open until a person answers it.
 - The message waits behind a session-limit request until a person answers that request.
 
 ### Several requests at once

@@ -281,11 +281,11 @@ Approvals, questions, sign-ins, and budget prompts are requests for input, which
 - A request stays `open` until eve decides it. Submitting an answer doesn't end it; the stream's `interaction.settled` event does.
 - A tool part's `state` is the call's state, not the decision. A call can be `cancelled` while its approval was never answered.
 
-| `outcome`                                                               | Meaning                                                                                                            |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `accepted`                                                              | A person approved or answered it                                                                                   |
-| `declined`                                                              | A person declined                                                                                                  |
-| `withdrawn`, `interrupted`, `abandoned`, `expired`, `invalid`, `failed` | No decision. The request ended another way, such as a cancelled turn or a message sent while a sign-in was pending |
+| `outcome`                                                               | Meaning                                                                                                   |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `accepted`                                                              | A person approved or answered it                                                                          |
+| `declined`                                                              | A person declined                                                                                         |
+| `withdrawn`, `interrupted`, `abandoned`, `expired`, `invalid`, `failed` | No decision. The request ended another way, such as a cancelled turn or a question a new message withdrew |
 
 Show "Approved" or "Denied" only for `accepted` and `declined`. For any other outcome, show the outcome itself. Keep a default branch: later releases can add outcomes.
 

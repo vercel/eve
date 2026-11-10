@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 import {
-  expectApprovalCancelled,
+  expectApprovalStillOpen,
   scriptedSession,
   expectChangeStillUnexecuted,
   expectResponseReply,
@@ -26,11 +26,11 @@ export default defineEval({
       { interactionId: current.interactionId, optionId: "deny" },
     ]);
 
-    // Then B does not execute and the read gets a completed reply; the message cancelled A, which never runs.
+    // Then B does not execute and the read gets a completed reply; A stays open and never runs.
     await expectToolResult(t, live, "read-draft");
     const reply = await expectResponseReply(t, live, "Draft status: ready.", current.interactionId);
     reply.calledTool("change-b", { status: "completed", count: 0 });
     expectChangeStillUnexecuted(session);
-    expectApprovalCancelled(session, approvalA);
+    expectApprovalStillOpen(session, approvalA);
   },
 });

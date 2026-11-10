@@ -8,7 +8,7 @@ import {
   dispatchCoordinationStep,
   publishDispatchedCallsStep,
 } from "#execution/coordination-dispatch-step.js";
-import type { SessionInputQueue } from "#execution/session/input-queue.js";
+import type { SessionInputQueue, SteeringOptions } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
@@ -271,8 +271,9 @@ export class SessionExecution {
   private async withSteering(
     turn: ActiveTurn,
     input: Omit<TurnStepPayload, "delivery">,
+    options?: SteeringOptions,
   ): Promise<TurnStepPayload | undefined> {
-    const delivery = await turn.takeSteering();
+    const delivery = await turn.takeSteering(options);
     if (delivery === undefined && input.runtimeResults === undefined) return undefined;
     if (delivery === undefined) return input;
     // Another person's message waits behind this one: the step only reads, and the next reads theirs.
@@ -282,12 +283,15 @@ export class SessionExecution {
   /**
    * Waits for what a paused turn awaits, and returns the input its next step reads:
    *
-   * - an interaction's answer, a sign-in callback, or the turn's own requester steering it, for the
-   *   requests and sign-ins it raised. Anyone else's message waits for the pause to end and then
-   *   steers the turn. A queued message admitted before the step that raised the request
-   *   (`heldSince`) waits too: it was sent before the request existed;
+   * - an interaction's answer, a sign-in callback, or a message, for the requests and sign-ins it
+   *   raised. A message joins whoever sent it, even a queued one admitted after the step that
+   *   raised the request (`heldSince`); one admitted before it was sent before the request
+   *   existed, and waits for the turn to end;
    * - one of its tasks settling. Steering interrupts that wait;
    * - every call's result. Steering interrupts the workflow tool calls, which still report.
+   *
+   * A person acting on a call that waits as a task wakes the turn however it waits: the step reads
+   * the answer or callback, and an `eve__task_wait` the turn is parked on returns.
    */
   private async resume(
     turn: ActiveTurn,
@@ -306,26 +310,21 @@ export class SessionExecution {
     ) {
       throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
     }
-    const pendingInteraction =
-      paused.on === "interaction"
-        ? { attemptIds: new Set(paused.attemptIds), requestIds: new Set(paused.requestIds) }
-        : undefined;
+    const person = personWake(paused);
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
+    // A person's action the calls wait holds for the step that reads their results.
+    let acted: TurnStepPayload["delivery"];
     let interrupted = false;
     while (true) {
-      if (pendingInteraction !== undefined) {
-        const callbacks = this.input.queue.takeAuthorizations(pendingInteraction.attemptIds);
-        if (callbacks !== undefined) {
-          turn.steerIfMessagesWaiting();
-          return { delivery: { kind: "deliver", payloads: callbacks } };
-        }
-        const answer = await turn.takeAnswers(pendingInteraction.requestIds);
-        if (answer !== undefined) {
-          turn.steerIfMessagesWaiting();
-          return { delivery: answer };
-        }
-        const steering = await turn.takeSteering({ heldSince });
-        if (steering !== undefined) return { delivery: steering };
+      if (person !== undefined && calls === undefined) {
+        const action = await this.takePersonAction(turn, person);
+        if (action !== undefined) return { delivery: action };
+        const steering = await this.withSteering(turn, {}, { heldSince });
+        if (steering !== undefined) return steering;
+      }
+      if (person !== undefined && calls !== undefined && acted === undefined) {
+        acted = await this.takePersonAction(turn, person);
+        if (acted !== undefined) await calls.personActed();
       }
       if (
         paused.on === "tasks" &&
@@ -335,7 +334,11 @@ export class SessionExecution {
         return await this.withSteering(turn, {});
       }
       const runtimeResults = await calls?.ready(interrupted);
-      if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
+      if (runtimeResults !== undefined) {
+        return acted === undefined
+          ? await this.withSteering(turn, { runtimeResults })
+          : { delivery: acted, runtimeResults };
+      }
 
       const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
       if (next === "cancelled") return next;
@@ -360,6 +363,25 @@ export class SessionExecution {
           continue;
       }
     }
+  }
+
+  /**
+   * A person's action the paused turn waits on: the callbacks of the sign-ins it holds on, once
+   * every one has arrived, or of one a call that waits as a task stopped on; else an answer to
+   * one of its requests.
+   */
+  private async takePersonAction(
+    turn: ActiveTurn,
+    person: PersonWake,
+  ): Promise<TurnStepPayload["delivery"]> {
+    const { queue } = this.input;
+    const callbacks =
+      queue.takeAuthorizations(person.attemptIds) ??
+      person.taskAttemptIds
+        .map((attemptId) => queue.takeAuthorizations(new Set([attemptId])))
+        .find((taken) => taken !== undefined);
+    if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
+    return person.requestIds.size === 0 ? undefined : await turn.takeAnswers(person.requestIds);
   }
 
   /** Starts the runs a paused step asked for, answers its task tool calls, and tracks the rest. */
@@ -440,6 +462,31 @@ export class SessionExecution {
   }
 }
 
+/** What wakes a paused turn on a person: answers to its requests, and sign-in callbacks. */
+interface PersonWake {
+  readonly requestIds: ReadonlySet<string>;
+  /** Sign-ins the turn holds on, which wake it once every one has called back. */
+  readonly attemptIds: ReadonlySet<string>;
+  /** Sign-ins calls that wait as tasks stopped on, each of which wakes it on its own. */
+  readonly taskAttemptIds: readonly string[];
+}
+
+/** What wakes `paused` on a person, if anything does. */
+function personWake(paused: TurnPause): PersonWake | undefined {
+  const requestIds = new Set([
+    ...(paused.on === "interaction" ? paused.requestIds : []),
+    ...(paused.taskRequestIds ?? []),
+  ]);
+  const taskAttemptIds = paused.taskAttemptIds ?? [];
+  if (paused.on !== "interaction" && requestIds.size === 0 && taskAttemptIds.length === 0)
+    return undefined;
+  return {
+    attemptIds: new Set(paused.on === "interaction" ? paused.attemptIds : []),
+    requestIds,
+    taskAttemptIds,
+  };
+}
+
 /**
  * The calls a paused turn waits on: the results that arrived and when, what the `ctx.agent`
  * sessions behind them spent, and the `eve__task_wait` calls still parked.
@@ -462,6 +509,11 @@ class CallWait {
     this.callIds = callIds;
     const acceptedAtMs = Date.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
+  }
+
+  /** A person acted on a call that waits as a task: every parked `eve__task_wait` returns. */
+  async personActed(): Promise<void> {
+    this.taskWaits = await this.resolveTaskWaits(false, true);
   }
 
   /** Every call's result, once each has one. */
@@ -556,11 +608,11 @@ class CallWait {
   }
 
   /** Answers every `eve__task_wait` that can return now; returns the ones still waiting. */
-  private async resolveTaskWaits(interrupted: boolean): Promise<TaskWait[]> {
+  private async resolveTaskWaits(interrupted: boolean, answered = false): Promise<TaskWait[]> {
     const table = sessionTaskTable(this.cursor);
     const waiting: TaskWait[] = [];
     for (const wait of this.taskWaits) {
-      const result = taskWaitResult(table, { interrupted, timedOut: wait.timedOut });
+      const result = taskWaitResult(table, { answered, interrupted, timedOut: wait.timedOut });
       if (result === undefined) {
         waiting.push(wait);
         continue;

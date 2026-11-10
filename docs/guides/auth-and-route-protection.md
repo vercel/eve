@@ -314,7 +314,7 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 The caller stays the same for the whole turn; only its claims can change:
 
 - A message from the turn's own caller joins the turn and updates `auth.current` with its claims. This includes a typed answer to a pending `ctx.ask()` or `ask_question`.
-- A message from anyone else joins the turn and sets `auth.sender`; `auth.current` stays the caller. While the turn waits on an approval, sign-in, or question, that message waits for it to end first.
+- A message from anyone else joins the turn and sets `auth.sender`; `auth.current` stays the caller. It joins even while the turn waits on an approval, sign-in, or question.
 - Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current` and `auth.sender`.
 
 After someone else's message joins the turn, eve refuses calls that use the caller's identity until the caller speaks again. See [Shared sessions](../concepts/security-model#shared-sessions).

@@ -131,7 +131,7 @@ The provided `sleep` tool races its timer against the signal; see the example in
 ## What the model sees
 
 When the agent has an agent tool or a `task` or `serve` workflow tool, eve adds `eve__task_wait`
-and `eve__task_cancel`. It also adds a short system prompt block about tasks, which depends on who
+and `eve__task_cancel`. eve also adds them while a [call waits on a person](#calls-that-wait-on-a-person). It also adds a short system prompt block about tasks, which depends on who
 reads the session:
 
 - **Root sessions:** a person reads each reply. The block tells the model to call `eve__task_wait`
@@ -177,7 +177,8 @@ Stopped researcher-7k2m9q; it won't report back.
 researcher-7k2m9q had no work to stop.
 ```
 
-**`[Tasks]` note.** Before the model's next step, eve tells the model which tasks are working. The
+**`[Tasks]` note.** Before the model's next step, eve tells the model which tasks are working. A
+task that waits on a person shows `status="awaiting-approval"` or `status="awaiting-sign-in"`. The
 note then lists the 10 most recently used idle resumable tasks, so the model can find them again.
 The note returns after [compaction](/docs/concepts/default-harness#compaction).
 
@@ -198,7 +199,7 @@ No turn ends while any task is working. When the model ends a turn early, eve wa
 then adds the results and calls the model again in the same turn. No result ever starts a turn on
 its own. An idle resumable task doesn't hold the turn.
 
-A held turn keeps running while it waits on its tasks, and pauses only for questions and sign-ins. The next
+A held turn keeps running while it waits on its tasks, and pauses only for questions, approvals, and sign-ins. The next
 `model.requested` for the same `turnId` means the turn took its results, and `turn.settled` comes
 only when the turn ends. The model's text before the wait depends on the session:
 
@@ -221,7 +222,34 @@ A steering message from anyone in the session, sent with `turnPolicy: "steer"` (
 ends an `eve__task_wait`. It also aborts the `abortSignal` of any `execute` call the turn waits on,
 but it never interrupts a task. The model reads the message and decides what to do with each task.
 It can keep the task, correct an agent by calling it again with its `taskId`, or stop the task with
-`eve__task_cancel`. A `"queue"` message waits for the turn to end.
+`eve__task_cancel`. A `"queue"` message waits for the turn to end, unless the turn waits on an
+approval or sign-in it asked for. Then the message joins, as the next section describes.
+
+## Calls that wait on a person
+
+A call that waits on an approval or a sign-in pauses the turn, as described in
+[Human-in-the-loop](/docs/human-in-the-loop). When a message joins the turn before the person
+acts, the call becomes a task, and its approval or sign-in stays open:
+
+- The model reads a receipt as the call's result, beside the results of the step's other calls,
+  then reads the message:
+
+  ```text
+  Started task deploy-4hd8sa. It waits for a person to approve it, and runs once they do. Its result will arrive in a <task_result> message.
+  ```
+
+- When the person approves or completes the sign-in, the call runs, and its result arrives in a
+  `task.result` message. A denial arrives the same way, as a failed result that says the call
+  didn't run.
+- `eve__task_wait` returns when the person acts.
+- `eve__task_cancel` drops the call. Its approval ends as `withdrawn`, a sign-in no other call waits
+  on is withdrawn, and the call doesn't run.
+- The turn waits for the call as it does for any working task. While it has nothing else to do,
+  the stream reports `turn.paused` awaiting the open requests.
+
+The stream reports no `task.started` or `task.ended` for these calls. The call's `call.requested`
+and `interaction.opened` stay open, and `call.settled` comes when the call runs, is denied, or is
+dropped.
 
 ## Cancel a task
 

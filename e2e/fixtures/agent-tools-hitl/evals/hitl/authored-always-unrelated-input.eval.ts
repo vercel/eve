@@ -6,13 +6,13 @@ const TOOL_NAME = "gate";
 /**
  * Regression reproduction for https://github.com/vercel/eve/issues/533: an
  * unrelated message must never replay the unresolved authored tool call. The
- * approval holds the turn, so the message steers it and cancels the approval;
- * the call is resolved as ignored and never runs.
+ * message joins the held turn, the approval stays open, and the call waits for
+ * it without running.
  */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "HITL repro (#533): unrelated input cancels, and never replays, an unresolved authored tool call.",
+    "HITL repro (#533): unrelated input never replays an unresolved authored tool call, whose approval stays open.",
   async test(t) {
     const held = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
     const session = held.session;
@@ -27,12 +27,10 @@ export default defineEval({
     );
 
     unrelated.expectOk();
-    unrelated.event("interaction.settled", {
-      count: 1,
-      data: { interactionId: approval.interactionId, outcome: "withdrawn" },
-    });
+    unrelated.notEvent("interaction.settled", { data: { interactionId: approval.interactionId } });
+    unrelated.notEvent("interaction.opened");
     unrelated.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
-    unrelated.event("turn.settled", { count: 1, data: { outcome: "completed" } });
+    unrelated.notEvent("turn.settled");
     t.succeeded();
   },
 });

@@ -344,7 +344,7 @@ export default slackChannel({
 - `ctx.defaultAuth` identifies the person who clicked but doesn't authorize them.
 - Without `onAnswers`, Slack accepts every answer with the clicking user's auth.
 
-While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a pending request. A message typed in the thread or DM reaches the agent as a new message under the [turn policy](#control-overlapping-turns). With the default `"steer"` policy, it withdraws an open question.
+While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a pending request. A message typed in the thread or DM reaches the agent as a new message under the [turn policy](#control-overlapping-turns). With the default `"steer"` policy, it withdraws an open question. An open approval or sign-in stays open, and its controls keep working.
 
 Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` and `ctx.session.auth.sender` in a sensitive tool before it changes anything, because another person's message can steer the caller's turn.
 

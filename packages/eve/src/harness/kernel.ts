@@ -20,9 +20,10 @@ import {
   queueInput,
   settleHumanInput,
   turnInputOnly,
+  waitOnPeopleAsTasks,
   withoutTurnInput,
 } from "#harness/hitl/index.js";
-import { blocked, hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { blocked, hasQueuedTurnInput, nothingToRead, park } from "#harness/step/park.js";
 import {
   clear,
   controlDeliveryFor,
@@ -153,6 +154,7 @@ export function createKernel(config: KernelConfig): StepFn {
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
     }
+    if (nothingToRead(step, { hasInput: turn.messages.length > 0 })) return park(step);
     return runModelStep(step, {
       generation,
       turn,
@@ -193,6 +195,8 @@ async function answers(
   const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
   if (intake.kind === "stop") return { ended: intake.result } as Ended;
   const decided = await settleHumanInput(step, intake);
+  // A message joined the turn: what still waits on a person waits as tasks, and the model reads on.
+  if (intake.steer) await waitOnPeopleAsTasks(step);
   let { input, message } = intake;
   if (
     decided.approved.length > 0 ||

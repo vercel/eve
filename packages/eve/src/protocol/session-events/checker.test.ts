@@ -270,7 +270,7 @@ describe("createStreamChecker", () => {
     expect(rulesOf(lines)).toEqual(["serves-running-task"]);
   });
 
-  it("refuses an approval decided apart from the rest of its batch", () => {
+  describe("an approval decided apart from the rest of its batch", () => {
     const approval = (callId: string, interactionId: string) => [
       {
         data: { callId, capability: { kind: "tool", name: "deploy" }, owner: { runId: "run_0" } },
@@ -286,14 +286,47 @@ describe("createStreamChecker", () => {
         type: "interaction.opened",
       },
     ];
-    const lines = repliedTurn().slice(0, 4);
-    lines.push(
+    const decidedApart = () => [
+      ...repliedTurn().slice(0, 4),
       ...commits(
         [...approval("c_0", "i_0"), ...approval("c_1", "i_1")],
         [{ data: { interactionId: "i_0", outcome: "accepted" }, type: "interaction.settled" }],
       ),
-    );
-    expect(rulesOf(lines)).toEqual(["batch-settles-together"]);
+    ];
+    const batchRules = (lines: readonly StoredLine[]) =>
+      rulesOf(lines).filter((rule) => rule === "batch-settles-together");
+
+    it("is refused once its turn ends without a message joining it", () => {
+      const lines = decidedApart();
+      lines.push(
+        ...commits([
+          { data: { outcome: "cancelled", turnId: "turn_0" }, scope: turn, type: "turn.settled" },
+        ]),
+      );
+      expect(batchRules(lines)).toEqual(["batch-settles-together"]);
+    });
+
+    it("is fine once a message joins its turn, so each approval waits on its own", () => {
+      const lines = decidedApart();
+      lines.push(
+        ...commits(
+          [{ data: { deliveryId: "d_1" }, type: "delivery.admitted" }],
+          [
+            {
+              data: {
+                deliveryId: "d_1",
+                parts: [{ kind: "text", text: "Also" }],
+                turnId: "turn_0",
+              },
+              scope: turn,
+              type: "delivery.consumed",
+            },
+          ],
+          [{ data: { outcome: "cancelled", turnId: "turn_0" }, scope: turn, type: "turn.settled" }],
+        ),
+      );
+      expect(batchRules(lines)).toEqual([]);
+    });
   });
 
   describe("a call a person was asked about", () => {

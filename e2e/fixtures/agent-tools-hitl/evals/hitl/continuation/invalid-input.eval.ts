@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 import {
-  expectApprovalCancelled,
+  expectApprovalStillOpen,
   scriptedSession,
   expectChangeStillUnexecuted,
   expectReply,
@@ -23,7 +23,7 @@ export default defineEval({
       "Try a numeric draft ID, then correct it and read the status.",
     );
 
-    // Then the model corrects the input and reports ready plus the validation error; the message cancelled A, which never runs.
+    // Then the model corrects the input and reports ready plus the validation error; A stays open and never runs.
     const rejectedStep = await live.waitForEvent("model.settled");
     t.log(
       `Initial tool-call step completed; awaiting correction: ${JSON.stringify(rejectedStep.data)}`,
@@ -35,6 +35,6 @@ export default defineEval({
       count: 1,
     });
     expectChangeStillUnexecuted(session);
-    expectApprovalCancelled(session, approval);
+    expectApprovalStillOpen(session, approval);
   },
 });

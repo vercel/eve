@@ -253,7 +253,7 @@ Rules for `ctx.cancel()`:
 - Repeated calls cancel that turn once and never a later turn.
 - `ctx.compact` and `ctx.once` aren't available in hooks.
 
-A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Only the turn's own caller can answer by text; anyone else's text waits for the question to end and then joins the turn. The answer updates the claims on `ctx.session.auth.current` for that event's hooks and the rest of the turn, as a follow-up message does. Calling `ctx.cancel()` from that event's hook cancels the turn: the question ends as `interrupted`, and the waiting tool call never gets the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
+A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Only the turn's own caller can answer by text; anyone else's text joins the turn as a message. The answer updates the claims on `ctx.session.auth.current` for that event's hooks and the rest of the turn, as a follow-up message does. Calling `ctx.cancel()` from that event's hook cancels the turn: the question ends as `interrupted`, and the waiting tool call never gets the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
 
 ## Scope side effects to a channel
 

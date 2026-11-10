@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 import {
-  expectApprovalCancelled,
+  expectApprovalStillOpen,
   scriptedSession,
   expectChangeStillUnexecuted,
   expectResponseReply,
@@ -26,7 +26,7 @@ export default defineEval({
       { interactionId: current.interactionId, optionId: "approve" },
     ]);
 
-    // Then authorization settles, the change executes once, and the read gets a reply; the message cancelled A, which never runs.
+    // Then authorization settles, the change executes once, and the read gets a reply; A stays open and never runs.
     await expectToolResult(t, live, "read-draft");
     const reply = await expectResponseReply(t, live, "Draft status: ready.", current.interactionId);
     reply.calledTool("authorized-change", {
@@ -39,6 +39,6 @@ export default defineEval({
       count: 1,
     });
     expectChangeStillUnexecuted(session);
-    expectApprovalCancelled(session, approvalA);
+    expectApprovalStillOpen(session, approvalA);
   },
 });

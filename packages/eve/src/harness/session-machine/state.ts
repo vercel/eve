@@ -77,6 +77,18 @@ export interface SuspendedStep {
   readonly responseAuthRequiredRequestIds?: readonly string[];
   /** The caller whose turn parked the step; `null` when unauthenticated. */
   readonly requester?: SessionAuthContext | null;
+  /**
+   * Who had spoken last when the model made the step's calls, which each call keeps when it runs
+   * later, whatever the turn read meanwhile; `null` for someone who isn't signed in.
+   */
+  readonly sender?: SessionAuthContext | null;
+  /**
+   * The calls that still waited on a person when a message joined the turn, each with the task
+   * it became. The step's response already joined history with a receipt for each, so the step
+   * holds only these calls and never commits again: each call's result reaches the model as its
+   * task's result.
+   */
+  readonly taskIds?: Readonly<Record<string, string>>;
 }
 
 export interface TurnState {

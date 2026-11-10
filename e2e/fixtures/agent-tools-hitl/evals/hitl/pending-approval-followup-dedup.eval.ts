@@ -13,8 +13,8 @@ const FOLLOW_UP_QUESTIONS = [
 
 /**
  * Regression coverage for https://github.com/vercel/eve/issues/2217: follow-up
- * questions never create another call or approval. The approval holds the
- * turn, so the first follow-up steers it and cancels the approval.
+ * questions never create another call or approval. Each follow-up joins the
+ * held turn, and the approval stays open through all of them.
  */
 export default defineEval({
   tags: ["real-model"],
@@ -28,27 +28,18 @@ export default defineEval({
       toolName: TOOL_NAME,
     });
 
-    for (const [index, question] of FOLLOW_UP_QUESTIONS.entries()) {
+    for (const question of FOLLOW_UP_QUESTIONS) {
       const followup = await session.send(question);
 
       followup.expectOk();
-      followup.notEvent("call.requested");
+      followup.calledTool(TOOL_NAME, { count: 0 });
       followup.notEvent("interaction.opened");
-      if (index === 0) {
-        // The steer cancels the held call, so its not-run result lands in this turn.
-        followup.calledTool(TOOL_NAME, { status: "completed", count: 0 });
-        followup.event("interaction.settled", {
-          count: 1,
-          data: { interactionId: approval.interactionId, outcome: "withdrawn" },
-        });
-      } else {
-        followup.usedNoTools();
-      }
-      followup.event("turn.settled", { count: 1, data: { outcome: "completed" } });
+      followup.notEvent("interaction.settled", { data: { interactionId: approval.interactionId } });
+      followup.notEvent("turn.settled");
     }
 
     t.succeeded();
-    t.check(session.pendingInteractions.length, equals(0));
+    t.check(session.pendingInteractions.length, equals(1));
     t.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
   },
 });

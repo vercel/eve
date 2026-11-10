@@ -6,7 +6,8 @@ import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
+import { renderDeniedCall, UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
+import type { ToolResultPart } from "#harness/session-machine/suspended-steps.js";
 
 // The session's task table: the tasks part of its record of running work
 // (`harness/running-work.ts`), which also holds the workflow runs a turn waits on.
@@ -94,6 +95,12 @@ export interface TaskRecord {
   readonly run?: TaskRun;
   /** Commands issued before the run could take them, sent in order once it reports started. */
   readonly held?: readonly TaskRunCommand[];
+  /**
+   * A call that waited on a person's approval or sign-in when a message joined its turn. It has
+   * no run: the session runs the call once the person acts, and its result is already what the
+   * model reads.
+   */
+  readonly awaitsPerson?: true;
 }
 
 export interface TaskTable {
@@ -187,7 +194,12 @@ export function tasksWithResults(table: TaskTable): readonly TaskRecord[] {
  */
 export function taskWaitResult(
   table: TaskTable,
-  wake: { readonly interrupted: boolean; readonly timedOut: boolean },
+  wake: {
+    readonly interrupted: boolean;
+    readonly timedOut: boolean;
+    /** A person acted on a task that waits for them. */
+    readonly answered?: boolean;
+  },
 ): TaskWaitResult | undefined {
   const settled = tasksWithResults(table).map((record) => ({
     id: record.id,
@@ -196,6 +208,7 @@ export function taskWaitResult(
   const working = workingTasks(table).map((record) => record.id);
   if (settled.length > 0 || working.length === 0) return { settled, status: "settled", working };
   if (wake.interrupted) return { status: "interrupt", working };
+  if (wake.answered === true) return { status: "answered", working };
   if (wake.timedOut) return { status: "timeout", working };
   return undefined;
 }
@@ -245,6 +258,7 @@ export function createTask(
     readonly name: string;
     readonly resumable: boolean;
     readonly turnId: string;
+    readonly awaitsPerson?: true;
   },
 ): { readonly table: TaskTable; readonly taskId: string } {
   const taskId = createTaskId(table, input.name);
@@ -255,8 +269,29 @@ export function createTask(
     name: input.name,
     results: [],
     resumable: input.resumable,
+    ...(input.awaitsPerson && { awaitsPerson: true }),
   };
   return { table: { ...table, tasks: [...table.tasks, record] }, taskId };
+}
+
+/**
+ * A call that waited on a person settled: its result, as the model reads it, becomes its task's.
+ * A denial or failure is a failed result; whatever else the call returned completes it.
+ */
+export function settleWaitingCall(
+  table: TaskTable,
+  input: { readonly taskId: string; readonly part: ToolResultPart },
+): TaskTable {
+  const { output, toolCallId } = input.part;
+  const outcome: TaskOutcome =
+    output.type === "execution-denied"
+      ? { error: renderDeniedCall(output.reason), status: "failed" }
+      : output.type === "error-text"
+        ? { error: output.value, status: "failed" }
+        : output.type === "error-json"
+          ? { error: JSON.stringify(output.value), status: "failed" }
+          : { output: output as JsonValue, status: "completed" };
+  return settleTaskCalls(table, { callIds: [toolCallId], outcome, taskId: input.taskId }).table;
 }
 
 /** Drops a task that never started, such as one past the cap. */

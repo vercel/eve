@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import {
+  expectApprovalStillOpen,
   scriptedSession,
   expectChangeStillUnexecuted,
   expectReply,
@@ -20,20 +21,17 @@ export default defineEval({
     const approvalB = requestFrom(parked, "change-b");
     const session = parked.session;
     await submitPartialApproval(t, session, approvalA);
-    // When the user sends a message instead of answering B, which steers the held turn.
+    // When the user sends a message instead of answering B, which joins the held turn.
     const live = await session.start("Explain what is waiting, without calling any tools.");
     const reply = await expectReply(t, live, "Your changes are waiting for approval.");
-    // Then A keeps its approval and runs once, B is cancelled, and the message gets its reply.
+    // Then A keeps its approval and runs once, B stays open, and the message gets its reply.
     reply.event("interaction.settled", {
       data: { interactionId: approvalA.interactionId, outcome: "accepted" },
       count: 1,
     });
-    reply.event("interaction.settled", {
-      data: { interactionId: approvalB.interactionId, outcome: "withdrawn" },
-      count: 1,
-    });
+    expectApprovalStillOpen(session, approvalB);
     reply.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
     expectChangeStillUnexecuted(session, "change-b");
-    t.check(session.pendingInteractions.length, equals(0));
+    t.check(session.pendingInteractions.length, equals(1));
   },
 });

@@ -3,25 +3,17 @@ import type { SettledCall } from "#harness/session-machine/transitions.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { ResponseValue } from "#protocol/session-events/families/response.js";
 
-const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 export const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
 const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
 
-type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
+type ApprovalTerminalStatus = "approved" | "denied" | "invalid";
 
-export function resolveApprovalOutcome(response: ResponseValue | undefined): {
+/** How a person's answer to an approval decides its call. */
+export function resolveApprovalOutcome(response: ResponseValue): {
   readonly approved: boolean;
   readonly reason: string | undefined;
   readonly status: ApprovalTerminalStatus;
 } {
-  if (response === undefined) {
-    return {
-      approved: false,
-      reason: IGNORED_INPUT_REASON,
-      status: "ignored",
-    };
-  }
-
   if (response.optionId === "approve") {
     return {
       approved: true,

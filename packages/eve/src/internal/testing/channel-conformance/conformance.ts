@@ -276,9 +276,9 @@ const channelConformance = {
         "a text reply of deny stops the gated tool without running it": TUI_TYPED_APPROVAL,
         "approving by text clears the approval's buttons": TUI_TYPED_APPROVAL,
         "approving by text names who approved on the approval": TUI_TYPED_APPROVAL,
-        "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply":
+        "a message while an approval is pending leaves it open, so typing approve afterwards runs the tool and the next message gets a reply":
           TUI_TYPED_APPROVAL,
-        "pressing Approve on an approval a message cancelled runs nothing": TUI_TYPED_APPROVAL,
+        "pressing Approve on an approval a message left open runs the tool": TUI_TYPED_APPROVAL,
         "the requester typing approve on a requester-only approval runs the tool":
           TUI_TYPED_APPROVAL,
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,

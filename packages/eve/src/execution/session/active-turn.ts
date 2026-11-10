@@ -6,7 +6,6 @@ import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
-  isSteeringDelivery,
   isSteeringMessage,
   type SteeringOptions,
   type SteeringTurn,
@@ -28,10 +27,8 @@ import {
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
-import { selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
-import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 
 export type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
@@ -65,7 +62,7 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** The turn's principal, who alone steers it while it's held, and its delegated caller. */
+  /** The turn's principal and its delegated caller. */
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
@@ -125,11 +122,6 @@ export class ActiveTurn {
     this.unsubscribeDelivery();
   }
 
-  /** A child's prompt waits on this turn's person, so the turn is held on it. */
-  private get relaysPrompt(): boolean {
-    return this.input.cursor.sessionState.hasProxyInputRequests;
-  }
-
   get steeringSignal(): AbortSignal {
     return this.steeringController.signal;
   }
@@ -157,10 +149,7 @@ export class ActiveTurn {
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     let delivery: DeliverHookPayload | undefined;
     while (delivery === undefined) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, {
-        ...options,
-        held: this.relaysPrompt,
-      });
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
@@ -177,25 +166,11 @@ export class ActiveTurn {
   }
 
   /**
-   * Messages still waiting steer the turn now, such as other people's once a
-   * pause ends. Before the turn's first assistant output, the next step stops
-   * before the model runs and the step after it reads them; later, they are read
-   * at the next step boundary.
-   */
-  steerIfMessagesWaiting(): void {
-    if (this.hasSteeringWaiting()) this.steeringController.abort();
-  }
-
-  /**
    * Whether a message still waits to steer the turn after `takeSteering`, which takes one
    * person's messages at a time: the model runs once the turn has read them all.
    */
   hasSteeringWaiting(): boolean {
-    return this.input.queue.hasSteering(
-      this.admitted,
-      this.identity,
-      this.relaysPrompt ? "paused" : undefined,
-    );
+    return this.input.queue.hasSteering(this.admitted, this.identity);
   }
 
   /**
@@ -285,13 +260,8 @@ export class ActiveTurn {
         delivery = mapped.delivery;
       }
       this.admitted.delete(sequence);
-      // Someone else's answers settle the paused turn's request, but the rest of their
-      // delivery waits for the pause to end, as their messages do.
-      const split = isSteeringDelivery(delivery, this.identity, "awaiting-caller")
-        ? undefined
-        : splitAnswers(delivery);
-      this.input.queue.replaceDelivery(sequence, split?.rest);
-      return split?.answers ?? delivery;
+      this.input.queue.replaceDelivery(sequence, undefined);
+      return delivery;
     }
     return undefined;
   }
@@ -388,10 +358,7 @@ export class ActiveTurn {
         this.admitted.delete(sequence);
         continue;
       }
-      if (
-        isSteeringMessage(routed.remainder, this.identity, this.relaysPrompt ? "paused" : undefined)
-      )
-        steered = true;
+      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
     }
     return steered;
   }
@@ -417,35 +384,4 @@ function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefi
   // the turn may have no wait left to take the message, and publishing it needs none.
   if (isAgentSessionMessage(event.message)) return event.message;
   return undefined;
-}
-
-function splitAnswers(delivery: DeliverHookPayload): {
-  readonly answers: DeliverHookPayload;
-  readonly rest: DeliverHookPayload | undefined;
-} {
-  const answers = delivery.payloads.flatMap((payload, index) =>
-    payload.answers === undefined ? [] : [{ index, payload: { answers: payload.answers } }],
-  );
-  // Only a message waits for the turn to end. What else a press carries, such as a channel's
-  // state, has nothing left to deliver; queued, it would come back as a delivery the session
-  // already settled.
-  const rest = delivery.payloads.flatMap((payload, index) => {
-    if (payload.message === undefined) return [];
-    const { answers: _answers, ...other } = payload;
-    return [{ index, payload: other }];
-  });
-  const selectedAnswers = selectDeliveryPayloads(delivery, answers);
-  const messageIndices = new Set(rest.map(({ index }) => index));
-  return {
-    answers: {
-      ...selectedAnswers,
-      deliveryMetadata: selectedAnswers.deliveryMetadata?.map((entry) => ({
-        ...entry,
-        deliveryId: messageIndices.has(answers[entry.payloadIndex]!.index)
-          ? answersDeliveryId(entry.deliveryId)
-          : entry.deliveryId,
-      })),
-    },
-    rest: rest.length === 0 ? undefined : selectDeliveryPayloads(delivery, rest),
-  };
 }

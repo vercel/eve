@@ -39,7 +39,7 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { readHitlState } from "#harness/hitl/index.js";
+import { readHitlState, withdrawWaitingCalls } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
@@ -178,6 +178,8 @@ interface TaskCancellationInput {
 async function cancelTasks(
   input: SessionStepState & TaskCancellationInput,
 ): Promise<PublishedSessionEvents> {
+  const dropped = await dropWaitingCalls(input);
+  if (dropped !== undefined) input = { ...input, ...dropped };
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
   const settles: Decision[] = [];
@@ -230,6 +232,26 @@ async function cancelTasks(
       finished = finishTaskRun(finished, record.id, record.run.runId);
   }
   return { ...committed, sessionState: saveTable(committed.sessionState, current, finished) };
+}
+
+/**
+ * The model dropped tasks whose calls wait on a person: their requests are withdrawn and the
+ * calls end without running, in a commit of their own. A cancelled or ended turn withdraws them
+ * itself as it settles.
+ */
+async function dropWaitingCalls(
+  input: SessionStepState & TaskCancellationInput,
+): Promise<PublishedSessionEvents | undefined> {
+  if (input.reason !== "task-cancel") return undefined;
+  const table = readTaskTable(readDurableSession(input.sessionState).state);
+  const callIds = input.taskIds.flatMap((taskId) => {
+    const record = findTask(table, taskId);
+    return record?.awaitsPerson === true ? record.calls.map(({ callId }) => callId) : [];
+  });
+  if (callIds.length === 0) return undefined;
+  return await commitSessionStep(input, (view) => [withdrawWaitingCalls(view, { callIds })], {
+    origin: "own",
+  });
 }
 
 /** A transition a task step decides against the session it commits to. */

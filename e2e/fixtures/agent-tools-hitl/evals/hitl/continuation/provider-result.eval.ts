@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 import {
-  expectApprovalCancelled,
+  expectApprovalStillOpen,
   scriptedSession,
   expectChangeStillUnexecuted,
   expectReply,
@@ -24,7 +24,7 @@ export default defineEval({
       turnPolicy: "steer",
     });
 
-    // Then the reply reports provider-ready and completes; the message cancelled A, which never runs.
+    // Then the reply reports provider-ready; A stays open and never runs.
     await expectToolResult(t, live, "read-draft");
     const reply = await expectReply(t, live, "Provider draft status: provider-ready.");
     reply.calledTool("read-draft", {
@@ -33,6 +33,6 @@ export default defineEval({
       count: 1,
     });
     expectChangeStillUnexecuted(session);
-    expectApprovalCancelled(session, approval);
+    expectApprovalStillOpen(session, approval);
   },
 });

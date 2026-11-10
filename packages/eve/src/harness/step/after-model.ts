@@ -35,6 +35,7 @@ import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
+import { readSessionAuth } from "#context/session-auth.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -131,6 +132,8 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     step.session = changeHistory(dispatched.session, { extend: promptMessages });
     const parked = {
       event: { sequence, stepIndex, turnId },
+      // Every call the step parks runs, when it does, as the model made it.
+      sender: readSessionAuth(step.ctx).sender,
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
       messages: answerCallsThatWontRun(responseMessages, result),

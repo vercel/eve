@@ -672,9 +672,8 @@ const approvalRules = [
     },
   },
   {
-    rule: "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply",
-    // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    rule: "a message while an approval is pending leaves it open, so typing approve afterwards runs the tool and the next message gets a reply",
+    source: "docs/tools/human-in-the-loop.md#follow-up-messages",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -683,17 +682,14 @@ const approvalRules = [
       await conversation.waitForReplyTo(ASIDE);
       await conversation.say("approve");
       await conversation.waitForRest();
-      expect(
-        conversation.runsOf(GATED_TOOL),
-        `${GATED_TOOL} ran on an approval the aside cancelled`,
-      ).toBe(0);
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} runs`).toBe(1);
       await conversation.say(FOLLOW_UP);
       await conversation.waitForReplyTo(FOLLOW_UP);
     },
   },
   {
-    rule: "pressing Approve on an approval a message cancelled runs nothing",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    rule: "pressing Approve on an approval a message left open runs the tool",
+    source: "docs/tools/human-in-the-loop.md#follow-up-messages",
     requires: ["buttons", "text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -703,10 +699,7 @@ const approvalRules = [
       // The card's original button, as a client that hasn't refreshed still shows it.
       await conversation.press(option(options, APPROVE_LABELS));
       await conversation.waitForRest();
-      expect(
-        conversation.runsOf(GATED_TOOL),
-        `${GATED_TOOL} ran on an approval the aside cancelled`,
-      ).toBe(0);
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} runs`).toBe(1);
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -1144,13 +1137,12 @@ const approvalPermissionRules = [
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
-      // Another person's text waits for the approval to end, so it never answers it; the
-      // approval stays pending either way.
+      // Another person's text joins the turn as a message, never as an answer, so the approval
+      // stays pending.
       await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A denial taken as Alice's would settle the call as denied before this approval. Bob's
-      // messages then join the turn, so the model answers them rather than the tool's result.
+      // A denial taken as Alice's would settle the call as denied before this approval.
       await conversation.say("approve");
       await conversation.waitForRest();
       expect(conversation.runsOf(REQUESTER_GATED_TOOL), `${REQUESTER_GATED_TOOL} runs`).toBe(1);

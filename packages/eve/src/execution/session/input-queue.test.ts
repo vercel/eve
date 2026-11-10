@@ -75,7 +75,7 @@ describe("SessionInputQueue", () => {
     expect(queue.takeAuthorizations(held)).toBeUndefined();
   });
 
-  it("lets anyone steer a running turn, but only its own person while it's held", () => {
+  it("lets anyone steer a turn, and lets a queued message join one that waits on a person", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -93,22 +93,19 @@ describe("SessionInputQueue", () => {
         payloads: [{ message }],
       })!.sequence;
 
+    const queuedEarly = send("Invite the design team too.", alice, "queue");
     const fromBob = send("Add a meeting to my calendar.", bob);
-    const fromAlice = send("Also cover the launch date.", alice);
-    const unauthenticated = send("Include the press notes.");
-    const queuedByBob = send("Invite the design team too.", bob, "queue");
-    const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
+    const heldSince = queue.nextAdmission;
+    const queuedByBob = send("Book the large room.", bob, "queue");
+    const admitted = new Set([queuedEarly, fromBob, queuedByBob]);
 
-    // A turn held on Alice takes only her messages, and a delivery without auth acts as hers.
-    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })?.sequences).toEqual([
-      fromAlice,
-      unauthenticated,
-    ]);
-    // Once the pause ends, Bob's message joins the turn; his queued one waits for it to end.
-    expect(queue.hasSteering(admitted, turn)).toBe(true);
+    // Bob's message steers Alice's turn; queued messages wait while nothing holds it.
     expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromBob]);
     expect(queue.hasSteering(admitted, turn)).toBe(false);
-    expect(queue.takeNext()).toMatchObject({ delivery: { auth: bob }, sequences: [queuedByBob] });
+    // A turn that waits on a person can't end until they act, so a queued message sent since
+    // joins it, whoever sent it. One sent before the request existed waits for the next turn.
+    expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([queuedByBob]);
+    expect(queue.takeNext()).toMatchObject({ delivery: { auth: alice }, sequences: [queuedEarly] });
   });
 
   it("takes one person's messages per step, so each is recorded as its sender's", () => {

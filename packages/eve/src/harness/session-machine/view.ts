@@ -181,3 +181,8 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
       .map((row) => row.interactionId),
   );
 }
+
+/** Whether the step's response already joined history, so it holds only calls waiting as tasks. */
+export function waitsAsTasks(step: SuspendedStep): boolean {
+  return step.taskIds !== undefined;
+}

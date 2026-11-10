@@ -11,7 +11,7 @@ import type {
   ToolExecuteOptions,
 } from "#tools/definition.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
-import { hasCallerIdentity } from "#runtime/connections/caller-confirmation.js";
+import { callSender } from "#runtime/connections/caller-confirmation.js";
 import { handleAuthorizationError } from "#runtime/connections/scoped-authorization.js";
 
 type ToolExecuteWithAuthInput<TInput> = {
@@ -26,13 +26,12 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
     const base = buildBaseToolContext({ options, toolName: input.scope });
     const ctx: ToolContext = {
       ...base,
-      // A call the caller approved is theirs: it reads the caller as the last to speak.
-      ...(hasCallerIdentity() && {
-        session: {
-          ...base.session,
-          auth: { ...base.session.auth, sender: base.session.auth.current },
-        },
-      }),
+      // A call the caller approved reads them as the last to speak, and a call that waited on a
+      // person reads who had spoken last when it was asked.
+      session: {
+        ...base.session,
+        auth: { ...base.session.auth, sender: callSender(base.session.auth) },
+      },
       messages: options.messages,
       ...(contextStorage.getStore()?.get(ToolChannelKey) ?? {
         channel: { kind: "unknown", metadata: {} },

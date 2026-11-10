@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
   scriptedSession,
-  expectApprovalCancelled,
+  expectApprovalStillOpen,
   expectChangeStillUnexecuted,
   expectReply,
   expectResponseReply,
@@ -15,7 +15,7 @@ export default defineEval({
   tags: ["hitl", "continuation", "regression", "input-response", "stale-response"],
   timeoutMs: 60_000,
   async test(t) {
-    // Given asking for B cancelled A's held approval, and B has been cancelled and acknowledged.
+    // Given A's approval stays open after asking for B, and B has been cancelled and acknowledged.
     const first = await t.send("Prepare change A.", scriptedSession);
     const approvalA = requestFrom(first, "change-a");
     const session = first.session;
@@ -37,6 +37,6 @@ export default defineEval({
     await expectReply(t, repeated, "Draft status: ready.");
     expectChangeStillUnexecuted(session, "change-a");
     session.calledTool("change-b", { status: "completed", count: 0 });
-    expectApprovalCancelled(session, approvalA);
+    expectApprovalStillOpen(session, approvalA);
   },
 });

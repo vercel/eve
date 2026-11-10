@@ -2,7 +2,7 @@
 
 Every accepted user message must reach its own answer, required input request, or explicit failure/cancellation. An unanswered request cannot silently stop that message's work.
 
-A sign-in or tool approval holds its turn open until it is answered. A message from the same person steers the held turn: it cancels the requests still waiting (they settle `withdrawn` and their calls never run) and the turn carries on with the message. Answers already given, as in a partial approval, keep their effect. This holds whatever `turnPolicy` the client sends, because a queued message would wait on a turn that waits on that person.
+A sign-in or tool approval holds its turn open until it is answered. A message joins the held turn: the requests still waiting stay open, their calls wait as tasks, and the model answers the message. The turn then pauses on those requests again instead of ending. Answers already given, as in a partial approval, keep their effect. This holds whatever `turnPolicy` the client sends, because a queued message would wait on a turn that waits on a person.
 
 This directory contains **32 scripted evals: 18 regressions, 12 controls, and 2 pause checks**. They exercise the HTTP session, approval, tool, workflow, and event-stream paths. A deterministic model chooses calls and constructs answers from the results it receives. There is no model judge and no manually seeded pending state.
 
@@ -18,34 +18,34 @@ The tags are filters, not expected verdicts: every case must pass. `eve eval --t
 
 ## What makes a passing answer
 
-[`expectReply`](./helpers.ts) requires exactly one matching reply `content.completed`, followed by exactly one completed `turn.settled`, both attributed to the same turn. A tool result, unrelated reply, or completion without an answer cannot pass. New messages use the turn ID of their own `delivery.consumed`. Approval responses require successful resolution of the saved request before its matching reply and completion in the held turn, with no new `turn.started`. A message that steers a held turn joins that turn, so its `delivery.consumed` carries the held turn's ID.
+[`expectReply`](./helpers.ts) requires exactly one matching reply `content.completed`, followed by exactly one completed `turn.settled`, both attributed to the same turn. When an earlier request still waits, a `turn.paused` on it takes the place of `turn.settled`. A tool result, unrelated reply, or completion without an answer cannot pass. New messages use the turn ID of their own `delivery.consumed`. Approval responses require successful resolution of the saved request before its matching reply and completion in the held turn, with no new `turn.started`. A message that steers a held turn joins that turn, so its `delivery.consumed` carries the held turn's ID.
 
-Each approval ID is saved when emitted. The driver's latest-turn request list is not treated as durable pending state. Tests check that a steering message cancels the saved request (`withdrawn`, with a rejected, not-run call) and that the change never executes. Budget cases require the next budget request instead of an answer beyond the granted limit.
+Each approval ID is saved when emitted. The driver's latest-turn request list is not treated as durable pending state. Tests check that the saved request stays open after a message (no `interaction.settled`, and no `call.settled` for its call) and that the change never executes. Budget cases require the next budget request instead of an answer beyond the granted limit.
 
 ## Regressions
 
 Each row maps to exactly one eval. “Response authorization” here means the fixture checks the authenticated responder's principal; it does not exercise an OAuth callback.
 
-| Conversation                                                       | Required outcome                                          | Eval                                                                 |
-| ------------------------------------------------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------- |
-| Read while A waits                                                 | Report returned status; A is cancelled                    | [read](./read.eval.ts)                                               |
-| Write while A waits                                                | Confirm exactly one write; A is cancelled                 | [write](./write.eval.ts)                                             |
-| Parallel read and write while A waits                              | Report both results                                       | [parallel tools](./parallel-tools.eval.ts)                           |
-| Tool throws while A waits                                          | Explain the actual error                                  | [tool error](./tool-error.eval.ts)                                   |
-| Invalid tool input while A waits                                   | Correct input and report the result                       | [invalid input](./invalid-input.eval.ts)                             |
-| Response-authorized approval waits                                 | Finish an unrelated read                                  | [authorized pending](./authorized-pending.eval.ts)                   |
-| Approve newer B while A waits                                      | Execute B, read, and reply                                | [approve sibling](./approve-sibling.eval.ts)                         |
-| Cancel newer B while A waits                                       | Leave B unexecuted, read, and reply                       | [cancel sibling](./cancel-sibling.eval.ts)                           |
-| Approve newer response-authorized request while A waits            | Settle authorization, read, and reply                     | [authorized sibling](./authorized-sibling.eval.ts)                   |
-| Ask for A while a response-authorized request holds the turn       | The request is cancelled; approving A runs it and replies | [authorized older sibling](./authorized-older-sibling.eval.ts)       |
-| Answer cancelled A while a newer response-authorized request holds | The stale answer steers like a message; nothing runs      | [ordinary older sibling](./ordinary-older-sibling.eval.ts)           |
-| Workflow completes while A waits                                   | Interpret its result                                      | [workflow result](./workflow-result.eval.ts)                         |
-| Provider supplies a tool result while A waits                      | Report the distinct provider result                       | [provider result](./provider-result.eval.ts)                         |
-| Submit A from a same-batch A+B pair, then request a read           | A runs once, B is cancelled, and the read completes       | [partial approval, tool](./partial-approval-tool.eval.ts)            |
-| Submit A from a same-batch A+B pair, then request text only        | A runs once, B is cancelled, and the reply completes      | [partial approval, text](./partial-approval-text.eval.ts)            |
-| Repeat a resolved response while A waits                           | Process the new input without authorizing A               | [stale response](./stale-response.eval.ts)                           |
-| Grant another budget window while A waits                          | Run one tool, then request the next required grant        | [budget grant](./budget-grant.eval.ts)                               |
-| Submit A and B from one batch in separate deliveries               | Accumulate both responses, execute both once, and reply   | [separate approval responses](./separate-approval-responses.eval.ts) |
+| Conversation                                                     | Required outcome                                          | Eval                                                                 |
+| ---------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
+| Read while A waits                                               | Report returned status; A stays open                      | [read](./read.eval.ts)                                               |
+| Write while A waits                                              | Confirm exactly one write; A stays open                   | [write](./write.eval.ts)                                             |
+| Parallel read and write while A waits                            | Report both results                                       | [parallel tools](./parallel-tools.eval.ts)                           |
+| Tool throws while A waits                                        | Explain the actual error                                  | [tool error](./tool-error.eval.ts)                                   |
+| Invalid tool input while A waits                                 | Correct input and report the result                       | [invalid input](./invalid-input.eval.ts)                             |
+| Response-authorized approval waits                               | Finish an unrelated read                                  | [authorized pending](./authorized-pending.eval.ts)                   |
+| Approve newer B while A waits                                    | Execute B, read, and reply                                | [approve sibling](./approve-sibling.eval.ts)                         |
+| Cancel newer B while A waits                                     | Leave B unexecuted, read, and reply                       | [cancel sibling](./cancel-sibling.eval.ts)                           |
+| Approve newer response-authorized request while A waits          | Settle authorization, read, and reply                     | [authorized sibling](./authorized-sibling.eval.ts)                   |
+| Ask for A while a response-authorized request holds the turn     | The request stays open; approving A runs it and replies   | [authorized older sibling](./authorized-older-sibling.eval.ts)       |
+| Answer waiting A while a newer response-authorized request holds | A runs; the newer request still holds the turn            | [ordinary older sibling](./ordinary-older-sibling.eval.ts)           |
+| Workflow completes while A waits                                 | Interpret its result                                      | [workflow result](./workflow-result.eval.ts)                         |
+| Provider supplies a tool result while A waits                    | Report the distinct provider result                       | [provider result](./provider-result.eval.ts)                         |
+| Submit A from a same-batch A+B pair, then request a read         | A runs once, B stays open, and the read gets its reply    | [partial approval, tool](./partial-approval-tool.eval.ts)            |
+| Submit A from a same-batch A+B pair, then request text only      | A runs once, B stays open, and the message gets its reply | [partial approval, text](./partial-approval-text.eval.ts)            |
+| Repeat a resolved response while A waits                         | Process the new input without authorizing A               | [stale response](./stale-response.eval.ts)                           |
+| Grant another budget window while A waits                        | Run one tool, then request the next required grant        | [budget grant](./budget-grant.eval.ts)                               |
+| Submit A and B from one batch in separate deliveries             | Accumulate both responses, execute both once, and reply   | [separate approval responses](./separate-approval-responses.eval.ts) |
 
 ## Controls
 
@@ -59,7 +59,7 @@ Each row maps to exactly one eval. “Response authorization” here means the f
 | Workflow without older input                            | Interpret its result                                                             | [workflow result](./workflow-result.control.eval.ts)             |
 | Provider result without older input                     | Report distinct provider result                                                  | [provider result](./provider-result.control.eval.ts)             |
 | Budget renewal without older approval                   | Run one tool, then request next grant                                            | [budget grant](./budget-grant.control.eval.ts)                   |
-| Text-only message while A waits                         | Reply without new tool calls; A is cancelled                                     | [text only](./text-only.control.eval.ts)                         |
+| Text-only message while A waits                         | Reply without new tool calls; A stays open                                       | [text only](./text-only.control.eval.ts)                         |
 | Resolve the only approval                               | Execute, read, and reply                                                         | [resolve only approval](./resolve-only-approval.control.eval.ts) |
 | Approve both calls together                             | Execute each once and reply                                                      | [approve both](./approve-both.control.eval.ts)                   |
 | Workflow finishes beside an approval from the same turn | Observe workflow completion before approval; require approval before final reply | [same-turn workflow](./same-turn-workflow.control.eval.ts)       |

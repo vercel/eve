@@ -79,7 +79,7 @@ A [channel](/docs/channels) authenticates its own inbound traffic. The built-in 
 
 Several people can share one session, such as a Slack thread or a GitHub issue. A turn's caller is the person whose message started it, and the caller never changes while the turn runs. Their own messages update only their claims.
 
-Anyone the channel lets into the session can steer the running turn. Their message changes what the model reads, never whose identity the turn uses. `ctx.session.auth.sender` names who spoke last. When the speaker changes, eve adds a line before the message that names its sender and the previous sender by `principalId`. While the turn waits on an approval, sign-in, or question, other people's messages wait for it to end.
+Anyone the channel lets into the session can steer the running turn. Their message changes what the model reads, never whose identity the turn uses. `ctx.session.auth.sender` names who spoke last. When the speaker changes, eve adds a line before the message that names its sender and the previous sender by `principalId`. A message joins even while the turn waits on an approval, sign-in, or question.
 
 eve hands the caller's identity to a call only while the caller is the last person to have spoken. After someone else's message joins the turn, these calls fail, and eve doesn't retry them:
 
@@ -92,6 +92,8 @@ eve hands the caller's identity to a call only while the caller is the last pers
 Each failed call's message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. eve releases the caller's identity on any later message from the caller, so this relies on the model's judgment.
 
 A call the caller approves runs with their identity, whoever spoke last. The approval covers only that call. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
+
+A call that waits on an approval or sign-in while the turn reads new messages runs as the model made it. Its `auth.sender` is whoever had spoken last when the model made the call, whatever messages arrive before it runs. A call the caller approves, or whose sign-in the caller completes, runs with the caller's identity.
 
 A session with one person never reaches any of this. Tools that use no credentials aren't covered: a tool that decides from the caller's role must check `auth.sender` as well as `auth.current`.
 

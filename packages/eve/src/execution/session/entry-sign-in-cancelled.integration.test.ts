@@ -20,12 +20,18 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
 
-// Calls create_issue, which asks for a sign-in; after the steering message, calls it again.
-const script: readonly ({ readonly tool: string } | { readonly text: string })[] = [
-  { tool: "create_issue" },
-  { tool: "create_issue" },
-  { text: "That needs Issues access." },
-  { tool: "create_issue" },
+// Calls create_issue, which asks for a sign-in. After the person's message, drops the call that
+// waits on it, calls it again, and replies.
+type Turn = { readonly tool: string; readonly input?: object } | { readonly text: string };
+const script: readonly ((prompt: string) => Turn)[] = [
+  () => ({ tool: "create_issue" }),
+  (prompt) => ({
+    input: { taskId: /Started task ([\w-]+)\./u.exec(prompt)?.[1] },
+    tool: "eve__task_cancel",
+  }),
+  () => ({ tool: "create_issue" }),
+  () => ({ text: "That needs Issues access." }),
+  () => ({ tool: "create_issue" }),
 ];
 let scriptIndex = 0;
 const alice = {
@@ -37,12 +43,12 @@ const alice = {
 };
 const scriptedModel = markMockModel(
   new MockLanguageModelV4({
-    doStream: async () => {
-      const next = script[scriptIndex++] ?? { text: "Done." };
+    doStream: async ({ prompt }) => {
+      const next = script[scriptIndex++]?.(JSON.stringify(prompt)) ?? { text: "Done." };
       return "text" in next
         ? textStreamResult(next.text)
         : toolCallStreamResult({
-            input: "{}",
+            input: JSON.stringify(next.input ?? {}),
             toolCallId: `call-${scriptIndex}`,
             toolName: next.tool,
           });
@@ -53,8 +59,8 @@ const scriptedModel = markMockModel(
 );
 
 describe("workflowEntry cancelled sign-in", () => {
-  // a message that cancels an open sign-in does not lead to a second sign-in card.
-  it("does not ask again in the turn for a sign-in a new message cancelled", async () => {
+  // A sign-in the model dropped with its waiting call does not lead to a second sign-in card.
+  it("does not ask again in the turn for a sign-in the model dropped", async () => {
     scriptIndex = 0;
     let starts = 0;
     const issuesAuth: AuthorizationDefinition<{ nonce: string }> = {
@@ -130,8 +136,9 @@ describe("workflowEntry cancelled sign-in", () => {
         )!.data;
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        // A new message arrives while the card is up: it cancels the sign-in, and the model's
-        // next create_issue call gets that cancellation instead of a second card.
+        // A new message arrives while the card is up: the call waits on the sign-in as a task,
+        // which the model drops, and its next create_issue call is told the sign-in ended
+        // instead of getting a second card.
         await send(run.runId, "Also add a label.");
         const resumed = await stream.nextUntil(
           "turn after the cancelled sign-in",

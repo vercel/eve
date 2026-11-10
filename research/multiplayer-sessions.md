@@ -173,7 +173,8 @@ Alice approves                    deploy runs as Alice; its result arrives as ta
 - A sign-in stays open too. Once the person connects, the call runs as the person who signed in.
 - The model can drop a call the message made unnecessary with `eve__task_cancel`. The request is
   withdrawn and the call doesn't run.
-- The turn can't end while such a task waits, as with any task. Cancelling the turn withdraws it.
+- The turn can't end while such a task waits, as with any task. Cancelling the turn interrupts
+  its request, as today.
 - While a request is open, a `"queue"` message joins too, because the turn can't end until the
   person acts. This matches today's rule for the caller's own message.
 

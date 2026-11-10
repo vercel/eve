@@ -32,7 +32,7 @@
       "content": "Did it ship?",
       "kind": "user",
       "metadata": {
-        "eve.turn": "turn_3"
+        "eve.turn": "turn_2"
       },
       "role": "user"
     },
@@ -106,29 +106,32 @@
     "eve.reactions": {
       "at": "<time>",
       "latest": {
-        "*": 51,
+        "*": 54,
         "call.requested": 18,
-        "call.settled": 23,
-        "call.started": 5,
-        "content.completed": 49,
-        "content.delta": 48,
-        "context.settled": 42,
-        "context.settled:compaction": 42,
-        "context.started": 40,
-        "context.started:compaction": 40,
-        "delivery.admitted": 44,
-        "delivery.consumed": 45,
-        "delivery.settled": 51,
+        "call.settled": 35,
+        "call.started": 34,
+        "content.completed": 52,
+        "content.delta": 51,
+        "context.settled": 45,
+        "context.settled:compaction": 45,
+        "context.started": 43,
+        "context.started:compaction": 43,
+        "delivery.admitted": 47,
+        "delivery.consumed": 48,
+        "delivery.settled": 54,
         "interaction.opened": 20,
-        "interaction.settled": 23,
-        "model.requested": 46,
-        "model.settled": 50,
-        "model.started": 47,
+        "interaction.settled": 32,
+        "model.requested": 49,
+        "model.settled": 53,
+        "model.started": 50,
+        "response.admitted": 31,
+        "response.settled": 32,
+        "response.submitted": 31,
         "session.started": 0,
-        "turn.paused": 21,
-        "turn.settled": 51,
-        "turn.started": 45,
-        "usage.recorded": 50
+        "turn.paused": 29,
+        "turn.settled": 54,
+        "turn.started": 48,
+        "usage.recorded": 53
       },
       "revision": "bundled",
       "slots": {
@@ -212,7 +215,7 @@
               "changes": 1,
               "runs": 7
             },
-            "outputStarted": "turn_3",
+            "outputStarted": "turn_2",
             "view": {
               "calls": {},
               "changes": {},
@@ -236,7 +239,7 @@
                   },
                   "startedAt": "<time>",
                   "status": "settled",
-                  "turnId": "turn_3"
+                  "turnId": "turn_2"
                 }
               },
               "interactions": {},
@@ -251,7 +254,7 @@
                   "value": "Yes."
                 }
               },
-              "position": 52,
+              "position": 55,
               "responses": {},
               "runs": {
                 "run_6": {
@@ -263,7 +266,7 @@
                   "modelId": "eve-test/layout",
                   "outcome": "completed",
                   "owner": {
-                    "turnId": "turn_3"
+                    "turnId": "turn_2"
                   },
                   "runId": "run_6",
                   "startedAt": "<time>",
@@ -278,7 +281,7 @@
                 }
               },
               "session": {
-                "latestTurnId": "turn_3",
+                "latestTurnId": "turn_2",
                 "runtime": {
                   "agentId": "layout-release",
                   "agentName": "layout-release",
@@ -286,17 +289,17 @@
                 },
                 "startedAt": "<time>",
                 "status": "open",
-                "turnCount": 4
+                "turnCount": 3
               },
               "tasks": {},
               "turns": {
-                "turn_3": {
+                "turn_2": {
                   "cause": {
                     "deliveryId": "<uuid1>"
                   },
                   "closedAt": "<closedAt>",
                   "endedAt": "<time>",
-                  "follows": "turn_2",
+                  "follows": "turn_1",
                   "introducedAt": "<introducedAt>",
                   "outcome": "completed",
                   "reply": [
@@ -305,7 +308,7 @@
                   "runs": 1,
                   "startedAt": "<time>",
                   "status": "settled",
-                  "turnId": "turn_3"
+                  "turnId": "turn_2"
                 }
               },
               "usage": {
@@ -325,6 +328,20 @@
                 }
               }
             }
+          },
+          "eve.work": {
+            "tasks": [
+              {
+                "awaitsPerson": true,
+                "calls": [],
+                "id": "<id0>",
+                "kind": "tool",
+                "name": "deploy",
+                "results": [],
+                "resumable": false
+              }
+            ],
+            "version": 1
           }
         }
       }

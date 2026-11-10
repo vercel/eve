@@ -32,8 +32,10 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | A partial answer keeps the turn held, with no model call                           | [partial-answer-keeps-turn-held](./approvals/partial-answer-keeps-turn-held.eval.ts)                                    |
 | A typed reply naming an option answers                                             | [typed-approve-answers](./approvals/typed-approve-answers.eval.ts)                                                      |
 | A typed reply answers only what it matches                                         | [typed-reply-answers-only-what-matches](./approvals/typed-reply-answers-only-what-matches.eval.ts)                      |
-| Steering ignores unanswered approvals and keeps given answers                      | [steer-ignores-unanswered](./approvals/steer-ignores-unanswered.eval.ts)                                                |
-| Someone else's message joins the turn once its approval settles                    | [other-person-joins-after-approval](./multiplayer/other-person-joins-after-approval.eval.ts)                            |
+| A message keeps unanswered approvals open; their calls run once approved           | [message-keeps-unanswered-open](./approvals/message-keeps-unanswered-open.eval.ts)                                      |
+| Denying a waiting call after a message reports a failed task result                | [deny-after-message-reports-not-run](./approvals/deny-after-message-reports-not-run.eval.ts)                            |
+| The model drops a waiting call with `eve__task_cancel`                             | [model-drops-waiting-call](./approvals/model-drops-waiting-call.eval.ts)                                                |
+| Someone else's message joins the turn while its approval waits                     | [other-person-joins-while-approval-waits](./multiplayer/other-person-joins-while-approval-waits.eval.ts)                |
 | A tool reads the turn's caller and its latest sender                               | [sender-is-latest-speaker](./multiplayer/sender-is-latest-speaker.eval.ts)                                              |
 | The caller's token is refused after someone else speaks, until the caller replies  | [caller-token-needs-confirmation](./multiplayer/caller-token-needs-confirmation.eval.ts)                                |
 | An answer to a request that is not open authorizes nothing                         | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |
@@ -54,14 +56,16 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | No step starts behind the budget question                                          | [no-step-behind-budget](./budget/no-step-behind-budget.eval.ts)                                                         |
 | A late budget answer is dropped                                                    | [stale-budget-answer-dropped](./budget/stale-budget-answer-dropped.eval.ts)                                             |
 | An authorization holds the turn; the callback resumes it as the requester          | [authorization-holds-then-resumes-as-requester](./authorizations/authorization-holds-then-resumes-as-requester.eval.ts) |
-| Steering withdraws an authorization and tells the model                            | [steer-declines-authorization](./authorizations/steer-declines-authorization.eval.ts)                                   |
+| A message keeps a sign-in open; its call runs as the caller once completed         | [message-keeps-authorization-open](./authorizations/message-keeps-authorization-open.eval.ts)                           |
 | Cancel declines an authorization                                                   | [cancel-declines-authorization](./authorizations/cancel-declines-authorization.eval.ts)                                 |
 | An approved call that needs an authorization                                       | [approved-call-needs-authorization](./authorizations/approved-call-needs-authorization.eval.ts)                         |
 | A sibling sign-in is emitted beside an approval; newer attempts replace older ones | [newer-attempt-supersedes](./authorizations/newer-attempt-supersedes.eval.ts)                                           |
 
-The rule that the model never runs while a request is open is checked inside
-the evals above by `expectNoModelCallWhileOpen` and
-`expectNoModelCallDuringAuthorization` ([helpers](./helpers.ts)).
+With no new message, the model never runs while a request is open. The evals
+above check this with `expectNoModelCallWhileOpen` and
+`expectNoModelCallDuringAuthorization` ([helpers](./helpers.ts)). A message that
+joins the turn lets the model run while the request stays open and its call
+waits as a task; `expectWaitsAsTask` checks that.
 
 ## Not covered here
 

@@ -19,12 +19,15 @@ import type {
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
+import { createTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
 import {
   askApprovals,
   approvalMemory,
   openLimit,
   requestLimit,
   requireSignIn,
+  waitAsTasks,
+  waitingCalls,
 } from "./approvals.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
@@ -44,7 +47,7 @@ export {
   type HumanDecisions,
   type HumanInputIntake,
 } from "./intake.js";
-export { openDeferredApprovals, queueInput } from "./approvals.js";
+export { openDeferredApprovals, queueInput, withdrawWaitingCalls } from "./approvals.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 
@@ -59,6 +62,8 @@ export async function askStepApprovals(
     readonly messages: readonly ModelMessage[];
     readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+    /** Who had spoken last as the model made the calls. */
+    readonly sender: SessionAuthContext | null;
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
   },
@@ -69,8 +74,36 @@ export async function askStepApprovals(
     requests: input.requests,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
+    sender: input.sender,
     tasks: input.tasks,
   });
+  await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
+}
+
+/**
+ * A message joined the turn: every call still waiting on a person becomes a task. The model reads
+ * the message with everything the calls' responses did, each waiting call's receipt among it, and
+ * the requests stay open; each call runs once its person acts.
+ */
+export async function waitOnPeopleAsTasks(step: Step): Promise<void> {
+  const calls = waitingCalls(step.view());
+  if (calls.length === 0) return;
+  let table = readTaskTable(step.session.state);
+  const taskIds: Record<string, string> = {};
+  for (const { callId, toolName, turnId } of calls) {
+    const created = createTask(table, {
+      awaitsPerson: true,
+      callId,
+      kind: "tool",
+      name: toolName,
+      resumable: false,
+      turnId,
+    });
+    table = created.table;
+    taskIds[callId] = created.taskId;
+  }
+  step.session = writeTaskTable(step.session, table);
+  const transition = waitAsTasks(step.view(), { taskIds });
   await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 

@@ -66,7 +66,13 @@ import {
 import { forwardedFrom, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
-import { activeTurnId, answeredCallIds, turnPosition, type SessionView } from "./view.js";
+import {
+  activeTurnId,
+  answeredCallIds,
+  turnPosition,
+  waitsAsTasks,
+  type SessionView,
+} from "./view.js";
 import {
   isComplete,
   stepCallIds,
@@ -220,8 +226,11 @@ export function fail(
     readonly terminal?: true;
   },
 ): Transition {
-  // The calls a sign-in stopped never run: the model reads that they stopped.
-  const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
+  // The calls a sign-in stopped, or that wait as tasks, never run: the model reads that they
+  // stopped.
+  const stopped = view.turn.suspended.filter(
+    (step) => (step.approved?.length ?? 0) > 0 || waitsAsTasks(step),
+  );
   const error = errorInfoOf(failure);
   const turnId = activeTurnIdOf(view.projection);
   // A terminal failure ends the session, which ends the turn with it, in one commit.
@@ -254,7 +263,8 @@ export interface SettledCall {
 
 /**
  * Results reach the steps that made their calls. A step whose every call now has a result
- * commits to history, where the model reads it.
+ * commits to history, where the model reads it; a call that waits as a task leaves its step as
+ * its task's result instead (`takeWaitingResults`).
  */
 export function settle(view: SessionView, input: { readonly results: readonly SettledCall[] }) {
   const events: SessionEvent[] = [];
@@ -282,7 +292,7 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage));
     }
   }
-  const complete = steps.filter(isComplete);
+  const complete = steps.filter((step) => isComplete(step) && !waitsAsTasks(step));
   return transition({ ...commitSteps({ ...view.turn, suspended: steps }, complete), events });
 }
 
@@ -324,7 +334,7 @@ export function discardAttempt(
  */
 export function suspendStep(
   view: SessionView,
-  step: Pick<SuspendedStep, "event" | "messages" | "tasks">,
+  step: Pick<SuspendedStep, "event" | "messages" | "sender" | "tasks">,
 ): Transition {
   return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }
@@ -1058,6 +1068,10 @@ export function stopInterruptedSteps(
   });
 }
 
+/**
+ * The `completed` steps' responses join history. A step that waits as tasks already joined it:
+ * the results `messages` gives its calls leave it as their tasks' results instead.
+ */
 function commitSteps(
   turn: TurnState,
   completed: readonly SuspendedStep[],
@@ -1065,8 +1079,14 @@ function commitSteps(
 ): { readonly history: HistoryChange; readonly turn: TurnState } {
   const removed = new Set(completed);
   return {
-    history: { append: completed.flatMap(messages) },
-    turn: { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) },
+    history: { append: completed.filter((step) => !waitsAsTasks(step)).flatMap(messages) },
+    turn: {
+      ...turn,
+      suspended: turn.suspended.flatMap((step) => {
+        if (!removed.has(step)) return [step];
+        return waitsAsTasks(step) ? [{ ...step, messages: [...messages(step)] }] : [];
+      }),
+    },
   };
 }
 

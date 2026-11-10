@@ -50,10 +50,3 @@ export function callerSpokeLast(auth: {
 }): boolean {
   return principalOf(auth.current) === principalOf(auth.sender);
 }
-
-/** Whether someone other than its caller spoke last in the turn `ctx` runs. */
-export function someoneElseSpokeLast(ctx: Pick<ContextReader, "get"> | undefined): boolean {
-  if (ctx === undefined) return false;
-  const current = ctx.get(AuthKey) ?? null;
-  return !callerSpokeLast({ current, sender: readSender(ctx, current) });
-}

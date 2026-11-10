@@ -82,9 +82,6 @@ export function callPlace(view: SessionView, callId: string): RunPlace | undefin
 // Requests
 // ---------------------------------------------------------------------------
 
-/** Why a request nobody answered closed when a message steered its turn instead. */
-export const SUPERSEDED_BY_MESSAGE = "superseded-by-message";
-
 /** The call an interaction asks about. */
 export interface AskedCall {
   readonly callId: string;

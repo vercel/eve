@@ -74,7 +74,7 @@ export type TaskWaitResult =
       }[];
       readonly working: readonly string[];
     }
-  | { readonly status: "timeout" | "interrupt"; readonly working: readonly string[] };
+  | { readonly status: "timeout" | "interrupt" | "answered"; readonly working: readonly string[] };
 
 export interface TaskCancelResult {
   readonly resumable: boolean;

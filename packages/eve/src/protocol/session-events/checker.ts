@@ -118,6 +118,8 @@ export function createStreamChecker(
   const view = options.seed === undefined ? emptySessionView() : copyView(options.seed);
   const announcedParts = new Set<string>();
   const announcedCalls = new Set<string>();
+  /** Approvals decided apart from their batch, until a message joins their turn. */
+  const apart = new Map<string, { readonly interactionId: string; readonly since: number }>();
   let lastPosition = view.position - 1;
 
   return {
@@ -177,6 +179,7 @@ export function createStreamChecker(
       });
 
       checkWaitPromises(line.facts as readonly Fact[], report);
+      checkApart(report);
       for (const { index, ref } of closed) {
         const owner = ref === "session" ? "the session" : `${ref.family} "${ref.id}"`;
         for (const open of openUnder(view, ref)) {
@@ -309,7 +312,8 @@ export function createStreamChecker(
 
   /**
    * What a line that announces a wait or decides approvals promises, checked once it folds: an
-   * announced turn waits on a person, and a person's decision settles its whole batch.
+   * announced turn waits on a person, and a person's decision settles its whole batch unless a
+   * message joins its turn (`checkApart`).
    */
   function checkWaitPromises(
     facts: readonly Fact[],
@@ -335,11 +339,29 @@ export function createStreamChecker(
         (other) =>
           own(other) && other.introducedAt === row!.introducedAt && other.status === "open",
       );
-      if (open.length > 0)
-        report("batch-settles-together", `"${row!.interactionId}" settled apart from its batch.`, {
-          index,
-        });
+      const owner = interactionOwner(view, row!).turnId;
+      if (open.length > 0 && owner !== undefined && !apart.has(owner))
+        apart.set(owner, { interactionId: row!.interactionId, since: row!.introducedAt });
     });
+  }
+
+  /**
+   * A message that joins the turn lets each approval it waited on wait as a task, settled on its
+   * own: one decided apart from its batch is fine once one does, in the step that read it or after.
+   * A turn that ends without one decided its batch apart.
+   */
+  function checkApart(report: (rule: ViolationRule, message: string) => void): void {
+    for (const [turnId, { interactionId, since }] of apart) {
+      const joined = Object.values(view.deliveries).some(
+        (row) =>
+          row.turnId === turnId && (row.consumedAt ?? -1) > since && (row.parts?.length ?? 0) > 0,
+      );
+      if (joined) apart.delete(turnId);
+      else if (view.turns[turnId]?.status === "settled") {
+        apart.delete(turnId);
+        report("batch-settles-together", `"${interactionId}" settled apart from its batch.`);
+      }
+    }
   }
 
   /**

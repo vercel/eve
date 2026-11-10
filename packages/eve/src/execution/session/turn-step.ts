@@ -805,11 +805,12 @@ async function runSessionStepBody(
 }
 
 /**
- * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's an interaction (`announceWaiting`).
+ * The step stopped for an interaction: it says so, or it stopped on its tasks or with nothing of its
+ * own to wait on, and the tables say whether that's an interaction (`announceWaiting`), as when a
+ * task's call waits on a person.
  */
 function stoppedForPerson(result: StepResult): boolean {
-  if (result.held !== undefined) return result.held.kind === "request";
+  if (result.held !== undefined) return true;
   return result.next === null && result.settledTurn === undefined;
 }
 

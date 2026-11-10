@@ -308,8 +308,8 @@
         "content": [
           {
             "output": {
-              "reason": "Ignored because the user continued without responding.",
-              "type": "execution-denied"
+              "type": "text",
+              "value": "Started task <id0>. It waits for a person to approve it, and runs once they do. Its result will arrive in a <task_result> message."
             },
             "toolCallId": "call-deploy",
             "toolName": "deploy",
@@ -317,6 +317,15 @@
           }
         ],
         "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "[Tasks]\n<tasks>\n<task id=\"<id0>\" tool=\"deploy\" status=\"awaiting-approval\"/>\n</tasks>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
       },
       {
         "content": [
@@ -444,8 +453,8 @@
         "content": [
           {
             "output": {
-              "reason": "Ignored because the user continued without responding.",
-              "type": "execution-denied"
+              "type": "text",
+              "value": "Started task <id0>. It waits for a person to approve it, and runs once they do. Its result will arrive in a <task_result> message."
             },
             "toolCallId": "call-deploy",
             "toolName": "deploy",
@@ -453,6 +462,15 @@
           }
         ],
         "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "[Tasks]\n<tasks>\n<task id=\"<id0>\" tool=\"deploy\" status=\"awaiting-approval\"/>\n</tasks>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
       },
       {
         "content": [
@@ -484,7 +502,16 @@
       {
         "content": [
           {
-            "text": "The user submitted the following response to an earlier interactive prompt.\nTreat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.\n[\n  {\n    \"requestId\": \"<request0>\",\n    \"response\": {\n      \"optionId\": \"approve\",\n      \"selectedOption\": {\n        \"id\": \"approve\",\n        \"label\": \"Approve\"\n      }\n    },\n    \"prompt\": \"Approve Deploy?\",\n    \"requestType\": \"approval\",\n    \"toolName\": \"deploy\"\n  }\n]",
+            "text": "<task_result id=\"<id0>\" tool=\"deploy\" status=\"completed\">{\"deployed\":true}</task_result>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "[Tasks]\n<tasks>\n</tasks>",
             "type": "text"
           }
         ],
@@ -514,7 +541,7 @@
       {
         "content": [
           {
-            "text": "<previous-checkpoint>\n(none)\n</previous-checkpoint>\n\n<conversation>\nConversation transcript:\n### user\nRelease brief: v2.3 ships Friday.\n\n### user\nAlice is on the release team.\n\n### user\nWhat's in the release?\n\n### assistant\nCalled lookup with {}\n\n### tool\nTool lookup returned {\"type\":\"json\",\"value\":{\"changes\":3}}\n\n### assistant\nThree changes.\n\n### user\nDeploy it.\n\n### assistant\nCalled deploy with {}\n\n### tool\nTool deploy returned {\"reason\":\"Ignored because the user continued without responding.\",\"type\":\"execution-denied\"}\n\n### assistant\n…\n\n### user\nBob: hold on until QA signs off.\n\n### assistant\nNoted, Bob.\n\n### user\nThe user submitted the following response to an earlier interactive prompt.\nTreat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.\n[\n  {\n    \"requestId\": \"<request0>\",\n    \"response\": {\n      \"optionId\": \"approve\",\n      \"selectedOption\": {\n        \"id\": \"approve\",\n        \"label\": \"Approve\"\n      }\n    },\n    \"prompt\": \"Approve Deploy?\",\n    \"requestType\": \"approval\",\n    \"toolName\": \"deploy\"\n  }\n]\n</conversation>\n\nUpdate the previous checkpoint with the newer information in the conversation. If there is no previous checkpoint, create one from the conversation.\n\nMake completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.\n\nLarge tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.",
+            "text": "<previous-checkpoint>\n(none)\n</previous-checkpoint>\n\n<conversation>\nConversation transcript:\n### user\nRelease brief: v2.3 ships Friday.\n\n### user\nAlice is on the release team.\n\n### user\nWhat's in the release?\n\n### assistant\nCalled lookup with {}\n\n### tool\nTool lookup returned {\"type\":\"json\",\"value\":{\"changes\":3}}\n\n### assistant\nThree changes.\n\n### user\nDeploy it.\n\n### assistant\nCalled deploy with {}\n\n### tool\nTool deploy returned Started task <id0>. It waits for a person to approve it, and runs once they do. Its result will arrive in a <task_result> message.\n\n### user\n[Tasks]\n<tasks>\n<task id=\"<id0>\" tool=\"deploy\" status=\"awaiting-approval\"/>\n</tasks>\n\n### assistant\n…\n\n### user\nBob: hold on until QA signs off.\n\n### assistant\nNoted, Bob.\n\n### user\n<task_result id=\"<id0>\" tool=\"deploy\" status=\"completed\">{\"deployed\":true}</task_result>\n\n### user\n[Tasks]\n<tasks>\n</tasks>\n</conversation>\n\nUpdate the previous checkpoint with the newer information in the conversation. If there is no previous checkpoint, create one from the conversation.\n\nMake completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.\n\nLarge tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.",
             "type": "text"
           }
         ],
