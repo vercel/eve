@@ -153,9 +153,20 @@ for a sign-in. While the caller isn't the last to speak, `ctx.getToken()` for a 
 provider fails with `ConnectionAuthorizationFailedError`,
 `reason: "caller_confirmation_required"`, `retryable: false`. It reaches the model as a failed
 tool result, like other authorization failures, and nothing pauses: no approval is opened. The
-message tells the model who spoke since and that the caller can confirm by replying. Any later
-message from the caller unlocks the token, not only an explicit yes, because rule 3 tracks who
-spoke last, not what they said. Traces record the reason, never the names. A tool that wants a
+message tells the model who spoke since, and that it must ask the caller to clearly confirm the
+action before retrying. eve unlocks the token on any later message from the caller, because
+rule 3 tracks who spoke last, not what they said, so the message leaves the judgment to the
+model: only a reply that plainly confirms this action counts. A reply such as "lol", one about
+something else, or anything ambiguous doesn't confirm it, and the model asks again instead of
+retrying. For example:
+
+> Alice spoke after Bob started this request, so using Bob's GitHub access needs his
+> confirmation. Ask Bob to clearly confirm this action. Retry only after a reply from Bob that
+> plainly confirms it. If his reply is unclear or about something else, ask again instead of
+> retrying.
+
+This leans on the model's judgment and isn't a guarantee. Traces record the reason, never the
+names. A tool that wants a
 prompt sets a mismatch helper as its `approval`, and the docs recommend one agent-wide, below.
 Pausing `execute` for an approval, as a sign-in does, would re-run every authored tool from the
 top after the answer, so eve doesn't.
