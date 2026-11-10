@@ -6,6 +6,7 @@ import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
   mergeGatewayAutoCaching,
+  omitGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
 const fiveMinutes = { ttl: "5m" } as const;
@@ -47,38 +48,77 @@ describe("Anthropic cache breakpoints with a 1-hour TTL", () => {
 
 describe("mergeGatewayAutoCaching", () => {
   it("creates a fresh gateway block when base is undefined", () => {
-    expect(mergeGatewayAutoCaching(undefined)).toEqual({
+    expect(mergeGatewayAutoCaching(undefined, "openai")).toEqual({
       gateway: { caching: "auto" },
     });
   });
 
   it("creates a fresh gateway block when base has no gateway key", () => {
-    expect(mergeGatewayAutoCaching({ someOtherProvider: { foo: "bar" } })).toEqual({
+    expect(mergeGatewayAutoCaching({ someOtherProvider: { foo: "bar" } }, "openai")).toEqual({
       someOtherProvider: { foo: "bar" },
       gateway: { caching: "auto" },
     });
   });
 
   it("preserves existing gateway.order and adds caching", () => {
-    const result = mergeGatewayAutoCaching({
-      gateway: { order: ["anthropic", "bedrock"] },
-    });
+    const result = mergeGatewayAutoCaching(
+      { gateway: { order: ["anthropic", "bedrock"] } },
+      "openai",
+    );
     expect(result).toEqual({
       gateway: { order: ["anthropic", "bedrock"], caching: "auto" },
     });
   });
 
   it("respects an explicit author override of gateway.caching", () => {
-    expect(mergeGatewayAutoCaching({ gateway: { caching: false } })).toEqual({
+    expect(mergeGatewayAutoCaching({ gateway: { caching: false } }, "anthropic")).toEqual({
       gateway: { caching: false },
     });
+  });
+
+  it("anchors a breakpoint on the system prompt for Anthropic models", () => {
+    expect(mergeGatewayAutoCaching(undefined, "anthropic")).toEqual({
+      gateway: { caching: "auto", cacheAnchorMessageIndex: 0 },
+    });
+  });
+
+  it("keeps an author's own anchor index", () => {
+    expect(
+      mergeGatewayAutoCaching({ gateway: { cacheAnchorMessageIndex: 2 } }, "anthropic"),
+    ).toEqual({ gateway: { caching: "auto", cacheAnchorMessageIndex: 2 } });
   });
 
   it("does not mutate the input object", () => {
     const base = { gateway: { order: ["anthropic", "bedrock"] } };
     const snapshot = JSON.parse(JSON.stringify(base));
-    mergeGatewayAutoCaching(base);
+    mergeGatewayAutoCaching(base, "anthropic");
     expect(base).toEqual(snapshot);
+  });
+});
+
+describe("omitGatewayAutoCaching", () => {
+  it("drops an authored automatic caching and keeps the other gateway options", () => {
+    expect(
+      omitGatewayAutoCaching({ gateway: { caching: "auto", order: ["anthropic"] }, other: 1 }),
+    ).toEqual({ gateway: { order: ["anthropic"] }, other: 1 });
+  });
+
+  it("keeps a caching value other than auto", () => {
+    expect(omitGatewayAutoCaching({ gateway: { caching: false } })).toEqual({
+      gateway: { caching: false },
+    });
+  });
+
+  it("passes options without a gateway block through", () => {
+    expect(omitGatewayAutoCaching({ anthropic: { thinking: true } })).toEqual({
+      anthropic: { thinking: true },
+    });
+  });
+
+  it("does not mutate the input object", () => {
+    const base = { gateway: { caching: "auto" } };
+    omitGatewayAutoCaching(base);
+    expect(base).toEqual({ gateway: { caching: "auto" } });
   });
 });
 
