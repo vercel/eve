@@ -15,7 +15,6 @@ import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
-import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
 import type { NitroBuildPlugin } from "nitro/types";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
@@ -54,7 +53,6 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       ...input.runtimeModules,
     ]),
     input.instrumentationEntryPlugin ?? null,
-    createNodeEsmCompatBannerPlugin(),
     // Before Nitro's externals and tracing, so a pseudo-package never reaches
     // the output as a live import.
     createPseudoPackagePlugin(),
