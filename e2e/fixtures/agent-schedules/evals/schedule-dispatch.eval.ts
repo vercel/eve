@@ -12,8 +12,8 @@ const HEARTBEAT_TOKEN = "schedule-heartbeat-ok-P2N";
  * called `record-heartbeat`, the result carried the token, and nothing failed.
  *
  * The dispatch route is dev-only, so this is a no-op on deployed (Vercel)
- * targets where `devRoutes` is false; the production cron path becomes a real
- * Vercel Cron Job that cannot be triggered on demand from an eval.
+ * targets where `devRoutes` is false. There, each schedule is a Vercel
+ * schedule that invokes a private function with no route an eval can call.
  */
 export default defineEval({
   tags: ["real-model"],

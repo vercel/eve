@@ -129,7 +129,7 @@ The route exists only in development. Production builds never include it. It nee
 
 Hosted Vercel builds run every schedule with [Vercel Schedules](https://vercel.com/docs/schedules). Each schedule becomes its own Vercel schedule in `.vercel/output/config.json`. The schedule invokes a private function that has no public route, so no `CRON_SECRET` is needed. Each schedule runs in its own invocation, so one failing schedule doesn't affect the others. Failed invocations aren't retried.
 
-Vercel Schedules is in beta and must be enabled for your Vercel team.
+Vercel Schedules is in beta. Each run starts within a short [jitter window](https://vercel.com/docs/schedules/concepts#jitter) after its scheduled time, and plan [limits](https://vercel.com/docs/schedules/limits) apply. On Hobby, a schedule can run at most once every 15 minutes.
 
 Each Vercel schedule is named `eve.` plus the schedule's name, with `/` replaced by `.`: `agent/schedules/billing/sweep.ts` is `eve.billing.sweep`. Use that name with `vercel schedules`, for example `vercel schedules invoke eve.billing.sweep`. A name with characters that Vercel schedule names don't allow, including `.`, keeps them as `.` and ends with a short hash, so `weekly report.ts` becomes `eve.weekly.report-<hash>`. Renaming a schedule's file creates a new Vercel schedule.
 
@@ -137,7 +137,7 @@ When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, 
 
 When you run `vercel build` locally, use Vercel CLI 65.14.0 or later. Older releases fail the build for `withEve` projects, and releases before 62.7.0 drop schedules from the output without an error.
 
-Find run history and per-run logs under **Observability → Logs**.
+Find each schedule's run history with `vercel schedules executions list <name>`, and per-run logs under **Observability → Logs**.
 
 ## Self-deployed hosts
 
