@@ -1,5 +1,25 @@
 # eve
 
+## 1.0.0-rc.9
+
+Released 2026-11-10 · [Compare with 1.0.0-rc.8](https://github.com/vercel/eve/compare/eve%401.0.0-rc.8...eve%401.0.0-rc.9)
+
+### Features
+
+- Preselect an option in a `display: "select"` question by passing `initialOptionId` to `ctx.ask`.
+  Slack, Discord, Microsoft Teams, and the `eve dev` terminal UI start with that option selected, and ACP clients receive it as the form field's default. On Slack and Discord, a **Use** button submits the preselected option, because those platforms send nothing when a person keeps the current selection. When `initialOptionId` matches none of the question's `options`, `ctx.ask` throws a `TypeError`. ([#6202](https://github.com/vercel/eve/pull/6202))
+- `executeGitHubShell` now throws `GitHubCommandInputError` when a command's own input is refused, so a custom GitHub tool can tell the agent's mistakes from real failures.
+  Shell syntax, an invalid repository, a `workingDirectory` outside the workspace, a `gh-signed-commit` directory that is not a repository root, and a missing `--body-file` used to throw a plain `Error`, like a missing configuration or an empty Connect token. Detect the new error with `isGitHubCommandInputError(error)` from `eve/extensions/git/sandbox`; its messages are unchanged. ([#6181](https://github.com/vercel/eve/pull/6181))
+- Each wait for a `gh` command's sandbox credential lock is recorded as an `agent.github.lease.wait` span, with `agent.github.lease.outcome` and `agent.github.lease.attempts`. ([#6196](https://github.com/vercel/eve/pull/6196))
+
+### Bug Fixes
+
+- Compaction now summarizes directly and must bring the input under half the context window on the provider's token count, so a long session compacts once instead of several times in a row.
+  It no longer caps old tool output first. A compaction whose result is still over the threshold on the next call skips the stage that fell short. ([#6126](https://github.com/vercel/eve/pull/6126))
+- A `gh` command whose lock was taken over after 10 minutes no longer clears the next command's GitHub credential when it finishes. ([#6189](https://github.com/vercel/eve/pull/6189))
+- Throw a clear, non-retrying error when a `defineState()` handle is read or updated inside a workflow tool's `"use step"` function.
+  A step runs outside the session that owns the state, so `get()` silently returned `initial()` and `update()` silently discarded its write. Code that relied on that now fails the step without a retry. Return the value from the workflow tool and update state in a `call.settled` hook instead; see the [State](https://eve.dev/docs/concepts/state#update-state-from-a-workflow-tool) docs. ([#6201](https://github.com/vercel/eve/pull/6201))
+
 ## 1.0.0-rc.8
 
 Released 2026-11-10 · [Compare with 1.0.0-rc.7](https://github.com/vercel/eve/compare/eve%401.0.0-rc.7...eve%401.0.0-rc.8)
