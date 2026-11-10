@@ -297,9 +297,9 @@ export class ModelCaller {
       : options.extraSystemNote;
     return {
       instructions: modelInstructions({
-        anthropicCache: this.profile.anthropicCache,
         extraSystemNote,
         instructions: this.system,
+        profile: this.profile,
       }),
       messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
     };

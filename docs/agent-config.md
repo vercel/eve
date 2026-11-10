@@ -220,7 +220,10 @@ prefix is read again after the 5-minute cache has expired.
 
 On an Anthropic model through Gateway, the default `5m` keeps Gateway's
 automatic caching, and eve sets `providerOptions.gateway.cacheAnchorMessageIndex`
-to `0` so sessions that share a system prompt share its cache. With `1h`, eve
+to `0` so sessions that share a system prompt share its cache. eve sends
+the base part of the system prompt as its own message first, and the sections
+that differ by session, such as dynamic instructions, tasks and approvals,
+after it, so those sessions share the base. With `1h`, eve
 turns Gateway's automatic caching off, because Gateway ignores a 1-hour TTL under
 it, and places its own breakpoints, all for 1 hour, as it does on a directly
 called model. eve rejects `promptCache` on other

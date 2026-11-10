@@ -13,33 +13,45 @@ export interface RequestMessages {
 }
 
 /**
- * The call's system prompt: a retry's note, then exactly the instructions. Without a cache profile
- * a string alone is sent as it is. Otherwise parts join into one system message, empty ones
- * skipped, with the cache breakpoint at its end.
+ * The call's system prompt: `instructions` is one string, or the base part followed by the own
+ * parts. A model that caches by message prefix gets the base as a message of its own, then the
+ * retry's note and the own parts as a second message, so sessions whose own parts differ still
+ * share the base. The base carries eve's breakpoint, or, on Gateway's automatic caching, the one
+ * Gateway anchors on the first message. Any other model gets one system message, a string alone
+ * as it is.
  */
 export function modelInstructions(input: {
   readonly instructions: string | readonly string[];
-  readonly anthropicCache: ModelProfile["anthropicCache"];
+  readonly profile: Pick<ModelProfile, "anthropicCache" | "gateway" | "provider">;
   readonly extraSystemNote?: string;
-}): SystemModelMessage | string | undefined {
-  const note = input.extraSystemNote ? [input.extraSystemNote] : [];
-  if (
-    typeof input.instructions === "string" &&
-    note.length === 0 &&
-    input.anthropicCache === undefined
-  ) {
+}): SystemModelMessage | SystemModelMessage[] | string | undefined {
+  const { anthropicCache, gateway, provider } = input.profile;
+  const [base = "", ...own] =
+    typeof input.instructions === "string" ? [input.instructions] : input.instructions;
+  const note = input.extraSystemNote ?? "";
+  if (anthropicCache === undefined && typeof input.instructions === "string" && note === "") {
     return input.instructions;
   }
-  const parts = [
-    ...note,
-    ...(typeof input.instructions === "string" ? [input.instructions] : input.instructions),
-  ].filter((part) => part !== "");
-  const instructions = parts.map((content): SystemModelMessage => ({ content, role: "system" }));
-  return mergeSystemInstructions(
-    input.anthropicCache
-      ? applySystemCacheBreakpoint(instructions, input.anthropicCache)
-      : instructions,
-  );
+  if (anthropicCache === undefined && !(gateway && provider === "anthropic")) {
+    return systemMessage([note, base, ...own]);
+  }
+  const rest = systemMessage([note, ...own]);
+  const first = base === "" ? undefined : systemMessage([base]);
+  const messages = [
+    ...(first === undefined
+      ? []
+      : anthropicCache
+        ? applySystemCacheBreakpoint([first], anthropicCache)
+        : [first]),
+    ...(rest === undefined ? [] : [rest]),
+  ];
+  return messages.length > 1 ? messages : messages[0];
+}
+
+/** The parts joined into one system message, empty ones skipped, or nothing if none is left. */
+function systemMessage(parts: readonly string[]): SystemModelMessage | undefined {
+  const content = parts.filter((part) => part !== "").join("\n\n");
+  return content === "" ? undefined : { role: "system", content };
 }
 
 /** A retry's note, trailing the call's messages. */
@@ -48,35 +60,4 @@ export function withTrailingUserNote(
   note?: string,
 ): ModelMessage[] {
   return note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
-}
-
-export function mergeSystemInstructions(
-  instructions: readonly SystemModelMessage[],
-): SystemModelMessage | undefined {
-  if (instructions.length === 0) {
-    return undefined;
-  }
-
-  if (instructions.length === 1) {
-    return { ...instructions[0]! };
-  }
-
-  let providerOptions: SystemModelMessage["providerOptions"] | undefined;
-  for (const instruction of instructions) {
-    if (instruction.providerOptions !== undefined) {
-      providerOptions = {
-        ...providerOptions,
-        ...instruction.providerOptions,
-      };
-    }
-  }
-
-  const merged: SystemModelMessage = {
-    role: "system",
-    content: instructions.map((instruction) => instruction.content).join("\n\n"),
-  };
-  if (providerOptions !== undefined) {
-    merged.providerOptions = providerOptions;
-  }
-  return merged;
 }
