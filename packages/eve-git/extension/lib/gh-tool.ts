@@ -24,8 +24,7 @@ const GH_TOOL_REPOSITORY = {
 } as const;
 
 const GH_TOOL_ACTOR = {
-  repository:
-    "When several people talk in the conversation, set actor to the principalId of the person whose request the command carries out, as the sender lines name them; the access policy checks them too. Omit it for the person whose message started this turn.",
+  repository: "Leave actor unset; app tokens act for no one.",
   caller:
     "When several people talk in the conversation, set actor to the principalId of the person whose request the command carries out, as the sender lines name them, and the command runs with that person's own GitHub token. Omit it for the person whose message started this turn. A person who didn't send the latest message is asked to approve the command first.",
 } as const;

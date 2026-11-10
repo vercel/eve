@@ -66,6 +66,11 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       `${message} The "approval" field cannot be selected at runtime; the root agent's \`approval\` applies.`,
     );
   }
+  if (definition.callerConfirmation !== undefined) {
+    throw new Error(
+      `${message} The "callerConfirmation" field cannot be selected at runtime; the root agent's \`callerConfirmation\` applies.`,
+    );
+  }
 
   const config: {
     compaction?: DynamicSubagentAgentConfig["compaction"];

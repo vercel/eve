@@ -12,8 +12,7 @@ const TOKEN_SCOPE = {
       "Connect mints a GitHub App installation token for the declared repository, or for the owner's installation when you declare only an owner.",
     repository:
       "Set `repository` to the `owner/name` the command acts on, or to an owner for discovery.",
-    actor:
-      "When several people talk in the conversation, set `actor` to the `principalId` of the person whose request the command carries out, as the sender lines name them; the access policy checks them too. Omit it for the person whose message started this turn.",
+    actor: "Leave `actor` unset; app tokens act for no one.",
   },
   caller: {
     token:

@@ -85,3 +85,13 @@ describe("participants", () => {
     expect(kept.at(-1)).toBe("person-51");
   });
 });
+
+it("records a person who keeps speaking, and forgets everyone when the conversation is cleared", () => {
+  // A session whose sender line names Alice, from before eve kept the participants record.
+  const spoke = rememberSender({} as { state?: Record<string, unknown> }, user("alice"));
+  const { "eve.harness.participants": _participants, ...earlier } = spoke.state!;
+  const session = rememberSender({ state: earlier }, user("alice"));
+
+  expect(readParticipants(session.state).map((person) => person.principalId)).toEqual(["alice"]);
+  expect(readParticipants(forgetSender(session).state)).toEqual([]);
+});

@@ -89,19 +89,19 @@ eve hands the caller's identity to a call when the caller sent the latest messag
 | A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded |
 | A remote agent that forwards the caller                                                        | The caller, forwarded |
 
-Where the session can ask for input, eve asks the caller to approve the call. The request names the call and quotes the latest message from someone else in the turn. Only the caller can approve it, and anyone signed in can cancel it. Approving runs the tool again from its first line with the caller's identity. See [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
+Where the session can ask for input, eve asks the caller to approve the call. The request names the call by its tool and input, and quotes the latest message from someone else in the turn. Only the caller can approve it, and anyone signed in can cancel it. Approving runs the tool again from its first line with the caller's identity. See [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
 
 Where eve can't ask, the call fails and eve doesn't retry it. That covers sessions that can't request input, such as scheduled runs, workflow tools, and remote agent calls. A connection or `ctx.getToken()` call fails with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`. A remote agent call fails with a terminal error that isn't a `ConnectionAuthorizationFailedError`. Each message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. The caller's next message makes them the last to speak.
 
 An approval covers only its own call, and it doesn't change `auth.sender`; only a message does. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
 
-`callerConfirmation` on the root agent's `defineAgent` decides when eve asks the caller. Local subagents use the root agent's value:
+`callerConfirmation` on the root agent's `defineAgent` decides when eve hands out the caller's identity without asking. It governs identity only: `auth.sender` always names who spoke last, and role checks see both people under every value. Local subagents and dynamic subagents use the root agent's value:
 
-| Value                | After someone else speaks                                                                                                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `"always"` (default) | Ask the caller before each call that uses their identity, until the caller speaks again.                                     |
-| `"once"`             | Ask once for each person who spoke after the caller. The caller's approval covers that person for the session.               |
-| `"never"`            | Don't ask. Anyone the channel admits steers the turn with the caller's identity, and calls read the caller as `auth.sender`. |
+| Value                | After someone else speaks                                                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"always"` (default) | Ask the caller before each call that uses their identity, until the caller speaks again.                                                                 |
+| `"once"`             | Ask once for each signed-in person who spoke after the caller. The caller's approval covers that person for the session. Anonymous people ask each time. |
+| `"never"`            | Don't ask. Anyone the channel admits steers the turn with the caller's identity.                                                                         |
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -120,7 +120,7 @@ A call that waits on an approval or sign-in while the turn reads new messages ru
 
 A session with one person never reaches any of this. Tools that use no credentials aren't covered: a tool that decides from the caller's role must check `auth.sender` as well as `auth.current`.
 
-eve's own role checks cover both people. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` returns `unavailable` until the caller speaks again. With `callerConfirmation: "never"`, these checks cover only the caller.
+eve's own role checks cover both people under every `callerConfirmation` value. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` opens a session as the caller, so it follows `callerConfirmation`: it returns `unavailable` until the caller speaks again, unless `"never"` or a remembered `"once"` approval hands out the caller's identity.
 
 Another person can still answer a pending request with a button or structured answer. They are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 

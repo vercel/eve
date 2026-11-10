@@ -437,7 +437,9 @@ function hasTurnInput(input: HarnessStepInput | undefined): boolean {
 function approvedByCaller(approval: ApprovedCall): boolean {
   // eve asked a person for their identity: the call has the caller's when the caller approved.
   if (approval.confirmedBy !== undefined)
-    return principalOf(personAuth(approval.confirmedBy)) === principalOf(sessionCaller());
+    return approval.confirmedBy.some(
+      (person) => principalOf(personAuth(person)) === principalOf(sessionCaller()),
+    );
   if (approval.interactionId === undefined) return false;
   // With no response policy, no responder is named: the requester, who is the caller, answered.
   return (

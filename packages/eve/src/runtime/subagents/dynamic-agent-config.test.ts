@@ -17,7 +17,18 @@ describe("normalizeDynamicSubagentAgentConfig", () => {
     );
   });
 
-  it("rejects a selected limits.sessionUsage", async () => {
+  it.each([
+    [
+      "limits.sessionUsage",
+      { limits: { sessionUsage: () => true } },
+      'The "limits.sessionUsage" field cannot be selected at runtime; the root agent\'s `sessionUsage` applies.',
+    ],
+    [
+      "callerConfirmation",
+      { callerConfirmation: "never" as const },
+      'The "callerConfirmation" field cannot be selected at runtime; the root agent\'s `callerConfirmation` applies.',
+    ],
+  ])("rejects a selected %s", async (_field, fields, message) => {
     await expect(
       normalizeDynamicSubagentAgentConfig({
         modelMetadata: undefined as never,
@@ -25,12 +36,10 @@ describe("normalizeDynamicSubagentAgentConfig", () => {
         state: {} as never,
         value: defineAgent({
           description: "Perform deep research.",
-          limits: { sessionUsage: () => true },
           model: "openai/gpt-5.5",
+          ...fields,
         }),
       }),
-    ).rejects.toThrow(
-      'The "limits.sessionUsage" field cannot be selected at runtime; the root agent\'s `sessionUsage` applies.',
-    );
+    ).rejects.toThrow(message);
   });
 });

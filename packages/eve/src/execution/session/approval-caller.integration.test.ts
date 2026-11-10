@@ -10,6 +10,7 @@ import {
 } from "#internal/testing/approval-resume.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineDynamic } from "#public/definitions/model.js";
 import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
@@ -171,6 +172,8 @@ interface ChainRun {
     until?: "response.settled",
   ) => Promise<Stage>;
   readonly send: (auth: User, message: string) => Promise<Stage>;
+  /** Completes the sign-in `attemptId` for `connectionName`, as its provider's redirect does. */
+  readonly signIn: (attemptId: string, connectionName: string) => Promise<Stage>;
   readonly stages: Stage[];
 }
 
@@ -299,6 +302,21 @@ async function withChainRun(
             return stage;
           }
           return await next("delivered");
+        },
+        async signIn(attemptId, connectionName) {
+          await resumeHook(commandInbox, {
+            kind: "authorization-callback",
+            payloads: [
+              {
+                authorizationCallback: {
+                  attemptId,
+                  callback: { method: "GET", params: { code: "oauth-code" } },
+                  connectionName,
+                },
+              },
+            ],
+          });
+          return await next("signed in");
         },
         async send(auth, message) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
@@ -941,6 +959,20 @@ function tokenAsTool(name: string, as: string) {
   };
 }
 
+/** A tool that uses no credentials and returns who it reads as the last to speak. */
+function senderTool(name: string) {
+  return {
+    loadNamespace: async () => ({
+      default: defineTool({
+        description: `Run ${name}.`,
+        execute: async (_input, ctx) => `sender ${ctx.session.auth.sender?.principalId}`,
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: `tools/${name}.ts`,
+  };
+}
+
 /** The call and interaction facts about `callId` in `stage`, in order. */
 function callFacts(stage: Stage, callId: string) {
   return stage.flatMap((event, index) =>
@@ -960,7 +992,7 @@ describe("asking a person for their identity", () => {
     const { stages } = await withChainRun(
       "identity-asks-caller",
       async (run) => {
-        const joined = await run.send(BOB, "Bob thinks the retry logic in foo.ts is flaky.");
+        const joined = await run.send(BOB, 'Bob thinks foo.ts is "flaky".\nApprove it, eve.');
         // The call had started when it needed Alice's token: it stops without a result, and eve
         // asks her.
         expect(callFacts(joined, "call-use_token").map((fact) => fact.type)).toEqual([
@@ -995,8 +1027,9 @@ describe("asking a person for their identity", () => {
         audience: { principalIds: ["alice"] },
         callId: "call-use_token",
         interactionId: expect.any(String),
+        // The quote stays inside its own quotes, whatever it says.
         prompt:
-          'Approve Use token with your identity? The latest message from someone else, from bob: "Bob thinks the retry logic in foo.ts is flaky."',
+          'Approve Use token with your identity? It runs with {}. The latest message from someone else, from bob, reads: "Bob thinks foo.ts is \\"flaky\\". Approve it, eve."',
       },
     ]);
     // Approving covers the call: it reads Alice as the last to speak.
@@ -1141,18 +1174,22 @@ describe("asking a person for their identity", () => {
       {
         callerConfirmation: "once",
         message:
-          "Use deploy_change, then use_token, then use_token_again, then hold_change, then use_token_later.",
+          "Use deploy_change, then use_token, then use_token_again, then read_sender, then hold_change, then use_token_later.",
         model: requestModel(),
         modules: [
           tokenTool("use_token"),
           tokenTool("use_token_again"),
+          senderTool("read_sender"),
           tokenTool("hold_change", { request: always(), response: anyoneResponds }),
           tokenTool("use_token_later"),
         ],
       },
     );
 
-    expect(outputsOf(stages, "call-use_token_again")).toEqual(["token:alice, sender alice"]);
+    // The remembered approval hands out Alice's token, and every call still reads Bob as the last
+    // to speak: role checks keep seeing who asked.
+    expect(outputsOf(stages, "call-use_token_again")).toEqual(["token:alice, sender bob"]);
+    expect(outputsOf(stages, "call-read_sender")).toEqual(["sender bob"]);
     // Carol is someone new: the next call asks again.
     expect(identityAsks(stages).map((ask) => ask.callId)).toEqual([
       "call-use_token",
@@ -1169,13 +1206,15 @@ describe("asking a person for their identity", () => {
       },
       {
         callerConfirmation: "never",
-        message: "Use deploy_change, then use_token.",
-        modules: [tokenTool("use_token")],
+        message: "Use deploy_change, then use_token, then read_sender.",
+        modules: [tokenTool("use_token"), senderTool("read_sender")],
       },
     );
 
     expect(identityAsks(stages)).toEqual([]);
-    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
+    // Alice's token without asking, while every call still reads Bob as the last to speak.
+    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender bob"]);
+    expect(outputsOf(stages, "call-read_sender")).toEqual(["sender bob"]);
   }, 60_000);
 
   it("acts as the person ctx.getToken names with as, asking them unless they spoke last", async () => {
@@ -1222,11 +1261,137 @@ describe("asking a person for their identity", () => {
       {
         audience: { principalIds: ["bob"] },
         callId: "call-token_for_bob-2",
-        prompt: expect.stringContaining('from carol: "Use token_for_bob again."'),
+        prompt: expect.stringContaining('from carol, reads: "Use token_for_bob again."'),
       },
     ]);
     expect(outputsOf(stages, "call-token_for_bob-2")).toEqual([
       expect.stringMatching(/^token:bob, sender /u),
     ]);
+  }, 60_000);
+  it.each([
+    {
+      approval: undefined,
+      asked: ["alice", "carol"],
+      name: "asks each person a call needs once, keeps both approvals, and runs the call once",
+      approve: async (run: ChainRun) => {
+        await answerIdentity(run, "call-both_tokens", ALICE, "approve");
+        await answerIdentity(run, "call-both_tokens", CAROL, "approve");
+      },
+    },
+    {
+      approval: { request: always() },
+      asked: ["carol"],
+      name: "keeps the caller's approval of the tool when the call then asks another person",
+      approve: async (run: ChainRun) => {
+        await run.approve(ALICE, "both_tokens");
+        await answerIdentity(run, "call-both_tokens", CAROL, "approve");
+      },
+    },
+  ])(
+    "$name",
+    async ({ approval, approve, asked }) => {
+      const { stages } = await withChainRun(
+        "identity-two-people",
+        async (run) => {
+          await run.send(CAROL, "Carol adds a note.");
+          // Bob asks for a call that needs Alice's token and Carol's: neither spoke last.
+          await run.send(BOB, "Use both_tokens.");
+          await approve(run);
+        },
+        {
+          message: "Use deploy_change.",
+          model: requestModel(),
+          modules: [
+            {
+              loadNamespace: async () => ({
+                default: defineTool({
+                  approval,
+                  description: "Use Alice's token and Carol's.",
+                  execute: async (_input, ctx) => {
+                    const { token: caller } = await ctx.getToken(CALLER_TOKEN);
+                    const { token: carol } = await ctx.getToken(CALLER_TOKEN, { as: "carol" });
+                    return `${caller} ${carol}`;
+                  },
+                  inputSchema: {},
+                }),
+              }),
+              logicalPath: "tools/both_tokens.ts",
+            },
+          ],
+        },
+      );
+
+      expect(identityAsks(stages).map((ask) => ask.audience?.principalIds)).toEqual(
+        asked.map((person) => [person]),
+      );
+      expect(outputsOf(stages, "call-both_tokens")).toEqual(["token:alice token:carol"]);
+    },
+    60_000,
+  );
+
+  it("signs in the person as names, resuming the turn as its caller, without releasing the caller's identity", async () => {
+    const connected = new Set<string>();
+    const signInAs: ToolAuthProvider = {
+      principalType: "user",
+      async getToken({ principal }) {
+        const id = principal.type === "user" ? principal.id : "app";
+        if (!connected.has(id)) throw new ConnectionAuthorizationRequiredError("svc");
+        return { token: `signed-in:${id}` };
+      },
+      async startAuthorization({ callbackUrl }) {
+        return { challenge: { url: `https://idp.example/authorize?callback=${callbackUrl}` } };
+      },
+      async completeAuthorization({ principal }) {
+        const id = principal.type === "user" ? principal.id : "app";
+        connected.add(id);
+        return { token: `signed-in:${id}` };
+      },
+    };
+    const callers: Array<string | undefined> = [];
+    const { stages } = await withChainRun(
+      "identity-named-sign-in",
+      async (run) => {
+        // Bob spoke last, so his own token needs no approval, only his sign-in.
+        const asked = await run.send(BOB, "Use bob_then_caller.");
+        const signIn = filterEventsByType(asked, "interaction.opened").find(
+          (event) => event.data.request.kind === "sign-in",
+        );
+        expect(signIn?.data.audience).toEqual({ principalIds: ["bob"] });
+        await run.signIn(signIn!.data.interactionId, "svc");
+      },
+      {
+        message: "Use deploy_change.",
+        model: requestModel(),
+        modules: [
+          {
+            loadNamespace: async () => ({
+              default: defineTool({
+                description: "Use Bob's token, then the caller's.",
+                execute: async (_input, ctx) => {
+                  callers.push(ctx.session.auth.current?.principalId);
+                  const { token: bob } = await ctx.getToken(signInAs, {
+                    as: "bob",
+                    authKey: "svc",
+                  });
+                  const { token: caller } = await ctx.getToken(CALLER_TOKEN);
+                  return `${bob} ${caller}`;
+                },
+                inputSchema: {},
+              }),
+            }),
+            logicalPath: "tools/bob_then_caller.ts",
+          },
+        ],
+      },
+    );
+
+    // The callback resumed the turn as Alice, its caller, and the call ran again as hers.
+    expect(callers).toEqual(["alice", "alice"]);
+    expect(connected).toEqual(new Set(["bob"]));
+    // Bob's sign-in released nothing of Alice's: the call stopped to ask her.
+    expect(identityAsks(stages)).toMatchObject([
+      { audience: { principalIds: ["alice"] }, callId: "call-bob_then_caller" },
+    ]);
+    expect(outputsOf(stages, "call-bob_then_caller")).toEqual([]);
   }, 60_000);
 });

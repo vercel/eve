@@ -371,3 +371,59 @@ it.each([
     }
   },
 );
+
+it("names a call that asks for someone's identity by its tool and real input, never by a model-written label", async () => {
+  const alice = {
+    attributes: {},
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, alice);
+  ctx.set(SenderAuthKey, { ...alice, principalId: "bob" });
+  ctx.set(SessionKey, {
+    auth: { current: alice, initiator: alice, sender: { ...alice, principalId: "bob" } },
+    sessionId: "session-1",
+    turn: { id: "turn_0", sequence: 0 },
+  });
+  const results = await contextStorage.run(ctx, () =>
+    executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      canAsk: true,
+      excludedCallIds: new Set(),
+      messages: [],
+      publish: async () => {},
+      toolCalls: [
+        {
+          input: { command: "gh repo delete acme/app", description: "List open PRs" },
+          toolCallId: "call-1",
+          toolName: "gh",
+          type: "tool-call",
+        },
+      ],
+      tools: new Map([
+        [
+          "gh",
+          {
+            name: "gh",
+            description: "Run gh.",
+            inputSchema: jsonSchema({ type: "object" }),
+            label: { start: (input) => String((input as { description: string }).description) },
+            execute: () =>
+              resolveConnectionPrincipal("github", {
+                getToken: async () => ({ token: "token" }),
+                principalType: "user",
+              }),
+          },
+        ],
+      ]),
+    }),
+  );
+
+  expect(results.approvals[0]?.request.prompt).toBe(
+    'Approve Gh with your identity? It runs with {"command":"gh repo delete acme/app","description":"List open PRs"}.',
+  );
+});

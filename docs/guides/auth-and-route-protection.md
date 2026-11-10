@@ -309,7 +309,7 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 
 - `auth.current`: the caller on the active inbound turn, whose message started it. A message from a different caller that starts a later turn replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
-- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call that has the caller's identity, because the caller approved it or `callerConfirmation` lets it, reads the caller here.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call the caller approved reads the caller here; `callerConfirmation` doesn't change it.
 
 The caller stays the same for the whole turn; only its claims can change:
 
@@ -516,6 +516,8 @@ export default defineTool({
   },
 });
 ```
+
+When `as` names someone other than the caller, the result's `person` is that person as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
 
 eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. `callerConfirmation` doesn't apply to someone who isn't the caller. Naming the caller is the same as omitting `as`.
 

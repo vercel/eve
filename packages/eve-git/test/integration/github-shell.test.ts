@@ -304,19 +304,23 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
   assert.equal(runs.length, 5);
 });
 
-test("runs a user-token command with its actor's token, and authorize checks the actor", async () => {
+test("runs a user-token command with its actor's token, and authorize checks the person eve resolved", async () => {
   const getTokenCalls: Parameters<ToolContext["getToken"]>[] = [];
   const requireAuthCalls: Parameters<ToolContext["requireAuth"]>[] = [];
   const asked: unknown[] = [];
   let stderr = "";
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  // Carol signed in through another workspace; eve resolves her as she signed in.
+  const carol = { ...slackUser("slack:carol"), issuer: "other-workspace" };
+  const people: Record<string, typeof carol> = { "slack:carol": carol };
   const dependencies = {
     auth: ALICE,
     sender: BOB,
     sessionId: "session-user-actor",
     getToken: (async (...args) => {
       getTokenCalls.push(args);
-      return { token: "user-token" };
+      const person = args[1]?.as === undefined ? undefined : people[args[1].as];
+      return { token: "user-token", ...(person !== undefined && { person }) };
     }) satisfies ToolContext["getToken"],
     requireAuth: ((...args) => {
       requireAuthCalls.push(args);
@@ -326,76 +330,68 @@ test("runs a user-token command with its actor's token, and authorize checks the
       return fakeSandbox(runs, () => ({ exitCode: stderr ? 1 : 0, stdout: "", stderr }));
     },
   };
+  // Only Alice's own workspace may run commands.
   const config = {
     ...CONFIG,
     principalType: "user" as const,
-    authorize: ({ auth }: { auth: unknown }) => {
+    authorize: ({ auth }: { auth: { issuer?: string } | null }) => {
       asked.push(auth);
-      return true;
+      return auth?.issuer === undefined;
     },
   };
 
-  // Bob spoke last, so authorize sees him as the channel sent him; Carol arrives by name only.
-  await executeGitHubShell({ ...READ, actor: BOB.principalId }, config, dependencies);
-  await executeGitHubShell({ ...READ, actor: "slack:carol" }, config, dependencies);
+  await assert.rejects(
+    executeGitHubShell({ ...READ, actor: "slack:carol" }, config, dependencies),
+    /The current caller is not authorized/u,
+  );
   // Naming no one, or the caller, uses the caller's token.
   await executeGitHubShell(READ, config, dependencies);
+  await executeGitHubShell({ ...READ, actor: ALICE.principalId }, config, dependencies);
+  // eve resolved no one for Dave, so the command isn't checked against a guess.
+  await assert.rejects(
+    executeGitHubShell({ ...READ, actor: "slack:dave" }, config, dependencies),
+    /eve didn't resolve who slack:dave is/u,
+  );
 
   assert.deepEqual(
     getTokenCalls.map(([, options]) => options),
-    [{ as: BOB.principalId }, { as: "slack:carol" }, undefined],
+    [{ as: "slack:carol" }, undefined, { as: ALICE.principalId }, { as: "slack:dave" }],
   );
-  assert.deepEqual(asked, [
-    BOB,
-    { attributes: {}, authenticator: "slack", principalId: "slack:carol", principalType: "user" },
-    ALICE,
-  ]);
+  assert.deepEqual(asked, [carol, ALICE, ALICE]);
+  assert.equal(runs.length, 2);
 
   stderr = "HTTP 401: Bad credentials (https://api.github.com/graphql)";
   await assert.rejects(
-    executeGitHubShell({ ...READ, actor: BOB.principalId }, config, dependencies),
+    executeGitHubShell({ ...READ, actor: ALICE.principalId }, config, dependencies),
     /authorization required/u,
   );
-  assert.deepEqual(requireAuthCalls[0]![1], { as: BOB.principalId });
+  assert.deepEqual(requireAuthCalls[0]![1], { as: ALICE.principalId });
 });
 
-test("asks authorize about an app-token command's actor when it is someone else again", async () => {
+test("leaves an app-token command's actor out of authorize and getToken", async () => {
   const asked: Array<string | undefined> = [];
-  const run = (actor: string | undefined, authorized: readonly string[]) =>
-    executeGitHubShell(
-      { ...READ, ...(actor !== undefined && { actor }) },
-      {
-        ...CONFIG,
-        authorize: ({ auth }: GitHubAppAuthorizeRequest) => {
-          asked.push(auth?.principalId);
-          return authorized.includes(auth?.principalId ?? "");
-        },
+  await executeGitHubShell(
+    { ...READ, actor: "slack:carol" },
+    {
+      ...CONFIG,
+      authorize: ({ auth }: GitHubAppAuthorizeRequest) => {
+        asked.push(auth?.principalId);
+        return true;
       },
-      {
-        auth: ALICE,
-        sender: BOB,
-        sessionId: "session-app-actor",
-        async getConnectToken() {
-          return "secret-token";
-        },
-        async getSandbox() {
-          return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
-        },
+    },
+    {
+      auth: ALICE,
+      sender: BOB,
+      sessionId: "session-app-actor",
+      async getConnectToken() {
+        return "secret-token";
       },
-    );
-
-  await run("slack:carol", [ALICE.principalId, BOB.principalId, "slack:carol"]);
-  assert.deepEqual(asked, [ALICE.principalId, BOB.principalId, "slack:carol"]);
-
-  asked.length = 0;
-  await assert.rejects(
-    run("slack:carol", [ALICE.principalId, BOB.principalId]),
-    /^Error: slack:carol is not authorized to run this command on vercel\/internal-agents/u,
+      async getSandbox() {
+        return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
   );
 
-  // An actor who is the caller or the person who spoke last is asked about once.
-  asked.length = 0;
-  await run(BOB.principalId, [ALICE.principalId, BOB.principalId]);
   assert.deepEqual(asked, [ALICE.principalId, BOB.principalId]);
 });
 

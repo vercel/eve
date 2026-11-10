@@ -37,4 +37,22 @@ describe("ctx.getToken with as", () => {
       retryable: false,
     });
   });
+
+  it("refuses a principalId the caller shares with someone signed in another way", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, alice);
+    enterParticipants(ctx, () => ({
+      "eve.harness.participants": [
+        { authenticator: "github", principalId: "alice", principalType: "user" },
+      ],
+    }));
+
+    const refusal = await contextStorage
+      .run(ctx, () =>
+        createAuthorizationContext({ scope: "inbox" }).getToken(PROVIDER, { as: "alice" }),
+      )
+      .catch((error: unknown) => error);
+
+    expect(refusal).toMatchObject({ reason: "person_ambiguous" });
+  });
 });

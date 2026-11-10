@@ -204,8 +204,15 @@ export type ToolContext = SessionContext & {
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
+   *
+   * With `options.as` naming someone other than the caller, the result's
+   * `person` is that person as eve resolved them, without attributes, so a
+   * tool can authorize the identity whose token it holds.
    */
-  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
+  getToken(
+    provider: ToolAuthProvider,
+    options?: ToolAuthOptions,
+  ): Promise<TokenResult & { readonly person?: SessionAuthContext }>;
   /**
    * Signals that the caller must complete authorization for an inline
    * provider before proceeding. Use this after a downstream `401` rejects a

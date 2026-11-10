@@ -131,8 +131,9 @@ call. After someone else's message joins the turn, the call needs the caller's a
 
 - **Asked.** Where eve can ask, the call stops and eve asks the caller. See
   [Asking a person](#asking-a-person).
-- **Refused.** Where eve can't ask, the call fails with `ConnectionAuthorizationFailedError`,
-  `reason: "confirmation_required"`, `retryable: false`. Nothing pauses. The message tells the
+- **Refused.** Where eve can't ask, a token or connection call fails with
+  `ConnectionAuthorizationFailedError`, `reason: "confirmation_required"`, `retryable: false`, and
+  a remote agent call fails with a terminal error carrying the same instruction. Nothing pauses. The message tells the
   model that someone else has spoken, and to ask the caller to confirm before it retries. The
   caller's next message makes them the last to speak.
 - **Approved.** A call the caller approved runs with their identity, whoever spoke last, and
@@ -149,8 +150,9 @@ Listing a connection's tools uses the caller's identity even after someone else 
 nothing the model chose. A local subagent inherits the sender of the call that started it. Rule 3
 doesn't cover app-scoped connections or tools that use no credentials. A tool that decides from
 the caller's role reads `auth.sender` as well as `auth.current`. eve's own checks do: `gh` with
-app tokens and deployed self-modification ask `authorize` about both people, and
-`openCodeChannel()` is unavailable until the caller speaks again.
+app tokens and deployed self-modification ask `authorize` about both people under every
+`callerConfirmation` value, and `openCodeChannel()`, which opens a session as the caller, is
+unavailable until the caller speaks again unless `callerConfirmation` hands out their identity.
 
 ### Waiting on a person
 
@@ -192,14 +194,16 @@ step, eve asks instead of refusing. The call stops without a result, as it does 
 eve opens an ordinary approval (`request.kind: "approval"`) for the person whose identity the call
 needs, with `audience.principalIds` naming them.
 
-- The prompt names the call by its label and quotes the latest message in the turn from someone
-  other than that person, truncated. With no such message, it has no quote. It never carries
-  secrets or attributes.
+- The prompt names the call by its tool's title and its input, truncated, never by a label the
+  model wrote. It quotes the latest message in the turn from a named sender other than that
+  person, truncated and JSON-escaped so it can't pass for eve's text. With no such message, it has
+  no quote. It never carries secrets or attributes.
 - Only that person can approve it, checked before any tool `response` policy, which doesn't govern
   this request. Anyone the channel admits who is signed in can cancel it. Another person can only
   press, never type, an answer.
 - Approving runs the call again from the top with that person's identity: the caller's for a call
-  that needed it, else the named person's. Work the tool did before it asked runs again. Approving
+  that needed it, else the named person's. A call that needs two people asks each once and keeps
+  every approval, including the caller's approval of the tool itself. Work the tool did before it asked runs again. Approving
   covers only that call and doesn't change `auth.sender`: only a message does. With `"always"`,
   each identity-using call after someone else spoke asks until the caller speaks again.
 - The call had started, so a client sees `call.started`, then `interaction.opened` about the same
@@ -214,18 +218,20 @@ needs, with `audience.principalIds` naming them.
 
 `callerConfirmation` on the agent decides when the caller is asked:
 
-| Value      | After someone else speaks                                                           |
-| ---------- | ----------------------------------------------------------------------------------- |
-| `"always"` | Ask the caller each time. The default.                                              |
-| `"once"`   | Ask the caller once for each person. Approving covers that person's later messages. |
-| `"never"`  | Don't ask. Anyone the channel admits steers the turn with the caller's identity.    |
+| Value      | After someone else speaks                                                             |
+| ---------- | ------------------------------------------------------------------------------------- |
+| `"always"` | Ask the caller each time. The default.                                                |
+| `"once"`   | Ask the caller once for each signed-in person. Approving covers their later messages. |
+| `"never"`  | Don't ask. Anyone the channel admits steers the turn with the caller's identity.      |
 
 `"once"` remembers for the caller and the person until the session ends, in the session's approval
-memory under an eve-owned key. Only approving a request is remembered; a message isn't. A workflow
-tool, which runs outside the session step, doesn't read it and keeps refusing. With `"never"`, every
-guard hands out the caller's identity, eve's own role checks look only at the caller, and calls
-read the caller as `auth.sender`, as a call the caller approved does. The root agent's value
-applies in its local subagents, and a subagent that sets `callerConfirmation` fails to compile.
+memory under an eve-owned key. Only approving a request is remembered; a message isn't. Anonymous
+people share one identity, so after an anonymous message eve asks each time. A workflow tool or
+remote agent, which runs outside the session step, doesn't read the memory and keeps refusing.
+With `"never"`, every identity guard hands out the caller's identity. `callerConfirmation` governs
+identity only: neither value changes `auth.sender`, and eve's own role checks still ask about both
+people. The root agent's value applies in its subagents. A local subagent that sets
+`callerConfirmation` fails to compile, and a dynamic subagent that sets it fails when selected.
 
 ### Acting for someone else
 
@@ -237,7 +243,9 @@ attributes. A name that matches no one fails with `reason: "person_not_found"`; 
 two people signed in different ways fails with `reason: "person_ambiguous"`. Naming the caller is
 the same as omitting `as`. A provider that reads `principal.attributes` receives none for a named
 person. `as` works only in tools that run in the session step, and a delegated session has no
-participants to name.
+participants to name. The record is dropped when the conversation is cleared. For a person other
+than the caller, the `ctx.getToken` result carries `person`: who eve resolved, without attributes,
+so a tool authorizes that identity rather than the name the model passed.
 
 Rule 3 decides the same way for everyone. The named person's token is handed out when they were
 the last to speak as the model made the call, or when they approved the call. Otherwise eve asks
@@ -247,9 +255,9 @@ them. The sign-in asks the named person, but its callback resumes the turn as it
 responders' tokens, `ctx.approval.responder.getToken`, aren't guarded this way: the answer bound
 them.
 
-The git extension's `gh` tool takes an `actor` input and passes it as `as`. With user tokens,
-`authorize` checks the actor; with app tokens, it also checks the actor when they are neither the
-caller nor the person who spoke last. In the incident, the
+The git extension's `gh` tool takes an `actor` input and, with user tokens, passes it as `as` and
+asks `authorize` about the person eve resolved, failing when eve resolved no one. App tokens act
+for no one, so `actor` doesn't change them. In the incident, the
 model names Alice, eve asks Alice, and the pull request opens as Alice. If it names Bob, the call
 runs as Bob: he spoke last, and eve can't tell that from "open it".
 

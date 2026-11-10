@@ -64,9 +64,9 @@ interface GitHubConfigBase {
 export interface GitHubAppConfig extends GitHubConfigBase {
   /**
    * The only access control: commands run only when it returns `true`. In a shared session it
-   * is asked about the turn's caller and, when someone else spoke last, about that person too,
-   * and about the command's `actor` when that is someone else again. The command runs only when
-   * it returns `true` for each of them.
+   * is asked about the turn's caller and, when someone else spoke last, about that person too.
+   * The command runs only when it returns `true` for both. App tokens act for no one, so the
+   * command's `actor` doesn't change it.
    */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
   /**
@@ -98,9 +98,8 @@ export interface GitHubUserAuthorizeRequest {
   readonly argv: readonly string[];
   /**
    * The person the command is checked for, or `null` when the session has none: the turn's
-   * caller, or the command's `actor` with user tokens; with app tokens also whoever spoke last
-   * and the `actor`, when each is someone else. An `actor` who is neither the caller nor the
-   * person who spoke last arrives without attributes.
+   * caller, or with user tokens the command's `actor` as eve resolved them, without attributes;
+   * with app tokens also whoever spoke last, when that is someone else.
    */
   readonly auth: SessionAuthContext | null;
   /** Always `null`: user tokens cannot be restricted to the declared repository. Use app tokens for repository allowlists. */
@@ -210,9 +209,11 @@ export async function executeGitHubShell(
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const auth = dependencies.auth ?? null;
   const sender = dependencies.sender === undefined ? auth : dependencies.sender;
-  const actor = actorOf(input.actor, auth, sender);
-  // eve hands out the actor's own token only when they spoke last or approved the call.
-  const actingAs = input.actor === undefined ? undefined : { as: input.actor };
+  // With user tokens, the command runs with the actor's own token, which eve hands out only once
+  // they spoke last or approved the call. App tokens act for no one.
+  const actingAs =
+    config.principalType === "user" && input.actor !== undefined ? { as: input.actor } : undefined;
+  let actor = auth;
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
   if (config.principalType === "user") {
@@ -222,7 +223,9 @@ export async function executeGitHubShell(
     // was consented with, and repository details do not narrow user tokens.
     // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
-    ({ token } = await dependencies.getToken(userAuth, actingAs));
+    const resolved = await dependencies.getToken(userAuth, actingAs);
+    token = resolved.token;
+    actor = actorOf(input.actor, auth, resolved.person);
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
@@ -252,9 +255,9 @@ export async function executeGitHubShell(
     throw new Error(`The current caller is not authorized to run this command${scope}.`);
   }
   // An app token is nobody's own, so `authorize` is the only check on who asks for the command.
-  // Another person's message can ask for it in the caller's turn, so they must pass it too, and
-  // so must the person the command acts for. A user token is its owner's own: `ctx.getToken`
-  // hands it out only once they spoke last or approved the call.
+  // Another person's message can ask for it in the caller's turn, so they must pass it too. A
+  // user token is its owner's own: `ctx.getToken` hands it out only once they spoke last or
+  // approved the call.
   if (
     config.principalType !== "user" &&
     !isSamePerson(auth, sender) &&
@@ -262,16 +265,6 @@ export async function executeGitHubShell(
   ) {
     throw new Error(
       `The person who spoke last in this turn is not authorized to run this command${scope}. Ask the person whose message started this turn to confirm it, and retry only after a reply from them that plainly confirms it.`,
-    );
-  }
-  if (
-    config.principalType !== "user" &&
-    !isSamePerson(actor, auth) &&
-    !isSamePerson(actor, sender) &&
-    !(await config.authorize({ argv, auth: actor, owner: owner!, repository, token }))
-  ) {
-    throw new Error(
-      `${input.actor} is not authorized to run this command${scope}, so it can't run for them.`,
     );
   }
   const coAuthor =
@@ -427,25 +420,23 @@ async function leaseCredential<T>(
 }
 
 /**
- * Whether two session identities are one person, as eve compares the people in a session.
- * Unauthenticated and anonymous identities are one person.
- */
-/**
- * The person `actor` names, as `authorize` sees them: the caller or the person who spoke last when
- * it names one of them, else someone signed in the caller's way, without attributes.
+ * The person a user-token command acts for, as `authorize` sees them: the caller, or the person
+ * eve resolved for `actor`. Without one, the command fails rather than authorize a guess.
  */
 function actorOf(
   actor: string | undefined,
   auth: SessionAuthContext | null,
-  sender: SessionAuthContext | null,
+  resolved: SessionAuthContext | undefined,
 ): SessionAuthContext | null {
+  if (resolved !== undefined) return resolved;
   if (actor === undefined || auth?.principalId === actor) return auth;
-  if (sender?.principalId === actor) return sender;
-  if (auth === null) return null;
-  const { subject: _subject, ...caller } = auth;
-  return { ...caller, attributes: {}, principalId: actor };
+  throw new Error(`eve didn't resolve who ${actor} is, so the command can't be checked for them.`);
 }
 
+/**
+ * Whether two session identities are one person, as eve compares the people in a session.
+ * Unauthenticated and anonymous identities are one person.
+ */
 function isSamePerson(a: SessionAuthContext | null, b: SessionAuthContext | null): boolean {
   return personKey(a) === personKey(b);
 }

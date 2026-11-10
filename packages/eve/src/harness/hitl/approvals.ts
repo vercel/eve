@@ -324,7 +324,9 @@ export function settleApprovals(
             call: request.call,
             interactionId: request.interactionId,
             ...(responder !== undefined && { responder }),
-            ...(request.identity !== undefined && { confirmedBy: request.identity.person }),
+            ...(request.identity !== undefined && {
+              confirmedBy: [...(request.identity.confirmed ?? []), request.identity.person],
+            }),
           },
           step,
         });

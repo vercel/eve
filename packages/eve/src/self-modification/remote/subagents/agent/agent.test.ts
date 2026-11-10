@@ -98,10 +98,10 @@ describe("deployed self-modification agent in a shared session", () => {
     await expect(offerInAliceTurn(sender)).resolves.toBeNull();
   });
 
-  it('is offered to an authorized caller after an unauthorized person spoke when callerConfirmation is "never"', async () => {
+  it('still asks about the person who spoke last when callerConfirmation is "never"', async () => {
     mount([alice]);
 
-    await expect(offerInAliceTurn(bob, memos(), "never")).resolves.not.toBeNull();
+    await expect(offerInAliceTurn(bob, memos(), "never")).resolves.toBeNull();
   });
 
   it("asks again within the turn once someone else speaks", async () => {

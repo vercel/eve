@@ -46,6 +46,8 @@ export interface IdentityAsk {
   readonly person: SessionPerson;
   /** Who approved the call's own approval; the call still reads them as `ctx.approval`. */
   readonly responder?: SessionAuthContext;
+  /** The people who had already approved the call, whose identities it keeps. */
+  readonly confirmed?: readonly SessionPerson[];
 }
 
 /**
@@ -63,8 +65,11 @@ export interface ApprovedCall {
    * runs, after the answer, and the responder's record with it, has settled.
    */
   readonly responder?: SessionAuthContext;
-  /** The person who let the call use their identity, by approving eve's request for it. */
-  readonly confirmedBy?: SessionPerson;
+  /**
+   * The people who let the call use their identity, by approving it: eve's requests for their
+   * identity, and the caller's approval of the call itself before one of those.
+   */
+  readonly confirmedBy?: readonly SessionPerson[];
 }
 
 /**

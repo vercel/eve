@@ -58,20 +58,38 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
 ): T {
   const next = senderOf(auth);
   const last = session.state?.[LAST_SENDER_KEY] as Sender | undefined;
-  if (last?.principal === next.principal) return session;
-  const state = { ...session.state, [LAST_SENDER_KEY]: next };
-  if (next.id === undefined || auth === null) return { ...session, state };
-  const others = readParticipants(session.state).filter(
-    (person) => principalOf(personAuth(person)) !== next.principal,
-  );
-  const participants = [...others, personOf(auth)].slice(-MAX_PARTICIPANTS);
-  return { ...session, state: { ...state, [PARTICIPANTS_KEY]: participants } };
+  const recorded = readParticipants(session.state);
+  const known =
+    recorded.at(-1) !== undefined && principalOf(personAuth(recorded.at(-1)!)) === next.principal;
+  const participants =
+    next.id === undefined || auth === null || known
+      ? undefined
+      : [
+          ...recorded.filter((person) => principalOf(personAuth(person)) !== next.principal),
+          personOf(auth),
+        ].slice(-MAX_PARTICIPANTS);
+  if (last?.principal === next.principal && participants === undefined) return session;
+  return {
+    ...session,
+    state: {
+      ...session.state,
+      [LAST_SENDER_KEY]: next,
+      ...(participants !== undefined && { [PARTICIPANTS_KEY]: participants }),
+    },
+  };
 }
 
-/** Forgets the last sender with the conversation it spoke in, when the context is cleared. */
+/**
+ * Forgets the last sender and the participants with the conversation they spoke in, when the
+ * context is cleared.
+ */
 export function forgetSender<T extends { readonly state?: SessionStateMap }>(session: T): T {
-  if (session.state?.[LAST_SENDER_KEY] === undefined) return session;
-  const { [LAST_SENDER_KEY]: _last, ...state } = session.state;
+  if (
+    session.state?.[LAST_SENDER_KEY] === undefined &&
+    session.state?.[PARTICIPANTS_KEY] === undefined
+  )
+    return session;
+  const { [LAST_SENDER_KEY]: _last, [PARTICIPANTS_KEY]: _participants, ...state } = session.state;
   return { ...session, state };
 }
 

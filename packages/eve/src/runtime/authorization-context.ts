@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
-import { personAuth, principalOf, type SessionPerson } from "#context/session-auth.js";
+import { personAuth, personOf, principalOf, type SessionPerson } from "#context/session-auth.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import { sessionParticipants } from "#harness/sender-line.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/definition.js";
@@ -34,9 +34,14 @@ export function createAuthorizationContext(input: {
       : { ...scoped, boundResponder: personAuth(person), named: true as const };
   };
   return {
-    async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
+    async getToken(
+      provider?: ToolAuthProvider,
+      options?: ToolAuthOptions,
+    ): Promise<TokenResult & { readonly person?: SessionAuthContext }> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
-      return await execution.getToken(resolveFor(provider, options));
+      const scoped = resolveFor(provider, options);
+      const token = await execution.getToken(scoped);
+      return scoped.named === true ? { ...token, person: scoped.boundResponder } : token;
     },
     /**
      * The given responder's stored token, resolved through this execution's
@@ -66,10 +71,10 @@ export function createAuthorizationContext(input: {
  */
 function namedPerson(as: string, scope: string): SessionPerson | undefined {
   const ctx = contextStorage.getStore();
-  const caller = ctx?.get(AuthKey) ?? null;
-  if (caller !== null && caller.principalType !== "anonymous" && caller.principalId === as)
-    return undefined;
+  const auth = ctx?.get(AuthKey) ?? null;
+  const caller = auth === null || auth.principalType === "anonymous" ? undefined : personOf(auth);
   const participants = sessionParticipants(ctx);
+  if (participants === undefined && caller?.principalId === as) return undefined;
   if (participants === undefined) {
     throw new ConnectionAuthorizationFailedError(scope, {
       message: `ctx.getToken can't name "${as}" with "as" here: eve looks a person up among the people who have spoken in the session, and this tool runs outside the session's turn. Omit "as" to use the caller's identity.`,
@@ -77,7 +82,12 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
       retryable: false,
     });
   }
-  const matches = participants.filter((person) => person.principalId === as);
+  const people = new Map(
+    [...participants, ...(caller === undefined ? [] : [caller])]
+      .filter((person) => person.principalId === as)
+      .map((person) => [principalOf(personAuth(person)), person]),
+  );
+  const matches = [...people.values()];
   if (matches.length === 0) {
     throw new ConnectionAuthorizationFailedError(scope, {
       message: `No one with the principalId "${as}" has spoken in this session, so this action can't act as them. Set "as" to the principalId of a person named in a sender line, or omit it to act as the person whose message started this turn.`,
@@ -85,14 +95,18 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
       retryable: false,
     });
   }
-  if (new Set(matches.map((person) => principalOf(personAuth(person)))).size > 1) {
+  if (matches.length > 1) {
     throw new ConnectionAuthorizationFailedError(scope, {
       message: `More than one person who has spoken in this session has the principalId "${as}", signed in different ways, so eve can't tell which one this action should act as. Omit "as" to act as the person whose message started this turn.`,
       reason: "person_ambiguous",
       retryable: false,
     });
   }
-  return matches[0];
+  const [person] = matches;
+  return caller !== undefined &&
+    principalOf(personAuth(caller)) === principalOf(personAuth(person!))
+    ? undefined
+    : person;
 }
 
 function buildInlineScopedAuthorization(input: {
