@@ -50,9 +50,9 @@ export function createAuthoredPackageTsConfigPathsPlugin(input: {
   importerFilter?: FilterExpression;
 }): Plugin {
   const probeStat = createCachedStatProbe();
-  // eve ships compiled JavaScript with no tsconfig `paths`, so its modules have nothing to
-  // resolve here. A workspace-linked eve sits outside `node_modules`, where its package-private
-  // imports would otherwise be most of this hook's calls.
+  // An installed eve is under `node_modules`, which the importer filter already rejects. A
+  // workspace-linked eve bundles its `src/*.ts` through the `eve-source` condition, and those
+  // imports have nothing to resolve here because eve's own tsconfig has no `paths`.
   const eveModule =
     input.authoredSourceOnly === true
       ? packageModulesRegex(realpathSync.native(resolvePackageRoot()))

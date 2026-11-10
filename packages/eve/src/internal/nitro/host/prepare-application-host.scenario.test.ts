@@ -58,7 +58,7 @@ describe("application host preparation", () => {
     expect(existsSync(workspace.rootDir)).toBe(false);
   });
 
-  it("refreshes only the bundled data with sandbox artifacts recorded after preparation", async () => {
+  it("carries a sandbox artifact recorded after preparation into the bundled data and leaves the generated modules unchanged", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-production-host-refresh-", {
       files: {
         "agent/instructions.md": "Use the configured model.",
