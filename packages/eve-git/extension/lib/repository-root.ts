@@ -1,32 +1,34 @@
 import type { SandboxSession } from "eve/sandbox";
 
-import { GitHubCommandInputError } from "./github-shell.ts";
 import { shellQuote } from "./shell.ts";
 
 type RootSandbox = Pick<SandboxSession, "resolvePath" | "run">;
 
 const MAX_ERROR_DETAIL_CHARS = 2_000;
 
+/** The resolved root, or why the given directory cannot be one. */
+export type RepositoryRoot = { readonly root: string } | { readonly refused: string };
+
 /** A workspace directory that must also be the top of a git work tree. */
-export async function validateRepositoryRoot(sandbox: RootSandbox, root: string): Promise<string> {
-  if (!root.startsWith("/"))
-    throw new GitHubCommandInputError("root must be an absolute sandbox path");
-  const workspace = await realPath(sandbox, sandbox.resolvePath(""), "sandbox workspace", Error);
-  const resolved = await realPath(sandbox, root, "root", GitHubCommandInputError);
+export async function validateRepositoryRoot(
+  sandbox: RootSandbox,
+  root: string,
+): Promise<RepositoryRoot> {
+  if (!root.startsWith("/")) return { refused: "root must be an absolute sandbox path" };
+  const workspace = await realPath(sandbox, sandbox.resolvePath(""), "sandbox workspace");
+  if (typeof workspace !== "string") throw new Error(workspace.unresolved);
+  const resolved = await realPath(sandbox, root, "root");
+  if (typeof resolved !== "string") return { refused: resolved.unresolved };
   const inside =
     workspace === "/" || resolved === workspace || resolved.startsWith(`${workspace}/`);
-  if (!inside) {
-    throw new GitHubCommandInputError(
-      `root resolves outside the workspace ${workspace}: ${resolved}`,
-    );
-  }
+  if (!inside) return { refused: `root resolves outside the workspace ${workspace}: ${resolved}` };
   const top = await sandbox.run({
     command: `git -C ${shellQuote(resolved)} rev-parse --show-toplevel`,
   });
   if (top.exitCode !== 0 || top.stdout.trim() !== resolved) {
-    throw new GitHubCommandInputError(`root is not a git work tree root: ${root}`);
+    return { refused: `root is not a git work tree root: ${root}` };
   }
-  return resolved;
+  return { root: resolved };
 }
 
 /** NUL-delimited output keeps paths that contain newlines unambiguous. */
@@ -34,12 +36,13 @@ async function realPath(
   sandbox: RootSandbox,
   path: string,
   label: string,
-  Failure: new (message: string) => Error,
-): Promise<string> {
+): Promise<string | { readonly unresolved: string }> {
   const result = await sandbox.run({ command: `realpath -e -z -- ${shellQuote(path)}` });
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || "no command output";
-    throw new Failure(`${label} could not be resolved: ${detail.slice(0, MAX_ERROR_DETAIL_CHARS)}`);
+    return {
+      unresolved: `${label} could not be resolved: ${detail.slice(0, MAX_ERROR_DETAIL_CHARS)}`,
+    };
   }
   const real = result.stdout.endsWith("\0") ? result.stdout.slice(0, -1) : result.stdout;
   if (real.length === 0 || real.includes("\0")) {

@@ -1,8 +1,6 @@
 import { posix } from "node:path";
 import type { SandboxSession } from "eve/sandbox";
 
-import { GitHubCommandInputError } from "./github-shell.ts";
-
 /** The person a commit or pull request is created for. */
 export interface GitHubCoAuthor {
   readonly email: string;
@@ -62,7 +60,7 @@ export async function attributeCommand(
   sandbox: Pick<SandboxSession, "readTextFile" | "writeTextFile">,
   workingDirectory: string,
   bodyFile: string,
-): Promise<string[]> {
+): Promise<string[] | { readonly missingBodyFile: string }> {
   const result = [...argv];
   if (argv[0] === "gh-signed-commit") {
     // gh-signed-commit keeps the last `-b`.
@@ -86,10 +84,7 @@ export async function attributeCommand(
       const path = inline ?? result[index + 1];
       if (!path || path === "-") return result;
       const content = await sandbox.readTextFile({ path: posix.resolve(workingDirectory, path) });
-      if (content === null)
-        throw new GitHubCommandInputError(
-          `Pull request body file ${JSON.stringify(path)} not found.`,
-        );
+      if (content === null) return { missingBodyFile: path };
       await sandbox.writeTextFile({ content: withTrailer(content, trailer), path: bodyFile });
       if (inline === undefined) result[index + 1] = bodyFile;
       else result[index] = `${flag}=${bodyFile}`;

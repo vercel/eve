@@ -203,7 +203,9 @@ export async function executeGitHubShell(
   const sandbox = await dependencies.getSandbox();
   let workingDirectory = resolveWorkingDirectory(sandbox, input.workingDirectory);
   if (argv[0] === "gh-signed-commit") {
-    workingDirectory = await validateRepositoryRoot(sandbox, workingDirectory);
+    const repositoryRoot = await validateRepositoryRoot(sandbox, workingDirectory);
+    if ("refused" in repositoryRoot) throw new GitHubCommandInputError(repositoryRoot.refused);
+    workingDirectory = repositoryRoot.root;
   }
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
@@ -254,6 +256,11 @@ export async function executeGitHubShell(
   const commandArgv = coAuthor
     ? await attributeCommand(argv, coAuthorTrailer(coAuthor), sandbox, workingDirectory, bodyFile)
     : argv;
+  if (!Array.isArray(commandArgv)) {
+    throw new GitHubCommandInputError(
+      `Pull request body file ${JSON.stringify(commandArgv.missingBodyFile)} not found.`,
+    );
+  }
 
   const executable = executablePath(commandArgv[0]!);
   const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
