@@ -2,6 +2,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
+const NODE_MODULES_SEGMENT = "/node_modules/";
+
 /** A package found on disk, or a declared dependency that isn't installed (empty `root`). */
 export interface InstalledPackage {
   readonly name: string | undefined;
@@ -32,30 +34,62 @@ export function installedDependencyClosure(
   return closure;
 }
 
-/**
- * Whether a module path sits inside one of `packageRoots` or a package they can load. Builds the
- * closure once, on the first call, and caches each directory's answer.
- */
+/** The packages at `packageRoots` and every package they can load. */
+export interface InstalledPackageScope {
+  /** Whether a module path sits inside one of the packages. Caches each directory's answer. */
+  readonly includes: (modulePath: string) => boolean;
+  /**
+   * Each package's directory below `node_modules`, such as `@ai-sdk/openai`. It is where the
+   * package is installed, which an npm alias makes differ from the package's name. A module of
+   * such a package has it in its path, by its real path and through a link of the same name.
+   * Packages outside `node_modules`, such as linked workspace packages, have none.
+   */
+  readonly nodeModulesDirectories: () => readonly string[];
+  /**
+   * The roots of the packages outside `node_modules`. A module of such a package can still have
+   * `node_modules` in its path: a directory there that names no package belongs to the package.
+   */
+  readonly rootsOutsideNodeModules: () => readonly string[];
+}
+
+/** Builds the closure once, on first use. */
 export function createInstalledPackageScope(
   packageRoots: readonly string[],
-): (modulePath: string) => boolean {
+): InstalledPackageScope {
   let scopeRoots: ReadonlySet<string> | undefined;
-  const byDirectory = new Map<string, boolean>();
-  return (modulePath) => {
-    if (packageRoots.length === 0) return false;
-    scopeRoots ??= new Set(
+  const roots = (): ReadonlySet<string> =>
+    (scopeRoots ??= new Set(
       installedDependencyClosure(packageRoots)
         .map((installed) => installed.root)
         .filter((root) => root !== ""),
-    );
-    const directory = dirname(toCanonicalPath(modulePath));
-    let inScope = byDirectory.get(directory);
-    if (inScope === undefined) {
-      const packageRoot = installedPackageRoot(modulePath);
-      inScope = packageRoot !== undefined && scopeRoots.has(packageRoot);
-      byDirectory.set(directory, inScope);
-    }
-    return inScope;
+    ));
+  const byDirectory = new Map<string, boolean>();
+  return {
+    includes(modulePath) {
+      if (packageRoots.length === 0) return false;
+      const directory = dirname(toCanonicalPath(modulePath));
+      let inScope = byDirectory.get(directory);
+      if (inScope === undefined) {
+        const packageRoot = installedPackageRoot(modulePath);
+        inScope = packageRoot !== undefined && roots().has(packageRoot);
+        byDirectory.set(directory, inScope);
+      }
+      return inScope;
+    },
+    nodeModulesDirectories() {
+      const directories = new Set<string>();
+      for (const root of roots()) {
+        const path = root.replaceAll("\\", "/");
+        const index = path.lastIndexOf(NODE_MODULES_SEGMENT);
+        if (index !== -1) directories.add(path.slice(index + NODE_MODULES_SEGMENT.length));
+      }
+      return [...directories];
+    },
+    rootsOutsideNodeModules() {
+      return [...roots()].filter(
+        (root) => !root.replaceAll("\\", "/").includes(NODE_MODULES_SEGMENT),
+      );
+    },
   };
 }
 
