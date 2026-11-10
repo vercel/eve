@@ -11,7 +11,7 @@ import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-pl
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
-import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
+import { escapeRegex, exactRegex, pathsRegex } from "#internal/bundler/filters.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
@@ -104,6 +104,8 @@ export interface ModulePathMatcher {
    * later hooks the resolved id.
    */
   readonly idFilter: RegExp;
+  /** Rolldown `resolveId` id filters that together admit every specifier `match` accepts. */
+  readonly specifierFilter: RegExp[];
 }
 
 export function createModulePathMatcher(
@@ -142,7 +144,22 @@ export function createModulePathMatcher(
     }
     return keys.has(toKey(resolved)) ? resolved : null;
   };
-  return { idFilter: pathsRegex([...new Set([...paths, ...targets])], platform), match };
+  // A path resolves to its own last segment unless that is empty, `.`, or `..`. File URLs may
+  // percent-encode the name, so all of them pass.
+  const basenames = new Set(targets.map((target) => target.slice(target.lastIndexOf("/") + 1)));
+  const pathSpecifier = new RegExp(
+    `^(?=\\.|[\\\\/]|[A-Za-z]:[\\\\/])(?:[^?#]*[\\\\/])?(?:${[...basenames].map(escapeRegex).join("|")}|\\.{0,2})(?:[?#].*)?$`,
+    windows ? "i" : undefined,
+  );
+  return {
+    idFilter: pathsRegex([...new Set([...paths, ...targets])], platform),
+    match,
+    specifierFilter: [
+      pathSpecifier,
+      /^file:\/\//,
+      ...WORKFLOW_MODULE_SPECIFIERS.map((specifier) => exactRegex(specifier)),
+    ],
+  };
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
@@ -202,23 +219,17 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
   return undefined;
 }
 
-// The specifiers createModulePathMatcher resolves; anything else cannot name a side-effect module.
-const SIDE_EFFECT_SPECIFIER_FILTER = [
-  /^(?:\.|\/|\\|[A-Za-z]:[\\/]|file:\/\/)/,
-  ...WORKFLOW_MODULE_SPECIFIERS.map((specifier) => exactRegex(specifier)),
-];
-
 /**
  * Keeps modules evaluated for their side effects: the workflow bundle and its
  * handler, step modules that register durable steps, and instrumentation
  * modules the generated instrumentation plugin imports eagerly.
  */
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
-  const { match } = createModulePathMatcher(rootDir, paths);
+  const { match, specifierFilter } = createModulePathMatcher(rootDir, paths);
   return {
     name: "eve:side-effect-modules",
     resolveId: {
-      filter: { id: SIDE_EFFECT_SPECIFIER_FILTER },
+      filter: { id: specifierFilter },
       handler(source: string, importer: string | undefined) {
         const id = match(source, importer);
         return id === null ? null : { id, moduleSideEffects: "no-treeshake" as const };
