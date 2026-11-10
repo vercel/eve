@@ -37,7 +37,7 @@ export interface BuildTelemetryRuntimeContextInput {
   readonly emissionState: TurnPosition;
   readonly environment: string;
   readonly modelInput: {
-    readonly instructions: string | SystemModelMessage | undefined;
+    readonly instructions: string | SystemModelMessage | readonly SystemModelMessage[] | undefined;
     readonly messages: readonly ModelMessage[];
   };
   readonly providerResolvers?: readonly RuntimeContextResolver[];

@@ -76,7 +76,12 @@ describe("buildStepHooks", () => {
 
     await contextStorage.run(context, async () => {
       expect((await prepare("anthropic/claude-sonnet-4-5"))?.providerOptions).toEqual({
-        gateway: { caching: "auto", order: ["bedrock"], sessionId: "forwarded-conversation" },
+        gateway: {
+          cacheAnchorMessageIndex: 0,
+          caching: "auto",
+          order: ["bedrock"],
+          sessionId: "forwarded-conversation",
+        },
         openai: { store: false },
       });
       expect(
@@ -89,7 +94,12 @@ describe("buildStepHooks", () => {
           )
         )?.providerOptions,
       ).toEqual({
-        gateway: { caching: "auto", order: ["bedrock"], sessionId: "forwarded-conversation" },
+        gateway: {
+          cacheAnchorMessageIndex: 0,
+          caching: "auto",
+          order: ["bedrock"],
+          sessionId: "forwarded-conversation",
+        },
         openai: { store: false },
       });
       expect(
@@ -132,7 +142,76 @@ describe("buildStepHooks", () => {
       steps: [],
     });
     expect(prepared?.providerOptions).toEqual({
-      gateway: { caching: "auto", sessionId: "authored-session" },
+      gateway: { cacheAnchorMessageIndex: 0, caching: "auto", sessionId: "authored-session" },
+    });
+  });
+
+  it("gives a Gateway Anthropic model a 1-hour cache on every breakpoint and no automatic caching", async () => {
+    const hooks = buildStepHooks({
+      model: {
+        id: "anthropic/claude-sonnet-4-5",
+        providerOptions: { gateway: { order: ["anthropic"] } },
+      },
+      profile: resolveModelProfile("anthropic/claude-sonnet-4-5", { anthropic: { ttl: "1h" } }),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [
+        { content: "a", role: "user" },
+        { content: "b", role: "assistant" },
+        { content: "c", role: "user" },
+      ],
+      model: "anthropic/claude-sonnet-4-5",
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.providerOptions).toEqual({
+      gateway: { order: ["anthropic"], sessionId: "session-test" },
+    });
+    const oneHour = {
+      anthropic: { cacheControl: { ttl: "1h", type: "ephemeral" } },
+      bedrock: { cachePoint: { ttl: "1h", type: "default" } },
+    };
+    expect(prepared?.messages?.map((message) => message.providerOptions)).toEqual([
+      undefined,
+      oneHour,
+      oneHour,
+    ]);
+  });
+
+  it("removes an authored automatic caching option from a Gateway model with a 1-hour cache", async () => {
+    const hooks = buildStepHooks({
+      model: {
+        id: "anthropic/claude-sonnet-4-5",
+        providerOptions: { gateway: { caching: "auto", order: ["anthropic"] } },
+      },
+      profile: resolveModelProfile("anthropic/claude-sonnet-4-5", { anthropic: { ttl: "1h" } }),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [{ content: "a", role: "user" }],
+      model: "anthropic/claude-sonnet-4-5",
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.providerOptions).toEqual({
+      gateway: { order: ["anthropic"], sessionId: "session-test" },
     });
   });
 

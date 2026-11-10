@@ -76,7 +76,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 ## Patterns
 
 - [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Scope any memory provider to an authenticated tenant and caller.
-- [Dynamic Scheduling](${EVE_ORIGIN}/docs/patterns/dynamic-scheduling.md): Build application-managed schedules from an eve schedule and authored tools.
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
 
