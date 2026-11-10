@@ -406,15 +406,6 @@ async function pressSignInCancel(conversation: ChannelConversation) {
   await conversation.press(cancel!);
 }
 
-/** Starts a calendar sign-in, then moves on with a new message before finishing it. */
-async function abandonSignIn(conversation: ChannelConversation) {
-  await conversation.say(READ_CALENDAR);
-  await conversation.waitForSignIn();
-  // A person moves on once they've seen the sign-in, which in a group they reply to.
-  await conversation.waitForRest();
-  await conversation.say(CHANGE_OF_PLANS);
-}
-
 const questionRules = [
   {
     rule: "a rendered question shows every option a person can choose",
@@ -1077,30 +1068,20 @@ const signInRules = [
     },
   },
   {
-    rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
+    rule: "a message while a sign-in is pending gets a reply and leaves it open, so signing in afterwards runs the tool",
     source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
-      await abandonSignIn(conversation);
-      await conversation.waitForReplyTo(CHANGE_OF_PLANS);
-      // Finishing the abandoned sign-in afterwards must not run the tool.
-      await conversation.completeSignIn();
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      // A person moves on once they've seen the sign-in, which in a group they reply to.
       await conversation.waitForRest();
-      expect(
-        conversation.runsOf("read_calendar"),
-        "read_calendar ran after its sign-in was cancelled",
-      ).toBe(0);
-    },
-  },
-  {
-    rule: "message after ignored sign-in tells user it was cancelled",
-    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
-    requires: ["text-replies"],
-    variesByConversation: true,
-    async run(conversation) {
-      await abandonSignIn(conversation);
-      await conversation.waitForShown(/\b(?:cancel|declin)/iu);
+      await conversation.say(CHANGE_OF_PLANS);
+      await conversation.waitForReplyTo(CHANGE_OF_PLANS);
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran before sign-in").toBe(0);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
     },
   },
 ] as const satisfies readonly ContractRule[];
