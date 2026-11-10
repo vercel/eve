@@ -151,9 +151,14 @@ Approving makes the caller the last to speak, so later calls run until another m
 **Authored tools.** A tool resolves its provider inside `execute`, where a call can stop only
 for a sign-in. While the caller isn't the last to speak, `ctx.getToken()` for a user-scoped
 provider fails with `ConnectionAuthorizationFailedError`,
-`reason: "caller_confirmation_required"`. The message tells the model who spoke since and that
-the caller can confirm by replying. A tool that wants a prompt sets a mismatch helper as its
-`approval`.
+`reason: "caller_confirmation_required"`, `retryable: false`. It reaches the model as a failed
+tool result, like other authorization failures, and nothing pauses: no approval is opened. The
+message tells the model who spoke since and that the caller can confirm by replying. Any later
+message from the caller unlocks the token, not only an explicit yes, because rule 3 tracks who
+spoke last, not what they said. Traces record the reason, never the names. A tool that wants a
+prompt sets a mismatch helper as its `approval`, and the docs recommend one agent-wide, below.
+Pausing `execute` for an approval, as a sign-in does, would re-run every authored tool from the
+top after the answer, so eve doesn't.
 
 A mismatch helper on the tool, the connection, or the agent replaces the default for the calls
 it clears, including when an author's own policy calls it. The helper's own evaluation signals
@@ -170,6 +175,10 @@ export default defineAgent({
   approval: once({ when: "principal-mismatch" }),
 });
 ```
+
+The docs and templates for multiplayer channels recommend this line, so the caller gets an
+approval prompt rather than a refused call. The refusal stays the default for agents without
+it.
 
 A session with one person never reaches any of this.
 
@@ -303,7 +312,8 @@ default. They use the approval helpers, or read `auth.sender` in their own polic
 - **Role checks.** A tool that decides from `auth.current` alone doesn't see who else is
   steering. The auth and human-in-the-loop docs show the approval helpers for it.
 - **Docs.** "A turn runs as one principal" is restated: the caller is fixed, and other people's
-  messages can join.
+  messages can join. The multiplayer channel docs and templates recommend
+  `approval: once({ when: "principal-mismatch" })` in `agent.ts`.
 - **Additive API.** `SessionAuth.sender`, the `when` option on `always()` and `once()`, and the
   `caller_confirmation_required` reason.
 
