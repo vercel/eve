@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
+import { SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
 import {
   BundleKey,
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { ContextContainer } from "#context/container.js";
-import { sandboxPrewarmer, sandboxProvider } from "#context/providers/sandbox.js";
+import { sandboxProvider } from "#context/providers/sandbox.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 
 vi.mock("../../execution/sandbox/ensure.js", () => ({
@@ -57,7 +57,6 @@ describe("sandboxProvider", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
     });
   });
@@ -97,7 +96,6 @@ describe("sandboxProvider", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
     });
     ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
@@ -128,29 +126,6 @@ describe("sandboxProvider", () => {
     );
   });
 
-  it("opens the sandbox for a prewarmed session but leaves it alone when a turn starts", async () => {
-    const ctx = new ContextContainer();
-    const access = {
-      captureState: vi.fn(),
-      release: vi.fn(),
-      end: vi.fn(),
-      get: vi.fn(),
-      stop: vi.fn(),
-      open: vi.fn(),
-      prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
-      settle: vi.fn(),
-    } satisfies EnsuredSandboxAccess;
-    ctx.set(SandboxKey, access);
-
-    sandboxPrewarmer.start(ctx, "turn");
-    expect(access.prepare).not.toHaveBeenCalled();
-    expect(access.resumeRecorded).not.toHaveBeenCalled();
-
-    sandboxPrewarmer.start(ctx, "session");
-    expect(access.prepare).toHaveBeenCalledOnce();
-  });
-
   it("closes the step's connection when the scope ends, without throwing", async () => {
     const ctx = new ContextContainer();
     ctx.set(
@@ -169,7 +144,6 @@ describe("sandboxProvider", () => {
       release,
       open: vi.fn(),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn(),
       stop: vi.fn(),
     });

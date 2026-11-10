@@ -31,7 +31,6 @@ access.prepare(); // open in the background
 access.prepare(async (open) => {
   /* work; call open() only if needed */
 });
-access.resumeRecorded(); // resume only; never starts a sandbox
 await access.get(); // waits for the open and all queued work: the last mile
 await access.open(); // the connection only, for attachment staging and hydration
 ```
