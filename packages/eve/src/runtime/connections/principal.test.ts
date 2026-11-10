@@ -290,7 +290,7 @@ describe("resolveConnectionPrincipal after someone other than the caller spoke",
 
   it("resolves them inside a call the caller approved", () => {
     const principal = contextStorage.run(ctx(), () =>
-      withCallerIdentity(true, () => resolveConnectionPrincipal("github", userAuthDef)),
+      withCallerIdentity(() => resolveConnectionPrincipal("github", userAuthDef)),
     );
     expect(principal).toMatchObject({ id: "alice", type: "user" });
   });

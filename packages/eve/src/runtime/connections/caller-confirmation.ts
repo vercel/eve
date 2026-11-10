@@ -49,13 +49,6 @@ export function sessionCaller(): SessionAuthContext | null {
   return contextStorage.getStore()?.get(AuthKey) ?? null;
 }
 
-/** The agent's `callerConfirmation`: the root agent's, also in a local subagent's session. */
-export function callerConfirmation(
-  ctx: AlsContext | undefined = contextStorage.getStore(),
-): CallerConfirmation {
-  return resolveCallerConfirmation(ctx?.get(BundleKey));
-}
-
 /**
  * Runs `fn` as a call `confirmed` approved, each of whom it may act as whoever spoke last.
  * `remembered` holds the caller's `callerConfirmation: "once"` approvals, which release the
@@ -82,12 +75,12 @@ export function withCallIdentity<T>(
 }
 
 /**
- * Runs `fn` with the caller's identity available whoever spoke last, when `released`: for listing
- * a connection's tools, which runs nothing the model chose.
+ * Runs `fn` with the caller's identity available whoever spoke last: for listing a connection's
+ * tools, which runs nothing the model chose.
  */
-export function withCallerIdentity<T>(released: boolean, fn: () => T): T {
+export function withCallerIdentity<T>(fn: () => T): T {
   const caller = sessionCaller();
-  return released && caller !== null ? withCallIdentity({ confirmed: [caller] }, fn) : fn();
+  return caller === null ? fn() : withCallIdentity({ confirmed: [caller] }, fn);
 }
 
 function callIdentity(): CallIdentity | undefined {
@@ -118,23 +111,6 @@ export function callerIdentityReleased(input: {
   return key !== undefined && input.remembered(key);
 }
 
-/** The rule as it applies to the running call, whose sender is `sender`. */
-function callerReleased(
-  ctx: AlsContext | undefined,
-  current: SessionAuthContext | null,
-  sender: SessionAuthContext | null,
-): boolean {
-  // A session with one person never reads the agent's configuration.
-  if (callerSpokeLast({ current, sender })) return true;
-  return callerIdentityReleased({
-    approved: approvedBy(current),
-    confirmation: callerConfirmation(ctx),
-    current,
-    remembered: (key) => callIdentity()?.remembered.has(key) === true,
-    sender,
-  });
-}
-
 /**
  * Runs `fn` as a call the model made while `sender` had spoken last, whoever spoke since, as a
  * call that waited on a person runs. `undefined` leaves the turn's latest sender.
@@ -143,13 +119,13 @@ export function withAskedSender<T>(sender: SessionAuthContext | null | undefined
   return sender === undefined ? fn() : withContextScopeValue(ASKED_SENDER, { sender }, fn);
 }
 
-/** Who had spoken last as the model made the running call, whoever approved it. */
-function spokeLast(
-  ctx: AlsContext | undefined,
-  current: SessionAuthContext | null,
-): SessionAuthContext | null {
+/**
+ * Who had spoken last as the model made the running call, whoever approved it: the sender a
+ * waiting call was asked under, else `sender`, the turn's latest.
+ */
+function spokeLast(sender: SessionAuthContext | null): SessionAuthContext | null {
   const asked = contextScopeValue<{ readonly sender: SessionAuthContext | null }>(ASKED_SENDER);
-  return asked === undefined ? readSender(ctx, current) : asked.sender;
+  return asked === undefined ? sender : asked.sender;
 }
 
 /**
@@ -160,12 +136,12 @@ export function callSender(auth: {
   readonly current: SessionAuthContext | null;
   readonly sender: SessionAuthContext | null;
 }): SessionAuthContext | null {
-  if (approvedBy(auth.current)) return auth.current;
-  const asked = contextScopeValue<{ readonly sender: SessionAuthContext | null }>(ASKED_SENDER);
-  return asked === undefined ? auth.sender : asked.sender;
+  return approvedBy(auth.current) ? auth.current : spokeLast(auth.sender);
 }
 
 const ONCE_KEY = "eve.callerConfirmation";
+/** How every `onceKey` starts. */
+const ONCE_KEY_PREFIX = `["${ONCE_KEY}",`;
 
 /**
  * The caller's `callerConfirmation: "once"` approvals: those the session remembers, and in a local
@@ -176,7 +152,7 @@ export function rememberedConfirmations(
   ctx: Pick<AlsContext, "get"> | undefined = contextStorage.getStore(),
 ): readonly string[] {
   const own = Object.entries(remembered ?? {}).flatMap(([key, approval]) =>
-    approval.outcome === "accepted" && isOnceKey(key) ? [key] : [],
+    approval.outcome === "accepted" && key.startsWith(ONCE_KEY_PREFIX) ? [key] : [],
   );
   const inherited = ctx?.get(DelegatedIdentityKey)?.confirmed ?? [];
   return inherited.length === 0 ? own : [...new Set([...inherited, ...own])];
@@ -192,10 +168,6 @@ function onceKey(
 ): string | undefined {
   if (sender === null || sender.principalType === "anonymous") return undefined;
   return JSON.stringify([ONCE_KEY, principalOf(caller), principalOf(sender)]);
-}
-
-function isOnceKey(key: string): boolean {
-  return key.startsWith(`${JSON.stringify([ONCE_KEY]).slice(0, -1)},`);
 }
 
 /** What eve asks for when a call stopped for a person's identity. */
@@ -262,10 +234,20 @@ function callerRefusal(
 ): ConnectionAuthorizationFailedError | undefined {
   if (ctx === undefined) return undefined;
   const current = ctx.get(AuthKey) ?? null;
-  const sender = spokeLast(ctx, current);
-  if (callerReleased(ctx, current, sender)) return undefined;
+  const sender = spokeLast(readSender(ctx, current));
+  // A session with one person never resolves `callerConfirmation`.
+  if (callerSpokeLast({ current, sender })) return undefined;
+  const confirmation = resolveCallerConfirmation(ctx.get(BundleKey));
+  const released = callerIdentityReleased({
+    approved: approvedBy(current),
+    confirmation,
+    current,
+    remembered: (key) => callIdentity()?.remembered.has(key) === true,
+    sender,
+  });
+  if (released) return undefined;
   const askable = current !== null && current.principalType !== "anonymous";
-  const remember = callerConfirmation(ctx) === "once" ? onceKey(current, sender) : undefined;
+  const remember = confirmation === "once" ? onceKey(current, sender) : undefined;
   return confirmationRequired(
     connectionName,
     callerConfirmationMessage(what),
@@ -291,8 +273,8 @@ export function requirePersonConfirmation(
   connectionName: string,
   ctx: AlsContext | undefined,
 ): void {
-  if (approvedBy(person)) return;
-  if (principalOf(spokeLast(ctx, ctx?.get(AuthKey) ?? null)) === principalOf(person)) return;
+  const sender = spokeLast(readSender(ctx, ctx?.get(AuthKey) ?? null));
+  if (approvedBy(person) || principalOf(sender) === principalOf(person)) return;
   throw confirmationRequired(
     connectionName,
     `${person.principalId} didn't send the latest message and hasn't approved this action, so it ` +

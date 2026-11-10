@@ -118,7 +118,7 @@ export async function listToolMetadata(
   try {
     // Listing reads what the connection offers and runs nothing the model chose, so it uses the
     // caller's credentials even after someone else spoke; each call still asks the caller first.
-    const tools = await withCallerIdentity(true, () =>
+    const tools = await withCallerIdentity(() =>
       listConnectionMetadata(connectionName, client, deadline),
     );
     return tools.filter((tool) =>

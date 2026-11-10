@@ -243,7 +243,7 @@ describe("McpConnectionClient", () => {
       expect(sent).not.toHaveBeenCalled();
 
       await contextStorage.run(ctx, () =>
-        withCallerIdentity(true, () => fetch("https://mcp.example.com", {})),
+        withCallerIdentity(() => fetch("https://mcp.example.com", {})),
       );
       expect(new Headers(sent.mock.calls[0]![1]!.headers).has("eve-forwarded-principal")).toBe(
         true,
