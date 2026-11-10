@@ -623,14 +623,18 @@ function elicitationProperty(request: Interaction) {
     request.request.allowFreeform !== true &&
     request.request.options?.length
   ) {
+    const { initialOptionId, options } = request.request;
     return {
       type: "string" as const,
       title: request.request.prompt,
-      oneOf: request.request.options.map((option) => ({
+      oneOf: options.map((option) => ({
         const: option.id,
         title: option.label,
         description: option.description,
       })),
+      default: options.some((option) => option.id === initialOptionId)
+        ? initialOptionId
+        : undefined,
     };
   }
   if (request.request.display === "text" && request.request.allowFreeform !== false) {

@@ -102,6 +102,8 @@ With a bot token, the bot shows typing when a turn starts and when it calls a to
 
 Approvals and questions render as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and free-text input becomes a button that opens a modal. The session resumes when the user responds. Discord caps a select option's value at 100 characters, so a `display: "select"` request with a longer option `id` fails to post with an error.
 
+When a `display: "select"` question sets `initialOptionId`, that option starts selected, and a primary **Use** button labeled with the option submits it, because Discord sends nothing when a person keeps the current selection. Discord caps a component's ID at 100 characters, and the button's ID holds both the request and option IDs. When those IDs are too long, eve keeps the preselection and leaves out the button.
+
 A press, select, or modal submission answers as the Discord user who made it, with the same `defaultDiscordAuth` identity their commands get. Approvals are requester-only by default, so only the person whose command asked can approve.
 
 `onAnswers(ctx, interaction)` decides who an answer comes from. Return `{ auth }` to accept the answer, or `null` (or throw) to drop it and keep the request open. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`. It identifies the presser but doesn't authorize them.
