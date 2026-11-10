@@ -236,7 +236,7 @@ acts, the call becomes a task, and its approval or sign-in stays open:
   then reads the message:
 
   ```text
-  Started task deploy-4hd8sa. It waits for a person to approve it, and runs once they do. Its result will arrive in a <task_result> message.
+  Started task deploy-4hd8sa. It waits for a person to approve it, and runs once they do. Its result will arrive in a <task_result> message. If a later message makes it unnecessary, drop it with eve__task_cancel.
   ```
 
 - When the person approves or completes the sign-in, the call runs, and its result arrives in a

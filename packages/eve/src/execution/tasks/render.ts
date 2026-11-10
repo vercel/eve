@@ -97,7 +97,7 @@ export function renderWaitingTaskReceipt(task: {
     task.awaiting === "approval"
       ? "It waits for a person to approve it, and runs once they do."
       : "It waits for a person to sign in, and runs once they do.";
-  return `Started task ${task.id}. ${waits} Its result will arrive in a <task_result> message.`;
+  return `Started task ${task.id}. ${waits} Its result will arrive in a <task_result> message. If a later message makes it unnecessary, drop it with ${TASK_CANCEL_TOOL_NAME}.`;
 }
 
 /** The result of a waiting call a person denied, or a policy refused when it was approved. */
