@@ -13,9 +13,9 @@ export interface RequestMessages {
 }
 
 /**
- * The call's system prompt: a retry's note, then exactly the instructions. A string alone is sent
- * as it is; parts join into one system message, empty ones skipped, with the cache breakpoint at
- * its end.
+ * The call's system prompt: a retry's note, then exactly the instructions. Without a cache profile
+ * a string alone is sent as it is. Otherwise parts join into one system message, empty ones
+ * skipped, with the cache breakpoint at its end.
  */
 export function modelInstructions(input: {
   readonly instructions: string | readonly string[];
@@ -23,7 +23,13 @@ export function modelInstructions(input: {
   readonly extraSystemNote?: string;
 }): SystemModelMessage | string | undefined {
   const note = input.extraSystemNote ? [input.extraSystemNote] : [];
-  if (typeof input.instructions === "string" && note.length === 0) return input.instructions;
+  if (
+    typeof input.instructions === "string" &&
+    note.length === 0 &&
+    input.anthropicCache === undefined
+  ) {
+    return input.instructions;
+  }
   const parts = [
     ...note,
     ...(typeof input.instructions === "string" ? [input.instructions] : input.instructions),
