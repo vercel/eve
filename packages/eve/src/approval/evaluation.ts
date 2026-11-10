@@ -53,6 +53,11 @@ export interface ApprovalEvaluation {
   readonly confirmCaller: () => ApprovalStatus;
   /** Whether a mismatch helper cleared the call for the caller during this evaluation. */
   readonly callerConfirmed: () => boolean;
+  /**
+   * Makes a status that asks a person ask only the caller to approve, keeping what an ask from
+   * `ask` remembers. Any other ask becomes a new caller-only ask.
+   */
+  readonly requireCaller: (status: ApprovalStatus) => ApprovalStatus;
 }
 
 // Bundles may load eve's policies and the harness from separate copies of this module. The global
@@ -95,6 +100,12 @@ export async function evaluateApproval(
       return status;
     },
     callerConfirmed: () => confirmed,
+    requireCaller: (status: ApprovalStatus) => {
+      const ask = typeof status === "object" && status !== null ? asked.get(status) : undefined;
+      if (ask === undefined) return evaluation.ask(undefined, { callerApproves: true });
+      asked.set(status as object, { ...ask, callerApproves: true });
+      return status;
+    },
     confirmCaller: () => {
       confirmed = true;
       return "approved" as const;

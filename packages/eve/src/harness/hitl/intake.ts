@@ -1,3 +1,4 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import { approvedClearance, taskClearance, type Clearance } from "#harness/clearance.js";
 import { approvedByCaller } from "#runtime/connections/caller-confirmation.js";
 import { transition } from "#harness/session-machine/commit.js";
@@ -225,10 +226,15 @@ async function runApproved(
   const denied: CallResult[] = [];
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
+  const confirmations = new Map<string, boolean | undefined>();
   for (const [parked, approvals] of byStep) {
     const tools = await toolsOf(step);
-    const workflows = new Map<string, { approval: ApprovedCall; clearance?: Clearance }>();
+    const workflows = new Map<
+      string,
+      { approval: ApprovedCall; clearance?: Clearance; refused?: SessionAuthContext | null }
+    >();
     for (const approval of approvals) {
+      confirmations.set(approval.call.callId, callerConfirmation(parked, approval));
       const tool = tools.get(approval.call.toolName);
       if (tool?.workflowId === undefined) continue;
       if (changedSinceOffered(approval.call, tool)) {
@@ -256,13 +262,19 @@ async function runApproved(
         );
       } else {
         // A person's acceptance clears the call; the recheck only confirms it still may run.
+        const confirmed = confirmations.get(approval.call.callId);
         const clearance =
           approvedClearance(
             step.view().projection.view,
             approval.call.callId,
-            approvedByCaller(approval.responder),
+            confirmed === true,
           ) ?? recheck.clearance;
-        workflows.set(approval.call.callId, { approval, clearance });
+        const asked = askOf(parked, approval);
+        workflows.set(approval.call.callId, {
+          approval,
+          clearance,
+          ...(confirmed === false && asked?.sender !== undefined && { refused: asked.sender }),
+        });
       }
     }
     local.push({
@@ -287,6 +299,9 @@ async function runApproved(
       ...dispatched.workflowRequests.map((task) => ({
         ...task,
         ...taskClearance(workflows.get(task.callId)?.clearance),
+        ...(workflows.get(task.callId)?.refused !== undefined && {
+          sender: workflows.get(task.callId)!.refused,
+        }),
       })),
     );
   }
@@ -331,6 +346,7 @@ async function runApproved(
         messages: step.session.history,
         publish: step.publish,
         responderOf: (approval) => approval.responder,
+        confirmationOf: (approval) => confirmations.get(approval.call.callId),
         telemetry: attempt?.telemetry,
         signIns,
         tools,
@@ -426,4 +442,18 @@ async function withdrawSteeredSignIns(
 function hasTurnInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.answers?.length ?? 0) > 0;
+}
+
+/**
+ * Whether an approved call gets the caller's token: the caller approved it, or was the last to
+ * speak when it was asked. Deciding it per call keeps one person's answer from changing what a
+ * sibling call gets. A call that only stopped for a sign-in leaves it to who spoke last.
+ */
+function callerConfirmation(parked: SuspendedStep, approval: ApprovedCall): boolean | undefined {
+  if (approval.interactionId === undefined) return undefined;
+  return approvedByCaller(approval.responder) || askOf(parked, approval)?.sender === undefined;
+}
+
+function askOf(parked: SuspendedStep, approval: ApprovedCall) {
+  return parked.requests.find((request) => request.interactionId === approval.interactionId);
 }

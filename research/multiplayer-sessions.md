@@ -195,6 +195,11 @@ The docs and templates for multiplayer channels recommend this line, so the call
 approval prompt rather than a refused call. The refusal stays the default for agents without
 it.
 
+An approved call gets the caller's token when the caller approved it, or when the caller was
+the last to speak as it was asked. It is decided for each call, so who answers last in a batch
+doesn't change what a sibling call gets. Listing a connection's tools runs nothing the model
+chose, so it uses the caller's credentials even after someone else spoke; calls still ask.
+
 A session with one person never reaches any of this.
 
 ### What rule 3 doesn't cover
@@ -205,8 +210,8 @@ A session with one person never reaches any of this.
   these.
 - A turn's first calls. The caller started the turn, so they are the last to speak. This is
   the incident, and the practice below is what narrows it.
-- Listing a `forwardPrincipal` connection's tools. Listing still forwards the caller's identity
-  after someone else spoke; only calls ask first.
+- Listing a connection's tools, including a `forwardPrincipal` connection's. Listing uses the
+  caller's identity after someone else spoke; only calls ask first.
 
 ### Paused turns
 
@@ -334,16 +339,16 @@ default. They use the approval helpers, or read `auth.sender` in their own polic
 - **Additive API.** `SessionAuth.sender`, the `when` option on `always()` and `once()`, and the
   `caller_confirmation_required` reason.
 
-E2E evals, in `agent-tools-hitl`: Bob's message joins Alice's running turn; her next
-user-scoped connection call asks Alice once, refuses Bob's answer, and the calls after it run;
-an authored tool's token is refused with `caller_confirmation_required` until Alice replies; a
-tool reads Bob as `auth.sender`; `always({ when })` asks Alice after Bob speaks and refuses Bob's
-approval; `once({ when })` asks Alice once in a session Bob started; a session with one person
-is never asked; a local subagent called after Bob speaks is refused Alice's token; a fixture
-tool with an `actor` field asks Bob in Alice's turn and runs with Bob's token. Existing evals
-change: in `other-person-message-waits`, Bob's message joins Alice's turn once her approval
-settles, and in `authorization-principal-after-other-speaker`, it joins once her sign-in
-completes.
+E2E evals, in `agent-tools-hitl/evals/hitl/multiplayer`: Bob's message joins Alice's turn once
+her approval settles (replacing `other-person-message-waits`); a tool reads Bob as
+`auth.sender`; an authored tool's token is refused with `caller_confirmation_required` until
+Alice replies; `always({ when })` asks Alice after Bob speaks and refuses Bob's approval; anyone
+can cancel that approval; `once({ when })` asks Alice once in a session Bob started; a session
+with one person is never asked; a fixture tool with an `actor` field asks Bob and runs with his
+token. In `authorization-principal-after-other-speaker`, Bob's message now joins once Alice's
+sign-in completes. The fixtures start no external services, so the connection default, the
+local-subagent inheritance, and the per-call confirmation of approved calls are covered by unit
+and integration tests instead.
 
 ## Out of scope
 

@@ -192,23 +192,28 @@ export class SessionInputQueue {
           heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
         }),
     );
-    if (steering.length === 0) return undefined;
-    this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
+    const run = oneSpeaker(steering);
+    if (run.length === 0) return undefined;
+    this.retain((entry) => entry.kind !== "delivery" || !run.includes(entry));
     return {
-      delivery: combine(steering),
+      delivery: combine(run),
       handoffEligible: false,
       kind: "turn",
-      sequences: steering.map(({ sequence }) => sequence),
+      sequences: run.map(({ sequence }) => sequence),
     };
   }
 
-  /** Whether an admitted delivery would steer the running turn once it isn't held. */
-  hasSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): boolean {
+  /** Whether an admitted delivery would steer the running turn. */
+  hasSteering(
+    admitted: ReadonlySet<number>,
+    turn: SteeringTurn,
+    options?: { readonly held?: boolean },
+  ): boolean {
     return this.entries.some(
       (entry) =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn),
+        isSteeringDelivery(entry.delivery, turn, options),
     );
   }
 
@@ -331,6 +336,24 @@ export function isSteeringMessage(
       (payload) => payload.message !== undefined && payload.answers === undefined,
     )
   );
+}
+
+/**
+ * The leading messages one person sent, so a step's input records each message as its sender's.
+ * A delivery without auth acts as the turn's identity and joins whoever's run it falls in.
+ */
+function oneSpeaker(steering: readonly QueuedDelivery[]): QueuedDelivery[] {
+  const run: QueuedDelivery[] = [];
+  let speaker: string | undefined;
+  for (const entry of steering) {
+    const auth = entry.delivery.auth;
+    if (auth !== undefined) {
+      if (speaker !== undefined && principalOf(auth) !== speaker) break;
+      speaker = principalOf(auth);
+    }
+    run.push(entry);
+  }
+  return run;
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {

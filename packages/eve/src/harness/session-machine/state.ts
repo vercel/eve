@@ -26,6 +26,8 @@ export interface ApprovalAsk {
   readonly remember?: RememberRequest;
   /** Only the caller can approve; anyone can deny. */
   readonly callerApproves?: true;
+  /** Who spoke last when the call was asked, while that wasn't the caller. */
+  readonly sender?: SessionAuthContext | null;
   readonly interactionId: string;
   readonly call: {
     readonly callId: string;

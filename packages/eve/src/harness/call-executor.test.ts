@@ -4,8 +4,9 @@ import { expect, it, vi } from "vitest";
 import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
-import { executeInlineCalls } from "#harness/call-executor.js";
+import { AuthKey, SenderAuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { executeInlineCalls, executeToolCall } from "#harness/call-executor.js";
+import { resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 
 it.each([
@@ -287,4 +288,56 @@ it("closes a streaming tool when progress publication fails", async () => {
   });
   expect(result.parts[0]?.output).toMatchObject({ type: "error-text" });
   expect(closed).toBe(true);
+});
+
+it.each([
+  [
+    "refuses the caller's token when the caller didn't confirm, though they spoke last",
+    false,
+    "alice",
+  ],
+  ["releases it when the caller confirmed, though someone else spoke last", true, "bob"],
+] as const)("an approved call %s", async (_, callerConfirmed, lastSpeaker) => {
+  const user = (principalId: string): SessionAuthContext => ({
+    attributes: {},
+    authenticator: "test",
+    principalId,
+    principalType: "user",
+  });
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, user("alice"));
+  if (lastSpeaker !== "alice") ctx.set(SenderAuthKey, user(lastSpeaker));
+  ctx.set(SessionKey, {
+    auth: { current: user("alice"), initiator: user("alice"), sender: user(lastSpeaker) },
+    sessionId: "session-1",
+    turn: { id: "turn_0", sequence: 0 },
+  });
+  const outcome = await contextStorage.run(ctx, () =>
+    executeToolCall(
+      { callId: "call-1", input: {}, toolName: "release" },
+      {
+        abortSignal: undefined,
+        callerConfirmed,
+        definition: {
+          approval: () => "user-approval",
+          description: "Release with the caller's token.",
+          execute: () =>
+            resolveConnectionPrincipal("release", {
+              getToken: async () => ({ token: "t" }),
+              principalType: "user",
+            }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "release",
+        },
+        messages: [],
+        publish: async () => {},
+      },
+      "recheck",
+    ),
+  );
+  expect(outcome.settled[0]?.part.output).toMatchObject(
+    callerConfirmed
+      ? { type: "json", value: { id: "alice", type: "user" } }
+      : { type: "error-text", value: expect.stringContaining("needs their confirmation") },
+  );
 });

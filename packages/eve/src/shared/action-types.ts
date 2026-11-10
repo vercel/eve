@@ -137,6 +137,17 @@ const workflowToolCallEntrySchema = z.discriminatedUnion("entryPoint", [
   z.object({ entryPoint: z.literal("receive"), taskId: z.string() }).strict(),
 ]);
 
+const senderSchema = z
+  .object({
+    attributes: z.record(z.string(), z.union([z.string(), z.array(z.string()).readonly()])),
+    authenticator: z.string(),
+    issuer: z.string().optional(),
+    principalId: z.string(),
+    principalType: z.string(),
+    subject: z.string().optional(),
+  })
+  .nullable();
+
 /**
  * One workflow task requested by the harness. The turn owner starts the
  * durable run named by `workflowId`, or sends the call to the running task it
@@ -154,6 +165,8 @@ export const runtimeWorkflowTaskRequestSchema = z
     clearedBy: clearedBySchema.optional(),
     /** The caller confirmed the call, so its run gets their token after someone else spoke. */
     callerConfirmed: z.literal(true).optional(),
+    /** Who spoke last when an unconfirmed call was asked, so its run never gets the caller's token. */
+    sender: senderSchema.optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,

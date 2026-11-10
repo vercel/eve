@@ -1,3 +1,4 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
@@ -108,6 +109,36 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromBob]);
     expect(queue.hasSteering(admitted, turn)).toBe(false);
     expect(queue.takeNext()).toMatchObject({ delivery: { auth: bob }, sequences: [queuedByBob] });
+  });
+
+  it("takes one person's messages per step, so each is recorded as its sender's", () => {
+    const user = (principalId: string) => ({
+      attributes: {},
+      authenticator: "slack",
+      principalId,
+      principalType: "user" as const,
+    });
+    const [alice, bob] = [user("ALICE"), user("BOB")];
+    const queue = new SessionInputQueue([]);
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const send = (message: string, auth?: SessionAuthContext) =>
+      queue.enqueueDelivery({
+        ...(auth !== undefined && { auth }),
+        kind: "deliver",
+        payloads: [{ message }],
+      })!.sequence;
+    const first = [send("It's the retry logic.", bob), send("In foo.ts.")];
+    const second = send("Thanks, that helps.", alice);
+    const admitted = new Set([...first, second]);
+
+    expect(queue.takeSteering(admitted, turn)).toMatchObject({
+      delivery: { auth: bob },
+      sequences: first,
+    });
+    expect(queue.takeSteering(admitted, turn)).toMatchObject({
+      delivery: { auth: alice },
+      sequences: [second],
+    });
   });
 
   it("lets a queued message steer a held turn only when it arrived after the hold", () => {

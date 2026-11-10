@@ -28,7 +28,7 @@ import {
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
-import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
+import { selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import { answersDeliveryId } from "#shared/answers-delivery-id.js";
@@ -155,8 +155,8 @@ export class ActiveTurn {
    * step; only deliveries still unread re-signal the next generation.
    */
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
-    const steering: DeliverHookPayload[] = [];
-    while (true) {
+    let delivery: DeliverHookPayload | undefined;
+    while (delivery === undefined) {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, {
         ...options,
         held: this.relaysPrompt,
@@ -168,22 +168,24 @@ export class ActiveTurn {
         this.abort();
         break;
       }
-      if (routed.kind === "turn") steering.push(routed.delivery);
+      if (routed.kind === "turn") delivery = routed.delivery;
     }
     this.resetSteering();
-    if (steering.length === 0) return undefined;
-    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
+    if (delivery === undefined) return undefined;
+    // A step reads one person's messages; the next person's steer the step after it.
+    this.steerWithWaitingMessages();
     if (delivery.caller !== undefined) this.caller = delivery.caller;
     return delivery;
   }
 
   /**
-   * A pause just ended. Messages from other people that waited behind it steer
-   * the turn now, so the step that reads the answer stops before the model runs
-   * and the next step reads them.
+   * Messages still waiting steer the turn now, such as other people's once a
+   * pause ends, so the next step stops before the model runs and the step after
+   * it reads them.
    */
   steerWithWaitingMessages(): void {
-    if (this.input.queue.hasSteering(this.admitted, this.identity)) this.steeringController.abort();
+    if (this.input.queue.hasSteering(this.admitted, this.identity, { held: this.relaysPrompt }))
+      this.steeringController.abort();
   }
 
   /**

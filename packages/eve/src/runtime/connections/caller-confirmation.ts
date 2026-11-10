@@ -19,9 +19,22 @@ import { principalOf } from "#execution/session/principal.js";
 
 const CALLER_CONFIRMED = Symbol.for("eve.callerConfirmed");
 
-/** Runs one call's effect, marked as confirmed by the caller when `confirmed`. */
-export function withCallerConfirmation<T>(confirmed: boolean, fn: () => T): T {
-  return confirmed ? withContextScopeValue(CALLER_CONFIRMED, true, fn) : fn();
+/**
+ * Runs one call's effect with the caller's confirmation decided for it: `true` releases their
+ * token, `false` refuses it whoever spoke last, and `undefined` leaves it to who spoke last.
+ */
+export function withCallerConfirmation<T>(confirmed: boolean | undefined, fn: () => T): T {
+  return confirmed === undefined ? fn() : withContextScopeValue(CALLER_CONFIRMED, confirmed, fn);
+}
+
+/** Who spoke last in the running turn, while that isn't its caller. */
+export function senderBesidesCaller(
+  ctx: AlsContext | undefined = contextStorage.getStore(),
+): { readonly sender: SessionAuthContext | null } | undefined {
+  if (ctx === undefined) return undefined;
+  const current = ctx.get(AuthKey) ?? null;
+  const sender = readSender(ctx, current);
+  return callerSpokeLast({ current, sender }) ? undefined : { sender };
 }
 
 /**
@@ -51,9 +64,9 @@ export function requireCallerConfirmation(
   ctx: AlsContext | undefined,
 ): void {
   if (ctx === undefined) return;
-  const current = ctx.get(AuthKey) ?? null;
-  if (callerSpokeLast({ current, sender: readSender(ctx, current) })) return;
-  if (contextScopeValue<boolean>(CALLER_CONFIRMED) === true) return;
+  const confirmed = contextScopeValue<boolean>(CALLER_CONFIRMED);
+  if (confirmed === true) return;
+  if (confirmed === undefined && senderBesidesCaller(ctx) === undefined) return;
   throw new ConnectionAuthorizationFailedError(connectionName, {
     message: callerConfirmationMessage(`${connectionName} access`),
     reason: "caller_confirmation_required",

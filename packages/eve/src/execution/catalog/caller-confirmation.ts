@@ -26,11 +26,10 @@ export function withCallerConfirmationDefault(
     const evaluation = approvalEvaluation(context);
     if (evaluation?.callerConfirmed() === true) return status;
     const decision = approvalDecision(status);
-    if (decision.denied || decision.awaitsPerson === true) return status;
-    if (!(await actsAsCaller(context))) return status;
-    return evaluation === undefined
-      ? "user-approval"
-      : evaluation.ask(undefined, { callerApproves: true });
+    if (decision.denied || !(await actsAsCaller(context))) return status;
+    // Another policy's ask stays its own, with what it remembers, but only the caller approves it.
+    if (evaluation === undefined) return "user-approval";
+    return evaluation.requireCaller(decision.awaitsPerson === true ? status : "user-approval");
   };
   if (approval === undefined || typeof approval === "function") return request;
   return { ...approval, request };

@@ -1,7 +1,7 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
 import {
-  approvedByCaller,
+  senderBesidesCaller,
   withCallerConfirmation,
 } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -111,6 +111,11 @@ export async function executeToolCall(
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
     /**
+     * Whether an approved call gets the caller's token, decided when its approval settled. A call
+     * that only stopped for a sign-in leaves it to who spoke last.
+     */
+    readonly callerConfirmed?: boolean;
+    /**
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
      */
@@ -177,7 +182,7 @@ export async function executeToolCall(
     // A call a person approved runs on their acceptance; the recheck only confirms it still may.
     const clearance =
       (approval === "recheck" && input.view !== undefined
-        ? approvedClearance(input.view().projection.view, callId, approvedByCaller(input.responder))
+        ? approvedClearance(input.view().projection.view, callId, input.callerConfirmed === true)
         : undefined) ?? decision.clearance;
     if (clearance === undefined) throw new Error(`Call "${callId}" has no clearance to run.`);
     let output: unknown;
@@ -203,40 +208,42 @@ export async function executeToolCall(
           await input.publish(startCall(clearance));
           // Usage the tool records belongs to its call, including while a streaming tool iterates,
           // and so does the caller's confirmation.
-          await withCallerConfirmation(clearance.callerConfirmed === true, () =>
-            withUsageCall(callId, async () => {
-              const executed = invokeTool(
-                definition,
-                args,
-                {
-                  ...(input.responder !== undefined && {
-                    approval: { responder: input.responder },
-                  }),
-                  abortSignal: input.abortSignal,
-                  messages: [...input.messages],
-                  toolCallId: callId,
-                },
-                clearance,
-              );
-              // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-              // waiting, and whatever the tool returns later is dropped.
-              const abandon = approval === "evaluate" ? input.abortSignal : undefined;
-              if (isAsyncIterable(executed)) {
-                for await (const partial of untilAborted(executed, abandon)) {
-                  output = partial;
-                  const visible = withoutSignInSecrets(partial);
-                  await input.publish(
-                    callProgress(
-                      callId,
-                      visible,
-                      projectToolLabel(definition, "delta", args, visible),
-                    ),
-                  );
+          await withCallerConfirmation(
+            input.callerConfirmed ?? (clearance.callerConfirmed === true ? true : undefined),
+            () =>
+              withUsageCall(callId, async () => {
+                const executed = invokeTool(
+                  definition,
+                  args,
+                  {
+                    ...(input.responder !== undefined && {
+                      approval: { responder: input.responder },
+                    }),
+                    abortSignal: input.abortSignal,
+                    messages: [...input.messages],
+                    toolCallId: callId,
+                  },
+                  clearance,
+                );
+                // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
+                // waiting, and whatever the tool returns later is dropped.
+                const abandon = approval === "evaluate" ? input.abortSignal : undefined;
+                if (isAsyncIterable(executed)) {
+                  for await (const partial of untilAborted(executed, abandon)) {
+                    output = partial;
+                    const visible = withoutSignInSecrets(partial);
+                    await input.publish(
+                      callProgress(
+                        callId,
+                        visible,
+                        projectToolLabel(definition, "delta", args, visible),
+                      ),
+                    );
+                  }
+                } else {
+                  output = await raceAbort(Promise.resolve(executed), abandon);
                 }
-              } else {
-                output = await raceAbort(Promise.resolve(executed), abandon);
-              }
-            }),
+              }),
           );
         } finally {
           executionMs = performance.now() - startedAt;
@@ -523,6 +530,7 @@ export async function executeInlineCalls(input: {
                   ...approvalRequest(call, definition),
                   remember: executed.remember,
                   ...(executed.callerApproves && { callerApproves: true as const }),
+                  ...senderBesidesCaller(),
                 }
               : undefined;
           return { call, executed, approval };

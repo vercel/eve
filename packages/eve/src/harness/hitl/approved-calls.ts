@@ -114,6 +114,8 @@ export async function runApprovedCalls(input: {
   readonly telemetry?: TelemetryOptions;
   /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
   readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
+  /** Whether each call gets the caller's token; see `executeToolCall`'s `callerConfirmed`. */
+  readonly confirmationOf?: (approval: ApprovedCall) => boolean | undefined;
   /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
   /** The batch's sign-in reports, shared by every group of calls resumed together. */
@@ -137,12 +139,14 @@ export async function runApprovedCalls(input: {
       }
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
+        const callerConfirmed = input.confirmationOf?.(approval);
         return await executeToolCall(
           call,
           {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
+            ...(callerConfirmed !== undefined && { callerConfirmed }),
             beforeResult: (failure) => reportSignIns(approval, failure),
           },
           "recheck",

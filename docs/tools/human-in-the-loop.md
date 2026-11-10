@@ -222,6 +222,7 @@ export default defineAgent({
 - Both also ask when the caller didn't start the session. `always()` then asks on every call, and `once()` asks once.
 - A call they clear gets the caller's token, even while someone else spoke last. Without one, eve asks before a connection that acts as the caller, and refuses `ctx.getToken()` for a user-scoped provider until the caller replies.
 - Wrap them in your own policy as you would `once()`: pass the context through and return their status unchanged.
+- `once()` remembers for the rest of the session. After Alice approves once for Bob speaking, Bob's later messages can steer her turn into another call of the same tool without asking her. Use `always({ when: "principal-mismatch" })` for tools where each action needs fresh consent.
 
 Use these on the agent for multiplayer channels such as Slack threads and GitHub issues, so the caller gets an approval prompt instead of a refused call.
 

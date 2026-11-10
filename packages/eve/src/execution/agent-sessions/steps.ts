@@ -661,12 +661,13 @@ function agentDeliveryId(kind: string, sessionId: string): string {
 
 /**
  * A remote agent that forwards the principal acts as the caller, so after someone else spoke it
- * runs only for a call the caller confirmed: the dispatch then names the caller as the sender.
+ * runs only for a call the caller confirmed, whose dispatch names the caller as the sender.
  */
 function requireForwardingConfirmation(
   remote: { readonly forwardPrincipal?: boolean; readonly name: string },
   auth: SessionAuth,
 ): void {
   if (remote.forwardPrincipal !== true || callerSpokeLast(auth)) return;
-  throw new Error(callerConfirmationMessage(`identity with the "${remote.name}" agent`));
+  // Retrying can't change who spoke last; the model asks the caller instead.
+  throw new FatalError(callerConfirmationMessage(`identity with the "${remote.name}" agent`));
 }
