@@ -192,20 +192,8 @@ async function clickConnect(runtime: Runtime, click: Record<string, unknown>): P
   await Promise.all(tasks);
 }
 
-const waitingPost = [
-  RESPONSE_URL,
-  {
-    body: JSON.stringify({
-      replace_original: true,
-      text: "Waiting for you to finish connecting Linear in your browser…",
-    }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  },
-];
-
 describe("dispatchSignInConnect", () => {
-  it("swaps the prompt for a waiting line and records its response_url", async () => {
+  it("leaves the prompt on screen and records its response_url", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(
       vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
@@ -221,8 +209,7 @@ describe("dispatchSignInConnect", () => {
       },
       continuationToken: expect.stringContaining("C1"),
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(...waitingPost);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("removes a prompt that carries no session at once", async () => {
@@ -246,7 +233,7 @@ describe("dispatchSignInConnect", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("removes the prompt when the session cannot record it", async () => {
+  it("leaves the prompt on screen when the session cannot record it", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(vi.fn().mockResolvedValue({ status: "no_active_session" }));
 
@@ -256,8 +243,7 @@ describe("dispatchSignInConnect", () => {
       "failed to record the sign-in prompt for removal",
       expect.objectContaining({ name: "linear" }),
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(1, ...waitingPost);
-    expect(fetchMock).toHaveBeenNthCalledWith(2, ...deletePost);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("leaves every other interaction alone", () => {

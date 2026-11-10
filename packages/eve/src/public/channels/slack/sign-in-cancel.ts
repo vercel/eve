@@ -1,7 +1,6 @@
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createLogger } from "#internal/logging.js";
-import { displayProperName } from "#protocol/session-projection/display-name.js";
 import type { SlackChannelState, SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
 import { slackSessionToken } from "#public/channels/slack/api.js";
 
@@ -60,12 +59,12 @@ export function parseSignInConnectTarget(value: unknown): SignInConnectTarget | 
 
 /**
  * Handles a click on a sign-in prompt's Connect button. Slack opens the sign-in URL itself, and
- * the click's `response_url` is the only way to change the ephemeral prompt. eve swaps the prompt
- * for a line saying it waits on the sign-in, and records the URL in the session's channel state
- * under the sign-in's interaction, so that line goes once the sign-in ends, in whichever order the
- * click and the ending reach the session. A prompt that carries no
- * session is removed at once. Only the person the prompt was shown to counts. Returns false for
- * any other interaction.
+ * the prompt stays as it is, link and Cancel included, so the person can come back to it. The
+ * click's `response_url` is the only way to remove an ephemeral prompt later, so eve records it in
+ * the session's channel state under the sign-in's interaction, and the prompt goes once the
+ * sign-in ends, in whichever order the click and the ending reach the session. A prompt that
+ * carries no session is removed at once. Only the person the prompt was shown to counts. Returns
+ * false for any other interaction.
  */
 export function dispatchSignInConnect(
   raw: Record<string, unknown>,
@@ -85,30 +84,25 @@ export function dispatchSignInConnect(
   }
   const user = isObjectRecord(raw.user) ? raw.user : undefined;
   if (user?.id !== target.userId) return true;
-  ctx.waitUntil(awaitSignIn(target, responseUrl, ctx));
+  ctx.waitUntil(recordSignInPrompt(target, responseUrl, ctx));
   return true;
 }
 
 /**
- * Swaps the prompt for its waiting line, then records the click's `response_url`. A session that
- * can't record it would never remove the line, so the prompt goes now instead.
+ * Records the click's `response_url` so the prompt can be removed when its sign-in ends. A session
+ * that can't record it leaves the prompt on screen, which is still usable, and logs the failure.
  */
-async function awaitSignIn(
+async function recordSignInPrompt(
   target: SignInConnectTarget,
   responseUrl: string,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
 ): Promise<void> {
-  await postToPrompt(responseUrl, {
-    replace_original: true,
-    text: `Waiting for you to finish connecting ${displayProperName(target.name)} in your browser…`,
-  });
   try {
     await ctx.from(slackSessionToken(target)).patchState({
       signInPrompts: { [target.interactionId]: { responseUrl } },
     });
   } catch (error) {
     log.warn("failed to record the sign-in prompt for removal", { error, name: target.name });
-    await removeSignInPrompt(responseUrl);
   }
 }
 

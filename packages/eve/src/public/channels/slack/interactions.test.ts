@@ -238,13 +238,6 @@ describe("handleInteractionPost", () => {
       },
       continuationToken: expect.stringContaining("C0123456789"),
     });
-    expect(fetchMock).toHaveBeenCalledWith("https://hooks.slack.com/actions/T1/1/abc", {
-      body: JSON.stringify({
-        replace_original: true,
-        text: "Waiting for you to finish connecting Linear in your browser…",
-      }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
