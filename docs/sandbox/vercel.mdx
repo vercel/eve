@@ -110,7 +110,7 @@ return environment.open({
 });
 ```
 
-Credential transforms add headers at the network boundary, so the secret never enters the sandbox process.
+Credential transforms add headers at the network boundary, so the secret never enters the sandbox process. If the sandbox stopped after it was opened, `setNetworkPolicy()` resumes it and retries the live policy update once.
 
 Sandboxes from a Vercel environment always have `setNetworkPolicy()`, so you can update the policy without checking that the method exists:
 
