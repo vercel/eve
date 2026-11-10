@@ -1,5 +1,5 @@
 import type { SessionAuthContext } from "#context/keys.js";
-import { isVercelDevelopmentUser } from "#runtime/connections/principal.js";
+import { isVercelDevelopmentUser } from "#shared/vercel-project.js";
 
 import type { ResolvedSelfModificationConfig } from "./config.js";
 

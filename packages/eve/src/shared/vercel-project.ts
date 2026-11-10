@@ -1,3 +1,5 @@
+import type { SessionAuthContext } from "#channel/types.js";
+
 /**
  * Claims eve reads from a Vercel OIDC token payload.
  *
@@ -15,6 +17,16 @@ const VERCEL_OIDC_ISSUER = "https://oidc.vercel.com";
 
 export function isVercelOidcIssuer(issuer: string | undefined): boolean {
   return issuer === VERCEL_OIDC_ISSUER || issuer?.startsWith(`${VERCEL_OIDC_ISSUER}/`) === true;
+}
+
+/** Whether `current` is a Vercel user authenticated by a development OIDC token for this project. */
+export function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
+  return (
+    current.authenticator === "oidc" &&
+    isVercelOidcIssuer(current.issuer) &&
+    current.attributes.environment === "development" &&
+    current.subject === current.attributes.user_id
+  );
 }
 
 /**
