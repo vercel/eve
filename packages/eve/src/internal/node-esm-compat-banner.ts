@@ -146,12 +146,11 @@ export function createNodeEsmCompatBannerPlugin(): BannerPlugin {
 // lets a failed match re-end the comment at every later `*/`, which
 // backtracks catastrophically on large JSDoc-heavy chunks.
 const DECLARATION_TRIVIA = String.raw`(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
-// A keyword directly after a quote can only be string content. This plugin's
-// own banner templates are bundled into every dev host, so without the
-// lookbehind they would force a full parse of eve's largest chunk.
+// A keyword directly after a quote can only be string content, such as these
+// banner templates in a bundled copy of this module; it must not force a parse.
 const DECLARATION_START = String.raw`(?:(?<![\w$"'\x60])(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}`;
 // `\b` would accept bundler-deconflicted names such as `__filename$1`, which
-// force a full parse of eve's largest vendor chunk on every hosted build.
+// would force a needless parse of a possibly large bundle.
 const BINDING_END = String.raw`(?![\w$])`;
 const COMPATIBILITY_BINDING_DECLARATION = new RegExp(
   String.raw`${DECLARATION_START}(?:__filename|__dirname|require)${BINDING_END}`,
