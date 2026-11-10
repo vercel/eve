@@ -1,5 +1,5 @@
 import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
-import { recordSessionCreator } from "#execution/session-creator.js";
+import { buildSessionCreatorAttributes } from "#execution/session-creator.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { readRemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -264,6 +264,9 @@ export function createWorkflowRuntime(config: {
       ...(input.externalInvocation === undefined
         ? {}
         : buildInvocationAttributes(input.externalInvocation)),
+      ...(input.sessionCreator === undefined
+        ? {}
+        : buildSessionCreatorAttributes(input.sessionCreator)),
     };
 
     const { continuationToken } = input;
@@ -303,9 +306,6 @@ export function createWorkflowRuntime(config: {
       throw error;
     }
 
-    if (input.sessionCreator !== undefined) {
-      await recordSessionCreator(run.runId, input.sessionCreator);
-    }
     return sessionHandle(run.runId, input.delivery?.deliveryId, hasContinuation ? true : undefined);
   };
 

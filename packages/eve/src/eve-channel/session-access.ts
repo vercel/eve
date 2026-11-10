@@ -12,6 +12,7 @@ export async function checkSessionAccess(
   sessionId: string,
 ): Promise<Response | undefined> {
   if (config.authorizeSession === undefined) return undefined;
+  let errorId: string | undefined;
   try {
     const allowed = await config.authorizeSession({
       caller: sessionAuthFromResult(caller),
@@ -21,10 +22,10 @@ export async function checkSessionAccess(
     });
     if (allowed === true) return undefined;
   } catch (error) {
-    logError(log, "Session authorization failed", error);
+    errorId = logError(log, "Session authorization failed", error);
   }
   return Response.json(
-    { ok: false, error: "Session access denied." },
+    { ok: false, error: "Session access denied.", ...(errorId !== undefined && { errorId }) },
     { status: 403, headers: { "cache-control": "no-store" } },
   );
 }

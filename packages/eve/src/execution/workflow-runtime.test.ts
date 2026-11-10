@@ -8,7 +8,11 @@ import {
   context as otelContext,
   trace as otelTrace,
 } from "#compiled/@opentelemetry/api/index.js";
-import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  HookConflictError,
+  HookNotFoundError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -21,6 +25,11 @@ import {
   workflowToolRunWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  buildSessionCreatorAttributes,
+  readSessionCreator,
+  SessionCreatorTooLongError,
+} from "#execution/session-creator.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -589,68 +598,115 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
-  it("persists the creator before accepting a message-free session", async () => {
+  it("records the creator with the start and reads it back from the run", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
-    const writeStarted = Promise.withResolvers<void>();
-    const finishWrite = Promise.withResolvers<void>();
-    const records: unknown[] = [];
-    getRunMock.mockReturnValue({
-      getWritable: () =>
-        new WritableStream({
-          async write(value) {
-            writeStarted.resolve();
-            await finishWrite.promise;
-            records.push(value);
-          },
-        }),
-    });
     const creator = {
+      attributes: { email: "alice@example.com" },
+      authenticator: "test",
+      issuer: "test-issuer",
+      principalId: "alice",
+      principalType: "user",
+      subject: "alice",
+    };
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: creator,
+        sessionCreator: creator,
+        input: {},
+      }),
+    ).resolves.toMatchObject({ sessionId: OWNER_RUN_ID });
+
+    const attributes = startMock.mock.calls[0]?.[2].attributes as Record<string, string>;
+    expect(attributes).toMatchObject({
+      "$eve.creator.authenticator": "test",
+      "$eve.creator.id": "alice",
+      "$eve.creator.issuer": "test-issuer",
+      "$eve.creator.subject": "alice",
+      "$eve.creator.type": "user",
+    });
+    expect(JSON.stringify(attributes)).not.toContain("alice@example.com");
+    getRunRecordMock.mockResolvedValue({ attributes, status: "running" });
+    await expect(readSessionCreator(OWNER_RUN_ID)).resolves.toEqual({
+      ...creator,
+      attributes: {},
+    });
+    expect(getRunRecordMock).toHaveBeenCalledWith(OWNER_RUN_ID, { resolveData: "none" });
+  });
+
+  it("answers a concurrent creation with an owner whose creator is already readable", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const token = "operation:token";
+    startMock.mockRejectedValue(new HookConflictError(token, "target-session", { kind: "start" }));
+    getHookByTokenMock.mockResolvedValue(
+      currentSessionHook(sessionInboxHookToken(token), "target-session"),
+    );
+    const owner = {
       attributes: {},
       authenticator: "test",
       principalId: "alice",
       principalType: "user",
     };
-    let accepted = false;
-    const creation = buildRuntime(compiledArtifactsSource)
-      .createSession({
+    const loser = { ...owner, principalId: "bob" };
+    getRunRecordMock.mockImplementation(async (runId: string) => ({
+      attributes: runId === "target-session" ? buildSessionCreatorAttributes(owner) : {},
+      status: "running",
+    }));
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
         adapter,
-        auth: creator,
-        sessionCreator: creator,
+        auth: loser,
+        continuationToken: token,
+        sessionCreator: loser,
         input: {},
-      })
-      .then((handle) => {
-        accepted = true;
-        return handle;
-      });
-    await writeStarted.promise;
-    expect(accepted).toBe(false);
-    finishWrite.resolve();
-    await expect(creation).resolves.toMatchObject({ sessionId: OWNER_RUN_ID });
-    expect(records).toEqual([creator]);
+      }),
+    ).resolves.toMatchObject({ sessionId: "target-session" });
+
+    expect(startMock).toHaveBeenCalledOnce();
+    await expect(readSessionCreator("target-session")).resolves.toEqual(owner);
   });
 
-  it("does not accept creation when the creator record cannot be persisted", async () => {
+  it("records anonymous creators as null and refuses identities it cannot record", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
-    getRunMock.mockReturnValue({
-      getWritable: () =>
-        new WritableStream({
-          write() {
-            throw new Error("creator storage unavailable");
-          },
-        }),
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      sessionCreator: null,
+      input: {},
     });
+    const attributes = startMock.mock.calls[0]?.[2].attributes as Record<string, string>;
+    expect(attributes).toMatchObject({ "$eve.creator.type": "anonymous" });
+    getRunRecordMock.mockResolvedValue({ attributes, status: "running" });
+    await expect(readSessionCreator(OWNER_RUN_ID)).resolves.toBeNull();
+
+    getRunRecordMock.mockResolvedValue({ attributes: {}, status: "running" });
+    await expect(readSessionCreator(OWNER_RUN_ID)).resolves.toBeUndefined();
+    getRunRecordMock.mockRejectedValue(new WorkflowRunNotFoundError("wrun_missing"));
+    await expect(readSessionCreator("wrun_missing")).resolves.toBeUndefined();
+
+    startMock.mockClear();
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
         adapter,
         auth: null,
-        sessionCreator: null,
+        sessionCreator: {
+          attributes: {},
+          authenticator: "test",
+          principalId: "a".repeat(300),
+          principalType: "user",
+        },
         input: {},
       }),
-    ).rejects.toThrow("creator storage unavailable");
+    ).rejects.toBeInstanceOf(SessionCreatorTooLongError);
+    expect(startMock).not.toHaveBeenCalled();
   });
 
   it("returns without waiting for the stable command inbox", async () => {

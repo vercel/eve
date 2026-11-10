@@ -5,35 +5,24 @@ import type { Delivery } from "#shared/delivery.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#eve-channel/index.js";
 import type { EveChannelConfig } from "#eve-channel/types.js";
-import { recordSessionCreator } from "#execution/session-creator.js";
+import { buildSessionCreatorAttributes } from "#execution/session-creator.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
-const storage = vi.hoisted(() => ({ records: new Map<string, unknown[]>(), reads: vi.fn() }));
+const storage = vi.hoisted(() => ({
+  attributes: new Map<string, Record<string, string>>(),
+  reads: vi.fn(),
+}));
 vi.mock("#internal/workflow/runtime.js", async (original) => ({
   ...(await original<typeof import("#internal/workflow/runtime.js")>()),
-  getRun: (id: string) => ({
-    getWritable: ({ namespace }: { namespace: string }) =>
-      new WritableStream({
-        write(value) {
-          const key = `${id}/${namespace}`;
-          storage.records.set(key, [...(storage.records.get(key) ?? []), structuredClone(value)]);
-        },
-      }),
-    getReadable: ({ namespace }: { namespace: string }) => {
-      storage.reads(id);
-      const records = storage.records.get(`${id}/${namespace}`) ?? [];
-      return Object.assign(
-        new ReadableStream({
-          start(controller) {
-            for (const record of records) controller.enqueue(record);
-            controller.close();
-          },
-        }),
-        { getTailIndex: async () => records.length - 1 },
-      );
+  getWorld: async () => ({
+    runs: {
+      get: async (id: string) => {
+        storage.reads(id);
+        return { attributes: storage.attributes.get(id) ?? {}, status: "running" };
+      },
     },
   }),
 }));
@@ -59,9 +48,13 @@ const receipt: Delivery = {
 };
 
 beforeEach(() => {
-  storage.records.clear();
+  storage.attributes.clear();
   storage.reads.mockClear();
 });
+
+function recordCreator(id: string, creator: SessionAuthContext | null) {
+  storage.attributes.set(id, buildSessionCreatorAttributes(creator));
+}
 
 function serve(config: EveChannelConfig) {
   const send = vi.fn(async () => receipt);
@@ -81,7 +74,7 @@ function serve(config: EveChannelConfig) {
   const channel = eveChannel(config);
   const app = new H3();
   for (const route of channel.routes) {
-    if (route.transport === "websocket") continue;
+    if (route.transport === "websocket") throw new Error("eve channel routes are HTTP only");
     app.on(route.method, route.path, (event) =>
       route.handler(
         event.req,
@@ -140,12 +133,13 @@ describe("session route authorization", () => {
     const server = serve({ auth: () => bob, authorizeSession });
     const response = await server.app.request(request("/eve/v1/session/alice%2Dsession/cancel"));
     expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, error: "Session access denied." });
     expect(authorizeSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
     expect(server.attach).not.toHaveBeenCalled();
   });
 
   it("lets the recorded creator send the first message without turn records", async () => {
-    await recordSessionCreator(sessionId, alice);
+    recordCreator(sessionId, alice);
     let caller: SessionAuthContext = bob;
     const server = serve({
       auth: () => caller,
@@ -166,7 +160,7 @@ describe("session route authorization", () => {
     expect(server.send).toHaveBeenCalledOnce();
   });
 
-  it("distinguishes missing and anonymous creators without persisting permission grants", async () => {
+  it("distinguishes missing and anonymous creators and records identity only", async () => {
     const observed: unknown[] = [];
     const server = serve({
       auth: () => alice,
@@ -177,13 +171,14 @@ describe("session route authorization", () => {
     });
     const path = `/eve/v1/session/${sessionId}/cancel`;
     await server.app.request(request(path));
-    await recordSessionCreator(sessionId, null);
+    recordCreator(sessionId, null);
     await server.app.request(request(path));
-    storage.records.clear();
-    const withGrant = { ...alice, allowToolStubs: true };
-    await recordSessionCreator(sessionId, withGrant);
+    recordCreator(sessionId, { ...alice, principalType: "anonymous" });
     await server.app.request(request(path));
-    expect(observed).toEqual([undefined, null, alice]);
+    const withGrant = { ...alice, allowToolStubs: true, attributes: { email: "a@b" } };
+    recordCreator(sessionId, withGrant);
+    await server.app.request(request(path));
+    expect(observed).toEqual([undefined, null, null, alice]);
   });
 
   it("preserves access without a hook and permits policies that need no creator lookup", async () => {
@@ -215,11 +210,17 @@ describe("session route authorization", () => {
     });
     const response = await server.app.request(request(`/eve/v1/session/${sessionId}/cancel`));
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ ok: false, error: "Session access denied." });
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({
+      ok: false,
+      error: "Session access denied.",
+      errorId: expect.any(String),
+    });
+    expect(body).not.toContain("private policy details");
     expect(server.attach).not.toHaveBeenCalled();
   });
 
-  it("records an accepted forwarded creator and rejects untrusted assertions", async () => {
+  it("records the transport identity as creator under an accepted forwarded principal", async () => {
     const forwarder = { ...bob, principalType: "service" };
     const payload = { forwardedPrincipal: { current: bob, initiator: alice } };
     const untrusted = serve({ auth: () => forwarder, authorizeSession: () => true });
@@ -237,23 +238,24 @@ describe("session route authorization", () => {
     );
     expect(trusted.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionCreator: { ...alice, attributes: { "eve:forwarded-by": forwarder.principalId } },
+        auth: expect.objectContaining({ principalId: bob.principalId }),
+        sessionCreator: forwarder,
       }),
     );
   });
 
-  it("records the effective creation identity without authorizing a nonexistent session", async () => {
+  it("records the transport identity regardless of the onMessage projection", async () => {
     const authorizeSession = vi.fn(() => false);
     const server = serve({ auth: () => alice, authorizeSession, onMessage: () => ({ auth: bob }) });
     expect((await server.app.request(request("/eve/v1/session"))).status).toBe(202);
     expect(server.create).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sessionCreator: alice }),
+      expect.objectContaining({ auth: alice, sessionCreator: alice }),
     );
     expect(
       (await server.app.request(request("/eve/v1/session", "POST", { message: "Hello" }))).status,
     ).toBe(202);
     expect(server.create).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sessionCreator: bob }),
+      expect.objectContaining({ auth: bob, sessionCreator: alice }),
     );
     expect(authorizeSession).not.toHaveBeenCalled();
   });

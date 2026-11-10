@@ -44,9 +44,9 @@ export interface EveSessionAccessContext {
   /** Router-matched session ID; parent ID for descendant and remote-child streams. */
   readonly sessionId: string;
   /**
-   * Reads the identity recorded at creation, independent of subsequent callers.
-   * `null` means anonymous; `undefined` means no creator record exists.
-   * Available before the first turn for sessions created with this hook configured.
+   * Reads the transport identity that created the session through this channel,
+   * written with the run and unchanged by later callers. `null` means anonymous;
+   * `undefined` means no creator record, such as a session another channel created.
    */
   getCreator(): Promise<SessionAuthContext | null | undefined>;
 }
@@ -140,8 +140,7 @@ export interface EveChannelConfig {
   /**
    * Authorizes every existing-session read or mutation after authentication and
    * route matching. Only `true` admits the request; denial or failure returns 403.
-   * Omit to retain authentication-only access. Creation uses `auth` and records
-   * its effective creator when this hook is configured.
+   * Omit to retain authentication-only access. Creation uses `auth` alone.
    */
   readonly authorizeSession?: (context: EveSessionAccessContext) => boolean | Promise<boolean>;
   /**

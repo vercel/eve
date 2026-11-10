@@ -409,9 +409,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                         token: crypto.randomUUID(),
                       },
                 auth: messageResult.auth,
-                ...(input.authorizeSession !== undefined && {
-                  sessionCreator: forwarded.accepted ? forwarded.initiatorAuth : messageResult.auth,
-                }),
+                sessionCreator: auth,
                 capabilities:
                   earlierCallerProtocol === undefined
                     ? (body.capabilities ?? { requestInput: true })

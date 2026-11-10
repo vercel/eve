@@ -499,7 +499,7 @@ export interface RunInput {
    * principal into session auth after route authentication.
    */
   readonly audienceAuth?: SessionAuthContext | null;
-  /** Identity to persist for HTTP session authorization before creation is accepted. */
+  /** Transport identity recorded with the run as the session's creator. */
   readonly sessionCreator?: SessionAuthContext | null;
   /**
    * Session-level capabilities. When omitted, every flag is

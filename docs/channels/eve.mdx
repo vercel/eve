@@ -196,14 +196,15 @@ Set `authorizeSession` to apply application policy to every existing-session rea
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
-import { appSession } from "../lib/auth";
+import { appSession, isTrustedService } from "../lib/auth";
 
 export default eveChannel({
   auth: appSession(),
   async authorizeSession({ caller, getCreator }) {
+    if (isTrustedService(caller)) return true;
     const creator = await getCreator();
+    if (creator == null) return false;
     return (
-      creator != null &&
       caller.authenticator === creator.authenticator &&
       caller.issuer === creator.issuer &&
       caller.principalId === creator.principalId
@@ -212,11 +213,11 @@ export default eveChannel({
 });
 ```
 
-The hook receives `caller`, `request`, the matched `sessionId`, and `getCreator()`. It runs after authentication, before follow-up messages, preparation, cancellation, compaction, clearing, ending, stub inspection, and streams. Descendant and remote-child streams pass the parent session ID; child-binding checks still apply. Only `true` admits the request. A denial or thrown error returns a generic 403.
+The hook receives `caller`, `request`, the matched `sessionId`, and `getCreator()`. It runs after authentication, before follow-up messages, preparation, cancellation, compaction, clearing, ending, stub inspection, and streams. Descendant and remote-child streams pass the parent session ID; child-binding checks still apply. Only `true` admits the request. A denial returns a generic 403; a thrown error also returns 403, with an `errorId` that matches the server log.
 
-When the hook is configured, creation records the effective creator before returning the session ID. The creator is available before the first turn and does not change when another caller sends a message or the session moves between deployments. Accepted forwarded identity is preserved. `getCreator()` reads private session storage only when called; it does not expose identity in the public event stream. Normal stream retention still applies.
+`caller` is the transport identity your `auth` returned for this request, before any forwarded principal is applied. `getCreator()` returns the same kind of identity: the `auth` result that created the session through this channel, recorded with the workflow run itself. It is readable as soon as creation returns a session ID, including to a concurrent or retried creation that is answered with an existing ID, and it does not change when another caller sends a message, when a trusted forwarder asserted a different initiator, or when the session moves between deployments. Only identity fields are recorded, never `attributes` or request-local grants. The lookup runs only when called, so policies that admit a caller without it cost nothing extra.
 
-A `null` creator means anonymous creation. `undefined` means no creator record exists, including sessions created without this hook. Choose an explicit policy for those sessions, such as checking an existing application permission record. The example denies both cases. This creation identity is separate from execution-time `session.auth.initiator`.
+`getCreator()` resolves `null` for a session an anonymous caller created and `undefined` when no creator was recorded, such as a session created by another channel or before upgrading. Neither value establishes ownership; the example denies both. Give those sessions an explicit policy, such as an application permission record. This creation identity is separate from execution-time `session.auth.initiator`.
 
 Omitting `authorizeSession` preserves authentication-only access. Session creation itself uses `auth`; apply service or environment admission there. Policies can admit trusted services without calling `getCreator()`.
 
