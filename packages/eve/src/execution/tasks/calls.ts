@@ -4,6 +4,9 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
+/** How long a wait that omits `timeoutSeconds` lasts, so a task that never reports can't hold a turn open for good. */
+export const TASK_WAIT_DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000;
+
 /**
  * Calls to the task tools. They defer out of the model step like
  * workflow tool calls; the session answers them instead of a workflow run.
@@ -12,7 +15,7 @@ export type TaskToolCall =
   | {
       readonly callId: string;
       readonly kind: typeof TASK_WAIT_TOOL_NAME;
-      readonly timeoutMs?: number;
+      readonly timeoutMs: number;
     }
   | {
       readonly callId: string;
@@ -46,15 +49,14 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
       } else if (part.toolName === TASK_WAIT_TOOL_NAME) {
         // Seconds, to match `sleep`.
         const timeoutSeconds: unknown = Reflect.get(input, "timeoutSeconds");
-        calls.push(
-          typeof timeoutSeconds === "number"
-            ? {
-                callId: part.toolCallId,
-                kind: TASK_WAIT_TOOL_NAME,
-                timeoutMs: timeoutSeconds * 1_000,
-              }
-            : { callId: part.toolCallId, kind: TASK_WAIT_TOOL_NAME },
-        );
+        calls.push({
+          callId: part.toolCallId,
+          kind: TASK_WAIT_TOOL_NAME,
+          timeoutMs:
+            typeof timeoutSeconds === "number"
+              ? timeoutSeconds * 1_000
+              : TASK_WAIT_DEFAULT_TIMEOUT_MS,
+        });
       }
     }
   }

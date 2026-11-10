@@ -21,6 +21,7 @@ export function activeOperation(
     type: operation.type,
     reference: operation.reference,
     capture,
+    memory: operation.memory,
     mcp:
       mcp === undefined
         ? undefined

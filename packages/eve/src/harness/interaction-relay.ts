@@ -41,8 +41,18 @@ export function relayedInteractionEvents(
 
 function relayedFact(view: SessionView, event: SessionEvent): RelayedInteractionEvent | undefined {
   switch (event.type) {
-    case "interaction.settled":
-      return relayEvent("interaction.settled", event.data);
+    case "interaction.settled": {
+      // The serving session knows the deciding answer by the delivery it forwarded it in.
+      const { cause } = event.data;
+      const decider =
+        cause !== undefined && "responseId" in cause ? view.responses[cause.responseId] : undefined;
+      return relayEvent(
+        "interaction.settled",
+        decider === undefined
+          ? event.data
+          : { ...event.data, cause: { deliveryId: decider.deliveryId } },
+      );
+    }
     case "response.admitted": {
       const row = view.responses[event.data.responseId];
       if (row === undefined) return undefined;

@@ -18,6 +18,15 @@ describe("parseRelay", () => {
     });
   });
 
+  it("keeps a route whose stored receipts are unreadable, without them", () => {
+    for (const receipts of [["d-1"], { "receipt-1": 7 }, "receipt-1"]) {
+      expect(parseRelay({ childContinuationToken: "child-hook", remote, receipts })).toEqual({
+        childContinuationToken: "child-hook",
+        remote,
+      });
+    }
+  });
+
   it("refuses a stored protocol that is not a version", () => {
     for (const earlierProtocol of ["2", 2.5, null]) {
       expect(

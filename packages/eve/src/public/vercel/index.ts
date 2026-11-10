@@ -2,8 +2,8 @@ import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
+import { writeMultiAgentSummary } from "#internal/vercel-agent-summary.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
-import { writeMultiAgentSummary } from "#internal/vercel/build-agent-workspace.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import {
   createEveHomeRouteSrc,

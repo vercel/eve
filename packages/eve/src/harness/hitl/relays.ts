@@ -24,6 +24,12 @@ export interface Relay extends RelayRoute {
    * can answer the request once that run ends.
    */
   readonly runId?: string;
+  /**
+   * This session's delivery for each receipt a remote asker gave answers it forwarded. A remote
+   * admits answers under a delivery id of its own, and names that id when it relays how they
+   * settled.
+   */
+  readonly receipts?: Readonly<Record<string, string>>;
 }
 
 const FORWARDED_SHARE = /^(.+)_forwarded_\d+$/;
@@ -79,6 +85,10 @@ export function parseRelay(value: unknown): Relay | undefined {
     if (typeof runId !== "string" || runId.length === 0) return undefined;
     relay.runId = runId;
   }
+  // Receipts only credit answers; the route still reaches the asker without them.
+  const receipts = Reflect.get(value, "receipts");
+  if (isRecord(receipts) && Object.values(receipts).every((id) => typeof id === "string"))
+    relay.receipts = receipts as Record<string, string>;
   return relay;
 }
 

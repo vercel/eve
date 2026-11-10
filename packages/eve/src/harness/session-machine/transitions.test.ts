@@ -4,6 +4,9 @@ import { requireSignIn, settleLimit } from "#harness/hitl/approvals.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { dropClosedRecords, saveTransition, sessionView } from "#harness/session-machine/commit.js";
 import { readHitlState } from "#harness/hitl/requests.js";
+import { relayedInteractionEvents } from "#harness/interaction-relay.js";
+import { forwardedShareId, type Relay } from "#harness/hitl/relays.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import {
   awaitSignIns,
   callSignInsSettled,
@@ -970,6 +973,154 @@ describe("routing answers", () => {
         },
       }).events,
     ).toEqual([]);
+  });
+});
+
+describe("crediting the answers this session forwarded", () => {
+  const interactionId = "approval-1";
+
+  /** A mirrored approval with two forwarded answers, in `order`, both still open. */
+  function forwardedTwice(order = ["bob", "alice"]): HarnessSession {
+    const parent = runningCall();
+    const mirrored = withPublished(
+      parent,
+      relayed(parent, [
+        {
+          type: "interaction.opened",
+          data: {
+            interactionId,
+            request: { kind: "approval", prompt: "Deploy?" },
+            subject: { turnId: "child-turn" },
+          },
+        },
+      ]),
+    );
+    return withPublished(
+      mirrored,
+      order.flatMap((name): SessionEvent[] => [
+        { data: { deliveryId: `d-${name}` }, type: "delivery.admitted" },
+        {
+          data: { deliveryId: `d-${name}`, interactionId, responseId: `r-${name}` },
+          type: "response.submitted",
+        },
+      ]),
+    );
+  }
+
+  function relayed(
+    session: HarnessSession,
+    events: SubagentInteractionHookPayload["events"],
+    relays?: ReadonlyMap<string, Relay>,
+  ): readonly SessionEvent[] {
+    return relay(viewOf(session), {
+      relays,
+      payload: {
+        callId: "probe",
+        childSessionId: "child-1",
+        events,
+        kind: "subagent-interaction",
+        subagentName: "deployer",
+      },
+    }).events;
+  }
+
+  /** Each forwarded answer's final status here, with its outcome once settled. */
+  function credited(session: HarnessSession): Record<string, string | undefined> {
+    const { responses } = viewOf(session).projection.view;
+    return Object.fromEntries(
+      ["r-bob", "r-alice"].map((id) => [id, responses[id]?.outcome ?? responses[id]?.status]),
+    );
+  }
+
+  const refusesBob = (deliveryId?: string): SubagentInteractionHookPayload["events"] => [
+    {
+      data: { ...(deliveryId !== undefined && { deliveryId }), interactionId, outcome: "refused" },
+      type: "response.settled",
+    },
+  ];
+
+  it("refuses and credits nothing it would have to guess, from a child that names no delivery", () => {
+    const session = forwardedTwice();
+    // A protocol 2 child names no delivery; another child may name one this session never sent.
+    expect(relayed(session, refusesBob())).toEqual([]);
+    expect(relayed(session, refusesBob("d-unknown"))).toEqual([]);
+    const settled = withPublished(
+      session,
+      relayed(session, [
+        { data: { interactionId, outcome: "accepted" }, type: "interaction.settled" },
+      ]),
+    );
+    expect(credited(settled)).toEqual({ "r-alice": "withdrawn", "r-bob": "withdrawn" });
+  });
+
+  it("resolves a remote child's answers only through the receipts it gave", () => {
+    const session = forwardedTwice();
+    const remote = { name: "deployer", sessionId: "child-1", url: "https://deployer.example" };
+    const relays = new Map<string, Relay>([
+      [
+        interactionId,
+        { childContinuationToken: "deployer-hook", receipts: { "receipt-1": "d-alice" }, remote },
+      ],
+    ]);
+    // A remote never received this session's delivery ids, so naming one, or a share of one,
+    // refuses nobody.
+    expect(relayed(session, refusesBob("d-bob"), relays)).toEqual([]);
+    expect(relayed(session, refusesBob(forwardedShareId("d-bob", 1)), relays)).toEqual([]);
+    // A local child names the delivery it received, so the same report refuses Bob there.
+    expect(credited(withPublished(session, relayed(session, refusesBob("d-bob"))))).toEqual({
+      "r-alice": "submitted",
+      "r-bob": "refused",
+    });
+    const refused = withPublished(session, relayed(session, refusesBob("receipt-1"), relays));
+    expect(credited(refused)).toEqual({ "r-alice": "refused", "r-bob": "submitted" });
+  });
+
+  it("credits nothing from an older child that names its own response as the cause", () => {
+    const session = forwardedTwice();
+    // An older child names the decider by its own response id, which means nothing here.
+    const settled = withPublished(
+      session,
+      relayed(session, [
+        {
+          data: { cause: { responseId: "response_d-bob_0" }, interactionId, outcome: "accepted" },
+          type: "interaction.settled",
+        },
+      ]),
+    );
+    expect(credited(settled)).toEqual({ "r-alice": "withdrawn", "r-bob": "withdrawn" });
+    expect(viewOf(settled).projection.view.interactions[interactionId]?.cause).toBeUndefined();
+  });
+
+  it("credits the answer the child applied, not a later one that raced it", () => {
+    // Bob's answer reached this session after Alice's went down, before the child settled.
+    const parent = forwardedTwice(["alice", "bob"]);
+    // The child applied Alice's answer, which it admitted under the delivery this session sent.
+    const child = withPublished(runningCall(), [
+      {
+        data: {
+          interactionId,
+          request: { kind: "approval", prompt: "Deploy?" },
+          subject: { callId: "probe" },
+        },
+        type: "interaction.opened",
+      },
+      { data: { deliveryId: "d-alice" }, type: "delivery.admitted" },
+      {
+        data: { deliveryId: "d-alice", interactionId, responseId: "r-child" },
+        type: "response.submitted",
+      },
+    ]);
+    const childSettled: SessionEvent = {
+      data: { cause: { responseId: "r-child" }, interactionId, outcome: "accepted" },
+      type: "interaction.settled",
+    };
+    const events = relayedInteractionEvents(viewOf(child).projection.view, childSettled, "child-1");
+
+    const settled = withPublished(parent, relayed(parent, events));
+    expect(credited(settled)).toEqual({ "r-alice": "applied", "r-bob": "withdrawn" });
+    expect(viewOf(settled).projection.view.interactions[interactionId]).toMatchObject({
+      cause: { responseId: "r-alice" },
+    });
   });
 });
 

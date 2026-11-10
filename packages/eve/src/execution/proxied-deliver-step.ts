@@ -32,7 +32,7 @@ import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol
 import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
-import { forwardedShareId, type WorkflowAskRoute } from "#harness/hitl/relays.js";
+import { forwardedShareId, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { commitSessionStep, publishSessionEvents } from "#execution/publish-session-events.js";
 import { admitDeliveries } from "#harness/session-machine/deliveries.js";
@@ -59,6 +59,8 @@ interface ChildBucket {
   readonly childSessionInbox?: SessionInboxAddress;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
+  /** The parent deliveries whose answers this child takes, by interaction. */
+  readonly answeredBy: Map<string, Set<string | undefined>>;
 }
 
 /**
@@ -202,7 +204,12 @@ async function routeProxiedDeliver(
         childSessionInbox: forChild.childSessionInbox,
         metadata: [],
         payloads: [],
+        answeredBy: new Map(),
       };
+      for (const { interactionId } of forChild.payload.answers) {
+        const deliveries = child.answeredBy.get(interactionId) ?? new Set();
+        child.answeredBy.set(interactionId, deliveries.add(answeredBy));
+      }
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
       // Each child admits its answers as a delivery of its own, even when this session keeps
@@ -276,6 +283,7 @@ async function routeProxiedDeliver(
   }
 
   // A workflow run publishes nothing of its own: the session settles its questions as it answers.
+  const receiptRoutes: Record<string, Relay> = {};
   const decided: { answer: Answer; outcome: "accepted" | "declined" }[] = [];
   for (const [childKey, child] of children) {
     if (child.workflowAsk !== undefined) {
@@ -299,7 +307,7 @@ async function routeProxiedDeliver(
           url: remote.url,
         });
         const responses = coalesceDeliverPayloads(child.payloads).answers ?? [];
-        await respondToRemoteAgentSession({
+        const receipt = await respondToRemoteAgentSession({
           remote,
           headers,
           auth: sourceDelivery.auth,
@@ -307,6 +315,18 @@ async function routeProxiedDeliver(
           idempotencyKey: await answersIdempotencyKey(sourceDelivery, childKey),
           responses: remoteAnswers(tables, responses),
         });
+        // The child names these answers by one receipt, so it maps back to a delivery only when
+        // every answer for the interaction came in that delivery; otherwise it credits nobody.
+        for (const [interactionId, deliveryIds] of child.answeredBy) {
+          const route = requests.get(interactionId);
+          const [deliveryId, ...others] = deliveryIds;
+          if (receipt === undefined || route === undefined) continue;
+          if (deliveryId === undefined || others.length > 0) continue;
+          receiptRoutes[interactionId] = {
+            ...route,
+            receipts: { ...route.receipts, [receipt]: deliveryId },
+          };
+        }
         // A protocol 2 child relays how its approvals settle, but never its questions or budget
         // prompts: this session settles those as the child takes their answers, as its own
         // protocol did.
@@ -337,6 +357,7 @@ async function routeProxiedDeliver(
             : [...decided, { answer: parentAction.answer, outcome: "declined" }],
         deliveries: routedDeliveries,
         forwarded: answers,
+        relays: Object.keys(receiptRoutes).length === 0 ? undefined : receiptRoutes,
       }),
     ],
     { origin: "relayed" },
