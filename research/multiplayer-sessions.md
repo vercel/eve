@@ -352,6 +352,10 @@ and integration tests instead.
 
 ## Out of scope
 
+- Keeping a sign-in open when its caller steers past it. Today the steer withdraws the sign-in
+  and fails its call, so the original work is lost. The proposal: the stopped call gets a result
+  saying it waits for the sign-in, the card stays clickable, and the call runs as its caller once
+  they connect. Rule 3 makes sign-ins and pauses more common, so this is the first follow-up.
 - Letting another person's message steer a turn that is paused on an approval or sign-in.
   Rule 3 pauses turns more often, so this is the first follow-up.
 - Covering tools that use no credentials by default.
