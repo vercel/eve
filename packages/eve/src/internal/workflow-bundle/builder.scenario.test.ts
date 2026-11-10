@@ -1,9 +1,24 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { createContext, runInContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
+import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { FatalError, RetryableError } from "#compiled/@workflow/errors/index.js";
 import { dehydrateStepError, hydrateStepError } from "#compiled/@workflow/core/serialization.js";
 import {
@@ -16,6 +31,30 @@ import {
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { bundleFinalWorkflowOutput } from "#internal/workflow-bundle/builder-support.js";
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
+
+const runFile = promisify(execFile);
+const scenarioApp = useScenarioApp();
+
+// Runs the installed package's own builder, as `eve build` and `eve dev` do.
+const INSTALLED_BUILD_SCRIPT = `
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const [eveRoot, appRoot, outDir, inlineSourcemap] = process.argv.slice(1);
+const builderPath = join(eveRoot, "dist", "src", "internal", "workflow-bundle", "builder.js");
+const { WorkflowBundleBuilder } = await import(pathToFileURL(builderPath).href);
+const compiledArtifactsBootstrapPath = join(outDir, "bootstrap.mjs");
+await mkdir(outDir, { recursive: true });
+await writeFile(compiledArtifactsBootstrapPath, "export {};\\n");
+await new WorkflowBundleBuilder({
+  agentName: "installed",
+  appRoot,
+  compiledArtifactsBootstrapPath,
+  inlineSourcemap: inlineSourcemap === "true",
+  outDir,
+  rootDir: eveRoot,
+}).build();
+`;
 
 const REQUIRE_EXPORT_MARKER = "eve-workflow-conditional-require-export";
 const IMPORT_EXPORT_MARKER = "eve-workflow-conditional-import-export";
@@ -846,10 +885,71 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).toContain("deploy ${service}");
       expect(workflowCode).not.toContain("defineWorkflowTool");
       expect(workflowCode).not.toContain("node:crypto");
+      // A linked eve changes without a version bump, so its framework layer is never reused.
+      expect(existsSync(join(appRoot, "node_modules", ".cache", "eve", "workflow-driver"))).toBe(
+        false,
+      );
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  it("reuses an installed eve's framework driver until a module or option changes", async () => {
+    const app = await scenarioApp({
+      files: {},
+      installDependencies: true,
+      name: "installed-driver",
+    });
+    const eveRoot = await realpath(join(app.appRoot, "node_modules", "eve"));
+    const cacheDirectory = join(app.appRoot, "node_modules", ".cache", "eve", "workflow-driver");
+    const outDir = join(app.appRoot, "workflow-build");
+    const build = async (inlineSourcemap: boolean) => {
+      await runFile(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          INSTALLED_BUILD_SCRIPT,
+          eveRoot,
+          app.appRoot,
+          outDir,
+          String(inlineSourcemap),
+        ],
+        { cwd: app.appRoot },
+      );
+      return {
+        code: await readFile(join(outDir, "workflows.code.txt"), "utf8"),
+        manifest: JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8")),
+      };
+    };
+
+    const cold = await build(true);
+    expect(cold.code).toContain("sourceMappingURL=data:");
+    const [mappedEntry] = await readdir(cacheDirectory);
+    const mappedEntryPath = join(cacheDirectory, mappedEntry!);
+    const { mtimeMs } = await stat(mappedEntryPath);
+    await expect(build(true)).resolves.toEqual(cold);
+    expect((await stat(mappedEntryPath)).mtimeMs).toBe(mtimeMs);
+
+    // Replaced rather than written through, which would edit pnpm's shared store.
+    const modulePath = join(eveRoot, "dist", "src", "tools", "provided", "sleep-workflow.js");
+    await writeFile(
+      `${modulePath}.edit`,
+      `${await readFile(modulePath, "utf8")}\nglobalThis.eveDriverProbe = "patched in place";\n`,
+    );
+    await rename(`${modulePath}.edit`, modulePath);
+    const patched = await build(true);
+    expect(patched.code).toContain("patched in place");
+
+    const unmapped = await build(false);
+    expect(unmapped.code).toContain("patched in place");
+    expect(unmapped.code).not.toContain("sourceMappingURL");
+    expect(await readdir(cacheDirectory)).toHaveLength(2);
+
+    await truncate(mappedEntryPath, Math.floor((await stat(mappedEntryPath)).size / 2));
+    await expect(build(true)).resolves.toEqual(patched);
+  }, 240_000);
+
   it.each([
     { importer: "workflow code", specifier: "missing-workflow-package" },
     // Dependency warnings are otherwise filtered as non-actionable.
