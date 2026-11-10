@@ -1,6 +1,6 @@
 ---
 title: "Deploy to Vercel"
-description: "Deploy an eve agent with Vercel Workflow, Sandbox, Cron, and project credentials."
+description: "Deploy an eve agent with Vercel Workflow, Sandbox, Schedules, and project credentials."
 ---
 
 On Vercel, eve builds to Vercel Build Output, and Vercel runs the agent’s web service, workflows, sandboxes, schedules, and observability.
@@ -139,9 +139,9 @@ eve deploy --project your_project_name --non-interactive --yes
 
 Vercel configures these services from the build output:
 
-- **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
+- **Web runtime**: serves health, session, stream, channel, and callback routes
 - **Vercel Workflow**: stores and resumes agent runs
-- **Vercel Cron**: invokes authored schedules
+- **Vercel Schedules**: runs authored [schedules](../../schedules#on-vercel) through a private function
 - **Vercel Sandbox**: runs sandbox sessions selected by the default sandbox environment
 
 ## Verify the deployment

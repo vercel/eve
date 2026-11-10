@@ -1300,11 +1300,10 @@ The registry also writes \`agent/schedules/gmail-maintenance.ts\`, which calls \
 From your linked Vercel project:
 
 \`\`\`bash
-vercel crons list
-vercel crons run <maintenance-job-path>
+vercel schedules invoke eve.gmail-maintenance
 \`\`\`
 
-Replace \`<maintenance-job-path>\` with the Gmail maintenance route listed by the first command. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
+For an agent added with \`withEve\`, the schedule name includes the agent's name, such as \`eve.support.gmail-maintenance\`. Run \`vercel schedules list\` to find it. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
 
 **Existing labelled mail is not imported on first setup.** The first successful \`watch()\` initializes the cursor at registration time. Send a new message from another account and apply the handoff label after initialization. Later watch renewals preserve the existing cursor. See the [Gmail adapter setup guide](https://chat-sdk.dev/adapters/official/gmail#setup) for Google Cloud, Pub/Sub, OAuth scopes, and watch-renewal requirements.`,
   },

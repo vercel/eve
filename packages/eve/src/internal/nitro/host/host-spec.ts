@@ -26,6 +26,8 @@ export type HostMode =
        * so callback URLs resolve behind a per-agent mount.
        */
       readonly publicRoutePrefix?: string;
+      /** Built as one service of a multi-service Vercel project. */
+      readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
     };
 
@@ -102,6 +104,7 @@ export function createHostSpec(
     mode: mode.kind,
     scheduleRegistrations: preparedHost.scheduleRegistrations,
     vercel: preset === "vercel",
+    vercelService: mode.kind === "production" && mode.vercelService === true,
   });
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),

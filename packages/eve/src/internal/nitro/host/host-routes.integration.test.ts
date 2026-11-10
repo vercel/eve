@@ -328,13 +328,14 @@ describe("rendered host routes", () => {
 
     expect(host.routes.experimental).toEqual({ tasks: true });
     expect(host.routes.scheduledTasks).toEqual({
-      "0 0 * * *": ["daily", "digest"],
-      "0 0 * * 0": "weekly",
+      "0 0 * * *": ["eve.daily", "eve.digest"],
+      "0 0 * * 0": "eve.weekly",
     });
-    const task = (await host.load(host.routes.tasks.daily!.handler)) as {
+    const task = (await host.load(host.routes.tasks["eve.daily"]!.handler)) as {
       run(event: { name: string }): Promise<unknown>;
     };
-    expect(await task.run({ name: "daily" })).toEqual({ result: "ran daily" });
+    // The task dispatches eve's own task name, whatever Nitro calls it.
+    expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran daily" });
     expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("daily", artifactsConfig);
   });
 });
