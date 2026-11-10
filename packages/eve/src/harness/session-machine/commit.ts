@@ -12,7 +12,12 @@ import type {
 } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { readHitlState, writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
-import { readTaskTable, settleWaitingCall, writeTaskTable } from "#execution/tasks/table.js";
+import {
+  dropStoppedWaits,
+  readTaskTable,
+  settleWaitingCall,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import { takeWaitingResults } from "./suspended-steps.js";
 import type { SessionView } from "./view.js";
@@ -120,7 +125,8 @@ export async function applyTransition<T extends { readonly state?: SessionStateM
 
 /**
  * Saves what a transition changes once its events are published. A call that waited as a task
- * and has its result now leaves its step as its task's result, which the model reads next.
+ * and has its result now leaves its step as its task's result, which the model reads next; one
+ * whose step stopped without a result takes its task with it.
  */
 export function saveTransition<T extends { readonly state?: SessionStateMap }>(
   session: T,
@@ -128,9 +134,10 @@ export function saveTransition<T extends { readonly state?: SessionStateMap }>(
 ): T {
   const { results, turn } = takeWaitingResults(transition.turn);
   let next = writeTurnState(writeHitlState(session, transition), turn);
-  if (results.length > 0) {
-    next = writeTaskTable(next, results.reduce(settleWaitingCall, readTaskTable(next.state)));
-  }
+  const table = readTaskTable(next.state);
+  const waiting = new Set(turn.suspended.flatMap((step) => Object.keys(step.taskIds ?? {})));
+  const settled = dropStoppedWaits(results.reduce(settleWaitingCall, table), waiting);
+  if (settled !== table) next = writeTaskTable(next, settled);
   if (transition.history === undefined) return next;
   if (!("history" in next)) {
     throw new Error("A transition that changes history needs the session's history.");

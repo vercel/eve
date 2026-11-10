@@ -169,8 +169,8 @@ export class ActiveTurn {
    * Whether a message still waits to steer the turn after `takeSteering`, which takes one
    * person's messages at a time: the model runs once the turn has read them all.
    */
-  hasSteeringWaiting(): boolean {
-    return this.input.queue.hasSteering(this.admitted, this.identity);
+  hasSteeringWaiting(options?: SteeringOptions): boolean {
+    return this.input.queue.hasSteering(this.admitted, this.identity, options);
   }
 
   /**

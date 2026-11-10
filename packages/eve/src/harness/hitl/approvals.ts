@@ -71,6 +71,7 @@ import {
   withResult,
 } from "#harness/session-machine/suspended-steps.js";
 import { renderWaitingTaskReceipt, type PersonWait } from "#execution/tasks/render.js";
+import type { TaskCancelReason } from "#execution/tasks/table.js";
 import { fact } from "#harness/facts.js";
 import {
   ownOpenRequestIds,
@@ -298,19 +299,17 @@ export function settleApprovals(
       (request) => tables.interactions[request.interactionId] !== undefined,
     );
     if (pending.length === 0) return step;
+    const answers = pending.flatMap((request) => {
+      const answer = answerOf(request);
+      return answer === undefined ? [] : [{ answer, request }];
+    });
     const settling =
-      input.steer || waitsAsTasks(step)
-        ? pending.filter((request) => answerOf(request) !== undefined)
-        : pending.every((request) => answerOf(request) !== undefined)
-          ? pending
-          : [];
+      input.steer || waitsAsTasks(step) || answers.length === pending.length ? answers : [];
     if (settling.length === 0) return step;
     answered = true;
     let messages = step.messages;
-    for (const request of settling) {
+    for (const { answer, request } of settling) {
       const { callId, toolName } = request.call;
-      const answer = answerOf(request);
-      if (answer === undefined) continue;
       const { approved: approves, reason, status } = resolveApprovalOutcome(answer);
       if (approves) {
         const responder = view.responders[standing.get(request.interactionId)?.responseId ?? ""];
@@ -453,29 +452,28 @@ export function waitingCalls(view: SessionView): readonly WaitingCall[] {
  */
 export function waitAsTasks(
   view: SessionView,
-  input: { readonly taskIds: Readonly<Record<string, string>> },
+  input: { readonly calls: readonly (WaitingCall & { readonly taskId: string })[] },
 ): Transition {
-  const waiting = new Map(waitingCalls(view).map((call) => [call.callId, call]));
+  const waiting = new Map(input.calls.map((call) => [call.callId, call]));
   const residual: SuspendedStep[] = [];
   const suspended = view.turn.suspended.map((step) => {
     const calls = [...stepCallIds(step)];
-    const ids = new Set(calls.filter((callId) => input.taskIds[callId] !== undefined));
+    const ids = new Set(calls.filter((callId) => waiting.has(callId)));
     if (waitsAsTasks(step) || ids.size === 0) return step;
     let messages = step.messages;
     for (const callId of ids) {
-      const call = waiting.get(callId);
-      const id = input.taskIds[callId]!;
-      const receipt = renderWaitingTaskReceipt({ awaiting: call?.awaiting ?? "approval", id });
+      const call = waiting.get(callId)!;
+      const receipt = renderWaitingTaskReceipt({ awaiting: call.awaiting, id: call.taskId });
       messages = withResult(messages, {
         output: { type: "text", value: receipt },
         toolCallId: callId,
-        toolName: call?.toolName ?? "",
+        toolName: call.toolName,
         type: "tool-result",
       });
     }
     residual.push({
       ...withoutCalls(step, new Set(calls.filter((callId) => !ids.has(callId)))),
-      taskIds: Object.fromEntries([...ids].map((callId) => [callId, input.taskIds[callId]!])),
+      taskIds: Object.fromEntries([...ids].map((callId) => [callId, waiting.get(callId)!.taskId])),
     });
     const { approved: _approved, ...rest } = step;
     const approved = (step.approved ?? []).filter((call) => !ids.has(call.call.callId));
@@ -493,8 +491,10 @@ export function waitAsTasks(
   );
 }
 
-/** Why a call the model dropped with `eve__task_cancel` didn't run. */
-const DROPPED_BY_MODEL = "task-cancel";
+/** Why a request ended when the model dropped the call that waited on it. */
+const DROPPED_BY_MODEL = "The model dropped this call with eve__task_cancel before it ran.";
+/** How a dropped call settles, as a cancelled task's calls do. */
+const TASK_CANCEL: TaskCancelReason = "task-cancel";
 
 /**
  * The model dropped calls that wait as tasks: each one's open approval is withdrawn and its call
@@ -512,41 +512,24 @@ export function withdrawWaitingCalls(
   const suspended = view.turn.suspended.flatMap((step) => {
     const dropped = new Set(Object.keys(step.taskIds ?? {}).filter((id) => dropping.has(id)));
     if (dropped.size === 0) return [step];
+    // Each dropped call ends as a cancelled task's call does, whether it waited on an approval or
+    // a sign-in: nobody refused it.
+    const interrupted = (callId: string) =>
+      fact("call.settled", { callId, outcome: "interrupted", reason: TASK_CANCEL });
     for (const request of step.requests) {
-      const { callId, toolName } = request.call;
+      const { callId } = request.call;
       if (!dropped.has(callId) || tables.interactions[request.interactionId]?.status !== "open")
         continue;
       responses.closeOthers(request.interactionId, undefined);
-      const settled = callSettledFrom(
-        {
-          callId,
-          isError: true,
-          kind: "tool-result",
-          output: {
-            approval: { interactionId: request.interactionId, status: "ignored" },
-            code: "TOOL_EXECUTION_DENIED",
-            message: TOOL_EXECUTION_DENIED_MESSAGE,
-            tool: { result: "not_run" },
-          },
-          toolName,
-        },
-        { rejected: true },
-      );
       events.push(
         interactionSettled(request.interactionId, "withdrawn", { reason: DROPPED_BY_MODEL }),
-        { ...settled, data: { ...settled.data, cause: { interactionId: request.interactionId } } },
+        interrupted(callId),
       );
     }
     for (const call of step.approved ?? []) {
       if (!dropped.has(call.call.callId)) continue;
       signIns.push(...(call.signIns ?? []));
-      events.push(
-        fact("call.settled", {
-          callId: call.call.callId,
-          outcome: "interrupted",
-          reason: DROPPED_BY_MODEL,
-        }),
-      );
+      events.push(interrupted(call.call.callId));
     }
     const rest = withoutCalls(step, dropped);
     return Object.keys(rest.taskIds ?? {}).length === 0 ? [] : [rest];

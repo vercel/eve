@@ -87,7 +87,7 @@ export function createAgentApprovalInstrumentation(input: {
           "agent.tool.approver.id": event.responder.id,
         });
     }
-    // Other ends carry their own reasons, such as `superseded-by-message`; none is a refusal.
+    // Other ends carry their own reasons, such as `asker-ended`; none is a refusal.
     if (event.kind === "sign-in" && event.outcome === "failed" && event.reason !== undefined)
       approval.attributes({ "agent.connection.authorization.reason": event.reason });
     if (event.outcome === "failed") await approval.fail(event.error);

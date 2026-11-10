@@ -44,7 +44,7 @@ import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { DENY_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
-import { defineTool, type ToolContext } from "#tools/definition.js";
+import { defineTool, disableTool, type ToolContext } from "#tools/definition.js";
 import { z } from "zod";
 import {
   defineWorkflowTool,
@@ -137,17 +137,22 @@ function readPrompt(prompt: Prompt) {
   return { results, said: (words: string) => text.includes(words), users: users.length };
 }
 
-/** A model that answers each request with what `script` returns for the prompt. */
+/** A model that answers each request with what `script` returns for the prompt and tool names. */
 function scriptedModel(
   script: (
     prompt: ReturnType<typeof readPrompt>,
     raw: Prompt,
+    tools: readonly string[],
   ) => StreamResult | readonly Call[] | string,
 ) {
   let count = 0;
   const model = new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
-      const next = script(readPrompt(prompt), prompt);
+    doStream: async ({ prompt, tools }) => {
+      const next = script(
+        readPrompt(prompt),
+        prompt,
+        (tools ?? []).map((tool) => tool.name),
+      );
       if (typeof next === "string") return textStreamResult(next);
       if (Array.isArray(next)) {
         return toolCallsStreamResult(
@@ -313,6 +318,8 @@ async function withSession(
     readonly hooks?: Readonly<Record<string, HookDefinition>>;
     readonly parent?: SessionParent;
     readonly sessionUsage?: SessionUsageLimit;
+    /** Framework tools the agent disables, such as `agent`. */
+    readonly disabledTools?: readonly string[];
   },
   body: (session: Session) => Promise<void>,
 ) {
@@ -335,6 +342,10 @@ async function withSession(
       ...Object.entries(options.hooks ?? {}).map(([slug, hook]) => ({
         loadNamespace: async () => ({ default: hook }),
         logicalPath: `hooks/${slug}.ts`,
+      })),
+      ...(options.disabledTools ?? []).map((name) => ({
+        loadNamespace: async () => ({ default: disableTool() }),
+        logicalPath: `tools/${name}.ts`,
       })),
       ...options.tools.map((tool) => ({
         loadNamespace: async () => ({
@@ -1514,8 +1525,12 @@ describe("approvals off the happy path", () => {
     expect(ran).toEqual([]);
     expect(
       ofType(events, "interaction.settled").map((event) => [event.data.outcome, event.data.reason]),
-    ).toEqual([["withdrawn", "task-cancel"]]);
-    expect(settlements(events)).toContain("call_deploy:rejected");
+    ).toEqual([["withdrawn", "The model dropped this call with eve__task_cancel before it ran."]]);
+    expect(
+      ofType(events, "call.settled")
+        .filter((event) => event.data.callId === "call_deploy")
+        .map((event) => [event.data.outcome, event.data.reason]),
+    ).toEqual([["interrupted", "task-cancel"]]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
@@ -1670,11 +1685,13 @@ describe("calls that wait on a person as tasks", () => {
   });
 
   it("holds the turn while a call waits as a task, and cancelling the turn withdraws its request", async () => {
+    const prompts: string[] = [];
     const { events, ran } = await withSession(
       "edge-wait-holds",
       {
         message: "Deploy it.",
-        model: scriptedModel(({ said }) => {
+        model: scriptedModel(({ said }, raw) => {
+          prompts.push(JSON.stringify(raw));
           if (said("Bob's aside")) return "Noted.";
           // The late answer reads as the person's words, naming the request it answered.
           if (said("Never mind") || said("requestId")) return "That was already done.";
@@ -1706,7 +1723,173 @@ describe("calls that wait on a person as tasks", () => {
       "interrupted",
     ]);
     expect(settlements(events)).toEqual(["call_deploy:interrupted"]);
+    // The stopped call's task never reports into the next turn.
+    expect(prompts.at(-1)).toContain("Never mind");
+    expect(prompts.at(-1)).not.toContain("<task_result id=");
   });
+
+  it("stops a waiting call when its turn fails, and its task never reports", async () => {
+    const prompts: string[] = [];
+    const { events, ran } = await withSession(
+      "edge-wait-failed-turn",
+      {
+        message: "Deploy it.",
+        model: scriptedModel(({ said }, raw) => {
+          prompts.push(JSON.stringify(raw));
+          if (said("Hello again")) return "Hello.";
+          // The step that reads Bob's message fails after the call starts waiting as a task.
+          if (said("Bob's aside"))
+            throw Object.assign(new Error("Payment required"), { statusCode: 402 });
+          return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+        }),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("asks");
+        await session.send("Bob's aside.", BOB);
+        await session.until("the turn fails", (event) => event.type === "turn.settled");
+        await session.send("Hello again.");
+        await session.until(
+          "next turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:failed", "turn_1:completed"]);
+    expect(ran).toEqual([]);
+    expect(prompts.at(-1)).toContain("Hello again");
+    expect(prompts.at(-1)).not.toContain("<task_result id=");
+  });
+
+  it("refuses another person's press on a waiting call's approval, waking no model call", async () => {
+    let modelCalls = 0;
+    const { events, ran } = await withSession(
+      "edge-wait-refused-press",
+      {
+        message: "Deploy it.",
+        model: scriptedModel(({ said }, raw) => {
+          modelCalls += 1;
+          if (readsTaskResult(raw)) return "Deployed.";
+          if (said("Bob's aside")) return [{ toolName: "eve__task_wait", toolCallId: "call_wait" }];
+          return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+        }),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("asks");
+        const [approval] = session.approvals();
+        await session.send("Bob's aside.", BOB);
+        // The model parks the turn on `eve__task_wait` until the call's task reports.
+        await session.until(
+          "the model waits",
+          (event) =>
+            event.type === "call.requested" && event.data.capability.name === "eve__task_wait",
+        );
+        // Only Alice may answer her call's approval, even while it waits as a task.
+        await session.answer(approval!, "approve", BOB);
+        await session.until(
+          "Bob's press is refused",
+          (event) => event.type === "response.settled" && event.data.outcome === "refused",
+        );
+        await session.answer(approval!, "approve");
+        await session.until("settled", (event) => event.type === "turn.settled");
+      },
+    );
+
+    // The model ran to make the call, to wait, and to read its result; Bob's press woke none.
+    expect(modelCalls).toBe(3);
+    // Bob's press approved nothing; Alice's answer ran the call.
+    expect(ofType(events, "response.settled").map((event) => event.data.outcome)).toEqual([
+      "refused",
+      "applied",
+    ]);
+    expect(ran).toEqual(["deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("keeps offering the task tools in later turns once a call waited on a person", async () => {
+    const offered: (readonly string[])[] = [];
+    await withSession(
+      "edge-wait-sticky-tools",
+      {
+        // Without the built-in agent tool, the agent has no tool that starts tasks.
+        disabledTools: ["agent"],
+        message: "Deploy it.",
+        model: scriptedModel(({ said }, raw, tools) => {
+          offered.push(tools.filter((name) => name.startsWith("eve__task_")).sort());
+          if (said("Thanks")) return "You're welcome.";
+          if (readsTaskResult(raw)) return "Deployed.";
+          if (said("Bob's aside")) return "Noted.";
+          return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+        }),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("asks");
+        const [approval] = session.approvals();
+        await session.send("Bob's aside.", BOB);
+        await session.until("the approval waits", (event) => event.type === "turn.paused");
+        await session.answer(approval!, "approve");
+        await session.until("settled", (event) => event.type === "turn.settled");
+        await session.send("Thanks.");
+        await session.until(
+          "next turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+
+    // The agent starts no tasks itself. The task tools arrive with the first waiting call and
+    // stay after it ends, so later requests keep the same tools.
+    const taskTools = ["eve__task_cancel", "eve__task_wait"];
+    expect(offered).toEqual([[], taskTools, taskTools, taskTools]);
+  });
+
+  it.each(["clear", "reset"] as const)(
+    "withdraws a waiting call's request on %s, and nothing reports later",
+    async (kind) => {
+      const prompts: string[] = [];
+      const { events, ran } = await withSession(
+        `edge-wait-${kind}`,
+        {
+          message: "Deploy it.",
+          model: scriptedModel(({ said }, raw) => {
+            prompts.push(JSON.stringify(raw));
+            if (said("Bob's aside") || said("Hello again")) return "Noted.";
+            return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+          }),
+          tools: [{ approval: true, name: "deploy" }],
+        },
+        async (session) => {
+          await session.next("asks");
+          const [approval] = session.approvals();
+          await session.send("Bob's aside.", BOB);
+          await session.until("the approval waits", (event) => event.type === "turn.paused");
+          await session.control(kind, kind === "reset" ? { reason: "start over" } : {});
+          if (kind === "reset") {
+            await session.until("ended", (event) => event.type === "session.ended");
+            return;
+          }
+          await session.until("cleared", (event) => event.type === "turn.settled");
+          await session.answer(approval!, "approve");
+          await session.send("Hello again.");
+          await session.until(
+            "next turn",
+            (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+          );
+        },
+      );
+
+      expect(ran).toEqual([]);
+      expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+        "interrupted",
+      ]);
+      expect(settlements(events)).toEqual(["call_deploy:interrupted"]);
+      expect(ofType(events, "task.started")).toEqual([]);
+      if (kind === "clear") expect(prompts.at(-1)).not.toContain("<task_result id=");
+    },
+  );
 });
 
 describe("models that fail", () => {
@@ -3122,9 +3305,9 @@ describe("controls between turns", () => {
 });
 
 describe("turns parked on their own prompt", () => {
-  // #4923: a turn parked on its continuation prompt is still alice's turn. The prompt takes its
-  // answer before any message, so bob's message waits behind it in her turn.
-  it("holds another principal's message behind its turn's budget prompt", async () => {
+  // #4923: a turn parked on its continuation prompt is still alice's turn, so
+  // bob's message waits for it to end instead of joining it.
+  it("keeps another principal's message out of a turn parked on its prompt", async () => {
     const seen: (readonly [string, string, unknown])[] = [];
     const { events } = await withSession(
       "edge-limit-foreign-message",
@@ -3163,24 +3346,24 @@ describe("turns parked on their own prompt", () => {
         seen.length = 0;
 
         await session.send("bob here", BOB);
-        await session.until(
-          "Bob's message waits behind the prompt",
-          (event) => event.type === "turn.paused" && event.data.turnId === "turn_1",
-        );
         await session.answer(prompt, DENY_OPTION_ID);
         await session.until(
           "declined",
           (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
         );
+        // Bob's message runs as his own turn, which parks on its own prompt.
+        await session.until(
+          "Bob's prompt",
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
+        );
       },
     );
 
-    // Declining ends Alice's turn; Bob's message stays in its conversation, unanswered.
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:cancelled"]);
     expect(seen).toEqual([
       ["(answer)", "turn_1", "alice"],
-      ["bob here", "turn_1", "alice"],
       ["turn.settled", "turn_1", "alice"],
+      ["bob here", "turn_2", "bob"],
     ]);
   });
 

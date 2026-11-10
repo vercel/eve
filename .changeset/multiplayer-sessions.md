@@ -4,7 +4,7 @@
 
 Let anyone in a shared session steer the running turn, and refuse calls that use the caller's identity after someone else has spoken until the caller speaks again.
 
-A message from another person now joins the running turn instead of waiting for it to end. The turn keeps its caller, `ctx.session.auth.sender` names who spoke last, and eve tells the model who sent a message when the speaker changes. While a turn waits on an approval, sign-in, or question, other people's messages wait for it to end and then join. Set `turnPolicy: "queue"` to keep every message waiting for the turn to end.
+A message from another person now joins the running turn instead of waiting for it to end. The turn keeps its caller, `ctx.session.auth.sender` names who spoke last, and eve tells the model who sent a message when the speaker changes. A message joins even while the turn waits on an approval, sign-in, or question; only the session-limit prompt keeps other people's messages waiting for a turn of their own. Set `turnPolicy: "queue"` to keep a message waiting for the turn to end, except while the turn waits on an approval or sign-in it asked for, which the message joins.
 
 After someone other than the caller speaks, a call that reads a user-scoped token or calls a `forwardPrincipal` connection fails with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`. A call to a remote agent that forwards the caller fails with a terminal error that carries the same instruction for the model and isn't a `ConnectionAuthorizationFailedError`. eve retries neither. The caller's next message releases their identity, and a call the caller approves keeps it. Sessions with one person don't change.
 

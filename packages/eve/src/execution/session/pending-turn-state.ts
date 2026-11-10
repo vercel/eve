@@ -5,7 +5,7 @@ import {
   storedProjection,
   type SessionView,
 } from "#harness/session-machine/view.js";
-import { taskWaits } from "#harness/step/park.js";
+import { holdsMessages, taskWaits } from "#harness/step/park.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
@@ -22,6 +22,8 @@ export type TurnPause =
       readonly on: "interaction";
       readonly attemptIds: readonly string[];
       readonly requestIds: readonly string[];
+      /** An open request takes its answer before any message, such as the budget prompt. */
+      readonly answerFirst?: true;
     } & TaskWake)
   /** Working tasks. Any of them settling resumes the turn. */
   | ({ readonly on: "tasks"; readonly taskIds: readonly string[] } & TaskWake)
@@ -61,6 +63,7 @@ export function pausedOnInteraction(
     ),
     on: "interaction",
     requestIds: [...ownOpenRequestIds(view)],
+    ...(holdsMessages(view) && { answerFirst: true as const }),
     ...wake,
   };
 }

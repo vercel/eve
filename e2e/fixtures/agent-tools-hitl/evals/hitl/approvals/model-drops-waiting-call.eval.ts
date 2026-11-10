@@ -6,7 +6,6 @@ import {
   aliceSession,
   approvalFor,
   asAlice,
-  expectNotRun,
   expectResolved,
   expectWaitsAsTask,
 } from "../helpers.ts";
@@ -14,7 +13,7 @@ import {
 /**
  * Alice asks for changes A and B, then says B is no longer needed while both approvals wait. Both
  * calls wait as tasks, and the model drops B with `eve__task_cancel`: B's approval is withdrawn
- * and its call never runs, while A's approval stays open.
+ * and its call ends without running, while A's approval stays open.
  */
 export default defineEval({
   description: "The model drops a call that waits on a person with eve__task_cancel.",
@@ -29,7 +28,12 @@ export default defineEval({
     const dropped = (await session.send(SAY.dropB, asAlice)).expectOk();
     dropped.calledTool("eve__task_cancel", { status: "completed", count: 1 });
     expectResolved(dropped, b, "withdrawn");
-    expectNotRun(dropped, "change-b");
+    // The dropped call ends as a cancelled task's call does, and never runs.
+    dropped.event("call.settled", {
+      count: 1,
+      data: { callId: b.call?.callId, outcome: "interrupted", reason: "task-cancel" },
+    });
+    dropped.calledTool("change-b", { count: 0, status: "completed" });
     expectWaitsAsTask(dropped, a);
     dropped.event("content.completed", { data: { phase: "reply", value: REPLY.droppedB } });
   },

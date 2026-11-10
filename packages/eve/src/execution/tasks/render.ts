@@ -142,8 +142,6 @@ export function renderTaskWaitResult(result: TaskWaitResult, waitedMs: number): 
       return `Stopped waiting after ${formatDuration(waitedMs)}; ${countWorking(result.working)}. ${resultsArriveLater(result.working.length)}`;
     case "interrupt":
       return `A new message arrived, so the wait ended after ${formatDuration(waitedMs)}; ${countWorking(result.working)}. Read the message, answer it if it asks you something, and decide whether it changes this work: ${interruptChoices(result.working.length)}`;
-    case "answered":
-      return `A person acted on a task that waits for them, so the wait ended after ${formatDuration(waitedMs)}; ${countWorking(result.working)}. ${resultsArriveLater(result.working.length)}`;
   }
 }
 

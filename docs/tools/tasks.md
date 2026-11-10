@@ -131,8 +131,9 @@ The provided `sleep` tool races its timer against the signal; see the example in
 ## What the model sees
 
 When the agent has an agent tool or a `task` or `serve` workflow tool, eve adds `eve__task_wait`
-and `eve__task_cancel`. eve also adds them while a [call waits on a person](#calls-that-wait-on-a-person). It also adds a short system prompt block about tasks, which depends on who
-reads the session:
+and `eve__task_cancel`. eve also adds them once a [call waits on a person](#calls-that-wait-on-a-person),
+and the session keeps them after that call ends. It also adds a short system prompt block about
+tasks, which depends on who reads the session:
 
 - **Root sessions:** a person reads each reply. The block tells the model to call `eve__task_wait`
   when it has nothing to say until a result arrives. It tells the model to reply now when the person
@@ -241,11 +242,13 @@ acts, the call becomes a task, and its approval or sign-in stays open:
 - When the person approves or completes the sign-in, the call runs, and its result arrives in a
   `task.result` message. A denial arrives the same way, as a failed result that says the call
   didn't run.
-- `eve__task_wait` returns when the person acts.
+- `eve__task_wait` returns once the call has its result. An answer eve refuses, such as another
+  person's press on an approval only its requester can answer, doesn't end the wait.
 - `eve__task_cancel` drops the call. Its approval ends as `withdrawn`, a sign-in no other call waits
-  on is withdrawn, and the call doesn't run.
-- The turn waits for the call as it does for any working task. While it has nothing else to do,
-  the stream reports `turn.paused` awaiting the open requests.
+  on is withdrawn, and the call doesn't run. Its `call.settled` reports `outcome: "interrupted"`
+  with `reason: "task-cancel"`, as a cancelled task's call does.
+- The turn waits for the call as it does for any working task. Cancelling the turn, clearing the
+  session, or a failed turn stops the call, and its task never reports.
 
 The stream reports no `task.started` or `task.ended` for these calls. The call's `call.requested`
 and `interaction.opened` stay open, and `call.settled` comes when the call runs, is denied, or is

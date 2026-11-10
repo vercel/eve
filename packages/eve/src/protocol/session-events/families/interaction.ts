@@ -103,7 +103,7 @@ export type InteractionOutcome =
 export interface InteractionSettledData {
   readonly interactionId: string;
   readonly outcome: InteractionOutcome;
-  /** Open, such as `superseded-by-message` for a withdrawal. */
+  /** Open, such as `asker-ended` for a withdrawal. */
   readonly reason?: string;
   /** The response that decided it, or what else settled it. */
   readonly cause?: Cause;

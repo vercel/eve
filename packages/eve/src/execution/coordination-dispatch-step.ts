@@ -69,6 +69,7 @@ async function dispatchCoordination(
   input: CoordinationDispatchInput,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
+    ...(input.callIds !== undefined && { callIds: input.callIds }),
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });

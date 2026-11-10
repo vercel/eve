@@ -22,15 +22,17 @@ import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
+import { isEmptyInput } from "#harness/hitl/index.js";
 import { readClientContext } from "#internal/client-context.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { Step } from "./context.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /**
- * Settles the calls the runtime ran for parked steps. Returns `undefined` while some are still
- * running: input queued behind them waits until they have. Otherwise returns the step's input
- * without the results it settled, and whether the step waited on any.
+ * Settles the calls the runtime ran for parked steps. While some still run, the step only weighs
+ * what else it brings, such as a person's action on a call that waits as a task, and returns
+ * `undefined` when it brings nothing else. Otherwise returns the step's input without the results
+ * it settled, and whether the step waited on any.
  */
 export async function settleRuntimeWork(
   step: Step,
@@ -48,7 +50,11 @@ export async function settleRuntimeWork(
     pendingCallIds: runtime.callIds,
     results: input?.runtimeActionResults ?? [],
   });
-  if (ready === undefined) return undefined;
+  if (ready === undefined) {
+    if (input === undefined) return undefined;
+    const { delegatedUsage: _usage, runtimeActionResults: _results, ...action } = input;
+    return isEmptyInput(action) ? undefined : { input: action, waited: true };
+  }
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));

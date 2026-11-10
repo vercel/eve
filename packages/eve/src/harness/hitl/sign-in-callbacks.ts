@@ -78,8 +78,8 @@ export function stepCallsBack(step: Pick<Step, "ctx" | "session">): CallsBack | 
 
 /**
  * Applies a transition that can end this session's own sign-in cards without an answer, as a
- * newer attempt replaces them. The sign-ins that waited on
- * such a card hear first that it ended (`signInsEnded`), so none waits on a card nobody sees.
+ * newer attempt replaces them. The sign-ins that waited on such a card hear first that it ended
+ * (`signInsEnded`), so none waits on a card nobody sees.
  */
 export async function applyEndingSignIns(
   step: Pick<Step, "apply" | "ctx" | "session" | "view">,

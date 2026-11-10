@@ -177,7 +177,7 @@ Client views retain observed history; hook and channel views can prune older fin
 
 ### Turns and interactions
 
-A turn waiting for an approval, question, or sign-in pauses rather than ends. `turn.paused.data.awaiting` lists the requests it waits on, as `{ interactionId }`. No event announces the turn resuming: the next event under it, such as `model.requested`, shows it's running. Only `turn.settled` ends it. A turn waiting on its own work, such as its tasks, stays running. When its only work left is calls that wait on a person as [tasks](/docs/tools/tasks#calls-that-wait-on-a-person), it reports `turn.paused` awaiting their requests.
+A turn waiting for an approval, question, or sign-in pauses rather than ends. `turn.paused.data.awaiting` lists the requests it waits on, as `{ interactionId }`. No event announces the turn resuming: the next event under it, such as `model.requested`, shows it's running. Only `turn.settled` ends it. A turn waiting on its own work, such as its tasks, stays running. A turn with calls that wait on a person as [tasks](/docs/tools/tasks#calls-that-wait-on-a-person) reports `turn.paused` awaiting their requests, even while its other tasks still work.
 
 The same pause can be reported more than once, such as when a message arrives that doesn't resume the turn. To notify someone once per pause, compare `awaiting` with the last one you saw.
 
@@ -332,7 +332,7 @@ Message sends default to `turnPolicy: "steer"`: the new message joins the runnin
 
 A steering message aborts the [`ctx.abortSignal`](/docs/tools/workflows#stop-early-for-a-new-message) of each `execute` workflow tool call the turn is waiting on. The call's questions end `withdrawn`, `sleep` and `ask_question` stop early, and the call ends with what its body returns. Steering ends an `eve__task_wait` but never interrupts a task, and a task's questions stay open.
 
-Anyone the channel lets into the session steers its running turn, and the turn keeps its caller. Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. A queued message still joins a turn that waits on an approval or sign-in it asked for. Structured `answers` answer the requests they name.
+Anyone the channel lets into the session steers its running turn, and the turn keeps its caller. Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. A queued message still joins a turn that waits on an approval or sign-in it asked for. While the turn waits on its session-limit prompt, other people's messages wait for a turn of their own. Structured `answers` answer the requests they name.
 
 Answer a human-in-the-loop approval with the channel's Approve or Deny controls. Only the person the turn serves can also answer with matching text. Any other text approves nothing and joins the turn as a message, even with `turnPolicy: "queue"`, because the turn can't end until a person acts. Calls already approved in the batch still run. The approval stays open, and its call waits as a task: once the approval is answered, the call's result reaches the model as a `task.result` message. See [Calls that wait on a person](/docs/tools/tasks#calls-that-wait-on-a-person). Cancelling the turn ends the approval as `interrupted`, and a later answer to it approves nothing.
 

@@ -226,8 +226,8 @@ export function fail(
     readonly terminal?: true;
   },
 ): Transition {
-  // The calls a sign-in stopped, or that wait as tasks, never run: the model reads that they
-  // stopped.
+  // The calls a sign-in stopped never run: the model reads that they stopped. Calls that wait
+  // as tasks stop with them, and their tasks never report.
   const stopped = view.turn.suspended.filter(
     (step) => (step.approved?.length ?? 0) > 0 || waitsAsTasks(step),
   );
@@ -1069,8 +1069,8 @@ export function stopInterruptedSteps(
 }
 
 /**
- * The `completed` steps' responses join history. A step that waits as tasks already joined it:
- * the results `messages` gives its calls leave it as their tasks' results instead.
+ * The `completed` steps' responses join history. A step that waits as tasks already joined it,
+ * so stopping it only ends its calls' tasks, which never report.
  */
 function commitSteps(
   turn: TurnState,
@@ -1080,13 +1080,7 @@ function commitSteps(
   const removed = new Set(completed);
   return {
     history: { append: completed.filter((step) => !waitsAsTasks(step)).flatMap(messages) },
-    turn: {
-      ...turn,
-      suspended: turn.suspended.flatMap((step) => {
-        if (!removed.has(step)) return [step];
-        return waitsAsTasks(step) ? [{ ...step, messages: [...messages(step)] }] : [];
-      }),
-    },
+    turn: { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) },
   };
 }
 

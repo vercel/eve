@@ -79,6 +79,14 @@ const TREE_FAMILY: Partial<Record<Family, TreeFamily>> = {
   turn: "turn",
 };
 
+/** Facts a step writes only once it has read its input: it ran a call or the model, or stopped. */
+const STEP_ENDS: ReadonlySet<string | undefined> = new Set([
+  "call.started",
+  "model.requested",
+  "turn.paused",
+  "turn.settled",
+]);
+
 const ID_FIELDS: Readonly<Record<string, TreeFamily>> = {
   callId: "call",
   changeId: "change",
@@ -118,8 +126,15 @@ export function createStreamChecker(
   const view = options.seed === undefined ? emptySessionView() : copyView(options.seed);
   const announcedParts = new Set<string>();
   const announcedCalls = new Set<string>();
-  /** Approvals decided apart from their batch, until a message joins their turn. */
-  const apart = new Map<string, { readonly interactionId: string; readonly since: number }>();
+  /**
+   * Approvals decided apart from their batch before their turn read a message, with the
+   * deliveries admitted then: the step that decided one reads one of them with a message before
+   * it runs a call or the model, or stops (`checkApart`).
+   */
+  const apart = new Map<
+    string,
+    { readonly turnId: string | undefined; readonly deliveryIds: Set<string> }
+  >();
   let lastPosition = view.position - 1;
 
   return {
@@ -179,7 +194,6 @@ export function createStreamChecker(
       });
 
       checkWaitPromises(line.facts as readonly Fact[], report);
-      checkApart(report);
       for (const { index, ref } of closed) {
         const owner = ref === "session" ? "the session" : `${ref.family} "${ref.id}"`;
         for (const open of openUnder(view, ref)) {
@@ -312,14 +326,16 @@ export function createStreamChecker(
 
   /**
    * What a line that announces a wait or decides approvals promises, checked once it folds: an
-   * announced turn waits on a person, and a person's decision settles its whole batch unless a
-   * message joins its turn (`checkApart`).
+   * announced turn waits on a person, and a person's decision settles its whole batch. A message
+   * the turn read while the batch waited lets each approval still waiting wait as a task, settled
+   * on its own, and so does one the deciding step reads (`checkApart`).
    */
   function checkWaitPromises(
     facts: readonly Fact[],
     report: (rule: ViolationRule, message: string, at: { readonly index: number }) => void,
   ): void {
     facts.forEach((fact, index) => {
+      checkApart(fact, index, report);
       const turnId =
         fact?.type === "turn.paused" ||
         (fact?.type === "delivery.settled" && fact.data.outcome === "awaiting-input")
@@ -335,32 +351,59 @@ export function createStreamChecker(
         row?.request.kind === "approval" && row.origin === undefined;
       const row = view.interactions[fact.data.interactionId];
       if (!own(row)) return;
-      const open = Object.values(view.interactions).filter(
+      const open = Object.values(view.interactions).some(
         (other) =>
           own(other) && other.introducedAt === row!.introducedAt && other.status === "open",
       );
+      if (!open) return;
       const owner = interactionOwner(view, row!).turnId;
-      if (open.length > 0 && owner !== undefined && !apart.has(owner))
-        apart.set(owner, { interactionId: row!.interactionId, since: row!.introducedAt });
+      const joined = Object.values(view.deliveries).some(
+        (delivery) =>
+          delivery.turnId === owner &&
+          (delivery.consumedAt ?? -1) > row!.introducedAt &&
+          (delivery.parts?.length ?? 0) > 0,
+      );
+      if (joined) return;
+      const deliveryIds = Object.values(view.deliveries)
+        .filter((delivery) => delivery.status === "admitted")
+        .map((delivery) => delivery.deliveryId);
+      if (deliveryIds.length > 0)
+        apart.set(row!.interactionId, { deliveryIds: new Set(deliveryIds), turnId: owner });
+      else
+        report("batch-settles-together", `"${row!.interactionId}" settled apart from its batch.`, {
+          index,
+        });
     });
   }
 
   /**
-   * A message that joins the turn lets each approval it waited on wait as a task, settled on its
-   * own: one decided apart from its batch is fine once one does, in the step that read it or after.
-   * A turn that ends without one decided its batch apart.
+   * An approval decided apart waits for its step to read, with a message, a delivery admitted by
+   * then. The step reads its input before it runs a call or the model, or stops, so any of those
+   * first, or the deliveries going without a message, decided the batch apart.
    */
-  function checkApart(report: (rule: ViolationRule, message: string) => void): void {
-    for (const [turnId, { interactionId, since }] of apart) {
-      const joined = Object.values(view.deliveries).some(
-        (row) =>
-          row.turnId === turnId && (row.consumedAt ?? -1) > since && (row.parts?.length ?? 0) > 0,
-      );
-      if (joined) apart.delete(turnId);
-      else if (view.turns[turnId]?.status === "settled") {
-        apart.delete(turnId);
-        report("batch-settles-together", `"${interactionId}" settled apart from its batch.`);
-      }
+  function checkApart(
+    fact: Fact,
+    index: number,
+    report: (rule: ViolationRule, message: string, at: { readonly index: number }) => void,
+  ): void {
+    for (const [interactionId, { deliveryIds, turnId }] of apart) {
+      if (fact?.type === "delivery.consumed" || fact?.type === "delivery.settled") {
+        if (!deliveryIds.has(fact.data.deliveryId)) continue;
+        if (
+          fact.type === "delivery.consumed" &&
+          fact.data.turnId === turnId &&
+          fact.data.parts.length > 0
+        ) {
+          apart.delete(interactionId);
+          continue;
+        }
+        deliveryIds.delete(fact.data.deliveryId);
+        if (deliveryIds.size > 0) continue;
+      } else if (!STEP_ENDS.has(fact?.type)) continue;
+      apart.delete(interactionId);
+      report("batch-settles-together", `"${interactionId}" settled apart from its batch.`, {
+        index,
+      });
     }
   }
 

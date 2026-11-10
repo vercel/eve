@@ -185,9 +185,7 @@ export class SessionInputQueue {
   ): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
-        entry.kind === "delivery" &&
-        admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn, awaitsPerson(entry.sequence, options)),
+        entry.kind === "delivery" && admitted.has(entry.sequence) && steers(entry, turn, options),
     );
     const run = oneSender(steering);
     if (run.length === 0) return undefined;
@@ -201,12 +199,14 @@ export class SessionInputQueue {
   }
 
   /** Whether an admitted delivery would steer the running turn. */
-  hasSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): boolean {
+  hasSteering(
+    admitted: ReadonlySet<number>,
+    turn: SteeringTurn,
+    options?: SteeringOptions,
+  ): boolean {
     return this.entries.some(
       (entry) =>
-        entry.kind === "delivery" &&
-        admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn),
+        entry.kind === "delivery" && admitted.has(entry.sequence) && steers(entry, turn, options),
     );
   }
 
@@ -290,6 +290,11 @@ export interface SteeringOptions {
    * they stay queued and never answer it.
    */
   readonly heldSince?: number;
+  /**
+   * An open request takes its answer before any message, such as the budget prompt: only the
+   * turn's caller's messages join it, and anyone else's waits for its own turn.
+   */
+  readonly callerOnly?: boolean;
 }
 
 /**
@@ -328,9 +333,17 @@ export function isCallerDelivery(delivery: DeliverHookPayload, turn: SteeringTur
   );
 }
 
-/** Whether the turn waits on a person for the delivery admitted at `sequence`. */
-function awaitsPerson(sequence: number, options: SteeringOptions | undefined): boolean {
-  return options?.heldSince !== undefined && sequence >= options.heldSince;
+/** Whether a queued delivery steers the running turn as `options` describe its wait. */
+function steers(
+  entry: QueuedDelivery,
+  turn: SteeringTurn,
+  options: SteeringOptions | undefined,
+): boolean {
+  const awaitsPerson = options?.heldSince !== undefined && entry.sequence >= options.heldSince;
+  return (
+    isSteeringDelivery(entry.delivery, turn, awaitsPerson) &&
+    (options?.callerOnly !== true || isCallerDelivery(entry.delivery, turn))
+  );
 }
 
 /**

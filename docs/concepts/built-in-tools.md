@@ -461,7 +461,7 @@ The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool
 
 ### `eve__task_wait` and `eve__task_cancel`
 
-eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks). These are the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, the `workflow` tool, and authored workflow tools that define `task(input, ctx)` or `serve(receive, ctx)`. There is no add command.
+eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks). These are the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, the `workflow` tool, and authored workflow tools that define `task(input, ctx)` or `serve(receive, ctx)`. eve also adds them once a [call waits on a person](/docs/tools/tasks#calls-that-wait-on-a-person) as a task, and the session keeps them from then on. There is no add command.
 
 - `eve__task_wait({ timeoutSeconds? })` waits until any task has a result, a new message arrives, or `timeoutSeconds` pass. It returns at once when a result is already waiting. The turn stays running, not paused, because `turn.paused` only reports approvals, questions, and other requests for input. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so. When the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve), it says the task had no work to stop. An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.

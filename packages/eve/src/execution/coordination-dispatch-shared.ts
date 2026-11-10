@@ -46,6 +46,8 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
+  /** Only these calls' runs start, when the turn already runs its other calls. */
+  readonly callIds?: readonly string[];
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -100,13 +102,18 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
  * run starts. Returns undefined when no actions are pending.
  */
 export async function prepareCoordinationDispatch(input: {
+  readonly callIds?: readonly string[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<PreparedCoordinationDispatch | undefined> {
   const durableSession = readDurableSession(input.sessionState);
   const waiting = runtimeWait(durableSession.state);
   if (waiting === undefined) return undefined;
-  const requests = waiting.tasks;
+  const { callIds } = input;
+  const requests =
+    callIds === undefined
+      ? waiting.tasks
+      : waiting.tasks.filter((task) => callIds.includes(task.callId));
   if (requests.length === 0) return undefined;
   const turnId =
     waiting.event.turnId || activeTurnId(turnPosition(storedProjection(durableSession.state)));

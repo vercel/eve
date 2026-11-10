@@ -29,7 +29,7 @@ export interface StepSource {
   readonly finalReplyOnly: boolean;
   /** A tool's `endsTurn` applies, which its description then says; `false` where omitted. */
   readonly endsTurn?: boolean;
-  readonly session: Pick<HarnessSession, "rootSessionId">;
+  readonly session: Pick<HarnessSession, "rootSessionId" | "state">;
   readonly view?: () => SessionView;
 }
 

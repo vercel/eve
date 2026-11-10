@@ -329,6 +329,7 @@
               }
             }
           },
+          "eve.tasks.personWaits": true,
           "eve.work": {
             "tasks": [
               {

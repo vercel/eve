@@ -12,7 +12,7 @@ import type { SessionInputQueue, SteeringOptions } from "#execution/session/inpu
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
-import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
+import { isBetweenTurns, runtimeWait, storedProjection } from "#harness/session-machine/view.js";
 import { renderTaskWaitResult } from "#execution/tasks/render.js";
 import {
   answerTaskCancel,
@@ -45,6 +45,7 @@ import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
   TurnStepPayload,
+  TurnStepResult,
 } from "#execution/session/turn-step-types.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { exhaustedStepError, normalizeSerializableError } from "#execution/workflow-errors.js";
@@ -190,37 +191,19 @@ export class SessionExecution {
     delivery: TurnStepPayload | undefined,
   ): Promise<TurnOutcome> {
     let nextStepInput: TurnStepPayload | undefined = delivery;
+    // A step the paused turn already ran, for a person's action, that left it waiting on nothing
+    // it waited on before: the loop takes its result next.
+    let ran: TurnStepResult | undefined;
     // Only the first step binds the caller. A caller that steers in mid-turn is
     // replied to at its own address (`TurnOutcome.caller`) and is bound by the
     // next turn, so this turn's forwarding keeps its original caller.
     let bindCaller = turn.caller;
 
     while (true) {
-      const { cursor } = this.input;
       const caller = bindCaller;
       bindCaller = undefined;
-      const observation = this.input.inbox.handoverObservation;
-      const handover =
-        observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
-      // A step that fails every attempt fails its turn, not the session; only a failed recovery
-      // ends the session. What fails once a step has returned, such as adopting its state, is
-      // not the step's failure, so it is not recovered.
-      const result = await cursor.advanceWithHistory((state) => {
-        const run = (recover?: { readonly error: unknown }) =>
-          turnStep({
-            ...state,
-            handover,
-            abortSignal: turn.signal,
-            caller,
-            input: nextStepInput,
-            recover,
-            steeringSignal: turn.steeringSignal,
-          });
-        return run().catch((error: unknown) =>
-          run({ error: normalizeSerializableError(exhaustedStepError(error)) }),
-        );
-      });
-      if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
+      const result = ran ?? (await this.runStep(turn, nextStepInput, caller));
+      ran = undefined;
       if (result.compacted === true) turn.compacted = true;
 
       // Deliveries the boundary admits next arrived while the step ran. A step
@@ -257,7 +240,8 @@ export class SessionExecution {
         case "paused": {
           const resumed = await this.resume(turn, result, stepAdmission);
           if (resumed === "cancelled") return await this.finishCancelledTurn(turn);
-          nextStepInput = resumed;
+          if (resumed !== undefined && "ran" in resumed) ran = resumed.ran;
+          else nextStepInput = resumed;
           continue;
         }
         case "continue":
@@ -265,6 +249,38 @@ export class SessionExecution {
           continue;
       }
     }
+  }
+
+  /**
+   * Runs one step of the turn. A step that fails every attempt fails its turn, not the session;
+   * only a failed recovery ends the session. What fails once a step has returned, such as
+   * adopting its state, is not the step's failure, so it is not recovered.
+   */
+  private async runStep(
+    turn: ActiveTurn,
+    input: TurnStepPayload | undefined,
+    caller?: TurnCaller,
+  ): Promise<TurnStepResult> {
+    const observation = this.input.inbox.handoverObservation;
+    const handover =
+      observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
+    const result = await this.input.cursor.advanceWithHistory((state) => {
+      const run = (recover?: { readonly error: unknown }) =>
+        turnStep({
+          ...state,
+          handover,
+          abortSignal: turn.signal,
+          caller,
+          input,
+          recover,
+          steeringSignal: turn.steeringSignal,
+        });
+      return run().catch((error: unknown) =>
+        run({ error: normalizeSerializableError(exhaustedStepError(error)) }),
+      );
+    });
+    if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
+    return result;
   }
 
   /** The next step's input: what resumed the turn, behind any steering admitted meanwhile. */
@@ -277,7 +293,11 @@ export class SessionExecution {
     if (delivery === undefined && input.runtimeResults === undefined) return undefined;
     if (delivery === undefined) return input;
     // Another person's message waits behind this one: the step only reads, and the next reads theirs.
-    return { ...input, delivery, ...(turn.hasSteeringWaiting() && { inputOnly: true as const }) };
+    return {
+      ...input,
+      delivery,
+      ...(turn.hasSteeringWaiting(options) && { inputOnly: true as const }),
+    };
   }
 
   /**
@@ -286,18 +306,22 @@ export class SessionExecution {
    * - an interaction's answer, a sign-in callback, or a message, for the requests and sign-ins it
    *   raised. A message joins whoever sent it, even a queued one admitted after the step that
    *   raised the request (`heldSince`); one admitted before it was sent before the request
-   *   existed, and waits for the turn to end;
+   *   existed, and waits for the turn to end. While a request takes its answer before any
+   *   message, such as the budget prompt, only the caller's messages join;
    * - one of its tasks settling. Steering interrupts that wait;
    * - every call's result. Steering interrupts the workflow tool calls, which still report.
    *
-   * A person acting on a call that waits as a task wakes the turn however it waits: the step reads
-   * the answer or callback, and an `eve__task_wait` the turn is parked on returns.
+   * A person acting on a call that waits as a task wakes the turn however it waits. While it
+   * waits on calls, a step of its own weighs the action and the calls keep waiting: an
+   * `eve__task_wait` returns only once the action gives a task its result, so a refused answer
+   * costs no model call. When that step leaves the turn waiting on no calls, as a failed turn
+   * does, the turn goes on from it (`ran`).
    */
   private async resume(
     turn: ActiveTurn,
     paused: TurnPause,
     heldSince: number,
-  ): Promise<TurnStepPayload | undefined | "cancelled"> {
+  ): Promise<TurnStepPayload | undefined | "cancelled" | { readonly ran: TurnStepResult }> {
     const earlierCaller = earlierRemoteCaller(this.input.cursor.serializedContext);
     if (paused.on === "interaction" && earlierCaller !== undefined) {
       throw new Error(formatEarlierRemoteCallerInputError(earlierCaller));
@@ -312,19 +336,37 @@ export class SessionExecution {
     }
     const person = personWake(paused);
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
-    // A person's action the calls wait holds for the step that reads their results.
-    let acted: TurnStepPayload["delivery"];
     let interrupted = false;
     while (true) {
       if (person !== undefined && calls === undefined) {
         const action = await this.takePersonAction(turn, person);
         if (action !== undefined) return { delivery: action };
-        const steering = await this.withSteering(turn, {}, { heldSince });
+        const steering = await this.withSteering(
+          turn,
+          {},
+          {
+            heldSince,
+            ...(paused.on === "interaction" && paused.answerFirst && { callerOnly: true }),
+          },
+        );
         if (steering !== undefined) return steering;
       }
-      if (person !== undefined && calls !== undefined && acted === undefined) {
-        acted = await this.takePersonAction(turn, person);
-        if (acted !== undefined) await calls.personActed();
+      if (person !== undefined && calls !== undefined) {
+        const action = await this.takePersonAction(turn, person);
+        if (action !== undefined) {
+          const ran = await this.runStep(turn, { delivery: action });
+          if (ran.action === "cancelled") return "cancelled";
+          const waiting =
+            ran.action === "paused" || ran.action === "continue"
+              ? runtimeWait(this.input.cursor.sessionState.snapshot.session.state)
+              : undefined;
+          if (waiting === undefined) return { ran };
+          // A call the action let run that needs a run of its own, as an approved workflow
+          // tool's does, starts now, and the turn waits on it with the rest.
+          const started = waiting.callIds.filter((callId) => !calls.waitsOn(callId));
+          if (started.length > 0) calls.follow(started, await this.dispatchRuns(started));
+          continue;
+        }
       }
       if (
         paused.on === "tasks" &&
@@ -334,11 +376,7 @@ export class SessionExecution {
         return await this.withSteering(turn, {});
       }
       const runtimeResults = await calls?.ready(interrupted);
-      if (runtimeResults !== undefined) {
-        return acted === undefined
-          ? await this.withSteering(turn, { runtimeResults })
-          : { delivery: acted, runtimeResults };
-      }
+      if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
 
       const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
       if (next === "cancelled") return next;
@@ -395,14 +433,15 @@ export class SessionExecution {
   }
 
   /**
-   * Starts the workflow tool runs a parked step requested, and returns the
-   * results of any that settled at once. Task tool calls need no dispatch: the
+   * Starts the workflow tool runs a parked step requested, only those of `callIds` when given,
+   * and returns the results of any that settled at once. Task tool calls need no dispatch: the
    * session answers them itself.
    */
-  private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
+  private async dispatchRuns(callIds?: readonly string[]): Promise<readonly RuntimeActionResult[]> {
     const { cursor } = this.input;
     const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
       dispatchCoordinationStep({
+        ...(callIds !== undefined && { callIds }),
         serializedContext,
         sessionState,
         workflowToolRunOwner: {
@@ -493,7 +532,7 @@ function personWake(paused: TurnPause): PersonWake | undefined {
  */
 class CallWait {
   private readonly cursor: SessionStateCursor;
-  private readonly callIds: readonly string[];
+  private readonly callIds: string[];
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
   /** By call id, so an outcome delivered twice counts once. */
@@ -506,14 +545,20 @@ class CallWait {
     dispatched: readonly RuntimeActionResult[],
   ) {
     this.cursor = cursor;
-    this.callIds = callIds;
+    this.callIds = [...callIds];
     const acceptedAtMs = Date.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
   }
 
-  /** A person acted on a call that waits as a task: every parked `eve__task_wait` returns. */
-  async personActed(): Promise<void> {
-    this.taskWaits = await this.resolveTaskWaits(false, true);
+  waitsOn(callId: string): boolean {
+    return this.callIds.includes(callId);
+  }
+
+  /** Waits on calls started meanwhile too, with the results of any that settled at once. */
+  follow(callIds: readonly string[], dispatched: readonly RuntimeActionResult[]): void {
+    this.callIds.push(...callIds);
+    const acceptedAtMs = Date.now();
+    for (const result of dispatched) this.accept(result, acceptedAtMs);
   }
 
   /** Every call's result, once each has one. */
@@ -608,11 +653,11 @@ class CallWait {
   }
 
   /** Answers every `eve__task_wait` that can return now; returns the ones still waiting. */
-  private async resolveTaskWaits(interrupted: boolean, answered = false): Promise<TaskWait[]> {
+  private async resolveTaskWaits(interrupted: boolean): Promise<TaskWait[]> {
     const table = sessionTaskTable(this.cursor);
     const waiting: TaskWait[] = [];
     for (const wait of this.taskWaits) {
-      const result = taskWaitResult(table, { answered, interrupted, timedOut: wait.timedOut });
+      const result = taskWaitResult(table, { interrupted, timedOut: wait.timedOut });
       if (result === undefined) {
         waiting.push(wait);
         continue;

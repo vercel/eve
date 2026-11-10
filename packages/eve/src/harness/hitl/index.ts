@@ -19,7 +19,12 @@ import type {
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
-import { createTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
+import {
+  createTask,
+  markPersonWaits,
+  readTaskTable,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
 import {
   askApprovals,
   approvalMemory,
@@ -48,7 +53,7 @@ export {
   type HumanInputIntake,
 } from "./intake.js";
 export { openDeferredApprovals, queueInput, withdrawWaitingCalls } from "./approvals.js";
-export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
+export { compactInput, isEmptyInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 
 /**
@@ -89,21 +94,20 @@ export async function waitOnPeopleAsTasks(step: Step): Promise<void> {
   const calls = waitingCalls(step.view());
   if (calls.length === 0) return;
   let table = readTaskTable(step.session.state);
-  const taskIds: Record<string, string> = {};
-  for (const { callId, toolName, turnId } of calls) {
+  const tasks = calls.map((call) => {
     const created = createTask(table, {
       awaitsPerson: true,
-      callId,
+      callId: call.callId,
       kind: "tool",
-      name: toolName,
+      name: call.toolName,
       resumable: false,
-      turnId,
+      turnId: call.turnId,
     });
     table = created.table;
-    taskIds[callId] = created.taskId;
-  }
-  step.session = writeTaskTable(step.session, table);
-  const transition = waitAsTasks(step.view(), { taskIds });
+    return { ...call, taskId: created.taskId };
+  });
+  step.session = markPersonWaits(writeTaskTable(step.session, table));
+  const transition = waitAsTasks(step.view(), { calls: tasks });
   await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 

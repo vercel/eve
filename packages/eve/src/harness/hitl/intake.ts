@@ -421,20 +421,15 @@ function hasTurnInput(input: HarnessStepInput | undefined): boolean {
 
 /**
  * Whether the caller approved the call: it then runs with their identity whoever spoke last.
- * The caller approves a call by answering its approval, or by completing a sign-in it stopped on
- * for them. Another person's approval, which a response policy allowed, doesn't release it.
+ * Another person's approval, which a response policy allowed, doesn't release it, and a call
+ * that only stopped for a sign-in was asked nothing: it runs with the sender it was asked under,
+ * who passed the caller's confirmation before the sign-in opened.
  */
 function approvedByCaller(approval: ApprovedCall): boolean {
-  const caller = principalOf(sessionCaller());
-  // A person's sign-in is the caller's: a call only gets a person's credentials as the caller.
-  const signedIn = (approval.signIns ?? []).some(
-    (challenge) =>
-      challenge.principal?.type === "user" &&
-      challenge.candidateId === undefined &&
-      principalOf(challenge.requester) === caller,
-  );
-  if (signedIn) return true;
   if (approval.interactionId === undefined) return false;
   // With no response policy, no responder is named: the requester, who is the caller, answered.
-  return approval.responder === undefined || principalOf(approval.responder) === caller;
+  return (
+    approval.responder === undefined ||
+    principalOf(approval.responder) === principalOf(sessionCaller())
+  );
 }

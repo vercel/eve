@@ -109,6 +109,25 @@ export interface TaskTable {
 
 const EMPTY_TABLE: TaskTable = { tasks: [] };
 
+/**
+ * Set once a call in the session waits on a person as a task. The session offers the task tools
+ * from then on, so its prompt and tool list stay stable and history never calls a tool it no
+ * longer offers.
+ */
+const PERSON_WAITS_STATE_KEY = "eve.tasks.personWaits";
+
+/** Whether a call in the session has waited on a person as a task. */
+export function hadPersonWaits(state: SessionStateMap | undefined): boolean {
+  return state?.[PERSON_WAITS_STATE_KEY] === true;
+}
+
+/** Records that a call in the session waits on a person as a task; see `hadPersonWaits`. */
+export function markPersonWaits<T extends { readonly state?: SessionStateMap }>(session: T): T {
+  return hadPersonWaits(session.state)
+    ? session
+    : { ...session, state: { ...session.state, [PERSON_WAITS_STATE_KEY]: true } };
+}
+
 export function readTaskTable(state: SessionStateMap | undefined): TaskTable {
   const stored = readRunningWork(state).tasks;
   if (stored.length === 0) return EMPTY_TABLE;
@@ -194,12 +213,7 @@ export function tasksWithResults(table: TaskTable): readonly TaskRecord[] {
  */
 export function taskWaitResult(
   table: TaskTable,
-  wake: {
-    readonly interrupted: boolean;
-    readonly timedOut: boolean;
-    /** A person acted on a task that waits for them. */
-    readonly answered?: boolean;
-  },
+  wake: { readonly interrupted: boolean; readonly timedOut: boolean },
 ): TaskWaitResult | undefined {
   const settled = tasksWithResults(table).map((record) => ({
     id: record.id,
@@ -208,7 +222,6 @@ export function taskWaitResult(
   const working = workingTasks(table).map((record) => record.id);
   if (settled.length > 0 || working.length === 0) return { settled, status: "settled", working };
   if (wake.interrupted) return { status: "interrupt", working };
-  if (wake.answered === true) return { status: "answered", working };
   if (wake.timedOut) return { status: "timeout", working };
   return undefined;
 }
@@ -292,6 +305,20 @@ export function settleWaitingCall(
           ? { error: JSON.stringify(output.value), status: "failed" }
           : { output: output as JsonValue, status: "completed" };
   return settleTaskCalls(table, { callIds: [toolCallId], outcome, taskId: input.taskId }).table;
+}
+
+/**
+ * Drops the tasks of calls that waited on a person and stopped without a result, as when the
+ * model dropped them or the turn was cancelled, failed, or interrupted: `waiting` names the calls
+ * that still wait. A stopped task never reports.
+ */
+export function dropStoppedWaits(table: TaskTable, waiting: ReadonlySet<string>): TaskTable {
+  const stopped = (record: TaskRecord) =>
+    record.awaitsPerson === true &&
+    record.calls.length > 0 &&
+    !record.calls.some(({ callId }) => waiting.has(callId));
+  const tasks = table.tasks.filter((record) => !stopped(record));
+  return tasks.length === table.tasks.length ? table : { ...table, tasks };
 }
 
 /** Drops a task that never started, such as one past the cap. */
