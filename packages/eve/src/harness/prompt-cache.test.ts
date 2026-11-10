@@ -6,6 +6,7 @@ import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
   mergeGatewayAutoCaching,
+  omitGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
 const fiveMinutes = { ttl: "5m" } as const;
@@ -92,6 +93,32 @@ describe("mergeGatewayAutoCaching", () => {
     const snapshot = JSON.parse(JSON.stringify(base));
     mergeGatewayAutoCaching(base, "anthropic");
     expect(base).toEqual(snapshot);
+  });
+});
+
+describe("omitGatewayAutoCaching", () => {
+  it("drops an authored automatic caching and keeps the other gateway options", () => {
+    expect(
+      omitGatewayAutoCaching({ gateway: { caching: "auto", order: ["anthropic"] }, other: 1 }),
+    ).toEqual({ gateway: { order: ["anthropic"] }, other: 1 });
+  });
+
+  it("keeps a caching value other than auto", () => {
+    expect(omitGatewayAutoCaching({ gateway: { caching: false } })).toEqual({
+      gateway: { caching: false },
+    });
+  });
+
+  it("passes options without a gateway block through", () => {
+    expect(omitGatewayAutoCaching({ anthropic: { thinking: true } })).toEqual({
+      anthropic: { thinking: true },
+    });
+  });
+
+  it("does not mutate the input object", () => {
+    const base = { gateway: { caching: "auto" } };
+    omitGatewayAutoCaching(base);
+    expect(base).toEqual({ gateway: { caching: "auto" } });
   });
 });
 

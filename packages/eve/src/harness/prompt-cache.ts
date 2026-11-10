@@ -73,6 +73,22 @@ export function mergeGatewayAutoCaching(
 }
 
 /**
+ * Returns `providerOptions` without an authored `gateway.caching: "auto"`. Under automatic caching
+ * Gateway ignores a 1-hour TTL, so a model that carries eve's own breakpoints must not send it.
+ * Any other `gateway.caching` value, such as `false`, stays.
+ */
+export function omitGatewayAutoCaching(
+  providerOptions: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const gateway = providerOptions.gateway;
+  if (gateway === null || typeof gateway !== "object" || Array.isArray(gateway)) {
+    return { ...providerOptions };
+  }
+  const { caching, ...rest } = gateway as Record<string, unknown>;
+  return { ...providerOptions, gateway: caching === "auto" ? rest : gateway };
+}
+
+/**
  * Returns a new ToolSet where the last tool entry carries the Anthropic
  * cache marker on `providerOptions`. Used for Anthropic-cache models
  * to place a stable breakpoint at the end of the tools block, caching the

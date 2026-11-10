@@ -187,6 +187,34 @@ describe("buildStepHooks", () => {
     ]);
   });
 
+  it("removes an authored automatic caching option from a Gateway model with a 1-hour cache", async () => {
+    const hooks = buildStepHooks({
+      model: {
+        id: "anthropic/claude-sonnet-4-5",
+        providerOptions: { gateway: { caching: "auto", order: ["anthropic"] } },
+      },
+      profile: resolveModelProfile("anthropic/claude-sonnet-4-5", { anthropic: { ttl: "1h" } }),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [{ content: "a", role: "user" }],
+      model: "anthropic/claude-sonnet-4-5",
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.providerOptions).toEqual({
+      gateway: { order: ["anthropic"], sessionId: "session-test" },
+    });
+  });
+
   it("marks an opaque Bedrock profile with the authored Anthropic cache TTL", async () => {
     const model = new MockLanguageModelV3({
       modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",

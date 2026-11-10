@@ -21,7 +21,11 @@ import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { ModelProfile } from "#harness/model-profile.js";
-import { applyConversationCacheControl, mergeGatewayAutoCaching } from "#harness/prompt-cache.js";
+import {
+  applyConversationCacheControl,
+  mergeGatewayAutoCaching,
+  omitGatewayAutoCaching,
+} from "#harness/prompt-cache.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import { type HarnessEmitFn, type HarnessSession } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
@@ -167,16 +171,17 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       providerOptions: input.model.providerOptions,
       session,
     });
-    // A Gateway model with eve's own breakpoints (`anthropicCache`) must not get `caching: "auto"`.
+    // A Gateway model with eve's own breakpoints (`anthropicCache`) must not get `caching: "auto"`,
+    // whether eve would add it or the author set it.
     if (profile.gateway && profile.anthropicCache === undefined) {
       stepResult.providerOptions = mergeGatewayAutoCaching(
         providerOptions,
         profile.provider,
       ) as NonNullable<typeof stepResult.providerOptions>;
     } else if (providerOptions !== undefined) {
-      stepResult.providerOptions = providerOptions as NonNullable<
-        typeof stepResult.providerOptions
-      >;
+      stepResult.providerOptions = (
+        profile.gateway ? omitGatewayAutoCaching(providerOptions) : providerOptions
+      ) as NonNullable<typeof stepResult.providerOptions>;
     }
 
     return stepResult;
