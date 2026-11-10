@@ -1105,43 +1105,47 @@ describe("calls in flight", () => {
     );
   });
 
-  it("reads another person's typed approve as a message, never as the caller's answer", async () => {
+  it.each([
+    [
+      "another person's typed approve as a message, never as the caller's answer",
+      BOB,
+      ["Waiting for Alice.", "Deployed."],
+    ],
+    ["the caller's typed approve as the answer it stands for", ALICE, ["Deployed."]],
+  ] as const)("reads %s", async (_label, typist, replies) => {
     const { events, ran } = await withSession(
-      "edge-foreign-typed-approve",
+      `edge-typed-approve-${typist.principalId}`,
       {
-        message: "Prepare and deploy.",
-        model: scriptedModel(({ results, said }) =>
-          said("Prepare") && results.length === 0
-            ? [
-                { toolName: "prepare", toolCallId: "call_prepare" },
-                { toolName: "deploy", toolCallId: "call_deploy" },
-              ]
-            : "Done.",
-        ),
-        // The approval is asked once the workflow call beside it ends, so the turn waits on
-        // that call, where anyone's message steers.
-        tools: [
-          { name: "prepare", workflow: holdUntilAbortedWorkflow },
-          { approval: true, name: "deploy" },
-        ],
+        message: "Deploy it.",
+        model: scriptedModel(({ results, said }, raw) => {
+          if (readsTaskResult(raw) || results.length > 0) return "Deployed.";
+          return said("approve")
+            ? "Waiting for Alice."
+            : [{ toolName: "deploy", toolCallId: "call_deploy" }];
+        }),
+        tools: [{ approval: true, name: "deploy" }],
       },
       async (session) => {
-        await session.until("started", (event) => event.type === "call.started");
-        await session.send("approve", BOB);
-        // Bob's text joins the turn as a message. The approval opens once the workflow call
-        // ends, and stays open while the model reads his message.
-        await session.until("the approval waits", (event) => event.type === "turn.paused");
-        expect(settlements(session.events())).toEqual(["call_prepare:completed"]);
-        expect(ofType(session.events(), "interaction.settled")).toEqual([]);
-        await session.answer(session.approvals()[0]!, "approve");
-        await session.until("done", (event) => event.type === "turn.settled");
+        await session.next("asks");
+        // The turn is parked on Alice's open approval when the text arrives.
+        await session.send("approve", typist);
+        const read = await session.until(
+          "the text is read",
+          (event) => event.type === "turn.paused" || event.type === "turn.settled",
+        );
+        if (typist === BOB) {
+          // Bob's text joins the turn as a message, and the approval waits as a task.
+          expect(ofType(read, "interaction.settled")).toEqual([]);
+          await session.answer(session.approvals()[0]!, "approve");
+          await session.until("done", (event) => event.type === "turn.settled");
+        }
       },
     );
 
     expect(ran).toEqual(["deploy"]);
-    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
-      "accepted",
-    ]);
+    expect(ofType(events, "content.completed").map((event) => event.data.value)).toEqual(replies);
+    // Only Alice's answer was submitted: Bob's text submitted none.
+    expect(ofType(events, "response.submitted")).toHaveLength(1);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
