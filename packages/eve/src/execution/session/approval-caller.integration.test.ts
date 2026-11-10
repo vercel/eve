@@ -66,6 +66,36 @@ const scriptedModel = markMockModel(
   }),
 );
 
+// Calls deploy_change, then publish_change twice, then replies.
+const publishTwiceModel = markMockModel(
+  new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      const ran = prompt.flatMap((message) =>
+        message.role === "tool"
+          ? message.content.flatMap((part) => (part.type === "tool-result" ? [part.toolName] : []))
+          : [],
+      );
+      if (!ran.includes("deploy_change")) {
+        return toolCallStreamResult({
+          input: "{}",
+          toolCallId: "call-deploy_change",
+          toolName: "deploy_change",
+        });
+      }
+      const published = ran.filter((name) => name === "publish_change").length;
+      return published < 2
+        ? toolCallStreamResult({
+            input: "{}",
+            toolCallId: `call-publish_change-${published + 1}`,
+            toolName: "publish_change",
+          })
+        : textStreamResult("All done.");
+    },
+    modelId: "publish-twice-model",
+    provider: "eve-test",
+  }),
+);
+
 function testUser(principalId: string) {
   return {
     attributes: {},
@@ -421,6 +451,32 @@ describe("approval caller", () => {
     },
     60_000,
   );
+
+  it("doesn't remember another person's approval of a request that asks the caller", async () => {
+    const { seen, stages } = await withChainRun(
+      "approval-caller-remember-caller-only",
+      async (run) => {
+        await run.post(BOB, "Publish it twice for me once it's deployed.");
+        await run.approve(ALICE, "deploy_change");
+        // Bob's approval runs the first publish_change only; the second, while he still spoke
+        // last, asks again rather than reusing his approval as Alice's.
+        await run.approve(BOB, "publish_change");
+      },
+      {
+        agentApproval: once({ when: "principal-mismatch" }),
+        model: publishTwiceModel,
+        secondApproval: { request: never(), response: () => ({ status: "allowed" }) },
+      },
+    );
+
+    expect(seen).toEqual([
+      { tool: "deploy_change", caller: "alice" },
+      { tool: "publish_change", caller: "alice" },
+    ]);
+    expect(approvalsIn(stages).filter((entry) => entry.toolName === "publish_change")).toHaveLength(
+      2,
+    );
+  }, 60_000);
 
   it("lets the requester steer the turn after someone else approves a call", async () => {
     const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {

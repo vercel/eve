@@ -454,7 +454,8 @@ function hasTurnInput(input: HarnessStepInput | undefined): boolean {
  */
 function callerTokenOf(parked: SuspendedStep, approval: ApprovedCall): CallerToken | undefined {
   if (approval.interactionId === undefined) return undefined;
-  // With no response policy, no responder is named: the requester, who is the caller, answered.
+  // No responder is named when only the requester could answer, which makes it the caller's
+  // approval. An anonymous caller lets anyone answer unnamed, but has no user token to protect.
   const byCaller =
     approval.responder === undefined ||
     principalOf(approval.responder) === principalOf(sessionCaller());

@@ -27,9 +27,11 @@ export function readSessionAuth(
   ctx: Pick<ContextReader, "get">,
   current: SessionAuthContext | null = ctx.get(AuthKey) ?? null,
 ): SessionAuth {
+  // `null` is an initiator too: a session an anonymous person started.
+  const initiator = ctx.get(InitiatorAuthKey);
   return {
     current,
-    initiator: ctx.get(InitiatorAuthKey) ?? current,
+    initiator: initiator === undefined ? current : initiator,
     sender: readSender(ctx, current),
   };
 }

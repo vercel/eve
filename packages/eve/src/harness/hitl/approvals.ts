@@ -8,7 +8,7 @@ import {
 } from "#approval/evaluation.js";
 
 import { pendingApprovals } from "./approval-prompt.js";
-import type { ResponderCheck } from "./responders.js";
+import { sameResponder, type ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import {
@@ -269,10 +269,15 @@ export function settleApprovals(
     readonly request: ApprovalAsk;
     readonly outcome: RememberedApproval["outcome"];
   }[] = [];
-  const decide = (request: ApprovalAsk, outcome: InteractionOutcome, reason?: string) => {
+  const decide = (
+    request: ApprovalAsk,
+    outcome: InteractionOutcome,
+    reason?: string,
+    remember = true,
+  ) => {
     const answer = outcome === "withdrawn" ? undefined : standing.get(request.interactionId);
     if (answer !== undefined) responses.settle(answer.responseId, "applied");
-    if (answer !== undefined && (outcome === "accepted" || outcome === "declined"))
+    if (remember && answer !== undefined && (outcome === "accepted" || outcome === "declined"))
       decisions.push({ at: answer.introducedAt, outcome, request });
     responses.closeOthers(request.interactionId, answer?.responseId);
     events.push(
@@ -305,7 +310,13 @@ export function settleApprovals(
           },
           step,
         });
-        decide(request, "accepted");
+        // A request that asks the caller remembers only the caller's approval: someone a response
+        // policy admits approves this call, never the caller's later ones.
+        const requester = step.requester ?? null;
+        const byCaller =
+          responder === undefined ||
+          (requester !== null && sameResponder(requester, responder.responder));
+        decide(request, "accepted", undefined, request.callerApproves !== true || byCaller);
         continue;
       }
       if (status === "ignored") decide(request, "withdrawn", SUPERSEDED_BY_MESSAGE);

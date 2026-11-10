@@ -219,7 +219,7 @@ export default defineAgent({
 | `once({ when: "principal-mismatch" })`   | Asks Alice once for Bob speaking. Her approval covers Bob speaking again, but not Carol.     |
 
 - Only the caller can approve, because the call runs as them. Anyone signed in can cancel.
-- When the tool has a `response` policy, it decides who can approve instead, as in [Act for the person who asked](#act-for-the-person-who-asked). The caller's token still goes only to a call the caller approved.
+- When the tool has a `response` policy, it decides who can approve or cancel instead, as in [Act for the person who asked](#act-for-the-person-who-asked). Only the caller's own approval is remembered, and the caller's token still goes only to a call the caller approved.
 - A call they clear gets the caller's token, even while someone else spoke last. Without one, eve asks before a connection that acts as the caller, and refuses `ctx.getToken()` for a user-scoped provider until the caller replies.
 - Wrap them in your own policy as you would `once()`: pass the context through and return their status unchanged.
 - `once()` remembers for the rest of the session. After Alice approves once for Bob speaking, Bob's later messages can steer her turn into another call of the same tool without asking her. Use `always({ when: "principal-mismatch" })` for tools where each action needs fresh consent.

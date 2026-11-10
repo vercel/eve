@@ -357,7 +357,7 @@ and integration tests instead.
   saying it waits for the sign-in, the card stays clickable, and the call runs as its caller once
   they connect. Rule 3 makes sign-ins and pauses more common, so this is the first follow-up.
 - Letting another person's message steer a turn that is paused on an approval or sign-in.
-  Rule 3 pauses turns more often, so this is the first follow-up.
+  Rule 3 pauses turns more often, so this follows the sign-in change above.
 - Covering tools that use no credentials by default.
 - Recording the latest sender on each tool call's trace beside the turn's caller. The stream
   doesn't carry the sender per call yet.
