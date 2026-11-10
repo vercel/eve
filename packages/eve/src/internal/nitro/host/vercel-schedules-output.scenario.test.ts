@@ -7,7 +7,6 @@ import { buildApplication } from "#internal/nitro/host.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
-const DIGEST_TASK_NAME = `eve.schedule.${Buffer.from("schedules/digest.md").toString("base64url")}`;
 
 interface VercelOutputConfig {
   readonly crons?: readonly { readonly path: string; readonly schedule: string }[];
@@ -49,7 +48,7 @@ describe("Vercel schedule delivery", () => {
 
     expect(config.crons ?? []).toEqual([]);
     expect(config.schedules).toEqual({
-      [DIGEST_TASK_NAME]: { schedule: "0 9 * * *", function: "_vercel/tasks" },
+      "eve.digest": { schedule: "0 9 * * *", function: "_vercel/tasks" },
     });
     expect(functionConfig.experimentalTriggers).toEqual([{ type: "schedule/v1beta" }]);
     expect(config.routes).not.toContainEqual(expect.objectContaining({ dest: "/_vercel/tasks" }));
@@ -69,7 +68,7 @@ describe("Vercel schedule delivery", () => {
 
     expect(config.crons ?? []).toEqual([]);
     expect(config.schedules).toEqual({
-      [`schedules-agent.${DIGEST_TASK_NAME}`]: { schedule: "0 9 * * *", function: "_vercel/tasks" },
+      "eve.schedules-agent.digest": { schedule: "0 9 * * *", function: "_vercel/tasks" },
     });
     await expect(
       readFile(join(outputDir, "functions", "_vercel", "tasks.func", ".vc-config.json"), "utf8"),

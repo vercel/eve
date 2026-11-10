@@ -27,7 +27,7 @@ const DAILY_TASK = {
   cron: "0 0 * * *",
   description: "Run daily.",
   logicalPath: "schedules/daily.md",
-  nitroTaskName: "test-agent.eve.schedule.daily",
+  nitroTaskName: "eve.daily",
   scheduleId: "daily",
   sourceId: "app:daily",
   taskName: "eve.schedule.daily",

@@ -210,10 +210,10 @@ describe("createHostRouteTable", () => {
   );
 
   it.each([
-    { vercelService: false, nitroTaskName: "eve.schedule.daily" },
-    { vercelService: true, nitroTaskName: "probe-agent.eve.schedule.daily" },
+    { vercelService: false, nitroTaskName: "eve.daily" },
+    { vercelService: true, nitroTaskName: "eve.probe-agent.daily" },
   ])(
-    "names Nitro tasks after the agent only in Vercel service builds ($vercelService)",
+    "names Nitro tasks after the schedule, and the agent in Vercel service builds ($vercelService)",
     ({ nitroTaskName, vercelService }) => {
       const [task] = table({
         scheduleRegistrations: [DAILY],
@@ -224,6 +224,19 @@ describe("createHostRouteTable", () => {
       expect(task).toMatchObject({ nitroTaskName, taskName: DAILY.taskName });
     },
   );
+
+  it("rejects two schedules that get the same Vercel schedule name", () => {
+    expect(() =>
+      table({
+        scheduleRegistrations: [
+          DAILY,
+          { ...DAILY, logicalPath: "schedules/daily.ts", sourceId: "app:daily-ts" },
+        ],
+      }),
+    ).toThrow(
+      'Schedules "daily" (schedules/daily.md) and "daily" (schedules/daily.ts) both get the Vercel schedule name "eve.daily". Rename one of them.',
+    );
+  });
 
   it.each([
     { mode: "development", vercel: false, world: undefined, direct: false },

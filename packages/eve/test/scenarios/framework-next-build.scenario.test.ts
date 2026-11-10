@@ -8,7 +8,8 @@ import { createNextEveProxyDescriptor } from "../../src/internal/testing/scenari
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
-const VERCEL_GENERATED_SERVICES_VERSION = "56.4.0";
+// The first CLI that accepts schedules in a service's Build Output.
+const VERCEL_GENERATED_SERVICES_VERSION = "65.14.0";
 const VERCEL_PNPM_10_PROJECT_CREATED_AT = Date.UTC(2026, 6, 13);
 const scenarioApp = useScenarioApp();
 
@@ -179,17 +180,17 @@ describe("framework-next build", () => {
     const config = await readVercelOutputConfig(outputRoot);
     expect(config.crons).toEqual([{ path: "/api/user-cleanup", schedule: "0 0 * * *" }]);
     // Vercel CLI lifts each service's schedules into the deployment and sets `service`.
-    expect(Object.entries(config.schedules as Record<string, unknown>)).toEqual(
-      expect.arrayContaining([
-        [
-          expect.stringMatching(/^billing\.eve\.schedule\./),
-          { function: "_vercel/tasks", schedule: "*/10 * * * *", service: "eve-billing" },
-        ],
-        [
-          expect.stringMatching(/^support\.eve\.schedule\./),
-          { function: "_vercel/tasks", schedule: "*/5 * * * *", service: "eve-support" },
-        ],
-      ]),
-    );
+    expect(config.schedules).toEqual({
+      "eve.billing.sweep": {
+        function: "_vercel/tasks",
+        schedule: "*/10 * * * *",
+        service: "eve-billing",
+      },
+      "eve.support.triage": {
+        function: "_vercel/tasks",
+        schedule: "*/5 * * * *",
+        service: "eve-support",
+      },
+    });
   }, 240_000);
 });

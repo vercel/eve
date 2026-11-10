@@ -131,7 +131,9 @@ Hosted Vercel builds run every schedule with [Vercel Schedules](https://vercel.c
 
 Vercel Schedules is in beta and must be enabled for your Vercel team.
 
-When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, each agent builds as a Vercel service, and Vercel attaches each schedule to the service that built it. These schedule names start with the agent's name, so the agents in one project never share a name.
+Each Vercel schedule is named `eve.` plus the schedule's name, with `/` replaced by `.`: `agent/schedules/billing/sweep.ts` is `eve.billing.sweep`. Use that name with `vercel schedules`, for example `vercel schedules invoke eve.billing.sweep`. A name with characters that Vercel schedule names don't allow, including `.`, keeps them as `.` and ends with a short hash, so `weekly report.ts` becomes `eve.weekly.report-<hash>`. Renaming a schedule's file creates a new Vercel schedule.
+
+When [`withEve`](./guides/frontend/nextjs) adds agents to a Next.js deployment, each agent builds as a Vercel service, and Vercel attaches each schedule to the service that built it. These schedule names include the agent's name, so the agents in one project never share a name: `agents/billing/agent/schedules/heartbeat.ts` is `eve.billing.heartbeat`.
 
 When you run `vercel build` locally, use Vercel CLI 65.14.0 or later. Older releases fail the build for `withEve` projects, and releases before 62.7.0 drop schedules from the output without an error.
 

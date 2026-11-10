@@ -10,6 +10,7 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import { connectionEventRoute } from "#runtime/connections/events/path.js";
+import { createVercelScheduleName } from "#internal/nitro/host/vercel-schedule-name.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
@@ -81,8 +82,7 @@ type HostRoute =
 export interface HostScheduleTask extends ScheduleRegistration {
   /**
    * The Nitro task name, which Vercel Schedules also uses as the schedule
-   * name. A Vercel service build leads it with the agent name, because the
-   * agents in one project share a deployment and its schedule names.
+   * name. See {@link createVercelScheduleName}.
    */
   readonly nitroTaskName: string;
 }
@@ -159,12 +159,30 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
 
   const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
     ...task,
-    nitroTaskName: input.vercelService ? `${manifest.config.name}.${task.taskName}` : task.taskName,
+    nitroTaskName: createVercelScheduleName({
+      agentName: input.vercelService ? manifest.config.name : undefined,
+      scheduleId: task.scheduleId,
+    }),
   }));
+  assertUniqueScheduleNames(scheduleTasks);
   return {
     routes: routes.map((route) => withHeadAllow(route, routes)),
     scheduleTasks,
   };
+}
+
+// Nitro keys tasks by name, so a shared name would drop a schedule silently.
+function assertUniqueScheduleNames(tasks: readonly HostScheduleTask[]): void {
+  const byName = new Map<string, HostScheduleTask>();
+  for (const task of tasks) {
+    const other = byName.get(task.nitroTaskName);
+    if (other !== undefined) {
+      throw new Error(
+        `Schedules "${other.scheduleId}" (${other.logicalPath}) and "${task.scheduleId}" (${task.logicalPath}) both get the Vercel schedule name "${task.nitroTaskName}". Rename one of them.`,
+      );
+    }
+    byName.set(task.nitroTaskName, task);
+  }
 }
 
 /**
