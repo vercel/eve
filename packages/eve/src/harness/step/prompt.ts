@@ -10,6 +10,7 @@ import {
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { hasUnansweredToolCall } from "#harness/model-call/response.js";
+import { rememberSender } from "#harness/sender-line.js";
 import { repairToolHistory } from "#harness/tool-history-repair.js";
 import {
   getTurnClientContextState,
@@ -89,6 +90,7 @@ export async function commitTurnInput(step: Step, turn: TurnInput): Promise<Prom
   const settled = await settleHistory(step, turn);
   const messages = placeTurnInput(step, settled.messages, settled.turn);
   step.session = changeHistory(step.session, { extend: messages });
+  if (turn.sender !== undefined) step.session = rememberSender(step.session, turn.sender);
   return {
     clientContext: getTurnClientContextState(step.session.state, turn.turnId),
     messages: [...step.session.history],

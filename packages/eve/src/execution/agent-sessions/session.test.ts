@@ -98,6 +98,7 @@ function auth(principalId: string): SessionAuth {
   return {
     current: { attributes: {}, authenticator: "test", principalId, principalType: "user" },
     initiator: null,
+    sender: { attributes: {}, authenticator: "test", principalId, principalType: "user" },
   };
 }
 

@@ -41,6 +41,7 @@ describe("buildCallbackContext – session", () => {
       auth: {
         current: null,
         initiator: null,
+        sender: null,
       },
       id: "session_public_session",
       turn: {

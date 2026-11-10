@@ -288,8 +288,8 @@ describe("invokeTool", () => {
     await invokeTool(runtime, "whoami", {}, { auth: alice });
     await invokeTool(runtime, "whoami", {}, { auth: alice, initiator: bob });
     expect(seen).toEqual([
-      { current: alice, initiator: alice },
-      { current: alice, initiator: bob },
+      { current: alice, initiator: alice, sender: alice },
+      { current: alice, initiator: bob, sender: alice },
     ]);
   });
 

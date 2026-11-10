@@ -6,7 +6,7 @@ import { byPrincipal } from "#public/memory/scope.js";
 const baseContext: MemoryScopeContext = {
   abortSignal: new AbortController().signal,
   channel: { kind: "channel:eve", metadata: {} },
-  session: { auth: { current: null, initiator: null }, id: "session_1" },
+  session: { auth: { current: null, initiator: null, sender: null }, id: "session_1" },
 };
 
 afterEach(() => {
@@ -105,6 +105,7 @@ describe("memory namespaces and scopes", () => {
             principalType,
           },
           initiator: null,
+          sender: null,
         },
       },
     });
@@ -129,6 +130,13 @@ describe("memory namespaces and scopes", () => {
             principalType: "user",
           },
           initiator: null,
+          sender: {
+            attributes: {},
+            authenticator: "oidc:primary",
+            issuer: "https://issuer.example",
+            principalId: "user:123",
+            principalType: "user",
+          },
         },
       },
     };

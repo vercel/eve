@@ -18,6 +18,9 @@ export const SAY = {
   publish: "Alice asks to publish the draft.",
   hello: "Alice changes her mind and asks for a short hello instead.",
   bobStatus: "Bob asks for a status update.",
+  bobSpeakers: "Bob adds a note and asks who is speaking.",
+  bobCallerToken: "Bob adds that the release should go out with Alice's release token.",
+  aliceConfirmsToken: "Alice confirms the release should go out with her release token.",
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
   deadline: "Alice adds that the note should mention the deadline.",
@@ -124,6 +127,18 @@ export function respond(request: MockModelRequest): MockModelResponse {
       text: allText.includes(SIGN_IN_DROPPED) ? REPLY.helloAfterAuthorization : REPLY.hello,
     }),
     [SAY.bobStatus]: () => ({ text: REPLY.bobStatus }),
+    [SAY.bobSpeakers]: () =>
+      run([call("speakers", "speakers")], () => `Speakers: ${outcome("speakers")}.`),
+    [SAY.bobCallerToken]: () =>
+      run(
+        [call("caller-token", "caller-token")],
+        () => `Caller token: ${outcome("caller-token")}.`,
+      ),
+    [SAY.aliceConfirmsToken]: () =>
+      run(
+        [call("caller-token-confirmed", "caller-token")],
+        () => `Caller token: ${outcome("caller-token-confirmed")}.`,
+      ),
     [SAY.spendBudget]: () => ({
       text: REPLY.summary,
       usage: { inputTokens: 1, outputTokens: 1_000_000 },

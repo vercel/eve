@@ -69,7 +69,7 @@ const bindingFor = (tenant: string): DynamicRemoteBinding => ({
   channel: { kind: "unknown", metadata: {} },
   memos: { [digestOf("tenant")]: { id: tenant } },
   position: 0,
-  session: { auth: { current: null, initiator: null }, id: "parent" },
+  session: { auth: { current: null, initiator: null, sender: null }, id: "parent" },
 });
 
 /** The parent's context, as its session stands now: the finance agent for `tenant`. */

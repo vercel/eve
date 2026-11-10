@@ -148,6 +148,13 @@ describe("dynamic remote agent credentials", () => {
           principalType: "user",
         },
         initiator: null,
+        sender: {
+          attributes: { tenantId },
+          authenticator: "test",
+          issuer: "test",
+          principalId: "alice",
+          principalType: "user",
+        },
       },
       id: "parent",
     },

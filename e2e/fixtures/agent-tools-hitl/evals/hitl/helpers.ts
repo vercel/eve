@@ -31,6 +31,11 @@ export function aliceSession(t: EveEvalContext): Promise<EveEvalSession> {
 
 export const asAlice = as(ALICE);
 export const asBob = as(BOB);
+/**
+ * Bob in the session, sending as a channel does by default: his message joins a running turn.
+ * The eval client queues messages unless asked to steer.
+ */
+export const bobSteers = { ...asBob, turnPolicy: "steer" as const };
 export const asReleaseManager = as(RELEASE_MANAGER);
 
 /** The one approval request `turn` raised for `toolName`. */

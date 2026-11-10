@@ -152,6 +152,8 @@ export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
     clearedBy: clearedBySchema.optional(),
+    /** The caller approved the call, so its run has the caller as its `auth.sender`. */
+    callerApproved: z.literal(true).optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,

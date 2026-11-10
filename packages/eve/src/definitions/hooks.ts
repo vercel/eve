@@ -12,7 +12,7 @@ import {
   type HookContinueResult,
   type HookEventKey,
 } from "#public/definitions/hook.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";

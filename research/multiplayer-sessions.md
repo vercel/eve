@@ -98,8 +98,8 @@ connection or channel definitions, and the approval helpers don't change.
 
 - `auth.current`, the turn's memory scope, its hooks, and its dynamic functions stay the caller's.
 - `auth.sender` changes only as a step reads a message, so every call the model makes in one step
-  sees the same value. Only a message changes it: an answer to an approval puts no words in front
-  of the model.
+  sees the same value. Only a message changes it. Text the caller types counts, even when it
+  answers a request. A pressed answer doesn't: it puts no words in front of the model.
 - When messages from several people are waiting, eve adds them to the conversation in the order
   they arrived, each as its sender's. The model runs once it has read them all.
 - Principals are compared by identity, as steering compares them today. Unauthenticated and

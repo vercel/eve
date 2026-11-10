@@ -44,7 +44,7 @@ function runContext(input: { readonly abortSignal?: AbortSignal; readonly reques
   attachWorkflowToolRunContext(ctx, {
     agentContext: { capabilities: { requestInput: input.requestInput } } as AgentSessionContext,
     asks,
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     control: "control",
     from: {
       callId: "call",

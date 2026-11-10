@@ -141,6 +141,7 @@ export function catalogBundle(
       dynamicResolvers: (input.dynamicSubagents ?? []).map((name) => ({ name })),
       preparedTools: [],
       subagentsByName: new Map(),
+      subagentsByNodeId: new Map(),
     } as never,
     toolRegistry: { toolsByName: new Map() } as never,
     turnAgent: { tools: [] } as never,

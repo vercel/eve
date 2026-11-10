@@ -1,7 +1,8 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 
 function signInCallback(attemptId: string) {
   return {
@@ -74,7 +75,7 @@ describe("SessionInputQueue", () => {
     expect(queue.takeAuthorizations(held)).toBeUndefined();
   });
 
-  it("lets only the turn's own person steer it and keeps another person's message for its own turn", () => {
+  it("lets anyone steer a running turn, but only its own person while it's held", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -98,13 +99,45 @@ describe("SessionInputQueue", () => {
     const queuedByBob = send("Invite the design team too.", bob, "queue");
     const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
 
-    // A delivery without auth acts as the session's current identity, which is the turn's.
-    expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromAlice, unauthenticated]);
-    // A turn held on Alice lets her queued messages steer it, but never Bob's.
-    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })).toBeUndefined();
-    expect(queue.takeNext()).toMatchObject({
+    // A turn held on Alice takes only her messages, and a delivery without auth acts as hers.
+    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })?.sequences).toEqual([
+      fromAlice,
+      unauthenticated,
+    ]);
+    // Once the pause ends, Bob's message joins the turn; his queued one waits for it to end.
+    expect(queue.hasSteering(admitted, turn)).toBe(true);
+    expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromBob]);
+    expect(queue.hasSteering(admitted, turn)).toBe(false);
+    expect(queue.takeNext()).toMatchObject({ delivery: { auth: bob }, sequences: [queuedByBob] });
+  });
+
+  it("takes one person's messages per step, so each is recorded as its sender's", () => {
+    const user = (principalId: string) => ({
+      attributes: {},
+      authenticator: "slack",
+      principalId,
+      principalType: "user" as const,
+    });
+    const [alice, bob] = [user("ALICE"), user("BOB")];
+    const queue = new SessionInputQueue([]);
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const send = (message: string, auth?: SessionAuthContext) =>
+      queue.enqueueDelivery({
+        ...(auth !== undefined && { auth }),
+        kind: "deliver",
+        payloads: [{ message }],
+      })!.sequence;
+    const first = [send("It's the retry logic.", bob), send("In foo.ts.")];
+    const second = send("Thanks, that helps.", alice);
+    const admitted = new Set([...first, second]);
+
+    expect(queue.takeSteering(admitted, turn)).toMatchObject({
       delivery: { auth: bob },
-      sequences: [fromBob, queuedByBob],
+      sequences: first,
+    });
+    expect(queue.takeSteering(admitted, turn)).toMatchObject({
+      delivery: { auth: alice },
+      sequences: [second],
     });
   });
 

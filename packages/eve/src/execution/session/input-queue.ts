@@ -1,7 +1,7 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { DELIVERY_IDEMPOTENCY_WINDOW } from "#channel/delivery-idempotency.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
+import { ANONYMOUS_PRINCIPAL, principalOf } from "#context/session-auth.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
 
@@ -187,18 +187,27 @@ export class SessionInputQueue {
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn, {
-          heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
-        }),
+        isSteeringDelivery(entry.delivery, turn, heldTurn(entry.sequence, options)),
     );
-    if (steering.length === 0) return undefined;
-    this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
+    const run = oneSender(steering);
+    if (run.length === 0) return undefined;
+    this.retain((entry) => entry.kind !== "delivery" || !run.includes(entry));
     return {
-      delivery: combine(steering),
+      delivery: combine(run),
       handoffEligible: false,
       kind: "turn",
-      sequences: steering.map(({ sequence }) => sequence),
+      sequences: run.map(({ sequence }) => sequence),
     };
+  }
+
+  /** Whether an admitted delivery would steer the running turn. */
+  hasSteering(admitted: ReadonlySet<number>, turn: SteeringTurn, held?: HeldTurn): boolean {
+    return this.entries.some(
+      (entry) =>
+        entry.kind === "delivery" &&
+        admitted.has(entry.sequence) &&
+        isSteeringDelivery(entry.delivery, turn, held),
+    );
   }
 
   /**
@@ -274,6 +283,8 @@ export interface SteeringTurn {
 }
 
 export interface SteeringOptions {
+  /** The turn waits on a question, such as a child's prompt it relays, so only its person steers. */
+  readonly held?: boolean;
   /**
    * The turn waits on its own person for a sign-in or approval, held since
    * this admission sequence. Their later messages steer even with
@@ -285,31 +296,70 @@ export interface SteeringOptions {
 }
 
 /**
- * Only the turn's own principal steers it; another principal's message waits
- * for the turn to end. A delivery without auth acts as the session's current
- * identity, which is the turn's. `heldOnPerson` lets a queued message steer a
- * turn that waits on its person.
+ * How a paused turn takes a delivery. While `"paused"` on an approval, sign-in, or question, only
+ * its own principal steers it, and anyone else's message waits for the pause to end. While
+ * `"awaiting-caller"`, it waits on its own caller to act, so their message steers it even with
+ * `turnPolicy: "queue"`: queued, it would wait for a turn that can't end until they act.
+ */
+export type HeldTurn = "paused" | "awaiting-caller";
+
+/**
+ * Anyone the channel admits steers a running turn; their message changes what the model reads,
+ * never who the caller is. A delivery without auth acts as the session's current identity, which
+ * is the turn's.
  */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
-  options?: { readonly heldOnPerson?: boolean },
+  held?: HeldTurn,
 ): boolean {
   return (
-    (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
+    (held === "awaiting-caller" || (delivery.turnPolicy ?? "steer") === "steer") &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
-    (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
+    (held === undefined ||
+      delivery.auth === undefined ||
+      principalOf(delivery.auth) === turn.principal)
   );
 }
 
 /** A steering delivery with a message for the model, not only answers to requests. */
-export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
+export function isSteeringMessage(
+  delivery: DeliverHookPayload,
+  turn: SteeringTurn,
+  held?: HeldTurn,
+): boolean {
   return (
-    isSteeringDelivery(delivery, turn) &&
+    isSteeringDelivery(delivery, turn, held) &&
     delivery.payloads.some(
       (payload) => payload.message !== undefined && payload.answers === undefined,
     )
   );
+}
+
+/** How the turn takes the delivery admitted at `sequence`. */
+function heldTurn(sequence: number, options: SteeringOptions | undefined): HeldTurn | undefined {
+  if (options?.heldSince !== undefined) {
+    return sequence >= options.heldSince ? "awaiting-caller" : "paused";
+  }
+  return options?.held === true ? "paused" : undefined;
+}
+
+/**
+ * The leading messages one person sent, so a step's input records each message as its sender's.
+ * A delivery without auth acts as the turn's identity and joins whoever's run it falls in.
+ */
+function oneSender(steering: readonly QueuedDelivery[]): QueuedDelivery[] {
+  const run: QueuedDelivery[] = [];
+  let sender: string | undefined;
+  for (const entry of steering) {
+    const auth = entry.delivery.auth;
+    if (auth !== undefined) {
+      if (sender !== undefined && principalOf(auth) !== sender) break;
+      sender = principalOf(auth);
+    }
+    run.push(entry);
+  }
+  return run;
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {

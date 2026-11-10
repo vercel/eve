@@ -420,12 +420,13 @@ Tools from a dynamic connection can require approval, including an `approval.res
 
 ### Troubleshooting Vercel Connect auth
 
-| What you see                                      | What to do                                                                                                                                                                                                 |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "principal_required"`                    | A per-user connection ran with no signed-in user, such as in a schedule, a same-project runtime token, or `localDev()` run. Return `principalType: "user"` from the channel's route auth, or use app auth. |
-| A sign-in `interaction.opened` event, but no UI   | Render the sign-in from the stream event, and continue the same session after the callback.                                                                                                                |
-| OAuth works locally but fails after deploy        | Run Connect setup from the project that uses it, deploy again, and check the connector UID, because the project may lack the link or OIDC scope.                                                           |
-| Sign-in ends on a Vercel login or protection page | Have the user sign in to Vercel with project access, or add a Deployment Protection Exception for the domain.                                                                                              |
+| What you see                                      | What to do                                                                                                                                                                                                                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reason: "principal_required"`                    | A per-user connection ran with no signed-in user, such as in a schedule, a same-project runtime token, or `localDev()` run. Return `principalType: "user"` from the channel's route auth, or use app auth.                                             |
+| `reason: "confirmation_required"`                 | Someone else spoke after the turn's caller, so eve didn't hand out the caller's token. The model asks the caller to confirm, and the call works after the caller's next message. See [Shared sessions](/docs/concepts/security-model#shared-sessions). |
+| A sign-in `interaction.opened` event, but no UI   | Render the sign-in from the stream event, and continue the same session after the callback.                                                                                                                                                            |
+| OAuth works locally but fails after deploy        | Run Connect setup from the project that uses it, deploy again, and check the connector UID, because the project may lack the link or OIDC scope.                                                                                                       |
+| Sign-in ends on a Vercel login or protection page | Have the user sign in to Vercel with project access, or add a Deployment Protection Exception for the domain.                                                                                                                                          |
 
 ## What to read next
 

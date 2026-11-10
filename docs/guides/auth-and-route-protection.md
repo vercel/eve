@@ -307,18 +307,21 @@ Subagent sessions persist by default but don't keep a caller's access between tu
 
 Inside runtime code, `ctx.session.auth` carries the channel's route-auth result as a caller snapshot:
 
-- `auth.current`: the caller on the active inbound turn. A follow-up from a different caller replaces it for that turn.
+- `auth.current`: the caller on the active inbound turn, whose message started it. A message from a different caller that starts a later turn replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps.
 
 The caller stays the same for the whole turn; only its claims can change:
 
 - A message from the turn's own caller joins the turn and updates `auth.current` with its claims. This includes a typed answer to a pending `ctx.ask()` or `ask_question`.
-- A message from anyone else waits for the turn to end and runs as its own turn.
-- Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current`.
+- A message from anyone else joins the turn and sets `auth.sender`; `auth.current` stays the caller. While the turn waits on an approval, sign-in, or question, that message waits for it to end first.
+- Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current` and `auth.sender`.
+
+After someone else's message joins the turn, eve refuses calls that use the caller's identity until the caller speaks again. See [Shared sessions](../concepts/security-model#shared-sessions).
 
 `auth.current` is whatever `auth` the channel sent the message with. A route handler or channel hook can send with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`; on a continuation, only `auth.current` is. Internal runtime paths, such as subagents, can also have no caller auth.
 
-Use the caller on `auth.current` (or `auth.initiator`) to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries.
+Use the caller on `auth.current` (or `auth.initiator`) to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries. In a shared session, another person's message can reach a tool in the caller's turn. A tool that decides from who is asking must check `auth.sender` as well as `auth.current`.
 
 Route auth doesn't check who may use a session, and eve adds no per-session access list. If multiple users or tenants can reach the same route, implement the per-user, per-tenant, or per-session authorization your application requires.
 

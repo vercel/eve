@@ -336,12 +336,13 @@ eve serves `POST /eve/v1/hooks/:connectionName`, under any configured agent or p
 
 ## Troubleshooting
 
-| What you see                               | What to do                                                                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `principal_required`                       | `connect("...")` needs a signed-in user, and the session had none. Return `principalType: "user"` from route auth, or use app-scoped auth. |
-| The model does not find the remote tool    | Improve the connection `description`, then check `tools.allow` / `tools.block`.                                                            |
-| OAuth works locally but fails after deploy | Attach the Connect connector to the deployed Vercel project and verify the UID in `connect("...")`.                                        |
-| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, required headers, and application-provided arguments.                                 |
+| What you see                               | What to do                                                                                                                                                                                                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `principal_required`                       | `connect("...")` needs a signed-in user, and the session had none. Return `principalType: "user"` from route auth, or use app-scoped auth.                                                                                                             |
+| `confirmation_required`                    | Someone else spoke after the turn's caller, so eve didn't hand out the caller's token. The model asks the caller to confirm, and the call works after the caller's next message. See [Shared sessions](/docs/concepts/security-model#shared-sessions). |
+| The model does not find the remote tool    | Improve the connection `description`, then check `tools.allow` / `tools.block`.                                                                                                                                                                        |
+| OAuth works locally but fails after deploy | Attach the Connect connector to the deployed Vercel project and verify the UID in `connect("...")`.                                                                                                                                                    |
+| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, required headers, and application-provided arguments.                                                                                                                                             |
 
 ## What to read next
 

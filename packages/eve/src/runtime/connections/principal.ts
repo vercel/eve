@@ -15,6 +15,7 @@ import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
 import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { requireCallerConfirmation } from "#runtime/connections/caller-confirmation.js";
 
 /**
  * Stable string key identifying one principal within a connection's
@@ -81,7 +82,15 @@ export function resolveConnectionPrincipal(
   authorization: AuthorizationDefinition,
   ctx: AlsContext | undefined = contextStorage.getStore(),
 ): ConnectionPrincipal {
-  return resolveConnectionPrincipalFromAuth(connectionName, authorization, ctx?.get(AuthKey), ctx);
+  const principal = resolveConnectionPrincipalFromAuth(
+    connectionName,
+    authorization,
+    ctx?.get(AuthKey),
+    ctx,
+  );
+  // The caller's own credentials: after someone else spoke, only a call they approved gets them.
+  if (principal.type === "user") requireCallerConfirmation(connectionName, ctx);
+  return principal;
 }
 
 /** Resolves a connection principal from an explicitly bound session identity. */

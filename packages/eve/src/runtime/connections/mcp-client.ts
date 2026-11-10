@@ -11,7 +11,9 @@ import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scope
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { buildConnectionCallbackContext } from "#runtime/connections/approval-scope.js";
 import { isObject } from "#shared/guards.js";
+import { contextStorage } from "#context/container.js";
 import { readTurnPrincipals } from "#context/turn-principals.js";
+import { requireCallerConfirmation } from "#runtime/connections/caller-confirmation.js";
 import {
   encodeForwardedPrincipalHeader,
   FORWARDED_PRINCIPAL_HEADER,
@@ -212,6 +214,9 @@ export class McpConnectionClient implements ConnectionClient {
     return async (request, init) => {
       const principals = readTurnPrincipals();
       if (principals === undefined) return await globalThis.fetch(request, init);
+      // The forwarded principal is the caller's identity: after someone else spoke, only a call
+      // the caller approved sends it.
+      requireCallerConfirmation(connectionName, contextStorage.getStore());
       const headers = new Headers(init?.headers);
       headers.set(
         FORWARDED_PRINCIPAL_HEADER,

@@ -278,7 +278,7 @@ function createCallContext(input: {
   context.set(SessionIdKey, input.sessionId);
   // No turn exists; the stand-in names the call, as sandbox setup outside a turn does.
   context.setVirtualContext(SessionKey, {
-    auth: { current: input.auth, initiator: input.initiator },
+    auth: { current: input.auth, initiator: input.initiator, sender: input.auth },
     sessionId: input.sessionId,
     turn: { id: input.callId, sequence: 0 },
   });

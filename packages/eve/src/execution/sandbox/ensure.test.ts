@@ -109,7 +109,7 @@ async function open(
 ) {
   const context = new ContextContainer();
   context.set(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: id,
     turn: { id: "turn", sequence: 0 },
   });
@@ -452,7 +452,7 @@ describe("ensureSandboxAccess", () => {
     const value = fixture();
     const context = new ContextContainer();
     context.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn", sequence: 0 },
     });
@@ -519,7 +519,7 @@ describe("ensureSandboxAccess", () => {
     });
     const context = new ContextContainer();
     context.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn", sequence: 0 },
     });

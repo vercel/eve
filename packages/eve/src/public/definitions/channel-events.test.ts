@@ -20,7 +20,7 @@ function adapterOf(channel: unknown): ChannelAdapter<any> {
 function sessionContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "session_1",
     turn: { id: "turn_0", sequence: 0 },
   });

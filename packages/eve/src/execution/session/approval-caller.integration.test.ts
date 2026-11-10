@@ -22,12 +22,15 @@ import { buildSerializedContext, withTimeout } from "#internal/testing/entry-tes
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { always } from "#tools/approval/policies.js";
-import { defineTool } from "#tools/definition.js";
+import { defineTool, type ToolAuthProvider } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
-import { reportCallerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import {
+  reportCallerWorkflow,
+  reportSenderWorkflow,
+} from "#internal/testing/workflow-tool-fixtures.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 
 // Scripted model: calls each tool the first message names, in the order it
@@ -116,6 +119,29 @@ function recordingTool(
   };
 }
 
+/** A per-user credential: each person's token names them, so a result shows whose was used. */
+const CALLER_TOKEN: ToolAuthProvider = {
+  principalType: "user",
+  getToken: async ({ principal }) => ({
+    token: `token:${principal.type === "user" ? principal.id : "app"}`,
+  }),
+};
+
+/** A tool that returns the caller's token. */
+function tokenTool(name: string, approval?: Approval) {
+  return {
+    loadNamespace: async () => ({
+      default: defineTool({
+        approval,
+        description: `Run ${name} with the caller's token.`,
+        execute: async (_input, ctx) => (await ctx.getToken(CALLER_TOKEN)).token,
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: `tools/${name}.ts`,
+  };
+}
+
 type User = ReturnType<typeof testUser>;
 type Stage = Awaited<ReturnType<ReturnType<typeof captureTurnEvents>["nextTurn"]>>;
 
@@ -141,6 +167,8 @@ interface ChainRun {
     until?: "response.settled",
   ) => Promise<Stage>;
   readonly send: (auth: User, message: string) => Promise<Stage>;
+  /** Sends `message` without reading, for one that waits for the turn's pause to end. */
+  readonly post: (auth: User, message: string) => Promise<void>;
   readonly stages: Stage[];
 }
 
@@ -275,6 +303,14 @@ async function withChainRun(
           });
           return await next("message");
         },
+        async post(auth, message) {
+          await resumeHook(sessionInboxHookToken(continuationToken), {
+            auth,
+            kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload: { message },
+          });
+        },
       });
     } finally {
       stream.dispose();
@@ -364,6 +400,41 @@ describe("approval caller", () => {
     60_000,
   );
 
+  it.each([
+    ["hands the caller's token to a call the caller approved", ALICE, always(), "token:alice"],
+    [
+      "withholds it from a call someone else approved",
+      BOB,
+      { request: always(), response: anyoneResponds },
+      expect.stringContaining("until they confirm it"),
+    ],
+  ] as const)(
+    "after someone else speaks, %s",
+    async (label, approver, approval, output) => {
+      const { stages } = await withChainRun(
+        `approval-caller-token-${label.split(" ")[0]}`,
+        async (run) => {
+          // Bob's message waits for Alice's approval, then joins her turn: he spoke last from
+          // then on.
+          await run.post(BOB, "Bob adds a note.");
+          await run.approve(ALICE, "deploy_change");
+          await run.approve(approver, "use_token");
+        },
+        {
+          message: "Use deploy_change, then use_token, then use_token_again.",
+          modules: [tokenTool("use_token", approval), tokenTool("use_token_again")],
+        },
+      );
+
+      expect(outputsOf(stages, "call-use_token")).toEqual([output]);
+      // An approval covers its own call: the next one is refused until Alice speaks again.
+      expect(outputsOf(stages, "call-use_token_again")).toEqual([
+        expect.stringContaining("until they confirm it"),
+      ]);
+    },
+    60_000,
+  );
+
   it("lets the requester steer the turn after someone else approves a call", async () => {
     const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {
       await run.approve(BOB);
@@ -443,6 +514,44 @@ describe("approval caller", () => {
 
     expect(outputsOf(stages, "call-report_caller")).toEqual([{ caller: "alice" }]);
   }, 60_000);
+
+  it.each([
+    ["the caller as its sender when the caller approved it", ALICE, "alice"],
+    ["the person who spoke last as its sender when someone else approved it", BOB, "bob"],
+  ] as const)(
+    "after someone else speaks, starts a workflow tool's run with %s",
+    async (label, approver, sender) => {
+      const { stages } = await withChainRun(
+        `approval-caller-workflow-sender-${label.split(" ")[1]}`,
+        async (run) => {
+          // Bob's message waits for Alice's approval, then joins her turn: he spoke last from
+          // then on.
+          await run.post(BOB, "Bob adds a note.");
+          await run.approve(ALICE, "deploy_change");
+          await run.approve(approver, "report_sender");
+        },
+        {
+          message: "Use deploy_change, then report_sender.",
+          modules: [
+            {
+              loadNamespace: async () => ({
+                default: defineWorkflowTool({
+                  approval: { request: always(), response: anyoneResponds },
+                  description: "Report who spoke last.",
+                  execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
+                  inputSchema: {},
+                }),
+              }),
+              logicalPath: "tools/report_sender.ts",
+            },
+          ],
+        },
+      );
+
+      expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender }]);
+    },
+    60_000,
+  );
 
   it("keeps the rest of another person's delivery out of the turn their answer resumes", async () => {
     const { seen, secondRequesters, stages } = await withChainRun(

@@ -1,4 +1,6 @@
-import { approvedClearance } from "#harness/clearance.js";
+import { approvedClearance, taskClearance, type Clearance } from "#harness/clearance.js";
+import { principalOf } from "#context/session-auth.js";
+import { sessionCaller } from "#runtime/connections/caller-confirmation.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { stepCatalog } from "#definitions/step.js";
@@ -19,7 +21,6 @@ import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-can
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
@@ -225,10 +226,12 @@ async function runApproved(
   const denied: CallResult[] = [];
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
+  const callerApproved = new Set<string>();
   for (const [parked, approvals] of byStep) {
     const tools = await toolsOf(step);
-    const workflows = new Map<string, { approval: ApprovedCall; clearedBy?: ClearedBy }>();
+    const workflows = new Map<string, { approval: ApprovedCall; clearance?: Clearance }>();
     for (const approval of approvals) {
+      if (approvedByCaller(approval)) callerApproved.add(approval.call.callId);
       const tool = tools.get(approval.call.toolName);
       if (tool?.workflowId === undefined) continue;
       if (changedSinceOffered(approval.call, tool)) {
@@ -257,8 +260,12 @@ async function runApproved(
       } else {
         // A person's acceptance clears the call; the recheck only confirms it still may run.
         const clearance =
-          approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
-        workflows.set(approval.call.callId, { approval, clearedBy: clearance?.clearedBy });
+          approvedClearance(
+            step.view().projection.view,
+            approval.call.callId,
+            callerApproved.has(approval.call.callId),
+          ) ?? recheck.clearance;
+        workflows.set(approval.call.callId, { approval, clearance });
       }
     }
     local.push({
@@ -282,7 +289,7 @@ async function runApproved(
     tasks.push(
       ...dispatched.workflowRequests.map((task) => ({
         ...task,
-        clearedBy: workflows.get(task.callId)?.clearedBy,
+        ...taskClearance(workflows.get(task.callId)?.clearance),
       })),
     );
   }
@@ -327,6 +334,7 @@ async function runApproved(
         messages: step.session.history,
         publish: step.publish,
         responderOf: (approval) => approval.responder,
+        callerApprovedOf: (approval) => callerApproved.has(approval.call.callId),
         telemetry: attempt?.telemetry,
         signIns,
         tools,
@@ -422,4 +430,18 @@ async function withdrawSteeredSignIns(
 function hasTurnInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.answers?.length ?? 0) > 0;
+}
+
+/**
+ * Whether the caller approved the call: it then runs with their identity whoever spoke last.
+ * Another person's approval, which a response policy allowed, doesn't release it, and a call
+ * that only stopped for a sign-in was asked nothing.
+ */
+function approvedByCaller(approval: ApprovedCall): boolean {
+  if (approval.interactionId === undefined) return false;
+  // With no response policy, no responder is named: the requester, who is the caller, answered.
+  return (
+    approval.responder === undefined ||
+    principalOf(approval.responder) === principalOf(sessionCaller())
+  );
 }

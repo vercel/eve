@@ -20,6 +20,7 @@ import {
   ScheduleInstanceKey,
   OccurrenceIdKey,
   InitiatorAuthKey,
+  SenderAuthKey,
   SessionTitleKey,
   ParentSessionKey,
   SandboxKey,
@@ -61,7 +62,7 @@ import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import { continueTurnAuth } from "#execution/session/principal.js";
+import { continueTurnAuth, recordSender } from "#execution/session/principal.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -419,10 +420,22 @@ async function runSessionStepBody(
     // correction and other input without a message keep a running turn's
     // identity; a message joining it may update only its principal's claims.
     let turnAuth = ctx.get(AuthKey);
-    if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
-    else if (delivery !== undefined && !startedBetweenTurns) {
+    // Who spoke last changes as this step reads a message, so every call the model makes in the
+    // step sees one sender: a new turn starts with its caller, and a message joining the turn
+    // makes its sender the last to speak, including text the caller types to answer a request.
+    // A pressed answer speaks no words: it settles its own request, whoever gave it. A session's
+    // first turn keeps the sender its run started with, such as a delegating parent's.
+    if (startedBetweenTurns && initialEmissionState.sessionStarted) ctx.delete(SenderAuthKey);
+    if (answers !== undefined || ignoredActiveDelivery) {
+      turnAuth = previousAuth;
+    } else if (delivery !== undefined && !startedBetweenTurns) {
       turnAuth =
         resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+      if (resolved?.message !== undefined) recordSender(ctx, previousAuth, delivery.auth);
+    }
+    // A delegating parent passes its own latest sender down with the message it sends.
+    if (resolved?.message !== undefined && delivery?.caller?.senderAuth !== undefined) {
+      recordSender(ctx, turnAuth, delivery.caller.senderAuth);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
@@ -649,6 +662,7 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        inputOnly: input.input?.inputOnly === true,
         controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,

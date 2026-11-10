@@ -183,6 +183,9 @@
         },
         "sessionId": "wrun_<ulid0>",
         "state": {
+          "eve.harness.lastSender": {
+            "principal": "anonymous"
+          },
           "eve.harness.reportedSessionUsage": {
             "cacheReadTokens": 0,
             "cacheWriteTokens": 0,

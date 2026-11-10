@@ -36,7 +36,7 @@ export function slackRenderingHarness(
   const store = new ContextContainer();
   store.setVirtualContext(SessionKey, {
     sessionId: "s1",
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     turn: { id: "t1", sequence: 0 },
   });
   // Handlers read the view with each event already folded in, as a running session's do.

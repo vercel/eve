@@ -1,4 +1,5 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
+import { withCallerIdentity } from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -103,6 +104,8 @@ export async function executeToolCall(
     readonly view?: () => Pick<SessionView, "projection">;
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
+    /** The caller approved the call, so it runs with their identity whoever spoke last. */
+    readonly callerApproved?: boolean;
     /**
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
@@ -170,7 +173,7 @@ export async function executeToolCall(
     // A call a person approved runs on their acceptance; the recheck only confirms it still may.
     const clearance =
       (approval === "recheck" && input.view !== undefined
-        ? approvedClearance(input.view().projection.view, callId)
+        ? approvedClearance(input.view().projection.view, callId, input.callerApproved === true)
         : undefined) ?? decision.clearance;
     if (clearance === undefined) throw new Error(`Call "${callId}" has no clearance to run.`);
     let output: unknown;
@@ -194,38 +197,43 @@ export async function executeToolCall(
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
-          // Usage the tool records belongs to its call, including while a streaming tool iterates.
-          await withUsageCall(callId, async () => {
-            const executed = invokeTool(
-              definition,
-              args,
-              {
-                ...(input.responder !== undefined && { approval: { responder: input.responder } }),
-                abortSignal: input.abortSignal,
-                messages: [...input.messages],
-                toolCallId: callId,
-              },
-              clearance,
-            );
-            // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-            // waiting, and whatever the tool returns later is dropped.
-            const abandon = approval === "evaluate" ? input.abortSignal : undefined;
-            if (isAsyncIterable(executed)) {
-              for await (const partial of untilAborted(executed, abandon)) {
-                output = partial;
-                const visible = withoutSignInSecrets(partial);
-                await input.publish(
-                  callProgress(
-                    callId,
-                    visible,
-                    projectToolLabel(definition, "delta", args, visible),
-                  ),
-                );
+          // Usage the tool records belongs to its call, including while a streaming tool iterates,
+          // and so does the caller's identity, for a call the caller approved.
+          await withCallerIdentity(input.callerApproved === true, () =>
+            withUsageCall(callId, async () => {
+              const executed = invokeTool(
+                definition,
+                args,
+                {
+                  ...(input.responder !== undefined && {
+                    approval: { responder: input.responder },
+                  }),
+                  abortSignal: input.abortSignal,
+                  messages: [...input.messages],
+                  toolCallId: callId,
+                },
+                clearance,
+              );
+              // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
+              // waiting, and whatever the tool returns later is dropped.
+              const abandon = approval === "evaluate" ? input.abortSignal : undefined;
+              if (isAsyncIterable(executed)) {
+                for await (const partial of untilAborted(executed, abandon)) {
+                  output = partial;
+                  const visible = withoutSignInSecrets(partial);
+                  await input.publish(
+                    callProgress(
+                      callId,
+                      visible,
+                      projectToolLabel(definition, "delta", args, visible),
+                    ),
+                  );
+                }
+              } else {
+                output = await raceAbort(Promise.resolve(executed), abandon);
               }
-            } else {
-              output = await raceAbort(Promise.resolve(executed), abandon);
-            }
-          });
+            }),
+          );
         } finally {
           executionMs = performance.now() - startedAt;
         }

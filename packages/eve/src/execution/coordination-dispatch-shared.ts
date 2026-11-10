@@ -31,7 +31,8 @@ import {
   turnPosition,
 } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
+import type { SessionAuthContext, SessionParent, SessionTraceRoot } from "#channel/types.js";
+import { readSender } from "#context/session-auth.js";
 import type { ContextReader } from "#context/key.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
@@ -76,6 +77,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly senderAuth: SessionAuthContext | null;
   /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
@@ -170,6 +172,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     dynamicSubagentSelections: readDynamicSubagentSelections(ctx),
     inheritedConversation: ctx.get(ConversationContextKey),
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    senderAuth: readSender(ctx, ctx.get(AuthKey) ?? null),
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
     plan,

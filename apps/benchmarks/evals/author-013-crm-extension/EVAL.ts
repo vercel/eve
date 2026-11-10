@@ -312,7 +312,7 @@ const graderApprover = {
 /** The session eve hands tools and approval policies: one conversation, in its first turn. */
 const graderSession = {
   id: "session-1",
-  auth: { current: null, initiator: null },
+  auth: { current: null, initiator: null, sender: null },
   turn: { id: "turn-1", sequence: 0 },
 };
 

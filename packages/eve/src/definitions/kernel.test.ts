@@ -282,7 +282,7 @@ describe("evaluateValues", () => {
         throw new Error("The policy doesn't use a sandbox.");
       },
       session: {
-        auth: { current: null, initiator: null },
+        auth: { current: null, initiator: null, sender: null },
         id: "session",
         turn: { id: "turn-1", sequence: 0 },
       },

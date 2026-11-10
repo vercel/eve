@@ -3,19 +3,14 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import { loadContext } from "#context/container.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import { readScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
-import {
-  AuthKey,
-  InitiatorAuthKey,
-  SessionIdKey,
-  ContinuationTokenKey,
-  ChannelInstrumentationKey,
-} from "#context/keys.js";
+import { SessionIdKey, ContinuationTokenKey, ChannelInstrumentationKey } from "#context/keys.js";
 import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import {
   createScheduleCollectionClient,
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
+import { readSessionAuth } from "#context/session-auth.js";
 
 /** Binds a registered subscription to a scope authorized on every operation. */
 export async function schedules<TPayload, TPrepared = TPayload>(
@@ -41,10 +36,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
     session: {
       id: context.get(SessionIdKey) ?? "",
       schedule: readSessionSchedule(context),
-      auth: {
-        current: context.get(AuthKey) ?? null,
-        initiator: context.get(InitiatorAuthKey) ?? null,
-      },
+      auth: readSessionAuth(context),
     },
     channel: {
       kind: normalizeInstrumentationChannelKind(context.get(ChannelInstrumentationKey)?.kind),

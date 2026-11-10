@@ -1140,18 +1140,20 @@ const approvalPermissionRules = [
   },
   {
     rule: "another person typing deny or approve doesn't settle a requester-only approval",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    source: "docs/tools/human-in-the-loop.md#follow-up-messages",
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
-      // Today another person's message waits for the turn to end, so it never reaches the
-      // response policy; the approval stays pending either way.
+      // Another person's text waits for the approval to end, so it never answers it; the
+      // approval stays pending either way.
       await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A denial taken as Alice's would settle the call as denied before this approval.
+      // A denial taken as Alice's would settle the call as denied before this approval. Bob's
+      // messages then join the turn, so the model answers them rather than the tool's result.
       await conversation.say("approve");
-      await expectReleased(conversation);
+      await conversation.waitForRest();
+      expect(conversation.runsOf(REQUESTER_GATED_TOOL), `${REQUESTER_GATED_TOOL} runs`).toBe(1);
     },
   },
   {

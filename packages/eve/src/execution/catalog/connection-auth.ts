@@ -1,5 +1,6 @@
 /** Sign-in shared by connection tool calls, searches, and connecting a connection. */
 
+import { withCallerIdentity } from "#runtime/connections/caller-confirmation.js";
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
@@ -115,7 +116,11 @@ export async function listToolMetadata(
     }, LISTING_TIMEOUT_MS);
   });
   try {
-    const tools = await listConnectionMetadata(connectionName, client, deadline);
+    // Listing reads what the connection offers and runs nothing the model chose, so it uses the
+    // caller's credentials even after someone else spoke; each call still asks the caller first.
+    const tools = await withCallerIdentity(true, () =>
+      listConnectionMetadata(connectionName, client, deadline),
+    );
     return tools.filter((tool) =>
       passesToolFilter(
         tool.operationId === undefined ? [tool.name] : [tool.name, tool.operationId],

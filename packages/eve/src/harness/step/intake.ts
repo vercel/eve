@@ -1,4 +1,8 @@
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { ParentSessionKey } from "#context/keys.js";
+import { readSessionAuth } from "#context/session-auth.js";
+import { senderLine } from "#harness/sender-line.js";
 import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import {
@@ -97,6 +101,8 @@ export interface TurnInput {
   readonly hasUserMessage: boolean;
   /** The message with its attachments staged, so input queued again isn't staged twice. */
   readonly message: HarnessStepInput["message"];
+  /** Who sent the message, when a person did: the model is told when the speaker changes. */
+  readonly sender?: SessionAuthContext | null;
 }
 
 /**
@@ -128,11 +134,24 @@ export async function prepareTurnInput(
     content !== undefined && !options.consumedMessage
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
+  const continuation = staged !== undefined && isContinuation(step, input);
+  // A delegated session's messages come from the agent that called it, not from a person.
+  const sender =
+    staged !== undefined &&
+    kind === undefined &&
+    !continuation &&
+    step.ctx.get(ParentSessionKey) === undefined
+      ? readSessionAuth(step.ctx).sender
+      : undefined;
   if (staged !== undefined) {
-    if (isContinuation(step, input)) {
+    if (continuation) {
       messages.push(
         anchorToTurn(createFrameworkUserMessage("context.instruction", CONTINUATION_NOTE), turnId),
       );
+    }
+    const line = sender === undefined ? undefined : senderLine(step.session.state, sender);
+    if (line !== undefined) {
+      messages.push(anchorToTurn(createFrameworkUserMessage("context.instruction", line), turnId));
     }
     messages.push(
       anchorToTurn(
@@ -150,6 +169,7 @@ export async function prepareTurnInput(
     // Staging keeps a message's text and file parts, with each file a sandbox ref.
     message: staged as HarnessStepInput["message"],
     messages,
+    ...(sender !== undefined && { sender }),
     storedClientContext,
     turnId,
   };

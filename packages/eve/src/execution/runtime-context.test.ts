@@ -24,7 +24,7 @@ function createTestSession(
   const auth = input.auth ?? null;
 
   return {
-    auth: { current: auth, initiator: auth },
+    auth: { current: auth, initiator: auth, sender: auth },
     parent: input.parent,
     sessionId: "sess-1",
     turn: { id: "turn-1", sequence: 0 },

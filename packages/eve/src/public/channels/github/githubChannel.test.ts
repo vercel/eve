@@ -76,7 +76,7 @@ function stubAccessor() {
 function createAlsContext(sandbox?: MockSandbox): ContextContainer {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "test-session",
     turn: { id: "test-turn", sequence: 0 },
   });

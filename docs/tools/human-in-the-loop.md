@@ -398,7 +398,7 @@ For approvals, a follow-up message that matches no option steers the turn, even 
 
 - eve withdraws every unanswered approval. The request ends as `withdrawn`, its call ends as `rejected` without running, and the model reads the message next.
 - Approvals that already have an answer use that answer, so approved calls still run.
-- A message from anyone other than the person the turn serves waits until the turn ends.
+- A message from anyone other than the person the turn serves waits until the approvals end, then joins the turn.
 
 ### Request kinds
 
