@@ -178,12 +178,16 @@ function slackUser(principalId: string) {
   return { attributes: {}, authenticator: "slack", principalId, principalType: "user" };
 }
 
-/** Runs READ with an app token in Alice's turn, after `sender` spoke last. */
-async function readInAliceTurn(sender: typeof ALICE, authorized: readonly string[]) {
+/** Runs READ with an app token in Alice's turn, after `sender` spoke last, naming `actor`. */
+async function readInAliceTurn(
+  sender: typeof ALICE,
+  authorized: readonly string[],
+  actor?: string,
+) {
   const asked: Array<string | undefined> = [];
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const outcome = await executeGitHubShell(
-    READ,
+    { ...READ, ...(actor !== undefined && { actor }) },
     {
       ...CONFIG,
       authorize: ({ auth }: GitHubAppAuthorizeRequest) => {
@@ -221,7 +225,12 @@ test("refuses an app-token command the caller may run when the person who spoke 
 });
 
 test("runs an app-token command when the caller and the person who spoke last are both authorized", async () => {
-  const { asked, outcome, runs } = await readInAliceTurn(BOB, [ALICE.principalId, BOB.principalId]);
+  // App tokens act for no one, so the actor the model names is never asked about.
+  const { asked, outcome, runs } = await readInAliceTurn(
+    BOB,
+    [ALICE.principalId, BOB.principalId],
+    "slack:carol",
+  );
 
   assert.equal(outcome, undefined);
   assert.deepEqual(asked, [ALICE.principalId, BOB.principalId]);
@@ -367,33 +376,6 @@ test("runs a user-token command with its actor's token, and authorize checks the
     /authorization required/u,
   );
   assert.deepEqual(requireAuthCalls[0]![1], { as: ALICE.principalId });
-});
-
-test("leaves an app-token command's actor out of authorize and getToken", async () => {
-  const asked: Array<string | undefined> = [];
-  await executeGitHubShell(
-    { ...READ, actor: "slack:carol" },
-    {
-      ...CONFIG,
-      authorize: ({ auth }: GitHubAppAuthorizeRequest) => {
-        asked.push(auth?.principalId);
-        return true;
-      },
-    },
-    {
-      auth: ALICE,
-      sender: BOB,
-      sessionId: "session-app-actor",
-      async getConnectToken() {
-        return "secret-token";
-      },
-      async getSandbox() {
-        return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
-      },
-    },
-  );
-
-  assert.deepEqual(asked, [ALICE.principalId, BOB.principalId]);
 });
 
 test("user tokens cannot satisfy repository allowlists with a declared target", async () => {
