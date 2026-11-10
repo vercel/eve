@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SenderAuthKey } from "#context/keys.js";
 import { openCodeChannel } from "#public/channels/slack/open-code-channel.js";
-import { identityRequestOf, withCallIdentity } from "#runtime/connections/caller-confirmation.js";
+import {
+  callerConfirmationMessage,
+  identityRequestOf,
+  withCallIdentity,
+} from "#runtime/connections/caller-confirmation.js";
 import type { SlackChannel } from "#public/channels/slack/slackChannel.js";
 
 const slack = {} as SlackChannel;
@@ -17,6 +21,14 @@ const slackUser = (principalId: string) => ({
 const alice = slackUser("U_ALICE");
 const bob = slackUser("U_BOB");
 const slackThread = { channelId: "C_ORIGIN", threadTs: "1700000000.000001" };
+
+/** Alice's turn, which Bob spoke in last. */
+function bobSpokeLast(): ContextContainer {
+  const session = new ContextContainer();
+  session.set(AuthKey, alice);
+  session.set(SenderAuthKey, bob);
+  return session;
+}
 
 function toolContext(
   metadata: Record<string, unknown> | undefined,
@@ -70,10 +82,12 @@ describe("openCodeChannel", () => {
   it("is unavailable after someone other than the caller spoke, telling the model to ask the caller", async () => {
     const { ctx, to } = toolContext(slackThread, { current: alice, sender: bob });
 
-    await expect(openCodeChannel(ctx, slack, "Start by reproducing it.")).resolves.toEqual({
-      reason: expect.stringContaining(
-        "Ask the person whose message started this turn to clearly confirm opening it.",
+    await expect(
+      contextStorage.run(bobSpokeLast(), () =>
+        openCodeChannel(ctx, slack, "Start by reproducing it."),
       ),
+    ).resolves.toEqual({
+      reason: callerConfirmationMessage("identity to open a Slack code channel"),
       status: "unavailable",
     });
     expect(to).not.toHaveBeenCalled();
@@ -81,12 +95,9 @@ describe("openCodeChannel", () => {
 
   it("asks the caller after someone else spoke, in a call eve can ask a person about", async () => {
     const { ctx, to } = toolContext(slackThread, { current: alice, sender: bob });
-    const session = new ContextContainer();
-    session.set(AuthKey, alice);
-    session.set(SenderAuthKey, bob);
 
     const refusal = await contextStorage
-      .run(session, () =>
+      .run(bobSpokeLast(), () =>
         withCallIdentity({ canAsk: true, confirmed: [] }, () =>
           openCodeChannel(ctx, slack, "Start by reproducing it."),
         ),

@@ -1,7 +1,4 @@
-import {
-  askCallerToConfirm,
-  callerIdentityAvailable,
-} from "#runtime/connections/caller-confirmation.js";
+import { callerIdentityRefusal } from "#runtime/connections/caller-confirmation.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { SlackChannel, SlackOpenCodeChannelOptions } from "./slackChannel.js";
@@ -51,12 +48,8 @@ export async function openCodeChannel(
   // The code channel's session starts as the caller, who counts as the last to speak there:
   // opening it for someone else's message would hand their requests the caller's identity. An
   // inline call asks the caller, as a call that reads their token does.
-  if (!callerIdentityAvailable(ctx.session.auth)) {
-    askCallerToConfirm("slack", "identity to open a Slack code channel");
-    return unavailable(
-      "Someone else has spoken since the person whose message started this turn, so a code channel can't be opened as them until they confirm it. Ask the person whose message started this turn to clearly confirm opening it. Retry only after a reply from them that plainly confirms it.",
-    );
-  }
+  const refusal = callerIdentityRefusal("slack", "identity to open a Slack code channel");
+  if (refusal !== undefined) return unavailable(refusal);
 
   const delivery = await ctx
     .to(slack, {

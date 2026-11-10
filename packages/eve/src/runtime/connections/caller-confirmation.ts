@@ -139,17 +139,6 @@ function callerReleased(
 }
 
 /**
- * Whether work may act as the caller: they spoke last, or their identity is released for the
- * running call. `openCodeChannel()` reads this, since it opens a session as the caller.
- */
-export function callerIdentityAvailable(auth: {
-  readonly current: SessionAuthContext | null | undefined;
-  readonly sender: SessionAuthContext | null | undefined;
-}): boolean {
-  return callerReleased(contextStorage.getStore(), auth.current ?? null, auth.sender ?? null);
-}
-
-/**
  * Runs `fn` as a call the model made while `sender` had spoken last, whoever spoke since, as a
  * call that waited on a person runs. `undefined` leaves the turn's latest sender.
  */
@@ -254,13 +243,33 @@ export function requireCallerConfirmation(
   ctx: AlsContext | undefined,
   what = `${connectionName} access`,
 ): void {
-  if (ctx === undefined) return;
+  const refusal = callerRefusal(connectionName, ctx, what);
+  if (refusal !== undefined) throw refusal;
+}
+
+/**
+ * Guards work that acts as the caller outside a connection, such as `openCodeChannel()`: throws
+ * the refusal eve turns into a request where it can ask the caller, and otherwise returns the
+ * refusal's message. `undefined` when the caller's identity is released for the running call.
+ */
+export function callerIdentityRefusal(scope: string, what: string): string | undefined {
+  const refusal = callerRefusal(scope, contextStorage.getStore(), what);
+  if (callIdentity()?.canAsk === true && identityRequestOf(refusal) !== undefined) throw refusal;
+  return refusal?.message;
+}
+
+function callerRefusal(
+  connectionName: string,
+  ctx: AlsContext | undefined,
+  what: string,
+): ConnectionAuthorizationFailedError | undefined {
+  if (ctx === undefined) return undefined;
   const current = ctx.get(AuthKey) ?? null;
   const sender = spokeLast(ctx, current);
-  if (callerReleased(ctx, current, sender)) return;
+  if (callerReleased(ctx, current, sender)) return undefined;
   const askable = current !== null && current.principalType !== "anonymous";
   const remember = callerConfirmation(ctx) === "once" ? onceKey(current, sender) : undefined;
-  throw confirmationRequired(
+  return confirmationRequired(
     connectionName,
     callerConfirmationMessage(what),
     askable
@@ -273,19 +282,6 @@ export function requireCallerConfirmation(
         }
       : undefined,
   );
-}
-
-/**
- * Asks the caller to approve the running call, by throwing the refusal eve turns into a request,
- * when their identity isn't released and eve can ask them: the call runs in a session step that
- * can ask, and the caller is signed in. Returns where eve can't ask.
- */
-export function askCallerToConfirm(scope: string, what: string): void {
-  const ctx = contextStorage.getStore();
-  const caller = ctx?.get(AuthKey) ?? null;
-  if (callIdentity()?.canAsk !== true || caller === null || caller.principalType === "anonymous")
-    return;
-  requireCallerConfirmation(scope, ctx, what);
 }
 
 /**
