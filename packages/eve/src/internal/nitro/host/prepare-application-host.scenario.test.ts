@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +15,9 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 import {
   prepareDevelopmentApplicationHost,
   prepareProductionApplicationHost,
+  refreshProductionCompiledArtifacts,
 } from "#internal/nitro/host/prepare-application-host.js";
+import { writeSandboxPreparedArtifactsManifest } from "#runtime/sandbox/prepared-artifacts.js";
 
 const createAppRoot = useTemporaryAppRoots();
 
@@ -54,6 +56,53 @@ describe("application host preparation", () => {
     }
 
     expect(existsSync(workspace.rootDir)).toBe(false);
+  });
+
+  it("refreshes only the bundled data with sandbox artifacts recorded after preparation", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-production-host-refresh-", {
+      files: {
+        "agent/instructions.md": "Use the configured model.",
+      },
+      packageName: "production-host-refresh",
+    });
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
+    const workspace = await createApplicationBuildWorkspace(appRoot);
+    const readHostArtifacts = async () => {
+      const names = await readdir(workspace.host.artifactsDir);
+      const entries = await Promise.all(
+        names.map(async (name) => [
+          name,
+          await readFile(join(workspace.host.artifactsDir, name), "utf8"),
+        ]),
+      );
+      return Object.fromEntries(entries) as Record<string, string>;
+    };
+
+    try {
+      const preparedHost = await prepareProductionApplicationHost(workspace);
+      const { "compiled-artifacts-data.json": _, ...preparedModules } = await readHostArtifacts();
+      const entry = {
+        artifact: { imageReference: "eve-sandbox-template:alice" },
+        nodeId: "__root__",
+        providerName: "docker",
+      };
+      await writeSandboxPreparedArtifactsManifest({
+        compileDirectoryPath: preparedHost.compileResult.paths.compileDirectoryPath,
+        entries: [entry],
+      });
+
+      await refreshProductionCompiledArtifacts(preparedHost, workspace.host.artifactsDir);
+
+      const { "compiled-artifacts-data.json": data, ...refreshedModules } =
+        await readHostArtifacts();
+      expect(JSON.parse(data!).sandboxPreparedArtifacts.entries).toEqual([entry]);
+      expect(refreshedModules).toEqual(preparedModules);
+    } finally {
+      await removeApplicationBuildWorkspace(workspace);
+    }
   });
 
   it("selects the Vercel Workflow world for a prebuilt production host", async () => {
