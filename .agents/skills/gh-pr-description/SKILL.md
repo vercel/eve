@@ -12,9 +12,9 @@ changesets. When updating a PR, read its current body first.
 
 ## Write
 
-Write only the Summary section from `.github/pull_request_template.md`. Never
-include a Validation, Test plan, or Checklist section, and delete them from an
-existing body when you update it. Write for a reviewer, not a changelog:
+Fill in the Summary section of `.github/pull_request_template.md`. Never add a
+Validation, Test plan, or Checklist section, and delete them from an existing
+body when you update it. Write for a reviewer, not a changelog:
 
 - Follow these ASD-STE100 rules where they apply:
   - Use approved words from the ASD-STE100 dictionary, with one meaning per
