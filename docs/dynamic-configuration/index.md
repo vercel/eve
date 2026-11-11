@@ -192,30 +192,29 @@ Return a single `defineTool(...)`, a map of tools, or `null`. Executors receive 
 
 ### Return a workflow tool
 
-A dynamic function can also return a [workflow tool](/docs/tools/workflows), so a tool that waits for a person, a webhook, or a timer is offered only on some calls. Declare its body as a top-level `async function` that starts with `"use workflow"`, so the build compiles it, and pass that function to `defineWorkflowTool()`:
+A dynamic function can also return a [workflow tool](/docs/tools/workflows), so a tool that waits for a person, a webhook, or a timer is offered only on some calls. Assign the `defineWorkflowTool()` to a top-level `const`, so the build compiles its body, and return that `const`:
 
 ```ts title="agent/tools/support.ts"
 import { defineDynamic, defineWorkflowTool } from "eve/tools";
-import type { WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
-async function escalate({ summary }: { summary: string }, ctx: WorkflowToolContext) {
-  "use workflow";
-  return await ctx.ask({ prompt: `Escalate this case? ${summary}` });
-}
-
-const escalateTool = defineWorkflowTool({
+const escalate = defineWorkflowTool({
   description: "Escalate a support case once someone confirms.",
   inputSchema: z.object({ summary: z.string() }),
-  execute: escalate,
+  async execute({ summary }, ctx) {
+    "use workflow";
+    return await ctx.ask({ prompt: `Escalate this case? ${summary}` });
+  },
 });
 
 export default defineDynamic((ctx) =>
-  ctx.session.auth.current?.attributes.team === "support" ? { escalate: escalateTool } : null,
+  ctx.session.auth.current?.attributes.team === "support" ? { escalate } : null,
 );
 ```
 
-The build fails when a workflow tool's body is written inline or doesn't start with `"use workflow"`. A body imported from another module is checked when the tool is offered: if it isn't a compiled workflow, the turn fails with an error that names the tool. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn.
+The entry point can also reference a top-level `async function` that starts with `"use workflow"`, in the same module or an imported one. eve compiles an inline body as a top-level function named after the `const` and the entry point, such as `escalate$execute`, so renaming the `const` changes the workflow's ID, as renaming a static tool's entry point does.
+
+A workflow can't read the variables around it, so a `defineWorkflowTool()` created inside the dynamic function, and an entry point without `"use workflow"`, fail the build. An imported entry point is checked when the tool is offered: if it isn't a compiled workflow, the turn fails with an error that names the tool. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn; while its task runs, the model keeps `eve__task_wait` and `eve__task_cancel`. eve's built-in workflow tools, such as `agent({ models })`, only work as static tools, so returning one fails the turn.
 
 ### Author replayable callbacks
 
@@ -239,7 +238,7 @@ Names use ASCII letters, digits, underscores, and dashes, start with a letter, a
 
 ### Conflicts
 
-A dynamic connection or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. A tool name belongs to one tool: when a dynamic tool returns the name of a static tool or of another dynamic tool, the first keeps it and eve logs an error for the other. Static tools come first. The same rule applies to duplicate dynamic skill names. To replace a built-in or extension tool, add `agent/tools/<name>.ts` instead. Dynamic tools can't take workflow-tool or subagent names. Other invalid results and name conflicts fail the turn.
+A dynamic connection or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. A tool name belongs to one tool: when a dynamic tool returns the name of a static tool or of another dynamic tool, the first keeps it and eve logs an error for the other. Static tools come first. The same rule applies to duplicate dynamic skill names. To replace a built-in or extension tool, add `agent/tools/<name>.ts` instead. Dynamic tools can't take the names of static workflow tools or subagents. Other invalid results and name conflicts fail the turn.
 
 <span id="events"></span>
 

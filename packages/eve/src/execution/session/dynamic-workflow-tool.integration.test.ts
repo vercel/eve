@@ -49,7 +49,7 @@ const DEPLOY_INPUT = {
 const holdDeploy = defineWorkflowTool({
   description: "Start a deploy that keeps running in the background.",
   inputSchema: DEPLOY_INPUT,
-  task: waitingForCleanupWorkflow as unknown as WorkflowTaskToolDefinition["task"],
+  task: waitingForCleanupWorkflow as WorkflowTaskToolDefinition["task"],
 });
 
 // Declared outside the dynamic function, so the same compiled workflow backs every evaluation.

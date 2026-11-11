@@ -182,6 +182,15 @@ return inner();
         /is the function "go" without "use workflow"/u,
       ],
       [
+        "a top-level step function",
+        dynamicModule([
+          'async function go() { "use step"; return 1; }',
+          'const deploy = defineWorkflowTool({ description: "d", inputSchema: {}, execute: go });',
+          "export default defineDynamic(() => ({ deploy }));",
+        ]),
+        /is the function "go" without "use workflow"/u,
+      ],
+      [
         "a top-level const arrow without the directive",
         dynamicModule([
           "const go = async () => 1;",
@@ -213,6 +222,63 @@ return inner();
     ])("rejects an entry point without the directive: %s", async (_name, source, message) => {
       await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
         message,
+      );
+    });
+
+    it("hoists an inline method of a top-level const tool to a function named after the const", async () => {
+      const source = dynamicModule([
+        'const escalate = defineWorkflowTool({ description: "d", inputSchema: {}, async execute(input) {\n  "use workflow";\n  return input;\n} });',
+        "export default defineDynamic(() => ({ escalate }));",
+      ]);
+
+      const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+
+      expect(prepared.hasWorkflowDirective).toBe(true);
+      expect(prepared.source).toContain("execute: escalate$execute }");
+      expect(prepared.source).toContain(
+        'async function escalate$execute(input) {\n  "use workflow";\n  return input;\n}',
+      );
+    });
+
+    it("hoists each tool in a module, exported or not, through an aliased definer", async () => {
+      const source = dynamicModule(
+        [
+          'export const escalate = durable({ description: "d", inputSchema: {}, async execute() {\n"use workflow";\nreturn 1; } });',
+          'const review: unknown = durable({ description: "d", inputSchema: {}, task: async () => {\n"use workflow";\nreturn 2; } });',
+          "export default defineDynamic(() => ({ escalate, review }));",
+        ],
+        'import { defineDynamic, defineWorkflowTool as durable } from "eve/tools";',
+      );
+
+      const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+
+      expect(prepared.source).toContain("execute: escalate$execute }");
+      expect(prepared.source).toContain("task: review$task }");
+      expect(prepared.source).toContain("async function escalate$execute() {");
+      expect(prepared.source).toContain("async function review$task() {");
+      expect(prepared.source.indexOf("escalate$execute() {")).toBeLessThan(
+        prepared.source.indexOf("review$task() {"),
+      );
+    });
+
+    it("rejects a workflow method inside the resolver, naming the fix", async () => {
+      const source = dynamicModule([
+        'export default defineDynamic(() => defineWorkflowTool({ description: "d", inputSchema: {}, async execute() {\n"use workflow";\nreturn 1; } }));',
+      ]);
+
+      await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+        /marks the "execute" of a defineWorkflowTool\(\) that isn't declared at the top level of the module.+assign the defineWorkflowTool\(\) to a top-level const/su,
+      );
+    });
+
+    it("rejects a step directive on a top-level const tool's method", async () => {
+      const source = dynamicModule([
+        'const escalate = defineWorkflowTool({ description: "d", inputSchema: {}, async execute() {\n"use step";\nreturn 1; } });',
+        "export default defineDynamic(() => ({ escalate }));",
+      ]);
+
+      await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+        /"use step" in ".+" marks "escalate"'s "execute" method/u,
       );
     });
 

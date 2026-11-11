@@ -73,8 +73,9 @@ continues, deploys, and returns one tool result.
 
 ### Rules
 
-- Default-export `defineWorkflowTool({ ... })` with exactly one entry point: `execute`, `task`, or
-  `serve`. Defining none, or more than one, throws when the tool is defined.
+- Default-export `defineWorkflowTool({ ... })`, or assign it to a top-level `const` that a
+  `defineDynamic` function returns, with exactly one entry point: `execute`, `task`, or `serve`.
+  Defining none, or more than one, throws when the tool is defined.
 - Write the entry point inline, or reference a top-level `async function` in the same module or an
   imported application module. `execute` and `task` can be async generators; `serve` can't.
 - Start the entry point with `"use workflow"`. A missing directive is a build error, even if another
@@ -88,8 +89,8 @@ continues, deploys, and returns one tool result.
   in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
-- A `defineDynamic` function can return a workflow tool whose body is a top-level `"use workflow"`
-  function; see [Return a workflow tool](/docs/guides/dynamic-capabilities#return-a-workflow-tool).
+- A `defineDynamic` function can return a workflow tool that a top-level `const` holds; see
+  [Return a workflow tool](/docs/guides/dynamic-capabilities#return-a-workflow-tool).
   `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
   handler fails the build. To start a session from a channel or schedule, use the
   [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
