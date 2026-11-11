@@ -38,13 +38,27 @@ const { default: ChatComark } = await import(componentUrl.href);
 async function render(value, streaming = false) {
   const app = createSSRApp({ render: () => h(ChatComark, { value, streaming }) });
   app.component("UButton", {
-    props: ["to", "label"],
-    setup: (props) => () => h("a", { href: props.to }, props.label),
+    props: ["to", "label", "avatar"],
+    setup: (props) => () =>
+      h("a", { href: props.to, "data-avatar-src": props.avatar?.src }, props.label),
   });
   return renderToString(app);
 }
 
 for (const streaming of [false, true]) {
+  test(`chat Markdown preserves inline source citations (streaming=${streaming})`, async () => {
+    const output = await render(
+      'A sourced answer :source-link{url="https://example.com" favicon="https://example.com/favicon.ico" label="example.com"} continues here.',
+      streaming,
+    );
+    assert.match(
+      output,
+      /<p>A sourced answer <a\b[^>]*href="https:\/\/example.com"[^>]*>example.com<\/a> continues here\.<\/p>/,
+    );
+    assert.match(output, /data-avatar-src="https:\/\/example.com\/favicon.ico"/);
+    assert.doesNotMatch(output, /\{url=/);
+  });
+
   test(`chat Markdown removes executable HTML and component syntax (streaming=${streaming})`, async () => {
     for (const value of [
       '<script>alert("xss")</script>',
@@ -67,6 +81,7 @@ for (const streaming of [false, true]) {
       ':img{src="data:image/svg+xml,test"}',
       '---\nx: data:image/svg+xml,test\n---\n:img{:src="frontmatter.x"}',
       ':source-link{url="javascript:alert(1)" favicon="https://example.com/favicon.ico" label="Click" onmouseover="alert(1)"}',
+      'A sourced answer :source-link{url="javascript:alert(1)" favicon="https://example.com/favicon.ico" label="Click" onmouseover="alert(1)"}',
     ]) {
       const output = await render(value, streaming);
       assert.doesNotMatch(

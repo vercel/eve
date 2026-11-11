@@ -1,3 +1,4 @@
+import attributes from "@comark/nuxt/plugins/attributes";
 import components from "@comark/nuxt/plugins/components";
 import highlight from "@comark/nuxt/plugins/highlight";
 import linkify from "@comark/nuxt/plugins/linkify";
@@ -30,6 +31,7 @@ export default defineMarkdownComponent({
     linkify(),
     taskList(),
     components(),
+    attributes(),
     highlight({
       languages: [
         html,
