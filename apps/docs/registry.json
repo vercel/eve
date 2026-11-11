@@ -424,7 +424,7 @@
       "description": "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
       "dependencies": ["@memco/eve"],
       "envVars": { "MEMCO_API_TOKEN": "" },
-      "meta": { "eve": { "requires": ">=0.84.1" } },
+      "meta": { "eve": { "requires": ">=0.84.1 <1.0.0-0" } },
       "files": [
         {
           "path": "registry/memory/memco.ts",

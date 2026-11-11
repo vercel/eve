@@ -15,6 +15,7 @@ interface RegistryItem {
   files?: RegistryFile[];
   meta?: {
     eve?: {
+      requires?: string;
       setup?: { package?: string; bin?: string; args?: string[] };
     };
   };
@@ -103,6 +104,9 @@ for (const item of items) {
   } else if (slug === "memco") {
     if (!item.dependencies?.includes("@memco/eve")) {
       throw new Error('Registry item "memory/memco" must depend on @memco/eve.');
+    }
+    if (item.meta?.eve?.requires !== ">=0.84.1 <1.0.0-0") {
+      throw new Error('Registry item "memory/memco" must require eve >=0.84.1 <1.0.0-0.');
     }
     if (!("MEMCO_API_TOKEN" in (item.envVars ?? {}))) {
       throw new Error(
