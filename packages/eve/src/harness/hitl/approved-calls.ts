@@ -2,7 +2,7 @@ import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage, TelemetryOptions } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { personOf } from "#context/session-auth.js";
+import { personOf, principalOf } from "#context/session-auth.js";
 import { sessionCaller } from "#runtime/connections/caller-confirmation.js";
 
 import {
@@ -146,12 +146,17 @@ export async function runApprovedCalls(input: {
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
         const caller = sessionCaller();
-        const confirmedBy = [
-          ...(input.callerApprovedOf?.(approval) === true && caller !== null
-            ? [personOf(caller)]
-            : []),
-          ...(approval.confirmedBy ?? []),
-        ];
+        const callerApproval =
+          input.callerApprovedOf?.(approval) === true && caller !== null
+            ? personOf(caller)
+            : undefined;
+        const earlier = approval.confirmedBy ?? [];
+        // The caller's approval can be one eve asked them for, already among the earlier ones.
+        const confirmedBy =
+          callerApproval === undefined ||
+          earlier.some((person) => principalOf(person) === principalOf(callerApproval))
+            ? earlier
+            : [callerApproval, ...earlier];
         return await executeToolCall(
           call,
           {
