@@ -1014,7 +1014,8 @@ An interrupted dispatch can start a second run for the same call, and both runs 
 application idempotency key for side effects that must happen only once.
 
 The workflow id comes from the entry point's module path and function name. Inline entry points use
-the tool module and the name `execute`, `task`, or `serve`. Imported ones use their declaring module
-and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
+the tool module and the name `execute`, `task`, or `serve`. For a tool that a top-level `const`
+holds, the name also carries the `const`, such as `escalate$execute`. Imported ones use their
+declaring module and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
 deployment that started them. A run that resumes on a deployment without its tool fails with an
 error naming the missing workflow.
