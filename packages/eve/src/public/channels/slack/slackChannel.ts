@@ -652,6 +652,13 @@ export interface SlackInteractionAction {
    */
   readonly label?: string;
   /**
+   * Slack `response_url` of the click. POST to it to replace or delete the
+   * message hosting the component, for example `{ delete_original: true }`.
+   * It is the only way to change an ephemeral message, which `chat.update`
+   * and `chat.delete` can't reach.
+   */
+  readonly responseUrl?: string;
+  /**
    * Slack actor who triggered the interaction, letting `onInteraction`
    * handlers attribute resolutions back to the clicker without re-parsing
    * the raw payload. Always present, since Slack requires `user` on every
