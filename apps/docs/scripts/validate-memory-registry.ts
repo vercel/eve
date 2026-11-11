@@ -100,6 +100,15 @@ for (const item of items) {
         'Registry item "memory/supermemory" must declare SUPERMEMORY_API_KEY as an environment variable.',
       );
     }
+  } else if (slug === "memco") {
+    if (!item.dependencies?.includes("@memco/eve")) {
+      throw new Error('Registry item "memory/memco" must depend on @memco/eve.');
+    }
+    if (!("MEMCO_API_TOKEN" in (item.envVars ?? {}))) {
+      throw new Error(
+        'Registry item "memory/memco" must declare MEMCO_API_TOKEN as an environment variable.',
+      );
+    }
   } else if (slug === "memanto") {
     if (!item.dependencies?.some((dependency) => dependency.startsWith("@moorcheh-ai/memanto@"))) {
       throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto.');

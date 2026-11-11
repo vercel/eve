@@ -388,6 +388,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "memco",
+    name: "memco",
+    kind: "memory",
+    tagline:
+      "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
