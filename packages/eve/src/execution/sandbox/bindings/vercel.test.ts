@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
@@ -321,6 +322,13 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  // What the Sandbox API answers a resume whose snapshot expired or was deleted.
+  const snapshotNotFound = () =>
+    Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
+      json: { error: { code: "snapshot_not_found" } },
+      response: { status: 410 },
+    });
+
   it("creates a session from the prepared snapshot artifact without looking up the template sandbox", async () => {
     const sessionSandbox = createMockSandbox({ name: "session-key" });
     const sandboxModule = {
@@ -954,12 +962,6 @@ describe("createVercelSandbox", () => {
 
   describe("tool sessions", () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
-    // What the Sandbox API answers a resume whose snapshot expired or was deleted.
-    const snapshotNotFound = () =>
-      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
-        json: { error: { code: "snapshot_not_found" } },
-        response: { status: 410 },
-      });
     const nameTaken = () =>
       Object.assign(new Error("A sandbox with the name already exists"), {
         response: { status: 400 },
@@ -1117,6 +1119,43 @@ describe("createVercelSandbox", () => {
       await expect(open()).rejects.toThrow();
       expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
       expect(gone.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("resuming recorded state", () => {
+    const sandboxName = "eve-sbx-vercel-recorded";
+
+    // A stopped sandbox that fails to resume with `error`.
+    function resumeFailing(error: Error, sessionId: string) {
+      const stopped = createMockSandbox({ name: sandboxName, status: "stopped" });
+      stopped.runCommand.mockRejectedValue(error);
+      const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => stopped) } };
+      const provider = createTestVercelSandbox({
+        loadSandboxModule: async () => sandboxModule as never,
+      });
+      return provider.openSession({
+        appRoot: "/tmp/test-app-root",
+        existing: { sandboxName, version: 3 },
+        prepared: { snapshotId: "prepared-snapshot" },
+        sandboxName: sessionId,
+      });
+    }
+
+    it("reports a session gone when its sandbox's snapshot expired", async () => {
+      const error = await resumeFailing(snapshotNotFound(), "session_abc").catch((e: unknown) => e);
+      expect(SandboxSessionGoneError.is(error)).toBe(true);
+    });
+
+    it.each([
+      ["a stopped sandbox", 410],
+      ["an internal error", 500],
+    ])("surfaces %s unchanged instead of reporting the session gone", async (_, status) => {
+      const original = Object.assign(new Error("Cannot resume sandbox"), {
+        response: { status },
+      });
+      const error = await resumeFailing(original, "session_abc").catch((e: unknown) => e);
+      expect(error).toBe(original);
+      expect(SandboxSessionGoneError.is(error)).toBe(false);
     });
   });
 
