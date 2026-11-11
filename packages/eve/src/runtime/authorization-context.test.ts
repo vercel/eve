@@ -54,7 +54,7 @@ describe("ctx.getToken with as", () => {
     // Bob spoke last, so his identity is his to hand out, and the session recorded him.
     ctx.set(SenderAuthKey, bobAuth);
     const session: { readonly state?: SessionStateMap } = {};
-    const { state } = rememberSender(session, bobAuth);
+    const { state } = rememberSender(session, bobAuth, "turn_0");
     enterParticipants(ctx, () => state);
     const received: ConnectionPrincipal[] = [];
 

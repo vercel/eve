@@ -16,7 +16,7 @@ Every dynamic function receives:
 
 | Field                     | Contents                                                                                                                                             |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                               |
+| `ctx.session`             | Session ID, authenticated caller, initiator, and latest sender, and optional schedule and predecessor.                                               |
 | `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
 | `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
 | `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
@@ -26,6 +26,8 @@ Every dynamic function receives:
 | `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                                            |
 | `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
 | `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
+
+`ctx.session.auth.current` is the turn's caller, the person whose message started the turn. In a session several people share, such as a Slack thread, another person's message can join the turn, and `ctx.session.auth.sender` names who sent the latest one. eve runs the function again before the model reads that message. A function that offers something from the caller's attributes alone offers it to that person too, so check `auth.sender` as well, as the [dynamic subagent](#dynamic-subagents) example does. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
 
 Before a model call, `ctx.messages()` includes the task results and `[Tasks]` note that call will receive. A dynamic model can react to a background task's result in the same step, without waiting for another call.
 
@@ -140,11 +142,13 @@ A declared subagent's `agent.ts` can return a child configuration or `null`:
 ```ts title="agent/subagents/finance/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
-export default defineDynamic((ctx) =>
-  ctx.session.auth.current?.attributes.plan === "enterprise"
+export default defineDynamic((ctx) => {
+  const { current, sender } = ctx.session.auth;
+  // `sender` is `current` until someone else's message joins the turn.
+  return current?.attributes.plan === "enterprise" && sender?.attributes.plan === "enterprise"
     ? defineAgent({ description: "Analyze financial data.", model: ctx.model.id })
-    : null,
-);
+    : null;
+});
 ```
 
 The child's tools, instructions, skills, and nested subagents still build from the filesystem; the returned config supplies runtime settings. A local child config requires a string model ID. Put build settings such as `build.externalDependencies` on the root agent, because build and Workflow world settings can't be chosen at runtime.

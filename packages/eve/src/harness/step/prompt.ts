@@ -100,7 +100,9 @@ export function commitTurnInput(step: Step, prepared: PreparedPrompt): Prompt {
   }
   step.session = changeHistory(step.session, { extend: prepared.messages });
   const { sender } = prepared.turn;
-  if (sender !== undefined) step.session = rememberSender(step.session, sender);
+  if (sender !== undefined) {
+    step.session = rememberSender(step.session, sender, prepared.turn.turnId);
+  }
   return {
     clientContext: getTurnClientContextState(step.session.state, prepared.turn.turnId),
     messages: [...step.session.history],

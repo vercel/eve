@@ -1,7 +1,9 @@
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlOrigin } from "#execution/session/input-queue.js";
-import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
+import type { DeliverHookPayload, SessionAuthContext, TurnCaller } from "#channel/types.js";
+import { AuthKey, SenderAuthKey } from "#context/keys.js";
+import { principalOf } from "#context/session-auth.js";
 import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
@@ -26,7 +28,12 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
-import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
+import {
+  activeTurnId,
+  queuedInput,
+  storedProjection,
+  turnPosition,
+} from "#harness/session-machine/view.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -155,7 +162,12 @@ export class ActiveTurn {
   async takeSteering(options = this.admittedWith): Promise<DeliverHookPayload | undefined> {
     let delivery: DeliverHookPayload | undefined;
     while (delivery === undefined) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(
+        this.admitted,
+        this.identity,
+        options,
+        this.unreadFrom(),
+      );
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
@@ -173,6 +185,22 @@ export class ActiveTurn {
     if (delivery === undefined) return undefined;
     if (delivery.caller !== undefined) this.caller = delivery.caller;
     return delivery;
+  }
+
+  /**
+   * Who sent the message the turn holds but hasn't read, such as one that waits behind the calls
+   * an approval let run. Nothing records another message's sender until the turn reads it, so the
+   * session's latest sender is still theirs.
+   */
+  private unreadFrom(): string | undefined {
+    const { cursor } = this.input;
+    if (queuedInput(readDurableSession(cursor.sessionState).state)?.message === undefined) {
+      return undefined;
+    }
+    const context = cursor.serializedContext;
+    const sender =
+      SenderAuthKey.name in context ? context[SenderAuthKey.name] : context[AuthKey.name];
+    return principalOf(sender as SessionAuthContext | null | undefined);
   }
 
   /**

@@ -149,7 +149,11 @@ async function captureTurn(
     .filter((message) => caller === null || !sentBy(message, caller))
     .map(sendersOf);
   // eve can't resolve a scope for someone it doesn't know, such as a person who isn't signed in.
+  // A channel that sends a message without auth names no sender on it, so the turn's own record
+  // of who spoke catches them.
   if (senders.some((people) => people.length === 0)) return;
+  const callerAnonymous = personKey(caller) === ANONYMOUS_PRINCIPAL;
+  if (unrecordedSpeakers().anonymousTurnId === turnContext.id && !callerAnonymous) return;
   if (!(await sharedWith(memory, context, scope, senders.flat()))) return;
   const id = operationId(sessionIdOf(container), memory.slot, "turn.completed", turnContext);
   try {

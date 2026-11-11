@@ -178,17 +178,22 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
+  /**
+   * Takes the next person's steering messages. `unreadFrom` names, by principal, who sent a
+   * message the turn holds but hasn't read: anyone else's messages wait until it reads it.
+   */
   takeSteering(
     admitted: ReadonlySet<number>,
     turn: SteeringTurn,
     options?: SteeringOptions,
+    unreadFrom?: string,
   ): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" && admitted.has(entry.sequence) && steers(entry, turn, options),
     );
     const run = oneSender(steering);
-    if (run.length === 0) return undefined;
+    if (run.length === 0 || waitsForUnread(run, unreadFrom, options)) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !run.includes(entry));
     return {
       delivery: combine(run),
@@ -352,6 +357,29 @@ function steers(
     isSteeringDelivery(entry.delivery, turn, awaitsPerson) &&
     (options?.callerOnly !== true || isCallerDelivery(entry.delivery, turn))
   );
+}
+
+/**
+ * A turn reads one sender's message at a time, so a message from someone other than `unreadFrom`
+ * waits until the turn reads theirs. The caller still types the answer to a request that takes its
+ * answer first, such as the budget prompt, because the turn can't read on until they answer it.
+ */
+function waitsForUnread(
+  run: readonly QueuedDelivery[],
+  unreadFrom: string | undefined,
+  options: SteeringOptions | undefined,
+): boolean {
+  if (unreadFrom === undefined || options?.callerOnly === true) return false;
+  return run.some(({ delivery }) => {
+    // A delegating parent's message speaks for the sender it passes down.
+    const sender =
+      delivery.caller?.senderAuth !== undefined ? delivery.caller.senderAuth : delivery.auth;
+    return (
+      sender !== undefined &&
+      principalOf(sender) !== unreadFrom &&
+      delivery.payloads.some((payload) => payload.message !== undefined)
+    );
+  });
 }
 
 /**

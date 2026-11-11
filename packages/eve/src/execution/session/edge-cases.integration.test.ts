@@ -322,7 +322,7 @@ interface Session {
   ) => Promise<Stage>;
   readonly send: (
     message: string,
-    auth?: SessionAuthContext,
+    auth?: SessionAuthContext | null,
     turnPolicy?: "queue" | "steer",
   ) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
@@ -1112,6 +1112,62 @@ describe("calls in flight", () => {
     );
   });
 
+  it("names each sender when the caller speaks while another person's message waits behind the call they approved", async () => {
+    const started = gate();
+    const release = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-unread-message-keeps-sender",
+      {
+        message: "Deploy it.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          prompts.push(prompt);
+          return prompt.includes("Deployed.") ? "Done." : [{ toolName: "deploy" }];
+        }),
+        tools: [
+          {
+            allowOtherResponders: true,
+            approval: true,
+            name: "deploy",
+            execute: async () => {
+              started.open();
+              await release.wait;
+              return "Deployed.";
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await session.next("asks Alice for approval");
+        // Bob approves and writes beside it: his message waits until the model reads the deploy's
+        // result, and Alice writes while it runs.
+        await session.answerAndSend(session.approvals()[0]!, "Bob's note.");
+        await started.wait;
+        try {
+          await session.send("Alice's note.");
+        } finally {
+          release.open();
+        }
+        await session.until(
+          "the model reads Alice's note",
+          (event) =>
+            event.type === "turn.settled" && prompts.some((prompt) => prompt.includes("Alice's")),
+        );
+      },
+    );
+
+    expect(turnOutcomes(events).every((outcome) => outcome.endsWith(":completed"))).toBe(true);
+    const answered = prompts.at(-1)!;
+    // The prompt is serialized as JSON, so the quotes around each id arrive escaped.
+    expect(answered).toContain(
+      String.raw`It is from \"bob\". The message before it was from \"alice\".`,
+    );
+    expect(answered).toContain(
+      String.raw`It is from \"alice\". The message before it was from \"bob\".`,
+    );
+  });
+
   it.each([
     [
       "another person's typed approve as a message, never as the caller's answer",
@@ -1313,6 +1369,14 @@ describe("calls in flight", () => {
         principalId: "anon-1",
         principalType: "anonymous" as const,
       },
+    },
+    {
+      agent: "edge-memory-no-auth",
+      captured: [/^team:.*second thing/u],
+      compacted: 0,
+      name: "a message the channel sent without auth joined to no scope",
+      scope: "team",
+      sender: null,
     },
   ])("saves a turn $name", async (row) => {
     const started = gate();

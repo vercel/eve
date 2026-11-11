@@ -15,13 +15,19 @@ function user(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
 }
 
+type Session = { state?: Record<string, unknown> };
+
+/** `session` after messages from `speakers`, all in one turn. */
+function spoken(speakers: readonly (SessionAuthContext | null)[], session: Session = {}) {
+  return speakers.reduce((current, auth) => rememberSender(current, auth, "turn_0"), session);
+}
+
 /** The line the model reads before `next`'s message, after messages from `earlier`. */
 function lineAfter(
   earlier: readonly (SessionAuthContext | null)[],
   next: SessionAuthContext | null,
 ) {
-  const session = earlier.reduce(rememberSender, {} as { state?: Record<string, unknown> });
-  return senderLine(session.state, next);
+  return senderLine(spoken(earlier).state, next);
 }
 
 describe("senderLine", () => {
@@ -45,9 +51,7 @@ describe("senderLine", () => {
   });
 
   it("adds nothing after the conversation was cleared", () => {
-    const session = forgetSender(
-      rememberSender({} as { state?: Record<string, unknown> }, user("alice")),
-    );
+    const session = forgetSender(spoken([user("alice")]));
     expect(senderLine(session.state, user("bob"))).toBeUndefined();
     expect(participantsOf(session.state, undefined)).toEqual([]);
   });
@@ -67,10 +71,7 @@ describe("participants", () => {
       authenticator: "slack",
       subject: "U_BOB",
     };
-    const session = [user("alice"), slack, null, user("alice")].reduce(
-      rememberSender,
-      {} as { state?: Record<string, unknown> },
-    );
+    const session = spoken([user("alice"), slack, null, user("alice")]);
 
     expect(participantsOf(session.state, undefined)).toEqual([
       { authenticator: "slack", principalId: "bob", principalType: "user", subject: "U_BOB" },
@@ -81,7 +82,7 @@ describe("participants", () => {
 
   it("keeps the 50 people who spoke most recently", () => {
     const people = Array.from({ length: 52 }, (_, index) => user(`person-${index}`));
-    const session = people.reduce(rememberSender, {} as { state?: Record<string, unknown> });
+    const session = spoken(people);
 
     const kept = participantsOf(session.state, undefined).map((person) => person.principalId);
     expect(kept).toHaveLength(50);
@@ -98,7 +99,7 @@ describe("participants", () => {
     ],
   ] as const)("notes, after %s, %j", (_label, speakers, expected) => {
     const ctx = new ContextContainer();
-    const session = speakers.reduce(rememberSender, {} as { state?: Record<string, unknown> });
+    const session = spoken(speakers);
     enterParticipants(ctx, () => session.state);
 
     expect(unrecordedSpeakers(ctx)).toEqual(expected);
@@ -106,18 +107,17 @@ describe("participants", () => {
 
   it("notes who spoke whom the participants don't record, until the conversation is cleared", () => {
     const ctx = new ContextContainer();
-    let session = [user("alice"), null].reduce(
-      rememberSender,
-      {} as {
-        state?: Record<string, unknown>;
-      },
-    );
+    let session = spoken([user("alice"), null]);
     enterParticipants(ctx, () => session.state);
-    expect(unrecordedSpeakers(ctx)).toEqual({ anonymous: true });
+    expect(unrecordedSpeakers(ctx)).toEqual({ anonymous: true, anonymousTurnId: "turn_0" });
 
     const people = Array.from({ length: 50 }, (_, index) => user(`person-${index}`));
-    session = people.reduce(rememberSender, session);
-    expect(unrecordedSpeakers(ctx)).toEqual({ anonymous: true, dropped: true });
+    session = spoken(people, session);
+    expect(unrecordedSpeakers(ctx)).toEqual({
+      anonymous: true,
+      anonymousTurnId: "turn_0",
+      dropped: true,
+    });
 
     session = forgetSender(session);
     expect(unrecordedSpeakers(ctx)).toEqual({});

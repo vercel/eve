@@ -31,6 +31,8 @@ export interface TurnMessage {
 export interface UnrecordedSpeakers {
   /** Someone who isn't signed in, whom eve can't name, beside people who are. */
   readonly anonymous?: true;
+  /** The latest turn in which someone who isn't signed in spoke beside people who are. */
+  readonly anonymousTurnId?: string;
   /** Someone the participants dropped, past the most recent people they keep. */
   readonly dropped?: true;
 }
@@ -71,12 +73,13 @@ export function senderLine(
 }
 
 /**
- * Remembers who sent the message the model reads now, for the next sender line, and records them
- * among the session's participants.
+ * Remembers who sent the message the model reads now in `turnId`, for the next sender line, and
+ * records them among the session's participants.
  */
 export function rememberSender<T extends { readonly state?: SessionStateMap }>(
   session: T,
   auth: SessionAuthContext | null,
+  turnId: string,
 ): T {
   const next = senderOf(auth);
   const last = session.state?.[LAST_SENDER_KEY] as Sender | undefined;
@@ -96,9 +99,13 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
   const unrecorded: UnrecordedSpeakers = {
     ...before,
     ...(mixed && { anonymous: true }),
+    ...(next.id === undefined && recorded.length > 0 && { anonymousTurnId: turnId }),
     ...(listed !== undefined && listed.length > MAX_PARTICIPANTS && { dropped: true }),
   };
-  const noted = unrecorded.anonymous !== before.anonymous || unrecorded.dropped !== before.dropped;
+  const noted =
+    unrecorded.anonymous !== before.anonymous ||
+    unrecorded.anonymousTurnId !== before.anonymousTurnId ||
+    unrecorded.dropped !== before.dropped;
   if (last?.principal === next.principal && participants === undefined && !noted) return session;
   return {
     ...session,

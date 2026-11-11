@@ -103,7 +103,9 @@ A tool can act for someone other than the caller with `ctx.getToken(provider, { 
 
 A call that waits on an approval or sign-in while the turn reads new messages runs as the model made it. Its `auth.sender` is whoever had spoken last when the model made the call, whatever messages arrive before it runs. A call the caller approves runs with the caller's identity. Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender it was asked under.
 
-A session with one person never reaches any of this. Tools that use no credentials aren't covered: a tool that decides from the caller's role must check `auth.sender` as well as `auth.current`.
+A session with one person never reaches any of this. eve checks only the calls in the table. Code that decides from `auth.current` alone gives the caller's access to anyone whose message joins the turn. That includes a tool that checks the caller's role, a credential your code picks for the caller, such as a [tenant API key](/docs/patterns/multi-tenant-auth#establish-the-tenant-scope), and a [dynamic](/docs/guides/dynamic-capabilities#context-and-memoization) tool, subagent, or connection offered from the caller's attributes. Check `auth.sender` as well.
+
+eve also doesn't check later use of a credential a call already received. A token a tool configured in the sandbox, for example, works for every later command until it expires or the tool removes it.
 
 eve's own role checks cover both people, whether or not the caller approved. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` opens a session as the caller, so it follows the same rule as a call that uses the caller's identity: eve asks the caller to approve it, and it returns `unavailable` only where eve can't ask.
 
