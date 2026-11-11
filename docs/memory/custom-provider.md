@@ -172,10 +172,13 @@ turn's recalled messages move to just after the summary.
 Before compaction rewrites history, eve calls `capture["compaction.requested"]`
 and waits for it, so a provider can keep detail the summary will lose.
 
-eve doesn't call `capture["turn.completed"]` for a turn that read a message
-from someone other than its caller, so another person's words in a
-[shared session](/docs/concepts/security-model#shared-sessions) don't reach the
-caller's scope that way.
+In a [shared session](/docs/concepts/security-model#shared-sessions), eve calls
+a capture handler only when the scope belongs to everyone whose words it can
+keep: the people who spoke in the turn for `capture["turn.completed"]`, and
+everyone who has spoken in the conversation for
+`capture["compaction.requested"]`. eve resolves the slot's scope as each person
+other than the caller, without their attributes, and skips the call if any of
+them gets a different scope or if it can't tell who sent a message.
 
 Calling `clear()` on a session removes its history and recalled messages but
 not the provider's store, so the next turn recalls again. A new scope, such as

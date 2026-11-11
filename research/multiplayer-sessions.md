@@ -298,8 +298,9 @@ An approval of eve's request covers that call only, and doesn't make the person 
 
 Both are decided from who sent which message and who pressed which button, never from what the
 model said. A sender line a person types into their own message can mislead the model, but it
-can't change either fact. Memory capture follows the same facts: a turn that read someone else's
-message isn't captured to its caller's memory.
+can't change either fact. Memory capture follows the same facts: eve saves people's words only to
+a memory scope that belongs to all of them. It resolves the slot's scope as each person other
+than the caller who spoke, and skips the capture when one of them gets a different scope.
 
 What remains:
 

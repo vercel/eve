@@ -94,7 +94,7 @@ function latestMessageFromOthers(
   // A local child's own messages come from the agent that delegated to it, so the messages its
   // parent's turn read count too, before the child's own.
   const latest = [...(delegatedMessages() ?? []), ...turnMessages(projection)]
-    .filter((message) => !sentBy(message, person))
+    .filter((message) => message.text !== "" && !sentBy(message, person))
     .at(-1);
   return latest === undefined ? undefined : { from: latest.from.id, text: latest.text };
 }

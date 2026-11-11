@@ -22,6 +22,7 @@ const DELEGATED_MESSAGE_LIMIT = 1_000;
 
 export interface TurnMessage {
   readonly from: Principal;
+  /** Empty for a message of attachments only. */
   readonly text: string;
 }
 
@@ -145,12 +146,13 @@ export function turnMessages(
   return Object.values(projection.view.deliveries)
     .flatMap((delivery) => {
       if (delivery.turnId !== turnId || delivery.consumedAt === undefined) return [];
-      if (delivery.principal === undefined) return [];
-      const text = (delivery.parts ?? [])
+      const parts = delivery.parts ?? [];
+      if (delivery.principal === undefined || parts.length === 0) return [];
+      const text = parts
         .flatMap((part) => (part.kind === "text" ? [part.text] : []))
         .join(" ")
         .trim();
-      return text.length === 0 ? [] : [{ at: delivery.consumedAt, from: delivery.principal, text }];
+      return [{ at: delivery.consumedAt, from: delivery.principal, text }];
     })
     .sort((a, b) => a.at - b.at)
     .map(({ from, text }) => ({ from, text }));
@@ -162,8 +164,14 @@ export function turnMessages(
  */
 export function sentBy(message: TurnMessage, person: SessionPerson): boolean {
   const key = principalOf(person);
-  const others = (sessionParticipants() ?? []).filter((other) => principalOf(other) !== key);
-  return names(message.from, person) && !others.some((other) => names(message.from, other));
+  return (
+    names(message.from, person) && sendersOf(message).every((sender) => principalOf(sender) === key)
+  );
+}
+
+/** The people who have spoken who could have sent a message the turn read. */
+export function sendersOf(message: TurnMessage): readonly SessionPerson[] {
+  return (sessionParticipants() ?? []).filter((person) => names(message.from, person));
 }
 
 /** Whether a delivery's principal names `person`, as far as the wire tells. */

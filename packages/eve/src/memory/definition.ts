@@ -6,6 +6,7 @@ import type { FactOf } from "#protocol/session-events/facts.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
+import { principalOf as personKey, type SessionPerson } from "#context/session-auth.js";
 import type { SessionFrame } from "#dynamic/definition.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf, latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
@@ -38,7 +39,13 @@ import {
 import { readDefinitionsState, sessionIdOf } from "#definitions/state.js";
 import { effectiveModelId } from "#definitions/model.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
-import { sentBy, turnMessages } from "#harness/sender-line.js";
+import {
+  delegatedMessages,
+  sendersOf,
+  sentBy,
+  sessionParticipants,
+  turnMessages,
+} from "#harness/sender-line.js";
 import { toolsDefinition } from "#definitions/tools.js";
 import type { MemoryToolsContext } from "#public/memory/index.js";
 import { isBrandedToolEntry } from "#tools/dynamic.js";
@@ -127,13 +134,18 @@ async function captureTurn(
   const messages = requireHistory(ctx.history, memory.logicalPath);
   const turnContext = activeTurn(messages);
   const context = commitScopeContext(ctx);
-  // The turn is saved to its caller's memory, so a turn that read someone else's message saves
-  // nothing: what it ends with, which providers keep, can be that person's words.
-  const caller = context.session.auth.current;
-  const read = turnMessages(currentProjection(), turnContext.id);
-  if (read.some((message) => caller === null || !sentBy(message, caller))) return;
   const scope = await resolveMemoryScope(memory, context);
   if (scope === null) return;
+  // What the turn ends with, which providers keep, can be the words of anyone whose message it
+  // read, and in a local child, of anyone whose message the delegating turn read.
+  const caller = context.session.auth.current;
+  const read = turnMessages(currentProjection(), turnContext.id);
+  const senders = [...(delegatedMessages() ?? []), ...read]
+    .filter((message) => caller === null || !sentBy(message, caller))
+    .map(sendersOf);
+  // eve can't resolve a scope for someone it doesn't know, such as a person who isn't signed in.
+  if (senders.some((people) => people.length === 0)) return;
+  if (!(await sharedWith(memory, context, scope, senders.flat()))) return;
   const id = operationId(sessionIdOf(container), memory.slot, "turn.completed", turnContext);
   try {
     await instrumentMemoryOperation(
@@ -209,6 +221,31 @@ async function recallOnce(
   };
 }
 
+/**
+ * Whether `scope` belongs to each of `people` as much as to the caller, so a capture may keep
+ * their words in it: the slot resolves to it as each of them, without the attributes eve keeps
+ * only for the caller. Participants are capped, so this resolves a bounded number of scopes.
+ */
+async function sharedWith(
+  memory: ResolvedMemoryDefinition,
+  context: ScopeContext,
+  scope: MemoryScope,
+  people: readonly SessionPerson[],
+): Promise<boolean> {
+  const others = new Map(people.map((person) => [personKey(person), person]));
+  others.delete(personKey(context.session.auth.current));
+  for (const person of others.values()) {
+    const as = { ...person, attributes: {} };
+    const auth = { current: as, initiator: as, sender: as };
+    const theirs = await resolveMemoryScope(memory, {
+      ...context,
+      session: { ...context.session, auth },
+    });
+    if (theirs?.key !== scope.key) return false;
+  }
+  return true;
+}
+
 /** What resolving a memory scope reads, after a commit. */
 function commitScopeContext(ctx: DefinitionContext): ScopeContext {
   const frame = buildCallbackContext();
@@ -234,8 +271,11 @@ async function captureBeforeCompaction(
   const container = ctx.container as ContextContainer;
   try {
     const messages = requireHistory(ctx.history, memory.logicalPath);
-    const scope = await resolveMemoryScope(memory, commitScopeContext(ctx));
+    const context = commitScopeContext(ctx);
+    const scope = await resolveMemoryScope(memory, context);
     if (scope === null) return;
+    // The history holds the words of everyone who has spoken in it.
+    if (!(await sharedWith(memory, context, scope, sessionParticipants() ?? []))) return;
     const turn = started.data.turnId === undefined ? null : activeTurn(messages);
     const id = [
       "eve-memory-operation-v1",

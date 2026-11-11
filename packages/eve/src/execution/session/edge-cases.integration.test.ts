@@ -42,7 +42,7 @@ import { failure } from "#protocol/session-projection/selectors.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
-import { defineMemory } from "#public/memory/index.js";
+import { defineMemory, type MemoryScopeDefinition } from "#public/memory/index.js";
 import { DENY_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
 import {
@@ -1282,28 +1282,47 @@ describe("calls in flight", () => {
     ]);
   });
 
-  // What Bob says in Alice's turn doesn't reach a memory scope of Alice's own.
-  it("saves nothing of a turn Bob joined to Alice's own memory", async () => {
+  // Bob's words reach memory only in a scope that is his as much as Alice's, both at the end of
+  // the turn he joined and before a compaction rewrites the history that holds them.
+  it.each([
+    {
+      agent: "edge-memory-own",
+      captured: [/^alice:.*second thing/u],
+      compacted: 0,
+      name: "a scope of her own",
+      scope: ((ctx) => ctx.session.auth.current?.principalId ?? null) as MemoryScopeDefinition,
+    },
+    {
+      agent: "edge-memory-shared",
+      captured: [/^team:.*staging/u, /^team:.*second thing/u],
+      compacted: 1,
+      name: "a scope they share",
+      scope: "team",
+    },
+  ])("saves a turn Bob joined to Alice's memory only in $name", async (row) => {
     const started = gate();
     const release = gate();
     const captured: string[] = [];
+    let compacted = 0;
     const { events } = await withSession(
-      "edge-memory-own",
+      row.agent,
       {
         message: "Look up the first thing.",
-        model: scriptedModel(({ results }) =>
-          results.length === 0 ? [{ toolName: "lookup" }] : "Done.",
-        ),
+        model: scriptedModel(({ results }, raw) => {
+          if (JSON.stringify(raw).includes("CONTEXT CHECKPOINT")) return "Summary.";
+          return results.length === 0 ? [{ toolName: "lookup" }] : "Done.";
+        }),
         modules: {
           "memory/notes.ts": defineMemory({
             provider: {
               capture: {
+                "compaction.requested": () => void compacted++,
                 "turn.completed": ({ memory, turn }) =>
                   void captured.push(`${String(memory.scope.value)}:${JSON.stringify(turn.input)}`),
               },
               recall: { "turn.started": () => null },
             },
-            scope: (ctx) => ctx.session.auth.current?.principalId ?? null,
+            scope: row.scope,
           }),
         },
         tools: [
@@ -1327,6 +1346,8 @@ describe("calls in flight", () => {
         await session.next("the turn Bob joined");
         await session.send("Look up the second thing.");
         await session.next("Alice's next turn");
+        await session.control("compact");
+        await session.until("compacted", (event) => event.type === "context.settled");
         await vi.waitFor(() => expect(captured.join()).toContain("second thing"), {
           timeout: 10_000,
         });
@@ -1334,7 +1355,8 @@ describe("calls in flight", () => {
     );
 
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
-    expect(captured).toEqual([expect.stringMatching(/^alice:.*second thing/u)]);
+    expect(captured).toEqual(row.captured.map((pattern) => expect.stringMatching(pattern)));
+    expect(compacted).toBe(row.compacted);
   });
 });
 

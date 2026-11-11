@@ -57,7 +57,7 @@ sequenceDiagram
 2. eve gives the model the provider's tools, named `<slot>__<tool>`.
 3. After the turn completes, eve asks the provider to capture it.
 
-In a [shared session](/docs/concepts/security-model#shared-sessions), eve skips step 3 for a turn that read a message from someone other than its caller, because that turn's memory is the caller's.
+In a [shared session](/docs/concepts/security-model#shared-sessions), eve skips step 3 unless the scope belongs to everyone who spoke in the turn. It resolves `scope` as each person other than the caller, without their attributes, and skips the capture if any of them gets a different scope. So `byPrincipal` skips a turn someone else spoke in, and a fixed or per-conversation scope keeps it.
 
 Recalled content enters the conversation as user messages labeled with the
 slot, never as system instructions.
