@@ -1,6 +1,5 @@
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { SessionAuthContext } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { openMemos, type MemoRun } from "#definitions/memos.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,18 +39,8 @@ function memos(kept?: MemoRun): MemoRun {
 }
 
 /** Evaluates the subagent in Alice's turn, after `sender` spoke last. */
-function offerInAliceTurn(
-  sender: SessionAuthContext | null,
-  run = memos(),
-  callerConfirmation?: "never",
-) {
-  const ctx = new ContextContainer();
-  ctx.set(BundleKey, {
-    graph: {
-      nodesByNodeId: new Map([["__root__", { agent: { config: { callerConfirmation } } }]]),
-    },
-  } as never);
-  return contextStorage.run(ctx, () => evaluate(sender, run));
+function offerInAliceTurn(sender: SessionAuthContext | null, run = memos()) {
+  return contextStorage.run(new ContextContainer(), () => evaluate(sender, run));
 }
 
 function evaluate(sender: SessionAuthContext | null, run: MemoRun) {
@@ -96,12 +85,6 @@ describe("deployed self-modification agent in a shared session", () => {
     mount(authorized);
 
     await expect(offerInAliceTurn(sender)).resolves.toBeNull();
-  });
-
-  it('still asks about the person who spoke last when callerConfirmation is "never"', async () => {
-    mount([alice]);
-
-    await expect(offerInAliceTurn(bob, memos(), "never")).resolves.toBeNull();
   });
 
   it("asks again within the turn once someone else speaks", async () => {

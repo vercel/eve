@@ -67,11 +67,6 @@ export function assertRootOnlyConfig(
   agentId: string,
 ): void {
   if (isRoot) return;
-  if (config.callerConfirmation !== undefined) {
-    throw new Error(
-      `"callerConfirmation" is only supported on the root agent config; local subagents use the root agent's value. Remove "callerConfirmation" from "${agentId}" and set it in the root agent's agent.ts.`,
-    );
-  }
   if (config.experimental?.workflow?.world !== undefined) {
     throw new Error(
       `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,

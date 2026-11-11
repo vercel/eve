@@ -355,15 +355,10 @@ describe("a remote agent and the caller's identity", () => {
   const open = (auth: SessionAuth, identity?: DelegatedIdentity) =>
     openAgentSessionStep({ ...message, auth, identity, name: "reviewer" });
 
-  function registerRemoteAgent(
-    forwardPrincipal: boolean | undefined,
-    callerConfirmation?: "never" | "once",
-  ): void {
+  function registerRemoteAgent(forwardPrincipal: boolean | undefined): void {
     mocks.targetKind = "remote";
     mocks.bundle = {
-      graph: {
-        nodesByNodeId: new Map([["__root__", { agent: { config: { callerConfirmation } } }]]),
-      },
+      graph: {},
       subagentRegistry: {
         subagentsByNodeId: new Map([
           [
@@ -430,27 +425,18 @@ describe("a remote agent and the caller's identity", () => {
   it.each([
     { reason: "the agent doesn't forward the caller", forwardPrincipal: undefined },
     {
-      reason: 'the agent\'s callerConfirmation is "never"',
-      callerConfirmation: "never" as const,
+      reason: "the caller approved a call since Bob spoke",
+      confirmed: [JSON.stringify(["eve.callerApproval", principalOf(alice)])],
       forwardPrincipal: true,
     },
-    {
-      reason: 'the caller already approved after Bob spoke, under callerConfirmation "once"',
-      callerConfirmation: "once" as const,
-      confirmed: [JSON.stringify(["eve.callerConfirmation", principalOf(alice), principalOf(bob)])],
-      forwardPrincipal: true,
-    },
-  ])(
-    "opens a session after Bob spoke when $reason",
-    async ({ callerConfirmation, confirmed, forwardPrincipal }) => {
-      registerRemoteAgent(forwardPrincipal, callerConfirmation);
+  ])("opens a session after Bob spoke when $reason", async ({ confirmed, forwardPrincipal }) => {
+    registerRemoteAgent(forwardPrincipal);
 
-      await open(
-        { current: alice, initiator: alice, sender: bob },
-        confirmed === undefined ? undefined : { confirmed, participants: [] },
-      );
+    await open(
+      { current: alice, initiator: alice, sender: bob },
+      confirmed === undefined ? undefined : { confirmed, participants: [] },
+    );
 
-      expect(mocks.startRemote).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
-    },
-  );
+    expect(mocks.startRemote).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
+  });
 });

@@ -21,8 +21,6 @@ import {
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
   ANTHROPIC_PROMPT_CACHE_TTLS,
-  CALLER_CONFIRMATION_VALUES,
-  type CallerConfirmation,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
   type PublicAgentStaticModelDefinition,
@@ -59,7 +57,6 @@ export function normalizeAgentDefinition(
     [
       "approval",
       "build",
-      "callerConfirmation",
       "compaction",
       "defaultTools",
       "description",
@@ -134,15 +131,6 @@ export function normalizeAgentDefinition(
 
   if (record.approval !== undefined) {
     definition.approval = normalizeAgentApproval(record.approval, message);
-  }
-
-  if (record.callerConfirmation !== undefined) {
-    if (!CALLER_CONFIRMATION_VALUES.includes(record.callerConfirmation as CallerConfirmation)) {
-      throw new Error(
-        `${message} The "callerConfirmation" field must be "always", "once", or "never".`,
-      );
-    }
-    definition.callerConfirmation = record.callerConfirmation as CallerConfirmation;
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;

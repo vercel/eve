@@ -346,16 +346,6 @@ export interface AgentWorkflowDefinition {
  */
 export type AgentToolExposure = boolean | "deferred";
 
-/** When eve asks the caller before a call uses their identity after someone else spoke. */
-export type CallerConfirmation = "always" | "once" | "never";
-
-/** The values `callerConfirmation` accepts. */
-export const CALLER_CONFIRMATION_VALUES: readonly CallerConfirmation[] = [
-  "always",
-  "once",
-  "never",
-];
-
 /**
  * Compiled-side agent definition. Carries a `name` because the compiler
  * stamps the path-derived `agentId` onto every compiled agent node.
@@ -371,7 +361,6 @@ export type InternalAgentDefinition = {
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
-  callerConfirmation?: CallerConfirmation;
   source?: ModuleSourceRef;
   tool?: AgentToolExposure;
   limits?: CompiledAgentLimitsDefinition;
@@ -421,20 +410,6 @@ type PublicAgentDefinitionBase = {
    */
   readonly approval?: ApprovalPolicy;
   readonly build?: AgentBuildDefinition;
-  /**
-   * When eve asks the caller before a call uses their identity after someone else spoke in
-   * their turn. A call uses the caller's identity when it reads a token for a user-scoped
-   * provider or connection, calls a `forwardPrincipal` connection, or calls a remote agent that
-   * forwards the caller.
-   *
-   * - `"always"` (default): ask the caller to approve each such call.
-   * - `"once"`: ask once for each person who spoke after the caller; an approval covers that
-   *   person's later messages for the rest of the session.
-   * - `"never"`: don't ask. Anyone the channel admits steers the turn with the caller's identity.
-   *
-   * Set it on the root agent; local subagents use the root agent's value.
-   */
-  readonly callerConfirmation?: CallerConfirmation;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**
    * Whether eve automatically adds its optional default tools. Defaults to `true`.

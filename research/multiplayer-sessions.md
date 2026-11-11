@@ -39,7 +39,8 @@ replaces it.
    never who the caller is.
 3. **A call gets a person's identity only from that person.** eve hands a person's identity to a
    call when they were the last to speak as the model made the call, or when they approved that
-   call. Otherwise eve asks them, or refuses the call where it can't ask.
+   call. The caller's approval also covers their later calls until someone else speaks. Otherwise
+   eve asks them, or refuses the call where it can't ask.
 4. **The model is told who is speaking.** eve names the sender when the speaker changes, on every
    channel.
 
@@ -53,7 +54,7 @@ The plan lands in one pull request, built in three parts.
 | --------------- | ----------------------------------------------------------------------------------------- |
 | 1. Steering     | Anyone steers a running turn, `auth.sender`, the sender line, and rule 3 as a refusal.    |
 | 2. Open waits   | A turn that waits on a person takes messages, and what it waited on stays open as a task. |
-| 3. Ask a person | eve asks instead of refusing, `callerConfirmation`, and `ctx.getToken(provider, { as })`. |
+| 3. Ask a person | eve asks instead of refusing, and `ctx.getToken(provider, { as })`.                       |
 
 ## API
 
@@ -64,14 +65,6 @@ interface SessionAuth {
   /** Who sent the latest message the turn read. Equal to `current` until someone else speaks. */
   readonly sender: SessionAuthContext | null;
 }
-```
-
-```ts title="agent/agent.ts"
-export default defineAgent({
-  // After someone else speaks, ask the caller before a call uses their identity.
-  // "always" (default): each time. "once": once for each person, for the session. "never": don't ask.
-  callerConfirmation: "once",
-});
 ```
 
 ```ts title="agent/tools/gh.ts"
@@ -89,7 +82,8 @@ export default defineTool({
 `ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`, and `as` adds
 `"principal_not_found"` and `"principal_ambiguous"`. With user tokens, the git extension's `gh` tool
 gains an `actor` input.
-Nothing is added to connection or channel definitions, and the approval helpers don't change.
+Nothing is added to agent, connection, or channel definitions, and the approval helpers don't
+change.
 
 ## Semantics
 
@@ -140,20 +134,21 @@ call. After someone else's message joins the turn, the call needs the caller's a
 - **Approved.** A call the caller approved runs with their identity, whoever spoke last, and
   reads the caller as `auth.sender`. The caller approves a call by answering its approval.
   Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender
-  it was asked under. An approval covers its own call only: it doesn't change `auth.sender`, so the next call is judged on its
-  own. Another person's approval, allowed by a `response` policy, doesn't release the caller's
-  identity.
+  it was asked under. An approval doesn't change `auth.sender`. Approving eve's request for their
+  identity also covers the caller's later calls until anyone else sends a message; see
+  [Asking a person](#asking-a-person). Another person's approval, allowed by a `response` policy,
+  doesn't release the caller's identity.
 
 A call that waits on a person runs as it was asked. It keeps the sender it had then, and messages
 read while it waited don't change what it gets.
 
 Listing a connection's tools uses the caller's identity even after someone else spoke: it runs
 nothing the model chose. A local subagent inherits the sender of the call that started it, the
-people who had spoken, and the caller's `"once"` approvals. Rule 3
+people who had spoken, and the caller's standing approval. Rule 3
 doesn't cover app-scoped connections or tools that use no credentials. A tool that decides from
 the caller's role reads `auth.sender` as well as `auth.current`. eve's own checks do: `gh` with
-app tokens and deployed self-modification ask `authorize` about both people under every
-`callerConfirmation` value. `openCodeChannel()`, which opens a session as the caller, follows rule 3
+app tokens and deployed self-modification ask `authorize` about both people, whether or not the
+caller approved. `openCodeChannel()`, which opens a session as the caller, follows rule 3
 as a call that uses the caller's identity does: eve asks the caller, and it returns `unavailable`
 only where eve can't ask. Creating a dynamic schedule or replacing its payload, and starting a
 connection event watch, record the caller for work that later runs as them, so they follow rule 3
@@ -201,8 +196,8 @@ eve opens an ordinary approval (`request.kind: "approval"`) for the person whose
 needs, with `audience.principalIds` naming them.
 
 - The prompt names the call by its tool's title, never by a label the model wrote. In order, it
-  says what is asked and of whom; under `"once"`, that approving also lets the person who spoke
-  last steer calls that use the caller's identity for the rest of the conversation; the latest
+  says what is asked and of whom; for the caller, that approving also lets later actions use
+  their identity until someone else sends a message; the latest
   message in the turn from a named sender other than that person, or in a local child from the
   turn that delegated to it; and every top-level input field. Each value, and each item inside
   one, is cut on its own after escaping, with a note of how much is hidden; keys are quoted.
@@ -214,8 +209,7 @@ needs, with `audience.principalIds` naming them.
 - Approving runs the call again from the top with that person's identity: the caller's for a call
   that needed it, else the named person's. A call that needs two people asks each once and keeps
   every approval, including the caller's approval of the tool itself. Work the tool did before it asked runs again. Approving
-  covers only that call and doesn't change `auth.sender`: only a message does. With `"always"`,
-  each identity-using call after someone else spoke asks until the caller speaks again.
+  doesn't change `auth.sender`: only a message does.
 - The call had started, so a client sees `call.started`, then `interaction.opened` about the same
   call, then `turn.paused`. Approving emits `call.started` again and one `call.settled`.
 - Cancelling fails the call with a result saying the request was cancelled and that what the call
@@ -226,24 +220,15 @@ needs, with `audience.principalIds` naming them.
 - Where eve can't ask, the call is refused: sessions without `requestInput`, workflow-step tools,
   and remote agents, which run outside the session step.
 
-`callerConfirmation` on the agent decides when the caller is asked:
-
-| Value      | After someone else speaks                                                             |
-| ---------- | ------------------------------------------------------------------------------------- |
-| `"always"` | Ask the caller each time. The default.                                                |
-| `"once"`   | Ask the caller once for each signed-in person. Approving covers their later messages. |
-| `"never"`  | Don't ask. Anyone the channel admits steers the turn with the caller's identity.      |
-
-`"once"` remembers for the caller and the person until the session ends, in the session's approval
-memory under an eve-owned key. Only approving a request is remembered; a message isn't. Anonymous
-people share one identity, so after an anonymous message eve asks each time. Every guard decides
-by one rule. A remote agent that forwards the caller reads the approvals the session remembered
-when the model called it, and a local subagent keeps them. A workflow tool, which runs outside the
-session step, doesn't read the memory and keeps refusing.
-With `"never"`, every identity guard hands out the caller's identity. `callerConfirmation` governs
-identity only: neither value changes `auth.sender`, and eve's own role checks still ask about both
-people. The root agent's value applies in its subagents. A local subagent that sets
-`callerConfirmation` fails to compile, and a dynamic subagent that sets it fails when selected.
+The caller's approval stands until someone else speaks. eve remembers it in the session's approval
+memory under an eve-owned key for the caller, and the next message from anyone other than the
+caller, including the person who spoke before, forgets it. That message also stops an open request
+for the caller's identity from being remembered: it was asked before the message, so approving it
+covers only its own call. Only approving a request is remembered; a message isn't. Every guard
+decides by one rule. A remote agent that forwards the caller reads the approval the session
+remembered when the model called it, and a local subagent keeps it. A workflow tool, which runs
+outside the session step, doesn't read the memory and keeps refusing. The approval governs identity
+only: it doesn't change `auth.sender`, and eve's own role checks still ask about both people.
 
 ### Acting for someone else
 
@@ -264,8 +249,8 @@ attributes, so a tool authorizes that identity rather than the name the model pa
 Rule 3 decides the same way for everyone. The named person's token is handed out when they were
 the last to speak as the model made the call, or when they approved the call. Otherwise eve asks
 them, signing them in if they haven't connected, or refuses where it can't ask.
-`callerConfirmation` doesn't apply to a person who isn't the caller: their identity always needs
-them. The sign-in asks the named person, but its callback resumes the turn as its caller. Approval
+The caller's standing approval doesn't apply to a person who isn't the caller: their identity
+always needs them, call by call. The sign-in asks the named person, but its callback resumes the turn as its caller. Approval
 responders' tokens, `ctx.approval.responder.getToken`, aren't guarded this way: the answer bound
 them.
 
@@ -306,8 +291,8 @@ What remains:
 
 - A turn's first calls. The caller just spoke, so their identity is available to whatever the
   model does next. Naming the person with `as` makes a wrong choice less likely, not impossible.
-- `callerConfirmation: "never"` and `"once"` are the author's decision to trust the people a
-  channel admits.
+- Calls the caller's approval covers before anyone else speaks. The approval request says so, and
+  the next message from someone else ends it.
 - Checks that read only `auth.current`. Another person's message can now reach a tool in the
   caller's turn, so a role check also reads `auth.sender`.
 
@@ -333,8 +318,7 @@ What remains:
   need no change: the request stays `open`, and a later `turn.paused` names it again.
 - **Role checks.** The auth, security, and Slack docs tell authors to read `auth.sender` in checks
   that used `auth.current` alone, and the changeset says so.
-- **Additive API.** `SessionAuth.sender`, `callerConfirmation`, the `as` option, and the
-  `confirmation_required` reason.
+- **Additive API.** `SessionAuth.sender`, the `as` option, and the `confirmation_required` reason.
 
 Each part carries its own evals under `agent-tools-hitl/evals/hitl/multiplayer`, with unit
 and integration tests for what the fixtures can't reach:
@@ -346,15 +330,16 @@ and integration tests for what the fixtures can't reach:
 2. A message joins a turn that waits on an approval and the approval stays open; approving later
    runs the call and delivers `task.result`; the model cancels a waiting call; a sign-in survives
    its caller's message.
-3. eve asks the caller and quotes the message; only the caller approves; `"once"` asks once for
-   each person; `"never"` doesn't ask; `gh` with `actor` asks the named person and runs with their
-   token.
+3. eve asks the caller and quotes the message; only the caller approves; the approval covers later
+   calls until someone else speaks, but not when it answers a request someone spoke after; `gh`
+   with `actor` asks the named person and runs with their token.
 
 ## Out of scope
 
 - Naming a person for connection tools. Their schemas belong to the server, so `as` reaches
   authored tools only. Rule 3 still guards the caller's identity there.
-- A function for `callerConfirmation`, to decide for each sender or channel.
+- An agent or channel setting that changes when eve asks the caller, such as trusting everyone a
+  channel admits. eve asks until real agents show the need.
 - Keeping an `ask_question` open through a new message. A task already does this.
 - Recording the sender on each tool call's trace beside the turn's caller.
 - A per-session access list. Channels still decide who reaches a session.

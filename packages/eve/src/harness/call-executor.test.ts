@@ -5,7 +5,6 @@ import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SenderAuthKey, SessionKey } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveConnectionPrincipal } from "#runtime/connections/principal.js";
@@ -292,15 +291,12 @@ it("closes a streaming tool when progress publication fails", async () => {
 });
 
 /**
- * Runs a `gh` call made with `input` that needs Alice's identity after Bob spoke, under the agent's
- * `callerConfirmation`, in a session that can ask her when `canAsk`.
+ * Runs a `gh` call made with `input` that needs Alice's identity after Bob spoke, in a session
+ * that can ask her when `canAsk`.
  */
 async function callNeedingAlice(
   input: Record<string, unknown>,
-  {
-    callerConfirmation = "always",
-    canAsk,
-  }: { readonly callerConfirmation?: "always" | "once"; readonly canAsk: boolean },
+  { canAsk }: { readonly canAsk: boolean },
 ) {
   const alice = {
     attributes: { team: "T01" },
@@ -309,11 +305,6 @@ async function callNeedingAlice(
     principalType: "user",
   };
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, {
-    graph: {
-      nodesByNodeId: new Map([["__root__", { agent: { config: { callerConfirmation } } }]]),
-    },
-  } as never);
   ctx.set(AuthKey, alice);
   ctx.set(SenderAuthKey, { ...alice, principalId: "bob" });
   ctx.set(SessionKey, {
@@ -357,12 +348,8 @@ async function callNeedingAlice(
 }
 
 /** The prompt eve asks Alice with for the `gh` call `callNeedingAlice` makes with `input`. */
-async function identityPrompt(
-  input: Record<string, unknown>,
-  callerConfirmation: "always" | "once" = "always",
-): Promise<string | undefined> {
-  return (await callNeedingAlice(input, { callerConfirmation, canAsk: true })).results.approvals[0]
-    ?.request.prompt;
+async function identityPrompt(input: Record<string, unknown>): Promise<string | undefined> {
+  return (await callNeedingAlice(input, { canAsk: true })).results.approvals[0]?.request.prompt;
 }
 
 it("stops and asks the caller for a call refused their token after someone else spoke", async () => {
@@ -400,10 +387,11 @@ it("fails a call refused the caller's token after someone else spoke where the s
 });
 
 it("names a call that asks for someone's identity by its tool and real input, never by a model-written label", async () => {
+  // What approving covers comes before the input, so a channel that cuts the prompt keeps it.
   await expect(
     identityPrompt({ command: "gh repo delete acme/app", description: "List open PRs" }),
   ).resolves.toBe(
-    'Approve Gh with your identity? It runs with "command": "gh repo delete acme/app", "description": "List open PRs".',
+    'Approve Gh with your identity? Approving also lets later actions use your identity until someone else sends a message. It runs with "command": "gh repo delete acme/app", "description": "List open PRs".',
   );
 });
 
@@ -441,23 +429,6 @@ it("quotes and shortens input keys, so a key can't pass for eve's text", async (
   expect(prompt).not.toContain("\n");
   expect(prompt).toContain('"command": "gh pr create"');
 });
-
-it.each([
-  ["once", true],
-  ["always", false],
-] as const)(
-  'tells the caller that approving lets the person who spoke last steer, only under callerConfirmation "%s": %s',
-  async (callerConfirmation, disclosed) => {
-    const prompt = await identityPrompt({ command: "gh pr create" }, callerConfirmation);
-
-    expect(prompt?.includes('Approving also lets "bob" steer calls that use your identity')).toBe(
-      disclosed,
-    );
-    // What approving remembers comes before the input, so a channel that cuts the prompt keeps it.
-    if (disclosed)
-      expect(prompt!.indexOf("Approving also")).toBeLessThan(prompt!.indexOf("It runs"));
-  },
-);
 
 it("shows a call's last input field however long the fields before it", async () => {
   const padding = Array<number>(1_000).fill(0);

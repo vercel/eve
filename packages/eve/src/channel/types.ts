@@ -174,12 +174,12 @@ export interface TurnCaller {
 /**
  * What a local child session inherits from the session that delegated to it, beside its latest
  * sender: who has spoken there, so `ctx.getToken(provider, { as })` can name them, and the
- * caller's remembered `callerConfirmation: "once"` approvals.
+ * callers' standing approvals, each of which lasts until someone else speaks.
  */
 export interface DelegatedIdentity {
   /** The people who have spoken in the delegating session, without their attributes. */
   readonly participants: readonly SessionPerson[];
-  /** The `"once"` approvals the caller gave there, by the key eve remembers each under. */
+  /** The standing caller approvals there, by the key eve remembers each under. */
   readonly confirmed: readonly string[];
   /** The latest message from each sender the delegating turn read, which a request can quote. */
   readonly messages?: readonly {

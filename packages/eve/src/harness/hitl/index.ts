@@ -52,7 +52,12 @@ export {
   type HumanDecisions,
   type HumanInputIntake,
 } from "./intake.js";
-export { openDeferredApprovals, queueInput, withdrawWaitingCalls } from "./approvals.js";
+export {
+  endCallerApprovals,
+  openDeferredApprovals,
+  queueInput,
+  withdrawWaitingCalls,
+} from "./approvals.js";
 export { compactInput, isEmptyInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 

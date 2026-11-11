@@ -49,11 +49,11 @@ export function identityApprovalRequest(
     latest === undefined
       ? ""
       : ` The latest message from someone else, from ${JSON.stringify(latest.from)}, reads: ${encodeText(latest.text, QUOTE_LIMIT)}.`;
-  // Under `callerConfirmation: "once"`, the approval is remembered for the person who spoke last.
+  // The caller's approval stands until someone else speaks.
   const remembered =
-    identity.steeredBy === undefined
+    identity.remember === undefined
       ? ""
-      : ` Approving also lets ${JSON.stringify(identity.steeredBy)} steer calls that use your identity for the rest of this conversation.`;
+      : " Approving also lets later actions use your identity until someone else sends a message.";
   const { confirmed, responder } = context;
   return {
     call: {

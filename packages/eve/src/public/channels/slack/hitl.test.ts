@@ -338,7 +338,7 @@ describe("renderInteractionBlocks", () => {
     ["an ordinary approval", undefined, false],
   ])("shows the whole prompt of %s beside its card: %s", (_label, audience, whole) => {
     const prompt =
-      'Approve Gh with your identity? Approving also lets "bob" steer calls that use your identity for the rest of this conversation. The latest message from someone else, from "bob", reads: "<!here> open it". It runs with "command": "gh pr create".';
+      'Approve Gh with your identity? Approving also lets later actions use your identity until someone else sends a message. The latest message from someone else, from "bob", reads: "<!here> open it". It runs with "command": "gh pr create".';
     const request: Interaction = {
       ...makeRequest({
         call: { callId: "call_gh", name: "gh", input: { command: "gh pr create" } },
@@ -358,7 +358,7 @@ describe("renderInteractionBlocks", () => {
 
     // The disclosure leads the prompt, so it fits the card body; the quote after it needs the
     // whole prompt beside the card.
-    expect(shown).toContain("for the rest of this conversation");
+    expect(shown).toContain("until someone else sends a message");
     expect(shown.includes("&lt;!here&gt; open it")).toBe(whole);
     expect(shown).not.toContain("<!here>");
     expect(JSON.stringify(parts.controls.blocks)).not.toContain("<!here>");

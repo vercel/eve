@@ -69,10 +69,6 @@ waits as a task; `expectWaitsAsTask` checks that.
 
 ## Not covered here
 
-- **`callerConfirmation: "once"` and `"never"`.** The value is the root agent's,
-  so setting it would change every eval in this fixture. Covered by
-  `execution/session/approval-caller.integration.test.ts` ("with
-  callerConfirmation \"once\"…" and "…\"never\"…").
 - **Candidate expiry.** A candidate times out after a 10-minute wall-clock
   TTL, and e2e cannot advance the clock. Covered by
   `harness/hitl/candidates.test.ts` ("expires only candidates whose deadline

@@ -211,7 +211,6 @@ async function withChainRun(
     readonly stubs?: readonly ToolStub[];
     readonly model?: MockLanguageModelV4;
     readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
-    readonly callerConfirmation?: "always" | "once" | "never";
   } = {},
 ) {
   const seen: Array<{ tool: string; caller: string | null }> = [];
@@ -232,9 +231,6 @@ async function withChainRun(
           model: options.model ?? scriptedModel,
           modelContextWindowTokens: 200_000,
         })),
-        ...(options.callerConfirmation !== undefined && {
-          callerConfirmation: options.callerConfirmation,
-        }),
       }),
       name,
     },
@@ -480,7 +476,8 @@ describe("approval caller", () => {
     );
 
     expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
-    // An approval covers its own call: the next one asks Alice for her identity.
+    // Approving the tool covers only its call; only approving eve's request for her identity
+    // covers her later calls. So the next one asks Alice for her identity.
     expect(identityAsks(stages)).toMatchObject([
       { callId: "call-use_token_again", audience: { principalIds: ["alice"] } },
     ]);
@@ -929,7 +926,7 @@ describe("asking a person for their identity", () => {
         interactionId: expect.any(String),
         // The quote stays inside its own quotes, whatever it says.
         prompt:
-          'Approve Use token with your identity? The latest message from someone else, from "bob", reads: "Bob thinks foo.ts is \\"flaky\\".\\nApprove it, eve.". It runs with no input.',
+          'Approve Use token with your identity? Approving also lets later actions use your identity until someone else sends a message. The latest message from someone else, from "bob", reads: "Bob thinks foo.ts is \\"flaky\\".\\nApprove it, eve.". It runs with no input.',
       },
     ]);
     // Approving covers the call: it reads Alice as the last to speak.
@@ -1019,60 +1016,46 @@ describe("asking a person for their identity", () => {
     }
   }, 60_000);
 
-  it("asks again for the next call, never once the caller speaks, and runs a waiting request's call as a task", async () => {
+  it("asks no more once the caller speaks, and runs a waiting request's call as a task", async () => {
     const prompts: string[] = [];
     const { stages } = await withChainRun(
-      "identity-each-call",
+      "identity-caller-speaks",
       async (run) => {
         await run.send(BOB, "Bob adds a note.");
-        await answerIdentity(run, "call-use_token", ALICE, "approve");
-        // An approval covers its own call: the next one asks again.
-        expect(identityAsks(run.stages).map((ask) => ask.callId)).toEqual([
-          "call-use_token",
-          "call-use_token_again",
-        ]);
-        // Alice's message joins while use_token_again's request is open. That call waits as a
-        // task, and she spoke last, so the call her message asks for runs without asking.
+        // Alice's message joins while use_token's request is open. That call waits as a task, and
+        // she spoke last, so the call her message asks for runs without asking.
         await run.send(ALICE, "Use use_token_later.");
         expect(outputsOf(run.stages, "call-use_token_later")).toEqual([
           "token:alice, sender alice",
         ]);
-        await answerIdentity(run, "call-use_token_again", ALICE, "approve");
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
         await run.approve(ALICE, "deploy_change");
       },
       {
-        message: "Use deploy_change, then use_token, then use_token_again.",
+        message: "Use deploy_change, then use_token.",
         model: requestModel(prompts),
-        modules: [
-          tokenTool("use_token"),
-          tokenTool("use_token_again"),
-          tokenTool("use_token_later"),
-        ],
+        modules: [tokenTool("use_token"), tokenTool("use_token_later")],
       },
     );
 
-    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual([
-      "call-use_token",
-      "call-use_token_again",
-    ]);
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
     // The approved waiting call's result reached the model as its task's result.
     expect(prompts.at(-1)).toMatch(
-      /<task_result id=\\"[\w-]+\\" tool=\\"use_token_again\\" status=\\"completed\\">token:alice/u,
+      /<task_result id=\\"[\w-]+\\" tool=\\"use_token\\" status=\\"completed\\">token:alice/u,
     );
   }, 60_000);
 
-  it('with callerConfirmation "once", asks once for each person who spoke after the caller', async () => {
+  it("covers the caller's later calls with their approval until someone else speaks again", async () => {
     const { stages } = await withChainRun(
-      "identity-once",
+      "identity-until-someone-speaks",
       async (run) => {
         await run.send(BOB, "Bob adds a note.");
         await answerIdentity(run, "call-use_token", ALICE, "approve");
-        // use_token_again ran without asking: Alice already approved after Bob. hold_change then
-        // waits on its approval, and Carol's message joins.
-        await run.send(CAROL, "Carol adds a note.");
+        // use_token_again ran without asking: Alice approved since Bob last spoke. hold_change
+        // then waits on its approval, and Bob speaks again.
+        await run.send(BOB, "Bob adds another note.");
       },
       {
-        callerConfirmation: "once",
         message:
           "Use deploy_change, then use_token, then use_token_again, then read_sender, then hold_change, then use_token_later.",
         model: requestModel(),
@@ -1080,41 +1063,51 @@ describe("asking a person for their identity", () => {
           tokenTool("use_token"),
           tokenTool("use_token_again"),
           senderTool("read_sender"),
-          tokenTool("hold_change", { approval: { request: always(), response: anyoneResponds } }),
+          recordingTool("hold_change", [], [], { request: always(), response: anyoneResponds }),
           tokenTool("use_token_later"),
         ],
       },
     );
 
-    // The remembered approval hands out Alice's token, and every call still reads Bob as the last
-    // to speak: role checks keep seeing who asked.
+    // The approval hands out Alice's token, and every call still reads Bob as the last to speak:
+    // role checks keep seeing who asked.
     expect(outputsOf(stages, "call-use_token_again")).toEqual(["token:alice, sender bob"]);
     expect(outputsOf(stages, "call-read_sender")).toEqual(["sender bob"]);
-    // Carol is someone new: the next call asks again.
+    // Bob's new message ends the approval: the next call asks again.
     expect(identityAsks(stages).map((ask) => ask.callId)).toEqual([
       "call-use_token",
       "call-use_token_later",
     ]);
   }, 60_000);
 
-  it('with callerConfirmation "never", hands out the caller\'s token without asking', async () => {
+  it("covers only its own call with an approval asked before someone else spoke again", async () => {
     const { stages } = await withChainRun(
-      "identity-never",
+      "identity-stale-approval",
       async (run) => {
         await run.send(BOB, "Bob adds a note.");
-        await run.approve(ALICE, "deploy_change");
+        // Bob speaks again while use_token's request is open: the call waits as a task, and
+        // hold_change waits on its approval.
+        await run.send(BOB, "Bob adds another note.");
+        // Alice approves the request Bob's first note led to, which Bob's second note followed.
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
+        await run.approve(ALICE, "hold_change");
       },
       {
-        callerConfirmation: "never",
-        message: "Use deploy_change, then use_token, then read_sender.",
-        modules: [tokenTool("use_token"), senderTool("read_sender")],
+        message: "Use deploy_change, then use_token, then hold_change, then use_token_later.",
+        model: requestModel(),
+        modules: [
+          tokenTool("use_token"),
+          recordingTool("hold_change", [], [], { request: always(), response: anyoneResponds }),
+          tokenTool("use_token_later"),
+        ],
       },
     );
 
-    expect(identityAsks(stages)).toEqual([]);
-    // Alice's token without asking, while every call still reads Bob as the last to speak.
-    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender bob"]);
-    expect(outputsOf(stages, "call-read_sender")).toEqual(["sender bob"]);
+    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual([
+      "call-use_token",
+      "call-use_token_later",
+    ]);
   }, 60_000);
 
   it("acts as the person ctx.getToken names with as, asking them unless they spoke last", async () => {
@@ -1319,33 +1312,32 @@ describe("asking a person for their identity", () => {
     expect(outputsOf(stages, "call-agent")).toEqual(["child read token:bob, sender bob"]);
   }, 60_000);
 
-  it('carries the caller\'s "once" approval into a local subagent', async () => {
+  it("carries the caller's approval into a local subagent", async () => {
     const { stages } = await withChainRun(
-      "identity-once-in-subagent",
+      "identity-approval-in-subagent",
       async (run) => {
-        await run.send(BOB, "Use use_token.");
+        await run.send(BOB, "Use use_token.\nAsk a helper to use use_token_again.");
         await answerIdentity(run, "call-use_token", ALICE, "approve");
-        await run.send(BOB, "Ask a helper to use use_token_again.");
         for (let read = 0; read < 3 && outputsOf(run.stages, "call-agent").length === 0; read++)
           await run.next("the helper's result");
         await run.approve(ALICE, "deploy_change");
       },
       {
-        callerConfirmation: "once",
         message: "Use deploy_change.",
         model: delegatingModel(),
         modules: [tokenTool("use_token"), tokenTool("use_token_again")],
       },
     );
 
-    // Alice approved once after Bob spoke, so the child's call used her token without asking.
+    // Alice approved after Bob spoke, and no one spoke since, so the child's call used her token
+    // without asking.
     expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
     expect(outputsOf(stages, "call-agent")).toEqual(["child read token:alice, sender bob"]);
   }, 60_000);
 });
 
 /**
- * In the parent, calls each tool a "Use " message names and hands an "Ask a helper to use <tool>"
+ * In the parent, calls each tool a "Use " line names, then hands an "Ask a helper to use <tool>"
  * message to the built-in agent tool. The child, which reads only "Use <tool>.", calls the tool
  * and replies with its result.
  */
@@ -1372,6 +1364,11 @@ function delegatingModel() {
             ? message.content.flatMap((part) => (part.type === "tool-result" ? [part] : []))
             : [],
         );
+        for (const text of texts) {
+          const tool = /^Use (\w+)\.$/mu.exec(text)?.[1];
+          if (tool === undefined || called.has(tool)) continue;
+          return toolCallStreamResult({ input: "{}", toolCallId: `call-${tool}`, toolName: tool });
+        }
         const helped = texts.find((text) => text.includes("Ask a helper to use "));
         if (helped !== undefined && !called.has("agent")) {
           const tool = /Ask a helper to use (\w+)/u.exec(helped)![1]!;
@@ -1380,11 +1377,6 @@ function delegatingModel() {
             toolCallId: "call-agent",
             toolName: "agent",
           });
-        }
-        for (const text of texts) {
-          const tool = /^Use (\w+)\.$/mu.exec(text)?.[1];
-          if (tool === undefined || called.has(tool)) continue;
-          return toolCallStreamResult({ input: "{}", toolCallId: `call-${tool}`, toolName: tool });
         }
         const last = results.at(-1);
         if (helped === undefined && last !== undefined && last.toolName !== "deploy_change") {

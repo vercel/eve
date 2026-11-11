@@ -39,7 +39,7 @@ import type {
   SessionTraceRoot,
 } from "#channel/types.js";
 import { messagesToDelegate, participantsOf } from "#harness/sender-line.js";
-import { rememberedConfirmations } from "#runtime/connections/caller-confirmation.js";
+import { callerApprovals } from "#runtime/connections/caller-confirmation.js";
 import { readSender } from "#context/session-auth.js";
 import type { ContextReader } from "#context/key.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
@@ -191,7 +191,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     senderAuth: readSender(ctx, ctx.get(AuthKey) ?? null),
     delegatedIdentity: {
-      confirmed: rememberedConfirmations(rememberedApprovals(session.state), ctx),
+      confirmed: callerApprovals(rememberedApprovals(session.state), ctx),
       messages: messagesToDelegate(storedProjection(session.state), ctx),
       participants: participantsOf(session.state, ctx),
     },

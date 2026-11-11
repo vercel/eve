@@ -16,6 +16,7 @@ import {
   admitHumanInput,
   applyHumanDecisions,
   compactInput,
+  endCallerApprovals,
   openDeferredApprovals,
   queueInput,
   settleHumanInput,
@@ -250,6 +251,7 @@ async function turnInput(
   if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
     return { ended: { next: null, session: step.session } } as Ended;
   }
+  if (turn.sender !== undefined) await step.apply(endCallerApprovals(step.view(), turn.sender));
   return turn;
 }
 

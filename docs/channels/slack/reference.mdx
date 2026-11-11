@@ -767,7 +767,7 @@ export default defineTool({
 
 - Slack links the new channel in the original thread and invites the person who asked. A private conversation opens a private code channel.
 - Omit `name` to let Slack name the channel from the message.
-- Outside Slack or inside a code channel, `openCodeChannel()` returns `{ status: "unavailable", reason }` and the model continues in the thread. The code channel opens as the caller, so after someone other than the caller spoke last, eve asks the caller to approve the call, as it does for a call that reads their token. Where eve can't ask, such as in a workflow tool, it returns `unavailable`. `callerConfirmation: "never"`, or a `"once"` approval the caller already gave after that person spoke, opens it without asking.
+- Outside Slack or inside a code channel, `openCodeChannel()` returns `{ status: "unavailable", reason }` and the model continues in the thread. The code channel opens as the caller, so after someone other than the caller spoke last, eve asks the caller to approve the call, as it does for a call that reads their token. Where eve can't ask, such as in a workflow tool, it returns `unavailable`. If the caller approved a call since anyone else last spoke, it opens without asking.
 - When Slack refuses, such as for a Slack Connect conversation, disabled code channels, or a missing scope, it throws Slack's error for the model to relay.
 - Like every [`ctx.to()`](/docs/tools#start-channel-sessions-ctxto), it works only in a tool on the root agent.
 

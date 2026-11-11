@@ -2,8 +2,9 @@
  * eve hands a person's identity to a call only when they were the last person to speak as the
  * model made the call, or when they approved that call. After anyone else's message joins the
  * turn, a call that needs the caller's identity stops: eve asks the caller to approve it where the
- * session can ask, and refuses it otherwise. A call that waited on a person runs as it was asked,
- * with the sender it had then.
+ * session can ask, and refuses it otherwise. The caller's approval also covers their later calls
+ * until someone else speaks again. A call that waited on a person runs as it was asked, with the
+ * sender it had then.
  */
 
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
@@ -26,9 +27,6 @@ import {
   ConnectionAuthorizationFailedError,
   isConnectionAuthorizationFailedError,
 } from "#connections/errors.js";
-import { resolveCallerConfirmation } from "#execution/effective-agent-config.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import type { CallerConfirmation } from "#shared/agent-definition.js";
 
 const CALL_IDENTITY = Symbol.for("eve.callIdentity");
 const ASKED_SENDER = Symbol.for("eve.askedSender");
@@ -47,9 +45,9 @@ export function sessionCaller(): SessionAuthContext | null {
 
 /**
  * Runs `fn` as a call `confirmed` approved, each of whom it may act as whoever spoke last.
- * `remembered` holds the caller's `callerConfirmation: "once"` approvals, which release the
- * caller's identity unasked; unlike the caller's own approval, they don't make the call read the
- * caller as `auth.sender`. `canAsk` says eve can ask a person for this call.
+ * `remembered` holds the callers' standing approvals, from `callerApprovals`, which release a
+ * caller's identity unasked; unlike the caller's approval of this call, they don't make the call
+ * read the caller as `auth.sender`. `canAsk` says eve can ask a person for this call.
  */
 export function withCallIdentity<T>(
   identity: {
@@ -89,20 +87,16 @@ function approvedBy(person: SessionPerson | null): boolean {
 
 /**
  * The one rule every guard of the caller's identity decides by, in the session step or outside
- * it: the caller spoke last, approved the call, or the agent's `callerConfirmation` hands their
- * identity out, as `"never"` always does and `"once"` does once the caller approved a call after
- * the person who spoke last.
+ * it: the caller spoke last, approved the call, or approved a call since someone else last spoke.
  */
 export function callerIdentityReleased(input: {
   readonly current: SessionAuthContext | null;
   readonly sender: SessionAuthContext | null;
   readonly approved: boolean;
-  readonly confirmation: CallerConfirmation;
   readonly remembered: (key: string) => boolean;
 }): boolean {
-  if (callerSpokeLast(input) || input.approved || input.confirmation === "never") return true;
-  if (input.confirmation !== "once") return false;
-  const key = onceKey(input.current, input.sender);
+  if (callerSpokeLast(input) || input.approved) return true;
+  const key = callerApprovalKey(input.current);
   return key !== undefined && input.remembered(key);
 }
 
@@ -134,45 +128,48 @@ export function callSender(auth: {
   return approvedBy(auth.current) ? auth.current : spokeLast(auth.sender);
 }
 
-const ONCE_KEY = "eve.callerConfirmation";
-/** How every `onceKey` starts. */
-const ONCE_KEY_PREFIX = `["${ONCE_KEY}",`;
+const CALLER_APPROVAL_KEY = "eve.callerApproval";
+/** How every `callerApprovalKey` starts. */
+const CALLER_APPROVAL_KEY_PREFIX = `["${CALLER_APPROVAL_KEY}",`;
 
 /**
- * The caller's `callerConfirmation: "once"` approvals: those the session remembers, and in a local
- * child session those the delegating session remembered.
+ * The callers' standing approvals: those the session remembers, and in a local child session
+ * those the delegating session remembered when it delegated.
  */
-export function rememberedConfirmations(
+export function callerApprovals(
   remembered: ApprovalMemory["remembered"] | undefined,
   ctx: Pick<AlsContext, "get"> | undefined = contextStorage.getStore(),
 ): readonly string[] {
   const own = Object.entries(remembered ?? {}).flatMap(([key, approval]) =>
-    approval.outcome === "accepted" && key.startsWith(ONCE_KEY_PREFIX) ? [key] : [],
+    approval.outcome === "accepted" && key.startsWith(CALLER_APPROVAL_KEY_PREFIX) ? [key] : [],
   );
   const inherited = ctx?.get(DelegatedIdentityKey)?.confirmed ?? [];
   return inherited.length === 0 ? own : [...new Set([...inherited, ...own])];
 }
 
 /**
- * Where `"once"` remembers that the caller approved a call after `sender` spoke. Every anonymous
- * person shares one identity, so nothing is remembered for one: each call asks.
+ * Where eve remembers that `caller` approved a call that used their identity, until someone else
+ * speaks. No one can approve for an anonymous caller, so there is nothing to remember for one.
  */
-function onceKey(
-  caller: SessionAuthContext | null,
-  sender: SessionAuthContext | null,
-): string | undefined {
-  if (sender === null || sender.principalType === "anonymous") return undefined;
-  return JSON.stringify([ONCE_KEY, principalOf(caller), principalOf(sender)]);
+function callerApprovalKey(caller: SessionAuthContext | null): string | undefined {
+  if (caller === null || caller.principalType === "anonymous") return undefined;
+  return JSON.stringify([CALLER_APPROVAL_KEY, principalOf(caller)]);
+}
+
+/**
+ * Whether a message from `sender` ends the caller approval remembered under `key`: a message from
+ * anyone but that caller does.
+ */
+export function endsCallerApproval(key: string, sender: SessionAuthContext | null): boolean {
+  return key.startsWith(CALLER_APPROVAL_KEY_PREFIX) && key !== callerApprovalKey(sender);
 }
 
 /** What eve asks for when a call stopped for a person's identity. */
 export interface IdentityRequest {
   /** Whose identity the call needs. Only they can approve it. */
   readonly person: SessionPerson;
-  /** Where the caller's approval is remembered, with `callerConfirmation: "once"`. */
+  /** Where the caller's approval is remembered, to cover their later calls until someone else speaks. */
   readonly remember?: RememberRequest;
-  /** Whom a remembered approval lets steer calls that use the caller's identity: who spoke last. */
-  readonly steeredBy?: string;
 }
 
 /** The identity request a refusal carries, if the call can wait for one. */
@@ -230,38 +227,27 @@ function callerRefusal(
   if (ctx === undefined) return undefined;
   const current = ctx.get(AuthKey) ?? null;
   const sender = spokeLast(readSender(ctx, current));
-  // A session with one person never resolves `callerConfirmation`.
-  if (callerSpokeLast({ current, sender })) return undefined;
-  const confirmation = resolveCallerConfirmation(ctx.get(BundleKey));
   const released = callerIdentityReleased({
     approved: approvedBy(current),
-    confirmation,
     current,
     remembered: (key) => callIdentity()?.remembered.has(key) === true,
     sender,
   });
   if (released) return undefined;
-  const askable = current !== null && current.principalType !== "anonymous";
-  const remember = confirmation === "once" ? onceKey(current, sender) : undefined;
+  const remember = callerApprovalKey(current);
   return confirmationRequired(
     connectionName,
     callerConfirmationMessage(what),
-    askable
-      ? {
-          person: personOf(current),
-          ...(remember !== undefined && {
-            remember: { key: remember },
-            steeredBy: sender!.principalId,
-          }),
-        }
-      : undefined,
+    remember === undefined
+      ? undefined
+      : { person: personOf(current!), remember: { key: remember } },
   );
 }
 
 /**
  * Throws unless the running call may use `person`'s identity for `connectionName`: they sent the
- * message the model read last as it made the call, or approved the call. `callerConfirmation`
- * doesn't apply: the identity of someone who isn't the caller always needs them.
+ * message the model read last as it made the call, or approved the call. A caller's standing
+ * approval doesn't apply: the identity of someone who isn't the caller always needs them.
  */
 export function requirePersonConfirmation(
   person: SessionPerson,

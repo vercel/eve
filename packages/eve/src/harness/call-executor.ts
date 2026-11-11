@@ -1,7 +1,7 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import {
   identityRequestOf,
-  rememberedConfirmations,
+  callerApprovals,
   withCallIdentity,
   type IdentityRequest,
 } from "#runtime/connections/caller-confirmation.js";
@@ -218,12 +218,12 @@ export async function executeToolCall(
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
           // Usage the tool records belongs to its call, including while a streaming tool iterates,
-          // and so do the identities of the people who approved the call, and the caller's
-          // remembered `callerConfirmation: "once"` approvals.
+          // and so do the identities of the people who approved the call, and the callers'
+          // standing approvals.
           const identityScope = {
             canAsk: input.canAsk === true,
             confirmed,
-            remembered: rememberedConfirmations(input.approvalMemory?.remembered),
+            remembered: callerApprovals(input.approvalMemory?.remembered),
           };
           await withCallIdentity(identityScope, () =>
             withUsageCall(callId, async () => {

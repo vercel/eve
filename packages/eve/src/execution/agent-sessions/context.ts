@@ -50,7 +50,7 @@ export interface AgentSessionContext {
   /** Whether a parent, local or remote, delegated the calling session. */
   readonly delegated?: boolean;
   /**
-   * Who had spoken in the calling session and the caller's remembered `"once"` approvals, as of
+   * Who had spoken in the calling session and the callers' standing approvals, as of
    * the call. A local child inherits them, and the remote-agent guard reads the approvals.
    */
   readonly identity?: DelegatedIdentity;

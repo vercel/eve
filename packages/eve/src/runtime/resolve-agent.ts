@@ -203,7 +203,6 @@ function createResolvedAgentConfig(
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     approval?: ApprovalPolicy;
-    callerConfirmation?: NonNullable<ResolvedAgent["config"]>["callerConfirmation"];
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
@@ -277,10 +276,6 @@ function createResolvedAgentConfig(
 
   if (manifest.config.reasoning !== undefined) {
     config.reasoning = manifest.config.reasoning;
-  }
-
-  if (manifest.config.callerConfirmation !== undefined) {
-    config.callerConfirmation = manifest.config.callerConfirmation;
   }
 
   if (manifest.config.source !== undefined) {

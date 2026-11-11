@@ -1,4 +1,6 @@
 import { transition } from "#harness/session-machine/commit.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { endsCallerApproval } from "#runtime/connections/caller-confirmation.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 import {
@@ -168,6 +170,35 @@ export function dispatch(
 /** Turn input the turn can't take yet waits, unreceived, for a later step. */
 export function queueInput(view: SessionView, input: HarnessStepInput | undefined): Transition {
   return transition({ events: [], turn: withQueued(view.turn, input) });
+}
+
+/**
+ * A message from `sender` joins the turn. A caller's approval lets calls use their identity only
+ * until someone else speaks, so the message ends every caller approval but the sender's own. A
+ * request for a caller's identity that is still open was asked before the message, so approving
+ * it now covers only its own call.
+ */
+export function endCallerApprovals(
+  view: SessionView,
+  sender: SessionAuthContext | null,
+): Transition {
+  const ends = (key: string | undefined) => key !== undefined && endsCallerApproval(key, sender);
+  const remembered = Object.fromEntries(
+    Object.entries(view.turn.remembered).filter(([key]) => !ends(key)),
+  );
+  const suspended = view.turn.suspended.map((step) =>
+    step.requests.some((request) => ends(request.remember?.key))
+      ? {
+          ...step,
+          requests: step.requests.map((request) => {
+            if (!ends(request.remember?.key)) return request;
+            const { remember: _ended, ...asked } = request;
+            return asked;
+          }),
+        }
+      : step,
+  );
+  return transition({ events: [], turn: { ...view.turn, remembered, suspended } });
 }
 
 function withQueued(turn: TurnState, queued: HarnessStepInput | undefined): TurnState {

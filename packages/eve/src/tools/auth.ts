@@ -45,8 +45,9 @@ export interface ToolAuthOptions {
    * eve hands out the named person's token when they sent the latest message the model read as it
    * made the call, or when they approved the call. Otherwise eve asks them to approve the call,
    * and signs them in if they haven't connected, where the session can ask; elsewhere the call
-   * fails with `reason: "confirmation_required"`. The agent's `callerConfirmation` doesn't apply
-   * to a person who isn't the caller.
+   * fails with `reason: "confirmation_required"`. Their approval covers only that call; the
+   * caller's approval, which covers the caller's later calls until someone else speaks, doesn't
+   * apply to anyone else.
    *
    * eve keeps a person's identity but not their attributes, so a provider that reads
    * `principal.attributes` receives none for the named person. Fails with

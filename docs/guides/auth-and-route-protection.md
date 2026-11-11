@@ -309,7 +309,7 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 
 - `auth.current`: the caller on the active inbound turn, whose message started it. A message from a different caller that starts a later turn replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
-- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call the caller approved reads the caller here; `callerConfirmation` doesn't change it.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call the caller approved reads the caller here; calls their approval covers later don't.
 
 The caller stays the same for the whole turn; only its claims can change:
 
@@ -519,7 +519,7 @@ export default defineTool({
 
 When `as` names someone other than the caller, the result's `principal` is that person as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
 
-eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. `callerConfirmation` doesn't apply to someone who isn't the caller. Naming the caller is the same as omitting `as`.
+eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. A named person's approval covers only that call, and the caller's approval doesn't cover them. Naming the caller is the same as omitting `as`.
 
 - eve keeps each person's identity but not their attributes, so a provider that reads `principal.attributes` receives none for a named person.
 - `as` works in tools that run in the session's turn, not in workflow tools. In a local subagent, `as` can also name anyone who had spoken in the session that delegated to it.
