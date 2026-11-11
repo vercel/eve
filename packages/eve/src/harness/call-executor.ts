@@ -403,8 +403,27 @@ function toolTelemetry(
     telemetry === undefined || telemetry.isEnabled === false
       ? []
       : [telemetry.integrations ?? []].flat();
+  // eve runs these calls itself, so the AI SDK never filters their events. Apply its rules here:
+  // an integration can ignore the flags and record whatever the event carries.
+  const hideInputs = telemetry?.recordInputs === false;
+  const hideOutputs = telemetry?.recordOutputs === false;
+  const recorded = (toolOutput: ToolExecutionEnd["toolOutput"]): ToolExecutionEnd["toolOutput"] => {
+    if (!hideInputs && !hideOutputs) return toolOutput;
+    const kept: Record<string, unknown> = { ...toolOutput };
+    if (hideInputs) kept.input = undefined;
+    if (hideOutputs) {
+      kept.output = undefined;
+      kept.error = undefined;
+    } else if (kept.error != null) {
+      // A raw error can carry the call's input.
+      kept.error = new Error("AI SDK operation failed");
+    }
+    return kept as ToolExecutionEnd["toolOutput"];
+  };
   const event = {
     ...execution,
+    messages: hideInputs ? [] : execution.messages,
+    toolCall: hideInputs ? { ...execution.toolCall, input: undefined } : execution.toolCall,
     functionId: telemetry?.functionId,
     recordInputs: telemetry?.recordInputs,
     recordOutputs: telemetry?.recordOutputs,
@@ -434,7 +453,7 @@ function toolTelemetry(
         integration.onToolExecutionEnd?.({
           ...event,
           toolExecutionMs,
-          toolOutput,
+          toolOutput: recorded(toolOutput),
         } as ToolExecutionEnd),
       ),
   };
