@@ -79,12 +79,7 @@ Either setup works with one agent or a workspace:
 
 `apps/web/` is a convention, not a directory eve reads. Your deployment configuration defines peer services, and eve finds only the agents. Both Vercel integrations deploy the services together, not as independent releases.
 
-Run `eve add channel/web` from a standalone agent, or pass `--agent <name>` in a workspace, to create a Next.js or TanStack Start frontend under `apps/web/`. The installer then asks how to host it:
-
-| Choice                            | Result                                                                                      |
-| --------------------------------- | ------------------------------------------------------------------------------------------- |
-| **Vercel services**               | Separate Vercel services, run locally with `pnpm dev:all` without linking a Vercel project. |
-| **Next.js** or **TanStack Start** | The frontend hosts the agent; run the application with `pnpm dev:web`.                      |
+Run `eve add channel/web` from a standalone agent, or pass `--agent <name>` in a workspace, to create a Next.js or TanStack Start frontend under `apps/web/`. The installer deploys it and the agents as separate Vercel services; run them locally with `pnpm dev:all` without linking a Vercel project. To run it outside Vercel, embed the agent in the frontend instead; see [Next.js](/docs/guides/frontend/nextjs#run-the-generated-app-outside-vercel) or [TanStack Start](/docs/guides/frontend/tanstack#run-the-generated-app-outside-vercel).
 
 Use `pnpm dev` or `pnpm dev:eve` for one agent and the eve terminal UI.
 

@@ -19,26 +19,56 @@ Run the Web Chat installer and choose **TanStack Start** when it asks which fram
 eve add channel/web
 ```
 
-In automation, answer the framework and hosting questions up front. Omit `web-framework` to install Next.js:
+In automation, answer the framework question up front. Omit `web-framework` to install Next.js:
 
 ```bash
 eve add channel/web --non-interactive \
-  --answer 'web-framework="tanstack"' \
-  --answer 'web-hosting="vercel"'
+  --answer 'web-framework="tanstack"'
 ```
 
-The installer creates a TanStack Start app under `apps/web/`, adds the `dev:web` and `build:web` scripts, and asks how to deploy it:
+The installer creates a TanStack Start app under `apps/web/`, adds the `dev:web` and `build:web` scripts, and writes a root `vercel.ts` that deploys Web Chat and the agent as separate Vercel services. Run both locally with `pnpm dev:all`, without linking a Vercel project.
 
-- **Vercel services** (recommended) deploys Web Chat and the agent as separate services. Run both locally with `pnpm dev:all`, without linking a Vercel project.
-- **TanStack Start** hosts the agent in the TanStack Start app through `eveTanStack()`. Run it with `pnpm dev:web`. A Vercel deploy from the project root doesn't build the app, because the app's dependencies are in the root `package.json`. Choose **Vercel services** to deploy Web Chat on Vercel.
+An existing Web Chat app in `apps/web/` keeps its framework, and the installer stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
 
-To switch hosting modes, rerun `eve add channel/web --skip-install` with the other choice. The installer removes the `vercel.ts` and scripts it wrote for the previous mode. An existing Web Chat app in `apps/web/` keeps its framework, and the installer stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
+### Run the generated app outside Vercel
+
+The generated app runs its agent as a Vercel service through `vercel.ts`, which only Vercel reads. To run it anywhere else, embed the agent in the TanStack Start app with `eveTanStack()`, the same way as in an [existing app](#register-the-vite-plugin):
+
+1. Replace `apps/web/vite.config.ts` with:
+
+   ```ts title="apps/web/vite.config.ts"
+   import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+   import tailwindcss from "@tailwindcss/vite";
+   import viteReact from "@vitejs/plugin-react";
+   import { eveTanStack } from "eve/tanstack";
+   import { nitro } from "nitro/vite";
+   import { fileURLToPath } from "node:url";
+   import { defineConfig } from "vite";
+
+   const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
+
+   export default defineConfig({
+     resolve: { tsconfigPaths: true },
+     plugins: [
+       eveTanStack({ eveRoot }),
+       tailwindcss(),
+       tanstackStart({ srcDirectory: "app" }),
+       viteReact(),
+       nitro(),
+     ],
+   });
+   ```
+
+2. Delete the root `vercel.ts`, and the `dev:eve` and `dev:all` scripts from `package.json`.
+3. Run it with `pnpm dev:web`, and build it with `pnpm build:web`.
+
+When `vite.config.ts` matches the file above, rerunning `eve add channel/web` keeps this setup. A Vercel deploy from the project root doesn't build an app set up this way, because the app's dependencies are in the root `package.json`, so keep `vercel.ts` to deploy Web Chat on Vercel. The installer doesn't embed a workspace agent in the app; to run one outside Vercel, see [Run workspace members](../deployment/self-hosted-operations#run-workspace-members).
 
 Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
 
 The chat uses the same routes as the [Next.js Web Chat](./nextjs#give-each-conversation-a-url): `/`, `/s`, and `/s/$sessionId`, one URL per session. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](/docs/guides/frontend#authenticate-browser-requests).
 
-A workspace agent always deploys as a separate Vercel service, because the installer doesn't support single-app hosting for it. If you already have a TanStack Start app, skip the installer and follow the steps below.
+If you already have a TanStack Start app, skip the installer and follow the steps below.
 
 ## Register the Vite plugin
 
