@@ -319,7 +319,7 @@ In a [shared session](/docs/concepts/security-model#shared-sessions), a call tha
 
 - The prompt names the call by its tool's title, never by text the model wrote. It quotes the latest message from someone else in the turn, then lists the input the call runs with: `Approve Deploy with your identity? The latest message from someone else, from "bob", reads: "ship it". It runs with "env": "prod".` The sender's ID, the quote, input keys, and values are JSON-escaped, and the quote and input are shortened, so none of them can pass for eve's text.
 - With `callerConfirmation: "once"`, the prompt says, before the quote, that approving also lets the person who spoke last steer calls that use the caller's identity for the rest of the conversation.
-- The prompt shows every top-level input field. A long value is cut on its own, and inside an array or object each item is cut on its own, with a note of how many characters are hidden, so it can't hide what comes after it.
+- The prompt shows every top-level input field. A long value is cut on its own, and inside an array or object each item is cut on its own, with a note of how many characters are hidden, so it can't hide what comes after it. Only an input with more than 100 fields is cut short, with a note that counts the fields left out and names the first five.
 - In a local subagent, the quote can come from the turn that delegated to it, since the subagent's own messages come from the delegating agent.
 - Slack shows the whole prompt beside the approval card, whose body holds only its start.
 - The event's `audience.principalIds` names that person. Only they can approve it, whatever the tool's `response` policy. Anyone signed in can cancel it.

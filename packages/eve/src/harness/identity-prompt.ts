@@ -21,6 +21,7 @@ const MIN_FIELD_LIMIT = 80;
 const MIN_ITEM_LIMIT = 40;
 const KEY_LIMIT = 80;
 const INPUT_LIMIT = 8_000;
+const HIDDEN_NAMES_LIMIT = 5;
 
 /**
  * What eve asks a person whose identity a call needs. The short parts come first, so a channel that
@@ -100,7 +101,8 @@ function latestMessageFromOthers(
 
 /**
  * The call's input as an identity request shows it: every top-level field, each cut on its own
- * with a marker that says how much is hidden. Fields past the overall limit are counted.
+ * with a marker that says how much is hidden. Only an input with more fields than the limit fits
+ * at their smallest share is cut short, and the fields it hides are counted and the first named.
  */
 function describeInput(input: JsonObject): string {
   const entries = Object.entries(input).filter(([, value]) => value !== undefined);
@@ -109,10 +111,14 @@ function describeInput(input: JsonObject): string {
     FIELD_LIMIT,
     Math.max(MIN_FIELD_LIMIT, Math.floor(INPUT_LIMIT / entries.length)),
   );
-  return describeEntries(entries, limit, INPUT_LIMIT, "fields");
+  const total = entries.length * MIN_FIELD_LIMIT <= INPUT_LIMIT ? Infinity : INPUT_LIMIT;
+  return describeEntries(entries, limit, total, "fields");
 }
 
-/** `key: value` pairs, each value cut at `limit` shown characters, until `total` is spent. */
+/**
+ * `key: value` pairs, each value cut at `limit` shown characters, until `total` is spent. The rest
+ * are counted, and the first few named.
+ */
 function describeEntries(
   entries: readonly (readonly [string | undefined, unknown])[],
   limit: number,
@@ -125,7 +131,13 @@ function describeEntries(
     const key = name === undefined ? "" : `${encodeText(name, KEY_LIMIT)}: `;
     const entry = `${key}${describeValue(value, limit)}`;
     if (shown.length > 0 && length + entry.length > total) {
-      shown.push(`and ${String(entries.length - index)} more ${noun} not shown`);
+      const hidden = entries.length - index;
+      const named = entries
+        .slice(index, index + HIDDEN_NAMES_LIMIT)
+        .flatMap(([other]) => (other === undefined ? [] : [encodeText(other, KEY_LIMIT)]));
+      const names =
+        named.length === 0 ? "" : ` (${named.join(", ")}${hidden > named.length ? ", …" : ""})`;
+      shown.push(`and ${String(hidden)} more ${noun} not shown${names}`);
       break;
     }
     shown.push(entry);

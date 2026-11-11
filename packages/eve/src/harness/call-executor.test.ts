@@ -490,3 +490,15 @@ it.each([
       expect(prompt!.indexOf("Approving also")).toBeLessThan(prompt!.indexOf("It runs"));
   },
 );
+
+it("shows a call's last input field however long the fields before it", async () => {
+  const padding = Array<number>(1_000).fill(0);
+  const prompt = await identityPrompt({
+    first: padding,
+    second: padding,
+    third: padding,
+    command: "gh repo delete acme/app --yes",
+  });
+
+  expect(prompt).toContain('"command": "gh repo delete acme/app --yes"');
+});
