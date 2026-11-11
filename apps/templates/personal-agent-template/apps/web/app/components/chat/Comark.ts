@@ -1,4 +1,8 @@
+import components from "@comark/nuxt/plugins/components";
 import highlight from "@comark/nuxt/plugins/highlight";
+import linkify from "@comark/nuxt/plugins/linkify";
+import security from "@comark/nuxt/plugins/security";
+import taskList from "@comark/nuxt/plugins/task-list";
 import html from "@shikijs/langs/html";
 import css from "@shikijs/langs/css";
 import python from "@shikijs/langs/python";
@@ -21,7 +25,11 @@ import SourceLink from "./SourceLink.vue";
 
 export default defineMarkdownComponent({
   name: "ChatComark",
+  registerDefaultPlugins: false,
   plugins: [
+    linkify(),
+    taskList(),
+    components(),
     highlight({
       languages: [
         html,
@@ -43,6 +51,41 @@ export default defineMarkdownComponent({
         toml,
         graphql,
       ],
+    }),
+    security({
+      allowedTags: [
+        "p",
+        "br",
+        "hr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+        "ul",
+        "ol",
+        "li",
+        "strong",
+        "em",
+        "del",
+        "a",
+        "img",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "pre",
+        "code",
+        "span",
+        "input",
+        "source-link",
+      ],
+      allowedProtocols: ["https", "http", "mailto"],
+      allowDataImages: false,
     }),
   ],
   components: {
