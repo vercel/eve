@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/pull/6199
 status: implemented
-last_updated: "2026-11-10"
+last_updated: "2026-11-11"
 ---
 
 # Multiplayer sessions
@@ -155,7 +155,9 @@ the caller's role reads `auth.sender` as well as `auth.current`. eve's own check
 app tokens and deployed self-modification ask `authorize` about both people under every
 `callerConfirmation` value. `openCodeChannel()`, which opens a session as the caller, follows rule 3
 as a call that uses the caller's identity does: eve asks the caller, and it returns `unavailable`
-only where eve can't ask.
+only where eve can't ask. Creating a dynamic schedule or replacing its payload, and starting a
+connection event watch, record the caller for work that later runs as them, so they follow rule 3
+the same way.
 
 ### Waiting on a person
 

@@ -83,11 +83,13 @@ Anyone the channel lets into the session can steer the running turn. Their messa
 
 eve hands the caller's identity to a call when the caller sent the latest message the model read as it made the call, or when the caller approved that call. After someone else's message joins the turn, a call that uses the caller's identity stops before it gets it:
 
-| Call                                                                                           | Identity it uses      |
-| ---------------------------------------------------------------------------------------------- | --------------------- |
-| A tool of a `principalType: "user"` connection, or `ctx.getToken()` for a user-scoped provider | The caller's token    |
-| A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded |
-| A remote agent that forwards the caller                                                        | The caller, forwarded |
+| Call                                                                                           | Identity it uses                      |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------- |
+| A tool of a `principalType: "user"` connection, or `ctx.getToken()` for a user-scoped provider | The caller's token                    |
+| A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded                 |
+| A remote agent that forwards the caller                                                        | The caller, forwarded                 |
+| Creating a [dynamic schedule](../experimental/dynamic-schedules) or replacing its payload      | The caller, as the schedule's creator |
+| Subscribing to an MCP connection's [events](../connections/mcp#events-experimental)            | The caller, as the watch's creator    |
 
 Where the session can ask for input, eve asks the caller to approve the call. The request names the call by its tool and each input field, and quotes the latest message from someone else in the turn. With `callerConfirmation: "once"`, it also says that approving lets that person steer calls that use the caller's identity for the rest of the conversation. Only the caller can approve it, and anyone signed in can cancel it. Approving runs the tool again from its first line with the caller's identity. See [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
 

@@ -9,7 +9,7 @@ import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { afterEach, beforeEach, expect, it, vi, onTestFinished } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
-import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
+import { AuthKey, SenderAuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -539,27 +539,31 @@ async function dispatch(message: ConnectionEventPayload) {
   });
 }
 
+function useCredential(principalType: "user" | "app") {
+  const auth = connection.authorization;
+  if (auth === undefined || typeof auth === "function") throw new Error("Missing fixture auth");
+  const authorization = {
+    principalType,
+    getToken: auth.getToken,
+    vercelConnect: auth.vercelConnect,
+  };
+  connection = {
+    ...connection,
+    authorization,
+    experimental_events: { ...connection.experimental_events!, authorization },
+  };
+  // The handler re-checks its binding against the deployed connection.
+  (ctx.require(BundleKey).resolvedAgent.connections as ResolvedConnectionDefinition[])[0] =
+    connection;
+  actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
+    account: ctx.require(AuthKey)!.principalId,
+  }));
+}
+
 it.each(["user", "app"] as const)(
   "isolates subscription management between users sharing a %s credential",
   async (principalType) => {
-    const auth = connection.authorization;
-    if (auth === undefined || typeof auth === "function") throw new Error("Missing fixture auth");
-    const authorization = {
-      principalType,
-      getToken: auth.getToken,
-      vercelConnect: auth.vercelConnect,
-    };
-    connection = {
-      ...connection,
-      authorization,
-      experimental_events: { ...connection.experimental_events!, authorization },
-    };
-    // The handler re-checks its binding against the deployed connection.
-    (ctx.require(BundleKey).resolvedAgent.connections as ResolvedConnectionDefinition[])[0] =
-      connection;
-    actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
-      account: ctx.require(AuthKey)!.principalId,
-    }));
+    useCredential(principalType);
     const { id } = await watch();
     setUser("bob");
     const tools = await contextStorage.run(ctx, () => actions.metadata());
@@ -574,6 +578,14 @@ it.each(["user", "app"] as const)(
     expect(subscriber).toHaveBeenCalledTimes(1);
   },
 );
+
+it("refuses to start a watch on an app credential, whose callbacks run as the caller, after someone else spoke", async () => {
+  useCredential("app");
+  ctx.set(SenderAuthKey, { ...ctx.require(AuthKey)!, principalId: "bob" });
+  await expect(watch()).rejects.toMatchObject({ reason: "confirmation_required" });
+  expect(subscriber).not.toHaveBeenCalled();
+  expect(handlers.size).toBe(0);
+});
 
 it("rejects invalid event arguments before subscription and fixes destination/identity outside model input", async () => {
   await contextStorage.run(ctx, async () => {

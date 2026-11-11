@@ -1,7 +1,8 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { loadContext } from "#context/container.js";
+import { contextStorage, loadContext } from "#context/container.js";
+import { requireCallerConfirmation } from "#runtime/connections/caller-confirmation.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
@@ -74,6 +75,14 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   callContext: ScheduleBoundCallContext,
 ): ScheduleCollectionClient<TPayload, TPrepared> {
   const nextOperationId = callContext.operationId ?? randomUUID;
+  // The schedule later runs as the creator a write records, so recording the caller hands their
+  // identity to that work: after someone else spoke, only a call the caller approved does it.
+  const requireCreator = () =>
+    requireCallerConfirmation(
+      callContext.collection,
+      contextStorage.getStore(),
+      "identity for a schedule that runs as them",
+    );
 
   const contextFor = (
     operation: NonNullable<ScheduleScopeContext["operation"]>,
@@ -190,6 +199,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       return (await prepareCreation(input)).prepared;
     },
     async create(input, approved) {
+      requireCreator();
       const { prepared, provider } = await prepareCreation(input);
       if (approved !== undefined && !isDeepStrictEqual(prepared, approved))
         throw new Error(
@@ -210,6 +220,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       return (await prepareUpdate(name, patch)).prepared;
     },
     async update(name, patch, approved) {
+      if (patch.payload !== undefined) requireCreator();
       const { prepared, provider } = await prepareUpdate(name, patch);
       if (approved !== undefined && !isDeepStrictEqual(prepared, approved))
         throw new Error(

@@ -271,7 +271,7 @@ The model does the work with the connection's tools, then waits for the user's a
 
 `onEvent` is required. Defining it doesn't subscribe to anything; the model subscribes while it works.
 
-Callbacks run outside any conversation, as the user who subscribed (`auth`). Nothing reaches a session unless you call `attachSession(sessionId).send(...)`, and `attachSession` never creates a session.
+Callbacks run outside any conversation, as the user who subscribed (`auth`). Nothing reaches a session unless you call `attachSession(sessionId).send(...)`, and `attachSession` never creates a session. So in a [shared session](/docs/concepts/security-model#shared-sessions), once someone other than the turn's caller has spoken, subscribing needs the caller's approval whatever credential the connection uses, as a call that reads the caller's token does.
 
 Callbacks can run concurrently, out of order, and more than once. Use `deliveryId` to deduplicate side effects:
 

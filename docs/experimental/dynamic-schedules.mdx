@@ -152,6 +152,8 @@ await client.update(created.name, {
 
 `client.update(name, patch)` changes timing, replaces the whole payload, or both. Timing-only updates keep the stored payload and creator and skip `preparePayload`. Payload replacement isn't a merge. It validates the complete new input, reruns preparation, and makes the updating caller the new creator. In a shared `scope`, permission to replace the payload is also permission to change who the schedule runs as.
 
+In a [shared session](../concepts/security-model#shared-sessions), once someone other than the turn's caller has spoken, creating a schedule or replacing its payload needs the caller's approval because the schedule runs as them: eve asks the caller where the session can ask for input, and otherwise fails the call with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`.
+
 Updates keep the management name, schedule ID, state, and destination. An update doesn't activate an inactive or completed schedule; use `enable` or `disable` to change state.
 
 Updates, `enable`, `disable`, and `delete` affect future runs, not callbacks already started or running sessions. Delete-and-create gives a new schedule identity, but isn't atomic.
