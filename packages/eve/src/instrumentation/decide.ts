@@ -9,7 +9,11 @@ import { context } from "#compiled/@opentelemetry/api/index.js";
 import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey, SessionKey } from "#context/keys.js";
-import { getRegisteredTelemetryIntegrations } from "#instrumentation/ai-sdk-telemetry.js";
+import {
+  aiSdkCapture,
+  getRegisteredTelemetryIntegrations,
+} from "#instrumentation/ai-sdk-telemetry.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
@@ -27,18 +31,25 @@ export async function decideWithTracing<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
 >(options: DecisionOptions<Questions>) {
   const runtime = getInstrumentationRuntime();
-  const settings = runtime?.otelSettings;
-  const traceDecision = runtime?.decision;
-  if (settings === undefined || traceDecision === undefined) return decideWithMetadata(options);
+  if (runtime === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
   const session = readInstrumentationSessionContext(ctx);
+  const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
+  const hooks = runtime.hooks.forTrace?.({ agentName, ...session.conversation }) ?? runtime.hooks;
+  const settings = runtime.otelSettings;
+  const traceDecision = runtime.decision;
+  if (settings === undefined || traceDecision === undefined) {
+    const content = shouldCaptureInstrumentationContent(session.conversation);
+    return decideWithMetadata(options, {
+      telemetry: aiSdkCapture({ recordInputs: content, recordOutputs: content }, hooks),
+    });
+  }
   const sessionId = ctx.get(SessionIdKey);
   const turnId = ctx.get(SessionKey)?.turn.id;
   const turnContext =
     sessionId === undefined || turnId === undefined
       ? undefined
-      : await runtime?.readTurnTraceContext?.(sessionId, turnId);
-  const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
+      : await runtime.readTurnTraceContext?.(sessionId, turnId);
   const decision = resolveInstrumentationTraceDecision(
     settings,
     agentName,
@@ -85,8 +96,7 @@ export async function decideWithTracing<
   // eve owns this operation; the SDK integration would emit a second pair of spans.
   const telemetry = {
     integrations: [...getRegisteredTelemetryIntegrations({ excludeEveOtelIntegration: true })],
-    recordInputs: operation.capture.recordInputs,
-    recordOutputs: operation.capture.recordOutputs,
+    ...aiSdkCapture(operation.capture, hooks),
   };
   try {
     const result = await operation.run(() =>
