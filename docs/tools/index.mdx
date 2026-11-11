@@ -345,16 +345,16 @@ The option works with `defineTool` and `defineWorkflowTool`. Copies of the root 
 
 ### Offer a tool on some calls
 
-Set `enabled` when a tool in `agent/tools/` should be offered only on some model calls, such as only to users on a paid plan. eve calls it before each model call with the same context a [`defineDynamic`](/docs/guides/dynamic-capabilities) function receives, and offers the tool on that call only when it returns `true`:
+Set `enabled` when a tool in `agent/tools/` should be offered only on some model calls, such as only to users with an active subscription. eve calls it before each model call with the same context a [`defineDynamic`](/docs/guides/dynamic-capabilities) function receives, and offers the tool on that call only when it returns `true`:
 
-```ts title="agent/tools/refund_order.ts"
+```ts title="agent/tools/cancel_subscription.ts"
 export default defineWorkflowTool({
-  description: "Refund one of the user's orders.",
-  enabled: (ctx) => ctx.session.auth.current?.attributes.plan === "pro",
-  inputSchema: z.object({ orderId: z.string() }),
-  async execute({ orderId }, ctx) {
+  description: "Cancel the user's subscription.",
+  enabled: (ctx) => ctx.session.auth.current?.attributes.subscription === "active",
+  inputSchema: z.object({ reason: z.string() }),
+  async execute({ reason }, ctx) {
     "use workflow";
-    return await refundOrder(orderId);
+    return await requestCancellation(reason);
   },
 });
 ```

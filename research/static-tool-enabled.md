@@ -8,7 +8,7 @@ last_updated: "2026-11-11"
 
 ## Problem
 
-A tool that only some model calls should offer, such as one for paid users, is a `defineDynamic()` tool that returns `null` when it shouldn't be offered. Workflow tools can't be: a `defineDynamic()` resolver may not return `defineWorkflowTool()`, because workflow tools are registered by name before any model call, for routing their durable runs. An agent whose gated action needs a workflow body, such as one that waits on `ctx.ask`, can only deny calls with `approval`. The model then sees a tool it may not use, calls it, and reads a denial.
+A tool that only some model calls should offer, such as one for users with an active subscription, is a `defineDynamic()` tool that returns `null` when it shouldn't be offered. Workflow tools can't be: a `defineDynamic()` resolver may not return `defineWorkflowTool()`, because workflow tools are registered by name before any model call, for routing their durable runs. An agent whose gated action needs a workflow body, such as one that waits on `ctx.ask`, can only deny calls with `approval`. The model then sees a tool it may not use, calls it, and reads a denial.
 
 ## Authoring API
 
@@ -16,12 +16,12 @@ Static tools accept `enabled`, called with the `DynamicContext` a `defineDynamic
 
 ```ts
 export default defineWorkflowTool({
-  description: "Refund one of the user's orders.",
-  enabled: (ctx) => ctx.session.auth.current?.attributes.plan === "pro",
-  inputSchema: z.object({ orderId: z.string() }),
-  async execute({ orderId }, ctx) {
+  description: "Cancel the user's subscription.",
+  enabled: (ctx) => ctx.session.auth.current?.attributes.subscription === "active",
+  inputSchema: z.object({ reason: z.string() }),
+  async execute({ reason }, ctx) {
     "use workflow";
-    return await refundOrder(orderId);
+    return await requestCancellation(reason);
   },
 });
 ```
