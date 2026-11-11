@@ -138,8 +138,10 @@ export function sessionParticipants(
   return state === undefined ? undefined : participantsOf(state(), ctx);
 }
 
-export function turnMessages(projection: SessionProjection): readonly TurnMessage[] {
-  const { turnId } = turnPosition(projection);
+export function turnMessages(
+  projection: SessionProjection,
+  turnId = turnPosition(projection).turnId,
+): readonly TurnMessage[] {
   return Object.values(projection.view.deliveries)
     .flatMap((delivery) => {
       if (delivery.turnId !== turnId || delivery.consumedAt === undefined) return [];
@@ -152,6 +154,25 @@ export function turnMessages(projection: SessionProjection): readonly TurnMessag
     })
     .sort((a, b) => a.at - b.at)
     .map(({ from, text }) => ({ from, text }));
+}
+
+/**
+ * Whether `person` sent a message the turn read. A delivery names its sender without how they
+ * signed in, so it is the person's only when no one else who has spoken could have sent it.
+ */
+export function sentBy(message: TurnMessage, person: SessionPerson): boolean {
+  const key = principalOf(person);
+  const others = (sessionParticipants() ?? []).filter((other) => principalOf(other) !== key);
+  return names(message.from, person) && !others.some((other) => names(message.from, other));
+}
+
+/** Whether a delivery's principal names `person`, as far as the wire tells. */
+function names(principal: Principal, person: SessionPerson): boolean {
+  return (
+    principal.id === person.principalId &&
+    principal.type === person.principalType &&
+    (principal.issuer ?? null) === (person.issuer ?? null)
+  );
 }
 
 /** The messages a local child session inherited from the turn that delegated to it. */

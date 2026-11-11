@@ -38,6 +38,7 @@ import {
 import { readDefinitionsState, sessionIdOf } from "#definitions/state.js";
 import { effectiveModelId } from "#definitions/model.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
+import { sentBy, turnMessages } from "#harness/sender-line.js";
 import { toolsDefinition } from "#definitions/tools.js";
 import type { MemoryToolsContext } from "#public/memory/index.js";
 import { isBrandedToolEntry } from "#tools/dynamic.js";
@@ -125,7 +126,13 @@ async function captureTurn(
   const container = ctx.container as ContextContainer;
   const messages = requireHistory(ctx.history, memory.logicalPath);
   const turnContext = activeTurn(messages);
-  const scope = await resolveMemoryScope(memory, commitScopeContext(ctx));
+  const context = commitScopeContext(ctx);
+  // The turn is saved to its caller's memory, so a turn that read someone else's message saves
+  // nothing: what it ends with, which providers keep, can be that person's words.
+  const caller = context.session.auth.current;
+  const read = turnMessages(currentProjection(), turnContext.id);
+  if (read.some((message) => caller === null || !sentBy(message, caller))) return;
+  const scope = await resolveMemoryScope(memory, context);
   if (scope === null) return;
   const id = operationId(sessionIdOf(container), memory.slot, "turn.completed", turnContext);
   try {

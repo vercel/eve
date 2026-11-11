@@ -57,6 +57,8 @@ sequenceDiagram
 2. eve gives the model the provider's tools, named `<slot>__<tool>`.
 3. After the turn completes, eve asks the provider to capture it.
 
+In a [shared session](/docs/concepts/security-model#shared-sessions), eve skips step 3 for a turn that read a message from someone other than its caller, because that turn's memory is the caller's.
+
 Recalled content enters the conversation as user messages labeled with the
 slot, never as system instructions.
 

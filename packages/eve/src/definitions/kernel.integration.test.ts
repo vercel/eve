@@ -584,6 +584,109 @@ describe("reactions", () => {
     }
   }, 90_000);
 
+  it("saves nothing of a turn another person steered to the caller's memory", async () => {
+    const log: string[] = [];
+    const captured: string[] = [];
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = scriptedModel(log, prompts);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "memory-steered",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineMemory({
+              provider: {
+                capture: {
+                  "turn.completed": ({ memory, turn }) => {
+                    captured.push(`${String(memory.scope.value)}:${turn.input.map(textOf)}`);
+                  },
+                },
+                recall: { "turn.started": () => null },
+              },
+              scope: (ctx) => ctx.session.auth.current?.principalId ?? null,
+            }),
+          }),
+          logicalPath: "memory/notes.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Look something up.",
+              execute: async () => {
+                log.push("lookup");
+                await held;
+                return { found: true };
+              },
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/lookup.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.settled": () => {
+                  log.push("turn:settled");
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+    const continuationToken = "http:memory-steered";
+    const send = (auth: typeof ALICE, message: string) =>
+      resumeHook(sessionInboxHookToken(continuationToken), {
+        auth,
+        delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+        kind: "send",
+        payload: { message },
+      });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Alice: look up the first thing." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken,
+          }),
+        },
+      ]);
+      try {
+        // Bob speaks while Alice's turn runs its tool, so his message joins her turn.
+        await until(log, "lookup", 1);
+        try {
+          await send({ ...ALICE, principalId: "bob" }, "Bob: use staging instead.");
+        } finally {
+          release();
+        }
+        await until(log, "turn:settled", 1);
+        await send(ALICE, "Alice: look up the second thing.");
+        await expect
+          .poll(() => captured.some((entry) => entry.includes("second thing")), { timeout: 20_000 })
+          .toBe(true);
+      } finally {
+        await run.cancel().catch(() => {});
+      }
+    });
+
+    expect(prompts.some((prompt) => JSON.stringify(prompt).includes("use staging"))).toBe(true);
+    expect(captured).toEqual([expect.stringMatching(/^alice:.*second thing/u)]);
+  }, 90_000);
+
   it("runs a ctx.agent model override instead of the agent's dynamic model", async () => {
     const log: string[] = [];
     const started: string[] = [];

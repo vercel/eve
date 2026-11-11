@@ -298,7 +298,8 @@ An approval of eve's request covers that call only, and doesn't make the person 
 
 Both are decided from who sent which message and who pressed which button, never from what the
 model said. A sender line a person types into their own message can mislead the model, but it
-can't change either fact.
+can't change either fact. Memory capture follows the same facts: a turn that read someone else's
+message isn't captured to its caller's memory.
 
 What remains:
 

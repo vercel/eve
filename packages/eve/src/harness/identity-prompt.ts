@@ -1,12 +1,11 @@
 import { generateId } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { principalOf, type SessionPerson } from "#context/session-auth.js";
+import type { SessionPerson } from "#context/session-auth.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
-import { delegatedMessages, sessionParticipants, turnMessages } from "#harness/sender-line.js";
+import { delegatedMessages, sentBy, turnMessages } from "#harness/sender-line.js";
 import { liveProjection } from "#harness/session-machine/current.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
-import type { Principal } from "#protocol/session-events/envelope.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 import type { IdentityRequest } from "#runtime/connections/caller-confirmation.js";
 import type { JsonObject } from "#shared/json.js";
@@ -91,28 +90,12 @@ function latestMessageFromOthers(
 ): { readonly from: string; readonly text: string } | undefined {
   const projection = liveProjection();
   if (projection === undefined) return undefined;
-  // A delivery names its sender without how they signed in, so eve compares the people who have
-  // spoken by `principalOf`: a delivery is the person's only when no one else who has spoken
-  // could have sent it.
-  const key = principalOf(person);
-  const others = (sessionParticipants() ?? []).filter((other) => principalOf(other) !== key);
-  const sentBy = (principal: Principal) =>
-    names(principal, person) && !others.some((other) => names(principal, other));
   // A local child's own messages come from the agent that delegated to it, so the messages its
   // parent's turn read count too, before the child's own.
   const latest = [...(delegatedMessages() ?? []), ...turnMessages(projection)]
-    .filter((message) => !sentBy(message.from))
+    .filter((message) => !sentBy(message, person))
     .at(-1);
   return latest === undefined ? undefined : { from: latest.from.id, text: latest.text };
-}
-
-/** Whether a delivery's principal names `person`, as far as the wire tells. */
-function names(principal: Principal, person: SessionPerson): boolean {
-  return (
-    principal.id === person.principalId &&
-    principal.type === person.principalType &&
-    (principal.issuer ?? null) === (person.issuer ?? null)
-  );
 }
 
 /**
