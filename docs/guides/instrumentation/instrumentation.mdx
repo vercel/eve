@@ -118,6 +118,14 @@ Inputs include model prompts, tool arguments, call labels (which can contain inp
 
 The channel sets the audience once, when it creates the session. The audience controls content capture, not access. See [Audience](/docs/channels#audience) for how the channel picks `public`, `private`, or `unknown`.
 
+### AI SDK telemetry integrations
+
+Some tools read AI SDK telemetry directly instead of eve events. Examples are Sentry's AI SDK integration and integrations added with `registerTelemetry()` from `ai`. These tools get content from the model call itself.
+
+A model call, including a `decide()` call, includes prompts and responses when the process-wide `otel(...)` policy or any file's `tracePolicy` allows them. Without `otel(...)`, eve applies the default rules in the table above.
+
+Every AI SDK telemetry integration in the process receives the same model call content. To keep content from one integration, use that integration's own settings to drop it.
+
 ## Redact fields
 
 Events are read-only, so copy the fields you need into a payload and redact the copy before sending it:

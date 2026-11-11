@@ -18,6 +18,7 @@ import {
   type BuildTelemetryRuntimeContextInput,
 } from "#instrumentation/runtime-context.js";
 import {
+  aiSdkCapture,
   ensureOtelIntegration,
   getRegisteredTelemetryIntegrations,
 } from "#instrumentation/ai-sdk-telemetry.js";
@@ -344,15 +345,19 @@ export function bindInstrumentationRuntime(
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordInputs
-              : capturesContent) &&
-            (settings?.recordInputs ?? false),
+              : capturesContent),
           recordOutputs:
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordOutputs
-              : capturesContent) &&
-            (settings?.recordOutputs ?? false),
+              : capturesContent),
         };
+        // eve's AI SDK OpenTelemetry integration is on the call only when eve does not own agent
+        // spans; it keeps the OpenTelemetry decision.
+        const aiSdkContent =
+          settings !== undefined && !executionRuntime.ownsAgentSpans
+            ? content
+            : aiSdkCapture(content, hooks);
         const telemetry = (telemetryInput: {
           readonly bridgeIntegration?: Telemetry;
           readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -383,8 +388,8 @@ export function bindInstrumentationRuntime(
                   : undefined
                 : [telemetryInput.bridgeIntegration, ...integrations()],
             isEnabled: true,
-            recordInputs: content.recordInputs,
-            recordOutputs: content.recordOutputs,
+            recordInputs: aiSdkContent.recordInputs,
+            recordOutputs: aiSdkContent.recordOutputs,
           };
         };
         const attemptSession = {

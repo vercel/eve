@@ -23,8 +23,6 @@ function createRuntime(tracePolicy: TraceCapturePolicy): InstrumentationRuntime 
     forceFlush: async () => undefined,
     hooks: { capturesContent: true, publish: async () => undefined },
     otelSettings: {
-      recordInputs: true,
-      recordOutputs: true,
       tracePolicy,
       traceChannelRequests: false,
     },

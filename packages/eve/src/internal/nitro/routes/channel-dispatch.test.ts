@@ -100,8 +100,6 @@ function registerChannelRequestTracing(enabled: boolean): void {
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,
-      recordInputs: false,
-      recordOutputs: false,
       traceChannelRequests: enabled,
     },
     runInContext: (_operation, execute) => execute(),

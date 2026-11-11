@@ -597,6 +597,14 @@ export interface InstrumentationHooks {
   readonly capturesInputs?: boolean;
   /** Output-content demand for publishers that can project directions separately. */
   readonly capturesOutputs?: boolean;
+  /**
+   * Input content an authored provider's trace policy admits. AI SDK
+   * integrations share one capture setting per model call, so the call
+   * records inputs when either this or the OpenTelemetry decision allows it.
+   */
+  readonly authoredCapturesInputs?: boolean;
+  /** Output content an authored provider's trace policy admits. */
+  readonly authoredCapturesOutputs?: boolean;
   readonly forTrace?: (trace: TraceCaptureContext) => InstrumentationHooks;
   publish(event: InstrumentationEvent): Promise<void>;
 }
