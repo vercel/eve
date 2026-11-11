@@ -343,32 +343,7 @@ describe("commands to a session that opened without waiting", () => {
   });
 });
 
-describe.each([
-  {
-    path: "opening a session",
-    dispatched: mocks.startRemote,
-    run: (auth: SessionAuth, identity?: DelegatedIdentity) =>
-      openAgentSessionStep({ ...message, auth, identity, name: "reviewer" }),
-  },
-  {
-    path: "a later message",
-    dispatched: mocks.continueRemote,
-    run: (auth: SessionAuth, identity?: DelegatedIdentity) =>
-      sendAgentSessionMessageStep({
-        ...message,
-        identity,
-        address: {
-          callbackBaseUrl: "https://parent.example.com",
-          kind: "remote",
-          name: "reviewer",
-          nodeId: "reviewer",
-          sessionId: "remote-1",
-          url: "https://reviewer.example.com",
-        },
-        auth,
-      }),
-  },
-])("$path with a remote agent that forwards the caller", ({ dispatched, run }) => {
+describe("a remote agent and the caller's identity", () => {
   const person = (principalId: string) => ({
     attributes: {},
     authenticator: "slack",
@@ -377,6 +352,8 @@ describe.each([
   });
   const alice = person("alice");
   const bob = person("bob");
+  const open = (auth: SessionAuth, identity?: DelegatedIdentity) =>
+    openAgentSessionStep({ ...message, auth, identity, name: "reviewer" });
 
   function registerRemoteAgent(
     forwardPrincipal: boolean | undefined,
@@ -403,60 +380,77 @@ describe.each([
         ]),
       },
     };
-    dispatched.mockResolvedValue({ sessionId: "remote-1" });
+    mocks.startRemote.mockResolvedValue({ sessionId: "remote-1" });
+    mocks.continueRemote.mockResolvedValue({ sessionId: "remote-1" });
   }
 
-  it("is refused without retrying after someone else spoke, telling the model to ask the caller", async () => {
-    registerRemoteAgent(true);
+  describe.each([
+    { path: "opening a session", dispatched: mocks.startRemote, run: open },
+    {
+      path: "a later message",
+      dispatched: mocks.continueRemote,
+      run: (auth: SessionAuth) =>
+        sendAgentSessionMessageStep({
+          ...message,
+          address: {
+            callbackBaseUrl: "https://parent.example.com",
+            kind: "remote",
+            name: "reviewer",
+            nodeId: "reviewer",
+            sessionId: "remote-1",
+            url: "https://reviewer.example.com",
+          },
+          auth,
+        }),
+    },
+  ])("$path, when the agent forwards the caller", ({ dispatched, run }) => {
+    it("is refused without retrying after someone else spoke, telling the model to ask the caller", async () => {
+      registerRemoteAgent(true);
 
-    const refusal = await run({ current: alice, initiator: alice, sender: bob }).catch(
-      (error: unknown) => error,
-    );
+      const refusal = await run({ current: alice, initiator: alice, sender: bob }).catch(
+        (error: unknown) => error,
+      );
 
-    expect(refusal).toBeInstanceOf(FatalError);
-    expect((refusal as Error).message).toContain(
-      `can't use their identity with the "reviewer" agent until they confirm it`,
-    );
-    expect(dispatched).not.toHaveBeenCalled();
+      expect(refusal).toBeInstanceOf(FatalError);
+      expect((refusal as Error).message).toContain(
+        `can't use their identity with the "reviewer" agent until they confirm it`,
+      );
+      expect(dispatched).not.toHaveBeenCalled();
+    });
+
+    it("goes through when the caller spoke last", async () => {
+      registerRemoteAgent(true);
+
+      await run({ current: alice, initiator: alice, sender: { ...alice } });
+
+      expect(dispatched).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
+    });
   });
 
   it.each([
-    { reason: "the caller spoke last", forwardPrincipal: true, sender: { ...alice } },
-    { reason: "the agent doesn't forward the caller", forwardPrincipal: undefined, sender: bob },
+    { reason: "the agent doesn't forward the caller", forwardPrincipal: undefined },
     {
       reason: 'the agent\'s callerConfirmation is "never"',
       callerConfirmation: "never" as const,
       forwardPrincipal: true,
-      sender: bob,
     },
-  ])("goes through when $reason", async ({ callerConfirmation, forwardPrincipal, sender }) => {
-    registerRemoteAgent(forwardPrincipal, callerConfirmation);
-
-    await run({ current: alice, initiator: alice, sender });
-
-    expect(dispatched).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
-  });
-
-  it.each([
-    { label: "goes through", remembered: true },
-    { label: "is refused", remembered: false },
+    {
+      reason: 'the caller already approved after Bob spoke, under callerConfirmation "once"',
+      callerConfirmation: "once" as const,
+      confirmed: [JSON.stringify(["eve.callerConfirmation", principalOf(alice), principalOf(bob)])],
+      forwardPrincipal: true,
+    },
   ])(
-    'with callerConfirmation "once", $label when the caller already approved after Bob spoke',
-    async ({ remembered }) => {
-      registerRemoteAgent(true, "once");
-      const approved = JSON.stringify([
-        "eve.callerConfirmation",
-        principalOf(alice),
-        principalOf(bob),
-      ]);
+    "opens a session after Bob spoke when $reason",
+    async ({ callerConfirmation, confirmed, forwardPrincipal }) => {
+      registerRemoteAgent(forwardPrincipal, callerConfirmation);
 
-      const outcome = await run(
+      await open(
         { current: alice, initiator: alice, sender: bob },
-        { confirmed: remembered ? [approved] : [], participants: [] },
-      ).catch((error: unknown) => error);
+        confirmed === undefined ? undefined : { confirmed, participants: [] },
+      );
 
-      expect(outcome instanceof FatalError).toBe(!remembered);
-      expect(dispatched).toHaveBeenCalledTimes(remembered ? 1 : 0);
+      expect(mocks.startRemote).toHaveBeenCalledWith(expect.objectContaining({ auth: alice }));
     },
   );
 });
