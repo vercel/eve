@@ -129,17 +129,38 @@ const CALLER_TOKEN: ToolAuthProvider = {
   }),
 };
 
-/** A tool that returns the caller's token and who it reads as the last to speak. */
-function tokenTool(name: string, approval?: Approval) {
+/**
+ * A tool that returns the token of the caller, or of the person `as` names, and who it reads as the
+ * last to speak.
+ */
+function tokenTool(name: string, { approval, as }: { approval?: Approval; as?: string } = {}) {
   return {
     loadNamespace: async () => ({
       default: defineTool({
         approval,
-        description: `Run ${name} with the caller's token.`,
+        description: `Run ${name} with ${as ?? "the caller"}'s token.`,
         execute: async (_input, ctx) => {
-          const { token } = await ctx.getToken(CALLER_TOKEN);
+          const { token } = await ctx.getToken(CALLER_TOKEN, { as });
           return `${token}, sender ${ctx.session.auth.sender?.principalId}`;
         },
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: `tools/${name}.ts`,
+  };
+}
+
+/** A workflow tool anyone may approve, which runs `execute`. */
+function workflowTool(
+  name: string,
+  execute: typeof reportCallerWorkflow | typeof reportSenderWorkflow,
+) {
+  return {
+    loadNamespace: async () => ({
+      default: defineWorkflowTool({
+        approval: { request: always(), response: anyoneResponds },
+        description: `Run ${name}.`,
+        execute: execute as WorkflowExecuteToolDefinition["execute"],
         inputSchema: {},
       }),
     }),
@@ -454,7 +475,7 @@ describe("approval caller", () => {
       },
       {
         message: "Use deploy_change, then use_token, then use_token_again.",
-        modules: [tokenTool("use_token", always()), tokenTool("use_token_again")],
+        modules: [tokenTool("use_token", { approval: always() }), tokenTool("use_token_again")],
       },
     );
 
@@ -474,7 +495,7 @@ describe("approval caller", () => {
         await run.send(BOB, "Bob adds a note.");
         await run.approve(ALICE, "use_token");
       },
-      { message: "Use use_token.", modules: [tokenTool("use_token", always())] },
+      { message: "Use use_token.", modules: [tokenTool("use_token", { approval: always() })] },
     );
 
     expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
@@ -495,7 +516,9 @@ describe("approval caller", () => {
       },
       {
         message: "Use deploy_change, then use_token.",
-        modules: [tokenTool("use_token", { request: always(), response: anyoneResponds })],
+        modules: [
+          tokenTool("use_token", { approval: { request: always(), response: anyoneResponds } }),
+        ],
       },
     );
 
@@ -505,35 +528,34 @@ describe("approval caller", () => {
     expect(outputsOf(stages, "call-use_token")).toEqual([]);
   }, 60_000);
 
-  it("starts a waiting workflow tool's run with the sender it was asked under", async () => {
-    const { stages } = await withChainRun(
-      "approval-caller-asked-workflow-sender",
-      async (run) => {
-        await run.send(BOB, "Bob adds a note.");
-        await run.send(ALICE, "Alice agrees.");
-        await run.approve(BOB, "report_sender");
-        await run.approve(ALICE, "deploy_change");
-      },
-      {
-        message: "Use deploy_change, then report_sender.",
-        modules: [
-          {
-            loadNamespace: async () => ({
-              default: defineWorkflowTool({
-                approval: { request: always(), response: anyoneResponds },
-                description: "Report who spoke last.",
-                execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
-                inputSchema: {},
-              }),
-            }),
-            logicalPath: "tools/report_sender.ts",
-          },
-        ],
-      },
-    );
+  it.each([
+    // Alice's message, read before Bob approves, doesn't change the sender the call was asked under.
+    { aliceAgrees: true, approver: BOB, sender: "bob" },
+    // The caller approving the call makes them its sender.
+    { aliceAgrees: false, approver: ALICE, sender: "alice" },
+  ])(
+    "after someone else speaks, starts a waiting workflow tool's run with the sender it was asked under, or the caller when they approve it: $sender",
+    async ({ aliceAgrees, approver, sender }) => {
+      const { stages } = await withChainRun(
+        `approval-caller-workflow-sender-${sender}`,
+        async (run) => {
+          // Bob's message joins Alice's turn while deploy_change waits as a task: he spoke last
+          // from then on.
+          await run.send(BOB, "Bob adds a note.");
+          if (aliceAgrees) await run.send(ALICE, "Alice agrees.");
+          await run.approve(approver, "report_sender");
+          await run.approve(ALICE, "deploy_change");
+        },
+        {
+          message: "Use deploy_change, then report_sender.",
+          modules: [workflowTool("report_sender", reportSenderWorkflow)],
+        },
+      );
 
-    expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender: "bob" }]);
-  }, 60_000);
+      expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender }]);
+    },
+    60_000,
+  );
 
   it("keeps a step's other approval open when a message arrives with one answer", async () => {
     const { seen, stages } = await withChainRun(
@@ -580,54 +602,11 @@ describe("approval caller", () => {
       },
       {
         message: "Use report_caller, then read_notes.",
-        modules: [
-          {
-            loadNamespace: async () => ({
-              default: defineWorkflowTool({
-                approval: { request: always(), response: anyoneResponds },
-                description: "Report who runs this.",
-                execute: reportCallerWorkflow as WorkflowExecuteToolDefinition["execute"],
-                inputSchema: {},
-              }),
-            }),
-            logicalPath: "tools/report_caller.ts",
-          },
-        ],
+        modules: [workflowTool("report_caller", reportCallerWorkflow)],
       },
     );
 
     expect(outputsOf(stages, "call-report_caller")).toEqual([{ caller: "alice" }]);
-  }, 60_000);
-
-  it("after someone else speaks, starts a workflow tool's run with the caller as its sender when the caller approved it", async () => {
-    const { stages } = await withChainRun(
-      "approval-caller-workflow-sender-caller",
-      async (run) => {
-        // Bob's message joins Alice's turn while deploy_change waits as a task: he spoke last
-        // from then on.
-        await run.send(BOB, "Bob adds a note.");
-        await run.approve(ALICE, "report_sender");
-        await run.approve(ALICE, "deploy_change");
-      },
-      {
-        message: "Use deploy_change, then report_sender.",
-        modules: [
-          {
-            loadNamespace: async () => ({
-              default: defineWorkflowTool({
-                approval: { request: always(), response: anyoneResponds },
-                description: "Report who spoke last.",
-                execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
-                inputSchema: {},
-              }),
-            }),
-            logicalPath: "tools/report_sender.ts",
-          },
-        ],
-      },
-    );
-
-    expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender: "alice" }]);
   }, 60_000);
 
   it("answers the requester's next message after another person's press ends the turn", async () => {
@@ -877,23 +856,6 @@ function requestModel(prompts: string[] = []) {
   );
 }
 
-/** A tool that returns the token of the person `as` names, and who it reads as the sender. */
-function tokenAsTool(name: string, as: string) {
-  return {
-    loadNamespace: async () => ({
-      default: defineTool({
-        description: `Run ${name} with ${as}'s token.`,
-        execute: async (_input, ctx) => {
-          const { token } = await ctx.getToken(CALLER_TOKEN, { as });
-          return `${token}, sender ${ctx.session.auth.sender?.principalId}`;
-        },
-        inputSchema: {},
-      }),
-    }),
-    logicalPath: `tools/${name}.ts`,
-  };
-}
-
 /** A tool that uses no credentials and returns who it reads as the last to speak. */
 function senderTool(name: string) {
   return {
@@ -1118,7 +1080,7 @@ describe("asking a person for their identity", () => {
           tokenTool("use_token"),
           tokenTool("use_token_again"),
           senderTool("read_sender"),
-          tokenTool("hold_change", { request: always(), response: anyoneResponds }),
+          tokenTool("hold_change", { approval: { request: always(), response: anyoneResponds } }),
           tokenTool("use_token_later"),
         ],
       },
@@ -1182,9 +1144,9 @@ describe("asking a person for their identity", () => {
           "Use deploy_change, then token_for_alice, then token_for_bob, then token_for_carol.",
         model: requestModel(),
         modules: [
-          tokenAsTool("token_for_alice", "alice"),
-          tokenAsTool("token_for_bob", "bob"),
-          tokenAsTool("token_for_carol", "carol"),
+          tokenTool("token_for_alice", { as: "alice" }),
+          tokenTool("token_for_bob", { as: "bob" }),
+          tokenTool("token_for_carol", { as: "carol" }),
         ],
       },
     );
@@ -1349,7 +1311,7 @@ describe("asking a person for their identity", () => {
       {
         message: "Use deploy_change.",
         model: delegatingModel(),
-        modules: [tokenAsTool("token_for_bob", "bob")],
+        modules: [tokenTool("token_for_bob", { as: "bob" })],
       },
     );
 
