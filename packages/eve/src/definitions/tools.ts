@@ -174,8 +174,8 @@ function compiledWorkflow(source: ToolSource, name: string, entry: object): Comp
 }
 
 /**
- * The agent's workflow tools and agents run after the model step, so a dynamic tool, which runs in
- * it, can't take their names. Nor can a connection's.
+ * The agent's static workflow tools and agents keep their names for calls that outlive the model
+ * step, so a dynamic tool can't take them. Nor can a connection's.
  */
 function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, name: string): void {
   assertNotConnectionOwned({
