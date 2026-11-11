@@ -304,7 +304,7 @@ The turn ends only when every tool call in the step can end the turn, succeeds, 
 
 eve ignores `endsTurn` in delegated sessions, which must reply to their caller, and on turns that request structured output. There, the model doesn't see the sentence, and eve doesn't call the function.
 
-Dynamic tool entries accept both forms of `endsTurn`. `defineWorkflowTool` rejects it at build time. To end a turn without any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+Dynamic tool entries accept both forms of `endsTurn`. `defineWorkflowTool` doesn't accept it. To end a turn without any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Keep a tool out of the tool list
 
