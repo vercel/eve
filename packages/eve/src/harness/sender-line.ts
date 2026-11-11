@@ -29,7 +29,7 @@ export interface TurnMessage {
 
 /** Who has spoken in the session whom its participants don't record. */
 export interface UnrecordedSpeakers {
-  /** Someone who isn't signed in, whom eve can't name. */
+  /** Someone who isn't signed in, whom eve can't name, beside people who are. */
   readonly anonymous?: true;
   /** Someone the participants dropped, past the most recent people they keep. */
   readonly dropped?: true;
@@ -88,9 +88,14 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
       : [...recorded.filter((person) => principalOf(person) !== next.principal), personOf(auth)];
   const participants = listed?.slice(-MAX_PARTICIPANTS);
   const before = readUnrecorded(session.state);
+  // Everyone signed in is listed, so a message from someone who isn't, beside listed people, or
+  // the first listed person after earlier messages, means the two kinds of people have mixed. A
+  // session only ever anonymous needs no note: its anonymous caller is everyone who spoke.
+  const mixed =
+    next.id === undefined ? recorded.length > 0 : recorded.length === 0 && last !== undefined;
   const unrecorded: UnrecordedSpeakers = {
     ...before,
-    ...(next.id === undefined && { anonymous: true }),
+    ...(mixed && { anonymous: true }),
     ...(listed !== undefined && listed.length > MAX_PARTICIPANTS && { dropped: true }),
   };
   const noted = unrecorded.anonymous !== before.anonymous || unrecorded.dropped !== before.dropped;

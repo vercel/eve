@@ -89,6 +89,21 @@ describe("participants", () => {
     expect(kept.at(-1)).toBe("person-51");
   });
 
+  it.each([
+    ["only people who aren't signed in", [null, null], {}],
+    [
+      "someone who isn't signed in before a signed-in person",
+      [null, user("alice")],
+      { anonymous: true },
+    ],
+  ] as const)("notes, after %s, %j", (_label, speakers, expected) => {
+    const ctx = new ContextContainer();
+    const session = speakers.reduce(rememberSender, {} as { state?: Record<string, unknown> });
+    enterParticipants(ctx, () => session.state);
+
+    expect(unrecordedSpeakers(ctx)).toEqual(expected);
+  });
+
   it("notes who spoke whom the participants don't record, until the conversation is cleared", () => {
     const ctx = new ContextContainer();
     let session = [user("alice"), null].reduce(
