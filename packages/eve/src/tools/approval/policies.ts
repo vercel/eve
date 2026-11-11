@@ -100,12 +100,13 @@ export function steered<TInput = unknown>(): ApprovalPolicy<TInput> {
     );
   }
   return (context) => {
-    const evaluation = approvalEvaluation(context as ApprovalContext);
-    // Outside eve's evaluation, such as a policy calling it directly, it can only ask.
-    if (evaluation === undefined) {
+    const requireCaller = approvalEvaluation(context as ApprovalContext)?.requireCaller;
+    // Outside eve's evaluation, such as a policy calling it directly, or under an older copy of
+    // eve's harness bundled beside this one, it can only ask.
+    if (requireCaller === undefined) {
       return callerSpokeLast(context.session.auth) ? "not-applicable" : "user-approval";
     }
-    evaluation.requireCaller();
+    requireCaller();
     return "not-applicable";
   };
 }

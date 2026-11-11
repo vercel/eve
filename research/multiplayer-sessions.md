@@ -135,7 +135,9 @@ call. After someone else's message joins the turn, the call needs the caller's a
   [Asking a person](#asking-a-person).
 - **Refused.** Where eve can't ask, a token or connection call fails with
   `ConnectionAuthorizationFailedError`, `reason: "confirmation_required"`, `retryable: false`, and
-  a remote agent call fails with a terminal error carrying the same instruction. Nothing pauses. The message tells the
+  a remote agent call fails with a terminal error carrying the same instruction. A remote agent
+  call never asks, even where eve could: it runs outside the session step, so `steered()` is how
+  an agent has eve ask first. Nothing pauses. The message tells the
   model that someone else has spoken, and to ask the caller to confirm before it retries. The
   caller's next message makes them the last to speak.
 - **Approved.** A call the caller approved runs with their identity, whoever spoke last, and

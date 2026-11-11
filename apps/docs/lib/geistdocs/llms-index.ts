@@ -24,7 +24,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand model context and compaction in the built-in loop.
 - [Built-in Tools](${EVE_ORIGIN}/docs/concepts/built-in-tools.md): Review default tools and add opt-in tools such as Workflow, glob, grep, and sleep.
 - [Context Control](${EVE_ORIGIN}/docs/concepts/context-control.md): Choose what the model sees and when.
-- [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
+- [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, fail-closed behavior, and how to protect tools in shared sessions.
 
 ## Build
 

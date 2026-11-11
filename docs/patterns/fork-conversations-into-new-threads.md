@@ -45,7 +45,8 @@ export default defineTool({
     if (!isChannel(ctx.channel, slack) || ctx.channel.metadata.channelId === null)
       return { forked: false, reason: "This conversation is not in Slack." };
     const { channelId } = ctx.channel.metadata;
-    const auth = ctx.session.auth.current;
+    // The person who asked, who may not be the turn's caller in a shared thread.
+    const auth = ctx.session.auth.sender;
 
     const history = toHistory(ctx.messages);
     const delivery = await ctx.to(slack, { channelId }).send("Continue this conversation here.", {
@@ -84,14 +85,14 @@ to follow replies in an active thread.
 
 ### Fork into direct messages
 
-To move the conversation into the caller's DMs instead, open a direct conversation with their
-Slack user id and use its channel id as the target:
+To move the conversation into the DMs of the person who asked instead, open a direct conversation
+with their Slack user id and use its channel id as the target:
 
 ```ts title="agent/tools/fork_to_dm.ts"
 import { callSlackApi } from "eve/channels/slack";
 
 // In execute(), replace the channelId lookup:
-const auth = ctx.session.auth.current;
+const auth = ctx.session.auth.sender;
 const userId = auth?.attributes.user_id;
 if (!isChannel(ctx.channel, slack) || typeof userId !== "string")
   return { forked: false, reason: "No Slack user to message." };

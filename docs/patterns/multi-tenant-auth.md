@@ -39,7 +39,7 @@ export function requireTenantCaller(ctx: SessionContext): {
 
 The tenant comes from verified route auth, never a prompt, tool argument, or remote API response. See [Auth & route protection](../guides/auth-and-route-protection) for custom session and OIDC examples.
 
-`auth.current` is the turn's caller, the person whose message started the turn. In a session several people share, another person's message can join the turn, and `auth.sender` names who sent the latest one. eve checks the sender before it hands out a token from connection `auth` with `principalType: "user"`, but not for credentials your code picks itself. That's why the helper also requires the sender to belong to the caller's tenant. A per-user credential, such as the API key the [API-key-only example](#authenticate-an-api-key-only-connection) looks up with `userId`, belongs to the caller alone. Before you use one, require `sender?.principalId === caller.principalId`. See [Shared sessions](../concepts/security-model#shared-sessions).
+`auth.current` is the turn's caller, the person whose message started the turn. In a session several people share, another person's message can join the turn, and `auth.sender` names who sent the latest one. eve checks the sender before it hands out a token from connection `auth` with `principalType: "user"`, but not for credentials your code picks itself. That's why the helper also requires the sender to belong to the caller's tenant. A per-user credential, such as the API key the [API-key-only example](#authenticate-an-api-key-only-connection) looks up with `userId`, belongs to the caller alone, so that connection sets `approval: steered()` to ask the caller before someone else's message uses it. See [Shared sessions](../concepts/security-model#shared-sessions).
 
 ## Authenticate with your own API key or JWT
 
@@ -229,6 +229,7 @@ tenant API key from `headers` instead:
 
 ```ts title="agent/connections/support.ts"
 import { defineMcpClientConnection } from "eve/connections";
+import { steered } from "eve/tools/approval";
 import { tenantCredentials } from "../lib/tenant-credentials";
 import { requireTenantCaller } from "../lib/tenant";
 
@@ -236,6 +237,8 @@ export default defineMcpClientConnection({
   url: "https://support.example.com/mcp",
   description: "Support tickets and customers for the current tenant.",
   tools: { allow: ["search_tickets", "get_ticket", "add_internal_note"] },
+  // The key below is the caller's own, so ask them after someone else speaks.
+  approval: steered(),
 
   headers: async (ctx) => {
     const { tenantId, userId } = requireTenantCaller(ctx);

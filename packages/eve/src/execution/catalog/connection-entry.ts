@@ -27,6 +27,7 @@ import { approvalDecision } from "#approval/status.js";
 import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
+import { identityRequestOf } from "#runtime/connections/caller-confirmation.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
   connectionToolModelOutput,
@@ -151,7 +152,17 @@ async function callConnectionTool(
   gated: boolean,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
-  const result = await runConnectionTool(registry, connection, toolName, rawInput, options);
+  let result: unknown;
+  try {
+    result = await runConnectionTool(registry, connection, toolName, rawInput, options);
+  } catch (error) {
+    // The call runs again once the person eve asks for their identity approves, and its approval
+    // recheck expects a pin.
+    if (gated && identityRequestOf(error) !== undefined) {
+      pinApprovedInstance(options.toolCallId, connection);
+    }
+    throw error;
+  }
   // The call runs again after the sign-in, and its approval recheck expects a pin.
   if (gated && isAuthorizationSignal(result)) {
     pinApprovedInstance(options.toolCallId, connection);
@@ -378,7 +389,9 @@ async function requestApproval(
   }
   // Preserve result identity for the approval evaluator's private metadata.
   const status = await policy(context);
-  if (!isApprovalRecheck(context) && approvalDecision(status).awaitsPerson === true) {
+  // A call can wait on a person even when its policy clears it, as when eve asks the caller for
+  // their identity, so every call that may run is pinned. Running it consumes the pin.
+  if (!isApprovalRecheck(context) && !approvalDecision(status).denied) {
     pinApprovedInstance(context.callId, connection);
   }
   return status;
@@ -418,7 +431,7 @@ async function authorizeApprovalResponse(
   return await response(context);
 }
 
-/** Records the instance a parked call was first sent for approval against or stopped on. */
+/** Records the instance a call was first decided against, or stopped on, until it runs. */
 function pinApprovedInstance(callId: string, connection: ResolvedConnectionDefinition): void {
   const ctx = loadContext();
   if (ctx.get(ConnectionApprovalPinsKey)?.[callId] !== undefined) return;

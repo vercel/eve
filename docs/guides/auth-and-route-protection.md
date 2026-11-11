@@ -309,7 +309,7 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 
 - `auth.current`: the caller on the active inbound turn, whose message started it. A message from a different caller that starts a later turn replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
-- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call the caller approved reads the caller here; calls their approval covers later don't.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and changes only between model steps. A tool call the caller approved reads the caller here. Later calls that the same approval covers still read the other person.
 
 The caller stays the same for the whole turn; only its claims can change:
 
@@ -317,11 +317,11 @@ The caller stays the same for the whole turn; only its claims can change:
 - A message from anyone else joins the turn and sets `auth.sender`; `auth.current` stays the caller. It joins even while the turn waits on an approval, sign-in, or question.
 - Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current` and `auth.sender`.
 
-After someone else's message joins the turn, a call that uses the caller's identity needs the caller's approval. eve asks the caller to approve it, and fails the call only where it can't ask, such as in a workflow tool. See [Shared sessions](../concepts/security-model#shared-sessions).
+After someone else's message joins the turn, a call that uses the caller's identity needs the caller's approval. eve asks the caller to approve it, and fails the call only where it can't ask, such as in a workflow tool. A call to a remote agent that forwards the caller fails without asking. See [Shared sessions](../concepts/security-model#shared-sessions).
 
-`auth.current` is whatever `auth` the channel sent the message with. A route handler or channel hook can send with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`; on a continuation, only `auth.current` is. Internal runtime paths, such as subagents, can also have no caller auth.
+`auth.current` is whatever `auth` the channel sent the message with. A route handler or channel hook can send with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`. For a message that starts a later turn, only `auth.current` is; a message that joins a running turn sets `auth.sender` to `null` instead. Internal runtime paths, such as subagents, can also have no caller auth.
 
-Use the caller on `auth.current` (or `auth.initiator`) to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries. In a shared session, another person's message can reach a tool in the caller's turn. A tool that decides from who is asking must check `auth.sender` as well as `auth.current`.
+Use the caller on `auth.current` to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries. In a shared session, another person's message can reach a tool in the caller's turn, so check `auth.sender` as well, or set `approval: steered()` in `agent.ts` to ask the caller before any call made after someone else spoke. See [Shared sessions](../concepts/security-model#shared-sessions).
 
 Route auth doesn't check who may use a session, and eve adds no per-session access list. If multiple users or tenants can reach the same route, implement the per-user, per-tenant, or per-session authorization your application requires.
 

@@ -13,13 +13,15 @@ You store tenant policy. It can be a few columns in PostgreSQL, a policy service
 
 ## Adapt tenant policy to eve approval
 
-This adapter checks that the current caller and the caller who started the session belong to the same tenant. Then it asks your policy store:
+This adapter checks that the caller, the caller who started the session, and the person who sent the latest message belong to the same tenant. In a [shared session](/docs/concepts/security-model#shared-sessions), the latest message can come from someone other than the caller, so the adapter also calls `steered()`: a call made after someone else spoke asks the caller first. Then it asks your policy store:
 
 ```ts title="agent/lib/tenant-approval.ts"
-import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
+import { steered, type ApprovalContext, type ApprovalStatus } from "eve/tools/approval";
 import { approvalPolicies } from "./approval-policies";
 
 type Surface = "connection" | "tool";
+
+const askCaller = steered();
 
 function tenantIdOf(auth: ApprovalContext["session"]["auth"]["current"]): string | null {
   const tenantId = auth?.attributes.tenantId;
@@ -30,13 +32,19 @@ export async function decideTenantApproval(
   surface: Surface,
   ctx: ApprovalContext,
 ): Promise<ApprovalStatus> {
-  const current = ctx.session.auth.current;
+  const { current, initiator, sender } = ctx.session.auth;
   const tenantId = tenantIdOf(current);
-  const initiatorTenantId = tenantIdOf(ctx.session.auth.initiator);
 
-  if (current?.principalType !== "user" || !tenantId || tenantId !== initiatorTenantId) {
-    return { type: "denied", reason: "The session is not pinned to one tenant user." };
+  if (
+    current?.principalType !== "user" ||
+    !tenantId ||
+    tenantId !== tenantIdOf(initiator) ||
+    tenantId !== tenantIdOf(sender)
+  ) {
+    return { type: "denied", reason: "The session is not pinned to one tenant." };
   }
+  // A call made after someone else spoke asks the caller, whatever the policy store decides.
+  askCaller(ctx);
 
   const input = ctx.toolInput as Record<string, unknown> | undefined;
   if (typeof input?.tenantId === "string" && input.tenantId !== tenantId) {

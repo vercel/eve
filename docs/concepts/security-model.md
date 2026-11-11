@@ -1,6 +1,6 @@
 ---
 title: "Security Model"
-description: "eve's trust boundaries, where secrets live, how credentials reach hosts, and what fails closed by default."
+description: "eve's trust boundaries, where secrets live, how credentials reach hosts, what fails closed by default, and how to protect tools when several people share a session."
 ---
 
 An eve agent runs in two contexts: the trusted app runtime and the isolated sandbox. Every secret stays in the app runtime. Use this model to decide what an agent, and the model driving it, can reach.
@@ -81,33 +81,61 @@ Several people can share one session, such as a Slack thread or a GitHub issue. 
 
 Anyone the channel lets into the session can steer the running turn. Their message changes what the model reads, never whose identity the turn uses. `ctx.session.auth.sender` names who spoke last. When the speaker changes, eve adds a line before the message that names its sender and the previous sender by `principalId`. A message joins even while the turn waits on an approval, sign-in, or question.
 
-eve hands the caller's identity to a call when the caller sent the latest message the model read as it made the call, or when the caller approved that call or an earlier one since anyone else last spoke. After someone else's message joins the turn, a call that uses the caller's identity stops before it gets it:
+### Protect tools in a shared session
 
-| Call                                                                                           | Identity it uses                      |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------- |
-| A tool of a `principalType: "user"` connection, or `ctx.getToken()` for a user-scoped provider | The caller's token                    |
-| A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded                 |
-| A remote agent that forwards the caller                                                        | The caller, forwarded                 |
-| Creating a [dynamic schedule](../experimental/dynamic-schedules) or replacing its payload      | The caller, as the schedule's creator |
-| Subscribing to an MCP connection's [events](../connections/mcp#events-experimental)            | The caller, as the watch's creator    |
+eve protects the caller's tokens and forwarded identity on its own. It doesn't know what else your code authorizes from the caller. For an agent that more than one person can reach, set `approval: steered()` in `agent.ts`. After someone else's message joins the turn, every call the model makes asks the caller first. A session with one person never asks.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { steered } from "eve/tools/approval";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: steered(),
+});
+```
+
+| If your code                                                                                                                               | Do this                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Gets the caller's token from a `principalType: "user"` connection or `ctx.getToken()`, or uses a `forwardPrincipal` connection             | Nothing more. eve asks the caller first.                                                        |
+| Calls a remote agent that forwards the caller                                                                                              | Set `steered()`. Without it, the call fails until the caller speaks.                            |
+| Decides from the caller's role or tenant, or picks a credential for the caller, such as an app token, a tenant API key, or `ctx.to()` auth | Set `steered()`, or refuse unless `auth.sender` passes the same check.                          |
+| Offers a dynamic skill or instructions from the caller's attributes                                                                        | Check `auth.sender` as well. `steered()` gates calls, not what the model reads.                 |
+| Uses a memory slot scoped to the caller                                                                                                    | Set `steered()` to gate the slot's tools. Memory recalled at the turn's start stays in context. |
+| Admits only people who may act for each other, such as a fixed team in a channel hook                                                      | Checking `auth.current` is enough.                                                              |
+
+`once()` doesn't depend on who spoke: its approval keeps covering a tool after someone else speaks. `turnPolicy: "queue"` keeps a message out of a running turn, but a queued message still joins a turn that waits on an approval or sign-in. See [Ask the caller after someone else speaks](/docs/human-in-the-loop#ask-the-caller-after-someone-else-speaks) for how `steered()` works with a tool's own approval.
+
+These checks gate new calls only. The model can still answer from what is already in the conversation, and a token a tool configured in the sandbox works for later commands until it expires or the tool removes it.
+
+### How eve protects the caller's identity
+
+eve hands the caller's identity to a call when the caller sent the latest message the model read as it made the call. It also does so when the caller approved that call, or approved an earlier one since anyone else last spoke. After someone else's message joins the turn, a call that uses the caller's identity stops before it gets it:
+
+| Call                                                                                           | Identity it uses                        |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------- |
+| A tool of a `principalType: "user"` connection, or `ctx.getToken()` for a user-scoped provider | The caller's token                      |
+| A tool of a `forwardPrincipal` connection                                                      | The caller, forwarded                   |
+| A remote agent that forwards the caller                                                        | The caller, forwarded                   |
+| Creating a [dynamic schedule](../experimental/dynamic-schedules) or replacing its payload      | The caller, as the schedule's creator   |
+| Subscribing to an MCP connection's [events](../connections/mcp#events-experimental)            | The caller, as the watch's creator      |
+| [`openCodeChannel()`](../channels/slack#enable-code-channels)                                  | The caller, as the new session's caller |
 
 Where the session can ask for input, eve asks the caller to approve the call. The request names the call by its tool and each input field, and quotes the latest message from someone else in the turn. It also says that approving lets later calls use the caller's identity, on any account, until someone else sends a message after the request. Only the caller can approve it, and anyone signed in can cancel it. Approving runs the tool again from its first line with the caller's identity. See [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
 
-Where eve can't ask, the call fails and eve doesn't retry it. That covers sessions that can't request input, such as scheduled runs, workflow tools, and remote agent calls. A connection or `ctx.getToken()` call fails with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`. A remote agent call fails with a terminal error that isn't a `ConnectionAuthorizationFailedError`. Each message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. The caller's next message makes them the last to speak.
+Where eve can't ask, the call fails and eve doesn't retry it. That covers sessions that can't request input, such as scheduled runs, and token or connection calls in a workflow tool's own code. A connection or `ctx.getToken()` call fails with `ConnectionAuthorizationFailedError` and `reason: "confirmation_required"`. `openCodeChannel()` returns `unavailable`. Each message tells the model to ask the caller to confirm, and to retry only after a reply that plainly confirms the action. The caller's next message makes them the last to speak.
+
+eve never asks before a call to a remote agent that forwards the caller. That call fails with a terminal error, which isn't a `ConnectionAuthorizationFailedError`, until the caller speaks or approves a call. With `steered()`, eve asks the caller before the call instead.
 
 The caller's approval covers that call and later calls that use their identity, until anyone other than the caller sends a message. The next message from someone else, including the same person again, makes eve ask again. Approving a request after someone else's newer message covers only that call. A local subagent and a remote agent that forwards the caller honor the approval as it stood when the model called them, as does an agent a workflow tool calls. A token or connection call in a workflow tool's own code doesn't, so it keeps failing until the caller speaks.
 
-An approval never changes `auth.sender`; only a message does. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
+An approval never changes `auth.sender`; only a message does. A call the caller approves reads the caller as `auth.sender`, but later calls their approval covers still read the other person. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
 
 A tool can act for someone other than the caller with `ctx.getToken(provider, { as })`, which names a person who has spoken in the session by `principalId`. eve hands out that person's token when they sent the latest message, or when they approve the call. Their approval covers only that call, and the caller's approval doesn't cover them. See [Act for another person](../guides/auth-and-route-protection#act-for-another-person).
 
 A call that waits on an approval or sign-in while the turn reads new messages runs as the model made it. Its `auth.sender` is whoever had spoken last when the model made the call, whatever messages arrive before it runs. A call the caller approves runs with the caller's identity. Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender it was asked under.
 
-A session with one person never reaches any of this. eve checks only the calls in the table. Code that decides from `auth.current` alone gives the caller's access to anyone whose message joins the turn. That includes a tool that checks the caller's role, a credential your code picks for the caller, such as a [tenant API key](/docs/patterns/multi-tenant-auth#establish-the-tenant-scope), and a [dynamic](/docs/guides/dynamic-capabilities#context-and-memoization) tool, subagent, or connection offered from the caller's attributes. Check `auth.sender` as well, or set `approval: steered()` in `agent.ts` to have eve ask the caller before any call made after someone else spoke. See [Ask the caller after someone else speaks](/docs/human-in-the-loop#ask-the-caller-after-someone-else-speaks).
-
-eve also doesn't check later use of a credential a call already received. A token a tool configured in the sandbox, for example, works for every later command until it expires or the tool removes it.
-
-eve's own role checks cover both people, whether or not the caller approved. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. `openCodeChannel()` opens a session as the caller, so it follows the same rule as a call that uses the caller's identity: eve asks the caller to approve it, and it returns `unavailable` only where eve can't ask.
+eve's own role checks cover both people. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. A `gh` command that the caller approves itself reads the caller as its sender, so `authorize` runs only for the caller.
 
 Another person can still answer a pending request with a button or structured answer. They are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
@@ -137,6 +165,10 @@ Before exposing an agent to real traffic:
       shouldn't have open egress; use credential brokering for authenticated egress.
 - [ ] Don't surface untrusted text as markup. Model- or user-controlled
       strings rendered into a channel UI should be escaped for that surface.
+- [ ] If more than one person can reach a session, such as a Slack thread or a
+      GitHub issue, set `approval: steered()` in `agent.ts` or check
+      `auth.sender` in code that authorizes from the caller. See
+      [Shared sessions](#shared-sessions).
 
 ## What to read next
 

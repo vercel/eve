@@ -99,14 +99,16 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
-  approval: always(), // or auto() / once() / never() / a policy
+  approval: always(), // or auto() / once() / never() / steered() / a policy
   async execute(input) {
     return refund(input);
   },
 });
 ```
 
-See [Human-in-the-loop](./human-in-the-loop) for the `auto`, `always`, `once`, and `never` helpers, input-dependent policies, and how a call waits for approval.
+See [Human-in-the-loop](./human-in-the-loop) for the `auto`, `always`, `once`, `never`, and `steered` helpers, input-dependent policies, and how a call waits for approval.
+
+When more than one person can reach a session, such as a Slack thread, anyone the channel admits can steer another person's turn, and the turn keeps that person's identity. A tool that decides from `ctx.session.auth.current` alone acts with the caller's access. Set `approval: steered()` in `agent.ts` to ask the caller before any call made after someone else spoke, or check `ctx.session.auth.sender` as well. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
 
 ## Shape what the model sees with `toModelOutput`
 
@@ -358,7 +360,7 @@ export default defineTool({
     const delivery = await ctx
       .to(slack, { channelId: "C0123ABC" })
       .send("Take over this investigation.", {
-        auth: ctx.session.auth.current, // start the session as the caller
+        auth: ctx.session.auth.sender, // start the session as the person who asked
         history: [{ role: "user", text: summary }],
         idempotencyKey: `${ctx.session.id}:${ctx.callId}`, // a retried call sends once
       });

@@ -698,7 +698,7 @@ async function openIncident(ctx: WorkflowStepToolContext, channelId: string, sum
   const delivery = await ctx
     .to(slack, { channelId })
     .send("Continue the investigation in this channel.", {
-      auth: ctx.session.auth.current,
+      auth: ctx.session.auth.sender, // the person who asked
       history: [{ role: "user", text: summary }],
       idempotencyKey: `${ctx.session.id}:${ctx.callId}:incident`,
     });

@@ -82,6 +82,7 @@ export default defineRemoteAgent({
 - When eve creates the remote session, it sends the parent turn's `session.auth.current` and `session.auth.initiator`. When `initiator` is absent, the receiver uses `current` for both.
 - A follow-up with `taskId` sends the follow-up call's `session.auth.current`. The remote session keeps its original `auth.initiator`.
 - eve sends only identity metadata, never tokens or credentials. The receiver gets per-user credentials through its own connections.
+- In a [shared session](/docs/concepts/security-model#shared-sessions), after someone else's message joins the turn, the call fails with a terminal error until the caller speaks or approves a call. eve doesn't ask first. Set `approval: steered()` in `agent.ts` so eve asks the caller before the call.
 
 Each turn runs as its own caller, even in a child session that persists. If Alice starts the child and Bob continues it with its `taskId`, the follow-up runs with Bob as `auth.current`. If the parent turn's auth is `null`, a local child clears `auth.current`, and a remote child runs as the verified calling deployment. Neither runs as Alice. A later turn can use only the OAuth grant of its own `auth.current` user.
 

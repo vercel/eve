@@ -954,70 +954,84 @@ describe("asking a person for their identity", () => {
     ]);
   }, 60_000);
 
-  it("asks the caller before a user-scoped MCP connection's tool uses their token", async () => {
-    const realFetch = globalThis.fetch;
-    const bearers: Array<string | null> = [];
-    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-      const request = new Request(input, init);
-      if (new URL(request.url).host !== "whoami.example.com") return await realFetch(input, init);
-      const message = (await request.json()) as { id?: number; method: string };
-      const results: Record<string, unknown> = {
-        initialize: {
-          capabilities: { tools: {} },
-          protocolVersion: "2025-11-25",
-          serverInfo: { name: "whoami", version: "1.0.0" },
-        },
-        "tools/call": {
-          content: [{ type: "text", text: `bearer ${request.headers.get("authorization")}` }],
-        },
-        "tools/list": {
-          tools: [{ inputSchema: { properties: {}, type: "object" }, name: "whoami" }],
-        },
-      };
-      if (message.method === "tools/call") bearers.push(request.headers.get("authorization"));
-      if (message.id === undefined) return new Response(null, { status: 202 });
-      return Response.json({ id: message.id, jsonrpc: "2.0", result: results[message.method] });
-    });
-    try {
-      const { stages } = await withChainRun(
-        "identity-connection",
-        async (run) => {
-          await run.send(BOB, "Bob adds a note.");
-          expect(identityAsks(run.stages)).toMatchObject([
-            { audience: { principalIds: ["alice"] }, callId: "call-whoami__whoami" },
-          ]);
-          // Nothing reached the server with Alice's token before she approved.
-          expect(bearers).toEqual([]);
-          await answerIdentity(run, "call-whoami__whoami", ALICE, "approve");
-          await run.approve(ALICE, "deploy_change");
-        },
-        {
-          message: "Use deploy_change, then whoami__whoami.",
-          model: requestModel(),
-          modules: [
-            {
-              loadNamespace: async () => ({
-                default: defineMcpClientConnection({
-                  auth: CALLER_TOKEN,
-                  description: "Says who the request is from.",
-                  protocolVersionDiscovery: false,
-                  url: "https://whoami.example.com/mcp",
+  it.each([
+    { approval: undefined, name: "with no approval policy" },
+    // The agent's policy clears the call, which then stops for the token.
+    {
+      approval: (() => "approved") satisfies ApprovalPolicy,
+      name: "under a policy that clears it",
+    },
+    // steered() asks before the call starts.
+    { approval: steered(), name: "under steered()" },
+  ])(
+    "asks the caller before a user-scoped MCP connection's tool uses their token, $name",
+    async ({ approval, name }) => {
+      const realFetch = globalThis.fetch;
+      const bearers: Array<string | null> = [];
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).host !== "whoami.example.com") return await realFetch(input, init);
+        const message = (await request.json()) as { id?: number; method: string };
+        const results: Record<string, unknown> = {
+          initialize: {
+            capabilities: { tools: {} },
+            protocolVersion: "2025-11-25",
+            serverInfo: { name: "whoami", version: "1.0.0" },
+          },
+          "tools/call": {
+            content: [{ type: "text", text: `bearer ${request.headers.get("authorization")}` }],
+          },
+          "tools/list": {
+            tools: [{ inputSchema: { properties: {}, type: "object" }, name: "whoami" }],
+          },
+        };
+        if (message.method === "tools/call") bearers.push(request.headers.get("authorization"));
+        if (message.id === undefined) return new Response(null, { status: 202 });
+        return Response.json({ id: message.id, jsonrpc: "2.0", result: results[message.method] });
+      });
+      try {
+        const { stages } = await withChainRun(
+          `identity-connection-${name.replaceAll(" ", "-")}`,
+          async (run) => {
+            await run.send(BOB, "Bob adds a note.");
+            expect(identityAsks(run.stages)).toMatchObject([
+              { audience: { principalIds: ["alice"] }, callId: "call-whoami__whoami" },
+            ]);
+            // Nothing reached the server with Alice's token before she approved.
+            expect(bearers).toEqual([]);
+            await answerIdentity(run, "call-whoami__whoami", ALICE, "approve");
+            await run.approve(ALICE, "deploy_change");
+          },
+          {
+            ...(approval !== undefined && { approval }),
+            message: "Use deploy_change, then whoami__whoami.",
+            model: requestModel(),
+            modules: [
+              {
+                loadNamespace: async () => ({
+                  default: defineMcpClientConnection({
+                    auth: CALLER_TOKEN,
+                    description: "Says who the request is from.",
+                    protocolVersionDiscovery: false,
+                    url: "https://whoami.example.com/mcp",
+                  }),
                 }),
-              }),
-              logicalPath: "connections/whoami.ts",
-            },
-          ],
-        },
-      );
+                logicalPath: "connections/whoami.ts",
+              },
+            ],
+          },
+        );
 
-      expect(bearers).toEqual(["Bearer token:alice"]);
-      expect(JSON.stringify(outputsOf(stages, "call-whoami__whoami"))).toContain(
-        "bearer Bearer token:alice",
-      );
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  }, 60_000);
+        expect(bearers).toEqual(["Bearer token:alice"]);
+        expect(JSON.stringify(outputsOf(stages, "call-whoami__whoami"))).toContain(
+          "bearer Bearer token:alice",
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+    60_000,
+  );
 
   it("asks no more once the caller speaks, and runs a waiting request's call as a task", async () => {
     const prompts: string[] = [];
