@@ -25,23 +25,26 @@ export function createAuthorizationContext(input: {
   // The person `options.as` names acts through the bound-responder path, guarded as they are.
   const resolveFor = (provider: ToolAuthProvider, options?: ToolAuthOptions) => {
     const scoped = resolve(provider, options);
-    if (options?.as === undefined) return scoped;
+    if (options?.as === undefined) return { scoped };
     if (input.boundResponder !== undefined)
       throw new Error(`"as" names a person for a tool's own ctx.getToken, not for an approver.`);
-    const person = namedPerson(options.as, scoped.scope);
-    return person === undefined
-      ? scoped
-      : { ...scoped, boundResponder: { ...person, attributes: {} }, named: true as const };
+    const named = namedPerson(options.as, scoped.scope);
+    // Naming the caller is the same as naming no one, but the result still says whose token it is.
+    if (named === undefined) return { person: callerPerson(), scoped };
+    return {
+      person: named,
+      scoped: { ...scoped, boundResponder: { ...named, attributes: {} }, named: true as const },
+    };
   };
   return {
     async getToken(
       provider?: ToolAuthProvider,
       options?: ToolAuthOptions,
-    ): Promise<TokenResult & { readonly principal?: SessionAuthContext }> {
+    ): Promise<TokenResult & { readonly principal?: SessionPerson }> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
-      const scoped = resolveFor(provider, options);
+      const { person, scoped } = resolveFor(provider, options);
       const token = await execution.getToken(scoped);
-      return scoped.named === true ? { ...token, principal: scoped.boundResponder } : token;
+      return person === undefined ? token : { ...token, principal: person };
     },
     /**
      * The given responder's stored token, resolved through this execution's
@@ -59,10 +62,16 @@ export function createAuthorizationContext(input: {
     },
     requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
       if (provider === undefined) throw missingProviderError("ctx.requireAuth");
-      return execution.requireAuth(resolveFor(provider, options));
+      return execution.requireAuth(resolveFor(provider, options).scoped);
     },
     run: execution.run,
   };
+}
+
+/** The turn's caller, without their attributes, or `undefined` when no one is signed in. */
+function callerPerson(): SessionPerson | undefined {
+  const auth = contextStorage.getStore()?.get(AuthKey) ?? null;
+  return auth === null || auth.principalType === "anonymous" ? undefined : personOf(auth);
 }
 
 /**
@@ -77,12 +86,11 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
   const caller = auth === null || auth.principalType === "anonymous" ? undefined : personOf(auth);
   const participants = sessionParticipants(ctx);
   if (participants === undefined && caller?.principalId === as) return undefined;
+  // A misuse the model can't fix, such as `as` in a workflow tool's own code: not an auth outcome.
   if (participants === undefined) {
-    throw new ConnectionAuthorizationFailedError(scope, {
-      message: `ctx.getToken can't name ${JSON.stringify(as)} with "as" here, because this tool runs outside the session's turn. "as" can name a person only from a tool that runs in the turn, and the person must have spoken in this conversation.`,
-      reason: "principal_not_found",
-      retryable: false,
-    });
+    throw new TypeError(
+      `ctx.getToken can't name ${JSON.stringify(as)} with "as" here, because this tool runs outside the session's turn. "as" can name a person only from a tool that runs in the turn, and the person must have spoken in this conversation.`,
+    );
   }
   const people = new Map(
     [...participants, ...(caller === undefined ? [] : [caller])]

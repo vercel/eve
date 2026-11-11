@@ -103,8 +103,8 @@ export interface ApprovalResponseSession {
 
 /** Narrow authorization capability available while validating a responder. */
 export interface ApprovalResponseAuth {
-  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
-  requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
+  getToken(provider: ToolAuthProvider, options?: Omit<ToolAuthOptions, "as">): Promise<TokenResult>;
+  requireAuth(provider: ToolAuthProvider, options?: Omit<ToolAuthOptions, "as">): never;
 }
 
 /** Submitted response passed to an approval response policy. */

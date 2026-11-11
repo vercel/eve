@@ -205,14 +205,14 @@ export type ToolContext = SessionContext & {
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
    *
-   * With `options.as` naming someone other than the caller, the result's
-   * `principal` is that person as eve resolved them, without attributes, so a
-   * tool can authorize the identity whose token it holds.
+   * With `options.as`, the result's `principal` is the person whose token it
+   * is, as eve resolved them, without attributes, so a tool can authorize the
+   * identity whose token it holds. It is absent without `as`.
    */
   getToken(
     provider: ToolAuthProvider,
     options?: ToolAuthOptions,
-  ): Promise<TokenResult & { readonly principal?: SessionAuthContext }>;
+  ): Promise<TokenResult & { readonly principal?: Omit<SessionAuthContext, "attributes"> }>;
   /**
    * Signals that the caller must complete authorization for an inline
    * provider before proceeding. Use this after a downstream `401` rejects a
@@ -270,7 +270,7 @@ export interface ApprovalResponder extends SessionAuthContext {
    * providers with `ctx.getToken`, so two inline providers without provider
    * metadata need `options.authKey` across both getters too.
    */
-  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
+  getToken(provider: ToolAuthProvider, options?: Omit<ToolAuthOptions, "as">): Promise<TokenResult>;
 }
 
 /**

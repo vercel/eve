@@ -72,6 +72,35 @@ describe("ctx.getToken with as", () => {
     );
 
     expect(received).toEqual([{ attributes: {}, id: "bob", issuer: "slack", type: "user" }]);
-    expect(result.principal).toEqual({ ...bob, attributes: {} });
+    expect(result.principal).toEqual(bob);
+  });
+
+  it("says whose token it is when as names the caller", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, { ...alice, attributes: { email: "alice@example.com" } });
+    enterParticipants(ctx, () => ({}));
+
+    const result = await contextStorage.run(ctx, () =>
+      createAuthorizationContext({ scope: "inbox" }).getToken(PROVIDER, { as: "alice" }),
+    );
+
+    expect(result.principal).toEqual({
+      authenticator: "slack",
+      principalId: "alice",
+      principalType: "user",
+    });
+  });
+
+  it("throws a TypeError when a tool outside the session's turn names someone", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, alice);
+
+    const refusal = await contextStorage
+      .run(ctx, () =>
+        createAuthorizationContext({ scope: "inbox" }).getToken(PROVIDER, { as: "bob" }),
+      )
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(TypeError);
   });
 });

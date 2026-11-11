@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { getToken } from "@vercel/connect";
-import type { SessionAuthContext } from "eve/context";
+import { samePrincipal, type SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolAuthProvider, ToolContext } from "eve/tools";
 
@@ -284,7 +284,7 @@ export async function executeGitHubShell(
   // approved this call or, for the caller, an earlier one since anyone else spoke.
   if (
     config.principalType !== "user" &&
-    !isSamePerson(auth, sender) &&
+    !samePrincipal(auth, sender) &&
     !(await config.authorize({ argv, auth: sender, owner: owner!, repository, token }))
   ) {
     throw new Error(
@@ -450,38 +450,22 @@ async function leaseCredential<T>(
 
 /**
  * The person a user-token command acts for, as `authorize` sees them: the caller, or the person
- * eve resolved for `actor`. Without one, the command fails rather than authorize a guess.
+ * eve resolved for `actor`, without attributes. Without one, the command fails rather than
+ * authorize a guess.
  */
 function actorOf(
   actor: string | undefined,
   auth: SessionAuthContext | null,
-  resolved: SessionAuthContext | undefined,
+  resolved: Omit<SessionAuthContext, "attributes"> | undefined,
 ): SessionAuthContext | null {
-  if (resolved !== undefined) return resolved;
-  if (actor === undefined || auth?.principalId === actor) return auth;
-  throw new Error(`eve didn't resolve who ${actor} is, so the command can't be checked for them.`);
-}
-
-/**
- * Whether two session identities are one person. Unauthenticated and anonymous identities are one
- * person. `personKey` matches eve's internal `principalOf` exactly, so this compares people as
- * every eve guard does; eve-git keeps its own copy because it may use only eve's public API.
- */
-function isSamePerson(
-  a: SessionAuthContext | null | undefined,
-  b: SessionAuthContext | null | undefined,
-): boolean {
-  return personKey(a) === personKey(b);
-}
-
-function personKey(auth: SessionAuthContext | null | undefined): string {
-  if (auth === null || auth === undefined || auth.principalType === "anonymous") return "anonymous";
-  return JSON.stringify([
-    auth.authenticator,
-    auth.issuer ?? null,
-    auth.principalType,
-    auth.principalId,
-  ]);
+  if (actor === undefined) return auth;
+  if (resolved === undefined) {
+    throw new Error(
+      `eve didn't resolve who ${actor} is, so the command can't be checked for them.`,
+    );
+  }
+  // Naming the caller acts for the caller, whose claims `authorize` reads as usual.
+  return samePrincipal(resolved, auth) ? auth : { ...resolved, attributes: {} };
 }
 
 export function parseCommand(command: string): string[] {

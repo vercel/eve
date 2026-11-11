@@ -320,9 +320,17 @@ test("runs a user-token command with its actor's token, and authorize checks the
   const asked: unknown[] = [];
   let stderr = "";
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
-  // Carol signed in through another workspace; eve resolves her as she signed in.
-  const carol = { ...slackUser("slack:carol"), issuer: "other-workspace" };
-  const people: Record<string, typeof carol> = { "slack:carol": carol };
+  // Carol signed in through another workspace; eve resolves her as she signed in. With `as`, eve
+  // names whose token it handed out, the caller included, without attributes.
+  const { attributes: _carolAttributes, ...carol } = {
+    ...slackUser("slack:carol"),
+    issuer: "other-workspace",
+  };
+  const { attributes: _aliceAttributes, ...alice } = ALICE;
+  const people: Record<string, Omit<typeof ALICE, "attributes">> = {
+    [ALICE.principalId]: alice,
+    "slack:carol": carol,
+  };
   const dependencies = {
     auth: ALICE,
     sender: BOB,
@@ -367,7 +375,8 @@ test("runs a user-token command with its actor's token, and authorize checks the
     getTokenCalls.map(([, options]) => options),
     [{ as: "slack:carol" }, undefined, { as: ALICE.principalId }, { as: "slack:dave" }],
   );
-  assert.deepEqual(asked, [carol, ALICE, ALICE]);
+  // A named person reaches `authorize` without attributes; naming the caller keeps theirs.
+  assert.deepEqual(asked, [{ ...carol, attributes: {} }, ALICE, ALICE]);
   assert.equal(runs.length, 2);
 
   stderr = "HTTP 401: Bad credentials (https://api.github.com/graphql)";

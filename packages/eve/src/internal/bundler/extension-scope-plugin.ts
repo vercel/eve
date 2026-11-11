@@ -42,8 +42,10 @@ function importerPath(importer: string): string {
   return canonicalize(queryIndex === -1 ? importer : importer.slice(0, queryIndex));
 }
 
+// Only state is per mount; every other value `eve/context` exports comes from the real module.
 function shimSource(mountId: string): string {
   return [
+    `export { samePrincipal } from "eve/context";`,
     `import { defineMountedState } from "eve/internal/mount-state";`,
     `export function defineState(name, initial) {`,
     `  return defineMountedState(${JSON.stringify(mountId)}, name, initial);`,

@@ -1492,27 +1492,24 @@ describe("steered()", () => {
   it.each([
     {
       approval: steered(),
-      approver: ALICE,
-      expected: [{ sender: "alice" }],
+      bobApproves: false,
       name: "asks the caller before it starts, and runs as them once they approve",
     },
     {
       approval: { request: always(), response: anyoneResponds },
-      approver: BOB,
-      expected: [
-        expect.objectContaining({ message: expect.stringContaining("can't run until they") }),
-      ],
-      name: "denies a call someone else approved when it would start, telling the model why",
+      bobApproves: true,
+      name: "asks the caller before a call someone else approved starts",
     },
   ])(
     "for a workflow tool, $name",
-    async ({ approval, approver, expected }) => {
+    async ({ approval, bobApproves }) => {
       const { stages } = await withChainRun(
-        `steered-workflow-${approver.principalId}`,
+        `steered-workflow-${String(bobApproves)}`,
         async (run) => {
           await run.send(BOB, "Bob adds a note.");
-          if (approver === ALICE) await answerIdentity(run, "call-report_sender", ALICE, "approve");
-          else await run.approve(BOB, "report_sender");
+          // Bob's approval answers the tool's own request; eve still asks Alice before the run.
+          if (bobApproves) await run.approve(BOB, "report_sender");
+          await answerIdentity(run, "call-report_sender", ALICE, "approve");
           await run.approve(ALICE, "deploy_change");
         },
         {
@@ -1535,7 +1532,10 @@ describe("steered()", () => {
         },
       );
 
-      expect(outputsOf(stages, "call-report_sender")).toEqual(expected);
+      expect(identityAsks(stages)).toMatchObject([
+        { audience: { principalIds: ["alice"] }, callId: "call-report_sender" },
+      ]);
+      expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender: "alice" }]);
     },
     60_000,
   );

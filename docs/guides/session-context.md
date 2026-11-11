@@ -45,7 +45,7 @@ Public fields include:
 - `turn.sequence`: the turn's position in the session.
 - `auth.current`: the caller for the active inbound turn.
 - `auth.initiator`: the caller that started the session.
-- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn.
+- `auth.sender`: the person who last sent a message into the turn. It equals `auth.current` until someone else's message joins the turn, and it's `null` when that person isn't signed in. Compare it with `auth.current` using `samePrincipal` from `eve/context`; see [Shared sessions](../concepts/security-model#shared-sessions).
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
 - `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) to read its earlier conversation.
 

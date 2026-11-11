@@ -63,6 +63,18 @@ export function readSender(
   return sender === undefined ? current : sender;
 }
 
+/**
+ * Whether two session identities are the same person, as eve's own checks compare them: by
+ * authenticator, issuer, principal type, and principal ID. Everyone who isn't signed in, or is
+ * anonymous, counts as one person.
+ */
+export function samePrincipal(
+  a: Omit<SessionAuthContext, "attributes"> | null | undefined,
+  b: Omit<SessionAuthContext, "attributes"> | null | undefined,
+): boolean {
+  return principalOf(a) === principalOf(b);
+}
+
 export function callerSpokeLast(auth: {
   readonly current: SessionAuthContext | null | undefined;
   readonly sender: SessionAuthContext | null | undefined;

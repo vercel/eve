@@ -259,22 +259,13 @@ The `response` policy receives:
 
 The policy runs for both decisions, so a rejected responder can neither approve nor deny. `{ status: "rejected", reason }` keeps the request open for another eligible responder. When a policy only checks who approves, allow every `deny`, so anyone can dismiss the request.
 
-In a shared thread, `session.initiator`, who started the session, can differ from `request.principal`, who asked for this call. To let only the requester answer, compare every identity field of the two:
+In a shared thread, `session.initiator`, who started the session, can differ from `request.principal`, who asked for this call. To let only the requester answer, compare the two with `samePrincipal` from `eve/context`. It compares people the way eve's own checks do: by `authenticator`, `issuer`, `principalType`, and `principalId`.
 
 ```ts title="agent/tools/publish_release.ts"
+import { samePrincipal } from "eve/context";
 import { defineTool } from "eve/tools";
-import type { SessionAuthContext } from "eve/context";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
-
-function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {
-  return (
-    a.authenticator === b.authenticator &&
-    a.issuer === b.issuer &&
-    a.principalType === b.principalType &&
-    a.principalId === b.principalId
-  );
-}
 
 export default defineTool({
   description: "Publish a release.",
@@ -369,7 +360,7 @@ export default defineAgent({
 - After someone else spoke, eve asks before the call starts, with the same request as for the caller's identity: the same prompt, quoting the latest message from someone else, and `audience.principalIds` naming the caller. Only the caller can approve it, and anyone signed in can cancel it. A client sees the approval's `interaction.opened` with no `call.started` before it.
 - An approved call runs and reads the caller as `ctx.session.auth.sender`. The approval also covers the caller's later calls, including ones that use their identity, until anyone other than the caller sends a message. Those later calls still read the other person as `auth.sender`, so a tool's own sender check can still refuse them.
 - Cancelling denies the call, which never ran: it ends with a rejected `call.settled` and `TOOL_EXECUTION_DENIED`.
-- Where eve can't ask, it denies the call and the model reads that it should ask the caller to confirm. That covers sessions that can't request input, and a workflow or agent call that someone else approved through a `response` policy. The turn goes on.
+- In a session that can't request input, eve denies the call instead, and the model reads that it should ask the caller to confirm. The turn goes on.
 - A tool's own `approval` still applies. When the caller answers it, eve doesn't ask again. When someone else answers it, eve asks the caller before the call runs.
 
 `steered()` gates new calls only. It doesn't stop the model from answering from what is already in the conversation, or work that started before someone else spoke. An agent-wide `steered()` doesn't gate the calls that no agent policy gates, listed in [Gate every call from one policy](#gate-every-call-from-one-policy).

@@ -54,7 +54,8 @@ export interface ToolAuthOptions {
    * `reason: "principal_not_found"` when no one who has spoken has this `principalId`, and with
    * `reason: "principal_ambiguous"` when more than one has. A local subagent can name the people
    * who had spoken in the session that delegated to it. Only a tool's own `ctx.getToken` and
-   * `ctx.requireAuth` take it, in a tool that runs in the session's turn.
+   * `ctx.requireAuth` take it, in a tool that runs in the session's turn; elsewhere, such as in a
+   * workflow tool's own code, it throws a `TypeError`.
    */
   readonly as?: string;
 }

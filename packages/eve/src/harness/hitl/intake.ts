@@ -9,6 +9,7 @@ import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
 import {
+  type ApprovalAsk,
   type ApprovedCall,
   type SessionView,
   type SuspendedStep,
@@ -231,6 +232,9 @@ async function runApproved(
   }[] = [];
   const claimed = new Set<string>();
   const callerApproved = new Set<string>();
+  // Workflow and agent calls `steered()` marks that someone else approved: eve asks the caller
+  // before their runs start.
+  const asks: ApprovalAsk[] = [];
   for (const [parked, approvals] of byStep) {
     const tools = await toolsOf(step);
     const workflows = new Map<string, { approval: ApprovedCall; clearance?: Clearance }>();
@@ -252,18 +256,22 @@ async function runApproved(
         callId: approval.call.callId,
         input: approval.call.input,
       });
-      // A run can't stop to ask, so a call `steered()` marks that someone else approved is denied
-      // here, and the model reads why.
+      // A run can't stop to ask once it starts, so eve asks the caller about a call `steered()`
+      // marks before it starts, and denies it where it can't ask.
       const steering =
         recheck.steered === true && !approvedByCaller(approval)
           ? withAskedSender(parked.sender, () =>
               steeredGate(approval.call, {
                 approvalMemory: approvalMemory(step.view()),
+                canAsk: canAskPerson(step),
                 confirmed: approval.confirmedBy ?? [],
+                responder: approval.responder,
               }),
             )
           : undefined;
-      if (recheck.denied || steering !== undefined) {
+      if (steering?.ask !== undefined) {
+        asks.push(steering.ask);
+      } else if (recheck.denied || steering !== undefined) {
         denied.push(
           ...(
             await publishDenial(approval.call, {
@@ -313,6 +321,7 @@ async function runApproved(
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length > 0) await step.apply(dispatch(step.view(), { tasks }));
+  if (asks.length > 0) await step.apply(askForIdentity(step.view(), { asks }));
 
   const calls = local.flatMap(({ approvals }) => approvals);
   step.frameworkToolNames = new Set(
@@ -322,7 +331,9 @@ async function runApproved(
         .filter((name) => tools.get(name)?.frameworkTool === true),
     ),
   );
-  if (calls.length === 0) return undefined;
+  if (calls.length === 0) {
+    return asks.length > 0 && blocked(step.view(), step.session.state) ? park(step) : undefined;
+  }
   // One reporter for every group: a group's call can complete a sign-in another group's call
   // stopped on, and each attempt settles once. It stays until every group has finished, so a
   // group that fails doesn't take it from a sibling still running.
@@ -379,7 +390,7 @@ async function runApproved(
   });
   if (signIn === undefined) {
     // A call that waits as a task waits for its person without holding the turn.
-    return identities.length > 0 && blocked(step.view(), step.session.state)
+    return (identities.length > 0 || asks.length > 0) && blocked(step.view(), step.session.state)
       ? park(step)
       : undefined;
   }

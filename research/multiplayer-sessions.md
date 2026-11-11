@@ -90,7 +90,8 @@ export default defineAgent({ approval: steered() });
 `ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`, and `as` adds
 `"principal_not_found"` and `"principal_ambiguous"`. With user tokens, the git extension's `gh` tool
 gains an `actor` input. `eve/tools/approval` gains `steered()`, an approval policy that puts any
-call under the identity rule. Nothing is added to agent, connection, or channel definitions.
+call under the identity rule, and `eve/context` gains `samePrincipal(a, b)`, which compares two
+people as eve's own checks do. Nothing is added to agent, connection, or channel definitions.
 
 ## Semantics
 
@@ -156,7 +157,7 @@ the agent's policy, it marks the call however the other policy decides, and eve 
 before the call starts: it runs, eve asks the caller with the same request, or, where eve can't
 ask, the call is denied with the same instruction to the model. The caller's approval is the same
 standing approval. Cancelling denies the call, which never started. A workflow or agent call that
-someone else approved is denied when it would start, since its run can't stop to ask.
+someone else approved asks the caller before its run starts, since the run can't stop to ask.
 
 Listing a connection's tools uses the caller's identity even after someone else spoke: it runs
 nothing the model chose. A local subagent inherits the sender of the call that started it, the
@@ -255,12 +256,13 @@ their `authenticator`, `issuer`, `principalId`, `principalType`, and `subject`, 
 attributes. A name that matches no one fails with `reason: "principal_not_found"`; one that
 matches two people signed in different ways fails with `reason: "principal_ambiguous"`. Neither
 refusal suggests omitting `as`, because the caller may not be the person who asked for the work.
-Naming the caller is the same as omitting `as`. A provider that reads `principal.attributes`
-receives none for a named person. `as` works only in tools that run in the session step. A local
+Naming the caller is the same as omitting `as`. The result's `principal` names whose token it is,
+without attributes, whenever `as` is passed. A provider that reads `principal.attributes` receives
+none for a named person. `as` works only in tools that run in the session step; elsewhere it throws
+a `TypeError`, since the model can't fix it. A local
 subagent can name the people who had spoken in the session that delegated to it, which passes the
-record down with the sender. The record is dropped when the conversation is cleared. For a person
-other than the caller, the `ctx.getToken` result carries `principal`: who eve resolved, without
-attributes, so a tool authorizes that identity rather than the name the model passed.
+record down with the sender. The record is dropped when the conversation is cleared. A tool
+authorizes the result's `principal` rather than the name the model passed.
 
 Rule 3 decides the same way for everyone. The named person's token is handed out when they were
 the last to speak as the model made the call, or when they approved the call. Otherwise eve asks

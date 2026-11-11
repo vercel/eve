@@ -323,6 +323,28 @@ After someone else's message joins the turn, a call that uses the caller's ident
 
 Use the caller on `auth.current` to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries. In a shared session, another person's message can reach a tool in the caller's turn, so check `auth.sender` as well, or set `approval: steered()` in `agent.ts` to ask the caller before any call made after someone else spoke. See [Shared sessions](../concepts/security-model#shared-sessions).
 
+To tell whether the sender is the caller, use `samePrincipal(auth.sender, auth.current)` from `eve/context`. It compares people the way eve's own checks do. Don't write `auth.sender ?? auth.current`: a `null` sender is someone who isn't signed in, not the caller.
+
+```ts title="agent/tools/close_account.ts"
+import { samePrincipal } from "eve/context";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Close the caller's account.",
+  inputSchema: z.object({}),
+  async execute(_input, ctx) {
+    const { current, sender } = ctx.session.auth;
+    if (!samePrincipal(sender, current)) {
+      return { error: "Only the person who started this request can close their account." };
+    }
+    return closeAccount(current);
+  },
+});
+```
+
+A tool reads the sender its call was made under. Code that runs outside a tool call, such as a dynamic function or a hook, reads whoever had spoken last when eve ran it.
+
 Route auth doesn't check who may use a session, and eve adds no per-session access list. If multiple users or tenants can reach the same route, implement the per-user, per-tenant, or per-session authorization your application requires.
 
 ## Tool replacement permission
@@ -517,19 +539,19 @@ export default defineTool({
 });
 ```
 
-When `as` names someone other than the caller, the result's `principal` is that person as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
+With `as`, the result's `principal` is the person whose token it is, as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
 
 eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. A named person's approval covers only that call, and the caller's approval doesn't cover them. Naming the caller is the same as omitting `as`.
 
 - eve keeps each person's identity but not their attributes, so a provider that reads `principal.attributes` receives none for a named person.
-- `as` works in tools that run in the session's turn, not in workflow tools. In a local subagent, `as` can also name anyone who had spoken in the session that delegated to it.
+- `as` works in tools that run in the session's turn. In a workflow tool's own code, it throws a `TypeError`. In a local subagent, `as` can also name anyone who had spoken in the session that delegated to it.
 - `as` names a person only for an authored tool's `ctx.getToken` and `ctx.requireAuth`. Connection tools always use the caller's identity.
 
-| What you see                      | What to do                                                                                                                                      |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "principal_not_found"`   | No one who has spoken in the conversation has that `principalId`, or the tool runs outside the session's turn. Name someone from a sender line. |
-| `reason: "principal_ambiguous"`   | Two people who have spoken share that `principalId`, signed in through different channels. Ask the person to continue in one channel.           |
-| `reason: "confirmation_required"` | The named person didn't speak last, and the session can't ask for input. Ask them to confirm in the conversation, then retry.                   |
+| What you see                      | What to do                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason: "principal_not_found"`   | No one who has spoken in the conversation has that `principalId`. Name someone from a sender line.                                    |
+| `reason: "principal_ambiguous"`   | Two people who have spoken share that `principalId`, signed in through different channels. Ask the person to continue in one channel. |
+| `reason: "confirmation_required"` | The named person didn't speak last, and the session can't ask for input. Ask them to confirm in the conversation, then retry.         |
 
 ## What to read next
 

@@ -9,5 +9,6 @@
   "SessionSchedule",
   "SessionTurn",
   "StateHandle",
-  "defineState"
+  "defineState",
+  "samePrincipal"
 ]
