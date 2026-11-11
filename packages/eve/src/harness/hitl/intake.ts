@@ -37,7 +37,7 @@ import {
 } from "./approvals.js";
 import { runApprovedCalls, signInReports } from "./approved-calls.js";
 import { SignInCompletedKey } from "#harness/authorization.js";
-import { publishDenial, type CallResult } from "#harness/call-executor.js";
+import { publishDenial, steeredGate, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
   compactInput,
@@ -252,12 +252,23 @@ async function runApproved(
         callId: approval.call.callId,
         input: approval.call.input,
       });
-      if (recheck.denied) {
+      // A run can't stop to ask, so a call `steered()` marks that someone else approved is denied
+      // here, and the model reads why.
+      const steering =
+        recheck.steered === true && !approvedByCaller(approval)
+          ? withAskedSender(parked.sender, () =>
+              steeredGate(approval.call, {
+                approvalMemory: approvalMemory(step.view()),
+                confirmed: approval.confirmedBy ?? [],
+              }),
+            )
+          : undefined;
+      if (recheck.denied || steering !== undefined) {
         denied.push(
           ...(
             await publishDenial(approval.call, {
               publish: step.publish,
-              reason: recheck.reason,
+              reason: recheck.denied ? recheck.reason : steering?.reason,
             })
           ).settled,
         );

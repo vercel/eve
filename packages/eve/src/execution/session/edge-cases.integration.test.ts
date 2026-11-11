@@ -44,7 +44,7 @@ import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { defineMemory, type MemoryScopeDefinition } from "#public/memory/index.js";
 import { DENY_OPTION_ID } from "#shared/input.js";
-import { always } from "#tools/approval/policies.js";
+import { always, steered } from "#tools/approval/policies.js";
 import {
   defineTool,
   disableTool,
@@ -358,6 +358,8 @@ async function withSession(
     readonly sessionUsage?: SessionUsageLimit;
     /** Framework tools the agent disables, such as `agent`. */
     readonly disabledTools?: readonly string[];
+    /** The session can ask a person for input; true unless set. */
+    readonly requestInput?: false;
   },
   body: (session: Session) => Promise<void>,
 ) {
@@ -447,7 +449,7 @@ async function withSession(
             continuationToken,
             parent: options.parent,
           }),
-          "eve.capabilities": { requestInput: true },
+          "eve.capabilities": { requestInput: options.requestInput ?? true },
         },
       },
     ]);
@@ -1166,6 +1168,59 @@ describe("calls in flight", () => {
     expect(answered).toContain(
       String.raw`It is from \"alice\". The message before it was from \"bob\".`,
     );
+  });
+
+  it("denies a call steered() marks after someone else spoke where eve can't ask, and the model reads why", async () => {
+    const started = gate();
+    const release = gate();
+    const exported: string[] = [];
+    const { events } = await withSession(
+      "edge-steered-cannot-ask",
+      {
+        message: "Look up the first thing.",
+        model: scriptedModel(({ results, said }) => {
+          if (results.some((result) => result.toolCallId === "call_export")) return "Asked Alice.";
+          if (said("staging")) return [{ toolName: "export_data", toolCallId: "call_export" }];
+          return results.length === 0 ? [{ toolName: "lookup" }] : "Found.";
+        }),
+        modules: {
+          "tools/export_data.ts": defineTool({
+            approval: steered(),
+            description: "Export the data.",
+            execute: async () => void exported.push("export_data"),
+            inputSchema: z.object({}),
+          }),
+        },
+        requestInput: false,
+        tools: [
+          {
+            name: "lookup",
+            execute: async () => {
+              started.open();
+              await release.wait;
+              return "Found.";
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await started.wait;
+        try {
+          await session.send("Export it to staging.", BOB);
+        } finally {
+          release.open();
+        }
+        await session.until("done", (event) => event.type === "turn.settled");
+      },
+    );
+
+    expect(exported).toEqual([]);
+    expect(settlements(events)).toContain("call_export:rejected");
+    expect(
+      ofType(events, "call.settled").find((event) => event.data.callId === "call_export")?.data
+        .output,
+    ).toMatchObject({ message: expect.stringContaining("Ask the person whose message started") });
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
   it.each([

@@ -38,6 +38,8 @@ export function identityApprovalRequest(
   context: {
     readonly confirmed: readonly SessionPerson[];
     readonly responder: SessionAuthContext | undefined;
+    /** eve asks before the call starts, as for a call `steered()` marks. */
+    readonly beforeStart?: true;
   },
 ): ApprovalAsk {
   const { callId, toolName } = call;
@@ -54,7 +56,7 @@ export function identityApprovalRequest(
     identity.remember === undefined
       ? ""
       : " Approving also lets later actions use your identity, on any account, until someone else sends a message after this request.";
-  const { confirmed, responder } = context;
+  const { beforeStart, confirmed, responder } = context;
   return {
     call: {
       callId,
@@ -66,6 +68,7 @@ export function identityApprovalRequest(
       person: identity.person,
       ...(responder !== undefined && { responder }),
       ...(confirmed.length > 0 && { confirmed }),
+      ...(beforeStart === true && { beforeStart }),
     },
     interactionId: generateId(),
     ...(identity.remember !== undefined && { remember: identity.remember }),

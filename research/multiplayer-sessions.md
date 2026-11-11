@@ -79,11 +79,18 @@ export default defineTool({
 });
 ```
 
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { steered } from "eve/tools/approval";
+
+// Every call the model makes after someone else spoke asks the caller first.
+export default defineAgent({ approval: steered() });
+```
+
 `ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`, and `as` adds
 `"principal_not_found"` and `"principal_ambiguous"`. With user tokens, the git extension's `gh` tool
-gains an `actor` input.
-Nothing is added to agent, connection, or channel definitions, and the approval helpers don't
-change.
+gains an `actor` input. `eve/tools/approval` gains `steered()`, an approval policy that puts any
+call under the identity rule. Nothing is added to agent, connection, or channel definitions.
 
 ## Semantics
 
@@ -141,6 +148,13 @@ call. After someone else's message joins the turn, the call needs the caller's a
 
 A call that waits on a person runs as it was asked. It keeps the sender it had then, and messages
 read while it waited don't change what it gets.
+
+`steered()` puts any call under this rule, whether or not it uses credentials. Set on a tool or as
+the agent's policy, it marks the call however the other policy decides, and eve checks the rule
+before the call starts: it runs, eve asks the caller with the same request, or, where eve can't
+ask, the call is denied with the same instruction to the model. The caller's approval is the same
+standing approval. Cancelling denies the call, which never started. A workflow or agent call that
+someone else approved is denied when it would start, since its run can't stop to ask.
 
 Listing a connection's tools uses the caller's identity even after someone else spoke: it runs
 nothing the model chose. A local subagent inherits the sender of the call that started it, the
@@ -294,7 +308,10 @@ What remains:
 - Calls the caller's approval covers before anyone else speaks. The approval request says so, and
   the next message from someone else ends it.
 - Checks that read only `auth.current`. Another person's message can now reach a tool in the
-  caller's turn, so a role check also reads `auth.sender`.
+  caller's turn, so a role check also reads `auth.sender`, or the agent sets `approval: steered()`.
+- What `steered()` can't gate: the model answering from what is already in the conversation, and
+  work that started before someone else spoke, such as a credential a tool already put in the
+  sandbox.
 
 ## Alternatives considered
 

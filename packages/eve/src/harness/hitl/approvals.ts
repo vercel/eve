@@ -365,7 +365,7 @@ export function settleApprovals(
         continue;
       }
       decide(request, status === "invalid" ? "invalid" : "declined");
-      if (request.identity !== undefined) {
+      if (request.identity !== undefined && request.identity.beforeStart !== true) {
         // The call already started, so it fails where it needed the person's identity.
         const failed = failedCall({
           callId,

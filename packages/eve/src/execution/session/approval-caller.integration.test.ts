@@ -13,7 +13,7 @@ import { defineHook } from "#public/definitions/hook.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineDynamic } from "#public/definitions/model.js";
-import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
+import type { Approval, ApprovalPolicy, ApprovalResponsePolicy } from "#approval/definition.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
@@ -23,7 +23,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { always } from "#tools/approval/policies.js";
+import { always, steered } from "#tools/approval/policies.js";
 import { defineTool, type ToolAuthProvider } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
@@ -206,6 +206,8 @@ async function withChainRun(
   name: string,
   body: (run: ChainRun) => Promise<void>,
   options: {
+    /** The agent's approval policy, which every call runs under. */
+    readonly approval?: ApprovalPolicy;
     readonly firstApproval?: Approval;
     readonly message?: string;
     readonly stubs?: readonly ToolStub[];
@@ -227,6 +229,7 @@ async function withChainRun(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
+        ...(options.approval !== undefined && { approval: options.approval }),
         model: defineDynamic(() => ({
           model: options.model ?? scriptedModel,
           modelContextWindowTokens: 200_000,
@@ -1391,3 +1394,135 @@ function delegatingModel() {
     }),
   );
 }
+
+describe("steered()", () => {
+  it("asks only the caller before a call made after someone else spoke, and their approval covers later calls until someone else speaks", async () => {
+    const { stages } = await withChainRun(
+      "steered-asks-caller",
+      async (run) => {
+        const joined = await run.send(BOB, "Bob adds a note.");
+        // eve asks before read_sender starts, with its request for Alice's identity.
+        expect(callFacts(joined, "call-read_sender").map((fact) => fact.type)).toEqual([
+          "interaction.opened",
+        ]);
+        const refused = await answerIdentity(
+          run,
+          "call-read_sender",
+          BOB,
+          "approve",
+          "response.settled",
+        );
+        expect(filterEventsByType(refused, "response.settled")).toMatchObject([
+          { data: { outcome: "refused", reason: expect.stringContaining('Only "alice" can') } },
+        ]);
+        // read_again then runs unasked, and hold_change waits on its own approval when Bob speaks
+        // again.
+        await answerIdentity(run, "call-read_sender", ALICE, "approve");
+        await run.send(BOB, "Bob adds another note.");
+      },
+      {
+        approval: steered(),
+        message:
+          "Use deploy_change, then read_sender, then read_again, then hold_change, then read_later.",
+        model: requestModel(),
+        modules: [
+          senderTool("read_sender"),
+          senderTool("read_again"),
+          recordingTool("hold_change", [], [], { request: always(), response: anyoneResponds }),
+          senderTool("read_later"),
+        ],
+      },
+    );
+
+    expect(identityAsks(stages)).toMatchObject([
+      {
+        audience: { principalIds: ["alice"] },
+        callId: "call-read_sender",
+        prompt:
+          'Approve Read sender with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. The latest message from someone else, from "bob", reads: "Bob adds a note.". It runs with no input.',
+      },
+      // Bob's new message ends Alice's approval.
+      { callId: "call-read_later" },
+    ]);
+    // The call Alice approved reads her as the last to speak; one her standing approval covers
+    // still reads Bob.
+    expect(outputsOf(stages, "call-read_sender")).toEqual(["sender alice"]);
+    expect(outputsOf(stages, "call-read_again")).toEqual(["sender bob"]);
+  }, 60_000);
+
+  it("denies the call when anyone cancels eve's request, and the call never starts", async () => {
+    const { stages } = await withChainRun(
+      "steered-cancelled",
+      async (run) => {
+        await run.send(BOB, "Bob adds a note.");
+        await answerIdentity(run, "call-read_sender", BOB, "deny");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        approval: steered(),
+        message: "Use deploy_change, then read_sender.",
+        model: requestModel(),
+        modules: [senderTool("read_sender")],
+      },
+    );
+
+    expect(callFacts(stages.flat(), "call-read_sender").map((fact) => fact.type)).toEqual([
+      "interaction.opened",
+      "call.settled",
+    ]);
+    expect(outputsOf(stages, "call-read_sender")).toMatchObject([
+      { code: "TOOL_EXECUTION_DENIED", tool: { result: "not_run" } },
+    ]);
+  }, 60_000);
+
+  it.each([
+    {
+      approval: steered(),
+      approver: ALICE,
+      expected: [{ sender: "alice" }],
+      name: "asks the caller before it starts, and runs as them once they approve",
+    },
+    {
+      approval: { request: always(), response: anyoneResponds },
+      approver: BOB,
+      expected: [
+        expect.objectContaining({ message: expect.stringContaining("can't run until they") }),
+      ],
+      name: "denies a call someone else approved when it would start, telling the model why",
+    },
+  ])(
+    "for a workflow tool, $name",
+    async ({ approval, approver, expected }) => {
+      const { stages } = await withChainRun(
+        `steered-workflow-${approver.principalId}`,
+        async (run) => {
+          await run.send(BOB, "Bob adds a note.");
+          if (approver === ALICE) await answerIdentity(run, "call-report_sender", ALICE, "approve");
+          else await run.approve(BOB, "report_sender");
+          await run.approve(ALICE, "deploy_change");
+        },
+        {
+          approval: steered(),
+          message: "Use deploy_change, then report_sender.",
+          model: requestModel(),
+          modules: [
+            {
+              loadNamespace: async () => ({
+                default: defineWorkflowTool({
+                  approval: approval as Approval,
+                  description: "Report who runs this.",
+                  execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
+                  inputSchema: {},
+                }),
+              }),
+              logicalPath: "tools/report_sender.ts",
+            },
+          ],
+        },
+      );
+
+      expect(outputsOf(stages, "call-report_sender")).toEqual(expected);
+    },
+    60_000,
+  );
+});

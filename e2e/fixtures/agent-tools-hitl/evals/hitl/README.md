@@ -38,6 +38,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | A tool reads the turn's caller and its latest sender                                   | [sender-is-latest-speaker](./multiplayer/sender-is-latest-speaker.eval.ts)                                              |
 | After someone else speaks, eve asks the caller, quoting them; only the caller approves | [caller-asked-after-other-speaks](./multiplayer/caller-asked-after-other-speaks.eval.ts)                                |
 | A call that names another person with `as` asks that person                            | [named-person-asked](./multiplayer/named-person-asked.eval.ts)                                                          |
+| A tool `steered()` marks asks the caller before it starts, after someone else speaks   | [steered-tool-asks-caller](./multiplayer/steered-tool-asks-caller.eval.ts)                                              |
 | An answer to a request that is not open authorizes nothing                             | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |
 | A `once()` grant is reused                                                             | [once-grant-is-reused](./approvals/once-grant-is-reused.eval.ts)                                                        |
 | An approved call runs with the asking step's tools                                     | [approved-call-uses-asking-step-tools](./approvals/approved-call-uses-asking-step-tools.eval.ts)                        |

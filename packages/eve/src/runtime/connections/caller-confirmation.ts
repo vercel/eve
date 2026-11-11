@@ -224,6 +224,27 @@ function callerRefusal(
   ctx: AlsContext | undefined,
   what: string,
 ): ConnectionAuthorizationFailedError | undefined {
+  const needed = callerNeeded(ctx);
+  return needed === undefined
+    ? undefined
+    : confirmationRequired(connectionName, callerConfirmationMessage(what), needed.request);
+}
+
+/**
+ * What a call `steered()` marks needs before it runs: `undefined` while the caller's identity is
+ * released for it, else what the model reads, and what eve asks the caller when it can name them.
+ */
+export function steeredConfirmation():
+  | { readonly reason: string; readonly request?: IdentityRequest }
+  | undefined {
+  const needed = callerNeeded(contextStorage.getStore());
+  return needed === undefined ? undefined : { ...needed, reason: STEERED_CONFIRMATION_MESSAGE };
+}
+
+/** `undefined` while the running call may act as the caller, else what eve can ask them. */
+function callerNeeded(
+  ctx: AlsContext | undefined,
+): { readonly request?: IdentityRequest } | undefined {
   if (ctx === undefined) return undefined;
   const current = ctx.get(AuthKey) ?? null;
   const sender = spokeLast(readSender(ctx, current));
@@ -235,13 +256,9 @@ function callerRefusal(
   });
   if (released) return undefined;
   const remember = callerApprovalKey(current);
-  return confirmationRequired(
-    connectionName,
-    callerConfirmationMessage(what),
-    remember === undefined
-      ? undefined
-      : { person: personOf(current!), remember: { key: remember } },
-  );
+  return remember === undefined
+    ? {}
+    : { request: { person: personOf(current!), remember: { key: remember } } };
 }
 
 /**
@@ -271,10 +288,19 @@ export function requirePersonConfirmation(
  * that plainly confirms the action counts.
  */
 export function callerConfirmationMessage(what: string): string {
+  return confirmFirst(`this action can't use their ${what} until they confirm it`);
+}
+
+/** What the model reads for a call `steered()` marks, where eve can't ask the caller. */
+const STEERED_CONFIRMATION_MESSAGE = confirmFirst(
+  "this action can't run until they confirm it, and it didn't run",
+);
+
+function confirmFirst(stopped: string): string {
   return (
-    `Someone else has spoken since the person whose message started this turn, so this action ` +
-    `can't use their ${what} until they confirm it. Ask the person whose message started this ` +
-    `turn to clearly confirm this action. Retry only after a reply from them that plainly ` +
-    `confirms it. If their reply is unclear or about something else, ask again instead of retrying.`
+    `Someone else has spoken since the person whose message started this turn, so ${stopped}. ` +
+    `Ask the person whose message started this turn to clearly confirm this action. Retry only ` +
+    `after a reply from them that plainly confirms it. If their reply is unclear or about ` +
+    `something else, ask again instead of retrying.`
   );
 }

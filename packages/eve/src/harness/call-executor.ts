@@ -2,6 +2,7 @@ import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import {
   identityRequestOf,
   callerApprovals,
+  steeredConfirmation,
   withCallIdentity,
   type IdentityRequest,
 } from "#runtime/connections/caller-confirmation.js";
@@ -180,11 +181,25 @@ export async function executeToolCall(
     });
     if (decision.awaitsPerson === true)
       return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
-    if (decision.denied) {
-      await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
+    const steering =
+      decision.steered === true
+        ? steeredGate(
+            { callId, input: args, toolName, version: definition.version },
+            {
+              approvalMemory: input.approvalMemory,
+              canAsk: input.canAsk,
+              confirmed: input.confirmedBy ?? [],
+              responder: input.responder,
+            },
+          )
+        : undefined;
+    if (steering?.ask !== undefined) return { identity: steering.ask, settled, toolResults };
+    const deniedFor = decision.denied ? decision.reason : steering?.reason;
+    if (decision.denied || deniedFor !== undefined) {
+      await input.beforeResult?.(deniedFor ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
         { callId, input: args, toolName },
-        { publish: input.publish, reason: decision.reason },
+        { publish: input.publish, reason: deniedFor },
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
@@ -595,6 +610,7 @@ async function decideDeferredCall(
   input: {
     readonly abortSignal: AbortSignal | undefined;
     readonly approvalMemory: ApprovalMemory;
+    readonly canAsk?: boolean;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
@@ -607,7 +623,15 @@ async function decideDeferredCall(
   });
   if (decision.awaitsPerson === true)
     return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
-  if (!decision.denied)
+  const steering =
+    decision.steered === true && !decision.denied
+      ? steeredGate(
+          { ...call, version: definition.version },
+          { approvalMemory: input.approvalMemory, canAsk: input.canAsk, confirmed: [] },
+        )
+      : undefined;
+  if (steering?.ask !== undefined) return { identity: steering.ask, settled: [], toolResults: [] };
+  if (!decision.denied && steering === undefined)
     return {
       settled: [],
       toolResults: [],
@@ -615,8 +639,47 @@ async function decideDeferredCall(
     };
   return await publishDenial(call, {
     publish: input.publish,
-    reason: decision.reason,
+    reason: decision.denied ? decision.reason : steering?.reason,
   });
+}
+
+/**
+ * A call `steered()` marks acts for the turn's caller, so it runs only while their identity is
+ * released, by the rule eve's guards of it use. Otherwise eve asks the caller with its request for
+ * their identity, before the call starts, or where it can't ask, the call is denied with why.
+ * `undefined` when the call may run.
+ */
+export function steeredGate(
+  call: {
+    readonly callId: string;
+    readonly input: unknown;
+    readonly toolName: string;
+    readonly version?: string;
+  },
+  input: {
+    readonly approvalMemory?: ApprovalMemory;
+    readonly canAsk?: boolean;
+    /** The people who approved the call, the caller among them when they approved it. */
+    readonly confirmed: readonly SessionPerson[];
+    readonly responder?: SessionAuthContext;
+  },
+):
+  | { readonly ask: ApprovalAsk; readonly reason?: never }
+  | { readonly reason: string; readonly ask?: never }
+  | undefined {
+  const needed = withCallIdentity(
+    { confirmed: input.confirmed, remembered: callerApprovals(input.approvalMemory?.remembered) },
+    steeredConfirmation,
+  );
+  if (needed === undefined) return undefined;
+  if (input.canAsk !== true || needed.request === undefined) return { reason: needed.reason };
+  return {
+    ask: identityApprovalRequest(call, needed.request, {
+      beforeStart: true,
+      confirmed: input.confirmed,
+      responder: input.responder,
+    }),
+  };
 }
 
 /** Reports a call its approval policy refused: it settles rejected, without running. */

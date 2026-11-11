@@ -48,6 +48,11 @@ export interface IdentityAsk {
   readonly responder?: SessionAuthContext;
   /** The people who had already approved the call, whose identities it keeps. */
   readonly confirmed?: readonly SessionPerson[];
+  /**
+   * eve asked before the call started, as for a call `steered()` marks: cancelling denies it,
+   * and nothing of it ran.
+   */
+  readonly beforeStart?: true;
 }
 
 /**

@@ -23,19 +23,20 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ tenantId: z.string(), chargeId: z.string(), amount: z.number() }),
-  approval: auto(), // or always() / once() / never() / a policy
+  approval: auto(), // or always() / once() / never() / steered() / a policy
   async execute(input) {
     return refund(input);
   },
 });
 ```
 
-| Helper     | Behavior                                                                     |
-| ---------- | ---------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                           |
-| `once()`   | Remember approval for this tool for the rest of the session.                 |
-| `always()` | Require approval before every call.                                          |
-| `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
+| Helper                                                   | Behavior                                                                                |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `never()`                                                | Never require approval (the default when omitted).                                      |
+| `once()`                                                 | Remember approval for this tool for the rest of the session.                            |
+| `always()`                                               | Require approval before every call.                                                     |
+| `auto()`                                                 | Ask a decision model whether to run the exact call or require user approval.            |
+| [`steered()`](#ask-the-caller-after-someone-else-speaks) | In a shared session, ask the turn's caller before a call made after someone else spoke. |
 
 Rules:
 
@@ -331,6 +332,29 @@ The call starts before it asks, so a client sees `call.started`, then the approv
 The caller's approval covers that call and later calls that use the caller's identity, until anyone other than the caller sends a message. The next message from someone else, including the same person again, makes eve ask again. Approving a request after someone else's newer message covers only that call. No approval changes `ctx.session.auth.sender`; only a call the caller approves reads the caller there.
 
 A message that arrives while the request is open leaves it open, like any approval, and the call waits as a task. Where the session can't ask for input, and in workflow tools, the call fails with `reason: "confirmation_required"` instead. A remote agent call fails with a terminal error.
+
+### Ask the caller after someone else speaks
+
+`steered()` applies the identity rule above to any call: after someone else's message joins the turn, the call asks the turn's caller before it runs. Set it in `agent.ts` to cover every call the model makes, or on one tool:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { steered } from "eve/tools/approval";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: steered(),
+});
+```
+
+- In a session with one person, `steered()` never asks.
+- After someone else spoke, eve asks before the call starts, with the same request as for the caller's identity: the same prompt, quoting the latest message from someone else, and `audience.principalIds` naming the caller. Only the caller can approve it, and anyone signed in can cancel it.
+- An approved call runs and reads the caller as `ctx.session.auth.sender`. The approval also covers the caller's later calls, including ones that use their identity, until anyone other than the caller sends a message.
+- Cancelling denies the call, which never ran: it ends with a rejected `call.settled` and `TOOL_EXECUTION_DENIED`.
+- Where eve can't ask, it denies the call and the model reads that it should ask the caller to confirm. That covers sessions that can't request input, and a workflow or agent call that someone else approved through a `response` policy. The turn goes on.
+- A tool's own `approval` still applies. When the caller answers it, eve doesn't ask again. When someone else answers it, eve asks the caller before the call runs.
+
+`steered()` gates new calls only. It doesn't stop the model from answering from what is already in the conversation, or work that started before someone else spoke. An agent-wide `steered()` doesn't gate the calls that no agent policy gates, listed in [Gate every call from one policy](#gate-every-call-from-one-policy).
 
 ### Skipping approval for schedule-dispatched turns
 
