@@ -96,14 +96,16 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   try {
     const resolvedModel = await resolveEffectiveRuntimeModel(step);
     step.model = resolvedModel.choice;
+    const compaction = compactionConfig(step);
     await summarizeHistory(step, {
+      compaction,
       betweenTurns: true,
       change,
       compact: true,
       messages,
       model: resolvedModel.model,
       promptMessages: messages,
-      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
+      requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
   } catch (error) {
     outcome = "failed";
@@ -136,8 +138,11 @@ export async function historyBeforeCall(
   },
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
-  const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
-  const config = compactionConfig(step);
+  const config = compactionConfig(step, {
+    messages: prompt,
+    requestEnvelopeTokens: input.requestEnvelopeTokens,
+  });
+  const previousEnvelope = config.requestEnvelopeTokens;
   if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }
@@ -152,6 +157,7 @@ export async function historyBeforeCall(
   });
   return await summarizeHistory(step, {
     change,
+    compaction: config,
     messages: input.messages,
     model: input.model,
     promptMessages: prompt,
@@ -207,6 +213,7 @@ async function summarizeHistory(
     readonly betweenTurns?: true;
     readonly change: LazyChange;
     readonly compact?: true;
+    readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
     /** The turn's model, which writes summaries unless the agent names a compaction model. */
     readonly model: LanguageModel;
@@ -217,7 +224,7 @@ async function summarizeHistory(
 ): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
   const before = validateHarnessModelMessages(input.messages);
-  const compaction = compactionConfig(step);
+  const { compaction } = input;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
   let runOpen = false;

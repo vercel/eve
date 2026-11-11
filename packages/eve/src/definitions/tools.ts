@@ -18,7 +18,14 @@ import {
   toOutputSchema,
   type ToolSchemaSource,
 } from "#tools/schema.js";
-import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
+import {
+  isWorkflowToolDefinition,
+  readWorkflowToolEntryPoints,
+} from "#tools/workflow-definition.js";
+import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { createWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
+import { assertNoOwnTaskIdInput } from "#internal/authored-definition/schema-backed.js";
 import { namedEntries, type EntryKind } from "./named.js";
 import { entryVersions, slotsOf } from "#definitions/state.js";
 import { sessionConnectionNames } from "./connections.js";
@@ -118,7 +125,7 @@ export interface ToolSource {
 export function contributeTools(source: ToolSource, result: unknown, ctx: ContextContainer): Kept {
   const tools = namedTools(source, result).map(({ entry, name }) => {
     assertToolNameAvailable(ctx, source, name);
-    return liveTool(name, entry);
+    return liveTool(source, name, entry);
   });
   if (tools.length === 0) return { value: null };
   return { live: tools, value: tools.map(declaration) };
@@ -134,20 +141,55 @@ const TOOLS: EntryKind = {
 };
 
 function namedTools(source: ToolSource, value: unknown) {
-  const entries = namedEntries(source, value, TOOLS);
-  for (const { entry } of entries) {
-    if (isWorkflowToolDefinition(entry)) {
-      throw new Error(
-        `The defineDynamic() in "${source.logicalPath}" cannot return defineWorkflowTool(). Workflow tools must be static tools; use defineTool() for dynamic entries.`,
-      );
-    }
-  }
-  return entries as readonly { readonly name: string; readonly entry: DynamicToolEntry }[];
+  return namedEntries(source, value, TOOLS) as readonly {
+    readonly name: string;
+    readonly entry: DynamicToolEntry;
+  }[];
+}
+
+interface CompiledWorkflow {
+  readonly entryPoint: WorkflowToolEntryPoint;
+  readonly workflowId: string;
 }
 
 /**
- * The agent's workflow tools and agents run after the model step, so a dynamic tool, which runs in
- * it, can't take their names. Nor can a connection's.
+ * The build compiles a `"use workflow"` function only where it can see it: a top-level function
+ * declaration, or the entry point of a default-exported `defineWorkflowTool()`. A dynamic
+ * function's workflow tool must point at one of those, so its calls run the compiled workflow.
+ */
+function compiledWorkflow(source: ToolSource, name: string, entry: object): CompiledWorkflow {
+  // eve's own workflow tools, such as `agent({ models })`, read settings the runtime finds only
+  // among the agent's static tools.
+  if (isFrameworkTool(entry)) {
+    throw new Error(
+      `The defineDynamic() in "${source.logicalPath}" returned eve's built-in workflow tool "${name}", which only works as a static tool. Export it from its own file under agent/tools/ instead.`,
+    );
+  }
+  const [entryPoint] = readWorkflowToolEntryPoints(entry);
+  const workflowId =
+    entryPoint === undefined ? undefined : readWorkflowFunctionId(Reflect.get(entry, entryPoint));
+  if (entryPoint === undefined || workflowId === undefined) {
+    throw new Error(
+      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" whose entry point isn't a compiled workflow. Declare it as a top-level async function that starts with "use workflow", and pass that function to defineWorkflowTool() as execute, task, or serve.`,
+    );
+  }
+  if (Reflect.get(entry, "endsTurn") !== undefined) {
+    throw new Error(
+      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" with "endsTurn", which defineWorkflowTool() doesn't support.`,
+    );
+  }
+  if (entryPoint === "serve") {
+    assertNoOwnTaskIdInput(
+      serializeInputSchema(Reflect.get(entry, "inputSchema") as ToolSchemaSource),
+      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" whose`,
+    );
+  }
+  return { entryPoint, workflowId };
+}
+
+/**
+ * The agent's static workflow tools and agents keep their names for calls that outlive the model
+ * step, so a dynamic tool can't take them. Nor can a connection's.
  */
 function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, name: string): void {
   assertNotConnectionOwned({
@@ -173,19 +215,18 @@ function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, na
   }
 }
 
-function liveTool(name: string, authored: DynamicToolEntry): HarnessToolDefinition {
+function liveTool(
+  source: ToolSource,
+  name: string,
+  authored: DynamicToolEntry,
+): HarnessToolDefinition {
   const entry = authored as ToolDefinition<unknown, unknown>;
   const definition = entry as ToolDefinition<unknown, unknown> & Partial<InternalToolDefinition>;
-  return {
+  const common = {
     approval: entry.approval,
     availableInSubagents: entry.availableInSubagents,
     deferred: entry.deferred,
     description: entry.description,
-    endsTurn: entry.endsTurn,
-    execute: createToolExecuteWithAuth({
-      execute: (input, context) => entry.execute(input as never, context),
-      scope: name,
-    }),
     frameworkTool: isFrameworkTool(entry) || undefined,
     inputSchema: toInputSchema(entry.inputSchema as ToolSchemaSource),
     label: definition.label as HarnessToolDefinition["label"],
@@ -195,6 +236,31 @@ function liveTool(name: string, authored: DynamicToolEntry): HarnessToolDefiniti
         ? undefined
         : toOutputSchema(entry.outputSchema as ToolSchemaSource),
     toModelOutput: entry.toModelOutput as HarnessToolDefinition["toModelOutput"],
+  };
+  // A workflow tool's calls run after the model step, from the workflow registry, as a static one's do.
+  if (isWorkflowToolDefinition(entry)) {
+    const { entryPoint, workflowId } = compiledWorkflow(source, name, entry);
+    return createWorkflowToolHarnessDefinition({
+      definition: {
+        ...common,
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: { entryPoint, kind: "workflow-tool-call", workflowId },
+          },
+        },
+      },
+      workflowId,
+    });
+  }
+  return {
+    ...common,
+    endsTurn: entry.endsTurn,
+    execute: createToolExecuteWithAuth({
+      execute: (input, context) => entry.execute(input as never, context),
+      scope: name,
+    }),
   };
 }
 

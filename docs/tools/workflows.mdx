@@ -73,8 +73,9 @@ continues, deploys, and returns one tool result.
 
 ### Rules
 
-- Default-export `defineWorkflowTool({ ... })` with exactly one entry point: `execute`, `task`, or
-  `serve`. Defining none, or more than one, throws when the tool is defined.
+- Default-export `defineWorkflowTool({ ... })`, or assign it to a top-level `const` that a
+  `defineDynamic` function returns, with exactly one entry point: `execute`, `task`, or `serve`.
+  Defining none, or more than one, throws when the tool is defined.
 - Write the entry point inline, or reference a top-level `async function` in the same module or an
   imported application module. `execute` and `task` can be async generators; `serve` can't.
 - Start the entry point with `"use workflow"`. A missing directive is a build error, even if another
@@ -88,8 +89,9 @@ continues, deploys, and returns one tool result.
   in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
-- Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
-  returns. `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
+- A `defineDynamic` function can return a workflow tool that a top-level `const` holds; see
+  [Return a workflow tool](/docs/guides/dynamic-capabilities#return-a-workflow-tool).
+  `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
   handler fails the build. To start a session from a channel or schedule, use the
   [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
   [schedule handler](/docs/schedules#handler-form-run) APIs.
@@ -1012,7 +1014,8 @@ An interrupted dispatch can start a second run for the same call, and both runs 
 application idempotency key for side effects that must happen only once.
 
 The workflow id comes from the entry point's module path and function name. Inline entry points use
-the tool module and the name `execute`, `task`, or `serve`. Imported ones use their declaring module
-and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
+the tool module and the name `execute`, `task`, or `serve`. For a tool that a top-level `const`
+holds, the name also carries the `const`, such as `escalate$execute`. Imported ones use their
+declaring module and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
 deployment that started them. A run that resumes on a deployment without its tool fails with an
 error naming the missing workflow.

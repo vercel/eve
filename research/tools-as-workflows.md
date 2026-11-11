@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: implemented
-last_updated: "2026-09-10"
+last_updated: "2026-11-11"
 ---
 
 # Tools as workflows
@@ -63,7 +63,8 @@ wrapper does not rename an existing inline executor.
 The definition carries a workflow-tool brand. Compilation requires both that brand and a compiled
 executor workflow ID. An ordinary `defineTool` or bare object with a workflow executor fails the
 build; an uncompiled `defineWorkflowTool` also fails instead of running inline. Channel and
-schedule handlers cannot be workflow executors. Dynamic resolvers cannot return workflow tools.
+schedule handlers cannot be workflow executors. A dynamic resolver can return a workflow tool
+declared at the top level of its module; one created inside the resolver is not compiled.
 Standalone Workflow SDK functions used by workflow helpers retain their SDK semantics.
 
 The driver drops the definition and schema imports, then runs the registered executor with a

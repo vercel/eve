@@ -17,7 +17,10 @@ import {
   TraceRootKey,
 } from "#context/keys.js";
 import { ensureOtelIntegration } from "#instrumentation/ai-sdk-telemetry.js";
-import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationProviderDefinition,
+} from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
   registerInstrumentationRuntime,
@@ -57,6 +60,7 @@ let sampleTrace: boolean;
 function useRuntime(
   tracePolicy?: TraceCapturePolicy,
   stateStore: AgentTraceStateStore = new ContextAgentTraceStateStore(),
+  authored: readonly InstrumentationProviderDefinition[] = [],
 ) {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
   const agent = createAgentOtelInstrumentation({
@@ -71,11 +75,12 @@ function useRuntime(
   });
   return registerInstrumentationRuntime({
     ...agent,
-    hooks: createInstrumentationHooks([agent.hook]),
+    hooks: createInstrumentationHooks({
+      serialBefore: [{ ...agent.hook, name: "internal:otel" }],
+      parallel: authored,
+    }),
     ownsAgentSpans: true,
     otelSettings: {
-      recordInputs: true,
-      recordOutputs: true,
       traceChannelRequests: false,
       tracePolicy,
     },
@@ -397,6 +402,42 @@ describe("decide tracing", () => {
         expect(result.answers.team.choice).toBe("billing");
       });
       expect(decisions()).toHaveLength(0);
+    },
+  );
+});
+
+// AI SDK integrations such as Sentry's read content from the decision call, not from eve events.
+describe("decide AI SDK integration content", () => {
+  const allowsContent: InstrumentationProviderDefinition = {
+    name: "sentry",
+    tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+  };
+
+  it.each([
+    ["declared", "no file allows", [], false],
+    ["declared", "a file allows", [allowsContent], true],
+    ["undeclared", "no file allows", [], false],
+    ["undeclared", "a file allows", [allowsContent], true],
+  ] as const)(
+    "with OpenTelemetry %s, follows whether %s private content",
+    async (otel, _files, authored, recordsContent) => {
+      const seen: { recordInputs?: boolean; recordOutputs?: boolean }[] = [];
+      vi.stubGlobal("AI_SDK_TELEMETRY_INTEGRATIONS", [
+        {
+          experimental_onDecisionModelCallStart: (event: (typeof seen)[number]) => seen.push(event),
+        },
+      ]);
+      runtime = useRuntime(undefined, undefined, authored);
+      if (otel === "undeclared") runtime.otelSettings = undefined;
+      const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
+
+      await inSession(() => decide({ model, questions, state }));
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({
+        recordInputs: recordsContent,
+        recordOutputs: recordsContent,
+      });
     },
   );
 });

@@ -2,7 +2,14 @@ import { sessionOffersTasks } from "#execution/catalog/step-catalog.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
 import { hadPersonWaits } from "#execution/tasks/table.js";
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
-import { type Definition, once, section, SECTION_ORDER, type ToolEntry } from "./definition.js";
+import {
+  type Definition,
+  once,
+  section,
+  SECTION_ORDER,
+  type StepInfo,
+  type ToolEntry,
+} from "./definition.js";
 
 /**
  * What eve adds for its own features, seeing everything the agent declares: the task tools and
@@ -15,6 +22,7 @@ export const builtins: Definition = {
         async () =>
           step !== undefined &&
           (hadPersonWaits(step.session.state) ||
+            hasRunningTask(step) ||
             sessionOffersTasks({
               ctx: container,
               session: step.session,
@@ -59,3 +67,12 @@ export const builtins: Definition = {
   id: "eve.builtins",
   label: "eve's builtins",
 };
+
+/**
+ * A dynamic tool can stop being offered while a task it started still runs; the task tools stay
+ * so the model can still wait for or cancel that task.
+ */
+function hasRunningTask(step: StepInfo): boolean {
+  const tasks = step.view?.().projection.view.tasks ?? {};
+  return Object.values(tasks).some((task) => task.status === "running");
+}

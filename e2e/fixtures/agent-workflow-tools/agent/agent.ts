@@ -151,6 +151,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     ["WORKFLOW-APPROVAL-START", "gated_deploy"],
     ["WORKFLOW-APPROVAL-DENIED-START", "gated_deploy", "review-only"],
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
+    ["WORKFLOW-DYNAMIC-START", "dynamic_deploy"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],

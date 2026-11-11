@@ -28,8 +28,6 @@ export function eventTracing() {
     enable(tracePolicy?: TraceCapturePolicy, requests = true) {
       runtime.otelSettings = {
         functionId: undefined,
-        recordInputs: false,
-        recordOutputs: false,
         tracePolicy,
         traceChannelRequests: requests,
       };

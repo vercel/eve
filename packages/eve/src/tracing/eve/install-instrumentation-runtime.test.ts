@@ -72,8 +72,6 @@ describe("installInstrumentationRuntime", () => {
     expect(runtime.ownsAgentSpans).toBe(true);
     expect(runtime.otelSettings).toEqual({
       functionId: undefined,
-      recordInputs: true,
-      recordOutputs: true,
       traceChannelRequests: false,
     });
     expect(shutdown).toHaveBeenCalledOnce();

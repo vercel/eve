@@ -170,6 +170,13 @@
           "estimateRatio": 0.00031279324366593683,
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 4,
+          "measurementsByModel": {
+            "eve-test/layout": {
+              "inputTokens": 1,
+              "promptMessageCount": 4,
+              "requestEnvelopeTokens": 3013
+            }
+          },
           "requestEnvelopeTokens": 3013
         },
         "continuationToken": "http:layout-connections",

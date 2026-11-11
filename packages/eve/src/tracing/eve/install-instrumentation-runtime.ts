@@ -68,8 +68,9 @@ export function installInstrumentationRuntime(input: {
         mapping: eveOutputMapping(),
       }),
       idGenerator,
-      recordInputs: input.collected.settings.recordInputs,
-      recordOutputs: input.collected.settings.recordOutputs,
+      // The trace policy decides content; each destination narrows it with its export policy.
+      recordInputs: true,
+      recordOutputs: true,
       stateStore: new ContextAgentTraceStateStore(),
       tracePolicy: input.collected.settings.tracePolicy,
     });
