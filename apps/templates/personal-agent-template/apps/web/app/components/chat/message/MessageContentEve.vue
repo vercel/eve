@@ -66,7 +66,7 @@ const showThinking = computed(
         :streaming="isPartStreaming(entry.part)"
         chevron="leading"
       >
-        <ChatComark :markdown="entry.part.text" :streaming="isPartStreaming(entry.part)" />
+        <ChatComark :value="entry.part.text" :streaming="isPartStreaming(entry.part)" />
       </UChatReasoning>
 
       <template v-else-if="isToolUIPart(entry.part) || isDynamicToolUIPart(entry.part)">
@@ -136,7 +136,7 @@ const showThinking = computed(
                 ? `${message.id}-text-${entry.part.text.length}`
                 : `${message.id}-text-${index}`
             "
-            :markdown="entry.part.text"
+            :value="entry.part.text"
             :streaming="isPartStreaming(entry.part)"
           />
           <span

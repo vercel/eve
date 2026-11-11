@@ -19,6 +19,8 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
+import { attachToolBehavior, readToolBehavior } from "#tools/behavior.js";
+import { agent as agentTool } from "#tools/framework/agent.js";
 
 // What eve sends the model, and what a session stores, for representative agents: the oracle for
 // changes to how a model call is assembled. These compare normalized prompts and tool names,
@@ -267,38 +269,108 @@ describe("what eve sends the model", () => {
     );
   });
 
-  it("reports a background task's listing and result", async () => {
-    const { calls, model } = recordingModel((options) => {
-      const all = JSON.stringify(options.prompt.filter((message) => message.role !== "system"));
-      if (!all.includes("Did QA pass?")) return textStreamResult("QA passed.");
-      if (all.includes("<task_result id=")) return textStreamResult("QA passed, so we can ship.");
-      if (options.prompt.some((message) => message.role === "tool"))
-        return textStreamResult("QA is still being checked.");
-      return toolCallStreamResult({
-        input: JSON.stringify({ message: "Check the QA status." }),
-        toolCallId: "call-agent",
-        toolName: "agent",
+  it.each([false, true])(
+    "reports a background task's listing and result to the dynamic model and its call (failed evaluation: %s)",
+    async (failEvaluation) => {
+      let dynamicMessages = "";
+      let failedPreview: string | undefined;
+      const name = failEvaluation ? "layout-tasks-recovery" : "layout-tasks";
+      const rootCalls: { dynamicMessages: string; modelMessages: string }[] = [];
+      const projections: unknown[] = [];
+      const { calls, model } = recordingModel((options) => {
+        const all = JSON.stringify(options.prompt.filter((message) => message.role !== "system"));
+        if (!all.includes("Did QA pass?")) return textStreamResult("QA passed.");
+        rootCalls.push({ dynamicMessages, modelMessages: all });
+        if (all.includes("<task_result id=")) {
+          return textStreamResult("QA passed, so we can ship.");
+        }
+        if (options.prompt.some((message) => message.role === "tool"))
+          return textStreamResult("QA is still being checked.");
+        return toolCallStreamResult({
+          input: JSON.stringify({ message: "Check the QA status." }),
+          toolCallId: "call-agent",
+          toolName: "agent",
+        });
       });
-    });
-    const test = await createTestRuntime({
-      agent: { definition: dynamicModel(model), name: "layout-tasks" },
-      modules: [
-        mod(
-          "instructions/agent.ts",
-          defineInstructions({ content: "You are Ada, a release assistant." }),
-        ),
-      ],
-    });
-    await test.run(async () => {
-      // Background tasks run as durable runs, which only the Workflow host offers.
-      const runtime = createWorkflowRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      const test = await createTestRuntime({
+        agent: {
+          definition: defineAgent({
+            model: defineDynamic(async (ctx) => {
+              if (ctx.session.parent === undefined) {
+                dynamicMessages = JSON.stringify(await ctx.messages());
+                if (
+                  failEvaluation &&
+                  failedPreview === undefined &&
+                  dynamicMessages.includes("<task_result id=")
+                ) {
+                  failedPreview = dynamicMessages;
+                  throw new Error("Could not choose the model for the QA result.");
+                }
+              }
+              return { model, modelContextWindowTokens: 200_000 };
+            }),
+          } as never),
+          name,
+        },
+        modules: [
+          mod(
+            "tools/agent.ts",
+            attachToolBehavior(
+              {
+                ...agentTool,
+                toModelOutput: (output: unknown) => {
+                  projections.push(output);
+                  // A second projection of this delivery would produce different prompt text.
+                  return {
+                    type: "text" as const,
+                    value:
+                      projections.length === 1
+                        ? "QA passed."
+                        : `QA passed. (projection ${projections.length})`,
+                  };
+                },
+              },
+              readToolBehavior(agentTool)!,
+            ),
+          ),
+          mod(
+            "instructions/agent.ts",
+            defineInstructions({ content: "You are Ada, a release assistant." }),
+          ),
+        ],
       });
-      await (await address(runtime, "layout-tasks").send("Did QA pass?", { auth: null })).result();
-    });
-    expect(JSON.stringify(calls)).toContain("<task_result id=");
-    await golden("tasks.requests", calls);
-  });
+      await test.run(async () => {
+        // Background tasks run as durable runs, which only the Workflow host offers.
+        const runtime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const alice = address(runtime, name);
+        await (await alice.send("Did QA pass?", { auth: null })).result();
+        if (failEvaluation) {
+          await (await alice.send("Please share the QA result.", { auth: null })).result();
+        }
+      });
+      expect(
+        rootCalls.some(({ modelMessages }) => modelMessages.includes("<task_result id=")),
+      ).toBe(true);
+      for (const { dynamicMessages, modelMessages } of rootCalls) {
+        for (const pattern of [
+          /\[Tasks\][\s\S]*?<\/tasks>(?:\\n<idle>[\s\S]*?<\/idle>)?/g,
+          /<task_result id=[\s\S]*?<\/task_result>/g,
+        ]) {
+          expect(dynamicMessages.match(pattern) ?? []).toEqual(modelMessages.match(pattern) ?? []);
+        }
+      }
+      expect(projections).toHaveLength(failEvaluation ? 2 : 1);
+      if (failEvaluation) {
+        expect(failedPreview).toContain("<task_result id=");
+        expect(failedPreview).toContain("QA passed.");
+        expect(rootCalls.at(-1)?.modelMessages).toContain("QA passed. (projection 2)");
+      } else {
+        await golden("tasks.requests", calls);
+      }
+    },
+  );
 
   it("lists the agent's connections, static and dynamic, behind eve's catalog tools", async () => {
     const { calls, model } = recordingModel(() =>

@@ -1038,19 +1038,33 @@ test("a lease breaks a lock whose holder stopped", async () => {
 test("a lease waits on the host and stops when its call is cancelled", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
+  const controller = new AbortController();
+  let resolveRetried!: () => void;
+  let rejectRetried!: (reason: unknown) => void;
+  const retried = new Promise<void>((resolve, reject) => {
+    resolveRetried = resolve;
+    rejectRetried = reject;
+  });
+  const watchdog = setTimeout(() => {
+    const error = new Error("Timed out waiting for two busy lease responses");
+    controller.abort(error);
+    rejectRetried(error);
+  }, 10_000);
+  let waiting: Promise<void> | undefined;
   try {
     execFileSync("mkdir", [lockPath]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     let attempts = 0;
     const sandboxFake: Pick<SandboxSession, "run"> = {
-      run(input) {
-        attempts += 1;
-        return runLockCommand(input.command, lockPath);
+      async run(input) {
+        const result = await runLockCommand(input.command, lockPath);
+        assert.equal(result.exitCode, 75);
+        if (++attempts === 2) resolveRetried();
+        return result;
       },
     };
-    const controller = new AbortController();
     let ran = false;
-    const waiting = withSandboxLeaseLock(
+    waiting = withSandboxLeaseLock(
       sandboxFake as SandboxSession,
       "waiter",
       async () => {
@@ -1058,14 +1072,19 @@ test("a lease waits on the host and stops when its call is cancelled", async () 
       },
       { signal: controller.signal },
     );
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    // Each attempt returns at once instead of waiting inside the sandbox.
-    assert.ok(attempts > 1);
+    void waiting.catch(rejectRetried);
+    // Observe real shell progress rather than assuming Windows starts two shells within 600 ms.
+    await retried;
+    // Let the lock loop consume the busy response and enter its host-side wait before aborting.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort(new Error("cancelled"));
     await assert.rejects(waiting, /cancelled/u);
     assert.equal(ran, false);
     assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "holder");
   } finally {
+    clearTimeout(watchdog);
+    controller.abort(new Error("test cleanup"));
+    await waiting?.catch(() => undefined);
     rmSync(lockRoot, { recursive: true, force: true });
   }
 });

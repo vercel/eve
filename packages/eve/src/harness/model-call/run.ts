@@ -67,9 +67,10 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+  const prepared = await previewPrompt(step, input.turn);
+  const failed = await prepareModelCall(step, prepared);
   if (failed !== undefined) return failed;
-  const prompt = await commitTurnInput(step, input.turn);
+  const prompt = commitTurnInput(step, prepared);
   // More input waits to be read: the model runs once the turn has read it all.
   if (step.config.inputOnly === true) {
     return { next: step.runStep, session: step.session, steered: true };
