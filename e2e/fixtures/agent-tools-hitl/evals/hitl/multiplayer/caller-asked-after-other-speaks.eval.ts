@@ -41,7 +41,7 @@ export default defineEval({
 
     const refused = await session.startRespond(answers("approve", identity), asBob);
     await refused.waitForEvent("response.settled", {
-      data: { outcome: "refused", reason: (reason) => reason?.startsWith("Only alice") ?? false },
+      data: { outcome: "refused", reason: (reason) => reason?.startsWith('Only "alice"') ?? false },
     });
     // A press its sender may not give settles its delivery as refused.
     (await refused.result()).event("delivery.settled", { count: 1, data: { outcome: "refused" } });
