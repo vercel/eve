@@ -291,98 +291,19 @@ it("closes a streaming tool when progress publication fails", async () => {
   expect(closed).toBe(true);
 });
 
-it.each([
-  [true, "stops and asks the caller"],
-  [false, "fails with the refusal"],
-] as const)(
-  "a call refused the caller's token after someone else spoke, where the session can ask: %s, %s",
-  async (canAsk, _outcome) => {
-    const alice = {
-      attributes: { team: "T01" },
-      authenticator: "test",
-      principalId: "alice",
-      principalType: "user",
-    };
-    const ctx = new ContextContainer();
-    ctx.set(AuthKey, alice);
-    ctx.set(SenderAuthKey, { ...alice, principalId: "bob" });
-    ctx.set(SessionKey, {
-      auth: { current: alice, initiator: alice, sender: { ...alice, principalId: "bob" } },
-      sessionId: "session-1",
-      turn: { id: "turn_0", sequence: 0 },
-    });
-    const events: import("#protocol/session-event.js").SessionEvent[] = [];
-    const results = await contextStorage.run(ctx, () =>
-      executeInlineCalls({
-        abortSignal: undefined,
-        approvalMemory: { pending: [], remembered: {} },
-        beforeExecute: () => {},
-        canAsk,
-        excludedCallIds: new Set(),
-        messages: [],
-        publish: async (publication) => {
-          events.push(...eventsOf(publication));
-        },
-        toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "read_inbox", type: "tool-call" }],
-        tools: new Map([
-          [
-            "read_inbox",
-            {
-              name: "read_inbox",
-              description: "Read the caller's inbox.",
-              inputSchema: jsonSchema({ type: "object" }),
-              // What a user-scoped token resolves through before it reaches the provider.
-              execute: () =>
-                resolveConnectionPrincipal("mail", {
-                  getToken: async () => ({ token: "token" }),
-                  principalType: "user",
-                }),
-            },
-          ],
-        ]),
-      }),
-    );
-
-    if (canAsk) {
-      expect(results.parts).toEqual([]);
-      expect(results.approvals).toMatchObject([
-        {
-          call: { callId: "call-1", toolName: "read_inbox" },
-          identity: {
-            person: { authenticator: "test", principalId: "alice", principalType: "user" },
-          },
-          request: {
-            kind: "approval",
-            options: [
-              { id: "approve", label: "Approve" },
-              { id: "deny", label: "Cancel" },
-            ],
-          },
-        },
-      ]);
-      expect(results.approvals[0]?.identity?.person).not.toHaveProperty("attributes");
-      expect(events.map((event) => event.type)).toEqual(["call.started"]);
-    } else {
-      expect(results.approvals).toEqual([]);
-      expect(results.parts[0]?.output).toEqual({
-        type: "error-text",
-        value: expect.stringContaining("can't use their mail access until they confirm it"),
-      });
-      expect(events.map((event) => event.type)).toEqual(["call.started", "call.settled"]);
-    }
-  },
-);
-
 /**
- * The prompt eve asks Alice with when a `gh` call needs her identity after Bob spoke, for a call
- * made with `input` under the agent's `callerConfirmation`.
+ * Runs a `gh` call made with `input` that needs Alice's identity after Bob spoke, under the agent's
+ * `callerConfirmation`, in a session that can ask her when `canAsk`.
  */
-async function identityPrompt(
+async function callNeedingAlice(
   input: Record<string, unknown>,
-  callerConfirmation: "always" | "once" = "always",
-): Promise<string | undefined> {
+  {
+    callerConfirmation = "always",
+    canAsk,
+  }: { readonly callerConfirmation?: "always" | "once"; readonly canAsk: boolean },
+) {
   const alice = {
-    attributes: {},
+    attributes: { team: "T01" },
     authenticator: "test",
     principalId: "alice",
     principalType: "user",
@@ -400,15 +321,18 @@ async function identityPrompt(
     sessionId: "session-1",
     turn: { id: "turn_0", sequence: 0 },
   });
+  const events: import("#protocol/session-event.js").SessionEvent[] = [];
   const results = await contextStorage.run(ctx, () =>
     executeInlineCalls({
       abortSignal: undefined,
       approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
-      canAsk: true,
+      canAsk,
       excludedCallIds: new Set(),
       messages: [],
-      publish: async () => {},
+      publish: async (publication) => {
+        events.push(...eventsOf(publication));
+      },
       toolCalls: [{ input, toolCallId: "call-1", toolName: "gh", type: "tool-call" }],
       tools: new Map([
         [
@@ -418,6 +342,7 @@ async function identityPrompt(
             description: "Run gh.",
             inputSchema: jsonSchema({ type: "object" }),
             label: { start: (input) => String((input as { description: string }).description) },
+            // What a user-scoped token resolves through before it reaches the provider.
             execute: () =>
               resolveConnectionPrincipal("github", {
                 getToken: async () => ({ token: "token" }),
@@ -428,8 +353,51 @@ async function identityPrompt(
       ]),
     }),
   );
-  return results.approvals[0]?.request.prompt;
+  return { events, results };
 }
+
+/** The prompt eve asks Alice with for the `gh` call `callNeedingAlice` makes with `input`. */
+async function identityPrompt(
+  input: Record<string, unknown>,
+  callerConfirmation: "always" | "once" = "always",
+): Promise<string | undefined> {
+  return (await callNeedingAlice(input, { callerConfirmation, canAsk: true })).results.approvals[0]
+    ?.request.prompt;
+}
+
+it("stops and asks the caller for a call refused their token after someone else spoke", async () => {
+  const { events, results } = await callNeedingAlice({ command: "gh pr list" }, { canAsk: true });
+
+  expect(results.parts).toEqual([]);
+  expect(results.approvals).toMatchObject([
+    {
+      call: { callId: "call-1", toolName: "gh" },
+      identity: {
+        person: { authenticator: "test", principalId: "alice", principalType: "user" },
+      },
+      request: {
+        kind: "approval",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Cancel" },
+        ],
+      },
+    },
+  ]);
+  expect(results.approvals[0]?.identity?.person).not.toHaveProperty("attributes");
+  expect(events.map((event) => event.type)).toEqual(["call.started"]);
+});
+
+it("fails a call refused the caller's token after someone else spoke where the session can't ask", async () => {
+  const { events, results } = await callNeedingAlice({ command: "gh pr list" }, { canAsk: false });
+
+  expect(results.approvals).toEqual([]);
+  expect(results.parts[0]?.output).toEqual({
+    type: "error-text",
+    value: expect.stringContaining("can't use their github access until they confirm it"),
+  });
+  expect(events.map((event) => event.type)).toEqual(["call.started", "call.settled"]);
+});
 
 it("names a call that asks for someone's identity by its tool and real input, never by a model-written label", async () => {
   await expect(
