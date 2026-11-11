@@ -216,6 +216,8 @@ async function answers(
     blocked(step.view(), step.session.state)
   ) {
     await step.apply(queueInput(step.view(), compactInput(input)));
+    const hookFailure = await failTurnForEffect(step);
+    if (hookFailure !== undefined) return { ended: hookFailure } as Ended;
     const stopped =
       decided.approved.length === 0 ? undefined : await applyHumanDecisions(step, decided);
     return { ended: stopped ?? (await park(step)) } as Ended;
