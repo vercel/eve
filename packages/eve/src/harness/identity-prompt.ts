@@ -53,7 +53,7 @@ export function identityApprovalRequest(
   const remembered =
     identity.remember === undefined
       ? ""
-      : " Approving also lets later actions use your identity until someone else sends a message.";
+      : " Approving also lets later actions use your identity, on any account, until someone else sends a message after this request.";
   const { confirmed, responder } = context;
   return {
     call: {

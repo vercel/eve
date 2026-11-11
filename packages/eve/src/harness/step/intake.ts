@@ -111,6 +111,11 @@ export interface TurnInput {
   readonly message: HarnessStepInput["message"];
   /** Who sent the message, when a person did: the model is told when the speaker changes. */
   readonly sender?: SessionAuthContext | null;
+  /**
+   * Who spoke last once the message joins: its sender, or in a delegated session the delegating
+   * turn's latest sender. Absent when the input carries no new message.
+   */
+  readonly spokeLast?: SessionAuthContext | null;
 }
 
 /**
@@ -143,14 +148,12 @@ export async function prepareTurnInput(
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
   const continuation = staged !== undefined && isContinuation(step, input);
-  // A delegated session's messages come from the agent that called it, not from a person.
-  const sender =
-    staged !== undefined &&
-    kind === undefined &&
-    !continuation &&
-    step.ctx.get(ParentSessionKey) === undefined
+  const spokeLast =
+    staged !== undefined && kind === undefined && !continuation
       ? readSessionAuth(step.ctx).sender
       : undefined;
+  // A delegated session's messages come from the agent that called it, not from a person.
+  const sender = step.ctx.get(ParentSessionKey) === undefined ? spokeLast : undefined;
   if (staged !== undefined) {
     if (continuation) {
       messages.push(
@@ -178,6 +181,7 @@ export async function prepareTurnInput(
     message: staged as HarnessStepInput["message"],
     messages,
     ...(sender !== undefined && { sender }),
+    ...(spokeLast !== undefined && { spokeLast }),
     storedClientContext,
     turnId,
   };

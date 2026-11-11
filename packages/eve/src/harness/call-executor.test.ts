@@ -391,7 +391,7 @@ it("names a call that asks for someone's identity by its tool and real input, ne
   await expect(
     identityPrompt({ command: "gh repo delete acme/app", description: "List open PRs" }),
   ).resolves.toBe(
-    'Approve Gh with your identity? Approving also lets later actions use your identity until someone else sends a message. It runs with "command": "gh repo delete acme/app", "description": "List open PRs".',
+    'Approve Gh with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. It runs with "command": "gh repo delete acme/app", "description": "List open PRs".',
   );
 });
 

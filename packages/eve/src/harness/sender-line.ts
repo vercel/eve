@@ -14,6 +14,7 @@ import type { Principal } from "#protocol/session-events/envelope.js";
 
 const LAST_SENDER_KEY = "eve.harness.lastSender";
 const PARTICIPANTS_KEY = "eve.harness.participants";
+const UNRECORDED_KEY = "eve.harness.unrecordedSpeakers";
 /** How many people the session remembers, the most recent to speak first to go last. */
 const MAX_PARTICIPANTS = 50;
 /** How many senders' latest messages a local child inherits, and how much of each. */
@@ -24,6 +25,14 @@ export interface TurnMessage {
   readonly from: Principal;
   /** Empty for a message of attachments only. */
   readonly text: string;
+}
+
+/** Who has spoken in the session whom its participants don't record. */
+export interface UnrecordedSpeakers {
+  /** Someone who isn't signed in, whom eve can't name. */
+  readonly anonymous?: true;
+  /** Someone the participants dropped, past the most recent people they keep. */
+  readonly dropped?: true;
 }
 
 interface Sender {
@@ -73,20 +82,26 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
   const last = session.state?.[LAST_SENDER_KEY] as Sender | undefined;
   const recorded = readParticipants(session.state);
   const known = recorded.at(-1) !== undefined && principalOf(recorded.at(-1)!) === next.principal;
-  const participants =
+  const listed =
     next.id === undefined || auth === null || known
       ? undefined
-      : [
-          ...recorded.filter((person) => principalOf(person) !== next.principal),
-          personOf(auth),
-        ].slice(-MAX_PARTICIPANTS);
-  if (last?.principal === next.principal && participants === undefined) return session;
+      : [...recorded.filter((person) => principalOf(person) !== next.principal), personOf(auth)];
+  const participants = listed?.slice(-MAX_PARTICIPANTS);
+  const before = readUnrecorded(session.state);
+  const unrecorded: UnrecordedSpeakers = {
+    ...before,
+    ...(next.id === undefined && { anonymous: true }),
+    ...(listed !== undefined && listed.length > MAX_PARTICIPANTS && { dropped: true }),
+  };
+  const noted = unrecorded.anonymous !== before.anonymous || unrecorded.dropped !== before.dropped;
+  if (last?.principal === next.principal && participants === undefined && !noted) return session;
   return {
     ...session,
     state: {
       ...session.state,
       [LAST_SENDER_KEY]: next,
       ...(participants !== undefined && { [PARTICIPANTS_KEY]: participants }),
+      ...(noted && { [UNRECORDED_KEY]: unrecorded }),
     },
   };
 }
@@ -98,15 +113,25 @@ export function rememberSender<T extends { readonly state?: SessionStateMap }>(
 export function forgetSender<T extends { readonly state?: SessionStateMap }>(session: T): T {
   if (
     session.state?.[LAST_SENDER_KEY] === undefined &&
-    session.state?.[PARTICIPANTS_KEY] === undefined
+    session.state?.[PARTICIPANTS_KEY] === undefined &&
+    session.state?.[UNRECORDED_KEY] === undefined
   )
     return session;
-  const { [LAST_SENDER_KEY]: _last, [PARTICIPANTS_KEY]: _participants, ...state } = session.state;
+  const {
+    [LAST_SENDER_KEY]: _last,
+    [PARTICIPANTS_KEY]: _participants,
+    [UNRECORDED_KEY]: _unrecorded,
+    ...state
+  } = session.state;
   return { ...session, state };
 }
 
 function readParticipants(state: SessionStateMap | undefined): readonly SessionPerson[] {
   return (state?.[PARTICIPANTS_KEY] as readonly SessionPerson[] | undefined) ?? [];
+}
+
+function readUnrecorded(state: SessionStateMap | undefined): UnrecordedSpeakers {
+  return (state?.[UNRECORDED_KEY] as UnrecordedSpeakers | undefined) ?? {};
 }
 
 // The participants of the session a step runs, for a tool the step runs. Never serialized: the
@@ -137,6 +162,17 @@ export function sessionParticipants(
 ): readonly SessionPerson[] | undefined {
   const state = ctx === undefined ? undefined : liveParticipants.get(ctx);
   return state === undefined ? undefined : participantsOf(state(), ctx);
+}
+
+/**
+ * Who has spoken in the running step's session whom its participants don't record, or nothing
+ * outside a session step.
+ */
+export function unrecordedSpeakers(
+  ctx: ContextReader | undefined = contextStorage.getStore(),
+): UnrecordedSpeakers {
+  const state = ctx === undefined ? undefined : liveParticipants.get(ctx);
+  return readUnrecorded(state?.());
 }
 
 export function turnMessages(

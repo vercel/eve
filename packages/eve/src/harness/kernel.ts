@@ -251,7 +251,8 @@ async function turnInput(
   if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
     return { ended: { next: null, session: step.session } } as Ended;
   }
-  if (turn.sender !== undefined) await step.apply(endCallerApprovals(step.view(), turn.sender));
+  if (turn.spokeLast !== undefined)
+    await step.apply(endCallerApprovals(step.view(), turn.spokeLast));
   return turn;
 }
 

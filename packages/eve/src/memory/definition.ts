@@ -6,7 +6,11 @@ import type { FactOf } from "#protocol/session-events/facts.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
-import { principalOf as personKey, type SessionPerson } from "#context/session-auth.js";
+import {
+  ANONYMOUS_PRINCIPAL,
+  principalOf as personKey,
+  type SessionPerson,
+} from "#context/session-auth.js";
 import type { SessionFrame } from "#dynamic/definition.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf, latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
@@ -45,6 +49,7 @@ import {
   sentBy,
   sessionParticipants,
   turnMessages,
+  unrecordedSpeakers,
 } from "#harness/sender-line.js";
 import { toolsDefinition } from "#definitions/tools.js";
 import type { MemoryToolsContext } from "#public/memory/index.js";
@@ -274,7 +279,12 @@ async function captureBeforeCompaction(
     const context = commitScopeContext(ctx);
     const scope = await resolveMemoryScope(memory, context);
     if (scope === null) return;
-    // The history holds the words of everyone who has spoken in it.
+    // The history holds the words of everyone who has spoken in it. eve can't resolve a scope for
+    // someone it doesn't record: a person who isn't signed in, unless the caller isn't either,
+    // or one the participants dropped.
+    const unrecorded = unrecordedSpeakers();
+    const callerAnonymous = personKey(context.session.auth.current) === ANONYMOUS_PRINCIPAL;
+    if (unrecorded.dropped === true || (unrecorded.anonymous === true && !callerAnonymous)) return;
     if (!(await sharedWith(memory, context, scope, sessionParticipants() ?? []))) return;
     const turn = started.data.turnId === undefined ? null : activeTurn(messages);
     const id = [

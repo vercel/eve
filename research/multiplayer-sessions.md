@@ -197,7 +197,7 @@ needs, with `audience.principalIds` naming them.
 
 - The prompt names the call by its tool's title, never by a label the model wrote. In order, it
   says what is asked and of whom; for the caller, that approving also lets later actions use
-  their identity until someone else sends a message; the latest
+  their identity, on any account, until someone else sends a message after the request; the latest
   message in the turn from a named sender other than that person, or in a local child from the
   turn that delegated to it; and every top-level input field. Each value, and each item inside
   one, is cut on its own after escaping, with a note of how much is hidden; keys are quoted.

@@ -280,8 +280,8 @@ export async function executeGitHubShell(
   }
   // An app token is nobody's own, so `authorize` is the only check on who asks for the command.
   // Another person's message can ask for it in the caller's turn, so they must pass it too. A
-  // user token is its owner's own: `ctx.getToken` hands it out only once they spoke last or
-  // approved the call.
+  // user token is its owner's own: `ctx.getToken` hands it out only once they spoke last, or
+  // approved this call or, for the caller, an earlier one since anyone else spoke.
   if (
     config.principalType !== "user" &&
     !isSamePerson(auth, sender) &&

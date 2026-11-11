@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { forgetSender, participantsOf, rememberSender, senderLine } from "#harness/sender-line.js";
+import { ContextContainer } from "#context/container.js";
+import {
+  enterParticipants,
+  forgetSender,
+  participantsOf,
+  rememberSender,
+  senderLine,
+  unrecordedSpeakers,
+} from "#harness/sender-line.js";
 
 function user(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
@@ -79,5 +87,24 @@ describe("participants", () => {
     expect(kept).toHaveLength(50);
     expect(kept[0]).toBe("person-2");
     expect(kept.at(-1)).toBe("person-51");
+  });
+
+  it("notes who spoke whom the participants don't record, until the conversation is cleared", () => {
+    const ctx = new ContextContainer();
+    let session = [user("alice"), null].reduce(
+      rememberSender,
+      {} as {
+        state?: Record<string, unknown>;
+      },
+    );
+    enterParticipants(ctx, () => session.state);
+    expect(unrecordedSpeakers(ctx)).toEqual({ anonymous: true });
+
+    const people = Array.from({ length: 50 }, (_, index) => user(`person-${index}`));
+    session = people.reduce(rememberSender, session);
+    expect(unrecordedSpeakers(ctx)).toEqual({ anonymous: true, dropped: true });
+
+    session = forgetSender(session);
+    expect(unrecordedSpeakers(ctx)).toEqual({});
   });
 });

@@ -1282,24 +1282,39 @@ describe("calls in flight", () => {
     ]);
   });
 
-  // Bob's words reach memory only in a scope that is his as much as Alice's, both at the end of
-  // the turn he joined and before a compaction rewrites the history that holds them.
+  // Another person's words reach memory only in a scope that is theirs as much as Alice's, both at
+  // the end of the turn they joined and before a compaction rewrites the history that holds them.
+  // eve can't resolve a scope for someone who isn't signed in, so their words never reach it.
   it.each([
     {
       agent: "edge-memory-own",
       captured: [/^alice:.*second thing/u],
       compacted: 0,
-      name: "a scope of her own",
+      name: "Bob joined to Alice's memory only in a scope of her own",
       scope: ((ctx) => ctx.session.auth.current?.principalId ?? null) as MemoryScopeDefinition,
+      sender: BOB,
     },
     {
       agent: "edge-memory-shared",
       captured: [/^team:.*staging/u, /^team:.*second thing/u],
       compacted: 1,
-      name: "a scope they share",
+      name: "Bob joined to Alice's memory only in a scope they share",
       scope: "team",
+      sender: BOB,
     },
-  ])("saves a turn Bob joined to Alice's memory only in $name", async (row) => {
+    {
+      agent: "edge-memory-anonymous",
+      captured: [/^team:.*second thing/u],
+      compacted: 0,
+      name: "someone who isn't signed in joined to no scope, even one they could share",
+      scope: "team",
+      sender: {
+        ...BOB,
+        principalId: "anon-1",
+        principalType: "anonymous" as const,
+      },
+    },
+  ])("saves a turn $name", async (row) => {
     const started = gate();
     const release = gate();
     const captured: string[] = [];
@@ -1339,11 +1354,11 @@ describe("calls in flight", () => {
       async (session) => {
         await started.wait;
         try {
-          await session.send("Use staging instead.", BOB);
+          await session.send("Use staging instead.", row.sender);
         } finally {
           release.open();
         }
-        await session.next("the turn Bob joined");
+        await session.next("the turn someone else joined");
         await session.send("Look up the second thing.");
         await session.next("Alice's next turn");
         await session.control("compact");
