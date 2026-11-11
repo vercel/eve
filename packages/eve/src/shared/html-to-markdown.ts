@@ -9,8 +9,10 @@
  *
  * Fetched HTML is untrusted and can be megabytes long, so parsing is a single
  * forward pass, every scan resumes past the previous match, and element
- * nesting is capped. Work stays linear in the input size and rendering
- * recursion stays bounded no matter how the markup is shaped.
+ * nesting is capped. Quote and list prefixes stop nesting at a smaller depth,
+ * so each output line is prefixed a bounded number of times. Work stays linear
+ * in the input size and rendering recursion stays bounded no matter how the
+ * markup is shaped.
  */
 
 interface ElementNode {
@@ -18,12 +20,17 @@ interface ElementNode {
   /** Raw attribute source, parsed only for the few elements that need it. */
   readonly attrs: string;
   readonly children: Node[];
+  /** Whether a block element is nested anywhere inside. */
+  hasBlock: boolean;
 }
 
 type Node = ElementNode | string;
 
 /** Deeper elements are flattened into their ancestor at the cap. */
 const MAX_DEPTH = 128;
+
+/** Quotes and lists nested deeper than this add no further prefix or indent. */
+const MAX_PREFIX_DEPTH = 8;
 
 const VOID_ELEMENTS = new Set([
   "area",
@@ -115,7 +122,7 @@ const LIST_ELEMENTS = new Set(["dir", "menu", "ol", "ul"]);
  * code blocks, `*` emphasis, and `---` rules.
  */
 export function convertHtmlToMarkdown(html: string): string {
-  return renderBlocks(parseHtml(html).children).join("\n\n");
+  return renderBlocks(parseHtml(html).children, 0, []).join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +130,7 @@ export function convertHtmlToMarkdown(html: string): string {
 // ---------------------------------------------------------------------------
 
 function parseHtml(html: string): ElementNode {
-  const root: ElementNode = { name: "#root", attrs: "", children: [] };
+  const root: ElementNode = { name: "#root", attrs: "", children: [], hasBlock: false };
   const stack: ElementNode[] = [root];
   let pos = 0;
 
@@ -172,15 +179,18 @@ function parseHtml(html: string): ElementNode {
 
     if (isClosing) {
       if (name === "br") {
-        current().children.push({ name, attrs: "", children: [] });
+        current().children.push({ name, attrs: "", children: [], hasBlock: false });
       } else {
         closeElement(stack, name);
       }
       continue;
     }
 
+    const selfClosing = source.charCodeAt(source.length - 1) === 47;
     if (SKIPPED_ELEMENTS.has(name)) {
-      pos = skipRawText(html, name, pos);
+      // Foreign elements honor `/>`; HTML elements such as `<script/>` ignore it.
+      const foreign = name === "svg" || name === "math";
+      if (!(foreign && selfClosing)) pos = skipRawText(html, name, pos);
       continue;
     }
 
@@ -189,10 +199,11 @@ function parseHtml(html: string): ElementNode {
       name,
       attrs: source.slice(nameMatch[0].length),
       children: [],
+      hasBlock: false,
     };
     current().children.push(element);
+    if (BLOCK_ELEMENTS.has(name)) markBlockAncestors(stack);
 
-    const selfClosing = source.charCodeAt(source.length - 1) === 47;
     if (!VOID_ELEMENTS.has(name) && !selfClosing && stack.length < MAX_DEPTH) {
       stack.push(element);
     }
@@ -233,6 +244,13 @@ function skipRawText(html: string, name: string, from: number): number {
   return end === -1 ? html.length : end + 1;
 }
 
+/** Marks open elements as holding block content. Each is marked once, so total work is linear. */
+function markBlockAncestors(stack: ElementNode[]): void {
+  for (let i = stack.length - 1; i > 0 && !stack[i]!.hasBlock; i--) {
+    stack[i]!.hasBlock = true;
+  }
+}
+
 function closeElement(stack: ElementNode[], name: string): void {
   // Stack depth is capped, so this search is bounded.
   for (let i = stack.length - 1; i > 0; i--) {
@@ -254,6 +272,8 @@ function closeImplicitly(stack: ElementNode[], name: string): void {
     closeWithin(stack, ["tr"], new Set(["table", "thead", "tbody", "tfoot"]));
   } else if (name === "td" || name === "th") {
     closeWithin(stack, ["td", "th"], new Set(["tr", "table"]));
+  } else if (name === "thead" || name === "tbody" || name === "tfoot") {
+    closeWithin(stack, ["thead", "tbody", "tfoot"], new Set(["table"]));
   } else if (BLOCK_ELEMENTS.has(name) && stack[stack.length - 1]!.name === "p") {
     stack.pop();
   }
@@ -288,30 +308,41 @@ function readAttribute(attrs: string, wanted: string): string | undefined {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/** Renders nodes as Markdown blocks, grouping runs of inline content into paragraphs. */
-function renderBlocks(nodes: readonly Node[]): string[] {
-  const blocks: string[] = [];
+/**
+ * Appends nodes to `out` as Markdown blocks, grouping runs of inline content
+ * into paragraphs. `depth` counts the quotes and list items around the nodes.
+ */
+function renderBlocks(nodes: readonly Node[], depth: number, out: string[]): string[] {
   let inline: Node[] = [];
 
   const flush = () => {
     const text = normalizeInline(renderInline(inline));
-    if (text) blocks.push(text);
+    if (text) out.push(text);
     inline = [];
   };
 
   for (const node of nodes) {
-    if (typeof node === "string" || !BLOCK_ELEMENTS.has(node.name)) {
+    if (typeof node === "string" || !rendersAsBlock(node)) {
       inline.push(node);
       continue;
     }
     flush();
-    blocks.push(...renderBlockElement(node));
+    renderBlockElement(node, depth, out);
   }
   flush();
-  return blocks;
+  return out;
 }
 
-function renderBlockElement(node: ElementNode): string[] {
+/**
+ * Inline elements that wrap block content, such as custom elements and
+ * `<span>`, pass their children through so headings, lists, and code inside
+ * keep their structure. Links stay inline to keep their target.
+ */
+function rendersAsBlock(node: ElementNode): boolean {
+  return BLOCK_ELEMENTS.has(node.name) || (node.hasBlock && node.name !== "a");
+}
+
+function renderBlockElement(node: ElementNode, depth: number, out: string[]): void {
   switch (node.name) {
     case "h1":
     case "h2":
@@ -320,51 +351,66 @@ function renderBlockElement(node: ElementNode): string[] {
     case "h5":
     case "h6": {
       const text = normalizeInline(renderInline(node.children)).replace(/\n+/g, " ");
-      return text ? [`${"#".repeat(Number(node.name[1]))} ${text}`] : [];
+      if (text) out.push(`${"#".repeat(Number(node.name[1]))} ${text}`);
+      return;
     }
     case "hr":
-      return ["---"];
+      out.push("---");
+      return;
     case "pre":
-      return [renderCodeBlock(node)];
+      out.push(renderCodeBlock(node));
+      return;
     case "blockquote": {
-      const content = renderBlocks(node.children).join("\n\n");
-      return content ? [prefixLines(content, "> ", ">")] : [];
+      if (depth >= MAX_PREFIX_DEPTH) {
+        renderBlocks(node.children, depth, out);
+        return;
+      }
+      const content = renderBlocks(node.children, depth + 1, []).join("\n\n");
+      if (content) out.push(prefixLines(content, "> ", ">"));
+      return;
     }
     case "ol":
     case "ul":
     case "dir":
-    case "menu": {
-      const list = renderList(node);
-      return list ? [list] : [];
-    }
-    case "table": {
-      const table = renderTable(node);
-      return table ? [table] : [];
-    }
+    case "menu":
+      renderList(node, depth, out);
+      return;
+    case "table":
+      renderTable(node, depth, out);
+      return;
     default:
-      return renderBlocks(node.children);
+      renderBlocks(node.children, depth, out);
   }
 }
 
-function renderList(node: ElementNode): string {
-  const ordered = node.name === "ol";
-  const start = ordered ? Number.parseInt(readAttribute(node.attrs, "start") ?? "1", 10) : 1;
-  let index = Number.isFinite(start) ? start : 1;
+function renderList(node: ElementNode, depth: number, out: string[]): void {
+  const start = node.name === "ol" ? readAttribute(node.attrs, "start") : undefined;
+  // Markdown list numbers have at most nine digits.
+  let index = start !== undefined && /^\d{1,9}$/.test(start) ? Number(start) : 1;
   const items: string[] = [];
 
   for (const child of node.children) {
     // Text between items is usually whitespace; anything else becomes its own item.
-    const content =
-      typeof child !== "string" && child.name === "li"
-        ? renderBlocks(child.children).join("\n")
-        : renderBlocks([child]).join("\n");
-    if (!content) continue;
+    const content = typeof child !== "string" && child.name === "li" ? child.children : [child];
+    const marker = node.name === "ol" ? `${index}. ` : "- ";
 
-    const marker = ordered ? `${index++}. ` : "- ";
-    const indent = " ".repeat(marker.length);
-    items.push(marker + prefixLines(content, indent, "", true));
+    if (depth >= MAX_PREFIX_DEPTH) {
+      // Too deep to indent further: the item's blocks follow its marker unindented.
+      const first = out.length;
+      renderBlocks(content, depth, out);
+      if (out.length > first) {
+        out[first] = marker + out[first];
+        index++;
+      }
+      continue;
+    }
+
+    const text = renderBlocks(content, depth + 1, []).join("\n");
+    if (!text) continue;
+    index++;
+    items.push(marker + prefixLines(text, " ".repeat(marker.length), "", true));
   }
-  return items.join("\n");
+  if (items.length > 0) out.push(items.join("\n"));
 }
 
 function renderCodeBlock(node: ElementNode): string {
@@ -381,28 +427,22 @@ function renderCodeBlock(node: ElementNode): string {
   return `${fence}${language}\n${text}\n${fence}`;
 }
 
-function renderTable(node: ElementNode): string {
-  const rows: string[][] = [];
-  const blocks: string[] = [];
+function renderTable(node: ElementNode, depth: number, out: string[]): void {
+  const rows: ElementNode[][] = [];
+  const captions: ElementNode[] = [];
 
   const visit = (children: readonly Node[]) => {
     for (const child of children) {
       if (typeof child === "string") continue;
       if (child.name === "tr") {
         rows.push(
-          child.children
-            .filter(
-              (cell): cell is ElementNode =>
-                typeof cell !== "string" && (cell.name === "td" || cell.name === "th"),
-            )
-            .map((cell) =>
-              normalizeInline(renderInline(cell.children))
-                .replace(/\n+/g, " ")
-                .replace(/\|/g, "\\|"),
-            ),
+          child.children.filter(
+            (cell): cell is ElementNode =>
+              typeof cell !== "string" && (cell.name === "td" || cell.name === "th"),
+          ),
         );
       } else if (child.name === "caption") {
-        blocks.push(...renderBlocks(child.children));
+        captions.push(child);
       } else if (child.name === "thead" || child.name === "tbody" || child.name === "tfoot") {
         visit(child.children);
       }
@@ -410,18 +450,32 @@ function renderTable(node: ElementNode): string {
   };
   visit(node.children);
 
+  // A Markdown table cell holds one line, so layout tables and code tables
+  // render as plain blocks to keep their structure.
+  if (rows.some((row) => row.some((cell) => cell.hasBlock))) {
+    renderBlocks(node.children, depth, out);
+    return;
+  }
+
+  const blocks: string[] = [];
+  for (const caption of captions) renderBlocks(caption.children, depth, blocks);
+
   const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
   if (width > 0) {
     const line = (cells: readonly string[]) =>
       `| ${Array.from({ length: width }, (_, i) => cells[i] ?? "").join(" | ")} |`;
-    const [header, ...body] = rows;
+    const [header, ...body] = rows.map((row) =>
+      row.map((cell) =>
+        normalizeInline(renderInline(cell.children)).replace(/\n+/g, " ").replace(/\|/g, "\\|"),
+      ),
+    );
     blocks.push(
       [line(header!), line(Array.from({ length: width }, () => "---")), ...body.map(line)].join(
         "\n",
       ),
     );
   }
-  return blocks.join("\n\n");
+  if (blocks.length > 0) out.push(blocks.join("\n\n"));
 }
 
 /** Renders inline Markdown. Block elements met here contribute their text. */

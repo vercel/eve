@@ -31,6 +31,7 @@ describe("convertHtmlToMarkdown", () => {
       "<script>if (a < b) alert('</p>')</script>",
       "<noscript>Enable JS</noscript>",
       "<svg><text>icon</text></svg>",
+      "<svg viewBox='0 0 1 1'/>",
       "<!-- comment -->",
       "<p>Visible content.</p>",
       "</body></html>",
@@ -57,6 +58,27 @@ describe("convertHtmlToMarkdown", () => {
       "- One\n- Two\n  - Nested",
     );
     expect(convertHtmlToMarkdown('<ol start="3"><li>Three<li>Four</ol>')).toBe("3. Three\n4. Four");
+    expect(convertHtmlToMarkdown('<ol start="100000000000"><li>One</ol>')).toBe("1. One");
+  });
+
+  it("stops nesting quote and list prefixes past eight levels", () => {
+    expect(convertHtmlToMarkdown("<blockquote>".repeat(12) + "x<br>y")).toBe(
+      `${"> ".repeat(8)}x\n${"> ".repeat(8)}y`,
+    );
+    expect(convertHtmlToMarkdown("<ul><li>".repeat(10) + "a<br>b")).toBe(
+      `${"- ".repeat(10)}a\n${"  ".repeat(8)}b`,
+    );
+  });
+
+  it("keeps block structure inside custom and inline elements", () => {
+    expect(
+      convertHtmlToMarkdown(
+        "<turbo-frame><h1>Title</h1><span><ul><li>a<li>b</ul></span><pre><code>x\n  y</code></pre></turbo-frame>",
+      ),
+    ).toBe("# Title\n\n- a\n- b\n\n```\nx\n  y\n```");
+    expect(convertHtmlToMarkdown('<a href="/post"><h2>Title</h2><p>Summary</p></a>')).toBe(
+      "[Title Summary](/post)",
+    );
   });
 
   it("converts fenced code blocks with language and preserved whitespace", () => {
@@ -74,12 +96,17 @@ describe("convertHtmlToMarkdown", () => {
     ).toBe("> One\n>\n> Two\n\n---\n\nAfter");
   });
 
-  it("converts simple tables", () => {
+  it("converts simple tables and renders tables with block content as blocks", () => {
     expect(
       convertHtmlToMarkdown(
-        "<table><thead><tr><th>Name<th>Value</thead><tbody><tr><td>a|b<td>1<tr><td>c</table>",
+        "<table><thead><tr><th>Name<th>Value<tbody><tr><td>a|b<td>1<tr><td>c</table>",
       ),
     ).toBe("| Name | Value |\n| --- | --- |\n| a\\|b | 1 |\n| c |  |");
+    expect(
+      convertHtmlToMarkdown(
+        "<table><tr><td>1<br>2</td><td><pre>def f():\n  return 1</pre></td></tr></table>",
+      ),
+    ).toBe("1\n2\n\n```\ndef f():\n  return 1\n```");
   });
 
   it("decodes entities", () => {
@@ -108,6 +135,9 @@ describe("convertHtmlToMarkdown", () => {
       "&#".repeat(200_000),
       "<table>" + "<tr><td>x".repeat(100_000) + "</table>",
       "<pre>" + "`".repeat(200_000) + "</pre>",
+      "<blockquote>".repeat(127) + "x<br>".repeat(400_000),
+      '<ol start="999999999"><li>'.repeat(63) + "x<br>".repeat(400_000),
+      "<div>" + "<p>x</p>".repeat(200_000),
     ];
     for (const html of inputs) {
       const started = performance.now();
