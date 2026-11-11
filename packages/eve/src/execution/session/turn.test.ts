@@ -2023,6 +2023,71 @@ describe("SessionExecution checkpoints", () => {
     const [cancelled] = vi.mocked(cancelTasksStep).mock.invocationCallOrder;
     expect(announced).toBeLessThan(cancelled!);
   });
+
+  it("keeps a queued message sent once a turn stopped waiting on a request for the next turn", async () => {
+    const sessionState = state("");
+    const person = (principalId: string) => ({
+      attributes: {},
+      authenticator: "slack",
+      principalId,
+      principalType: "user" as const,
+    });
+    const message = (principalId: string, text: string): DeliverHookPayload => ({
+      auth: person(principalId),
+      kind: "deliver",
+      payloads: [{ message: text }],
+      turnPolicy: "queue",
+    });
+    // Bob and Carol write while the step that asks for the approval runs.
+    const arrived: SessionInboxPayload[] = [
+      message("BOB", "Use staging."),
+      message("CAROL", "Bump the version."),
+    ];
+    const inbox: SessionInbox = { ...idleInbox(), drain: () => arrived.splice(0) };
+    const queue = new SessionInputQueue([]);
+    const inputs: TurnStepInput["input"][] = [];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          attemptIds: [],
+          on: "interaction",
+          requestIds: ["approval-1"],
+          serializedContext: input.serializedContext,
+          sessionState,
+        })),
+      )
+      .mockImplementation(
+        turnStepWork(async (input) => {
+          inputs.push(input.input);
+          // Dave writes once Bob's message joined the turn and it no longer waits on the approval.
+          if (inputs.length === 1) arrived.push(message("DAVE", "Add the changelog."));
+          return input.input?.inputOnly === true
+            ? { action: "continue", serializedContext: input.serializedContext, sessionState }
+            : {
+                action: "done",
+                output: "done",
+                serializedContext: input.serializedContext,
+                sessionState,
+              };
+        }),
+      );
+
+    await expect(
+      createExecution({ capabilities: { requestInput: true }, inbox, queue, sessionState }).runTurn(
+        {
+          delivery: { auth: person("ALICE"), kind: "deliver", payloads: [{ message: "Deploy." }] },
+        },
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(inputs).toEqual([
+      { delivery: expect.objectContaining({ auth: person("BOB") }), inputOnly: true },
+      { delivery: expect.objectContaining({ auth: person("CAROL") }) },
+    ]);
+    expect(queue.takeNext()).toMatchObject({ delivery: { auth: person("DAVE") } });
+  });
 });
 
 /** The context key the mocked publishing steps append to, as a hook's state write would. */

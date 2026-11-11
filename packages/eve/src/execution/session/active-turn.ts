@@ -69,7 +69,8 @@ export class ActiveTurn {
   private steeringController: AbortController;
   /**
    * How a wait admitted the messages `takeSteering` takes one person at a time, while some still
-   * wait: they joined together, so the rest join as the first did, even once the wait is over.
+   * wait: they joined together, so the rest join as the first did, even once the wait is over. A
+   * message admitted after that follows its own `turnPolicy`.
    */
   private admittedWith: SteeringOptions | undefined;
   /** The delegated caller of the latest message the turn read. */
@@ -165,7 +166,9 @@ export class ActiveTurn {
       if (routed.kind === "turn") delivery = routed.delivery;
     }
     this.admittedWith =
-      delivery !== undefined && this.hasSteeringWaiting(options) ? options : undefined;
+      delivery !== undefined && this.hasSteeringWaiting(options)
+        ? { ...options, heldUntil: options?.heldUntil ?? this.input.queue.nextAdmission }
+        : undefined;
     this.resetSteering();
     if (delivery === undefined) return undefined;
     if (delivery.caller !== undefined) this.caller = delivery.caller;

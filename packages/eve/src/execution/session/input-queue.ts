@@ -291,6 +291,11 @@ export interface SteeringOptions {
    */
   readonly heldSince?: number;
   /**
+   * The wait ended before this admission sequence: later messages follow their own `turnPolicy`
+   * again, while those admitted during the wait still join.
+   */
+  readonly heldUntil?: number;
+  /**
    * An open request takes its answer before any message, such as the budget prompt: only the
    * turn's caller's messages join it, and anyone else's waits for its own turn.
    */
@@ -339,7 +344,10 @@ function steers(
   turn: SteeringTurn,
   options: SteeringOptions | undefined,
 ): boolean {
-  const awaitsPerson = options?.heldSince !== undefined && entry.sequence >= options.heldSince;
+  const awaitsPerson =
+    options?.heldSince !== undefined &&
+    entry.sequence >= options.heldSince &&
+    entry.sequence < (options.heldUntil ?? Infinity);
   return (
     isSteeringDelivery(entry.delivery, turn, awaitsPerson) &&
     (options?.callerOnly !== true || isCallerDelivery(entry.delivery, turn))
