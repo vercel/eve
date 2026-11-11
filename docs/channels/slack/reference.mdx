@@ -87,7 +87,7 @@ eve drops the app's own messages before any hook runs. Other bots' messages reac
 
 Hooks don't post anything. eve still acknowledges the message, shows progress, and posts the reply. To change what the agent posts, add [renderers](#customize-rendering).
 
-`onInteraction(action, ctx)` handles clicks on your own buttons and selects (`block_actions`). Clicks on eve's approval and question controls go to `onAnswers(ctx, submission)` instead. To open a modal from a button, pass `action.triggerId` to `ctx.slack.request("views.open", { trigger_id, view })` within about 3 seconds. eve adds the clicking user's Slack ID to the model message.
+`onInteraction(action, ctx)` handles clicks on your own buttons and selects (`block_actions`). Clicks on eve's approval and question controls go to `onAnswers(ctx, submission)` instead. To open a modal from a button, pass `action.triggerId` to `ctx.slack.request("views.open", { trigger_id, view })` within about 3 seconds. To replace or delete the message the click came from, POST to `action.responseUrl`, for example `{ "delete_original": true }`. That is the only way to change an ephemeral message. eve adds the clicking user's Slack ID to the model message.
 
 `onShortcut(shortcut, ctx)` handles message and global shortcuts configured under **Interactivity & Shortcuts**. It receives the callback ID, user, workspace, and trigger ID, plus the message and channel for a message shortcut.
 

@@ -136,6 +136,7 @@ export function parseBlockActionsPayload(
       messageTs: message?.ts,
       triggerId: typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined,
       label: extractActionLabel(a),
+      responseUrl: typeof rawBody.response_url === "string" ? rawBody.response_url : undefined,
       user,
     })),
     channelId: channel,
@@ -166,6 +167,7 @@ function parseSharedBlockActionsPayload(
       messageTs: body.messageTs,
       triggerId: body.triggerId,
       label: action.label,
+      responseUrl: body.responseUrl,
       user: {
         id: action.user?.id ?? body.userId,
         username: action.user?.username,
