@@ -703,6 +703,7 @@ describe("compaction state: prompt measurement", () => {
       {},
       {
         inputTokens: 186_000,
+        modelId: "model-a",
         promptMessageCount: 10,
         promptMessages,
         requestEnvelopeTokens: envelope,
@@ -721,7 +722,7 @@ describe("compaction state: prompt measurement", () => {
   it("keeps the previous ratio when the measurement has no estimate", () => {
     const next = withPromptMeasurement(
       { estimateRatio: 1.2 },
-      { inputTokens: 186_000, promptMessageCount: 10 },
+      { inputTokens: 186_000, modelId: "model-a", promptMessageCount: 10 },
     );
 
     expect(next.estimateRatio).toBe(1.2);
@@ -752,6 +753,7 @@ describe("compaction state: prompt measurement", () => {
     });
     const measurement = {
       inputTokens: 130_000,
+      modelId: "model-a",
       promptMessageCount: 6,
       promptMessages: [],
       requestEnvelopeTokens: 100_000,
@@ -768,7 +770,7 @@ describe("compaction state: prompt measurement", () => {
   it("drops the last stage when the first call after a rewrite reports no input tokens", () => {
     let state = withoutPromptMeasurement({ estimateRatio: 1.3, lastStage: "tail" });
     for (let call = 0; call < 6; call += 1) {
-      state = withPromptMeasurement(state, {});
+      state = withPromptMeasurement(state, { modelId: "model-a" });
     }
 
     expect(state.lastStage).toBeUndefined();
