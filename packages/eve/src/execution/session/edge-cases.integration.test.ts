@@ -42,6 +42,7 @@ import { failure } from "#protocol/session-projection/selectors.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
+import { defineMemory } from "#public/memory/index.js";
 import { DENY_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
 import {
@@ -351,6 +352,8 @@ async function withSession(
     readonly model: LanguageModel;
     readonly modelCallsPerStep?: number;
     readonly hooks?: Readonly<Record<string, HookDefinition>>;
+    /** Other agent files, by their path under `agent/`. */
+    readonly modules?: Readonly<Record<string, unknown>>;
     readonly parent?: SessionParent;
     readonly sessionUsage?: SessionUsageLimit;
     /** Framework tools the agent disables, such as `agent`. */
@@ -377,6 +380,10 @@ async function withSession(
       ...Object.entries(options.hooks ?? {}).map(([slug, hook]) => ({
         loadNamespace: async () => ({ default: hook }),
         logicalPath: `hooks/${slug}.ts`,
+      })),
+      ...Object.entries(options.modules ?? {}).map(([logicalPath, definition]) => ({
+        loadNamespace: async () => ({ default: definition }),
+        logicalPath,
       })),
       ...(options.disabledTools ?? []).map((name) => ({
         loadNamespace: async () => ({ default: disableTool() }),
@@ -1273,6 +1280,61 @@ describe("calls in flight", () => {
       "Once there was a dragon.",
       "The end.",
     ]);
+  });
+
+  // What Bob says in Alice's turn doesn't reach a memory scope of Alice's own.
+  it("saves nothing of a turn Bob joined to Alice's own memory", async () => {
+    const started = gate();
+    const release = gate();
+    const captured: string[] = [];
+    const { events } = await withSession(
+      "edge-memory-own",
+      {
+        message: "Look up the first thing.",
+        model: scriptedModel(({ results }) =>
+          results.length === 0 ? [{ toolName: "lookup" }] : "Done.",
+        ),
+        modules: {
+          "memory/notes.ts": defineMemory({
+            provider: {
+              capture: {
+                "turn.completed": ({ memory, turn }) =>
+                  void captured.push(`${String(memory.scope.value)}:${JSON.stringify(turn.input)}`),
+              },
+              recall: { "turn.started": () => null },
+            },
+            scope: (ctx) => ctx.session.auth.current?.principalId ?? null,
+          }),
+        },
+        tools: [
+          {
+            name: "lookup",
+            execute: async () => {
+              started.open();
+              await release.wait;
+              return "Found.";
+            },
+          },
+        ],
+      },
+      async (session) => {
+        await started.wait;
+        try {
+          await session.send("Use staging instead.", BOB);
+        } finally {
+          release.open();
+        }
+        await session.next("the turn Bob joined");
+        await session.send("Look up the second thing.");
+        await session.next("Alice's next turn");
+        await vi.waitFor(() => expect(captured.join()).toContain("second thing"), {
+          timeout: 10_000,
+        });
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    expect(captured).toEqual([expect.stringMatching(/^alice:.*second thing/u)]);
   });
 });
 
