@@ -144,6 +144,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "label",
       "auth",
       "description",
+      "enabled",
       "execute",
       "inputSchema",
       "approval",
@@ -161,6 +162,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
+  if (record.enabled !== undefined) expectFunction(record.enabled, message);
   // A workflow tool's entry point is its executor; the runtime loads the module for its hooks.
   const hasExecute = workflow !== undefined || record.execute !== undefined;
   if (!hasExecute && behavior?.handling?.kind !== "dispatch") {

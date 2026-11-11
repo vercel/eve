@@ -131,7 +131,9 @@ export async function resolveToolDefinition(
 type LabelCallbacks = Exclude<NonNullable<ResolvedToolDefinition["label"]>, false>;
 
 type OptionalResolvedFields = {
-  -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [
+    K in "label" | "approval" | "enabled" | "endsTurn" | "toModelOutput"
+  ]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -179,6 +181,13 @@ function extractOptionalHooks(
       record.approval,
       describe(definition, "to provide a valid approval definition"),
     );
+  }
+
+  if (record.enabled !== undefined) {
+    optional.enabled = expectFunction(
+      record.enabled,
+      describe(definition, "to provide enabled as a function"),
+    ) as ResolvedToolDefinition["enabled"];
   }
 
   if (record.endsTurn !== undefined) {

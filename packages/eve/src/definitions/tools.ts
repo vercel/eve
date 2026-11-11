@@ -31,12 +31,32 @@ import {
 } from "./definition.js";
 
 /**
- * The agent's `defineTool()` files: the same tools in every session, so they keep nothing. The step
- * holds them, as it runs them outside a turn too; each joins the call like any other tool.
+ * The agent's `defineTool()` files: the same tools in every session. The step holds them, as it
+ * runs them outside a turn too; each joins the call like any other tool. A tool with `enabled`
+ * joins only the calls it enables, so the definition keeps the names it hid from the latest call.
  */
 export const staticTools: Definition = {
-  contribute: ({ step }) => ({
-    tools: () => ({ entries: toolEntries([...(step?.agentTools.values() ?? [])], "eve.tools") }),
+  contribute: (ctx) => ({
+    tools: async () => {
+      const tools = [...(ctx.step?.agentTools.values() ?? [])];
+      const gated = tools.filter((tool) => tool.enabled !== undefined);
+      if (gated.length === 0) return { entries: toolEntries(tools, "eve.tools") };
+      const kept = await ctx.keep(async (evaluation) => {
+        const enabled = await Promise.all(
+          gated.map((tool) => authoredEvaluate(tool.enabled)(evaluation)),
+        );
+        return {
+          value: gated.filter((_, index) => enabled[index] !== true).map(({ name }) => name),
+        };
+      });
+      const hidden = new Set(Array.isArray(kept?.value) ? kept.value : []);
+      return {
+        entries: toolEntries(
+          tools.filter(({ name }) => !hidden.has(name)),
+          "eve.tools",
+        ),
+      };
+    },
   }),
   id: "eve.tools",
   label: "the agent's tools",
@@ -139,6 +159,11 @@ function namedTools(source: ToolSource, value: unknown) {
     if (isWorkflowToolDefinition(entry)) {
       throw new Error(
         `The defineDynamic() in "${source.logicalPath}" cannot return defineWorkflowTool(). Workflow tools must be static tools; use defineTool() for dynamic entries.`,
+      );
+    }
+    if ((entry as DynamicToolEntry & { enabled?: unknown }).enabled !== undefined) {
+      throw new Error(
+        `The defineDynamic() in "${source.logicalPath}" returned a tool with "enabled". A dynamic tool is offered whenever its defineDynamic() returns it; return null to leave it out.`,
       );
     }
   }

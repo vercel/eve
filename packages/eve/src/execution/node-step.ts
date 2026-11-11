@@ -231,6 +231,7 @@ function createRegisteredHarnessToolDefinition(input: {
     behavior: input.behavior,
     deferred: def.deferred,
     description: def.description,
+    enabled: def.enabled,
     endsTurn: def.endsTurn,
     executeInput: def.executeInput,
     execute: resolveAuthoredExecute({

@@ -11,6 +11,10 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { nativeCatalog } from "#internal/testing/catalog-fixtures.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
+import { evaluateStepValues } from "#definitions/step.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { toInputSchema } from "#tools/schema.js";
 
 const tool = (description = "Search issues.") =>
   defineTool({ description, execute: async () => null, inputSchema: {} });
@@ -62,6 +66,12 @@ describe("dynamic tools", () => {
         }),
       {},
       "cannot return defineWorkflowTool()",
+    ],
+    [
+      "a tool with enabled",
+      () => defineTool({ ...tool(), enabled: () => true }),
+      {},
+      'returned a tool with "enabled"',
     ],
     [
       "an authored workflow tool's name",
@@ -149,5 +159,75 @@ describe("dynamic tools", () => {
     expect(logs.records.map(({ message }) => message)).toContain(
       'Tool "search" from "tool::second" collides with the one from "tool::first"; the first keeps it.',
     );
+  });
+});
+
+describe("static tools", () => {
+  const staticTool = (
+    name: string,
+    enabled?: HarnessToolDefinition["enabled"],
+  ): HarnessToolDefinition => ({
+    description: `${name}.`,
+    inputSchema: toInputSchema({ type: "object" }),
+    name,
+    ...(enabled !== undefined && { enabled }),
+  });
+
+  const offered = async (ctx: ContextContainer, agentTools: readonly HarnessToolDefinition[]) => {
+    const catalog = await nativeCatalog({
+      agentTools: new Map(agentTools.map((definition) => [definition.name, definition])),
+      ctx,
+      endsTurn: false,
+      session: {},
+    });
+    return [...catalog.advertised.keys()].filter((name) =>
+      agentTools.some((definition) => definition.name === name),
+    );
+  };
+
+  const evaluate = (ctx: ContextContainer, agentTools: readonly HarnessToolDefinition[]) =>
+    contextStorage.run(ctx, () =>
+      evaluateStepValues(
+        {
+          config: { tools: new Map(agentTools.map((definition) => [definition.name, definition])) },
+          ctx,
+          finalReplyOnly: false,
+          session: { rootSessionId: "" },
+        },
+        { conversation: [] },
+      ),
+    );
+
+  it("offers a tool only on the calls its enabled allows", async () => {
+    let allowed = false;
+    const tools = [staticTool("search"), staticTool("deploy", () => allowed)];
+    const { ctx } = definitionSession();
+
+    await evaluate(ctx, tools);
+    expect(await offered(ctx, tools)).toEqual(["search"]);
+
+    allowed = true;
+    await evaluate(ctx, tools);
+    expect(await offered(ctx, tools)).toEqual(["search", "deploy"]);
+  });
+
+  it("reads what the latest model call's evaluation decided until the next one", async () => {
+    let allowed = true;
+    const tools = [staticTool("deploy", () => allowed)];
+    const { ctx } = definitionSession();
+
+    await evaluate(ctx, tools);
+    allowed = false;
+
+    expect(await offered(ctx, tools)).toEqual(["deploy"]);
+  });
+
+  it("decides from the dynamic context", async () => {
+    const tools = [staticTool("deploy", (context) => context.model.id === "openai/gpt-5.4")];
+    const { ctx } = definitionSession({ model: { id: "openai/gpt-5.4" } });
+
+    await evaluate(ctx, tools);
+
+    expect(await offered(ctx, tools)).toEqual(["deploy"]);
   });
 });

@@ -70,6 +70,7 @@ export default defineTool({
 | `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).               |
 | `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).    |
 | `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).  |
+| `enabled`              | always             | [Offers the tool only on some model calls](#offer-a-tool-on-some-calls).      |
 
 ## When a tool throws
 
@@ -341,6 +342,26 @@ export default defineTool({
 ```
 
 The option works with `defineTool` and `defineWorkflowTool`. Copies of the root agent from the built-in `agent` tool don't get the tool. A declared subagent's own tool with this option is never offered, because a subagent always runs delegated. The option doesn't change a workflow's `ctx.agents` registry.
+
+### Offer a tool on some calls
+
+Set `enabled` when a tool in `agent/tools/` should be offered only on some model calls, such as only to users on a paid plan. eve calls it before each model call with the same context a [`defineDynamic`](/docs/guides/dynamic-capabilities) function receives, and offers the tool on that call only when it returns `true`:
+
+```ts title="agent/tools/refund_order.ts"
+export default defineWorkflowTool({
+  description: "Refund one of the user's orders.",
+  enabled: (ctx) => ctx.session.auth.current?.attributes.plan === "pro",
+  inputSchema: z.object({ orderId: z.string() }),
+  async execute({ orderId }, ctx) {
+    "use workflow";
+    return await refundOrder(orderId);
+  },
+});
+```
+
+While `enabled` returns `false`, the tool isn't in the model's tool list, and a call the model makes to it fails as a call to an unknown tool. If `enabled` throws, the turn fails, as it does when a `defineDynamic` function throws.
+
+The option works with `defineTool` and `defineWorkflowTool`. Workflow tools can't be returned from `defineDynamic`, so `enabled` is how a workflow tool joins only some calls. A dynamic tool entry rejects `enabled`: return `null` from its `defineDynamic` function instead.
 
 ### Start channel sessions: `ctx.to`
 

@@ -48,6 +48,21 @@ describe("normalizeToolDefinition", () => {
     expect(entry.definition.endsTurn).toBe(true);
   });
 
+  it("accepts an enabled function and rejects other enabled values", () => {
+    const enabled = () => true;
+    const tool = defineTool({
+      description: "Offered on some calls.",
+      enabled,
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+    expect(() => normalizeToolDefinition({ ...tool, enabled: true }, FAILURE_MESSAGE)).toThrow(
+      FAILURE_MESSAGE,
+    );
+  });
+
   it("accepts an endsTurn function and rejects other endsTurn values", () => {
     const endsTurn = (output: unknown) => output === null;
     const tool = defineTool({

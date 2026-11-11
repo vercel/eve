@@ -11,6 +11,7 @@ import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
+import type { DynamicContext } from "#dynamic/definition.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
@@ -48,6 +49,14 @@ interface ToolDefinitionBase {
    */
   readonly deferred?: boolean;
   readonly description: string;
+  /**
+   * Whether the model is offered this tool, decided before each model call from the same context
+   * a `defineDynamic()` function reads. While it returns `false`, the tool leaves the model's tool
+   * list and a call to it fails as a call to an unknown tool. Use it on a static tool in
+   * `agent/tools/`, such as a workflow tool, that only some turns should offer; a dynamic tool
+   * returns `null` from its `defineDynamic()` instead. Defaults to offering the tool on every call.
+   */
+  readonly enabled?: (ctx: DynamicContext) => boolean | Promise<boolean>;
 }
 
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {

@@ -19,6 +19,8 @@ export interface HarnessToolDefinition {
   /** Kept out of the model's tool list; the model reaches it through `eve__search` and `eve__tool`. */
   readonly deferred?: boolean;
   readonly description: string;
+  /** Whether the model is offered the tool on a call; see `ToolDefinition.enabled`. */
+  readonly enabled?: InternalToolDefinition["enabled"];
   /** A successful call ends the turn without a final reply; see `ToolDefinition.endsTurn`. */
   readonly endsTurn?: InternalToolDefinition["endsTurn"];
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
