@@ -53,7 +53,7 @@ describe("dynamic tools", () => {
     ["an illegal name", () => ({ "Search!": tool() }), {}, 'illegal tool name "Search!"'],
     ["eve's namespace", () => ({ eve__search: tool() }), {}, 'reserved tool name "eve__search"'],
     [
-      "a workflow tool",
+      "a workflow tool whose entry point the build never compiled",
       () =>
         defineWorkflowTool({
           description: "Deploy.",
@@ -61,7 +61,19 @@ describe("dynamic tools", () => {
           inputSchema: {},
         }),
       {},
-      "cannot return defineWorkflowTool()",
+      'Pass execute, task, or serve a top-level "async function" that starts with "use workflow"',
+    ],
+    [
+      "a serve workflow tool whose input declares taskId",
+      () =>
+        defineWorkflowTool({
+          description: "Deploy.",
+          inputSchema: { properties: { taskId: { type: "string" } }, type: "object" },
+          // What the build leaves on a compiled entry point.
+          serve: Object.assign(async () => null, { workflowId: "workflow//./tools/search//serve" }),
+        }),
+      {},
+      'inputSchema declares "taskId"',
     ],
     [
       "an authored workflow tool's name",

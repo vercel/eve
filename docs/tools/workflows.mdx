@@ -88,11 +88,12 @@ continues, deploys, and returns one tool result.
   in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
-- Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
-  returns. `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
-  handler fails the build. To start a session from a channel or schedule, use the
+- `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule handler
+  fails the build. To start a session from a channel or schedule, use the
   [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
   [schedule handler](/docs/schedules#handler-form-run) APIs.
+- A `defineDynamic` function can return `defineWorkflowTool` when the entry point is a top-level
+  function. See [Return a workflow tool from `defineDynamic`](#return-a-workflow-tool-from-definedynamic).
 - Workflow imports resolve `paths` aliases from your package's own `tsconfig.json` or
   `jsconfig.json`, including configs it extends. Source in a workspace package uses that package's
   own config. eve doesn't search parent directories for a config. An
@@ -611,6 +612,59 @@ Its input is `{ message: string }`. `agentRouter()` considers only targets with 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
+
+## Return a workflow tool from `defineDynamic`
+
+A [`defineDynamic`](/docs/guides/dynamic-capabilities#dynamic-tools) function in `agent/tools/` can return
+`defineWorkflowTool`, alone or in a map with other tools. Use it to offer a workflow tool to some
+sessions only, or to choose its description and schemas per session. Declare the entry point as a
+top-level `async function` and pass it by reference:
+
+```ts title="agent/tools/deploy.ts"
+import { defineDynamic, defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
+import { z } from "zod";
+import { runDeploy } from "../lib/deploy";
+
+async function deploy({ service }: { service: string }, ctx: WorkflowToolContext) {
+  "use workflow";
+  const answer = await ctx.ask({
+    prompt: `Deploy ${service}?`,
+    display: "confirmation",
+    options: [
+      { id: "approve", label: "Deploy", style: "primary" },
+      { id: "cancel", label: "Cancel" },
+    ],
+  });
+  if (answer.status !== "answered" || answer.optionId !== "approve") return { deployed: false };
+  return { deployed: true, url: await applyDeploy(service) };
+}
+
+async function applyDeploy(service: string) {
+  "use step";
+  return runDeploy(service);
+}
+
+export default defineDynamic((ctx) => {
+  if (ctx.session.auth.current?.principalType !== "user") return null;
+  return defineWorkflowTool({
+    description: "Deploy a service to production.",
+    inputSchema: z.object({ service: z.string() }),
+    execute: deploy, // or `task: deploy` to run each call as a task
+  });
+});
+```
+
+- eve compiles the entry point when it builds the agent, so the function must be top-level in the
+  tool module or an imported application module. `"use workflow"` on a function written inside
+  `defineDynamic` fails the build. An entry point without `"use workflow"` fails the turn.
+- The entry point can't read variables from the `defineDynamic` function, because its run outlives
+  that function. It gets the call's input and `ctx`; read what it needs from those, such as
+  `ctx.session.auth`.
+- `execute`, `task`, `serve`, `approval`, and `toModelOutput` work as they do in a static workflow
+  tool. The [dynamic tool rules](/docs/guides/dynamic-capabilities#dynamic-tools) for naming, conflicts,
+  and calls that wait for approval apply.
+- Return the tool for as long as its calls and tasks run. A result that arrives after the function
+  stops returning the tool reaches the model without `toModelOutput`.
 
 ## Add a runtime-generated workflow tool
 

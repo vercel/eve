@@ -190,6 +190,8 @@ Dynamic connections take the same filtering, provided arguments, and approval op
 
 Return a single `defineTool(...)`, a map of tools, or `null`. Executors receive the same `ToolContext` as static tools, including `ctx.getToken` and `ctx.requireAuth`. Validators, including refinements and transformations, and an `endsTurn` function run as they do on a static tool.
 
+A tool can also be a `defineWorkflowTool(...)` whose entry point is a top-level `"use workflow"` function. See [Return a workflow tool from `defineDynamic`](/docs/tools/workflows#return-a-workflow-tool-from-definedynamic).
+
 ### Author replayable callbacks
 
 Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()` and `Date.now()` in declarations unless memoized; use `ctx.now` for commit time.
