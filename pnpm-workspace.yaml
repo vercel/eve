@@ -67,6 +67,7 @@ overrides:
   "simple-git@<4.0.2": "4.0.2"
   "shell-quote@<1.11.0": "1.11.0"
   "dompurify@<3.4.17": "3.4.17"
+  "turndown@<7.2.5": "7.2.5"
   "zod@>=4.0.0 <4.6.6": "4.6.7"
   # eve ships one vendored Zod (packages/eve/scripts/vendor-compiled/zod.mjs).
   # @vercel/cli-config, which @vercel/oidc uses, pins its own Zod 4 release,
