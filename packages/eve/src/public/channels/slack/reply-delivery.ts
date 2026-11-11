@@ -30,6 +30,14 @@ const REFUSED_PAYLOAD_ERRORS = new Set([
   "msg_too_long",
 ]);
 
+/**
+ * Slack's `fatal_error` means it failed while processing the call, which it
+ * has returned for Block Kit replies whose plain Markdown still posts. Slack
+ * says part of the call may have succeeded, so eve falls back from it only for
+ * the blocks, accepting a rare duplicate over a lost reply.
+ */
+const BLOCKS_FALLBACK_ERRORS = new Set([...REFUSED_PAYLOAD_ERRORS, "fatal_error"]);
+
 type ContentCompletedHandler = NonNullable<SlackChannelInternalEvents["content.completed"]>;
 
 /**
@@ -59,7 +67,8 @@ export type SlackCompletedReply =
  *    {@link SLACK_MARKDOWN_TEXT_MAX_LENGTH} characters. eve moves on from
  *    the blocks only when Slack refuses them as too large or malformed
  *    (`msg_too_long`, `msg_blocks_too_long`, `msg_blocks_too_many`,
- *    `invalid_blocks`, or `invalid_blocks_format`).
+ *    `invalid_blocks`, or `invalid_blocks_format`), or fails processing
+ *    them with `fatal_error`.
  * 3. `markdown` uploaded unchanged as an `eve-response.md` snippet with a
  *    short note, when it is longer or Slack refuses the Markdown message.
  *    This requires the `files:write` bot scope. In a session without a
@@ -110,7 +119,7 @@ export async function deliverCompletedSlackReply(
       await channel.thread.post({ blocks, text: text ?? truncateMessageText(markdown) });
       return;
     } catch (error) {
-      slackError = refusedPayloadError(error);
+      slackError = slackErrorCode(error, (code) => BLOCKS_FALLBACK_ERRORS.has(code));
       if (slackError === undefined) throw error;
     }
   }
@@ -191,6 +200,10 @@ export function isRefusedPayloadCode(code: unknown): code is string {
 
 /** Slack's error code when `error` is a refused-payload error, checking its causes. */
 export function refusedPayloadError(error: unknown): string | undefined {
+  return slackErrorCode(error, isRefusedPayloadCode);
+}
+
+function slackErrorCode(error: unknown, matches: (code: string) => boolean): string | undefined {
   let current = error;
   for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
     const candidate = current as {
@@ -200,7 +213,7 @@ export function refusedPayloadError(error: unknown): string | undefined {
     };
     // eve's Slack client reports the code on `response`; `@slack/web-api` on `data`.
     const code = candidate.response?.error ?? candidate.data?.error;
-    if (isRefusedPayloadCode(code)) return code;
+    if (typeof code === "string" && matches(code)) return code;
     current = candidate.cause;
   }
   return undefined;
