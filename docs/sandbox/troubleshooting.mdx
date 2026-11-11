@@ -208,13 +208,13 @@ The just-bash sandbox provider requires the `just-bash` package, which is not bu
 
 `eve dev` installs `just-bash` automatically unless the environment sets `autoInstall: false`. For other commands, add it to your application, for example with `pnpm add -D just-bash`, which matches what `eve dev` installs. See [just-bash Sandbox](/docs/sandbox/just-bash#automatic-installation).
 
-### `Cannot build deployable Vercel output because this app requires sandbox templates`
+### `Cannot build deployable Vercel output because this app's sandbox templates need preparation`
 
 ```text
-Cannot build deployable Vercel output because this app requires sandbox templates and VERCEL_OIDC_TOKEN is missing.
+Cannot build deployable Vercel output because this app's sandbox templates need preparation and VERCEL_OIDC_TOKEN is missing.
 ```
 
-A build with `VERCEL` set needs `VERCEL_OIDC_TOKEN` to prepare sandbox templates. Don't deploy the `.vercel/output` from a build that failed this way. For a local `vercel build`, run `vercel link` and `vercel pull`, then retry. Builds on Vercel set `VERCEL_OIDC_TOKEN` automatically; see [Vercel OIDC federation](https://vercel.com/docs/oidc).
+A build with `VERCEL` set needs `VERCEL_OIDC_TOKEN` for templates with a `prepare` callback, managed workspace or skill files, or a `source`. Empty Vercel templates without these inputs build without the token. Don't deploy the `.vercel/output` from a build that failed this way. For a local `vercel build`, run `vercel link` and `vercel pull`, then retry. Builds on Vercel set `VERCEL_OIDC_TOKEN` automatically; see [Vercel OIDC federation](https://vercel.com/docs/oidc).
 
 ### Vercel Sandbox authentication fails
 
