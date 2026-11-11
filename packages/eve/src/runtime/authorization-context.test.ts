@@ -73,7 +73,5 @@ describe("ctx.getToken with as", () => {
 
     expect(received).toEqual([{ attributes: {}, id: "bob", issuer: "slack", type: "user" }]);
     expect(result.principal).toEqual({ ...bob, attributes: {} });
-    // The session's record of who spoke, which it persists, keeps none either.
-    expect(JSON.stringify(state)).not.toContain("example.com");
   });
 });

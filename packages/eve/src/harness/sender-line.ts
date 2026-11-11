@@ -105,7 +105,7 @@ export function forgetSender<T extends { readonly state?: SessionStateMap }>(ses
   return { ...session, state };
 }
 
-export function readParticipants(state: SessionStateMap | undefined): readonly SessionPerson[] {
+function readParticipants(state: SessionStateMap | undefined): readonly SessionPerson[] {
   return (state?.[PARTICIPANTS_KEY] as readonly SessionPerson[] | undefined) ?? [];
 }
 

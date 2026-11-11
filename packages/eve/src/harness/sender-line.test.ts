@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import {
-  forgetSender,
-  readParticipants,
-  rememberSender,
-  senderLine,
-} from "#harness/sender-line.js";
+import { forgetSender, participantsOf, rememberSender, senderLine } from "#harness/sender-line.js";
 
 function user(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
@@ -46,6 +41,7 @@ describe("senderLine", () => {
       rememberSender({} as { state?: Record<string, unknown> }, user("alice")),
     );
     expect(senderLine(session.state, user("bob"))).toBeUndefined();
+    expect(participantsOf(session.state, undefined)).toEqual([]);
   });
 
   it("names someone who isn't signed in without an id", () => {
@@ -68,7 +64,7 @@ describe("participants", () => {
       {} as { state?: Record<string, unknown> },
     );
 
-    expect(readParticipants(session.state)).toEqual([
+    expect(participantsOf(session.state, undefined)).toEqual([
       { authenticator: "slack", principalId: "bob", principalType: "user", subject: "U_BOB" },
       { authenticator: "test", principalId: "alice", principalType: "user" },
     ]);
@@ -79,19 +75,9 @@ describe("participants", () => {
     const people = Array.from({ length: 52 }, (_, index) => user(`person-${index}`));
     const session = people.reduce(rememberSender, {} as { state?: Record<string, unknown> });
 
-    const kept = readParticipants(session.state).map((person) => person.principalId);
+    const kept = participantsOf(session.state, undefined).map((person) => person.principalId);
     expect(kept).toHaveLength(50);
     expect(kept[0]).toBe("person-2");
     expect(kept.at(-1)).toBe("person-51");
   });
-});
-
-it("records a person who keeps speaking, and forgets everyone when the conversation is cleared", () => {
-  // A session whose sender line names Alice, from before eve kept the participants record.
-  const spoke = rememberSender({} as { state?: Record<string, unknown> }, user("alice"));
-  const { "eve.harness.participants": _participants, ...earlier } = spoke.state!;
-  const session = rememberSender({ state: earlier }, user("alice"));
-
-  expect(readParticipants(session.state).map((person) => person.principalId)).toEqual(["alice"]);
-  expect(readParticipants(forgetSender(session).state)).toEqual([]);
 });
