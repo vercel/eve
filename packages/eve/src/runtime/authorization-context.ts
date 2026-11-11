@@ -79,7 +79,7 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
   if (participants === undefined && caller?.principalId === as) return undefined;
   if (participants === undefined) {
     throw new ConnectionAuthorizationFailedError(scope, {
-      message: `ctx.getToken can't name "${as}" with "as" here, because this tool runs outside the session's turn. "as" can name a person only from a tool that runs in the turn, and the person must have spoken in this conversation.`,
+      message: `ctx.getToken can't name ${JSON.stringify(as)} with "as" here, because this tool runs outside the session's turn. "as" can name a person only from a tool that runs in the turn, and the person must have spoken in this conversation.`,
       reason: "principal_not_found",
       retryable: false,
     });
@@ -92,14 +92,14 @@ function namedPerson(as: string, scope: string): SessionPerson | undefined {
   const matches = [...people.values()];
   if (matches.length === 0) {
     throw new ConnectionAuthorizationFailedError(scope, {
-      message: `No one with the principalId "${as}" has spoken in this conversation, so this action can't act as them. The person must have spoken in this conversation: set "as" to the principalId a sender line names them by.`,
+      message: `No one with the principalId ${JSON.stringify(as)} has spoken in this conversation, so this action can't act as them. The person must have spoken in this conversation: set "as" to the principalId a sender line names them by.`,
       reason: "principal_not_found",
       retryable: false,
     });
   }
   if (matches.length > 1) {
     throw new ConnectionAuthorizationFailedError(scope, {
-      message: `More than one person who has spoken in this conversation has the principalId "${as}", signed in different ways, so eve can't tell which one this action should act as. Ask that person to continue in one place, then retry.`,
+      message: `More than one person who has spoken in this conversation has the principalId ${JSON.stringify(as)}, signed in different ways, so eve can't tell which one this action should act as. Ask that person to continue in one place, then retry.`,
       reason: "principal_ambiguous",
       retryable: false,
     });
