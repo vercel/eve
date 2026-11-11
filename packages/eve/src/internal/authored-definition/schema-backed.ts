@@ -264,7 +264,7 @@ function modelInputSchemaOf(source: unknown, serve: boolean): JsonObject {
 }
 
 /** eve adds `taskId` to a `serve` tool's model input, so the tool's own input can't use it. */
-function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
+export function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
   const properties = inputSchema?.properties;
   if (!isObject(properties) || !(TASK_ID_INPUT in properties)) return;
   throw new Error(

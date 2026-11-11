@@ -25,6 +25,7 @@ import {
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { createWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
+import { assertNoOwnTaskIdInput } from "#internal/authored-definition/schema-backed.js";
 import { namedEntries, type EntryKind } from "./named.js";
 import { entryVersions, slotsOf } from "#definitions/state.js";
 import { sessionConnectionNames } from "./connections.js";
@@ -175,6 +176,12 @@ function compiledWorkflow(source: ToolSource, name: string, entry: object): Comp
   if (Reflect.get(entry, "endsTurn") !== undefined) {
     throw new Error(
       `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" with "endsTurn", which defineWorkflowTool() doesn't support.`,
+    );
+  }
+  if (entryPoint === "serve") {
+    assertNoOwnTaskIdInput(
+      serializeInputSchema(Reflect.get(entry, "inputSchema") as ToolSchemaSource),
+      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" whose`,
     );
   }
   return { entryPoint, workflowId };

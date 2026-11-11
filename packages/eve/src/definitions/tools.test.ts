@@ -65,6 +65,18 @@ describe("dynamic tools", () => {
       `returned workflow tool "search" whose entry point isn't a compiled workflow`,
     ],
     [
+      "a serve workflow tool whose input declares taskId",
+      () =>
+        defineWorkflowTool({
+          description: "Deploy.",
+          inputSchema: { properties: { taskId: { type: "string" } }, type: "object" },
+          // What the build leaves on a compiled entry point.
+          serve: Object.assign(async () => null, { workflowId: "workflow//./tools/search//serve" }),
+        }),
+      {},
+      'returned workflow tool "search" whose inputSchema declares "taskId"',
+    ],
+    [
       "eve's built-in agent({ models }) tool",
       () => agent({ models: { "openai/gpt-5.4": "Hard tasks" } }),
       {},
