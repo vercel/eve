@@ -190,6 +190,33 @@ Dynamic connections take the same filtering, provided arguments, and approval op
 
 Return a single `defineTool(...)`, a map of tools, or `null`. Executors receive the same `ToolContext` as static tools, including `ctx.getToken` and `ctx.requireAuth`. Validators, including refinements and transformations, and an `endsTurn` function run as they do on a static tool.
 
+### Return a workflow tool
+
+A dynamic function can also return a [workflow tool](/docs/tools/workflows), so a tool that waits for a person, a webhook, or a timer is offered only on some calls. Declare its body as a top-level `async function` that starts with `"use workflow"`, so the build compiles it, and pass that function to `defineWorkflowTool()`:
+
+```ts title="agent/tools/support.ts"
+import { defineDynamic, defineWorkflowTool } from "eve/tools";
+import type { WorkflowToolContext } from "eve/tools";
+import { z } from "zod";
+
+async function escalate({ summary }: { summary: string }, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await ctx.ask({ prompt: `Escalate this case? ${summary}` });
+}
+
+const escalateTool = defineWorkflowTool({
+  description: "Escalate a support case once someone confirms.",
+  inputSchema: z.object({ summary: z.string() }),
+  execute: escalate,
+});
+
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes.team === "support" ? { escalate: escalateTool } : null,
+);
+```
+
+A body written inline in a dynamic function isn't compiled, and the turn fails with an error that names the tool. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn.
+
 ### Author replayable callbacks
 
 Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()` and `Date.now()` in declarations unless memoized; use `ctx.now` for commit time.

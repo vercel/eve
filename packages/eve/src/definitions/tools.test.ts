@@ -53,7 +53,7 @@ describe("dynamic tools", () => {
     ["an illegal name", () => ({ "Search!": tool() }), {}, 'illegal tool name "Search!"'],
     ["eve's namespace", () => ({ eve__search: tool() }), {}, 'reserved tool name "eve__search"'],
     [
-      "a workflow tool",
+      "a workflow tool whose entry point the build didn't compile",
       () =>
         defineWorkflowTool({
           description: "Deploy.",
@@ -61,7 +61,7 @@ describe("dynamic tools", () => {
           inputSchema: {},
         }),
       {},
-      "cannot return defineWorkflowTool()",
+      `returned workflow tool "search" whose entry point isn't a compiled workflow`,
     ],
     [
       "an authored workflow tool's name",
@@ -86,6 +86,40 @@ describe("dynamic tools", () => {
   ])("rejects %s", async (_name, evaluate, session, message) => {
     const { ctx } = definitionSession({ ...session, tools: [{ evaluate, slug: "search" }] });
     expect(await evaluationError(ctx)).toContain(message);
+  });
+
+  it("runs a returned workflow tool from its compiled workflow", async () => {
+    const execute = Object.assign(async () => null, {
+      workflowId: "workflow//./tools/deploy//deploy",
+    });
+    const { ctx } = definitionSession({
+      tools: [
+        {
+          evaluate: () => ({
+            deploy: defineWorkflowTool({ description: "Deploy.", execute, inputSchema: {} }),
+          }),
+          slug: "deploy",
+        },
+      ],
+    });
+    await beforeModelCall(ctx);
+
+    const [deploy] = await dynamicTools(ctx);
+    expect(deploy).toMatchObject({
+      behavior: {
+        handling: {
+          kind: "dispatch",
+          target: {
+            entryPoint: "execute",
+            kind: "workflow-tool-call",
+            workflowId: "workflow//./tools/deploy//deploy",
+          },
+        },
+      },
+      execute: undefined,
+      name: "deploy",
+      workflowId: "workflow//./tools/deploy//deploy",
+    });
   });
 
   it("takes a name a dynamic connection gives up in the same call", async () => {

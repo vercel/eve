@@ -88,8 +88,9 @@ continues, deploys, and returns one tool result.
   in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
-- Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
-  returns. `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
+- A `defineDynamic` function can return a workflow tool whose body is a top-level `"use workflow"`
+  function; see [Return a workflow tool](/docs/guides/dynamic-capabilities#return-a-workflow-tool).
+  `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
   handler fails the build. To start a session from a channel or schedule, use the
   [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
   [schedule handler](/docs/schedules#handler-form-run) APIs.
