@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 
 const registryPath = new URL("../apps/docs/registry.json", import.meta.url);
 const evePackagePath = new URL("../packages/eve/package.json", import.meta.url);
-const minimumVersionPattern = /^>=(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
+const requirementPattern =
+  /^>=(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?: <(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?))?$/u;
 const versionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
 
 function parseVersion(version, pattern) {
@@ -36,9 +37,15 @@ export function validatePublicRegistryRequirements(registry, eveVersion) {
   for (const item of registry.items) {
     const requirement = item?.meta?.eve?.requires;
     if (requirement === undefined) continue;
-    const minimum = parseVersion(requirement, minimumVersionPattern);
-    if (minimum === undefined) {
+    const match = requirementPattern.exec(requirement);
+    if (match === null) {
       errors.push(`${item.name}: unsupported Eve requirement ${JSON.stringify(requirement)}`);
+      continue;
+    }
+    const minimum = parseVersion(match[1], versionPattern);
+    const maximum = match[2] === undefined ? undefined : parseVersion(match[2], versionPattern);
+    if (maximum !== undefined && compareVersions(minimum, maximum) >= 0) {
+      errors.push(`${item.name}: empty Eve requirement ${JSON.stringify(requirement)}`);
     } else if (compareVersions(minimum, published) > 0) {
       errors.push(`${item.name}: requires ${requirement}, but packages/eve is ${eveVersion}`);
     }
