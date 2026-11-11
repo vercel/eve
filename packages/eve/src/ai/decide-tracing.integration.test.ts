@@ -74,8 +74,6 @@ function useRuntime(
     hooks: createInstrumentationHooks([agent.hook]),
     ownsAgentSpans: true,
     otelSettings: {
-      recordInputs: true,
-      recordOutputs: true,
       traceChannelRequests: false,
       tracePolicy,
     },

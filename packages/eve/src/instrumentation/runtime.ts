@@ -344,15 +344,23 @@ export function bindInstrumentationRuntime(
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordInputs
-              : capturesContent) &&
-            (settings?.recordInputs ?? false),
+              : capturesContent),
           recordOutputs:
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordOutputs
-              : capturesContent) &&
-            (settings?.recordOutputs ?? false),
+              : capturesContent),
         };
+        // Every AI SDK integration on the call shares one setting, so it admits what any authored
+        // policy admits; each file's events are narrowed again to its own decision. eve's AI SDK
+        // OpenTelemetry integration is on the call only when eve does not own agent spans.
+        const aiSdkContent =
+          settings !== undefined && !executionRuntime.ownsAgentSpans
+            ? content
+            : {
+                recordInputs: content.recordInputs || hooks.authoredCapturesInputs === true,
+                recordOutputs: content.recordOutputs || hooks.authoredCapturesOutputs === true,
+              };
         const telemetry = (telemetryInput: {
           readonly bridgeIntegration?: Telemetry;
           readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -383,8 +391,8 @@ export function bindInstrumentationRuntime(
                   : undefined
                 : [telemetryInput.bridgeIntegration, ...integrations()],
             isEnabled: true,
-            recordInputs: content.recordInputs,
-            recordOutputs: content.recordOutputs,
+            recordInputs: aiSdkContent.recordInputs,
+            recordOutputs: aiSdkContent.recordOutputs,
           };
         };
         const attemptSession = {

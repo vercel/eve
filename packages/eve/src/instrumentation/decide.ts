@@ -59,16 +59,8 @@ export async function decideWithTracing<
   const record = effective?.action === "record";
   const capture = {
     emit: record && inherited?.emit !== false,
-    recordInputs:
-      settings.recordInputs &&
-      record &&
-      effective.recordInputs &&
-      inherited?.recordInputs !== false,
-    recordOutputs:
-      settings.recordOutputs &&
-      record &&
-      effective.recordOutputs &&
-      inherited?.recordOutputs !== false,
+    recordInputs: record && effective.recordInputs && inherited?.recordInputs !== false,
+    recordOutputs: record && effective.recordOutputs && inherited?.recordOutputs !== false,
   };
   let host = withChannelAudience(context.active(), session.audience);
   if (sessionId !== undefined)

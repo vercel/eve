@@ -15,7 +15,10 @@ import {
   TraceRootKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationHooks,
+} from "#instrumentation/lifecycle.js";
 import { instrumentMemoryOperation } from "#instrumentation/memory.js";
 import {
   bindInstrumentationRuntime,
@@ -39,6 +42,12 @@ const boundSession = {
   sessionId: "session-1",
 };
 
+const allowsInputs: TraceCapturePolicy = () => ({
+  emit: true,
+  recordInputs: true,
+  recordOutputs: false,
+});
+
 function createRuntime(
   hooks: InstrumentationHooks,
   tracePolicy?: TraceCapturePolicy,
@@ -48,8 +57,6 @@ function createRuntime(
     idGenerator: new AgentSpanIdGenerator(),
     hooks,
     otelSettings: {
-      recordInputs: true,
-      recordOutputs: true,
       tracePolicy,
       traceChannelRequests: false,
     },
@@ -655,6 +662,72 @@ describe("bindInstrumentationRuntime", () => {
 
     expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
   });
+
+  // AI SDK integrations such as Sentry's read content from the call, not from an eve destination.
+  it.each([
+    ["public", true],
+    ["private", false],
+  ] as const)(
+    "gives AI SDK integrations the %s audience's content decision without OpenTelemetry",
+    async (audience, recordsContent) => {
+      const instrumentation = bindInstrumentationRuntime(
+        {
+          ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+          otelSettings: undefined,
+        },
+        createContext(audience),
+        boundSession,
+      );
+
+      const telemetry = await instrumentation?.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "0.0.0",
+          hasInput: true,
+          session: { sessionId: "session-1" },
+        },
+        async (scope) =>
+          scope.prepareAttempt({ runId: "run_0", attempt: 0, stepIndex: 0, turnId: "turn-1" })
+            .telemetry,
+      );
+
+      expect(telemetry).toMatchObject({
+        recordInputs: recordsContent,
+        recordOutputs: recordsContent,
+      });
+    },
+  );
+
+  it.each([
+    ["an authored file's", { parallel: [{ name: "sentry", tracePolicy: allowsInputs }] }, true],
+    ["eve's own", { serialBefore: [{ name: "internal:otel", tracePolicy: allowsInputs }] }, false],
+  ] as const)(
+    "lets %s policy open AI SDK inputs on a private call",
+    async (_label, groups, recordsInputs) => {
+      const instrumentation = bindInstrumentationRuntime(
+        {
+          ...createRuntime(createInstrumentationHooks(groups)),
+          ownsAgentSpans: true,
+        },
+        createContext("private"),
+        boundSession,
+      );
+
+      const telemetry = await instrumentation?.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "0.0.0",
+          hasInput: true,
+          session: { sessionId: "session-1" },
+        },
+        async (scope) =>
+          scope.prepareAttempt({ runId: "run_0", attempt: 0, stepIndex: 0, turnId: "turn-1" })
+            .telemetry,
+      );
+
+      expect(telemetry).toMatchObject({ recordInputs: recordsInputs, recordOutputs: false });
+    },
+  );
 
   it("uses one framework-owned span tree when the runtime owns agent spans", async () => {
     const originalIntegrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS;
