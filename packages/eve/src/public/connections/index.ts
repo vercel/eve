@@ -38,6 +38,8 @@ export {
 } from "#public/definitions/connections/mcp.js";
 export type {
   ConnectionToolCallDefinition,
+  ConnectionToolErrorContext,
+  ConnectionToolErrorHandler,
   ProvidedArgumentContext,
   ProvidedArgumentsDefinition,
   ProvidedArgumentValue,

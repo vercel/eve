@@ -27,6 +27,7 @@ import { approvalDecision } from "#approval/status.js";
 import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
+import { connectionToolError } from "#runtime/connections/tool-error.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
   connectionToolModelOutput,
@@ -192,9 +193,24 @@ async function runConnectionTool(
           callId: options.toolCallId,
         }),
       );
-    raw = await approved(() =>
-      executeWithDeadline(connection.connectionName, client, tool.name, input, options),
-    );
+    raw = await approved(async () => {
+      try {
+        return await executeWithDeadline(
+          connection.connectionName,
+          client,
+          tool.name,
+          input,
+          options,
+        );
+      } catch (error) {
+        // A cancelled turn is not a connection failure, and the model never reads it.
+        if (options.abortSignal?.aborted === true) throw error;
+        throw await connectionToolError(connection, error, {
+          callId: options.toolCallId,
+          toolName: tool.name,
+        });
+      }
+    });
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
     throw error;

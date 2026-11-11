@@ -16,6 +16,7 @@ import type {
   ConnectionToolMetadata,
 } from "#shared/connection-types.js";
 import type { ToolSchema } from "#tools/schema.js";
+import { ModelFacingError } from "#shared/model-facing-error.js";
 
 import { connectionEntry } from "./connection-entry.js";
 
@@ -276,5 +277,101 @@ describe("connection tool calls", () => {
       { query: null },
       expect.objectContaining({ callId: "call-search" }),
     );
+  });
+});
+
+describe("connection tool errors", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "test",
+    issuer: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+
+  /** Alice's tracker call that fails in the transport, with the connection's `toolCall.onError`. */
+  function failingCall(
+    onError?: NonNullable<ResolvedConnectionDefinition["toolCall"]>["onError"],
+    abortSignal?: AbortSignal,
+  ) {
+    const failure = new Error("Modern MCP result is missing resultType");
+    const connection = {
+      connectionName: "tracker",
+      description: "Issue tracker.",
+      logicalPath: "connections/tracker.ts",
+      protocol: "mcp",
+      sourceId: "tracker",
+      sourceKind: "module",
+      toolCall: { onError },
+      url: "https://tracker.example.com/mcp",
+    } as ResolvedConnectionDefinition;
+    const client: ConnectionClient = {
+      close: async () => {},
+      connect: async () => undefined,
+      executeTool: async () => {
+        throw failure;
+      },
+      getToolMetadata: async () => tools,
+    };
+    const registry: ConnectionRegistry = {
+      dispose: async () => {},
+      getClient: () => client,
+      getConnectionApproval: () => undefined,
+      getConnectionNames: () => ["tracker"],
+      getConnections: () => [connection],
+    };
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: alice, initiator: alice },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    const run = contextStorage.run(ctx, async () =>
+      connectionEntry(registry, connection, "list_issues").execute!(
+        {},
+        { abortSignal, messages: [], toolCallId: "call-1" },
+      ),
+    );
+    return { failure, run };
+  }
+
+  it("gives the model the handler's text and keeps the transport error as its cause", async () => {
+    const onError = vi.fn(() => "The tracker is connected, but its reply was malformed.");
+    const { failure, run } = failingCall(onError);
+    const error = await run.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ModelFacingError);
+    expect(error).toMatchObject({
+      cause: failure,
+      message: "The tracker is connected, but its reply was malformed.",
+    });
+    expect(onError).toHaveBeenCalledWith(
+      failure,
+      expect.objectContaining({
+        callId: "call-1",
+        session: expect.objectContaining({ id: "session-1" }),
+        toolName: "list_issues",
+      }),
+    );
+  });
+
+  it("leaves a cancelled turn's error to the turn, without calling the handler", async () => {
+    const onError = vi.fn(() => "The tracker is unavailable.");
+    const { failure, run } = failingCall(onError, AbortSignal.abort());
+    await expect(run).rejects.toBe(failure);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["has no handler", undefined],
+    ["handler returns undefined", () => undefined],
+    [
+      "handler throws",
+      () => {
+        throw new Error("handler bug");
+      },
+    ],
+  ])("rethrows the transport error when the connection %s", async (_case, onError) => {
+    const { failure, run } = failingCall(onError);
+    await expect(run).rejects.toBe(failure);
   });
 });

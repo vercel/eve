@@ -48,6 +48,7 @@ Define every connection with `defineMcpClientConnection` or `defineOpenAPIConnec
 | `approval`                              | Calls run without approval | `never()`, `once()`, `always()`, `auto()`, or your own policy.                                                    |
 | `instanceKey`                           | None                       | A stable, non-secret account or tenant ID. Required on authenticated [dynamic connections](#dynamic-connections). |
 | `toolCall.providedArguments`            | None                       | Arguments your app supplies. eve removes them from the model's input schema.                                      |
+| `toolCall.onError`                      | The error's name and text  | What the model reads when a call fails. See [Failed calls](#what-the-model-reads-when-a-call-fails).              |
 | `tools` (MCP) or `operations` (OpenAPI) | Every tool or operation    | A filter with exactly one of `allow` or `block`.                                                                  |
 
 ## MCP connections
@@ -369,6 +370,29 @@ export default defineTool({
 ### Authorization and approval together
 
 A tool can require both sign-in (`auth`) and human approval. Approval runs before `execute`, so the user sees **approve, then sign in**. eve keeps a granted approval, so the turn doesn't ask for approval again after sign-in.
+
+## What the model reads when a call fails
+
+When a call to the connection fails, the model reads the error's name and message, such as `MCPClientError: …`. The failure might be a transport or protocol error, or a timeout. The model may then tell the user the connection isn't available when the connection is fine. Set `toolCall.onError` to choose the text the model reads instead:
+
+```ts title="agent/connections/tracker.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://tracker.example.com/mcp",
+  description: "Search and update issues",
+  toolCall: {
+    onError: (error, { toolName }) =>
+      `The tracker is connected, but its reply to ${toolName} could not be read. ` +
+      "The call may already have run, so check before you try again.",
+  },
+});
+```
+
+- **Your logs keep the original.** Logs, telemetry, and the result your channels and clients receive keep the original error. Only the model's text changes.
+- **The handler gets the call's context.** It receives the error and the call's context: the session, `callId`, the server's bare `toolName`, and the approver while an approved call runs.
+- **`undefined` keeps the default.** Return `undefined` to keep eve's default for an error you don't handle. If the handler throws, eve logs that and keeps the default.
+- **Some results aren't failures.** A tool result that the server marks as an error isn't a failure here; the model reads it as the server wrote it. Sign-in requests aren't either, since eve handles them itself, and neither is a cancelled turn.
 
 ## Dynamic connections
 
