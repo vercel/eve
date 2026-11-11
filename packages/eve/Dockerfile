@@ -31,6 +31,7 @@ RUN set -eux; \
     ca-certificates \
     curl \
     dnsutils \
+    gh \
     gpgv \
     git \
     jq \
@@ -66,6 +67,7 @@ RUN set -eux; \
   python3 --version; \
   dig -v; \
   gpgv --version | head -1; \
+  gh --version | head -1; \
   git --version; \
   jq --version; \
   rg --version | head -1; \
