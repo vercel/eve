@@ -29,13 +29,16 @@ type AstNode = {
   readonly expression?: AstNode | boolean | null;
   readonly id?: AstNode | null;
   readonly imported?: AstNode | null;
+  readonly init?: AstNode | null;
   readonly key?: AstNode | null;
   readonly kind?: string;
   readonly local?: AstNode | null;
   readonly method?: boolean;
   readonly name?: string;
+  readonly object?: AstNode;
   readonly params?: readonly AstNode[];
   readonly properties?: readonly AstNode[];
+  readonly property?: AstNode;
   readonly returnType?: AstNode | null;
   readonly specifiers?: readonly AstNode[];
   readonly start?: number;
@@ -78,7 +81,11 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
-  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("workflow")) {
+  if (
+    !mayContainWorkflowDirective(input.source) &&
+    !input.source.includes("workflow") &&
+    !input.source.includes("defineWorkflowTool")
+  ) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
@@ -138,6 +145,8 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     allowed.add(entryPoint.fn);
   }
 
+  assertWorkflowToolEntryPoints(input.filePath, body, program as AstNode);
+
   const found = collectDirectiveFunctions(program as AstNode);
   if (found.length === 0) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
@@ -190,6 +199,119 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     hasWorkflowDirective,
     source: hoistEntryPointMethod(input.source, hoisted),
   };
+}
+
+/**
+ * The build compiles a default-exported workflow tool and checks its entry point. Any other
+ * `defineWorkflowTool()`, such as one a `defineDynamic()` returns, is only checked when the tool is
+ * offered, so its entry point is checked here: an inline function, or a top-level one the module
+ * declares, must start with "use workflow". An imported entry point is left to that later check.
+ */
+function assertWorkflowToolEntryPoints(
+  filePath: string,
+  body: readonly AstNode[],
+  program: AstNode,
+): void {
+  const definers = workflowToolDefiners(body);
+  if (definers.names.size === 0 && definers.namespaces.size === 0) return;
+  const exported = body.find((statement) => statement.type === "ExportDefaultDeclaration");
+  visit(program, (node) => {
+    if (node.type !== "CallExpression" || node === exported?.declaration) return;
+    if (!isWorkflowToolDefiner(node.callee, definers)) return;
+    const definition = node.arguments?.[0];
+    if (definition?.type !== "ObjectExpression") return;
+    for (const property of definition.properties ?? []) {
+      if (property.type !== "Property" || property.computed === true) continue;
+      const name = readPropertyName(property.key);
+      if (name === undefined || !WORKFLOW_TOOL_ENTRY_POINTS.some((entry) => entry === name)) {
+        continue;
+      }
+      const fn = localFunction(body, unwrapExpression(property.value));
+      if (fn === undefined || readLeadingDirective(fn) === "use workflow") continue;
+      throw new Error(
+        `The "${name}" of a defineWorkflowTool() in "${filePath}" is ${fn.type === "FunctionDeclaration" ? `the function "${fn.id?.name}"` : describeFunction(fn)} without "use workflow", so it can't run as a workflow. ` +
+          `Declare it as a top-level "async function" that starts with "use workflow", and pass that function as "${name}".`,
+      );
+    }
+  });
+}
+
+interface WorkflowToolDefiners {
+  readonly names: ReadonlySet<string>;
+  readonly namespaces: ReadonlySet<string>;
+}
+
+/** The local names `defineWorkflowTool` is imported under, directly or through a namespace. */
+function workflowToolDefiners(body: readonly AstNode[]): WorkflowToolDefiners {
+  const names = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const statement of body) {
+    if (statement.type !== "ImportDeclaration") continue;
+    const source = statement.source?.value;
+    if (source !== "eve" && source !== "eve/tools") continue;
+    for (const specifier of statement.specifiers ?? []) {
+      const local = specifier.local?.name;
+      if (local === undefined) continue;
+      if (specifier.type === "ImportNamespaceSpecifier") namespaces.add(local);
+      if (
+        specifier.type === "ImportSpecifier" &&
+        specifierName(specifier) === "defineWorkflowTool"
+      ) {
+        names.add(local);
+      }
+    }
+  }
+  return { names, namespaces };
+}
+
+function isWorkflowToolDefiner(
+  callee: AstNode | undefined,
+  definers: WorkflowToolDefiners,
+): boolean {
+  if (callee?.type === "Identifier") return definers.names.has(callee.name ?? "");
+  if (callee?.type !== "MemberExpression" || callee.computed === true) return false;
+  return (
+    callee.object?.type === "Identifier" &&
+    definers.namespaces.has(callee.object.name ?? "") &&
+    readPropertyName(callee.property) === "defineWorkflowTool"
+  );
+}
+
+/** The function an entry point is: inline, or a top-level declaration it names. */
+function localFunction(body: readonly AstNode[], value: AstNode | undefined): AstNode | undefined {
+  if (value === undefined) return undefined;
+  if (isFunctionLike(value)) return value;
+  if (value.type !== "Identifier") return undefined;
+  for (const statement of body) {
+    const declaration =
+      statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
+    if (declaration === null || declaration === undefined) continue;
+    if (declaration.type === "FunctionDeclaration" && declaration.id?.name === value.name) {
+      return declaration;
+    }
+    if (declaration.type !== "VariableDeclaration") continue;
+    for (const declarator of declaration.declarations ?? []) {
+      if (declarator.id?.name !== value.name) continue;
+      const init = unwrapExpression(declarator.init);
+      return init !== undefined && isFunctionLike(init) ? init : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Looks through type assertions and parentheses, which don't change the value. */
+function unwrapExpression(value: unknown): AstNode | undefined {
+  let node = isAstNode(value) ? value : undefined;
+  while (
+    node !== undefined &&
+    (node.type === "TSAsExpression" ||
+      node.type === "TSSatisfiesExpression" ||
+      node.type === "TSNonNullExpression" ||
+      node.type === "ParenthesizedExpression")
+  ) {
+    node = isAstNode(node.expression) ? node.expression : undefined;
+  }
+  return node;
 }
 
 function findDefaultExportEntryPoints(body: readonly AstNode[]): EntryPointMethod[] {

@@ -157,6 +157,13 @@ interface CompiledWorkflow {
  * function's workflow tool must point at one of those, so its calls run the compiled workflow.
  */
 function compiledWorkflow(source: ToolSource, name: string, entry: object): CompiledWorkflow {
+  // eve's own workflow tools, such as `agent({ models })`, read settings the runtime finds only
+  // among the agent's static tools.
+  if (isFrameworkTool(entry)) {
+    throw new Error(
+      `The defineDynamic() in "${source.logicalPath}" returned eve's built-in workflow tool "${name}", which only works as a static tool. Export it from its own file under agent/tools/ instead.`,
+    );
+  }
   const [entryPoint] = readWorkflowToolEntryPoints(entry);
   const workflowId =
     entryPoint === undefined ? undefined : readWorkflowFunctionId(Reflect.get(entry, entryPoint));

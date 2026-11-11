@@ -1,5 +1,5 @@
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { workflowEntry } from "#execution/session/entry.js";
@@ -12,15 +12,19 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { returnAskAnswerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import {
+  returnAskAnswerWorkflow,
+  waitingForCleanupWorkflow,
+} from "#internal/testing/workflow-tool-fixtures.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { defineTool } from "#tools/definition.js";
-import { defineDynamic } from "#tools/dynamic.js";
+import { type DynamicToolEntry, defineDynamic } from "#tools/dynamic.js";
 import {
   type WorkflowExecuteToolDefinition,
+  type WorkflowTaskToolDefinition,
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
 
@@ -34,16 +38,25 @@ const ALICE = {
 
 type Stage = Awaited<ReturnType<ReturnType<typeof captureTurnEvents>["nextTurn"]>>;
 
+const DEPLOY_INPUT = {
+  additionalProperties: false,
+  properties: { service: { type: "string" } },
+  required: ["service"],
+  type: "object",
+} as const;
+
+// A task that keeps running after the turn that started it.
+const holdDeploy = defineWorkflowTool({
+  description: "Start a deploy that keeps running in the background.",
+  inputSchema: DEPLOY_INPUT,
+  task: waitingForCleanupWorkflow as unknown as WorkflowTaskToolDefinition["task"],
+});
+
 // Declared outside the dynamic function, so the same compiled workflow backs every evaluation.
 const confirmDeploy = defineWorkflowTool({
   description: "Deploy a service once someone confirms.",
   execute: returnAskAnswerWorkflow as WorkflowExecuteToolDefinition["execute"],
-  inputSchema: {
-    additionalProperties: false,
-    properties: { service: { type: "string" } },
-    required: ["service"],
-    type: "object",
-  },
+  inputSchema: DEPLOY_INPUT,
 });
 
 /**
@@ -55,11 +68,14 @@ const confirmDeploy = defineWorkflowTool({
 async function withDynamicRun(
   name: string,
   isOffered: () => boolean,
+  tool: DynamicToolEntry,
   body: (run: {
     readonly offered: string[][];
     readonly answer: (stage: Stage) => Promise<Stage>;
     readonly send: (message: string) => Promise<Stage>;
-    readonly first: Stage;
+    readonly first: () => Promise<Stage>;
+    /** Delivers a message without waiting for a turn to settle, as steering joins an open one. */
+    readonly deliver: (message: string) => Promise<void>;
   }) => Promise<void>,
 ) {
   const offered: string[][] = [];
@@ -86,6 +102,8 @@ async function withDynamicRun(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
+        // Without the default `agent` tool, only the dynamic tool can start tasks.
+        defaultTools: false,
         model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
       }),
       name,
@@ -94,7 +112,7 @@ async function withDynamicRun(
       {
         logicalPath: "tools/support.ts",
         loadNamespace: async () => ({
-          default: defineDynamic(() => (isOffered() ? { confirm_deploy: confirmDeploy } : null)),
+          default: defineDynamic(() => (isOffered() ? { confirm_deploy: tool } : null)),
         }),
       },
       {
@@ -128,7 +146,15 @@ async function withDynamicRun(
     try {
       await body({
         offered,
-        first: await withTimeout(stream.nextTurn(), "first turn"),
+        first: () => withTimeout(stream.nextTurn(), "first turn"),
+        async deliver(message) {
+          await resumeHook(sessionInboxHookToken(continuationToken), {
+            auth: ALICE,
+            kind: "send",
+            delivery,
+            payload: { message },
+          });
+        },
         async answer(stage) {
           const question = questionsIn(stage)[0];
           expect(question).toBeDefined();
@@ -177,7 +203,9 @@ describe("dynamic workflow tools", () => {
     await withDynamicRun(
       "dynamic-workflow-offer",
       () => offeredNow,
-      async ({ answer, first, offered, send }) => {
+      confirmDeploy,
+      async ({ answer, first: settled, offered, send }) => {
+        const first = await settled();
         expect(offered.at(-1)).toContain("read_notes");
         expect(offered.at(-1)).not.toContain("confirm_deploy");
         expect(questionsIn(first)).toHaveLength(0);
@@ -201,7 +229,9 @@ describe("dynamic workflow tools", () => {
     await withDynamicRun(
       "dynamic-workflow-withdrawn",
       () => offeredNow,
-      async ({ answer, first, offered }) => {
+      confirmDeploy,
+      async ({ answer, first: settled, offered }) => {
+        const first = await settled();
         expect(questionsIn(first)).toHaveLength(1);
 
         offeredNow = false;
@@ -212,6 +242,32 @@ describe("dynamic workflow tools", () => {
         });
         expect(filterEventsByType(answered, "turn.settled").at(-1)?.data.outcome).toBe("completed");
         expect(offered.at(-1)).not.toContain("confirm_deploy");
+      },
+    );
+  }, 60_000);
+
+  it("keeps the task tools while a task started by a withdrawn tool still runs", async () => {
+    let offeredNow = true;
+    await withDynamicRun(
+      "dynamic-workflow-task-withdrawn",
+      () => offeredNow,
+      holdDeploy,
+      async ({ deliver, offered }) => {
+        // The turn stays open while its task runs, so wait for the call after the task started.
+        await vi.waitFor(() => expect(offered.length).toBeGreaterThanOrEqual(2), {
+          timeout: 20_000,
+        });
+        expect(offered.at(-1)).toContain("eve__task_wait");
+
+        offeredNow = false;
+        const calls = offered.length;
+        await deliver("How is it going?");
+        await vi.waitFor(() => expect(offered.length).toBeGreaterThan(calls), { timeout: 20_000 });
+
+        expect(offered.at(-1)).not.toContain("confirm_deploy");
+        expect(offered.at(-1)).toEqual(
+          expect.arrayContaining(["eve__task_wait", "eve__task_cancel"]),
+        );
       },
     );
   }, 60_000);

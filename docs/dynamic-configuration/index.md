@@ -215,7 +215,7 @@ export default defineDynamic((ctx) =>
 );
 ```
 
-A body written inline in a dynamic function isn't compiled, and the turn fails with an error that names the tool. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn.
+The build fails when a workflow tool's body is written inline or doesn't start with `"use workflow"`. A body imported from another module is checked when the tool is offered: if it isn't a compiled workflow, the turn fails with an error that names the tool. A call that has started keeps running when a later model call no longer offers the tool, and its result still reaches the turn.
 
 ### Author replayable callbacks
 

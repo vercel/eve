@@ -10,6 +10,7 @@ import { captureLogRecords } from "#internal/testing/log-records.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
+import { agent } from "#public/tools/agent.js";
 import { nativeCatalog } from "#internal/testing/catalog-fixtures.js";
 
 const tool = (description = "Search issues.") =>
@@ -62,6 +63,12 @@ describe("dynamic tools", () => {
         }),
       {},
       `returned workflow tool "search" whose entry point isn't a compiled workflow`,
+    ],
+    [
+      "eve's built-in agent({ models }) tool",
+      () => agent({ models: { "openai/gpt-5.4": "Hard tasks" } }),
+      {},
+      `returned eve's built-in workflow tool "search", which only works as a static tool`,
     ],
     [
       "an authored workflow tool's name",

@@ -150,6 +150,100 @@ return inner();
     });
   });
 
+  describe("a workflow tool that isn't the default export", () => {
+    const dynamicModule = (
+      lines: readonly string[],
+      binding = 'import { defineDynamic, defineWorkflowTool } from "eve/tools";',
+    ) => [binding, 'import { run } from "../lib/run";', ...lines, ""].join("\n");
+
+    it.each([
+      [
+        "an inline method in the resolver",
+        dynamicModule([
+          'export default defineDynamic(() => defineWorkflowTool({ description: "d", inputSchema: {}, async execute() { return 1; } }));',
+        ]),
+        /"execute" of a defineWorkflowTool\(\) in ".+" is a function expression without "use workflow"/u,
+      ],
+      [
+        "an inline arrow on a top-level tool",
+        dynamicModule([
+          'const deploy = defineWorkflowTool({ description: "d", inputSchema: {}, task: async () => 1 });',
+          "export default defineDynamic(() => ({ deploy }));",
+        ]),
+        /"task" of a defineWorkflowTool\(\) in ".+" is an arrow function without "use workflow"/u,
+      ],
+      [
+        "a top-level function without the directive",
+        dynamicModule([
+          "async function go() { return 1; }",
+          'const deploy = defineWorkflowTool({ description: "d", inputSchema: {}, execute: go });',
+          "export default defineDynamic(() => ({ deploy }));",
+        ]),
+        /is the function "go" without "use workflow"/u,
+      ],
+      [
+        "a top-level const arrow without the directive",
+        dynamicModule([
+          "const go = async () => 1;",
+          'const deploy = defineWorkflowTool({ description: "d", inputSchema: {}, execute: go as never });',
+          "export default defineDynamic(() => ({ deploy }));",
+        ]),
+        /is an arrow function without "use workflow"/u,
+      ],
+      [
+        "a renamed import",
+        dynamicModule(
+          [
+            'export default defineDynamic(() => durable({ description: "d", inputSchema: {}, async execute() { return 1; } }));',
+          ],
+          'import { defineDynamic, defineWorkflowTool as durable } from "eve/tools";',
+        ),
+        /without "use workflow"/u,
+      ],
+      [
+        "a namespace import",
+        dynamicModule(
+          [
+            'export default tools.defineDynamic(() => tools.defineWorkflowTool({ description: "d", inputSchema: {}, async execute() { return 1; } }));',
+          ],
+          'import * as tools from "eve/tools";',
+        ),
+        /without "use workflow"/u,
+      ],
+    ])("rejects an entry point without the directive: %s", async (_name, source, message) => {
+      await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+        message,
+      );
+    });
+
+    it.each([
+      [
+        "a top-level workflow function",
+        dynamicModule([
+          'async function go() { "use workflow"; return 1; }',
+          'const deploy = defineWorkflowTool({ description: "d", inputSchema: {}, execute: go });',
+          "export default defineDynamic(() => ({ deploy }));",
+        ]),
+      ],
+      [
+        "an imported function, which its own module and the offered tool check",
+        dynamicModule([
+          'export default defineDynamic(() => defineWorkflowTool({ description: "d", inputSchema: {}, execute: run }));',
+        ]),
+      ],
+      [
+        "a default export, which compilation checks",
+        dynamicModule([
+          'export default defineWorkflowTool({ description: "d", inputSchema: {}, async execute() { return 1; } });',
+        ]),
+      ],
+    ])("accepts %s", async (_name, source) => {
+      await expect(
+        prepareAuthoredWorkflowDirectives({ filePath: FILE, source }),
+      ).resolves.toBeDefined();
+    });
+  });
+
   const runtimeApiSpecifier = JSON.stringify("workflow/api");
   it.each([
     'import { sleep } from "workflow";',
