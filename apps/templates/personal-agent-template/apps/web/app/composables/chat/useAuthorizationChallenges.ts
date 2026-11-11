@@ -139,7 +139,7 @@ export function useAuthorizationChallenges() {
 
     let connectors: Array<{ connectionName: string; status: { state: string } }>;
     try {
-      connectors = await $fetch("/api/connectors");
+      connectors = await $fetch<typeof connectors>("/api/connectors");
     } catch {
       return;
     }
