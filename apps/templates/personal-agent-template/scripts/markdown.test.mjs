@@ -11,6 +11,18 @@ import { renderToString } from "vue/server-renderer";
 const require = createRequire(import.meta.url);
 const comarkRequire = createRequire(require.resolve("@comark/nuxt"));
 const comarkVueUrl = pathToFileURL(comarkRequire.resolve("@comark/vue")).href;
+const uiRequire = createRequire(import.meta.resolve("@nuxt/ui"));
+const { Primitive } = await import(pathToFileURL(uiRequire.resolve("reka-ui")).href);
+
+// Follow UButton's avatar binding and UAvatar's root/image selectors, using the
+// real Primitive so nested element selection is not hidden by the button stub.
+const Avatar = {
+  props: ["as", "src", "text"],
+  setup: (props) => () =>
+    h(Primitive, { as: typeof props.as === "string" ? props.as : props.as?.root || "span" }, () =>
+      props.src ? h(props.as?.img || "img", { src: props.src }) : h("span", props.text || "\u00a0"),
+    ),
+};
 const componentUrl = new URL("../apps/web/app/components/chat/Comark.ts", import.meta.url);
 registerHooks({
   load(url, context, nextLoad) {
@@ -40,7 +52,10 @@ async function render(value, streaming = false) {
   app.component("UButton", {
     props: ["to", "label", "avatar"],
     setup: (props) => () =>
-      h("a", { href: props.to, "data-avatar-src": props.avatar?.src }, props.label),
+      h("a", { href: props.to, "data-avatar-src": props.avatar?.src }, [
+        h(Avatar, props.avatar),
+        props.label,
+      ]),
   });
   return renderToString(app);
 }
@@ -53,10 +68,36 @@ for (const streaming of [false, true]) {
     );
     assert.match(
       output,
-      /<p>A sourced answer <a\b[^>]*href="https:\/\/example.com"[^>]*>example.com<\/a> continues here\.<\/p>/,
+      /<p>A sourced answer <a\b[^>]*href="https:\/\/example.com"[^>]*><span><img\b[^>]*><\/span>example.com<\/a> continues here\.<\/p>/,
     );
     assert.match(output, /data-avatar-src="https:\/\/example.com\/favicon.ico"/);
     assert.doesNotMatch(output, /\{url=/);
+  });
+
+  test(`chat Markdown keeps source citation component props private (streaming=${streaming})`, async () => {
+    for (const as of [
+      "script",
+      "iframe",
+      "style",
+      { root: "script" },
+      { img: "iframe" },
+      { img: "style" },
+    ]) {
+      const avatar = JSON.stringify({
+        as,
+        src: "https://example.com/marker.png",
+        text: "harmless marker",
+      });
+      const output = await render(
+        `A source :source-link{url="https://example.com" favicon="https://example.com/favicon.ico" label="example.com" :avatar='${avatar}' data-marker="untrusted"} remains a citation.`,
+        streaming,
+      );
+      assert.doesNotMatch(output, /<(?:script|iframe|style)\b/i);
+      assert.doesNotMatch(output, /data-marker=|marker\.png|harmless marker/);
+      assert.match(output, /<img\b[^>]*src="https:\/\/example.com\/favicon.ico"/);
+      assert.match(output, /href="https:\/\/example.com"/);
+      assert.match(output, /example.com<\/a> remains a citation\./);
+    }
   });
 
   test(`chat Markdown removes executable HTML and component syntax (streaming=${streaming})`, async () => {
@@ -115,5 +156,8 @@ test("chat Markdown preserves formatting, highlighted code, and source links", a
   assert.match(output, /<span\b/);
   assert.match(output, /&lt;/);
   assert.doesNotMatch(output, /<script\b/);
-  assert.match(output, /<a\b[^>]*href="https:\/\/example.com"[^>]*>example.com<\/a>/);
+  assert.match(
+    output,
+    /<a\b[^>]*href="https:\/\/example.com"[^>]*><span><img\b[^>]*><\/span>example.com<\/a>/,
+  );
 });
