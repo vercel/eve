@@ -1830,50 +1830,6 @@ describe("calls that wait on a person as tasks", () => {
     expect(joined.match(/It waits for a person to approve it/gu)).toHaveLength(1);
   });
 
-  it("holds the turn while a call waits as a task, and cancelling the turn withdraws its request", async () => {
-    const prompts: string[] = [];
-    const { events, ran } = await withSession(
-      "edge-wait-holds",
-      {
-        message: "Deploy it.",
-        model: scriptedModel(({ said }, raw) => {
-          prompts.push(JSON.stringify(raw));
-          if (said("Bob's aside")) return "Noted.";
-          // The late answer reads as the person's words, naming the request it answered.
-          if (said("Never mind") || said("requestId")) return "That was already done.";
-          return [{ toolName: "deploy", toolCallId: "call_deploy" }];
-        }),
-        tools: [{ approval: true, name: "deploy" }],
-      },
-      async (session) => {
-        await session.next("asks");
-        const [approval] = session.approvals();
-        await session.send("Bob's aside.", BOB);
-        // The model replied, and the turn waits on the approval rather than ending.
-        await session.until("the approval waits", (event) => event.type === "turn.paused");
-        expect(ofType(session.events(), "turn.settled")).toEqual([]);
-        await session.control("cancel");
-        await session.until("cancelled", (event) => event.type === "turn.settled");
-        // One delivery, so the late answer and the message start one turn together.
-        await session.answer(approval!, "approve", ALICE, { message: "Never mind, how are you?" });
-        await session.until(
-          "next turn",
-          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
-        );
-      },
-    );
-
-    expect(ran).toEqual([]);
-    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
-    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
-      "interrupted",
-    ]);
-    expect(settlements(events)).toEqual(["call_deploy:interrupted"]);
-    // The stopped call's task never reports into the next turn.
-    expect(prompts.at(-1)).toContain("Never mind");
-    expect(prompts.at(-1)).not.toContain("<task_result id=");
-  });
-
   it("stops a waiting call when its turn fails, and its task never reports", async () => {
     const prompts: string[] = [];
     const { events, ran } = await withSession(
@@ -2150,7 +2106,7 @@ describe("calls that wait on a person as tasks", () => {
     expect(offered).toEqual([[], taskTools, taskTools, taskTools]);
   });
 
-  it.each(["clear", "reset"] as const)(
+  it.each(["cancel", "clear", "reset"] as const)(
     "withdraws a waiting call's request on %s, and nothing reports later",
     async (kind) => {
       const prompts: string[] = [];
@@ -2160,8 +2116,9 @@ describe("calls that wait on a person as tasks", () => {
           message: "Deploy it.",
           model: scriptedModel(({ said }, raw) => {
             prompts.push(JSON.stringify(raw));
-            if (said("Bob's aside") || said("Hello again")) return "Noted.";
-            return [{ toolName: "deploy", toolCallId: "call_deploy" }];
+            return said("Deploy it")
+              ? [{ toolName: "deploy", toolCallId: "call_deploy" }]
+              : "Noted.";
           }),
           tools: [{ approval: true, name: "deploy" }],
         },
@@ -2175,9 +2132,9 @@ describe("calls that wait on a person as tasks", () => {
             await session.until("ended", (event) => event.type === "session.ended");
             return;
           }
-          await session.until("cleared", (event) => event.type === "turn.settled");
-          await session.answer(approval!, "approve");
-          await session.send("Hello again.");
+          await session.until("withdrawn", (event) => event.type === "turn.settled");
+          // One delivery, so the late answer and the message start one turn together.
+          await session.answer(approval!, "approve", ALICE, { message: "Hello again." });
           await session.until(
             "next turn",
             (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
@@ -2191,7 +2148,11 @@ describe("calls that wait on a person as tasks", () => {
       ]);
       expect(settlements(events)).toEqual(["call_deploy:interrupted"]);
       expect(ofType(events, "task.started")).toEqual([]);
-      if (kind === "clear") expect(prompts.at(-1)).not.toContain("<task_result id=");
+      if (kind === "reset") return;
+      expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+      // The stopped call's task never reports into the next turn.
+      expect(prompts.at(-1)).toContain("Hello again");
+      expect(prompts.at(-1)).not.toContain("<task_result id=");
     },
   );
 });
