@@ -2617,7 +2617,7 @@ describe("work delegated to a child session", () => {
       origin: { call: { callId: "call_child_inbox", name: "read_inbox" } },
       request: {
         kind: "approval",
-        prompt: expect.stringContaining('from bob, reads: "Bob\'s note."'),
+        prompt: expect.stringContaining('from "bob", reads: "Bob\'s note."'),
       },
       subject: { callId: "call_agent" },
     });
