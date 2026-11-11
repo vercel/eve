@@ -51,7 +51,13 @@ export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
 /** This workflow's callback base URL, or `undefined` outside a workflow. */
 export async function workflowCallbackBaseUrl(): Promise<string | undefined> {
   const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-  const url = getWorkflowMetadata().url;
+  let url: unknown;
+  try {
+    url = getWorkflowMetadata().url;
+  } catch {
+    // Outside a workflow step, the SDK throws instead of returning metadata.
+    return undefined;
+  }
   return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
 }
 
