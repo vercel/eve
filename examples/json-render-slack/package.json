@@ -5,7 +5,6 @@
   "scripts": {
     "build": "eve build",
     "dev": "eve dev",
-    "simulate": "node scripts/simulate-slack.mjs",
     "start": "eve start",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

@@ -18,17 +18,6 @@ The extension contributes three things:
 
 Channels without card support, such as SMS, post the card's fallback text. `agent/tools/get_deploy_stats.ts` supplies deterministic sample data worth putting in a card.
 
-## Try it without Slack
-
-`scripts/simulate-slack.mjs` runs the built agent against a local stand-in for Slack's Web API, sends one signed `app_mention`, and prints every post, edit, and delete, then the final blocks:
-
-```bash
-pnpm build
-pnpm simulate "How did our deploys go last week?"
-```
-
-The model call needs AI Gateway credentials, such as `AI_GATEWAY_API_KEY` or a pulled `VERCEL_OIDC_TOKEN`.
-
 ## Run it in Slack
 
 This example builds against the workspace `eve` and `@eve/json-render`. From the repository, set up the channel and deploy:
