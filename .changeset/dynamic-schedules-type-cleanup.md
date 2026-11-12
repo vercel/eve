@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
 Clarify the experimental dynamic schedules types and error messages, and deprecate the top-level identity fields of `ScheduleOccurrenceEvent` in favor of `occurrence`.
