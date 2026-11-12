@@ -64,6 +64,18 @@ A space has a stable `id`, namespaced by platform and workspace so it is unique 
 
 A session started with `receive()` reports a space only when its target names the workspace, such as Slack's `installationTeamId` or Teams' `tenantId`, so it never reports a different space than the conversations already in that place. Discord sessions started with `receive()` report none, and so do Chat SDK sessions started from a thread ID whose adapter can't tell DMs apart. Other built-in channels report no space. A [custom channel](/docs/channels/custom#conversation-space) reports its own. Like the audience, the space is fixed when the session is created, and a local subagent inherits its parent's.
 
+The model is told where it is too. When the channel reports a space, eve adds a short note to the system prompt with its `type` and `visibility`, which reads `unknown` when the platform didn't say, but never its ID:
+
+```text
+<conversation_space>
+type: channel
+visibility: private
+</conversation_space>
+This conversation is a channel that people join. Only its members can see it.
+```
+
+It helps the model decide what's appropriate to say, such as being more careful in a public channel than in a DM. It's guidance, not enforcement: decide access in code.
+
 A space identifies a place, not who may act there. Check the caller in `ctx.session.auth.current` before you let them change data that everyone in the space shares.
 
 ## Sign-ins

@@ -5,6 +5,7 @@ import { declared } from "#runtime/types.js";
 import { approvals } from "./approvals.js";
 import { builtins } from "./builtins.js";
 import { catalog } from "./catalog.js";
+import { conversation } from "./conversation.js";
 import { connectionDefinition, connections } from "./connections.js";
 import type { Definition } from "./definition.js";
 import { hookDefinition } from "./hooks.js";
@@ -68,6 +69,7 @@ async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly D
       .map(scheduleToolsDefinition),
     ...declared(agent, "skill").map(skillDefinition),
     skills,
+    conversation,
     approvals,
     builtins,
     catalog,
