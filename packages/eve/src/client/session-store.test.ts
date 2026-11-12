@@ -375,6 +375,18 @@ describe("SessionStore acceptance and observation", () => {
     expect(attachmentError).toBeUndefined();
   });
 
+  it("sends end() issued during session creation to the created session", async () => {
+    const created = Promise.withResolvers<void>();
+    const server = agent((id) => (id === "d_0" ? created.promise : undefined));
+    const current = store();
+    const sending = current.send({ message: "Alice asks for a report." });
+    const ending = current.end();
+    created.resolve();
+    await sending;
+    expect(await ending).toMatchObject({ sessionId: "session_1" });
+    expect(server.posts).toEqual(["/eve/v1/session", "/eve/v1/session/session_1/end"]);
+  });
+
   it("does not replay historical errors into a new pending send", async () => {
     const receipt = Promise.withResolvers<void>();
     const server = agent(() => receipt.promise);

@@ -65,7 +65,7 @@ function harness(
   const state: SlackChannelState = {
     audience: "public",
     channelId: "C1",
-    slackUsersByPrincipal: { p_bob: "U_BOB" },
+    slackUsersByPrincipal: { p_alice: "U_ALICE", p_bob: "U_BOB" },
     teamId: null,
     threadTs: options.codeChannel === true ? null : "1.0",
     triggeringUserId: "U_ALICE",
@@ -91,11 +91,15 @@ function harness(
         }
         return { id: response.ts };
       },
-      async postEphemeral(user: string, text: string) {
-        const response = respond("chat.postEphemeral", { text, user });
+      async postEphemeral(user: string, message: string | Record<string, unknown>) {
+        const body = typeof message === "string" ? { text: message } : message;
+        const response = respond("chat.postEphemeral", { ...body, user });
         if (!response.ok)
           throw Object.assign(new Error("Slack refused the ephemeral"), { response });
-        return { id: "" };
+        return { id: response.ts };
+      },
+      async startTyping(status: string) {
+        respond("thread.startTyping", { status });
       },
     },
   };
@@ -452,6 +456,63 @@ describe("Slack input request cards", () => {
       ["D_ALICE", "Answered: Approve"],
       ["C1", "Answered: Approve by <@U_BOB>."],
     ]);
+  });
+
+  it("shows an ephemeral question only to Alice and keeps her answer out of the thread", async () => {
+    const { answer, ask, calls, channel, sent, settle } = harness({
+      approvalChannel: () => "ephemeral",
+    });
+    await ask(dayQuestion());
+
+    // The note goes first: Slack hides an ephemeral in a thread that has no replies yet.
+    expect(sent.map((call) => call.method)).toEqual(["thread.post", "chat.postEphemeral"]);
+    expect(calls("thread.post")[0]?.body.text).toBe("Waiting on a response from <@U_ALICE>…");
+    const [card] = calls("chat.postEphemeral");
+    expect(card?.body.user).toBe("U_ALICE");
+    expect(eveActionIds(card?.body)[0]).toMatch(/^eve_input:route:C1:1\.0:q_day/u);
+
+    await answer("q_day", { optionId: "Saturday" }, "p_alice");
+    await settle("q_day", "accepted", { optionId: "Saturday" });
+
+    // Slack can't edit an ephemeral, so only the thread note changes, without the answer.
+    expect(calls("chat.update").map((update) => [update.body.ts, update.body.text])).toEqual([
+      ["ts_1", "Answered by <@U_ALICE>."],
+    ]);
+    expect(calls("chat.delete")).toEqual([]);
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("removes an ephemeral request's thread note when its card can't be posted", async () => {
+    const { ask, calls, channel } = harness({
+      approvalChannel: () => "ephemeral",
+      fails: ({ method }) => (method === "chat.postEphemeral" ? "ratelimited" : undefined),
+    });
+
+    await expect(ask(dayQuestion())).rejects.toThrow("Slack refused the ephemeral");
+
+    expect(calls("chat.delete").map((call) => [call.body.channel, call.body.ts])).toEqual([
+      ["C1", "ts_1"],
+    ]);
+    expect(channel.state.interactionCards ?? []).toEqual([]);
+  });
+
+  it("posts an ephemeral approval's controls again when its answer is refused", async () => {
+    const { answer, ask, calls, commit } = harness({ approvalChannel: () => "ephemeral" });
+    await ask(approval("a_deploy", "deploy", { target: "production" }));
+    const [first] = calls("chat.postEphemeral");
+    // An ephemeral can't drop a details message later, so the details ride with the controls.
+    expect(JSON.stringify(first?.body)).toContain("production");
+    await answer("a_deploy", { optionId: "approve" }, "p_alice");
+
+    await commit({
+      data: { outcome: "refused", reason: "Sign in to approve.", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    const [, again, notice] = calls("chat.postEphemeral");
+    expect(again?.body.blocks).toEqual(first?.body.blocks);
+    expect(notice?.body.text).toBe("Sign in to approve.");
+    expect(calls("chat.update")).toEqual([]);
   });
 
   const invalid: {
@@ -859,6 +920,48 @@ describe("Slack input request cards", () => {
     ]);
   });
 
+  it.each<{ asked: Asked; name: string; shown: string; value: Record<string, string> }>([
+    {
+      asked: freeformQuestion,
+      name: "a typed answer",
+      shown: "Mostly the billing migration",
+      value: { text: "Mostly the billing migration" },
+    },
+    {
+      asked: dayQuestion(),
+      name: "a chosen option",
+      shown: "Saturday",
+      value: { optionId: "Saturday" },
+    },
+  ])(
+    "keeps $name to a direct-message question out of its thread note",
+    async ({ asked, shown, value }) => {
+      const { answer, ask, calls, settle } = harness({ approvalChannel: () => "direct-message" });
+      await ask(asked);
+
+      await answer(asked.interactionId, value);
+      await settle(asked.interactionId, "accepted", value);
+
+      const updates = calls("chat.update");
+      const dm = updates.filter((update) => update.body.channel === "D_ALICE");
+      const thread = updates.filter((update) => update.body.channel === "C1");
+      expect(JSON.stringify(dm)).toContain(shown);
+      expect(thread.map((update) => update.body.text)).toEqual(["Answered by <@U_BOB>."]);
+    },
+  );
+
+  it("still shows a thread question's answer in the thread", async () => {
+    const { answer, ask, calls, settle } = harness();
+    await ask(dayQuestion());
+
+    await answer("q_day", { optionId: "Saturday" });
+    await settle("q_day", "accepted", { optionId: "Saturday" });
+
+    const [update, ...more] = calls("chat.update");
+    expect(more).toEqual([]);
+    expect(update?.body).toMatchObject({ channel: "C1", text: "Answered: Saturday" });
+  });
+
   it("ignores cards recorded before the upgrade", async () => {
     const { ask, calls, channel, settle } = harness();
     await ask(approval("a_deploy", "deploy"));
@@ -986,3 +1089,40 @@ function controls(
 ): SlackInteractionCardParts {
   return { ...parts, controls: { ...parts.controls, blocks } };
 }
+
+describe("Slack sign-ins that wait on a card already shown", () => {
+  const signIn = (interactionId: string, waitsOn?: string): Asked => ({
+    call: { name: "get_weather" },
+    interactionId,
+    request: {
+      kind: "sign-in",
+      prompt: "Sign in to Weather.",
+      signIn: {
+        displayName: "Weather",
+        name: "weather",
+        url: "https://idp.example/authorize",
+        ...(waitsOn !== undefined && { waitsOn }),
+      },
+    },
+  });
+
+  it("posts nothing and leaves the shown card when a waiting sign-in ends", async () => {
+    for (const ending of [
+      { interactionId: "s_waiting", outcome: "accepted" },
+      { interactionId: "s_waiting", outcome: "failed", reason: "access_denied" },
+    ] as const) {
+      const slack = harness();
+      await slack.ask(signIn("s_shown"), signIn("s_waiting", "s_shown"));
+      expect(slack.calls("thread.post"), "the one status the thread shows").toHaveLength(1);
+      const pending = slack.channel.state.pendingAuthMessageTs;
+      const before = slack.sent.length;
+
+      await slack.commit({ data: ending, type: "interaction.settled" });
+      expect(slack.sent.slice(before), ending.outcome).toEqual([]);
+      expect(slack.channel.state.pendingAuthMessageTs).toEqual(pending);
+
+      await slack.settle("s_shown", "accepted");
+      expect(slack.calls("chat.update"), "the shown card's ending").toHaveLength(1);
+    }
+  });
+});

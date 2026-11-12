@@ -30,6 +30,7 @@ import {
   RESOLVE_EXTENSIONS,
   createDistributionPackageBoundaryPlugin,
   createGenerationPackageBoundaryPlugin,
+  type GenerationHostBundle,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
   normalizeExternalDependencies,
@@ -222,12 +223,13 @@ export async function bundleAuthoredModuleCode(
  */
 export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
-  options: AuthoredModuleLoadOptions = {},
+  options: AuthoredModuleLoadOptions & { readonly hostBundle?: GenerationHostBundle } = {},
 ): Promise<string> {
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
+      hostBundle: options.hostBundle,
     }),
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
@@ -258,7 +260,7 @@ export async function bundleExtensionDistributionGraph(input: {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
     ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
-    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createNodeEsmCompatBannerPlugin(),
     createDistributionPackageBoundaryPlugin({
       packageRoot: input.packageRoot,
       runtimeDependencies: input.runtimeDependencies,
@@ -319,6 +321,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
   readonly resolveExternalPaths?: boolean;
+  readonly hostBundle?: GenerationHostBundle;
 }): Promise<AuthoredModuleMapBundle> {
   // The package root owns dependency resolution, while the selected app root
   // owns authored workflow IDs and must match the workflow driver.
@@ -364,6 +367,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
           packageRoot,
           extensionSpecifiers: new Set(extensionMounts.map((mount) => mount.specifier)),
           resolveExternalPaths: input.resolveExternalPaths,
+          hostBundle: input.hostBundle,
         }),
         packageRoot,
         plugins: [

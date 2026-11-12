@@ -17,8 +17,15 @@ import type { RunHandle, Runtime, SessionAuthContext } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { isScheduleAuth } from "#public/schedules/index.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import {
+  defineDynamicSchedules,
+  type DynamicSchedulesRunArgs,
+  type DynamicSchedulesToFn,
+  type ScheduleHandle,
+  type SchedulePrincipalReference,
+} from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { z } from "#compiled/zod/index.js";
 import { defineChannel } from "#public/definitions/channel.js";
@@ -79,7 +86,18 @@ describe("ScheduleDispatcher", () => {
       scheduleId: "sch-1",
       scheduledAt: "2026-09-29T19:00:00Z",
     };
-    function setup(auth: typeof creator | null = creator) {
+    type AuthResult = SessionAuthContext | Pick<SessionAuthContext, "attributes"> | null;
+    function setup(
+      auth:
+        | AuthResult
+        | ((context: { schedule: ScheduleHandle }) => AuthResult | Promise<AuthResult>) = creator,
+      idempotencyKey?: string,
+      principal: SchedulePrincipalReference = {
+        type: "user",
+        authenticator: "test",
+        principalId: "alice",
+      },
+    ) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
       const channel = defineChannel<undefined, void, { channelId: string }>({
@@ -88,25 +106,27 @@ describe("ScheduleDispatcher", () => {
           targets.push(input.target.channelId);
           return await context
             .from(input.target.channelId)
-            .send(input.message, { auth: input.auth });
+            .send(input.message, { auth: input.auth, idempotencyKey: input.idempotencyKey });
         },
       });
       const run = vi.fn(
         async (args: {
           payload: { task: string; destination: string };
-          to: import("#public/schedules/subscription.js").DynamicSchedulesToFn;
+          to: DynamicSchedulesToFn;
           auth: SessionAuthContext;
           waitUntil: (task: Promise<unknown>) => void;
         }) => {
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
-          args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
+          args.waitUntil(
+            args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
+          );
         },
       );
       const definition = defineDynamicSchedules({
         provider: inMemoryScheduleProvider(),
         inputSchema: z.object({ task: z.string(), destination: z.enum(["my-dm", "team-channel"]) }),
-        auth: () => auth,
+        auth: typeof auth === "function" ? auth : () => auth,
         run,
       });
       const payload = createScheduleCollectionPayload({
@@ -116,7 +136,7 @@ describe("ScheduleDispatcher", () => {
           version: 3,
           payload: { task: "Summarize the week.", destination: "my-dm" },
           scope: "alice",
-          principal: { type: "user", authenticator: "test", principalId: "alice" },
+          principal,
         },
       });
       const dispatcher = new ScheduleDispatcher({
@@ -141,6 +161,7 @@ describe("ScheduleDispatcher", () => {
         definition,
         occurrence,
         payload,
+        schedule: { disable: async () => {}, delete: async () => {} },
       };
       return { dispatcher, input, runtime, run, targets };
     }
@@ -164,17 +185,91 @@ describe("ScheduleDispatcher", () => {
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
     });
 
-    it.each([null, { ...creator, principalId: "bob" }])(
-      "does not invoke authored code when creator resolution fails (%j)",
-      async (auth) => {
-        const { dispatcher, input, runtime, run } = setup(auth);
-        await expect(dispatcher.triggerCollection(input)).rejects.toThrow(
-          /no longer authorized|must resolve the schedule creator/,
+    it("starts a keyed send without looking up an earlier session", async () => {
+      const { dispatcher, input, runtime } = setup(creator, "exec-1:digest");
+      await dispatcher.triggerCollection(input);
+      await dispatcher.triggerCollection(input);
+      expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+      const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
+      expect(started).toHaveLength(2);
+      // A retried callback claims the same address, so its start reaches the first session.
+      expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
+      expect(started[1]).toMatchObject({
+        idempotencyKey: "exec-1:digest",
+        continuationConflictCommand: { idempotencyKey: "exec-1:digest", kind: "send" },
+      });
+    });
+
+    it.each([
+      ["no issuer or subject", { type: "user", authenticator: "test", principalId: "alice" }],
+      [
+        "an issuer and subject",
+        {
+          type: "user",
+          authenticator: "test",
+          issuer: "https://issuer.test",
+          principalId: "alice",
+          subject: "sub-alice",
+        },
+      ],
+    ])(
+      "builds creator auth from attributes and a stored creator with %s",
+      async (_label, stored) => {
+        const { dispatcher, input, runtime, run } = setup(
+          { attributes: { team: "billing" } },
+          undefined,
+          stored,
         );
+        await dispatcher.triggerCollection(input);
+        const { type, ...identity } = stored;
+        const auth = { ...identity, principalType: type, attributes: { team: "billing" } };
+        expect(run.mock.calls[0]![0].auth).toEqual(auth);
+        expect(vi.mocked(runtime.createSession).mock.calls[0]![0]).toMatchObject({
+          auth,
+          initiatorAuth: auth,
+        });
+      },
+    );
+
+    it("runs as the stored creator even when attributes carry other identity fields", async () => {
+      const { dispatcher, input, run } = setup({
+        attributes: {},
+        authenticator: "other",
+        principalType: "service",
+      } as Pick<SessionAuthContext, "attributes">);
+      await dispatcher.triggerCollection(input);
+      expect(run.mock.calls[0]![0].auth).toEqual(creator);
+    });
+
+    it.each([
+      ["auth returns null", null, /no longer authorized/],
+      ["auth returns another principal", { ...creator, principalId: "bob" }, /schedule creator/],
+      ["auth returns no attributes", {} as AuthResult, /must return \{ attributes \}/],
+      ["auth returns nothing", () => undefined as never, /must return \{ attributes \}/],
+    ])(
+      "fails permanently without invoking authored code when %s",
+      async (_label, auth, message) => {
+        const { dispatcher, input, runtime, run } = setup(auth);
+        const error = await dispatcher.triggerCollection(input).catch((thrown: unknown) => thrown);
+        expect(error).toBeInstanceOf(PermanentScheduleMessageError);
+        expect((error as Error).message).toMatch(message);
         expect(run).not.toHaveBeenCalled();
         expect(runtime.createSession).not.toHaveBeenCalled();
       },
     );
+
+    it("lets auth stop the schedule it denies", async () => {
+      const { dispatcher, input, run } = setup(async ({ schedule }) => {
+        await schedule.disable();
+        return null;
+      });
+      const disable = vi.fn(async () => {});
+      input.schedule = { ...input.schedule, disable };
+      const error = await dispatcher.triggerCollection(input).catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(PermanentScheduleMessageError);
+      expect(disable).toHaveBeenCalledOnce();
+      expect(run).not.toHaveBeenCalled();
+    });
 
     it("validates provider-delivered payloads before auth or callback side effects", async () => {
       const { dispatcher, input, run } = setup();
@@ -187,9 +282,7 @@ describe("ScheduleDispatcher", () => {
       const { dispatcher, input } = setup();
       const definition = {
         ...input.definition,
-        run: ({
-          waitUntil,
-        }: import("#public/schedules/subscription.js").DynamicSchedulesRunArgs<unknown>) =>
+        run: ({ waitUntil }: DynamicSchedulesRunArgs<unknown>) =>
           waitUntil(Promise.reject(new Error("send failed"))),
       };
       await expect(dispatcher.triggerCollection({ ...input, definition })).rejects.toThrow(
@@ -354,6 +447,45 @@ describe("ScheduleDispatcher", () => {
       } finally {
         vi.unstubAllEnvs();
       }
+    });
+    // the turn a scheduled send starts in a conversation must know a schedule sent it.
+    it("marks to() sends into an existing conversation with the schedule", async () => {
+      const runtime = createMockRuntime();
+      runtime.dispatchContinuation = vi
+        .fn()
+        .mockResolvedValue({ sessionId: "existing-session", status: "accepted" });
+      const thread: CompiledChannel = {
+        __kind: CHANNEL_SENTINEL,
+        routes: [],
+        adapter: { kind: "channel:thread" },
+        receive: async ({ auth, message, target }, { from }) =>
+          await from(String(target.address)).send(message, { auth }),
+      };
+      const resolved: ResolvedChannelDefinition = {
+        name: "thread",
+        method: "POST",
+        urlPath: "/thread",
+        logicalPath: "channels/thread.ts",
+        sourceId: "channel-thread",
+        sourceKind: "module",
+        adapter: thread.adapter,
+        definition: thread,
+        receive: thread.receive,
+        fetch: async () => new Response("ok"),
+      };
+      await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
+        scheduleId: "daily",
+        async run({ to }) {
+          await to(thread, { address: "C1:1761400000.000100" }).send("daily check", {
+            auth: null,
+          });
+        },
+      });
+      expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: expect.objectContaining({ schedule: { definition: "daily" } }),
+        }),
+      );
     });
     it("rejects unregistered channels", async () => {
       const stranger = {

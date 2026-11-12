@@ -139,6 +139,8 @@ how they capture it.
 | [Supermemory](#supermemory)             | `@supermemory/eve`      | Semantic search over stored memories                   | Automatic after each turn, plus tools                |
 | [Upstash AgentKit](#upstash-agentkit)   | `@upstash/agentkit-eve` | Ranked Redis Search recall or a Redis document backend | Automatic user-message capture or model-driven tools |
 | [Kybernesis Arcana](#kybernesis-arcana) | `@kybernesis/arcana`    | Semantic search and brain notes                        | Model-driven tools or optional automatic capture     |
+| [memco](#memco)                         | `@memco/eve`            | Briefing and reminders; search through tools           | Model-driven tools only                              |
+| [claude-mem](#claude-mem)               | `claude-mem`            | Scope's newest memory and matching records each turn   | Automatic after each turn, plus `remember`           |
 | [Your own provider](#build-your-own)    | Your code               | Whatever your store returns                            | Whatever rules you implement                         |
 
 ### File memory
@@ -240,6 +242,88 @@ export default defineMemory({
 Set `capture: { enabled: true }` when you want Arcana to capture completed
 turns automatically. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme)
 for provider options.
+
+### memco
+
+[memco](https://docs.memco.ai/integrations/eve/) provides hosted shared memory.
+Agents search existing knowledge, save findings, and add evidence or feedback
+through tools. The provider supplies guidance and search reminders, not automatic
+retrieval or transcript capture.
+
+```bash
+eve add memory/memco
+```
+
+The command installs the independently maintained `@memco/eve` package and writes
+this slot:
+
+```ts title="agent/memory/memco.ts"
+import { memco } from "@memco/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "The team's shared memory: search it before working something out.",
+  provider: memco({ domain: "knowledge" }),
+  scope: byPrincipal,
+});
+```
+
+Set `MEMCO_API_TOKEN` in your server environment. Every caller using this token
+shares its memco identity and accessible memory; `byPrincipal` does not partition
+the token's stored memory. For separate customers, use API client credentials and
+`byTenant` from `@memco/eve`.
+
+`@memco/eve@0.1.2` requires Node.js 24 or later and declares support for
+`eve >=0.84.1 <1`, which excludes eve 1.0 prereleases. See the
+[memco integration page](/integrations/memco) for credentials, both identity
+setups, and deployment boundaries.
+
+### claude-mem
+
+[claude-mem](https://docs.claude-mem.ai/eve-integration) connects a slot to your
+hosted claude-mem memory on cmem.ai. By default, each scope gets its own project.
+Before every turn, the provider adds that project's newest memory and records that
+match the message. It records each completed turn, and gives the model tools to
+search, browse, and save notes.
+
+```bash
+eve add memory/claude-mem
+```
+
+The command installs `claude-mem` and writes a `claude-mem` slot:
+
+```ts title="agent/memory/claude-mem.ts"
+import { claudeMem } from "claude-mem/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY });
+
+export default defineMemory({
+  description: "Recall and save durable context for the current user.",
+  provider: {
+    ...provider,
+    // get_observations fetches by ID across every project the key can see, so it
+    // would let one principal read another's memory through the shared key.
+    async tools(context) {
+      const { get_observations: _unscoped, ...tools } = (await provider.tools?.(context)) ?? {};
+      return tools;
+    },
+  },
+  scope: byPrincipal,
+});
+```
+
+The slot omits the provider's `get_observations` tool, which has no project filter
+and would let one caller read another caller's observations by ID.
+
+Recording spends the key owner's cmem.ai allowance for every caller and needs a
+key with write access. Pass `capture: false` to `claudeMem(...)` to turn it off, and
+keep the `tools` wrapper. To recall your Claude
+Code and Codex work, a single-owner agent can set `searchAllProjects: true`. See the
+[claude-mem integration page](/integrations/claude-mem) for options and the
+security boundaries of `searchAllProjects`.
 
 ### Build your own
 

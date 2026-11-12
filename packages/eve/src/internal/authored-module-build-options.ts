@@ -20,7 +20,7 @@ export function createAuthoredModuleBuildOptions(input: {
     plugins: [
       ...input.plugins,
       ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
-      createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+      createNodeEsmCompatBannerPlugin(),
       input.packageBoundaryPlugin,
     ],
     resolve: {

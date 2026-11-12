@@ -5,7 +5,7 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
-import { type CompactionConfig, type StepResult } from "#harness/types.js";
+import { type CompactionConfig, type CompactionStage, type StepResult } from "#harness/types.js";
 import {
   type HarnessModelMessage,
   isUserModelMessage,
@@ -23,6 +23,7 @@ import {
 import {
   compactMessages,
   type CompactionSummarizer,
+  estimateRatio,
   getInputTokenCount,
   shouldCompact,
 } from "#harness/compaction/engine.js";
@@ -95,14 +96,16 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   try {
     const resolvedModel = await resolveEffectiveRuntimeModel(step);
     step.model = resolvedModel.choice;
+    const compaction = compactionConfig(step);
     await summarizeHistory(step, {
+      compaction,
       betweenTurns: true,
       change,
       compact: true,
       messages,
       model: resolvedModel.model,
       promptMessages: messages,
-      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
+      requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
   } catch (error) {
     outcome = "failed";
@@ -135,8 +138,11 @@ export async function historyBeforeCall(
   },
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
-  const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
-  const config = compactionConfig(step);
+  const config = compactionConfig(step, {
+    messages: prompt,
+    requestEnvelopeTokens: input.requestEnvelopeTokens,
+  });
+  const previousEnvelope = config.requestEnvelopeTokens;
   if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }
@@ -151,6 +157,7 @@ export async function historyBeforeCall(
   });
   return await summarizeHistory(step, {
     change,
+    compaction: config,
     messages: input.messages,
     model: input.model,
     promptMessages: prompt,
@@ -206,6 +213,7 @@ async function summarizeHistory(
     readonly betweenTurns?: true;
     readonly change: LazyChange;
     readonly compact?: true;
+    readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
     /** The turn's model, which writes summaries unless the agent names a compaction model. */
     readonly model: LanguageModel;
@@ -216,7 +224,7 @@ async function summarizeHistory(
 ): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
   const before = validateHarnessModelMessages(input.messages);
-  const compaction = compactionConfig(step);
+  const { compaction } = input;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
   let runOpen = false;
@@ -244,17 +252,18 @@ async function summarizeHistory(
   };
 
   let messages: HarnessModelMessage[];
+  let stage: CompactionStage;
   try {
-    const rewrite = historyContext(compaction, { ...input, threshold: compaction.threshold });
-    messages = (await compactMessages(
+    const compacted = await compactMessages(
       before,
-      rewrite.config,
+      historyConfig(compaction, input),
       summarize,
       input.compact === true,
-      rewrite.historyTokens,
       input.betweenTurns !== true,
-    )) as HarnessModelMessage[];
-    // Capping old tool output alone rewrites the history without a summary call.
+    );
+    messages = compacted.messages as HarnessModelMessage[];
+    stage = compacted.stage;
+    // Dropping tool activity alone rewrites the history without a summary call.
     if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
     const usage = summaryUsageOf(summaryUsage);
@@ -275,7 +284,8 @@ async function summarizeHistory(
     await settleChange(step, { ...input, runOpen, summaryUsage }, unchanged ? before : messages);
   }
   if (unchanged) return undefined;
-  step.session = changeHistory(step.session, { rewrite: messages });
+  const rewritten = changeHistory(step.session, { rewrite: messages });
+  step.session = { ...rewritten, compaction: { ...rewritten.compaction, lastStage: stage } };
   return messages;
 }
 
@@ -307,52 +317,30 @@ async function settleChange(
 }
 
 /**
- * The history's share of the threshold and of the last measurement. Whatever the model sees
- * besides the history (instructions, tools, memory, client context) is kept whole, so it takes
- * room like the envelope.
+ * The history's share of the threshold and the target. Whatever the model sees besides the
+ * history (instructions, tools, memory, client context) is kept whole, so it takes room like the
+ * envelope: on the estimate for the threshold, and on the provider's ruler for the target.
  */
-function historyContext(
+function historyConfig(
   compaction: CompactionConfig,
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
-    /** The call's input tokens to aim under. */
-    readonly threshold: number;
   },
-): { readonly config: CompactionConfig; readonly historyTokens?: number } {
+): CompactionConfig {
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
     0,
     estimateTokens(input.promptMessages) - estimateTokens(input.messages),
   );
-  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold: input.threshold });
-  const config: CompactionConfig = {
-    ...compaction,
-    threshold: Math.max(1, input.threshold - requestEnvelopeTokens - protectedTokens),
-    lastKnownInputTokens:
-      compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            compaction.lastKnownInputTokens -
-              Math.min(compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
-          ),
-  };
-  const promptTokens =
-    input.requestEnvelopeTokens === undefined
-      ? undefined
-      : getInputTokenCount(
-          input.promptMessages,
-          compaction,
-          requestEnvelopeTokens,
-          compaction.requestEnvelopeTokens,
-        );
+  const { threshold } = compaction;
+  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold });
+  const fixedTokens = requestEnvelopeTokens + protectedTokens;
   return {
-    config,
-    ...(promptTokens !== undefined && {
-      historyTokens: Math.max(0, promptTokens - requestEnvelopeTokens - protectedTokens),
-    }),
+    ...compaction,
+    target: Math.max(1, Math.floor(compaction.target - fixedTokens * estimateRatio(compaction))),
+    threshold: Math.max(1, threshold - fixedTokens),
   };
 }
 
@@ -390,6 +378,7 @@ async function summaryExecutor(
     telemetry: step.instrumentation?.prepareAttempt({
       attempt: 0,
       runId: input.change.runId,
+      runtimeContext: { "eve.compaction.request": "summary" },
       ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
     }).telemetry,
   };

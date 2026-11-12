@@ -59,6 +59,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Nuxt](${EVE_ORIGIN}/docs/guides/frontend/nuxt.md): Mount eve routes and use the Vue client in Nuxt.
 - [SvelteKit](${EVE_ORIGIN}/docs/guides/frontend/sveltekit.md): Mount eve routes and use the Svelte client in SvelteKit.
 - [TanStack Start](${EVE_ORIGIN}/docs/guides/frontend/tanstack.md): Mount eve routes and use the React client in TanStack Start.
+- [Vite](${EVE_ORIGIN}/docs/guides/frontend/vite.md): Mount eve routes in any other Vite app.
 - [Client SDK](${EVE_ORIGIN}/docs/guides/client.md): Call an eve app from scripts, services, tests, or custom UIs.
 
 ## Operate
@@ -75,7 +76,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 ## Patterns
 
 - [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Scope any memory provider to an authenticated tenant and caller.
-- [Dynamic Scheduling](${EVE_ORIGIN}/docs/patterns/dynamic-scheduling.md): Build application-managed schedules from an eve schedule and authored tools.
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
 

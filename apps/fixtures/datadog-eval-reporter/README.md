@@ -1,7 +1,7 @@
 # Datadog eval reporter fixture
 
 This deterministic mock-model app exercises the Datadog eval reporter against
-`dd-trace@6.13.0`.
+`dd-trace@6.20.1`.
 
 ```bash
 export DD_API_KEY="..."

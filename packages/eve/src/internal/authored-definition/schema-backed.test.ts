@@ -199,6 +199,28 @@ describe("normalizeToolDefinition", () => {
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
   });
 
+  it("accepts label: false, which hides a tool's calls from activity", () => {
+    const tool = defineTool({
+      label: false,
+      description: "React.",
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: true,
+          description: "React.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("rejects malformed label definitions", () => {
     expect(() =>
       normalizeToolDefinition(

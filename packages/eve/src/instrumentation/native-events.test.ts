@@ -539,7 +539,7 @@ describe("interactions", () => {
     },
   );
 
-  it("places a request about the turn on its latest run, and keeps sign-ins out", async () => {
+  it("places a request about the turn on its latest run, and names a sign-in's connection only", async () => {
     const { commit, heard } = session();
     await commit(...opening);
     await commit(started("run_0", 0));
@@ -566,16 +566,29 @@ describe("interactions", () => {
     await commit({
       data: {
         interactionId: "i_sign_in",
-        request: { kind: "sign-in", prompt: "Sign in to Calendar" },
+        request: {
+          kind: "sign-in",
+          prompt: "Sign in to Calendar",
+          signIn: { name: "calendar", url: "https://example.com/oauth", userCode: "ABCD" },
+        },
         subject: { turnId: "turn_0" },
       },
       scope: turn,
       type: "interaction.opened",
     } as SessionEvent);
 
-    expect(of(heard, "interaction.")).toMatchObject([
+    const events = of(heard, "interaction.");
+    expect(events).toMatchObject([
       { interactionId: "i_budget", request: undefined, scope: { runId: "run_1" } },
+      {
+        interactionId: "i_sign_in",
+        kind: "sign-in",
+        request: undefined,
+        scope: { runId: "run_1" },
+        signIn: { name: "calendar" },
+      },
     ]);
+    expect(JSON.stringify(events)).not.toMatch(/oauth|ABCD/u);
   });
 
   it("hears a withdrawn approval's end when its turn is cancelled, with no answer", async () => {

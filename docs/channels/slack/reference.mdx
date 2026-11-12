@@ -87,7 +87,7 @@ eve drops the app's own messages before any hook runs. Other bots' messages reac
 
 Hooks don't post anything. eve still acknowledges the message, shows progress, and posts the reply. To change what the agent posts, add [renderers](#customize-rendering).
 
-`onInteraction(action, ctx)` handles clicks on your own buttons and selects (`block_actions`). Clicks on eve's approval and question controls go to `onAnswers(ctx, submission)` instead. To open a modal from a button, pass `action.triggerId` to `ctx.slack.request("views.open", { trigger_id, view })` within about 3 seconds. eve adds the clicking user's Slack ID to the model message.
+`onInteraction(action, ctx)` handles clicks on your own buttons and selects (`block_actions`). Clicks on eve's approval and question controls go to `onAnswers(ctx, submission)` instead. To open a modal from a button, pass `action.triggerId` to `ctx.slack.request("views.open", { trigger_id, view })` within about 3 seconds. To replace or delete the message the click came from, POST to `action.responseUrl`, for example `{ "delete_original": true }`. That is the only way to change an ephemeral message. eve adds the clicking user's Slack ID to the model message.
 
 `onShortcut(shortcut, ctx)` handles message and global shortcuts configured under **Interactivity & Shortcuts**. It receives the callback ID, user, workspace, and trigger ID, plus the message and channel for a message shortcut.
 
@@ -142,6 +142,8 @@ message_ts: 1700000000.000004
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
 | `"immediate"` (default) | The `received` acknowledgement when the message arrives, then the thread status through the turn  |
 | `"deferred"`            | Nothing until the turn's first tool call finishes; a turn that ends with `no_reply` shows nothing |
+
+A call to a tool with [`label: false`](/docs/tools#label-tool-activity) shows no status and doesn't count as that first call, so a deferred turn that only adds a reaction and ends with `no_reply` stays silent.
 
 - Mentions and DMs outside code channels get the `received` acknowledgement, `Thinking...` by default, before their hook runs. `"deferred"` keeps the rest of their turn quiet but can't take the acknowledgement back.
 - When several messages start one turn, the turn is quiet only if all of them are deferred. A message that isn't deferred and joins a quiet turn shows the status from then on.
@@ -345,6 +347,26 @@ export default slackChannel({
 While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a pending request. A message typed in the thread or DM reaches the agent as a new message under the [turn policy](#control-overlapping-turns). With the default `"steer"` policy, it withdraws an open question.
 
 Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` in a sensitive tool before it changes anything.
+
+#### Use Slack's action token
+
+Slack sends an `action_token` with mentions and DMs. The [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api) needs it to search for the person who wrote the message with a bot token. eve reads it into `message.actionToken`, including the copy Slack nests under `assistant_thread`, and `defaultSlackAuth` adds it to the turn's auth as the `action_token` attribute. With the default hooks, or a hook that returns `defaultSlackAuth`, a tool reads it without any channel code:
+
+```ts title="agent/tools/search_slack.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Search public Slack channels for the person asking.",
+  inputSchema: z.object({ query: z.string() }),
+  async execute({ query }, ctx) {
+    const actionToken = ctx.session.auth.current?.attributes.action_token;
+    // Pass `actionToken` and `query` to `assistant.search.context` with the bot token.
+  },
+});
+```
+
+Each message carries its own token, and Slack rejects a token once it expires. Slack also rejects a token sent with another app's bot token, so a remote agent that receives it with a forwarded principal can't search with it.
 
 #### Continue conversations without repeated mentions
 
@@ -633,7 +655,15 @@ The plan title summarizes the turn, from `Working on 2 tasks` and `1 of 2 tasks 
 
 Approvals and questions show as Slack buttons and selects, and **Type your answer** opens a modal. Answers pass through `onAnswers` before the session resumes. Approval cards pair **Deny** with a primary **Approve** button.
 
-Set `approvalChannel` to choose where each request appears, including tool approvals and `ctx.ask()` questions. Return `"direct-message"` to show it only to the Slack user who triggered the turn, or `"thread"` for the shared thread:
+A `display: "select"` question shows radio buttons for up to 6 options and a dropdown for more. Picking an option answers it. When the question sets `initialOptionId`, that option starts selected, and a primary **Use** button labeled with the option submits it, because Slack sends nothing when a person keeps the current selection. The button is one of eve's controls, so a custom [`interactionCard`](#restyle-approval-and-question-cards) must keep it.
+
+Set `approvalChannel` to choose where each request appears, including tool approvals and `ctx.ask()` questions:
+
+| Value              | Where the request appears                                             |
+| ------------------ | --------------------------------------------------------------------- |
+| `"thread"`         | In the shared thread, for everyone. The default.                      |
+| `"ephemeral"`      | In the thread, visible only to the Slack user who triggered the turn. |
+| `"direct-message"` | In that user's DM with the app. Needs the `im:write` scope.           |
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
@@ -641,24 +671,26 @@ import { slackChannel } from "eve/channels/slack";
 export default slackChannel({
   approvalChannel: (request) =>
     request.request.kind === "question" || request.call?.name === "review_answer"
-      ? "direct-message"
+      ? "ephemeral"
       : "thread",
 });
 ```
 
-The callback receives the request (an `Interaction`) and the `SessionContext`. Omit it to keep every request in the thread. If eve can't find the Slack user for a direct message, it logs the request and posts nothing, so private requests fail closed. `onAnswers` or the tool's approval policy still decides who may answer.
+The callback receives the request (an `Interaction`) and the `SessionContext`. Omit it to keep every request in the thread. For `"ephemeral"` and `"direct-message"`, the thread shows a `Waiting on` note naming the person instead of the request. If eve can't find the Slack user, it logs the request and posts nothing, so private requests fail closed. `onAnswers` or the tool's approval policy still decides who may answer.
+
+Slack can't edit an ephemeral message after posting it, so an ephemeral card changes only when the person uses it. Their click replaces the card with eve's answered line, not an `interactionCard` rendering. If a policy refuses the answer, eve posts the card again. When the request ends without a click, only the thread note changes. Slack doesn't keep ephemeral messages across reloads, so use `"direct-message"` for a request the person may answer later.
 
 Each approval, question, and budget prompt card updates as its request changes:
 
 - Once eve accepts an answer, the card shows the answer and who gave it instead of the buttons, even while other requests from the same step wait. If a policy refuses the answer, the buttons come back.
 - When several requests share one message, answering one updates only its part.
-- Once the request ends, eve deletes the tool-input post after the last request it covers ends. It also updates a direct-message request's `Waiting on approval` note in the thread.
+- Once the request ends, eve deletes the tool-input post after the last request it covers ends. It also updates a private request's `Waiting on` note in the thread: an approval's note names the decision, and any other request's note says only who answered, so the answer stays private.
 - A request that ends without a click, such as when the person replies in the thread or the request is withdrawn, reads `No longer needed`.
 - A click on a request whose session has ended marks the card `No longer active`, and an ephemeral message tells the person to send a new message. A freeform answer submitted then replaces the whole message, including requests grouped with it.
 
 To change how these cards look, use [`interactionCard`](#restyle-approval-and-question-cards).
 
-A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
+A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. When the session has no thread and isn't a code channel, a public status would post top-level in the channel, so eve sends the prompt to the person's DM instead, names the channel it's for, and edits the DM when the sign-in ends. If the DM can't be sent, eve posts in the channel as usual. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
 
 ## Audience
 
@@ -679,7 +711,7 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 | `threadContext`   | Off                                                         | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
 | `codeChannels`    | `false`                                                     | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
 | `uploadPolicy`    | Any media type, up to 25 MB                                 | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
-| `approvalChannel` | `"thread"`                                                  | `(request, ctx) => "thread" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                                              |
+| `approvalChannel` | `"thread"`                                                  | `(request, ctx) => "thread" \| "ephemeral" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                               |
 | `renderers`       | eve's default renderer                                      | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |
 | `onAppMention`    | Dispatch with workspace-scoped auth                         | `(ctx, message)` hook for `app_mention` events.                                                                                                  |
 | `onDirectMessage` | Dispatch with workspace-scoped auth                         | `(ctx, message)` hook for DMs.                                                                                                                   |
@@ -1127,8 +1159,8 @@ export default slackChannel({
 | Field         | What it is                                                                                                                                                                                                                  |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `interaction` | The request, with its `status`, `outcome`, `call` (including the tool `input`), and `answer`. While the request is open, `answer` is the latest accepted answer, if any. Once it ends, `answer` is the one that decided it. |
-| `destination` | `"thread"` or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided. In a code channel, `"thread"` is the code channel itself.                                                                        |
-| `audience`    | Who reads the message. A direct message is always `private`; a thread request has the thread's audience.                                                                                                                    |
+| `destination` | `"thread"`, `"ephemeral"`, or `"direct-message"`, as [`approvalChannel`](#human-in-the-loop-hitl) decided. In a code channel, `"thread"` is the code channel itself.                                                        |
+| `audience`    | Who reads the message. An ephemeral or direct-message request is always `private`; a thread request has the thread's audience.                                                                                              |
 | `answeredBy`  | The Slack user ID whose answer stands or decided the request, when known.                                                                                                                                                   |
 | `view`        | The session snapshot, for the selectors from `eve/events`.                                                                                                                                                                  |
 

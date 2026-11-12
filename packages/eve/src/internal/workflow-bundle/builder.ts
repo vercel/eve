@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { Plugin } from "rolldown";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
 import {
@@ -37,6 +38,11 @@ import {
 import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-log.js";
 import {
+  type DriverChunk,
+  resolveInstalledEveRoot,
+  reuseFrameworkDriverChunk,
+} from "#internal/workflow-bundle/framework-driver-cache.js";
+import {
   type NitroStepEntrypointDiscoveredEntries,
   writeNitroStepEntrypoint,
 } from "#internal/workflow-bundle/nitro-step-entry.js";
@@ -59,6 +65,7 @@ export class WorkflowBundleBuilder {
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
   readonly #queueNamespace: string;
+  readonly #inlineSourcemap: boolean;
   protected readonly config: WorkflowBundleBuilderConfig;
 
   constructor(options: WorkflowBundleBuilderOptions) {
@@ -86,6 +93,7 @@ export class WorkflowBundleBuilder {
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
+    this.#inlineSourcemap = options.inlineSourcemap ?? true;
   }
 
   async build(): Promise<WorkflowArtifacts> {
@@ -187,6 +195,7 @@ export class WorkflowBundleBuilder {
     stepRegistrationsPath,
   }: WorkflowBundleCreateWorkflowsBundleOptions): Promise<WorkflowBundleCreateWorkflowsBundleResult> {
     const manifest: WorkflowManifest = {};
+    const installedEveRoot = resolveInstalledEveRoot();
     const chunks = await mapConcurrent(
       [
         {
@@ -196,14 +205,21 @@ export class WorkflowBundleBuilder {
         },
         { label: "app", serdeFiles: [], workflowFiles: appWorkflowFiles },
       ],
-      async (layer) => {
-        const layerManifest: WorkflowManifest = {};
-        const code = await this.#buildDriverChunk({
-          ...layer,
-          manifest: layerManifest,
-        });
-        return { code, manifest: layerManifest };
-      },
+      async (layer) =>
+        layer.label === "framework" && installedEveRoot !== undefined
+          ? await reuseFrameworkDriverChunk(
+              {
+                eveRoot: installedEveRoot,
+                inlineSourcemap: this.#inlineSourcemap,
+                inputFiles: [...layer.workflowFiles, ...layer.serdeFiles],
+                packageRoot: this.authoredPackageRoot,
+                projectRoot: this.transformProjectRoot,
+                workingDir: this.config.workingDir,
+              },
+              async (graphPlugin) =>
+                await this.#buildDriverChunk({ ...layer, authoredTsConfig: false, graphPlugin }),
+            )
+          : await this.#buildDriverChunk({ ...layer, authoredTsConfig: true }),
     );
     for (const chunk of chunks) mergeWorkflowManifest(manifest, chunk.manifest);
     const workflowCode = composeWorkflowDriverCode(chunks.map((chunk) => chunk.code));
@@ -224,17 +240,21 @@ export class WorkflowBundleBuilder {
    * nothing to bundle, the common case for an app with no workflow tools.
    */
   async #buildDriverChunk(options: {
+    /** An installed eve ships compiled JavaScript, which the app's tsconfig must not reshape. */
+    authoredTsConfig: boolean;
+    /** Lets {@link reuseFrameworkDriverChunk} record the layer's build graph. */
+    graphPlugin?: Plugin;
     label: string;
-    manifest: WorkflowManifest;
     serdeFiles: readonly string[];
     workflowFiles: readonly string[];
-  }): Promise<string> {
+  }): Promise<DriverChunk> {
+    const manifest: WorkflowManifest = {};
     const workflowFiles = [...options.workflowFiles].sort();
     const workflowFileSet = new Set(workflowFiles);
     const serdeOnlyFiles = [...options.serdeFiles]
       .sort()
       .filter((filePath) => !workflowFileSet.has(filePath));
-    if (workflowFiles.length === 0 && serdeOnlyFiles.length === 0) return "";
+    if (workflowFiles.length === 0 && serdeOnlyFiles.length === 0) return { code: "", manifest };
 
     const virtualEntrySource = [
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
@@ -262,27 +282,30 @@ export class WorkflowBundleBuilder {
         }),
         createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
         createWorkflowTransformPlugin({
-          manifest: options.manifest,
+          manifest,
           projectRoot: this.transformProjectRoot,
           sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
           workingDir: this.config.workingDir,
         }),
         // After the transform, so stubbed step bodies' node:* imports are already gone.
         createWorkflowNodeBuiltinGuardPlugin(),
+        options.graphPlugin,
       ],
       resolve: {
         conditionNames: ["eve-source", "workflow"],
         extensions: [...WORKFLOW_SOURCE_EXTENSIONS],
         mainFields: ["module", "main"],
       },
-      tsconfig: resolveAuthoredTsConfigPath(this.authoredPackageRoot),
+      tsconfig: options.authoredTsConfig
+        ? resolveAuthoredTsConfigPath(this.authoredPackageRoot)
+        : false,
       output: {
         comments: false,
         format: "cjs",
-        sourcemap: "inline",
+        sourcemap: this.#inlineSourcemap ? "inline" : false,
       },
     });
-    return interimBundle.code;
+    return { code: interimBundle.code, manifest };
   }
 
   protected async createManifest({

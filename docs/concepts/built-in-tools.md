@@ -43,7 +43,7 @@ export { default } from "eve/tools/bash";
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 
-The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A longer stream starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A line longer than 2,000 characters keeps its start and ends with `[truncated]`. A stream with lines left out starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
 
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
@@ -363,25 +363,38 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-To let the model choose an AI Gateway model for each root-copy task, export `agentWithModel` from the same slot:
+To let the model run a root-copy task on another model, call `agent({ models })` and list the models it may choose:
 
 ```ts title="agent/tools/agent.ts"
-export { agentWithModel as default } from "eve/tools/agent";
+import { agent } from "eve/tools/agent";
+import { anthropic } from "@ai-sdk/anthropic";
+
+export default agent({
+  models: {
+    "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
+    "openai/gpt-6-luna": "Routine tasks where fast completion matters",
+    haiku: {
+      model: anthropic("claude-haiku-5"),
+      description: "Cheap lookups and short summaries",
+      reasoning: "low",
+    },
+  },
+});
 ```
 
-`agentWithModel` is a separate workflow tool that calls `ctx.agent("agent", { model })`; the default `agent` tool has no `model` parameter. It accepts:
+`models` takes the same entries as [`auto()`](../guides/decide#choose-from-gateway-models). A string entry is the description, and its key is the AI Gateway model ID. An object entry holds the model, an AI Gateway model ID or an AI SDK model, with its description and optional `reasoning`, `modelContextWindowTokens`, and `modelOptions`. The tool then accepts:
 
 ```ts
 {
   message: string;
-  model: string; // AI Gateway model id for the child session
+  model?: "openai/gpt-6-sol" | "openai/gpt-6-luna" | "haiku"; // one of the keys
   taskId?: string;
 }
 ```
 
-It otherwise behaves like the default tool, and `taskId` continues the same root-copy session. The selected model applies to every turn in that session, so a continuation must repeat the original model; start a new task to use another. Because the parent model picks the value, use this tool only when it may choose any model your AI Gateway credentials and policies allow.
+The model sees each key with its description and can choose only those keys. A call without `model` runs on the root agent's model, the same as the default tool; with a dynamic model such as `auto()`, the copy chooses again. `agent()` with no `models` is the default tool, with no `model` input. The selected model applies to every turn of the task's session. A continuation can omit `model` or repeat the original one; start a new task to use another. Copies and declared subagents never get this tool.
 
-An authored `agent/tools/agent.ts` replaces the framework tool. Re-export the default definition, export `agentWithModel`, export another tool such as `agentRouter()`, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
+An authored `agent/tools/agent.ts` replaces the framework tool. Re-export the default definition, export `agent({ models })`, export another tool such as `agentRouter()`, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";

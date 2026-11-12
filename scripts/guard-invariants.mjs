@@ -915,11 +915,11 @@ const NITRO_ID_LITERAL_RE = /["'`]#nitro\//;
 
 // Nitro modules that must act after Nitro resolves its options. The host's
 // entry swap runs in a config-declared build:before hook, after the preset
-// picks its entry; the TanStack module configures the host app's own Nitro,
-// not eve's.
+// picks its entry; the Vite plugin module configures the host app's own
+// Nitro, not eve's.
 const RULE58_NITRO_OPTIONS_WRITERS = new Set([
   "packages/eve/src/internal/nitro/host/instrumentation-entry.ts",
-  "packages/eve/src/public/tanstack/index.ts",
+  "packages/eve/src/shared/vite-eve-plugin.ts",
 ]);
 
 /**

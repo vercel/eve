@@ -8,7 +8,7 @@ import { formatDuration } from "#shared/format-duration.js";
 export const TASK_WAIT_DESCRIPTION = `Call ${TASK_WAIT_TOOL_NAME} sparingly, only when you deliberately want to withhold a message from the user while waiting for a task result. Tasks keep running and their results reach you without calling ${TASK_WAIT_TOOL_NAME}. If the user should hear from you now, reply instead. Wait silently until any of your tasks has a result, a new message arrives, or timeoutSeconds pass. It returns after the first result, which follows in a <task_result> message; wait again only if you still want to withhold a reply until another result arrives. Waiting never stops a task.`;
 
 export const TASK_WAIT_TIMEOUT_DESCRIPTION =
-  "Optional. Seconds to wait before returning without a result. Omit it to wait for a result or a new message, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
+  "Optional. Seconds to wait before returning without a result. There is no upper limit, so set it above 1800 to wait longer than 30 minutes. Omit it to wait up to 30 minutes for a result or a new message, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
 
 export const TASK_CANCEL_DESCRIPTION =
   "Stop a task's current work. That work never reports back; if it already had a result, that result is still delivered. Cancelling an agent or one-shot task ends it; start a new task to delegate again. Other tasks that accept more input stay available: call their tool with the taskId to give them new work.";
@@ -204,6 +204,8 @@ function fitToBudget(body: string, budget: { bytes: number; lines: number }): st
   for (const line of lines) {
     const cost = encoder.encode(line).byteLength + 1;
     if (budget.lines === 0 || cost > budget.bytes) {
+      const head = budget.lines === 0 ? "" : cutToBytes(encoder, line, budget.bytes - 1);
+      if (head !== "") kept.push(head);
       kept.push(TRUNCATED_MARKER);
       budget.lines = 0;
       budget.bytes = 0;
@@ -214,6 +216,13 @@ function fitToBudget(body: string, budget: { bytes: number; lines: number }): st
     budget.bytes -= cost;
   }
   return kept.join("\n");
+}
+
+/** The longest prefix of `text` within `maxBytes` of UTF-8, without splitting a character. */
+function cutToBytes(encoder: TextEncoder, text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  const { read } = encoder.encodeInto(text, new Uint8Array(maxBytes));
+  return text.slice(0, read);
 }
 
 function escapeTaskResultBody(body: string): string {

@@ -1,1 +1,9 @@
-["AgentWithModelTool", "AgentWithModelToolInput", "agent", "agentWithModel", "default"]
+[
+  "AgentModelsTool",
+  "AgentModelsToolInput",
+  "AgentTool",
+  "AgentToolModel",
+  "AgentToolOptions",
+  "agent",
+  "default"
+]

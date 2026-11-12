@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import {
@@ -25,6 +25,7 @@ import {
 } from "#internal/nitro/host/build-extension.js";
 import { withExtensionBuildLock } from "#internal/nitro/host/extension-build-lock.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { parseExtensionPackageRoots } from "#shared/extension-package-contract.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 /**
@@ -58,21 +59,19 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
       : await Promise.all(input.changedPaths.map(async (path) => await toCanonicalPath(path)));
   const force = input.previousExtensions === undefined || changedPaths?.length === 0;
 
-  await Promise.all(
-    extensions.map(async (extension) => {
-      const previous = previousByPackageRoot.get(extension.packageRoot);
-      if (
-        force === true ||
-        previous === undefined ||
-        !sameBuildInputs(previous, extension) ||
-        changedPaths?.some((path) => affectsExtensionBuild(path, extension)) === true
-      ) {
-        await withExtensionBuildLock(extension.packageRoot, async () => {
-          await buildExtensionPackage(extension.packageRoot, extension.config);
-        });
-      }
-    }),
-  );
+  await buildInDependencyOrder(extensions, async (extension) => {
+    const previous = previousByPackageRoot.get(extension.packageRoot);
+    if (
+      force === true ||
+      previous === undefined ||
+      !sameBuildInputs(previous, extension) ||
+      changedPaths?.some((path) => affectsExtensionBuild(path, extension)) === true
+    ) {
+      await withExtensionBuildLock(extension.packageRoot, async () => {
+        await buildExtensionPackage(extension.packageRoot, extension.config);
+      });
+    }
+  });
 
   return extensions;
 }
@@ -88,22 +87,55 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
  */
 export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
   const extensions = await discoverWorkspaceExtensions(appRoot);
-  await Promise.all(
-    extensions.map(async (extension) => {
-      if (await isExtensionDistributionCurrent(extension)) return;
-      try {
-        await withExtensionBuildLock(extension.packageRoot, async () => {
-          if (await isExtensionDistributionCurrent(extension)) return;
-          await buildExtensionPackage(extension.packageRoot, extension.config);
-        });
-      } catch (error) {
-        // The message embeds the build error; a cause would print it twice.
-        throw new Error(
-          `Failed to build workspace extension "${extension.config.packageName}" at ${extension.packageRoot}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\n${toErrorMessage(error)}`,
-        );
-      }
-    }),
+  await buildInDependencyOrder(extensions, async (extension) => {
+    if (await isExtensionDistributionCurrent(extension)) return;
+    try {
+      await withExtensionBuildLock(extension.packageRoot, async () => {
+        if (await isExtensionDistributionCurrent(extension)) return;
+        await buildExtensionPackage(extension.packageRoot, extension.config);
+      });
+    } catch (error) {
+      // The message embeds the build error; a cause would print it twice.
+      throw new Error(
+        `Failed to build workspace extension "${extension.config.packageName}" at ${extension.packageRoot}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\n${toErrorMessage(error)}`,
+      );
+    }
+  });
+}
+
+/**
+ * Runs `build` for each extension once the builds of the workspace extensions
+ * it declares as dependencies succeed, since building an extension reads the
+ * distributions of the extensions it mounts. Independent extensions build in
+ * parallel.
+ */
+async function buildInDependencyOrder(
+  extensions: readonly WorkspaceExtension[],
+  build: (extension: WorkspaceExtension) => Promise<void>,
+): Promise<void> {
+  const byPackageName = new Map(
+    extensions.map((extension) => [extension.config.packageName, extension]),
   );
+  const builds = new Map<WorkspaceExtension, Promise<void>>();
+  const visiting = new Set<WorkspaceExtension>();
+
+  const schedule = (extension: WorkspaceExtension): Promise<void> => {
+    let pending = builds.get(extension);
+    if (pending !== undefined) return pending;
+    // A dependency cycle has no valid order; break it where it closes.
+    if (visiting.has(extension)) return Promise.resolve();
+    visiting.add(extension);
+    const dependencies = extension.config.runtimeDependencies
+      .map((name) => byPackageName.get(name))
+      .filter((dependency) => dependency !== undefined)
+      .map(schedule);
+    visiting.delete(extension);
+    pending = Promise.all(dependencies).then(async () => await build(extension));
+    builds.set(extension, pending);
+    return pending;
+  };
+
+  await Promise.all(extensions.map(schedule));
 }
 
 async function discoverWorkspaceExtensions(
@@ -129,6 +161,24 @@ async function discoverWorkspaceExtensions(
     });
     if (extension !== undefined) {
       extensionsByPackageRoot.set(extension.packageRoot, extension);
+    }
+  }
+
+  // Building an extension reads the distributions of the workspace extensions
+  // it depends on, so they must be built even when only another extension
+  // mounts them.
+  const pending = [...extensionsByPackageRoot.values()];
+  for (let extension = pending.pop(); extension !== undefined; extension = pending.pop()) {
+    for (const packageName of extension.config.runtimeDependencies) {
+      const dependency = await resolveWorkspaceExtensionDependency({
+        dependentRoot: extension.packageRoot,
+        packageName,
+        workspaceSourceRoot,
+      });
+      if (dependency !== undefined && !extensionsByPackageRoot.has(dependency.packageRoot)) {
+        extensionsByPackageRoot.set(dependency.packageRoot, dependency);
+        pending.push(dependency);
+      }
     }
   }
 
@@ -203,8 +253,62 @@ async function resolveWorkspaceExtension(input: {
   if (location?.authoredSourceRoot === undefined) {
     return undefined;
   }
+  return await readWorkspaceExtension({
+    packageRoot: location.packageRoot,
+    authoredSourceRoot: location.authoredSourceRoot,
+    workspaceSourceRoot: input.workspaceSourceRoot,
+  });
+}
 
-  const packageRoot = await realpath(location.packageRoot).catch(() => undefined);
+/** Resolves a dependency the way Node does from the dependent package's root. */
+async function resolveWorkspaceExtensionDependency(input: {
+  readonly dependentRoot: string;
+  readonly packageName: string;
+  readonly workspaceSourceRoot: string;
+}): Promise<WorkspaceExtension | undefined> {
+  let current = input.dependentRoot;
+  while (true) {
+    const packageRoot = join(current, "node_modules", input.packageName);
+    const manifest = await readFile(join(packageRoot, "package.json"), "utf8").catch(
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error.code === "ENOENT" || error.code === "ENOTDIR")
+        ) {
+          return undefined;
+        }
+        throw error;
+      },
+    );
+    if (manifest !== undefined) {
+      let pkg: { eve?: { extension?: unknown } };
+      try {
+        pkg = JSON.parse(manifest) as typeof pkg;
+      } catch {
+        return undefined;
+      }
+      const source = parseExtensionPackageRoots(pkg.eve?.extension)?.source;
+      return source === undefined
+        ? undefined
+        : await readWorkspaceExtension({
+            packageRoot,
+            authoredSourceRoot: resolve(packageRoot, source),
+            workspaceSourceRoot: input.workspaceSourceRoot,
+          });
+    }
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+async function readWorkspaceExtension(input: {
+  readonly packageRoot: string;
+  readonly authoredSourceRoot: string;
+  readonly workspaceSourceRoot: string;
+}): Promise<WorkspaceExtension | undefined> {
+  const packageRoot = await realpath(input.packageRoot).catch(() => undefined);
   if (packageRoot === undefined || !isAuthoredSourcePath(packageRoot, input.workspaceSourceRoot)) {
     return undefined;
   }
@@ -212,7 +316,7 @@ async function resolveWorkspaceExtension(input: {
   // A package without its declared source directory ships a prebuilt
   // distribution; there is nothing to build, so its producer config is not
   // validated.
-  const sourceStat = await stat(location.authoredSourceRoot).catch(() => undefined);
+  const sourceStat = await stat(input.authoredSourceRoot).catch(() => undefined);
   if (sourceStat?.isDirectory() !== true) {
     return undefined;
   }

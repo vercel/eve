@@ -556,6 +556,57 @@ describe("mounted extension without config", () => {
   });
 });
 
+describe("mounted extension schedule collections", () => {
+  it("mount-prefixes a path-derived collection name and keeps an explicit id verbatim", async () => {
+    const collection = (id?: string) =>
+      [
+        'import { defineDynamicSchedules } from "eve/experimental/schedules";',
+        'import { inMemoryScheduleProvider } from "eve/experimental/schedules/testing";',
+        "const inputSchema = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
+        `export default defineDynamicSchedules({ ${id === undefined ? "" : `id: ${JSON.stringify(id)}, `}provider: inMemoryScheduleProvider(), inputSchema, auth: () => null, run: async () => {} });`,
+      ].join("\n");
+    const app = await createAppRoot("eve-mounted-extension-schedule-collections-", {
+      files: {
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "You are a precise assistant.",
+        "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";',
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
+        "node_modules/@acme/crm/extension/extension.mjs":
+          'import { defineExtension } from "eve/extension";\nexport default defineExtension();',
+        "node_modules/@acme/crm/extension/schedules/requests.mjs": collection(),
+        "node_modules/@acme/crm/extension/schedules/workflows.mjs": collection("crm-workflows"),
+      },
+    });
+
+    const { graph, manifest } = await compileRuntimeGraph(app.appRoot);
+    expect(
+      manifest.scheduleCollections.map(({ logicalPath, name }) => [logicalPath, name]),
+    ).toEqual([
+      ["schedules/crm__requests.mjs", "crm__requests"],
+      ["schedules/crm__workflows.mjs", "crm-workflows"],
+    ]);
+    expect(declared(graph.root.agent, "schedules").map(({ name }) => name)).toEqual([
+      "crm__requests",
+      "crm-workflows",
+    ]);
+
+    await writeFile(
+      join(app.appRoot, "agent/extensions/other.mjs"),
+      'export { default } from "@acme/crm";',
+    );
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
+      'Schedule collections "schedules/crm__workflows.mjs" and "schedules/other__workflows.mjs" both resolve to the name "crm-workflows".',
+    );
+  });
+});
+
 describe("mounted extension with an unsupported capability contract", () => {
   it("fails compilation when the distribution requires an unsupported generation", async () => {
     const app = await createAppRoot("eve-mounted-extension-incompatible-", {

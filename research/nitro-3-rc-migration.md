@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer-requested migration plan)"
 status: in-progress
-last_updated: "2026-11-03"
+last_updated: "2026-11-10"
 ---
 
 # Nitro 3 RC migration and host foundation
@@ -167,7 +167,9 @@ These hold after the migration, and review and `guard:invariants` enforce them:
    - Nothing patches a third-party plugin or rewrites Nitro's generated modules.
 4. **Generated code carries data through `text:` or `bytes:` imports,** never as inlined JS
    literals, so Nitro's `replace` can't touch it.
-5. **Every eve-owned Nitro id uses `#eve/`.** No `#nitro/` ids, no ad hoc prefixes.
+5. **Every eve-owned Nitro id uses `#eve/`.** No `#nitro/` ids, no ad hoc prefixes. Route and task
+   virtual module ids end in `.mjs`, because the bundler infers module type from the id's
+   extension and an id can embed an authored route path (#5742).
 6. **eve never lets Nitro resolve or install a dependency.** Rolldown comes through `deps.paths`.
    Storage and database runtimes are rejected in authored code.
 7. **Post-build output rewriting is a named, shrinking list.** Each entry is tied to an upstream
@@ -188,26 +190,26 @@ workflow builder ──► { stepsPath, workflowsPath, stepTargets }   (data; on
    ▼
 nitro adapter ──► createNitro(NitroConfig) ──► prepare → copyPublicAssets → prerender → build
    ▼
-named output shims (Vercel crons, service fallback) ──► publish
+named output shims (service fallback) ──► publish
 ```
 
-| Module                              | Responsibility                                                                                                                                                          | Replaces                                                                                                                                   |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `nitro/host/host-spec.ts`           | `createHostSpec(preparedHost, mode, dirs)`: a pure function from the compiled manifest to the full host intent.                                                         | The decide-then-mutate flow in `create-application-nitro.ts` and the dev/prod near-copies.                                                 |
-| `nitro/host/host-routes.ts`         | One route table rendered into `handlers`, `virtual`, `tasks`, `scheduledTasks`, and the cron route. Each entry carries its Vercel function intent and HEAD `Allow` set. | `configure-nitro-routes.ts`, `channel-routes.ts`, `schedule-task-routes.ts`, `cron-handler-route.ts`, and the consumer route special case. |
-| `nitro/host/route-handlers.ts`      | Codegen for channel, host, and WebSocket handlers, including the HEAD guard.                                                                                            | Per-module virtual strings.                                                                                                                |
-| `nitro/host/host-plugins.ts`        | The ordered host plugin list with filters: step transform, one side-effects plugin over an exact id set, instrumentation entry, and the hosted-graph plugin.            | Five `unshift` hooks, the routing rewrite, and `createNitroBundlerConfig`.                                                                 |
-| `nitro/host/externals-policy.ts`    | Computes `traceDeps`, `noExternals`, substitutions, and output checks once from the manifest, preset, and mode.                                                         | The overlapping externals mechanisms described below.                                                                                      |
-| `nitro/host/hosted-graph-plugin.ts` | The single plugin for module substitutions (sandbox prune, dev-runtime prune, unconfigured optional engines) and the output check.                                      | Two prune plugins, the optional-engine plugin, and the output-check plugin.                                                                |
-| `nitro/host/create-host-nitro.ts`   | The only Nitro-aware adapter: `createNitro(toNitroConfig(spec), loadOptions)`.                                                                                          | Both `create*ApplicationNitro` functions.                                                                                                  |
-| `nitro/host/vercel-output.ts`       | The named post-build shims only (service crons and fallback). It shrinks as upstream asks land.                                                                         | `normalize-vercel-service-crons.ts` and the normalize half of `vercel-workflow-output.ts`.                                                 |
-| `workflow-bundle/builder.ts`        | Returns step targets as data, writes one workflow directory, and owns its external lists.                                                                               | Regex re-parsing of `steps.mjs`, duplicate `steps.mjs` and `workflows.mjs` copies, and the build queue.                                    |
-| `bundler/rolldown.ts`               | eve's Rolldown loader with types from `"rolldown"`.                                                                                                                     | The `nitro-rolldown` wrappers and hand-written option shapes.                                                                              |
-| `bundler/authored-plugins.ts`       | One authored-source plugin factory for the authored module graph, loader, extension builds, workflow builder, and host.                                                 | Five hand-ordered lists.                                                                                                                   |
-| `nitro/host/runtime-plugin.ts`      | One generated eve runtime plugin, plus a lifecycle plugin that uses only close hooks.                                                                                   | Several side-effect plugins that talk through `process.env` and globals, and the signal handler with `process.exit`.                       |
-| `nitro/host/dev-host-supervisor.ts` | Readiness-gated swaps, the spare worker, host refcounts, crash restart, and close, all on `RunnerManager`.                                                              | `DrainedNitroDevServer`.                                                                                                                   |
-| `nitro/host/dev-runner.ts`          | `EveDevRunner extends NodeWorkerEnvRunner`, with a 15-second `shutdown` default.                                                                                        | The copied worker lifecycle.                                                                                                               |
-| `internal/extension/`               | The extension producer modules (build config, declarations, distribution, workspace extensions, state usage), which don't use Nitro.                                    | Their current home under `nitro/host/`.                                                                                                    |
+| Module                              | Responsibility                                                                                                                                               | Replaces                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `nitro/host/host-spec.ts`           | `createHostSpec(preparedHost, mode, dirs)`: a pure function from the compiled manifest to the full host intent.                                              | The decide-then-mutate flow in `create-application-nitro.ts` and the dev/prod near-copies.                                                 |
+| `nitro/host/host-routes.ts`         | One route table rendered into `handlers`, `virtual`, `tasks`, and `scheduledTasks`. Each entry carries its Vercel function intent and HEAD `Allow` set.      | `configure-nitro-routes.ts`, `channel-routes.ts`, `schedule-task-routes.ts`, `cron-handler-route.ts`, and the consumer route special case. |
+| `nitro/host/route-handlers.ts`      | Codegen for channel, host, and WebSocket handlers, including the HEAD guard.                                                                                 | Per-module virtual strings.                                                                                                                |
+| `nitro/host/host-plugins.ts`        | The ordered host plugin list with filters: step transform, one side-effects plugin over an exact id set, instrumentation entry, and the hosted-graph plugin. | Five `unshift` hooks, the routing rewrite, and `createNitroBundlerConfig`.                                                                 |
+| `nitro/host/externals-policy.ts`    | Computes `traceDeps`, `noExternals`, substitutions, and output checks once from the manifest, preset, and mode.                                              | The overlapping externals mechanisms described below.                                                                                      |
+| `nitro/host/hosted-graph-plugin.ts` | The single plugin for module substitutions (sandbox prune, dev-runtime prune, unconfigured optional engines) and the output check.                           | Two prune plugins, the optional-engine plugin, and the output-check plugin.                                                                |
+| `nitro/host/create-host-nitro.ts`   | The only Nitro-aware adapter: `createNitro(toNitroConfig(spec), loadOptions)`.                                                                               | Both `create*ApplicationNitro` functions.                                                                                                  |
+| `nitro/host/vercel-output.ts`       | The named post-build shims only (service fallback). It shrinks as upstream asks land.                                                                        | The normalize half of `vercel-workflow-output.ts`.                                                                                         |
+| `workflow-bundle/builder.ts`        | Returns step targets as data, writes one workflow directory, and owns its external lists.                                                                    | Regex re-parsing of `steps.mjs`, duplicate `steps.mjs` and `workflows.mjs` copies, and the build queue.                                    |
+| `bundler/rolldown.ts`               | eve's Rolldown loader with types from `"rolldown"`.                                                                                                          | The `nitro-rolldown` wrappers and hand-written option shapes.                                                                              |
+| `bundler/authored-plugins.ts`       | One authored-source plugin factory for the authored module graph, loader, extension builds, workflow builder, and host.                                      | Five hand-ordered lists.                                                                                                                   |
+| `nitro/host/runtime-plugin.ts`      | One generated eve runtime plugin, plus a lifecycle plugin that uses only close hooks.                                                                        | Several side-effect plugins that talk through `process.env` and globals, and the signal handler with `process.exit`.                       |
+| `nitro/host/dev-host-supervisor.ts` | Readiness-gated swaps, the spare worker, host refcounts, crash restart, and close, all on `RunnerManager`.                                                   | `DrainedNitroDevServer`.                                                                                                                   |
+| `nitro/host/dev-runner.ts`          | `EveDevRunner extends NodeWorkerEnvRunner`, with a 15-second `shutdown` default.                                                                             | The copied worker lifecycle.                                                                                                               |
+| `internal/extension/`               | The extension producer modules (build config, declarations, distribution, workspace extensions, state usage), which don't use Nitro.                         | Their current home under `nitro/host/`.                                                                                                    |
 
 The audits estimate the net change, before verification:
 
@@ -651,7 +653,7 @@ in CI.
   - `waitUntil` work registered during a streamed body completes;
   - Windows integration covers handler import paths.
 - **Vercel.** Service and non-service scenarios cover functions, the schedule consumer function and
-  its queue trigger, routes, crons with prefixes, the pinned runtime, and the flow function.
+  its queue trigger, routes, the private schedules function, the pinned runtime, and the flow function.
 - **Development.** Supervisor scenarios on real workers cover:
   - readiness-gated swap with rollback;
   - the spare worker;

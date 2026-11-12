@@ -72,6 +72,7 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     authoredWorkflowModules: locations.compiledArtifacts.authoredWorkflowModules,
     compiledArtifactsBootstrapPath: locations.compiledArtifacts.bootstrapPath,
     outDir: locations.workflowBuildDir,
+    inlineSourcemap: spec.development,
     rootDir: resolvePackageRoot(),
   }).build();
   const skillFilesPlugin = spec.runtimePlugins.includes("skill-files")
@@ -139,6 +140,7 @@ function toNitroConfig(
       extensionOverridePaths: spec.extensionOverridePaths,
       instrumentationEntryPlugin: instrumentationEntry?.plugin,
       instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
+      hostBundledPackageRoots: compiledArtifacts.hostBundledPackageRoots,
       runtimeModules: [compiledArtifacts.bootstrapPath, compiledArtifacts.workflowWorldPluginPath],
       workflowArtifacts: built.workflowArtifacts,
     }),
@@ -172,6 +174,12 @@ function toNitroConfig(
       onLog: onVendoredDependencyLog,
       // Keep dependency filtering out of Rolldown's JS callback bridge.
       output: { sourcemapIgnoreList: /node_modules/ },
+      // ESM output has no CommonJS path globals. Rolldown replaces only free
+      // references, so no chunk code crosses into JS and a module's own
+      // declaration is left alone.
+      transform: {
+        define: { __dirname: "import.meta.dirname", __filename: "import.meta.filename" },
+      },
       tsconfig: spec.authored.tsconfig,
       // Region comments contain invocation-random scratch paths, not runtime inputs.
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),

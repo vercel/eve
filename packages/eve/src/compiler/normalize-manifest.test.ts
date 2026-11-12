@@ -25,7 +25,9 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
-import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules, type ScheduleProvider } from "#public/schedules/subscription.js";
+import { createScheduleCollectionClient } from "#runtime/schedules/collection-client.js";
+import { readScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -37,7 +39,8 @@ import {
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
-import { compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
@@ -65,6 +68,18 @@ function registry(modules: readonly ProgrammaticAgentModule[]) {
       }),
     },
   ]);
+}
+
+function scheduleCollection(
+  options: { readonly id?: string; readonly provider?: ScheduleProvider } = {},
+) {
+  return defineDynamicSchedules({
+    provider: inMemoryScheduleProvider(),
+    inputSchema: z.object({ task: z.string() }),
+    auth: () => null,
+    run: async () => {},
+    ...options,
+  });
 }
 
 describe("compileAgentManifest source graph", () => {
@@ -476,12 +491,179 @@ describe("compileAgentManifest source graph", () => {
     );
     expect(Object.values(entries).every((entry) => entry.deferred)).toBe(true);
     expect(
-      entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
+      labelCallbacks(entries["schedule__billing-requests__create"]!.label)?.start({
+        name: "daily-digest",
+      }),
     ).toBe("Create schedule: daily-digest");
-    expect(entries["schedule__billing-requests__list"]!.label?.start({})).toBe("List schedules");
+    expect(labelCallbacks(entries["schedule__billing-requests__list"]!.label)?.start({})).toBe(
+      "List schedules",
+    );
     expect(
-      entries["schedule__billing-requests__delete"]!.label?.start({ name: "daily-digest" }),
+      labelCallbacks(entries["schedule__billing-requests__delete"]!.label)?.start({
+        name: "daily-digest",
+      }),
     ).toBe("Delete schedule: daily-digest");
+  });
+
+  it("names a collection by its explicit id wherever the path-derived name went", async () => {
+    const collection = scheduleCollection({ id: "requests" });
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/workflows/native.ts",
+        loadNamespace: async () => ({ default: collection }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.scheduleCollections).toEqual([
+      expect.objectContaining({ logicalPath: "schedules/workflows/native.ts", name: "requests" }),
+    ]);
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    expect(declared(resolved, "schedules")).toEqual([
+      expect.objectContaining({ name: "requests", offersTools: true }),
+    ]);
+    expect(readScheduleCollectionSource(collection)).toMatchObject({
+      collection: "requests",
+      logicalPath: "schedules/workflows/native.ts",
+    });
+    expect(Object.keys(scheduleCollectionTools(collection, "requests")!)).toContain(
+      "schedule__requests__create",
+    );
+  });
+
+  it("keeps a moved collection's stored namespace when its id is the old path-derived name", async () => {
+    const namespaceOf = async (logicalPath: string, id?: string) => {
+      const provider = inMemoryScheduleProvider();
+      const create = vi.spyOn(provider, "create");
+      const collection = scheduleCollection({ provider, ...(id !== undefined && { id }) });
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [
+          registry([{ logicalPath, loadNamespace: async () => ({ default: collection }) }]),
+        ],
+      });
+      const { application, name } = compiled.scheduleCollections[0]!;
+      await createScheduleCollectionClient(collection, {
+        abortSignal: new AbortController().signal,
+        application,
+        channel: { kind: "unknown", metadata: {} },
+        collection: name,
+        session: {
+          auth: {
+            current: {
+              attributes: {},
+              authenticator: "test",
+              principalId: "alice",
+              principalType: "user",
+            },
+            initiator: null,
+          },
+          id: "session-alice",
+        },
+      }).create({
+        expression: { type: "delay", minutes: 5 },
+        name: "report",
+        payload: { task: "Summarize the week." },
+      });
+      return create.mock.calls[0]![0].namespace;
+    };
+
+    const original = await namespaceOf("schedules/billing/requests.ts");
+    expect(await namespaceOf("schedules/workflows.ts", "billing/requests")).toBe(original);
+    expect(await namespaceOf("schedules/workflows.ts")).not.toBe(original);
+    expect(await namespaceOf("schedules/billing/requests.ts", "invoices")).not.toBe(original);
+  });
+
+  it.each([
+    ["a path-derived name", undefined, "requests"],
+    ["another explicit id", "shared", "shared"],
+  ])("rejects an explicit collection id that matches %s", async (_label, id, name) => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/requests.ts",
+        loadNamespace: async () => ({
+          default: scheduleCollection(id === undefined ? {} : { id }),
+        }),
+      },
+      {
+        logicalPath: "schedules/workflows.ts",
+        loadNamespace: async () => ({ default: scheduleCollection({ id: name }) }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      `Schedule collections "schedules/requests.ts" and "schedules/workflows.ts" both resolve to the name "${name}".`,
+    );
+  });
+
+  it("rejects a collection id that matches a static schedule's name", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({
+          default: defineSchedule({ cron: "0 9 * * *", content: "Run the report." }),
+        }),
+      },
+      {
+        logicalPath: "schedules/workflows.ts",
+        loadNamespace: async () => ({ default: scheduleCollection({ id: "daily" }) }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Schedule collection "schedules/workflows.ts" and schedule "schedules/daily.ts" both resolve to the name "daily".',
+    );
+  });
+
+  it("rejects collections whose different names produce the same tool names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/billing-requests.ts",
+        loadNamespace: async () => ({ default: scheduleCollection() }),
+      },
+      {
+        logicalPath: "schedules/workflows.ts",
+        loadNamespace: async () => ({ default: scheduleCollection({ id: "billing/requests" }) }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow('both name their tools "schedule__billing-requests"');
+  });
+
+  it("disables a collection's tools through the tool file named for its explicit id", async () => {
+    const compileWithToolFile = async (logicalPath: string) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: "schedules/native.ts",
+          loadNamespace: async () => ({ default: scheduleCollection({ id: "requests" }) }),
+        },
+        { logicalPath, loadNamespace: async () => ({ default: disableTool() }) },
+      ]);
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+      const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+        frameworkAgentSourceRegistry,
+        sourceRegistry,
+      ]);
+      return declared(await resolveAgent({ manifest: compiled, moduleMap }), "schedules");
+    };
+
+    expect(await compileWithToolFile("tools/schedule__requests.ts")).toEqual([
+      expect.not.objectContaining({ offersTools: true }),
+    ]);
+    await expect(compileWithToolFile("tools/schedule__native.ts")).rejects.toThrow(
+      'Source "tools/schedule__native.ts" disables a slot with no lower-precedence source.',
+    );
   });
 
   it("classifies compile and runtime usage from normalized authored semantics", async () => {
@@ -766,13 +948,13 @@ describe("compileAgentManifest source graph", () => {
     }
   });
 
-  it("rejects prompt cache options on an AI Gateway model", async () => {
+  it("rejects prompt cache options on a non-Anthropic AI Gateway model", async () => {
     const sourceRegistry = registry([
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
           default: defineAgent({
-            model: "anthropic/claude-opus-5",
+            model: "openai/gpt-5.5",
             modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
           }),
         }),
@@ -782,8 +964,36 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
-      'modelOptions.promptCache applies only to models eve calls directly, but "anthropic/claude-opus-5" routes through AI Gateway',
+      'modelOptions.promptCache applies to Anthropic models and to models eve calls directly, but "openai/gpt-5.5" routes through AI Gateway',
     );
+  });
+
+  it("keeps prompt cache options on an Anthropic AI Gateway model", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: "anthropic/claude-opus-5",
+            modelContextWindowTokens: 200_000,
+            modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({
+      manifest: compiledAgentManifestSchema.parse(compiled),
+      moduleMap,
+    });
+    expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
   it("classifies extension mount initialization as runtime-only", async () => {

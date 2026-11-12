@@ -210,7 +210,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
-  if (record.label !== undefined) {
+  // `label: false` hides the tool's calls from activity.
+  if (record.label !== undefined && record.label !== false) {
     const label = expectObjectRecord(record.label, message);
     expectOnlyKnownKeys(label, ["start", "complete", "delta"], message);
     expectFunction(label.start, message);
@@ -263,7 +264,7 @@ function modelInputSchemaOf(source: unknown, serve: boolean): JsonObject {
 }
 
 /** eve adds `taskId` to a `serve` tool's model input, so the tool's own input can't use it. */
-function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
+export function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
   const properties = inputSchema?.properties;
   if (!isObject(properties) || !(TASK_ID_INPUT in properties)) return;
   throw new Error(

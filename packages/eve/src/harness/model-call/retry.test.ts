@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 
+// Skip the real backoff between attempts.
+vi.mock("node:timers/promises", () => ({ setTimeout: async () => {} }));
+
 const session = { sessionId: "session-alice", turnId: "turn-1" };
 const busy = () => Object.assign(new Error("The provider is busy."), { isRetryable: true });
 
@@ -28,5 +31,25 @@ describe("runModelCallWithRetries", () => {
     ).rejects.toThrow("busy");
     expect(call).toHaveBeenCalledOnce();
     expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("retries a gateway stream timeout only once", async () => {
+    const call = vi.fn(async () => {
+      throw new Error("Stream exceeded maximum duration before function timeout", {
+        cause: { code: "gateway_stream_timeout", origin: "gateway" },
+      });
+    });
+
+    await expect(runModelCallWithRetries(call, session)).rejects.toThrow("maximum duration");
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the full retry budget for other transient failures", async () => {
+    const call = vi.fn(async () => {
+      throw busy();
+    });
+
+    await expect(runModelCallWithRetries(call, session)).rejects.toThrow("busy");
+    expect(call).toHaveBeenCalledTimes(3);
   });
 });

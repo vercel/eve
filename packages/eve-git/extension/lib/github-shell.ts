@@ -11,6 +11,7 @@ import {
   type GitHubCoAuthor,
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
+import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
 import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
@@ -58,6 +59,11 @@ interface GitHubConfigBase {
 export interface GitHubAppConfig extends GitHubConfigBase {
   /** The only access control: commands run only when it returns `true`. */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
+  /**
+   * Installation permissions each minted token carries, such as `"contents:write"`.
+   * Omit it for every permission the App holds.
+   */
+  readonly permissions?: readonly string[];
   readonly principalType: "app";
 }
 
@@ -118,6 +124,7 @@ interface GitHubShellDependencies {
         type: "github_app_installation";
         org: string;
         repositories?: string[];
+        permissions?: string[];
       }[];
       subject: { type: "app" };
     },
@@ -126,8 +133,13 @@ interface GitHubShellDependencies {
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
-  /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
+  /**
+   * Orders this session's own credential leases in process; every `ctx.getSandbox()` call returns
+   * a new handle. Sessions that share a sandbox are serialized by a lock inside the sandbox.
+   */
   readonly sessionId: string;
+  /** Stops waiting for another command's credential lease when the tool call is cancelled. */
+  readonly abortSignal?: AbortSignal;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
@@ -135,6 +147,28 @@ const leaseQueues = new Map<string, Promise<void>>();
 const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
 /** How `gh` and `git` report a rejected token. */
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
+
+/**
+ * Thrown when a GitHub command's own input is refused before it runs, such as
+ * shell syntax, a working directory outside the workspace, or a missing body
+ * file. The agent can fix these by changing the call.
+ */
+export class GitHubCommandInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitHubCommandInputError";
+  }
+}
+
+/**
+ * Type guard for {@link GitHubCommandInputError}.
+ *
+ * Uses `err.name` rather than `instanceof` because consumers and eve can end
+ * up with different class identities after bundling.
+ */
+export function isGitHubCommandInputError(err: unknown): err is GitHubCommandInputError {
+  return err instanceof Error && err.name === "GitHubCommandInputError";
+}
 
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
@@ -160,7 +194,7 @@ export async function executeGitHubShell(
     target: { owner, repository, name },
   } = validateGitHubShellInput(input);
   if (config.principalType === "user" ? owner && !repository : !owner) {
-    throw new Error(
+    throw new GitHubCommandInputError(
       config.principalType === "user"
         ? "Set repository to owner/name or omit it; user tokens are not scoped to an owner."
         : "App tokens need repository set to an owner or owner/name.",
@@ -169,7 +203,9 @@ export async function executeGitHubShell(
   const sandbox = await dependencies.getSandbox();
   let workingDirectory = resolveWorkingDirectory(sandbox, input.workingDirectory);
   if (argv[0] === "gh-signed-commit") {
-    workingDirectory = await validateRepositoryRoot(sandbox, workingDirectory);
+    const repositoryRoot = await validateRepositoryRoot(sandbox, workingDirectory);
+    if ("refused" in repositoryRoot) throw new GitHubCommandInputError(repositoryRoot.refused);
+    workingDirectory = repositoryRoot.root;
   }
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
@@ -187,9 +223,14 @@ export async function executeGitHubShell(
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
-    const installation: { type: "github_app_installation"; org: string; repositories?: string[] } =
-      { type: "github_app_installation", org: owner! };
+    const installation: {
+      type: "github_app_installation";
+      org: string;
+      repositories?: string[];
+      permissions?: string[];
+    } = { type: "github_app_installation", org: owner! };
     if (name) installation.repositories = [name];
+    if (config.permissions) installation.permissions = [...config.permissions];
     token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
       authorizationDetails: [installation],
       subject: { type: "app" },
@@ -215,6 +256,11 @@ export async function executeGitHubShell(
   const commandArgv = coAuthor
     ? await attributeCommand(argv, coAuthorTrailer(coAuthor), sandbox, workingDirectory, bodyFile)
     : argv;
+  if (!Array.isArray(commandArgv)) {
+    throw new GitHubCommandInputError(
+      `Pull request body file ${JSON.stringify(commandArgv.missingBodyFile)} not found.`,
+    );
+  }
 
   const executable = executablePath(commandArgv[0]!);
   const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
@@ -229,7 +275,7 @@ export async function executeGitHubShell(
   try {
     result = await withGitHubCredentialLease(
       sandbox,
-      dependencies.sessionId,
+      dependencies,
       { authorization, placeholder, placeholderAuthorization, token },
       () => {
         const env: Record<string, string> = {
@@ -278,15 +324,18 @@ export async function executeGitHubShell(
   };
 }
 
+/** The real credential and the placeholder a leased command sends in its place. */
+interface LeaseCredential {
+  readonly authorization: string;
+  readonly placeholder: string;
+  readonly placeholderAuthorization: string;
+  readonly token: string;
+}
+
 async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
-  sessionId: string,
-  credential: {
-    readonly authorization: string;
-    readonly placeholder: string;
-    readonly placeholderAuthorization: string;
-    readonly token: string;
-  },
+  { sessionId, abortSignal }: Pick<GitHubShellDependencies, "sessionId" | "abortSignal">,
+  credential: LeaseCredential,
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
@@ -299,51 +348,67 @@ async function withGitHubCredentialLease<T>(
   leaseQueues.set(sessionId, current);
   await previous;
   try {
-    const api: GitHubLeaseRule[] = [
+    return await withSandboxLeaseLock(
+      sandbox,
+      credential.placeholder,
+      () => leaseCredential(sandbox, credential, run, broker),
+      {
+        // Clears the policy only while this command still holds the lock, so a command whose
+        // lock was broken as stale can't clear its successor's credential.
+        cleanup: () => broker(sandbox, null),
+        ...(abortSignal !== undefined && { signal: abortSignal }),
+      },
+    );
+  } finally {
+    release();
+    if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
+  }
+}
+
+/** Points the sandbox's network policy at `credential` for `run`; the lock's release clears it. */
+async function leaseCredential<T>(
+  sandbox: SandboxSession,
+  credential: LeaseCredential,
+  run: () => PromiseLike<T>,
+  broker: GitHubConfig["broker"],
+): Promise<T> {
+  const api: GitHubLeaseRule[] = [
+    {
+      match: {
+        headers: [
+          {
+            key: { exact: "authorization" },
+            value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+          },
+        ],
+      },
+      transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+    },
+  ];
+  await broker(sandbox, {
+    "api.github.com": api,
+    // `gh release upload` and `gh release create` with assets send files here.
+    "uploads.github.com": api,
+    "github.com": [
       {
         match: {
           headers: [
             {
               key: { exact: "authorization" },
-              value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+              value: { exact: credential.placeholderAuthorization },
             },
           ],
         },
-        transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+        transform: [{ headers: { authorization: credential.authorization } }],
       },
-    ];
-    await broker(sandbox, {
-      "api.github.com": api,
-      // `gh release upload` and `gh release create` with assets send files here.
-      "uploads.github.com": api,
-      "github.com": [
-        {
-          match: {
-            headers: [
-              {
-                key: { exact: "authorization" },
-                value: { exact: credential.placeholderAuthorization },
-              },
-            ],
-          },
-          transform: [{ headers: { authorization: credential.authorization } }],
-        },
-      ],
-    });
-    return await run();
-  } finally {
-    try {
-      await broker(sandbox, null);
-    } finally {
-      release();
-      if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
-    }
-  }
+    ],
+  });
+  return await run();
 }
 
 export function parseCommand(command: string): string[] {
   const value = command.trim();
-  if (!value) throw new Error("GitHub command must not be empty.");
+  if (!value) throw new GitHubCommandInputError("GitHub command must not be empty.");
   const argv: string[] = [];
   let token = "";
   let quote: "single" | "double" | null = null;
@@ -391,9 +456,11 @@ export function parseCommand(command: string): string[] {
       started = true;
     }
   }
-  if (escaped || quote) throw new Error("GitHub command contains an unfinished quote or escape.");
+  if (escaped || quote) {
+    throw new GitHubCommandInputError("GitHub command contains an unfinished quote or escape.");
+  }
   if (started) argv.push(token);
-  if (argv.length === 0) throw new Error("GitHub command must not be empty.");
+  if (argv.length === 0) throw new GitHubCommandInputError("GitHub command must not be empty.");
   return argv;
 }
 
@@ -402,13 +469,17 @@ function validateGitHubShellInput(input: GitHubShellInput): {
   target: ReturnType<typeof declaredTarget>;
 } {
   const argv = parseCommand(input.command);
-  if (!input.description.trim()) throw new Error("description must describe the intended result.");
+  if (!input.description.trim()) {
+    throw new GitHubCommandInputError("description must describe the intended result.");
+  }
   // The credential lease is wired only into these executables: gh reads the
   // placeholder GH_TOKEN and git sends the placeholder header.
   if (!EXECUTABLES.has(argv[0]!)) {
-    throw new Error("GitHub commands must use gh, git, or gh-signed-commit.");
+    throw new GitHubCommandInputError("GitHub commands must use gh, git, or gh-signed-commit.");
   }
-  if (argv.length < 2) throw new Error(`A ${argv[0]} subcommand or argument is required.`);
+  if (argv.length < 2) {
+    throw new GitHubCommandInputError(`A ${argv[0]} subcommand or argument is required.`);
+  }
   return { argv, target: declaredTarget(input.repository) };
 }
 
@@ -420,7 +491,11 @@ function declaredTarget(value: string | undefined): {
   const declared = value?.trim();
   if (!declared) return { owner: null, repository: null, name: null };
   const match = GITHUB_TARGET.exec(declared.replace(/\.git$/iu, ""));
-  if (!match) throw new Error(`Invalid GitHub repository or owner ${JSON.stringify(value)}.`);
+  if (!match) {
+    throw new GitHubCommandInputError(
+      `Invalid GitHub repository or owner ${JSON.stringify(value)}.`,
+    );
+  }
   const [, owner, name] = match;
   return { owner: owner!, repository: name ? `${owner}/${name}` : null, name: name ?? null };
 }
@@ -438,7 +513,9 @@ function resolveWorkingDirectory(
   const workspace = posix.resolve("/", sandbox.resolvePath(""));
   const resolved = posix.resolve("/", sandbox.resolvePath(workingDirectory?.trim() || ""));
   if (resolved !== workspace && !resolved.startsWith(`${workspace}/`)) {
-    throw new Error("GitHub command workingDirectory must stay inside the sandbox workspace.");
+    throw new GitHubCommandInputError(
+      "GitHub command workingDirectory must stay inside the sandbox workspace.",
+    );
   }
   return resolved;
 }
@@ -456,8 +533,8 @@ function sanitizeOutput(
   };
 }
 
-function unsupportedSyntax(): Error {
-  return new Error(
+function unsupportedSyntax(): GitHubCommandInputError {
+  return new GitHubCommandInputError(
     "GitHub commands support argv syntax only, not pipes, redirects, substitutions, or shell operators.",
   );
 }

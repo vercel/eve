@@ -80,6 +80,11 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    * - `"app_not_installed"`: an authored `getToken` for a
    *   `principalType: "app"` connection signalled the agent's own
    *   credentials are missing. Terminal.
+   * - `"sign_in_cancelled"`: the same sign-in already ended without being
+   *   completed in this turn, such as one a new message cancelled.
+   *   Terminal for the turn.
+   * - `"sign_in_unavailable"`: a turn a schedule started needed a sign-in.
+   *   Scheduled turns never ask for one. Terminal.
    */
   readonly reason?: string;
 

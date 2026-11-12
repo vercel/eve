@@ -1,6 +1,28 @@
 import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
 import { registerTelemetry, type Telemetry } from "ai";
+import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
 import { createLogger } from "#internal/logging.js";
+
+interface ContentCapture {
+  readonly recordInputs: boolean;
+  readonly recordOutputs: boolean;
+}
+
+/**
+ * The content one AI SDK call records. Every AI SDK integration on the call
+ * shares this setting, so it admits what the OpenTelemetry decision or any
+ * authored provider's trace policy admits. Each file's events are narrowed
+ * again to its own decision; eve's spans keep the OpenTelemetry decision.
+ */
+export function aiSdkCapture(
+  content: ContentCapture,
+  hooks: Pick<InstrumentationHooks, "authoredCapturesInputs" | "authoredCapturesOutputs">,
+): ContentCapture {
+  return {
+    recordInputs: content.recordInputs || hooks.authoredCapturesInputs === true,
+    recordOutputs: content.recordOutputs || hooks.authoredCapturesOutputs === true,
+  };
+}
 
 const log = createLogger("harness.ai-sdk-telemetry");
 let registered = false;

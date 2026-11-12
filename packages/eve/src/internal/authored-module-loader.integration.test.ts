@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -138,6 +138,86 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
       kind: "workflow-tool",
       workflowId: "workflow//./agent/lib/run//run",
     });
+  });
+
+  it.each([
+    [
+      "inline",
+      'defineWorkflowTool({ description: "Probe", inputSchema: {}, async execute() { return 1; } })',
+      "",
+    ],
+    [
+      "local reference",
+      'defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run })',
+      "async function run() { return 1; }",
+    ],
+  ])(
+    "rejects a dynamic workflow tool with an %s executor without the directive during compilation",
+    async (_kind, tool, helper) => {
+      const app = await createApp({
+        files: {
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+          "agent/tools/probe.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+${helper}
+export default defineDynamic(() => ${tool});`,
+        },
+        name: "dynamic-missing-workflow-directive",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        'without "use workflow"',
+      );
+    },
+  );
+
+  it("compiles a dynamic workflow tool whose executor is a top-level workflow function", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/probe.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+async function run() { "use workflow"; return 1; }
+const probe = defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });
+export default defineDynamic(() => ({ probe }));`,
+      },
+      name: "dynamic-workflow-tool",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
+  it("compiles inline workflow methods of top-level const tools a defineDynamic() returns", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/support.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+export const escalate = defineWorkflowTool({ description: "Escalate", inputSchema: {}, async execute() { "use workflow"; return 1; } });
+export const review = defineWorkflowTool({ description: "Review", inputSchema: {}, async task() { "use workflow"; return 2; } });
+export default defineDynamic(() => ({ escalate, review }));`,
+      },
+      name: "dynamic-inline-workflow-tools",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+
+    const namespace = (await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "support.ts"),
+    )) as Record<string, Record<string, { workflowId?: unknown }>>;
+    expect(namespace.escalate?.execute?.workflowId).toBe(
+      "workflow//./agent/tools/support//escalate$execute",
+    );
+    expect(namespace.review?.task?.workflowId).toBe("workflow//./agent/tools/support//review$task");
   });
 
   it("compiles a workflow tool that calls agent through an imported helper", async () => {
@@ -1015,6 +1095,108 @@ export const result = true;
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
+  });
+
+  it("keeps host-bundled packages that reach a host-traced dependency in the generated bundle", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_echo.ts": [
+          'import { result } from "gadget-extension/extension/tools/echo.ts";',
+          "",
+          "export const toolResult = result;",
+          "",
+        ].join("\n"),
+      },
+      name: "store-sibling-traced",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-traced-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, storeRoot });
+      await writeFile(
+        join(storeRoot, "node_modules", "gadget-extension", "package.json"),
+        JSON.stringify({
+          dependencies: { "store-sibling": "1.0.0" },
+          name: "gadget-extension",
+          type: "module",
+        }),
+      );
+      const entry = join(app.appRoot, "agent", "tools", "use_echo.ts");
+
+      const traced = await bundleAuthoredModuleForGeneration(entry, {
+        hostBundle: {
+          tracedDependencies: ["store-sibling*"],
+          externalPackageRoots: new Set<string>(),
+        },
+      });
+      expect(traced).toContain("store-sibling-value");
+      expect(traced).not.toContain("node_modules/gadget-extension");
+
+      const untraced = await bundleAuthoredModuleForGeneration(entry, {
+        hostBundle: {
+          tracedDependencies: ["unrelated-package"],
+          externalPackageRoots: new Set<string>(),
+        },
+      });
+      expect(untraced).not.toContain("store-sibling-value");
+      expect(untraced).toContain("node_modules/gadget-extension");
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("records installed packages it leaves to the host, including ones with assets", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_packages.ts": [
+          'import prompt from "prompt-pack";',
+          'import { label } from "ts-entry-pack";',
+          'import { plain } from "plain-pack";',
+          "",
+          "export const values = [prompt, label, plain];",
+          "",
+        ].join("\n"),
+      },
+      name: "host-bundle-authored-transforms",
+    });
+    const packages: Record<string, Record<string, string>> = {
+      "plain-pack": {
+        "index.js": 'export const plain = "plain-value";\n',
+        "package.json": JSON.stringify({ name: "plain-pack", type: "module", main: "index.js" }),
+      },
+      "prompt-pack": {
+        "index.js": 'import text from "./prompt.txt?raw";\nexport default text;\n',
+        "package.json": JSON.stringify({ name: "prompt-pack", type: "module", main: "index.js" }),
+        "prompt.txt": "prompt-pack-text\n",
+      },
+      "ts-entry-pack": {
+        "index.ts": 'export { label } from "./label";\n',
+        "label.ts": 'export const label: string = "ts-entry-value";\n',
+        "package.json": JSON.stringify({ name: "ts-entry-pack", type: "module", main: "index.ts" }),
+      },
+    };
+    for (const [name, files] of Object.entries(packages)) {
+      const root = join(app.appRoot, "node_modules", name);
+      await mkdir(root, { recursive: true });
+      for (const [file, content] of Object.entries(files)) {
+        await writeFile(join(root, file), content);
+      }
+    }
+
+    const externalPackageRoots = new Set<string>();
+    const code = await bundleAuthoredModuleForGeneration(
+      join(app.appRoot, "agent", "tools", "use_packages.ts"),
+      { hostBundle: { tracedDependencies: [], externalPackageRoots } },
+    );
+
+    for (const name of Object.keys(packages)) {
+      expect(code).toContain(`node_modules/${name}/`);
+    }
+    expect(code).not.toContain("prompt-pack-text");
+    const appNodeModules = join(await realpath(app.appRoot), "node_modules");
+    expect([...externalPackageRoots].sort()).toEqual(
+      Object.keys(packages).map((name) => join(appNodeModules, name)),
+    );
   });
 
   it("resolves store siblings for generation bundles entered at node_modules paths", async () => {

@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
+import { parseWithRolldownAst } from "../../src/internal/bundler/rolldown.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
@@ -23,6 +24,14 @@ const EVE_CATALOG_FINGERPRINT_FILES = [
   "tsconfig.json",
 ] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
+const DIST_SOURCE_ROOT = join(EVE_PACKAGE_ROOT, "dist", "src");
+// Package entry points that app bundlers compile for the browser.
+const BROWSER_ENTRY_FILES = [
+  "client/index.js",
+  "react/index.js",
+  "svelte/index.js",
+  "vue/index.js",
+] as const;
 
 /** The version of `name` that `from` resolves, for packages that do not export their manifest. */
 function installedVersion(name: string, from: string): string {
@@ -51,6 +60,17 @@ const VERCEL_SANDBOX_DIST_ROOT = join(
 
 function containsSourceMapComment(source: string): boolean {
   return /(?:^|\n)\s*\/\/# sourceMappingURL=/u.test(source);
+}
+
+// Resolves an import in the published dist tree the way the package `imports`
+// map does. Bare specifiers are app-provided peers (`react`, `vue`, ...).
+function resolveDistImport(importer: string, specifier: string): string | undefined {
+  if (specifier.startsWith("#compiled/")) {
+    return join(DIST_SOURCE_ROOT, "compiled", specifier.slice("#compiled/".length));
+  }
+  if (specifier.startsWith("#")) return join(DIST_SOURCE_ROOT, specifier.slice(1));
+  if (specifier.startsWith(".")) return resolve(dirname(importer), specifier);
+  return undefined;
 }
 
 function rewriteDeclarationImports(
@@ -314,6 +334,45 @@ type Note = 'request from "./not-an-import"';`,
 
     expect(sourceMapFiles).toEqual([]);
     expect(javaScriptSources.some(containsSourceMapComment)).toBe(false);
+  });
+
+  it("keeps class expressions out of shared declarations in browser modules", async () => {
+    // webpack before 5.90 credits the declarators after `var a = class {}, b = f()`
+    // to the class. When the class is unused it drops the `f` import binding but
+    // keeps the call, so the bundle throws `f is not defined` (#5037).
+    // Walk every published module a browser entry reaches: eve's own code and
+    // the vendored chunks alike.
+    const visited = new Set<string>();
+    const pending = BROWSER_ENTRY_FILES.map((entry) => join(DIST_SOURCE_ROOT, entry));
+    const joinedClasses: string[] = [];
+    for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
+      const path = relative(DIST_SOURCE_ROOT, file);
+      if (visited.has(path)) continue;
+      visited.add(path);
+      const program = (await parseWithRolldownAst(file, await readFile(file, "utf8"))) as {
+        body: {
+          type: string;
+          source?: { value: string } | null;
+          declarations?: { id: { name?: string }; init: { type: string } | null }[];
+        }[];
+      };
+      for (const statement of program.body) {
+        if (statement.source) {
+          const target = resolveDistImport(file, statement.source.value);
+          if (target !== undefined) pending.push(target);
+        }
+        if (statement.type !== "VariableDeclaration") continue;
+        for (const declarator of statement.declarations!.slice(0, -1)) {
+          if (declarator.init?.type === "ClassExpression") {
+            joinedClasses.push(`${path}: ${declarator.id.name}`);
+          }
+        }
+      }
+    }
+
+    expect(visited).toContain("client/client-error.js");
+    expect([...visited].some((path) => path.startsWith("compiled/_chunks/client/"))).toBe(true);
+    expect(joinedClasses).toEqual([]);
   });
 
   it("copies the complete @vercel/blob declaration tree", async () => {

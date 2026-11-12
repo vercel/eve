@@ -1,4 +1,4 @@
-import { APICallError } from "ai";
+import { APICallError, StreamProviderError, TypeValidationError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +12,7 @@ import {
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import { modelCallErrorInfo } from "#harness/model-call/failure.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
@@ -212,6 +213,56 @@ describe("classifyModelCallError", () => {
 
     expect(classifyModelCallError(overloaded)).toBe("retry");
     expect(classifyModelCallError(new Error("stream failed", { cause: overloaded }))).toBe("retry");
+  });
+
+  it("returns retry for an AI Gateway stream timeout payload", () => {
+    // The gateway aborts a long stream with a plain payload keyed on
+    // `code`; the harness wraps it through normalizeModelStreamError.
+    const payload = {
+      code: "gateway_stream_timeout",
+      message: "Stream exceeded maximum duration before function timeout",
+      origin: "gateway",
+    };
+
+    expect(classifyModelCallError(normalizeModelStreamError(payload))).toBe("retry");
+    expect(classifyModelCallError(payload)).toBe("retry");
+  });
+
+  it("returns retry for a stream chunk that failed the provider schema", () => {
+    const error = new TypeValidationError({
+      cause: new Error("Invalid input: expected string, received undefined"),
+      value: { type: "response.output_text.delta" },
+    });
+
+    expect(classifyModelCallError(normalizeModelStreamError(error))).toBe("retry");
+  });
+
+  it("does not retry invalid provider options that wrap a validation error", () => {
+    // The shape `parseProviderOptions` throws from a provider adapter's `doStream`.
+    const error = Object.assign(
+      new Error("invalid openai provider options", {
+        cause: new TypeValidationError({ cause: new Error("Invalid input"), value: {} }),
+      }),
+      { name: "AI_InvalidArgumentError" },
+    );
+
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(modelCallErrorInfo(error).message).toBe("invalid openai provider options");
+  });
+
+  it("returns retry for an AI Gateway stream the provider ended before its finish", () => {
+    const message = "Upstream stream ended before terminal chunk";
+
+    expect(
+      classifyModelCallError(
+        normalizeModelStreamError(
+          new StreamProviderError({ code: "gateway_stream_terminated", message }),
+        ),
+      ),
+    ).toBe("retry");
+    expect(
+      classifyModelCallError(normalizeModelStreamError(new StreamProviderError({ message }))),
+    ).toBe("retry");
   });
 
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {

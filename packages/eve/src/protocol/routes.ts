@@ -4,9 +4,6 @@
  */
 export const EVE_ROUTE_PREFIX = "/eve/v1";
 
-/** Reservation pattern for the production cron bridge's unguessable token. */
-export const EVE_PRODUCTION_CRON_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/cron/:token`;
-
 /**
  * Stable framework-owned health route.
  */
@@ -200,6 +197,34 @@ export function createEveConnectionCallbackRoutePath(
   token: string,
 ): string {
   return `${EVE_ROUTE_PREFIX}/connections/${encodeURIComponent(name)}/callback/${encodeURIComponent(attemptId)}/${encodeURIComponent(token)}`;
+}
+
+/**
+ * Reads the connection, attempt and token a connection callback path names, under any prefix the
+ * deployment serves eve at, or `undefined` for another path.
+ */
+export function parseEveConnectionCallbackRoutePath(
+  pathname: string,
+): { readonly name: string; readonly attemptId: string; readonly token: string } | undefined {
+  const segments = pathname.split("/");
+  const [connections, name, callback, attemptId, token] = segments.slice(-5);
+  if (connections !== "connections" || callback !== "callback") return undefined;
+  if (!name || !attemptId || !token) return undefined;
+  const decoded = [name, attemptId, token].map(decodedSegment);
+  const [decodedName, decodedAttemptId, decodedToken] = decoded;
+  if (decodedName === undefined || decodedAttemptId === undefined || decodedToken === undefined)
+    return undefined;
+  return { attemptId: decodedAttemptId, name: decodedName, token: decodedToken };
+}
+
+/** One path segment, decoded, or `undefined` when its percent-encoding is malformed. */
+function decodedSegment(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch (error) {
+    if (error instanceof URIError) return undefined;
+    throw error;
+  }
 }
 
 /**

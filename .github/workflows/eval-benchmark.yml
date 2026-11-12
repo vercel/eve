@@ -166,13 +166,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 90
+    environment:
+      name: eve-ci
+      deployment: false
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.live_matrix) }}
     env:
-      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
     steps:
@@ -225,6 +227,7 @@ jobs:
       - name: Run fixture evals
         working-directory: ${{ matrix.dir }}
         env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           KEEP_STATE_FLAG: ${{ needs.plan.outputs.keep_state == 'true' && '--keep-state' || '' }}
         run: |
           pnpm run --if-present e2e:prepare
@@ -454,6 +457,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 60
+    environment:
+      name: eve-ci
+      deployment: false
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -634,6 +640,9 @@ jobs:
     needs: [plan, run-live, run-mock, run-hosted, dev-startup]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: eve-benchmark-publish
+      deployment: false
     steps:
       - name: Checkout harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

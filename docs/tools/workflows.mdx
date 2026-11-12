@@ -73,8 +73,9 @@ continues, deploys, and returns one tool result.
 
 ### Rules
 
-- Default-export `defineWorkflowTool({ ... })` with exactly one entry point: `execute`, `task`, or
-  `serve`. Defining none, or more than one, throws when the tool is defined.
+- Default-export `defineWorkflowTool({ ... })`, or assign it to a top-level `const` that a
+  `defineDynamic` function returns, with exactly one entry point: `execute`, `task`, or `serve`.
+  Defining none, or more than one, throws when the tool is defined.
 - Write the entry point inline, or reference a top-level `async function` in the same module or an
   imported application module. `execute` and `task` can be async generators; `serve` can't.
 - Start the entry point with `"use workflow"`. A missing directive is a build error, even if another
@@ -88,8 +89,9 @@ continues, deploys, and returns one tool result.
   in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
   [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
-- Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
-  returns. `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
+- A `defineDynamic` function can return a workflow tool that a top-level `const` holds; see
+  [Return a workflow tool](/docs/guides/dynamic-capabilities#return-a-workflow-tool).
+  `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
   handler fails the build. To start a session from a channel or schedule, use the
   [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
   [schedule handler](/docs/schedules#handler-form-run) APIs.
@@ -110,7 +112,9 @@ The context depends on where your code runs:
 
 Call `ctx.agent()` and `ctx.ask()` and read `ctx.agents` in the workflow body. Pass a step only the
 serializable values it needs. Call `getSandbox`, `getToken`, `requireAuth`, and `to` in a step, because
-the workflow body throws when it calls them. Ordinary tools, channel handlers, and schedule handlers
+the workflow body throws when it calls them. A step can't read or update
+[`defineState`](/docs/concepts/state#update-state-from-a-workflow-tool) state; return the value and
+save it from a `call.settled` hook. Ordinary tools, channel handlers, and schedule handlers
 don't receive `agent`, `agents`, or `ask`. Import `WorkflowStepToolContext` from `eve/tools` to type
 step helpers.
 
@@ -134,7 +138,7 @@ import { resumeHook } from "eve/workflow/api";
 | `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
 | `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
 
-A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
+A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to `{ runId }` for the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
 
 Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
 
@@ -323,6 +327,7 @@ const answer = await ctx.ask(
     title?: string,
     display?: "confirmation" | "select" | "text",
     options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
+    initialOptionId?: string, // preselects this option when display is "select"
     allowFreeform?: boolean,
   },
   { signal?: AbortSignal },
@@ -341,6 +346,25 @@ on `ctx.ask`.
 | `answered`    | The person picked an option (`optionId`) or typed a reply (`text`).                                                                                                                                                                  |
 | `cancelled`   | The question was withdrawn before anyone answered, because `signal` or the call's `abortSignal` aborted or a `serve` body replied to the call. The stream reports `interaction.settled` as `withdrawn`, so clients stop offering it. |
 | `unavailable` | The session cannot ask for input, such as a scheduled run. `ctx.ask` returns this immediately.                                                                                                                                       |
+
+Set `initialOptionId` to preselect an option you already expect, such as the team inferred from the
+thread:
+
+```ts
+const answer = await ctx.ask({
+  prompt: "Which team owns this incident?",
+  display: "select",
+  options: teams.map((team) => ({ id: team.id, label: team.name })),
+  initialOptionId: inferredTeam.id,
+});
+```
+
+Only `display: "select"` uses `initialOptionId`, and there it must match one of the `options` ids,
+or `ctx.ask` throws a `TypeError` before it asks anyone. Slack, Discord, Microsoft Teams, and the `eve dev`
+terminal UI preselect the option, and ACP clients receive it as the form field's `default`. Other
+channels show the options without a preselection.
+On Slack and Discord, a **Use** button submits the preselected option, because those platforms send
+nothing when a person keeps the current selection.
 
 A plain follow-up message answers the question when it is the only one open. The message must match
 an option, or the question must allow free text. Answer a question from a subagent with a structured
@@ -980,13 +1004,18 @@ for it. A task doesn't hold the turn. See [Stop early for a new message](#stop-e
 for `steer` messages.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
-not. An error that escapes the body fails the tool call.
+not. Errors crossing from a step preserve their class, so workflow code can use
+`instanceof FatalError` or `instanceof RetryableError`. When retries are exhausted, the SDK throws a `FatalError`
+with the original error in `cause`. `RetryableError` accepts `{ retryAfter }` as a duration
+string, a number of milliseconds, or a `Date`; its `retryAfter` property is the resolved retry date.
+The default delay is one second. An error that escapes the body fails the tool call.
 
 An interrupted dispatch can start a second run for the same call, and both runs may execute. Use an
 application idempotency key for side effects that must happen only once.
 
 The workflow id comes from the entry point's module path and function name. Inline entry points use
-the tool module and the name `execute`, `task`, or `serve`. Imported ones use their declaring module
-and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
+the tool module and the name `execute`, `task`, or `serve`. For a tool that a top-level `const`
+holds, the name also carries the `const`, such as `escalate$execute`. Imported ones use their
+declaring module and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
 deployment that started them. A run that resumes on a deployment without its tool fails with an
 error naming the missing workflow.

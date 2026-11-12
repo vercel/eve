@@ -9,25 +9,26 @@ import {
 } from "#dynamic/definition.js";
 import { turnInputText } from "#definitions/turn.js";
 import { createLogger, formatError } from "#internal/logging.js";
-import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import {
+  isModelOptions,
+  isModelSelection,
+  normalizeModelOptions,
+  normalizeModelSelection,
+  selectionLogIdentity,
+  type ModelOptions,
+  type ModelOptionSelection,
+} from "#models/options.js";
 import type {
   AgentModelOptionsDefinition,
   PublicAgentDynamicModelResult,
-  PublicAgentModelSelectionDefinition,
-  PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 
 import { decide } from "#ai/decide.js";
 import { DEFAULT_DECISION_MODEL } from "#ai/decision-adapter.js";
 
-type AutoModelSelection = PublicAgentStaticModelDefinition | PublicAgentModelSelectionDefinition;
+type AutoModelSelection = ModelOptionSelection;
 
-/** An option: a model ID, with its description, or a model selection with one. */
-type AutoOption = string | (PublicAgentModelSelectionDefinition & { readonly description: string });
-
-export interface AutoConfig<
-  T extends Readonly<Record<string, AutoOption>> = Readonly<Record<string, AutoOption>>,
-> {
+export interface AutoConfig<T extends ModelOptions = ModelOptions> {
   /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: DecisionModel;
   /** Provider options for the decision call, not the selected model. */
@@ -43,55 +44,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStaticModel(value: unknown): value is PublicAgentStaticModelDefinition {
-  return typeof value === "string" ? value.trim().length > 0 : isRuntimeLanguageModel(value);
-}
-
-function isModelSelection(value: unknown): value is AutoModelSelection {
-  return (
-    isStaticModel(value) ||
-    (isRecord(value) &&
-      isStaticModel(value.model) &&
-      (value.reasoning === undefined || isAgentReasoningDefinition(value.reasoning)) &&
-      (value.modelContextWindowTokens === undefined ||
-        (Number.isInteger(value.modelContextWindowTokens) &&
-          (value.modelContextWindowTokens as number) > 0)) &&
-      (value.modelOptions === undefined || isRecord(value.modelOptions)))
-  );
-}
-
-/** A selection with only a model is the model itself. */
-function normalizeSelection(selection: AutoModelSelection): PublicAgentDynamicModelResult {
-  if (typeof selection === "string" || isRuntimeLanguageModel(selection)) return selection;
-  const { model, ...settings } = selection;
-  return Object.values(settings).every((value) => value === undefined) ? model : selection;
-}
-
-function selectionLogIdentity(selection: AutoModelSelection): string {
-  const model =
-    typeof selection === "string" || isRuntimeLanguageModel(selection)
-      ? selection
-      : selection.model;
-  return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
-}
-
 /**
  * What the turn decides on: the turn, and the text it opened with. It holds still while the turn
  * runs, so the turn decides once: its tool calls, steering, and compaction don't decide again.
  */
 function turnState(turn: DynamicTurn): TurnState {
-  const input = turnInputText(turn);
-  // Longer input can't be routed.
-  return { input: input.length > MAX_ROUTING_CHARACTERS ? null : input, turnId: turn.id };
+  return { input: turnInputText(turn), turnId: turn.id };
 }
 
-const MAX_ROUTING_CHARACTERS = 16_000;
-
-type TurnState = { readonly input: string | null; readonly turnId: string };
+type TurnState = { readonly input: string; readonly turnId: string };
 
 /**
  * What the decision reads: the turn's input, after up to seven earlier user and assistant text
- * messages from before it, capped at 16,000 characters.
+ * messages from before it. The decision provider enforces its input limits.
  */
 function routingState(
   turn: TurnState,
@@ -116,18 +81,11 @@ function routingState(
       break;
     }
   }
-  if (turn.input === null) {
-    throw new Error("The latest message is too long for auto routing.");
-  }
   const messages: { role: string; text: string }[] = turn.input.trim()
     ? [{ role: "user", text: turn.input }]
     : [];
-  let characters = turn.input.length;
   for (let index = end - 1; index >= 0 && messages.length < 8; index--) {
-    const message = texts[index]!;
-    if (message.text.length + characters > MAX_ROUTING_CHARACTERS) break;
-    characters += message.text.length;
-    messages.unshift(message);
+    messages.unshift(texts[index]!);
   }
   return { messages };
 }
@@ -150,7 +108,7 @@ function routingState(
  * The decision is a memo keyed by the turn, so a process that didn't decide uses the same model
  * without deciding again, and a new deployment decides again.
  */
-export function auto<const T extends Readonly<Record<string, AutoOption>>>(
+export function auto<const T extends ModelOptions>(
   config: AutoConfig<T>,
 ): DynamicSentinel<PublicAgentDynamicModelResult, DynamicModelContext> {
   if (
@@ -159,15 +117,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
       !isRecord(config.model) &&
       (typeof config.model !== "string" || !config.model.trim())) ||
     (config.fallback !== undefined && !isModelSelection(config.fallback)) ||
-    !isRecord(config.options) ||
-    Object.values(config.options).some((option) =>
-      typeof option === "string"
-        ? !option.trim()
-        : !isRecord(option) ||
-          typeof option.description !== "string" ||
-          !option.description.trim() ||
-          !isModelSelection({ ...option, description: undefined }),
-    )
+    !isModelOptions(config.options)
   ) {
     throw new Error(
       "auto requires descriptions or { model, description, reasoning?, modelContextWindowTokens?, modelOptions? } option entries and, when provided, a valid decision model and fallback model.",
@@ -175,11 +125,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
   }
 
   const decisionModel = config.model ?? DEFAULT_DECISION_MODEL;
-  const options = Object.entries(config.options).map(([key, option]) => {
-    if (typeof option === "string") return { description: option, key, selection: key };
-    const { description, ...selection } = option;
-    return { description, key, selection: normalizeSelection(selection) };
-  });
+  const options = normalizeModelOptions(config.options);
   if (options.length === 0) throw new Error("auto requires at least one option.");
 
   const models = new Map<string, PublicAgentDynamicModelResult>(
@@ -188,7 +134,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
   let fallbackKey = "eve:auto:fallback";
   while (models.has(fallbackKey)) fallbackKey += ":fallback";
   if (config.fallback !== undefined) {
-    models.set(fallbackKey, normalizeSelection(config.fallback));
+    models.set(fallbackKey, normalizeModelSelection(config.fallback));
   }
   const criteria = Object.fromEntries(options.map(({ key, description }) => [key, description]));
 

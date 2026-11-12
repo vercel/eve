@@ -18,7 +18,7 @@
     "@vercel/connect": "^2.5.5",
     "ai": "7.0.140",
     "eve": "^0.90.0",
-    "zod": "4.5.4"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "24.x",

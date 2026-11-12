@@ -31,17 +31,11 @@ function renderChunk(
 }
 
 describe("buildNodeEsmCompatBanner", () => {
-  it("emits both path globals when the chunk declares neither", () => {
+  it("emits the path globals and the require shim when the chunk declares none", () => {
     const banner = buildNodeEsmCompatBanner(EMPTY_PROGRAM);
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
     expect(banner).toContain("const __dirname = __eveDirname(__filename);");
-    expect(banner).not.toContain("__eveCreateRequire");
-  });
-
-  it("includes the require shim when requested", () => {
-    const banner = buildNodeEsmCompatBanner(EMPTY_PROGRAM, { includeRequire: true });
-
     expect(banner).toContain("const require = __eveCreateRequire(import.meta.url);");
   });
 
@@ -54,8 +48,6 @@ describe("buildNodeEsmCompatBanner", () => {
 
     expect(banner).not.toContain("__dirname");
     expect(banner).not.toContain("__filename");
-    // With both globals already declared we emit nothing.
-    expect(banner).toBe("");
   });
 
   it("emits only the missing path global", () => {
@@ -76,9 +68,7 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("omits the require shim when the chunk binds require", () => {
-    const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("require"), {
-      includeRequire: true,
-    });
+    const banner = buildNodeEsmCompatBanner(programWithTopLevelBindings("require"));
 
     expect(banner).not.toContain("__eveCreateRequire");
     expect(banner).not.toContain("const require");
@@ -87,7 +77,6 @@ describe("buildNodeEsmCompatBanner", () => {
   it("does not treat bundler-suffixed bindings as compatibility globals", () => {
     const banner = buildNodeEsmCompatBanner(
       programWithTopLevelBindings("__filename$1", "__dirname$1", "require$1"),
-      { includeRequire: true },
     );
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
@@ -135,6 +124,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     "const first = (() => { return 1; })(), /* next */ __dirname = '/';",
     String.raw`const __dirn\u0061me = '/';`,
     String.raw`let value = 1, \u{5f}_filename = '/x';`,
+    String.raw`const requir\u0065 = customRequire;`,
   ])("parses possible declarations: %s", (code) => {
     const parse = vi.fn(() => programWithTopLevelBindings("__dirname"));
     const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
@@ -147,10 +137,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     "const lines = ['var __dirname = x', \"let require = y\"]; export const value = __dirname;",
   ])("does not parse chunks that only quote a declaration: %s", (code) => {
     const parse = vi.fn(() => EMPTY_PROGRAM);
-    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
-      { parse },
-      code,
-    );
+    const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
     expect(parse).not.toHaveBeenCalled();
     expect(result?.code).toContain("const __dirname =");
   });
@@ -159,10 +146,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     const parse = vi.fn(() => EMPTY_PROGRAM);
     const code =
       "const require$1 = createRequire$1(import.meta.url);\nconst __filename$1 = fileURLToPath$1(import.meta.url), __dirname$1 = dirname$1(__filename$1);";
-    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
-      { parse },
-      code,
-    );
+    const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
     expect(parse).not.toHaveBeenCalled();
     expect(result?.code).toContain("const __dirname =");
   });
@@ -170,7 +154,6 @@ describe("createNodeEsmCompatBannerPlugin", () => {
   it.each([
     String.raw`const separators = /[\u2028,\u2029]/; export const value = __dirname;`,
     String.raw`const label = "caf\u00e9", other\u0041 = 1; export const value = __dirname;`,
-    String.raw`const requir\u0065 = customRequire; export const value = __dirname;`,
   ])("does not parse chunks whose unicode escapes cannot name a binding: %s", (code) => {
     const parse = vi.fn(() => EMPTY_PROGRAM);
     const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
@@ -185,24 +168,18 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     const code = `export const timers = [first,\n${comments.join("\n")}\nsecond];\nexport const directory = __dirname;`;
     const parse = vi.fn(() => EMPTY_PROGRAM);
     const startedAt = performance.now();
-    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
-      { parse },
-      code,
-    );
+    const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
 
     expect(performance.now() - startedAt).toBeLessThan(1_000);
     expect(parse).not.toHaveBeenCalled();
     expect(result?.code).toContain("const __dirname =");
   });
 
-  it("checks require declarations only when providing a require shim", () => {
+  it("parses a chunk that declares require instead of injecting a duplicate", () => {
     const parse = vi.fn(() => programWithTopLevelBindings("require"));
-    const code = "const require = customRequire;";
-    createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
-    expect(parse).not.toHaveBeenCalled();
-    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
+    const result = createNodeEsmCompatBannerPlugin().renderChunk.call(
       { parse },
-      code,
+      "const require = customRequire;",
     );
     expect(parse).toHaveBeenCalledOnce();
     expect(result?.code).not.toContain("__eveCreateRequire");
@@ -214,10 +191,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
       (name) => {
         const parse = vi.fn(() => programWithTopLevelBindings(name));
         const code = `${declaration} /* resource */ ${name} = { [Symbol.dispose]() {} };`;
-        const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
-          { parse },
-          code,
-        );
+        const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
 
         expect(parse).toHaveBeenCalledOnce();
         expect(result?.code).not.toContain(`const ${name} =`);
@@ -226,7 +200,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
   });
 
   it("omits bindings declared later in a top-level variable list", () => {
-    const plugin = createNodeEsmCompatBannerPlugin({ includeRequire: true });
+    const plugin = createNodeEsmCompatBannerPlugin();
     const chunk =
       "const logs = getLogs(), require = createRequire(import.meta.url), __filename = fileURLToPath(import.meta.url), __dirname = dirname(__filename);";
 
@@ -252,7 +226,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
       sources: ["agent.mjs"],
       sourcesContent: [code],
       names: [],
-      mappings: ";;;;AAAA",
+      mappings: ";;;;;;AAAA",
     });
   });
 
@@ -261,19 +235,6 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     const code = ['const value = "noop";', "export { value };"].join("\n");
     const result = renderChunk(plugin, code);
 
-    expect(result?.map.mappings).toBe(";;;;AAAA;AACA");
-  });
-
-  it("returns null when the chunk already provides every binding", () => {
-    const plugin = createNodeEsmCompatBannerPlugin();
-    const chunk = [
-      "const __filename = '/x';",
-      "const __dirname = '/';",
-      'export const value = "noop";',
-    ].join("\n");
-
-    expect(
-      renderChunk(plugin, chunk, programWithTopLevelBindings("__filename", "__dirname")),
-    ).toBeNull();
+    expect(result?.map.mappings).toBe(";;;;;;AAAA;AACA");
   });
 });

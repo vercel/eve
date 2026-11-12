@@ -3,12 +3,7 @@ title: "Dynamic Schedules"
 description: "Create and manage creator-owned recurring or one-time schedules at runtime."
 ---
 
-<Callout type="info" title="Feature flag required">
-  Dynamic schedules on Vercel are gated by an organization-level feature flag. Contact your Vercel
-  representative to have the feature enabled for your organization.
-</Callout>
-
-`defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it. Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](../schedules) instead.
+`defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it unless you set [`id`](#keep-a-stable-identity). Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](../schedules) instead.
 
 The definition gives the model tools to manage schedules, and gives you a `run` callback that runs each time a schedule fires. Each firing is an occurrence. This API is experimental and may change. Import it from `eve/experimental/schedules`.
 
@@ -20,8 +15,8 @@ The model supplies a payload that matches `inputSchema`. eve records who created
 import { byPrincipal, defineDynamicSchedules } from "eve/experimental/schedules";
 import { z } from "zod";
 import slack from "../channels/slack";
-// Application code: look up users and destinations.
-import { resolveCurrentUser } from "../lib/identity";
+// Application code: look up accounts and destinations.
+import { findActiveAccount } from "../lib/identity";
 import { resolveCreatorDm, resolveAuthorizedTeamChannel } from "../lib/schedule-policy";
 
 export default defineDynamicSchedules({
@@ -35,8 +30,12 @@ export default defineDynamicSchedules({
     .strict(),
   // Optional: byPrincipal is the default.
   scope: byPrincipal,
-  // Required: resolve the creator's current access before each run.
-  auth: ({ principal }) => resolveCurrentUser(principal),
+  // Required: check the creator's current access before each run.
+  async auth({ principal }) {
+    const account = await findActiveAccount(principal.principalId);
+    // null denies the run. Otherwise the run uses the creator's identity with these attributes.
+    return account === null ? null : { attributes: { team: account.team } };
+  },
   // Required: runs each time the schedule fires.
   async run({ payload, occurrence, to, auth }) {
     const target =
@@ -57,6 +56,7 @@ export default defineDynamicSchedules({
 | `inputSchema`    | Required                   | Validates the payload from the model or client.                                                                                   |
 | `auth`           | Required                   | Resolves the creator to current access. See [Revalidate creator identity](#revalidate-creator-identity).                          |
 | `run`            | Required                   | Runs each time a schedule fires. See [Handle occurrences and retries](#handle-occurrences-and-retries).                           |
+| `id`             | Name from the file path    | Names the definition and the schedules stored under it. See [Keep a stable identity](#keep-a-stable-identity).                    |
 | `description`    | None                       | Text added to each management tool's description.                                                                                 |
 | `scope`          | `byPrincipal`              | Decides which caller can manage which schedules.                                                                                  |
 | `provider`       | `vercelScheduleProvider()` | Stores schedules and fires them. See [Choose a provider and test locally](#choose-a-provider-and-test-locally).                   |
@@ -67,9 +67,26 @@ export default defineDynamicSchedules({
 
 `scope` decides who can manage a schedule. `byPrincipal` limits each caller to their own schedules, keyed by identity type, authenticator, issuer, and ID, plus the application and definition. A custom `scope` function must authorize each operation before it returns a namespace. Return `null` to deny.
 
+### Keep a stable identity
+
+A definition's name comes from its path under `agent/schedules/`: `agent/schedules/billing/requests.ts` is `billing/requests`. eve stores each schedule under that name, and uses it in the management tool names, `occurrence.collection`, and `ctx.session.schedule.definition`. Renaming or moving the file changes the name, so schedules created under the old name are no longer listed or run.
+
+Set `id` to fix the name whatever the path. To move a file and keep its schedules, set `id` to the old name:
+
+```ts title="agent/schedules/workflows.ts"
+export default defineDynamicSchedules({
+  id: "billing/requests",
+  // ...
+});
+```
+
+An `id` has up to 64 ASCII letters, digits, `_`, and `-`, with `/` allowed between segments. The build fails when two collections, or a collection and a [static schedule](../schedules), in one agent have the same name, whether it comes from `id` or the path.
+
+In an [extension](../extensions), a path-derived name takes the mount's prefix, such as `crm__requests`, so it changes with the mount filename. eve uses an `id` as written, without the prefix, so the extension's schedules keep one name in every agent that mounts it. Mounting that extension twice in one agent fails the build.
+
 ## Expose management tools
 
-Each definition adds one tool for each operation: `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`. Each tool has its own schema, approval policy, and action label. For example, `agent/schedules/billing/requests.ts` generates `schedule__billing-requests__create`, `schedule__billing-requests__update`, and so on.
+Each definition adds one tool for each operation: `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`. Each tool has its own schema, approval policy, and action label. For example, `agent/schedules/billing/requests.ts` generates `schedule__billing-requests__create`, `schedule__billing-requests__update`, and so on. With an `id`, the tool names use it instead of the path.
 
 | Tool                 | Input                                                                       |
 | -------------------- | --------------------------------------------------------------------------- |
@@ -165,34 +182,91 @@ Updates, `enable`, `disable`, and `delete` affect future runs, not callbacks alr
 
 ## Choose a provider and test locally
 
-The default `vercelScheduleProvider()` supports these environments:
+The built-in `vercelScheduleProvider()` uses Vercel Schedules in production and supports local development:
 
-| Environment                                      | Storage and delivery                                                                                                                               |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel production                                | Requires feature-flag enablement for your organization. Hosted Vercel Schedules delivers occurrences through Vercel Queues.                        |
-| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.                                       |
-| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.                                         |
-| Vercel preview or self-hosted production         | The default provider rejects operations. Use a different provider or the [application-managed scheduling pattern](../patterns/dynamic-scheduling). |
+| Environment                                      | Storage and delivery                                                                                           |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                            |
+| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.   |
+| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.     |
+| Self-hosted production                           | [Create a provider](#create-a-provider-for-your-use-case) for your application's storage and scheduling needs. |
+
+On Vercel, schedules belong to the deployment's track, selected by its OIDC credentials. Preview schedules are separate from production schedules. Occurrences run on the track's current leader deployment, so schedules follow updates within that track.
 
 Under `vc dev`, local queue errors appear in the dev server logs and retry after five seconds.
 
 Import `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to configure the Vercel endpoint explicitly. Import the in-memory provider from `eve/experimental/schedules/testing` for code-driven tests.
 
+### Create a provider for your use case
+
+Create a provider when your application needs a different scheduling backend, storage system, or deployment environment. Implement `ScheduleProvider` from `eve/experimental/schedules` and pass it as `provider` to `defineDynamicSchedules`.
+
+Your provider owns schedule storage, timing, and occurrence delivery. eve handles payload validation, management authorization, approvals, and creator revalidation.
+
+| Part of the contract | What your provider implements                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                       |
+| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                            |
+| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`. |
+| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                 |
+| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.    |
+
+`ScheduleProviderContext` is also exported from `eve/experimental/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
+
+For fixed cron jobs without runtime management, use [Schedules](../schedules).
+
 ## Handle occurrences and retries
 
-`run` receives `payload`, `occurrence`, `auth`, `to`, and `waitUntil`. It can start any number of sessions or do application work directly.
+`run` receives `payload`, `occurrence`, `auth`, `schedule`, `to`, and `waitUntil`. It can start any number of sessions or do application work directly.
 
 `to(channel, target).send(message, options)` runs as the resolved creator and takes no auth argument. `options` takes `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off). It takes no `turnPolicy`, because a send only reaches sessions the schedule started. It always starts a new session with no one present, through one of your channels, even when the target names an existing thread. Those sessions can't wait for approvals or questions, so configure tools to match.
 
+`schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish. The handle's type, `ScheduleHandle`, is exported from `eve/experimental/schedules`.
+
+```ts
+async run({ payload, schedule, to }) {
+  // isStillNeeded is application code.
+  if (!(await isStillNeeded(payload))) {
+    await schedule.disable();
+    return;
+  }
+  await to(slack, payload.target).send(payload.task);
+},
+```
+
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
-Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply. `occurrence.failed` reports a permanent provider failure or a provider that ran out of retries.
+Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+
+`occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 
 ## Revalidate creator identity
 
-`auth({ principal, payload, occurrence })` turns the stored creator reference into current access. `principal` identifies the creator; it holds no credentials or permissions. Look up current account status and permissions instead of replaying credentials or roles captured at creation. Return `null` to deny. A thrown error lets the provider retry.
+`auth({ principal, payload, occurrence, schedule })` turns the stored creator reference into current access. `principal` identifies the creator; it holds no credentials or permissions. Look up current account status and permissions instead of replaying credentials or roles captured at creation.
 
-The returned identity type, authenticator, issuer, ID, and subject must match the creator reference. eve never falls back to app identity. Manual `invoke` runs as the creator, not the caller. Tool and connection authorization still applies during the run.
+| `auth` result               | What happens                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ attributes }`            | The run uses the stored creator's identity with these attributes.                                                                     |
+| A full `SessionAuthContext` | The run uses it. Its identity type, authenticator, issuer, ID, and subject must match the creator reference, or the occurrence fails. |
+| `null`                      | The occurrence fails without a retry, and `run` isn't called.                                                                         |
+| A thrown error              | The provider retries the occurrence. Throw when a lookup fails, so an outage doesn't read as a denial.                                |
+
+A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/experimental/schedules`.
+
+A denial fails only the current occurrence; a recurring schedule keeps firing and failing. When a denial is permanent, such as a removed account, stop the schedule through `schedule` before you return `null`:
+
+```ts
+async auth({ principal, schedule }) {
+  const account = await findActiveAccount(principal.principalId);
+  if (account === null) {
+    await schedule.disable();
+    return null;
+  }
+  return { attributes: { team: account.team } };
+},
+```
+
+eve never falls back to app identity. Manual `invoke` runs as the creator, not the caller. Tool and connection authorization still applies during the run.
 
 ## Prepare payloads and destinations
 
@@ -227,15 +301,15 @@ eve doesn't save the conversation that created a schedule. To reply in that thre
 
 ## Troubleshooting
 
-| What you see                                                                                      | What to do                                                                             |
-| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `vercelScheduleProvider() requires a Vercel production deployment or eve dev.`                    | Run under `eve dev` or a Vercel production deployment, or pass a different `provider`. |
-| ``Vercel Schedules currently supports production deployments only. Deploy with `vercel --prod`.`` | Deploy to production, because the default provider rejects preview deployments.        |
-| `Prepared schedule write exceeds the 64 KB limit, including timing and payload.`                  | Store stable references instead of large data in the payload.                          |
+| What you see                                                                                  | What to do                                                                                                                               |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `vercelScheduleProvider() requires a Vercel deployment or eve dev.`                           | Use `eve dev` or a Vercel deployment with this provider, or [create a provider for your use case](#create-a-provider-for-your-use-case). |
+| `Prepared schedule write exceeds the 64 KB limit, including timing and payload.`              | Store stable references instead of large data in the payload.                                                                            |
+| `Scheduled execution is no longer authorized: "auth" returned null for the schedule creator.` | `auth` denied the creator. Restore their access, or delete the schedule.                                                                 |
+| `Scheduled execution auth must resolve the schedule creator.`                                 | Return `{ attributes }` from `auth`, or a `SessionAuthContext` whose identity matches `principal`.                                       |
 
 ## What to read next
 
 - [Schedules](../schedules): author fixed cron jobs with `defineSchedule`.
-- [Dynamic scheduling](../patterns/dynamic-scheduling): a self-hosted alternative with application-owned storage.
 - [Channels](/docs/channels): deliver schedule output to users.
 - [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): inspect a scheduled run.

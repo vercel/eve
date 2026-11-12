@@ -1,6 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import { resolvedPromptLabel, responderName } from "#channel/resolved-prompt.js";
 import type { Interaction, RequestSettlement } from "#channel/interaction-prompts.js";
 import { postedIn, type SignInSurface } from "#channel/sign-in.js";
 import { surfaceEvents } from "#channel/surface.js";
@@ -203,8 +203,9 @@ async function postDiscordRequest(
 }
 
 /**
- * Shows a prompt's answer in place of its buttons. The bot token outlives the interaction token
- * the prompt may have been posted with.
+ * Shows a prompt's answer, and who gave it, in place of its buttons. The mention doesn't ping:
+ * the edit allows none. The bot token outlives the interaction token the prompt may have been
+ * posted with.
  */
 async function editDiscordSettledRequest(
   channel: DiscordEventChannel,
@@ -213,7 +214,12 @@ async function editDiscordSettledRequest(
   const { [settlement.interactionId]: prompt, ...rest } = channel.state.hitlPrompts ?? {};
   if (prompt === undefined) return;
   channel.state.hitlPrompts = rest;
-  const label = resolvedPromptLabel(settlement, prompt.options);
+  const userId = responderName(channel.state.usersByPrincipal, settlement);
+  const label = resolvedPromptLabel(
+    settlement,
+    prompt.options,
+    userId === undefined ? undefined : `<@${userId}>`,
+  );
   try {
     await editDiscordResolvedPrompt(channel.discord, prompt, label);
   } catch (error) {

@@ -3,8 +3,7 @@ import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
-import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
+import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
 import {
@@ -81,7 +80,7 @@ export interface SessionInboxReader {
   readonly handoverObservation?: SessionHandoverObservation;
   /**
    * Waits for and removes the next accepted payload in arrival order, or
-   * `undefined` once no hook can deliver any more (released or taken over).
+   * `undefined` once no hook can deliver any more (disposed or taken over).
    * Only one consumer waits at a time; the owner program is strictly sequential.
    */
   next(): Promise<SessionInboxPayload | undefined>;
@@ -126,6 +125,11 @@ export interface SessionHookClaimOptions {
    * step confirms after that step; the hook still commits alongside it.
    */
   readonly confirmAfter?: Promise<unknown>;
+  /**
+   * `start()` already created this address's hook with the run, metadata
+   * included; claiming it opens that hook and never conflicts.
+   */
+  readonly claimedAtStart?: boolean;
 }
 
 export interface SessionHookBatchClaimOptions extends SessionHookClaimOptions {
@@ -165,13 +169,11 @@ export interface SessionInboxHandle extends SessionInbox {
   /**
    * Resolves once another run has force-claimed every hook this inbox held.
    * Every payload delivered before the takeover is queued by then. Rejects if
-   * a reader fails, if the inbox is released or disposed first, or once
+   * a reader fails, if the inbox is disposed first, or once
    * `signal` aborts.
    */
   whenTakenOver(signal?: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
-  /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
-  release(): Promise<SessionInboxPayload[]>;
 }
 
 export function isInterrupt(value: SessionInboxPayload): boolean {
@@ -328,7 +330,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     }
   };
 
-  const stop = async (): Promise<SessionInboxPayload[]> => {
+  const stop = async (): Promise<void> => {
     const released = sources.splice(0);
     handover = undefined;
     takenOver = false;
@@ -336,9 +338,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     for (const source of released) source.stopping = true;
     notify();
     await Promise.all(released.map(({ hook }) => disposeHook(hook)));
-    const accepted = queue.splice(0);
+    queue.splice(0);
     notify();
-    return accepted;
   };
 
   const claimSessionHook = async (
@@ -353,11 +354,15 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       throw new Error("A session may claim at most 256 addresses.");
     const source: Source = {
       token,
-      hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>({
-        token: sessionInboxHookToken(token),
-        metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
-        ...(force && { experimental_force: true }),
-      }),
+      hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>(
+        options.claimedAtStart === true
+          ? { token: sessionInboxHookToken(token) }
+          : {
+              token: sessionInboxHookToken(token),
+              metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
+              ...(force && { experimental_force: true }),
+            },
+      ),
       stopping: false,
       closed: false,
       replaced: false,
@@ -436,7 +441,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       signal?.addEventListener("abort", notify, { once: true });
       while (sources.length > 0 || !takenOver) {
         throwIfFailed();
-        if (stopped) throw new Error("The session inbox was released before a takeover.");
+        if (stopped) throw new Error("The session inbox was disposed before a takeover.");
         if (signal?.aborted === true) throw signal.reason;
         await wait();
       }
@@ -497,18 +502,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     async dispose() {
       // Accepted-but-unread payloads are dropped: disposal ends the session.
       await stop();
-    },
-    async release() {
-      // Commit disposal durably before the readers stop: the SDK delivers every
-      // hook event accepted before that commit to the iterators first, so the
-      // queue holds each accepted payload when `stop()` drains it.
-      if (sources.length > 0) {
-        await releaseSessionHooksStep({
-          ownerRunId: getWorkflowMetadata().workflowRunId,
-          tokens: sources.map(({ hook }) => hook.token),
-        });
-      }
-      return await stop();
     },
   };
 }

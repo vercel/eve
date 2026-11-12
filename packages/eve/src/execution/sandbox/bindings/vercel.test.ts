@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
@@ -321,6 +322,13 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  // What the Sandbox API answers a resume whose snapshot expired or was deleted.
+  const snapshotNotFound = () =>
+    Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
+      json: { error: { code: "snapshot_not_found" } },
+      response: { status: 410 },
+    });
+
   it("creates a session from the prepared snapshot artifact without looking up the template sandbox", async () => {
     const sessionSandbox = createMockSandbox({ name: "session-key" });
     const sandboxModule = {
@@ -954,12 +962,6 @@ describe("createVercelSandbox", () => {
 
   describe("tool sessions", () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
-    // What the Sandbox API answers a resume whose snapshot expired or was deleted.
-    const snapshotNotFound = () =>
-      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
-        json: { error: { code: "snapshot_not_found" } },
-        response: { status: 410 },
-      });
     const nameTaken = () =>
       Object.assign(new Error("A sandbox with the name already exists"), {
         response: { status: 400 },
@@ -1117,6 +1119,43 @@ describe("createVercelSandbox", () => {
       await expect(open()).rejects.toThrow();
       expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
       expect(gone.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("resuming recorded state", () => {
+    const sandboxName = "eve-sbx-vercel-recorded";
+
+    // A stopped sandbox that fails to resume with `error`.
+    function resumeFailing(error: Error, sessionId: string) {
+      const stopped = createMockSandbox({ name: sandboxName, status: "stopped" });
+      stopped.runCommand.mockRejectedValue(error);
+      const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => stopped) } };
+      const provider = createTestVercelSandbox({
+        loadSandboxModule: async () => sandboxModule as never,
+      });
+      return provider.openSession({
+        appRoot: "/tmp/test-app-root",
+        existing: { sandboxName, version: 3 },
+        prepared: { snapshotId: "prepared-snapshot" },
+        sandboxName: sessionId,
+      });
+    }
+
+    it("reports a session gone when its sandbox's snapshot expired", async () => {
+      const error = await resumeFailing(snapshotNotFound(), "session_abc").catch((e: unknown) => e);
+      expect(SandboxSessionGoneError.is(error)).toBe(true);
+    });
+
+    it.each([
+      ["a stopped sandbox", 410],
+      ["an internal error", 500],
+    ])("surfaces %s unchanged instead of reporting the session gone", async (_, status) => {
+      const original = Object.assign(new Error("Cannot resume sandbox"), {
+        response: { status },
+      });
+      const error = await resumeFailing(original, "session_abc").catch((e: unknown) => e);
+      expect(error).toBe(original);
+      expect(SandboxSessionGoneError.is(error)).toBe(false);
     });
   });
 
@@ -1612,7 +1651,7 @@ describe("createVercelSandbox", () => {
   it.each([
     ["open()", {}, { networkPolicy: "deny-all" as const }],
     ["the environment", { networkPolicy: "deny-all" as const }, {}],
-  ])("applies the policy from %s after template-less base setup", async (_, environment, open) => {
+  ])("creates a template-less sandbox with the policy from %s", async (_, environment, open) => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi.fn().mockResolvedValue(sessionSandbox);
     const provider = vercelHarness(
@@ -1631,16 +1670,15 @@ describe("createVercelSandbox", () => {
 
     await provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" });
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ networkPolicy: "allow-all" }));
-    expect(sessionSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
-    expect(sessionSandbox.runCommand.mock.invocationCallOrder[0]).toBeLessThan(
-      sessionSandbox.update.mock.invocationCallOrder[0]!,
-    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ networkPolicy: "deny-all" }));
+    expect(sessionSandbox.update).not.toHaveBeenCalled();
   });
 
-  it("discards a fresh template-less session when applying its policy fails", async () => {
+  it("keeps a template-less sandbox restricted when base setup fails and is retried", async () => {
     const sessionSandbox = createMockSandbox({ name: "session" });
-    sessionSandbox.update.mockRejectedValueOnce(new Error("policy rejected"));
+    const failedSetup = { ...createMockCommandResult(), exitCode: 1 };
+    // The first open's base setup fails, once directly and once through sudo.
+    sessionSandbox.runCommand.mockResolvedValueOnce(failedSetup).mockResolvedValueOnce(failedSetup);
     const fake = createFakeVercelProvider(sessionSandbox);
     const provider = vercelHarness(
       {
@@ -1651,13 +1689,61 @@ describe("createVercelSandbox", () => {
       { networkPolicy: "deny-all" },
       { preparedArtifact: () => ({}) },
     );
+    const open = () =>
+      provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" });
+    await expect(open()).rejects.toThrow("Failed to initialize Vercel sandbox base runtime.");
+    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({ networkPolicy: "deny-all" }),
+    );
+    expect(fake.sandboxes.get(sessionSandbox.name)).toBe(sessionSandbox);
 
-    await expect(
-      provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" }),
-    ).rejects.toThrow("policy rejected");
-    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
-    expect(sessionSandbox.delete).toHaveBeenCalledTimes(1);
-    expect(fake.sandboxes.size).toBe(0);
+    await open();
+
+    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(
+      sessionSandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update),
+    ).toEqual([]);
+  });
+
+  it("preserves a template-less keyed session's live policy across parallel opens with changed options", async () => {
+    const fake = createFakeVercelProvider();
+    const provider = vercelHarness(
+      {
+        createSandbox: async ({ createOptions, sandboxModule }) =>
+          await sandboxModule.Sandbox.create(createOptions),
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      },
+      { networkPolicy: "deny-all" },
+      { preparedArtifact: () => ({}) },
+    );
+    const open = (options?: VercelSandboxRuntimeOptions) =>
+      provider.start({ appRoot: "/tmp/test-app-root", options, sandboxName: "tool_session_abc" });
+    const first = await open();
+    const sessionSandbox = [...fake.sandboxes.values()][0]!;
+    await first.sandbox.setNetworkPolicy({ allow: ["github.com"] });
+    sessionSandbox.update.mockClear();
+
+    const reopened = await Promise.all([
+      open(),
+      open({ networkPolicy: "allow-all" }),
+      open({ networkPolicy: "deny-all" }),
+    ]);
+
+    expect(reopened.map(({ state }) => state)).toEqual([first.state, first.state, first.state]);
+    expect(sessionSandbox.update).not.toHaveBeenCalled();
+
+    await first.sandbox.setNetworkPolicy("allow-all");
+    sessionSandbox.update.mockClear();
+    const resumed = await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      existing: first.state,
+      sandboxName: "tool_session_abc",
+    });
+
+    expect(resumed.sandbox.name).toBe(first.sandbox.name);
+    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.update).not.toHaveBeenCalled();
+    expect(sessionSandbox.delete).not.toHaveBeenCalled();
   });
 
   it("brokers credentials through the session's setNetworkPolicy to sandbox.update", async () => {
@@ -1929,9 +2015,8 @@ describe("createVercelSandbox", () => {
     expect(created.mounts).toEqual({
       "/workspace/data": { drive: "initial-drive", mode: "read-write" },
     });
-    expect(sandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update)).toEqual([
-      [{ networkPolicy: "deny-all" }],
-    ]);
+    expect(created).toMatchObject({ networkPolicy: "deny-all" });
+    expect(sandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update)).toEqual([]);
   });
 
   it("prepares the base runtime in the template rather than its fresh snapshot-backed session", async () => {

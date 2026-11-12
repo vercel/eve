@@ -177,6 +177,8 @@ export default slackChannel({
 
 An ignored message never starts a turn. Once `decide` lets a message through, its thread has a session, so later replies take the followed-thread branch without another decision call. If `decide` throws, eve drops the message; catch the error and return `{ auth }` to answer anyway. See [Classify ambient replies with a decision model](/docs/channels/slack/reference#classify-ambient-replies-with-a-decision-model) for choosing the decision model.
 
+For a fuller setup with per-channel goals, instructions for staying silent, a decision model that filters out clearly unintended messages, and monitoring, see [Ambient Listening in Slack](/docs/patterns/ambient-listening).
+
 ## Handle message edits
 
 When someone edits a DM, a code channel message, or a message that mentions the agent before or after the edit, in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. By default, the edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until its first tool call finishes.
@@ -237,13 +239,13 @@ This adds the `users:read` scope, plus `users:read.email` with `email: true`, so
 
 By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
 
-To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
+To show a request only to the person who started the turn, return `"ephemeral"` from `approvalChannel` to keep it in the thread, or `"direct-message"` to send it to their DM:
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
-  approvalChannel: (request) => (request.request.kind === "question" ? "direct-message" : "thread"),
+  approvalChannel: (request) => (request.request.kind === "question" ? "ephemeral" : "thread"),
 });
 ```
 

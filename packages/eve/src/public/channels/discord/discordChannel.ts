@@ -69,7 +69,12 @@ import {
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import {
+  defineChannel,
+  POST,
+  type Channel,
+  type ChannelDelivery,
+} from "#public/definitions/channel.js";
 import {
   createDiscordFetchFile,
   discordCommandContent,
@@ -121,6 +126,10 @@ export interface DiscordChannelState {
   hitlPrompts?: Record<string, DiscordHitlPrompt>;
   /** @internal The sign-ins the default flow posted for, by connection name. */
   pendingSignIns?: Record<string, string>;
+  /** @internal The Discord user who sent a delivery's message, command, or answer. */
+  triggeringUserId?: string;
+  /** @internal The Discord user behind each principal that sent or answered, so an answered prompt can name them. */
+  usersByPrincipal?: Record<string, string>;
 }
 
 /** What a posted prompt needs so its message can be edited once eve resolves it. */
@@ -296,6 +305,14 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
+    },
+
+    // `session.auth.current` is the caller of this delivery.
+    deliver(
+      payload,
+      channel: DiscordChannelContext & { readonly session: ChannelContext["session"] },
+    ) {
+      recordDiscordUser(channel.state, channel.session.auth.current, payload);
     },
 
     routes: [
@@ -789,7 +806,7 @@ async function dispatchCommand(input: {
         auth: input.result.auth,
         context: [contextBlock, ...channelContext],
         history: input.result.history,
-        state: input.state,
+        state: { ...input.state, triggeringUserId: input.interaction.user.id },
         title: input.result.title,
       });
   } catch (error) {
@@ -834,7 +851,11 @@ async function dispatchAnswers(input: {
     }),
   );
   const response = await respondOrRetireInactivePrompt(
-    () => source.respond(input.answers, { auth }),
+    () =>
+      source.respond(input.answers, {
+        auth,
+        state: { triggeringUserId: input.interaction.user.id },
+      }),
     {
       // The session's record of the prompt is gone, so its text comes from the
       // pressed message. A modal submitted outside a message has neither, and
@@ -898,6 +919,21 @@ function stateFromInteraction(
     initialResponseSent: options.initialResponseSent,
     interactionToken: interaction.token,
   };
+}
+
+/**
+ * Records the Discord user who sent a delivery as the one behind its caller, so a prompt the
+ * delivery answers can name them.
+ */
+function recordDiscordUser(
+  state: DiscordChannelState,
+  caller: SessionAuthContext | null,
+  payload: ChannelDelivery<DiscordChannelState>,
+): void {
+  const userId = payload.state?.triggeringUserId;
+  if (caller === null || typeof userId !== "string") return;
+  if (state.usersByPrincipal?.[caller.principalId] === userId) return;
+  state.usersByPrincipal = { ...state.usersByPrincipal, [caller.principalId]: userId };
 }
 
 function initialDiscordState(): DiscordChannelState {

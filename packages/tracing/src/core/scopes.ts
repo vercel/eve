@@ -10,6 +10,7 @@ import {
   applyAttributes,
 } from "./span-kinds.js";
 import { mcpLifecycle, type McpLifecycle } from "./mcp.js";
+import { memoryToolLifecycle, type MemoryToolLifecycle } from "./memory.js";
 import { intersectCapture } from "./activation.js";
 import { snapshotRecord, traceSnapshot, validSnapshot, boundedSerializer } from "./snapshot.js";
 import { withAgentHandoff } from "./delegation.js";
@@ -68,6 +69,8 @@ export interface LiveOperation extends Operation {
   readonly settled: boolean;
   readonly callId?: string;
   readonly mcp: McpLifecycle;
+  /** Present on tool operations only. */
+  readonly memory?: MemoryToolLifecycle;
   record(): ScopeRecord;
 }
 
@@ -141,8 +144,9 @@ export function createScopes(input: {
   ): TraceReference | undefined {
     const ids = telemetry.ids;
     if (!input.durable || ids === undefined) return undefined;
-    // Re-executed model calls and memory reads are new work and get new IDs.
-    if (data.type === "model" || data.type === "memory") return undefined;
+    // Re-executed model calls, decisions, and memory reads are new work and get new IDs.
+    if (data.type === "model" || data.type === "decision" || data.type === "memory")
+      return undefined;
     if (data.type === "activation" && parent !== undefined)
       return {
         traceId: parent.traceId,
@@ -285,6 +289,8 @@ export function createScopes(input: {
       recordOutputs: actualCapture.emit && sampled && actualCapture.recordOutputs,
     };
     actualData = capturedData(actualData, actualCapture);
+    // A turn's messages are its steps' model calls, not ones it makes outside them, such as a summary.
+    const turnContentParent = parent?.type === "step" ? parent : undefined;
     let finished = binding.finished ?? false;
     let terminalResult = binding.terminal;
     const children = new Map<string, LiveOperation>();
@@ -302,6 +308,12 @@ export function createScopes(input: {
     /** Content arriving now is held to any narrower run ceiling in force. */
     function current(): CaptureDecision {
       return intersectCapture(actualCapture, telemetry.active()?.capture);
+    }
+
+    function enrich(attributes: Attributes): void {
+      const permitted = (withoutDeclinedContent(attributes, current()) ?? attributes) as Attributes;
+      Object.assign(enrichment, permitted);
+      if (operation !== undefined) applyAttributes(operation, permitted);
     }
 
     async function child(
@@ -400,7 +412,7 @@ export function createScopes(input: {
         const content = result.model.content;
         if (capture.recordOutputs && actualCapture.recordOutputs && content !== undefined) {
           const output = serializer.outputMessages(content, result.model.finishReason);
-          if (output !== undefined) parent?.turnContent({ output });
+          if (output !== undefined) turnContentParent?.turnContent({ output });
         }
       }
       operation.end(result.endTimeMs);
@@ -427,14 +439,6 @@ export function createScopes(input: {
         if (finished) return;
         const attributes = (withoutDeclinedContent(update.attributes ?? {}, current()) ??
           update.attributes) as Attributes;
-        if (actualData.type === "activation")
-          actualData = {
-            ...actualData,
-            options: {
-              ...actualData.options,
-              attributes: { ...actualData.options.attributes, ...attributes },
-            },
-          };
         prepared = {
           ...prepared,
           attributes: { ...prepared.attributes, ...attributes },
@@ -579,16 +583,12 @@ export function createScopes(input: {
       mcp: mcpLifecycle({
         serializer,
         ...actualCapture,
-        write(attributes) {
-          const permitted = (withoutDeclinedContent(attributes, current()) ??
-            attributes) as Attributes;
-          Object.assign(enrichment, permitted);
-          if (operation !== undefined) applyAttributes(operation, permitted);
-        },
+        write: enrich,
         error(error, type) {
           runtime.error(error, type);
         },
       }),
+      memory: actualData.type === "tool" ? memoryToolLifecycle(enrich) : undefined,
       get finished() {
         return finished;
       },
@@ -625,7 +625,13 @@ export function createScopes(input: {
                 );
         return runTraceContext(
           telemetry,
-          { type: runtime.type, reference: retainedReference, capture: scoped, mcp: runtime.mcp },
+          {
+            type: runtime.type,
+            reference: retainedReference,
+            capture: scoped,
+            mcp: runtime.mcp,
+            memory: runtime.memory,
+          },
           callback,
           host,
         );
@@ -698,7 +704,7 @@ export function createScopes(input: {
       operation.addEvent("step.started", undefined, startTimeMs);
     const inputMessages = prepared.attributes["gen_ai.input.messages"];
     if (!finished && actualData.type === "model" && typeof inputMessages === "string")
-      parent?.turnContent({ input: inputMessages });
+      turnContentParent?.turnContent({ input: inputMessages });
     return runtime;
   }
 

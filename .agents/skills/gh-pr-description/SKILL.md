@@ -12,8 +12,9 @@ changesets. When updating a PR, read its current body first.
 
 ## Write
 
-Fill in `.github/pull_request_template.md`. Write for a reviewer, not a
-changelog:
+Fill in the Summary section of `.github/pull_request_template.md`. Never add a
+Validation, Test plan, or Checklist section, and delete them from an existing
+body when you update it. Write for a reviewer, not a changelog:
 
 - Follow these ASD-STE100 rules where they apply:
   - Use approved words from the ASD-STE100 dictionary, with one meaning per
@@ -33,12 +34,8 @@ changelog:
   follow-ups, or stacked PRs only when they matter to review.
 - Link an existing issue or discussion with `Closes #N`, `Related to #N`, or an
   equivalent when one exists. Do not create an issue solely for a PR.
-- State only validation that actually ran, including limitations or failures.
-- In PR bodies, do **not** list routine checks like typecheck, lint, or standard test runs as "Test plan" items (those are implied engineering hygiene).
-- This also applies to reviewer-facing suggestions such as "recommended before merge: run `turbo typecheck test`" or "run `pnpm oxfmt-check` on the edited files" — CI already runs these on every PR, so listing them is noise. Only call out a check in Validation if it exercises change-specific behavior that CI does **not** cover (e.g. a manual production probe, a dashboard spot-check, a one-off data query).
-- Use the validation section only for change-specific verification: key scenarios exercised, expected behavioral outcomes, risk checks, and any manual/production-safe validation steps.
-
-Preserve the checklist and check only verified items.
+- Do not list checks you ran or suggest checks for reviewers to run. CI runs
+  them on every PR.
 
 ## Publish
 

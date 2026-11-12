@@ -16,7 +16,7 @@ const from = {
   turnId: "turn-1",
 };
 
-it("keeps the authored question heading in the relayed interaction", () => {
+it("keeps the authored question heading and preselected option in the relayed interaction", () => {
   const payload = workflowAskPayload({
     from,
     replyTo: "question-1",
@@ -26,7 +26,12 @@ it("keeps the authored question heading in the relayed interaction", () => {
       request: {
         title: "Deployment review",
         prompt: "Which environment should Alice use?",
-        options: [{ id: "staging", label: "Staging" }],
+        display: "select",
+        options: [
+          { id: "staging", label: "Staging" },
+          { id: "production", label: "Production" },
+        ],
+        initialOptionId: "staging",
       },
     },
   });
@@ -39,6 +44,7 @@ it("keeps the authored question heading in the relayed interaction", () => {
           kind: "question",
           title: "Deployment review",
           prompt: "Which environment should Alice use?",
+          initialOptionId: "staging",
         },
       },
     },

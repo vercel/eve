@@ -11,6 +11,7 @@ import { createTestKernel } from "#internal/testing/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
@@ -95,9 +96,10 @@ function userTexts(prompt: Prompt): string[] {
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+  measurement: HarnessSession["compaction"] = {},
 ) {
   const session: HarnessSession = {
-    compaction: {},
+    compaction: measurement,
     continuationToken: "http:compaction-session",
     history: [
       { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
@@ -377,6 +379,119 @@ describe("compaction summary call", () => {
     });
   });
 
+  it("compacts before switching back when the model's stale measurement undercounts appended JSON", async () => {
+    const history: HarnessModelMessage[] = [
+      { content: "Alice requested a report.", kind: "user", role: "user" },
+      { content: "I will collect the records.", role: "assistant" },
+      { content: "Please include Bob's records.", kind: "user", role: "user" },
+      { content: "I will include them.", role: "assistant" },
+      ...Array.from({ length: 10 }, (_, index): HarnessModelMessage[] => [
+        {
+          content: [
+            { type: "tool-call", toolCallId: `records-${index}`, toolName: "lookup", input: {} },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: `records-${index}`,
+              toolName: "lookup",
+              output: { type: "json", value: { records: '{"id":123,"value":456},'.repeat(1_500) } },
+            },
+          ],
+          role: "tool",
+        },
+      ]).flat(),
+    ];
+    let measurement = compaction.withPromptMeasurement(
+      {},
+      {
+        inputTokens: 10_000,
+        modelId: "model-a",
+        promptMessageCount: 4,
+      },
+    );
+    measurement = compaction.withPromptMeasurement(measurement, {
+      inputTokens: 185_000,
+      modelId: "model-b",
+      promptMessageCount: 24,
+    });
+    expect(estimateTokens(history.slice(4))).toBeGreaterThan(90_000);
+    expect(estimateTokens(history.slice(4))).toBeLessThan(110_000);
+    const events: SessionEvent[] = [];
+    let compactedBeforeCall = false;
+    const turnCalls = vi.fn(async () => {
+      compactedBeforeCall = events.some(
+        (event) => event.type === "context.settled" && event.data.outcome === "completed",
+      );
+      return answer();
+    });
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        return system.includes("CONTEXT CHECKPOINT COMPACTION") ? summaryStream() : turnCalls();
+      },
+    });
+
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 200_000, id: "model-a" } },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", lookupTool]]),
+    })(
+      {
+        compaction: measurement,
+        continuationToken: "http:stale-model-measurement",
+        history,
+        sessionId: "stale-model-measurement",
+      },
+      { message: "Please summarize Alice and Bob's records." },
+    );
+
+    const change = events.find((event) => event.type === "context.started");
+    expect(change?.data.trigger?.inputTokens).toBeGreaterThanOrEqual(185_000);
+    expect(compactedBeforeCall).toBe(true);
+    expect(turnCalls).toHaveBeenCalledOnce();
+    expect(estimateTokens(result.session.history)).toBeLessThan(estimateTokens(history));
+  });
+
+  it("reserves the selected model's envelope when manually compacting after a model switch", async () => {
+    const summary = "Alice prepared the quarterly report. ".repeat(2_000);
+    const model = new MockLanguageModelV3({
+      doStream: async () =>
+        streamOf([
+          { type: "stream-start", warnings: [] },
+          { id: "summary", type: "text-start" },
+          { delta: summary, id: "summary", type: "text-delta" },
+          { id: "summary", type: "text-end" },
+          finish("stop"),
+        ]),
+    });
+    let measurement = compaction.withPromptMeasurement(
+      {},
+      {
+        inputTokens: 90_040,
+        modelId: "summary-model",
+        promptMessageCount: 3,
+        requestEnvelopeTokens: 90_000,
+      },
+    );
+    measurement = compaction.withPromptMeasurement(measurement, {
+      inputTokens: 41,
+      modelId: "other-model",
+      promptMessageCount: 3,
+      requestEnvelopeTokens: 1,
+    });
+
+    const result = await compactWith(model, undefined, measurement);
+
+    expect(result.session.history[1]).toMatchObject({ role: "assistant" });
+    expect(JSON.stringify(result.session.history)).toContain("Alice prepared");
+    expect(estimateTokens(result.session.history)).toBeLessThanOrEqual(10_000);
+  });
+
   it("retries a transient stream failure like a model step", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -421,83 +536,6 @@ describe("compaction summary call", () => {
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
     expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120 });
-  });
-
-  it("starts no summary run when capping tool output is enough", async () => {
-    const model = new MockLanguageModelV3({
-      doStream: async () =>
-        streamOf([
-          { type: "stream-start", warnings: [] },
-          { id: "reply", type: "text-start" },
-          { delta: "Here is the report.", id: "reply", type: "text-delta" },
-          { id: "reply", type: "text-end" },
-          {
-            finishReason: { raw: undefined, unified: "stop" },
-            type: "finish",
-            usage: {
-              inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 10, total: 10 },
-              outputTokens: { reasoning: 0, text: 4, total: 4 },
-            },
-          },
-        ]),
-    });
-    const events: SessionEvent[] = [];
-    const checker = createStreamChecker();
-    const at = "2026-10-21T00:00:00.000Z";
-    const issues: unknown[] = [];
-    let position = 0;
-    // Over the threshold, but capping the old search output fits it without a summary.
-    const session: HarnessSession = {
-      compaction: {},
-      continuationToken: "http:compaction-capped",
-      history: [
-        { content: "Please search the backlog.", kind: "user", role: "user" },
-        {
-          content: [{ input: {}, toolCallId: "call-0", toolName: "search", type: "tool-call" }],
-          role: "assistant",
-        },
-        {
-          content: [
-            {
-              output: { type: "text", value: "x".repeat(100_000) },
-              toolCallId: "call-0",
-              toolName: "search",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-      ],
-      sessionId: "compaction-capped",
-    };
-    await createTestKernel({
-      agent: { model: { contextWindowTokens: 20_000, id: "turn-model" }, thresholdPercent: 1 },
-      handleEvent: async (publication) => {
-        const facts = eventsOf(publication);
-        events.push(...facts);
-        issues.push(...checker.check({ at, facts }, position++));
-      },
-      resolveModel: async () => model,
-      tools: new Map(),
-    })(session, { message: "Alice asks for the quarterly report." });
-
-    expect(
-      events
-        .filter((event) => event.type.startsWith("context."))
-        .map(({ data, type }) => ({ type, ...data })),
-    ).toMatchObject([
-      { kind: "compaction", type: "context.started" },
-      { kind: "compaction", outcome: "completed", type: "context.settled" },
-    ]);
-    // Only the turn's own run: the summary model was never requested.
-    expect(
-      events.filter((event) => event.type === "model.requested").map(({ data }) => data),
-    ).toEqual([expect.not.objectContaining({ changeId: expect.anything() })]);
-    expect(events.filter((event) => event.type === "model.settled")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
-      { data: { owner: { runId: "run_0" } } },
-    ]);
-    expect(issues).toEqual([]);
   });
 });
 
@@ -544,77 +582,5 @@ describe("announcements after a compaction during a turn", () => {
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
     ]);
-  });
-
-  it("doesn't announce the catalog again when capping keeps its message", async () => {
-    const requests: string[][] = [];
-    const model = new MockLanguageModelV3({
-      doStream: async ({ prompt }) => {
-        requests.push(userTexts(prompt));
-        const parts = (requests.length === 1 ? lookup("Let me check.") : answer()).stream;
-        // Usage that follows the prompt's size, as a provider reports it, so eve measures the
-        // large result it left behind.
-        const total = Math.ceil(JSON.stringify(prompt).length / 4);
-        return {
-          stream: parts.pipeThrough(
-            new TransformStream<StreamPart, StreamPart>({
-              transform(part, controller) {
-                controller.enqueue(
-                  part.type === "finish"
-                    ? {
-                        ...part,
-                        usage: {
-                          ...part.usage,
-                          inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: total, total },
-                        },
-                      }
-                    : part,
-                );
-              },
-            }),
-          ),
-        };
-      },
-    });
-    const tools: HarnessToolMap = new Map([
-      // A large result that capping shortens once it is old.
-      ["lookup", { ...lookupTool, execute: async () => "x".repeat(100_000) }],
-      // A deferred tool gives the session a catalog to announce.
-      ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
-    ]);
-    const events: SessionEvent[] = [];
-    // The first turn fits, and leaves the large result behind; the second doesn't, until capping
-    // shortens the old result.
-    const reference = { contextWindowTokens: 200_000, id: "step-model" };
-    const kernel = createTestKernel({
-      agent: { model: reference, thresholdPercent: 1 },
-      handleEvent: foldingHandler(async (event) => void events.push(event)),
-      resolveModel: async () => model,
-      tools,
-    });
-
-    await contextStorage.run(new ContextContainer(), async () => {
-      let session: HarnessSession = {
-        compaction: {},
-        continuationToken: "http:announcement-capping-session",
-        history: [],
-        sessionId: "announcement-capping-session",
-      };
-      for (const message of ["Look up the sources.", "Which sources back the second claim?"]) {
-        let stepped = await kernel(session, { message });
-        while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
-        session = stepped.session;
-        reference.contextWindowTokens = 20_000;
-      }
-    });
-
-    expect(
-      events.filter(({ type }) => type === "context.settled").map(({ data }) => data),
-    ).toMatchObject([{ kind: "compaction", outcome: "completed" }]);
-    // Only the turns' own runs: capping was enough, so no summary ran.
-    expect(requests).toHaveLength(3);
-    const catalogs = (texts: readonly string[]) =>
-      texts.filter((text) => text.includes("eve__search")).length;
-    expect(requests.map(catalogs)).toEqual([1, 1, 1]);
   });
 });

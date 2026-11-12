@@ -1,4 +1,6 @@
 import type { ChannelFrom } from "#channel/channel-operations.js";
+import { sendSlackResponseUrl } from "#compiled/@chat-adapter/slack/api.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createLogger } from "#internal/logging.js";
 import type { SlackChannelState, SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
 import { slackSessionToken } from "#public/channels/slack/api.js";
@@ -67,7 +69,10 @@ function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefine
   };
 }
 
-/** Cancels the turn held on the sign-in, then removes the private prompt. */
+/**
+ * Cancels the turn held on the sign-in, then removes the private prompt. A turn
+ * that already ended needs no cancel, so its prompt is removed too.
+ */
 async function cancelHeldSignIn(
   cancel: SignInCancel,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
@@ -76,16 +81,14 @@ async function cancelHeldSignIn(
   try {
     await ctx.from(slackSessionToken(cancel.target)).cancel({ turnId });
   } catch (error) {
-    log.error("sign-in cancel delivery failed", { error });
-    return;
+    if (!SessionNotActiveError.is(error) || error.retryable) {
+      log.error("sign-in cancel delivery failed", { error });
+      return;
+    }
   }
   if (cancel.responseUrl === undefined) return;
   try {
-    await fetch(cancel.responseUrl, {
-      body: JSON.stringify({ delete_original: true }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
+    await sendSlackResponseUrl(cancel.responseUrl, { deleteOriginal: true });
   } catch (error) {
     log.warn("failed to remove the cancelled sign-in prompt", { error });
   }

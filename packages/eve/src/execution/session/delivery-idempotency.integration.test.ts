@@ -100,6 +100,100 @@ describe("delivery idempotency", () => {
     });
   }, 60_000);
 
+  it("gives both of two racing first sends to an address the session that takes them", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    let turns = 0;
+    const app = await createTestRuntime({
+      agent: { name: "racing-first-sends", limits: { sessionTimeoutMs: false } },
+      modules: [
+        {
+          logicalPath: "hooks/record.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.started"() {
+                  turns += 1;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const address = createChannelOperations({
+        adapter: { kind: "http" },
+        channelName: "test",
+        runtime,
+      }).from(crypto.randomUUID());
+      // Alice and Bob write into a new thread at the same moment.
+      const [alice, bob] = await Promise.all([
+        address.send("Alice asks for the report.", { auth: null, turnPolicy: "queue" }),
+        address.send("Bob asks for the summary.", { auth: null, turnPolicy: "queue" }),
+      ]);
+      let completed = false;
+      try {
+        expect(bob.sessionId).toBe(alice.sessionId);
+        const outcomes = await Promise.all(
+          [alice, bob].map(
+            async (receipt) =>
+              (await receipt.result({ signal: AbortSignal.timeout(10_000) })).outcome,
+          ),
+        );
+        expect(outcomes).toEqual(["handled", "handled"]);
+        await waitForParkedTurnStep(alice.sessionId, 2);
+        expect(turns).toBe(2);
+        await createSession(alice.sessionId, runtime).end();
+        completed = true;
+      } finally {
+        for (const sessionId of new Set([alice.sessionId, bob.sessionId])) {
+          if (!completed && ["pending", "running"].includes(await getRun(sessionId).status)) {
+            await getRun(sessionId).cancel();
+          }
+        }
+      }
+    });
+  }, 60_000);
+
+  it("delivers a cancel sent as soon as a session is created", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    const app = await createTestRuntime({
+      agent: { name: "cancel-on-create", limits: { sessionTimeoutMs: false } },
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      // Alice starts a chat and presses stop before the session has booted.
+      const started = await runtime.createSession({
+        adapter: { kind: "http" },
+        auth: null,
+        input: { message: "Alice asks for a long report." },
+      });
+      const stream = captureTurnEvents(getRun(started.sessionId));
+      try {
+        await expect(
+          runtime.dispatchSession({
+            command: { deliveryId: "alice-stop", kind: "cancel" },
+            sessionId: started.sessionId,
+          }),
+        ).resolves.toMatchObject({ sessionId: started.sessionId, status: "accepted" });
+        // Whether it stops the turn depends on whether the turn is still running when it is read.
+        await stream.nextUntil(
+          (event) =>
+            event.type === "delivery.admitted" &&
+            (event.data as { deliveryId?: string }).deliveryId === "alice-stop",
+        );
+      } finally {
+        stream.dispose();
+        await getRun(started.sessionId).cancel();
+      }
+    });
+  }, 60_000);
+
   it("gives a keyed request's repeat the original receipt, as the session route does", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
     let turns = 0;
@@ -333,6 +427,7 @@ describe("delivery idempotency", () => {
                 principal: { type: "user", authenticator: "test", principalId: "alice" },
               },
             }),
+            schedule: { disable: async () => {}, delete: async () => {} },
           })
         ).sessions[0]!;
 

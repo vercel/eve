@@ -28,6 +28,7 @@ const integrations: Record<string, readonly string[]> = {
   "eve/svelte": ["svelte"],
   "eve/sveltekit": ["vite"],
   "eve/tanstack": ["vite"],
+  "eve/vite": ["vite"],
   "eve/next": [
     "next",
     "react",

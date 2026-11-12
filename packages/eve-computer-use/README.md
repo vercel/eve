@@ -27,9 +27,14 @@ Install the desktop and driver in the environment's `prepare` callback, then sta
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import { installComputerUse, startComputerUse } from "eve/extensions/computer-use/sandbox";
+import {
+  COMPUTER_USE_REVALIDATION_KEY,
+  installComputerUse,
+  startComputerUse,
+} from "eve/extensions/computer-use/sandbox";
 
 export const environment = VercelSandbox.environment({
+  env: { COMPUTER_USE_REVALIDATION_KEY },
   prepare: async (sandbox) => {
     await installComputerUse(sandbox);
   },
@@ -41,6 +46,8 @@ export default defineSandbox(async () => {
   return sandbox;
 });
 ```
+
+The `env: { COMPUTER_USE_REVALIDATION_KEY }` entry makes the prepared template rebuild when computer use changes. Firefox tracks the ESR line Mozilla currently serves, so a template picks up a new ESR line when it rebuilds, but a new ESR line does not trigger a rebuild by itself. To force one, change the key, for example ``env: { COMPUTER_USE_REVALIDATION_KEY: `${COMPUTER_USE_REVALIDATION_KEY}:2` }``.
 
 Mounting the extension exposes `computer_use` but does not install or start its driver. The prepared artifact captures files, not running processes; the `defineSandbox()` selector starts the driver once for each new durable sandbox. If the driver exits or the provider resumes only filesystem state, call `startComputerUse` again before using the tool; resuming a sandbox does not rerun the selector. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
 

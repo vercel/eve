@@ -6,6 +6,7 @@ export const staticOgImage = "https://ztwjwi3ssdvgx15d.public.blob.vercel-storag
 // from `public/` and resolve against the site's `metadataBase`.
 const docsOgImages: Record<string, string> = {
   "use-cases": "/og/docs-use-cases.png",
+  "patterns/ambient-listening": "/og/docs-ambient-listening.png",
 };
 
 /** Returns the OG image for a docs page, falling back to the shared image. */

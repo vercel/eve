@@ -40,6 +40,11 @@ export interface InteractionRequest {
   readonly options?: readonly InteractionOption[];
   readonly allowFreeform?: boolean;
   readonly display?: InteractionDisplay;
+  /**
+   * The `id` of the option to preselect when `display` is `"select"`. It must match one of
+   * `options`. Other displays ignore it, and so do channels that can't preselect an option.
+   */
+  readonly initialOptionId?: string;
   readonly link?: { readonly url: string; readonly label?: string };
   /** A sign-in's challenge. */
   readonly signIn?: SignInChallenge;
@@ -62,6 +67,11 @@ export interface SignInChallenge {
    * `"user"`, which has an `id`, and `"app"` today.
    */
   readonly principal?: { readonly type: string; readonly id?: string; readonly issuer?: string };
+  /**
+   * The open sign-in for the same grant and principal that the person already has a card for.
+   * This attempt completes with that one's answer, so channels show it no card of its own.
+   */
+  readonly waitsOn?: string;
 }
 
 /** Where a relayed request was asked: the child session's request, and the call it asks about. */
@@ -124,6 +134,7 @@ export const interactionRequestSchema = conforming<InteractionRequest>()(
   z.object({
     allowFreeform: z.boolean().optional(),
     display: known<InteractionDisplay>().optional(),
+    initialOptionId: z.string().optional(),
     kind: known<InteractionKind>(),
     link: z.object({ label: z.string().optional(), url: z.string() }).optional(),
     options: z
@@ -150,6 +161,7 @@ export const interactionRequestSchema = conforming<InteractionRequest>()(
           .optional(),
         url: z.string().optional(),
         userCode: z.string().optional(),
+        waitsOn: z.string().optional(),
       })
       .optional(),
     title: z.string().optional(),

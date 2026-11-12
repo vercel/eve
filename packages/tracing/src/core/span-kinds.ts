@@ -9,6 +9,7 @@ export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 const modelName = (name: string) => `chat ${name}`;
 const toolName = (name: string) => `execute_tool ${name}`;
+const decisionName = (modelId: string) => `decision ${modelId}`;
 const SPAN_NAMES = {
   approval: "agent.approval",
   step: "agent.step",
@@ -151,7 +152,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   model: {
-    parents: ["step"],
+    // A turn makes model calls outside its steps, such as a context compaction's summary request.
+    parents: ["step", "activation"],
     prepare({ options }, context) {
       const inputMessages =
         context.capture.recordInputs && options.messages !== undefined
@@ -165,6 +167,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           ...namingAttributes(modelName(options.modelId), "chat"),
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "chat",
+          "agent.turn.id": context.identity.turnId,
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
           ...runtimeContextAttributes(options.runtimeContext),
@@ -238,19 +241,25 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   approval: {
-    parents: ["tool"],
+    parents: ["tool", "activation"],
     prepare({ options }, context) {
       return {
         name: SPAN_NAMES.approval,
         attributes: {
           ...context.attributes,
           ...frameworkAttributes(context.identity.framework),
-          ...attemptAttributes(context),
+          // A wait the turn holds belongs to no step.
+          ...(options.callId === undefined
+            ? { "agent.turn.id": context.attempt.turnId }
+            : attemptAttributes(context)),
           ...namingAttributes(SPAN_NAMES.approval, "workflow"),
+          "agent.name": context.identity.agentName,
+          "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
           "agent.action.name": options.toolName,
-          "agent.approval.kind": "tool-approval",
+          "agent.approval.kind": options.kind ?? "tool-approval",
+          "agent.connection.name": options.connectionName,
           "agent.approval.request_id": options.requestId,
           [CONTENT_FIELDS.approvalRequest]: context.capture.recordInputs
             ? context.serializer.json(options.request)
@@ -268,6 +277,24 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
       return capture.recordInputs
         ? data
         : { ...data, options: { ...data.options, request: undefined } };
+    },
+  },
+  decision: {
+    parents: ["activation", "step", "tool"],
+    prepare({ options }, context) {
+      return {
+        name: decisionName(options.modelId),
+        kind: "CLIENT",
+        attributes: {
+          // A decision made outside any run has no run identity to record.
+          ...(context.identity.runId === "" ? undefined : context.attributes),
+          ...namingAttributes(decisionName(options.modelId), "decision"),
+          "gen_ai.agent.name": context.identity.agentName,
+          "gen_ai.operation.name": "decision",
+          "gen_ai.provider.name": options.provider,
+          "gen_ai.request.model": options.modelId,
+        },
+      };
     },
   },
   memory: {
@@ -347,7 +374,10 @@ export function completeScope(
   if (result.usage !== undefined)
     applyAttributes(
       span,
-      usageAttributes(result.usage, data.type === "activation" || data.type === "model"),
+      usageAttributes(
+        result.usage,
+        data.type === "activation" || data.type === "model" || data.type === "decision",
+      ),
     );
   kind(data).complete?.(span, data, result, { capture, startTimeMs, serializer, outcome });
   if (result.failed) span.fail(result.error, result.errorCode);

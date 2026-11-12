@@ -29,6 +29,8 @@ The `events` map keys each handler by event type, and `*` matches every event. A
 
 Handlers can call external services, cancel the running turn, and [continue a finished turn](#continue-a-turn-from-a-hook) with a new message. They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
+Import the SDK clients that a handler calls inside the handler, not at the top of the file. See [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
+
 ## Hook structure and context
 
 Every handler receives a `HookContext`, which includes the shared [session context](./session-context) helpers. `HookContext<K>` is keyed by the handler's event key. Only `turn.settled` and `*` handlers get `continue`, so type a helper that calls it as `HookContext<"turn.settled">`:

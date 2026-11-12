@@ -144,7 +144,7 @@ A direct call doesn't go through the AI SDK. AI SDK telemetry integrations regis
 
 ## Channel operations and session handles
 
-Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. Without an [idempotency key](#retried-deliveries), a new session's handle can return before the session takes the address. If another send takes it first, eve forwards the message to that session. Call `resolveSession(address)` after startup to get the handle of the session that won.
+Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. When two sends to a new address race, one session takes the address, eve forwards the other message to it, and both handles name that session. If the address keeps changing owners during the race, `create()` or `send()` throws `SessionNotActiveError` with `code: "session_not_ready"` and delivers nothing. Retry the call.
 
 ```ts
 const source = from(threadId);

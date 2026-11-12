@@ -19,6 +19,8 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { resumeSessionStartHook } from "#execution/session-inbox/resume.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -26,9 +28,7 @@ import {
 import {
   createWorkflowRuntime,
   dispatchWorkflowSessionCommand,
-  waitForCommandHookOwner,
   resolveContinuation,
-  waitForSessionInbox,
 } from "#execution/workflow-runtime.js";
 import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -59,6 +59,10 @@ import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
+import { readAgentToolModels } from "#tools/agent-models.js";
+import { selectionModel } from "#models/options.js";
+import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 const log = createLogger("execution.agent-sessions");
 
@@ -135,6 +139,8 @@ export async function openAgentSessionStep(
     readonly key: string;
     readonly model?: AgentSessionModelSelection;
     readonly name: string;
+    /** The workflow tool whose run opens the session. */
+    readonly toolName?: string;
   },
 ): Promise<{ readonly address: AgentSessionAddress; readonly deliveryId?: string }> {
   "use step";
@@ -161,7 +167,12 @@ export async function openAgentSessionStep(
   const runtimeOverrides =
     input.model === undefined
       ? undefined
-      : await normalizeRuntimeOverrides({ bundle, model: input.model, name: input.name });
+      : await normalizeRuntimeOverrides({
+          bundle,
+          model: input.model,
+          name: input.name,
+          toolName: input.toolName,
+        });
   const start = {
     auth: input.auth,
     bundle,
@@ -181,11 +192,17 @@ async function normalizeRuntimeOverrides({
   bundle,
   model,
   name,
+  toolName,
 }: {
   readonly bundle: CompiledBundle;
   readonly model: AgentSessionModelSelection;
   readonly name: string;
+  readonly toolName: string | undefined;
 }): Promise<AgentSessionRuntimeOverrides> {
+  const tool = await loadAgentModelsTool(bundle, toolName);
+  if (tool !== undefined) {
+    return { model: await resolveAgentToolModel(bundle, tool, model) };
+  }
   try {
     const selection = await resolveRuntimeModelSelection({
       durability: "durable",
@@ -201,6 +218,77 @@ async function normalizeRuntimeOverrides({
     }
     throw error;
   }
+}
+
+interface AgentModelsTool {
+  readonly definition: CompiledBundle["resolvedAgent"]["tools"][number];
+  readonly models: NonNullable<ReturnType<typeof readAgentToolModels>>;
+}
+
+/** The `agent({ models })` tool whose run opens the session, if that is what opens it. */
+async function loadAgentModelsTool(
+  bundle: CompiledBundle,
+  toolName: string | undefined,
+): Promise<AgentModelsTool | undefined> {
+  const definition =
+    toolName === undefined
+      ? undefined
+      : bundle.resolvedAgent.tools.find((candidate) => candidate.name === toolName);
+  // Only a workflow tool's run opens sessions, and only `agent({ models })` carries models.
+  if (definition?.behavior?.handling?.kind !== "workflow-tool") return undefined;
+  const models = readAgentToolModels(
+    await loadResolvedModuleExport({
+      definition,
+      kindLabel: "tool",
+      moduleMap: bundle.moduleMap,
+      nodeId: bundle.nodeId,
+    }),
+  );
+  return models === undefined ? undefined : { definition, models };
+}
+
+/**
+ * An `agent({ models })` tool names its model by option key. A live model's reference points
+ * back at the tool and key, so the child reads the model again from its own module map, and
+ * replay opens the same option.
+ */
+async function resolveAgentToolModel(
+  bundle: CompiledBundle,
+  { definition, models }: AgentModelsTool,
+  model: AgentSessionModelSelection,
+): Promise<RuntimeModelReference> {
+  const option = typeof model === "string" ? models.get(model) : undefined;
+  if (option === undefined) {
+    throw new FatalError(
+      `The "${definition.name}" tool has no model ${JSON.stringify(model)}. Use one of its agent({ models }) keys, or omit model to use the current model.`,
+    );
+  }
+  let reference: RuntimeModelReference;
+  try {
+    ({ reference } = await resolveRuntimeModelSelection({
+      durability: "live",
+      modelMetadata: bundle.modelMetadata,
+      selection: option.selection,
+    }));
+  } catch (error) {
+    if (error instanceof InvalidRuntimeModelSelectionError) {
+      throw new FatalError(
+        `The "${definition.name}" tool could not resolve its model "${option.key}": ${toErrorMessage(error)}`,
+      );
+    }
+    throw error;
+  }
+  if (typeof selectionModel(option.selection) === "string") return reference;
+  return {
+    ...reference,
+    source: {
+      exportName: definition.exportName,
+      logicalPath: definition.logicalPath,
+      sourceId: definition.sourceId,
+      sourceKind: "module",
+    },
+    sourceModelOption: option.key,
+  };
 }
 
 /**
@@ -302,13 +390,20 @@ export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Prom
     return;
   }
   const { sessionId } = opened.address;
+  const reset = {
+    kind: "reset",
+    reason: RUN_FINISHED_REASON,
+    deliveryId: agentDeliveryId("reset", sessionId),
+  } as const;
   try {
-    // Waiting for a booting inbox would hold the parent's next turn.
-    await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), {
-      kind: "reset",
-      reason: RUN_FINISHED_REASON,
-      deliveryId: agentDeliveryId("reset", sessionId),
-    });
+    // Waiting for a booting inbox would hold the parent's next turn. A child
+    // whose start claimed its address takes the reset there before it boots.
+    try {
+      await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), reset);
+    } catch (error) {
+      if (!HookNotFoundError.is(error)) throw error;
+      if ((await resumeSessionStartHook(sessionId, reset)) === undefined) throw error;
+    }
   } catch (error) {
     logError(log, "could not stop late child; cleanup is best effort", error, { sessionId });
   }
@@ -347,10 +442,10 @@ type LocalAgentSession = OpenedAgentSession & {
 };
 
 /**
- * Sends a command to a local session. A session opens without waiting for its
- * run to claim its inbox, so a command it refuses before then waits for it.
- * A duplicate start of the session can claim it instead of the run the open
- * recorded, and the command then goes to the session holding its continuation.
+ * Sends a command to a local session. Its start claimed its address, so it
+ * takes commands before it boots and a refusal means it ended. A session
+ * opened by an earlier eve may have lost its address to a duplicate start,
+ * and the command then goes to the session holding its continuation.
  */
 async function commandLocalSession<TCommand extends SessionCommand>(
   opened: LocalAgentSession,
@@ -359,10 +454,8 @@ async function commandLocalSession<TCommand extends SessionCommand>(
   const { continuationToken, sessionId } = opened.address;
   const result = await dispatchWorkflowSessionCommand({ command, sessionId });
   if (result.status === "accepted" || result.status === "reset") return result;
-  const current = (await waitForSessionInbox(sessionId))
-    ? sessionId
-    : (await resolveContinuation(continuationToken))?.sessionId;
-  if (current === undefined) return result;
+  const current = (await resolveContinuation(continuationToken))?.sessionId;
+  if (current === undefined || current === sessionId) return result;
   return await dispatchWorkflowSessionCommand({ command, sessionId: current });
 }
 
@@ -424,22 +517,15 @@ async function startLocalSession(
         toolStubs: childToolStubs,
       }),
   );
-  // Waiting for the run to claim the session would hold the caller for the
-  // child's boot. A retried attempt may have started a second run, so it waits
-  // to learn which run claimed the session; later commands resolve it again.
-  let sessionId = started.sessionId;
-  if (getStepMetadata().attempt > 1) {
-    ({ runId: sessionId } = await waitForCommandHookOwner(
-      sessionInboxHookToken(childContinuationToken),
-    ));
-  }
+  // The start claims the child's address, so a retried attempt is refused and
+  // names the run an earlier attempt started.
   return {
     address: {
       continuationToken: childContinuationToken,
       kind: "local",
       name: action.name,
       nodeId: action.nodeId,
-      sessionId,
+      sessionId: started.sessionId,
     },
     deliveryId,
   };

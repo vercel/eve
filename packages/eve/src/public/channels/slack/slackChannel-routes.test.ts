@@ -13,7 +13,10 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
-import { slackRenderingHarness } from "#internal/testing/slack-rendering-harness.js";
+import {
+  slackRenderingHarness,
+  type SlackTurnStep,
+} from "#internal/testing/slack-rendering-harness.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 import {
@@ -205,6 +208,146 @@ describe("slackChannel inactive prompt press", () => {
         user: "U_APPROVER",
       }),
     ]);
+  });
+});
+
+describe("slackChannel ephemeral request press", () => {
+  const RESPONSE_URL = "https://hooks.slack.com/actions/T01/1/abc";
+  const route = "route:C01:1700000000.000001:";
+
+  /** A press on an ephemeral card: Slack sends no `message`, only its container. */
+  function ephemeralPress(action: Record<string, unknown>): Request {
+    const payload = {
+      actions: [action],
+      channel: { id: "C01" },
+      container: {
+        channel_id: "C01",
+        is_ephemeral: true,
+        message_ts: "1700000000.000020",
+        thread_ts: "1700000000.000001",
+        type: "message",
+      },
+      response_url: RESPONSE_URL,
+      team: { id: "T01" },
+      trigger_id: "trigger-1",
+      type: "block_actions",
+      user: { id: "U01", name: "alice", team_id: "T01", username: "alice" },
+    };
+    return signed(
+      new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
+      "application/x-www-form-urlencoded",
+    );
+  }
+
+  function responseUrlPosts(): Record<string, unknown>[] {
+    return fetchMock.mock.calls
+      .filter(([url]) => String(url) === RESPONSE_URL)
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+  }
+
+  it.each([
+    {
+      action: {
+        action_id: `${ANSWER_ACTION_PREFIX}${route}q_team`,
+        selected_option: { text: { text: "Acme", type: "plain_text" }, value: "team_acme" },
+        type: "radio_buttons",
+      },
+      name: "a picked option",
+    },
+    {
+      // Keeping the preselected option submits it with the select's **Use Acme** button.
+      action: {
+        action_id: `${ANSWER_ACTION_PREFIX}${route}q_team:button:0`,
+        block_id: "eve_use:q_team",
+        text: { text: "Use Acme", type: "plain_text" },
+        type: "button",
+        value: "team_acme",
+      },
+      name: "the kept preselected option",
+    },
+  ])("replaces the card with $name through its response URL once delivered", async ({ action }) => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const press = ephemeralPress(action);
+
+    await firePost(slackChannel({ credentials: { botToken: "xoxb-test" } }), press, send);
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(slackCalls("chat.update")).toEqual([]);
+    const [replaced, ...more] = responseUrlPosts();
+    expect(more).toEqual([]);
+    expect(replaced).toMatchObject({ replace_original: true, text: "Acme" });
+    expect(JSON.stringify(replaced?.blocks)).toContain("Acme");
+  });
+
+  it("replaces the card with a typed answer from its modal", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    await firePost(
+      channel,
+      ephemeralPress({
+        action_id: `eve_input_freeform:${route}q_scope`,
+        type: "button",
+        value: "q_scope",
+      }),
+      send,
+    );
+    const [opened] = slackCalls("views.open");
+    const view = opened?.view as { private_metadata: string };
+
+    const submission = {
+      type: "view_submission",
+      user: { id: "U01", name: "alice", team_id: "T01", username: "alice" },
+      view: {
+        callback_id: "eve_input_freeform_submit",
+        private_metadata: view.private_metadata,
+        state: {
+          values: {
+            eve_freeform_block: {
+              eve_freeform_text: { type: "plain_text_input", value: "The billing migration" },
+            },
+          },
+        },
+        team_id: "T01",
+      },
+    };
+    await firePost(
+      channel,
+      signed(
+        new URLSearchParams({ payload: JSON.stringify(submission) }).toString(),
+        "application/x-www-form-urlencoded",
+      ),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(slackCalls("chat.update")).toEqual([]);
+    const [replaced] = responseUrlPosts();
+    expect(replaced).toMatchObject({ replace_original: true, text: "The billing migration" });
+  });
+});
+
+describe("slackChannel action token", () => {
+  it("adds Slack's action token to the default auth without a hook", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ ok: true, ts: "1700000001.000001" }));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    const event = {
+      assistant_thread: { action_token: "action-token" },
+      channel: "C01",
+      text: "hello",
+      ts: "1700000000.000001",
+      type: "app_mention",
+      user: "U01",
+    };
+
+    await firePost(
+      channel,
+      signed(JSON.stringify({ event, event_id: "Ev1", team_id: "T01", type: "event_callback" })),
+      send,
+    );
+
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(input.auth?.attributes).toMatchObject({ action_token: "action-token" });
   });
 });
 
@@ -604,11 +747,13 @@ describe("slackChannel message status and guidance", () => {
   });
 
   // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
-  // hook runs, so `deferred` can only keep the rest of the turn quiet.
+  // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
+  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
   it.each<{
     name: string;
     request: () => Request;
     status: "immediate" | "deferred";
+    steps?: readonly SlackTurnStep[];
     trace: string;
   }>([
     {
@@ -630,7 +775,28 @@ describe("slackChannel message status and guidance", () => {
       status: "deferred",
       trace: "post:Thinking... turn model tool model:Thinking...",
     },
-  ])("$name", async ({ request, status, trace }) => {
+    {
+      name: "deferred reply with a hidden tool",
+      request: threadReply,
+      status: "deferred",
+      steps: ["turn", "model", "hidden", "model", "no_reply", "end"],
+      trace: "post turn model hidden model no_reply end:",
+    },
+    {
+      name: "deferred reply with a hidden tool, then a real one",
+      request: threadReply,
+      status: "deferred",
+      steps: ["turn", "model", "hidden", "model", "tool", "model"],
+      trace: "post turn model hidden model tool model:Thinking...",
+    },
+    {
+      name: "immediate reply with a hidden tool",
+      request: threadReply,
+      status: "immediate",
+      steps: ["turn", "model", "hidden", "model"],
+      trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+    },
+  ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -652,7 +818,7 @@ describe("slackChannel message status and guidance", () => {
       threadTs: "1700000000.000001",
     });
     await harness.deliver(input);
-    for (const step of ["turn", "model", "tool", "model"] as const) {
+    for (const step of steps) {
       const before = statuses().length;
       await harness.step(step);
       observed.push([step, ...statuses().slice(before)].join(":"));

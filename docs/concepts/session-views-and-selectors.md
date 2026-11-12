@@ -77,7 +77,7 @@ ID lookups can return `undefined` when the entity is not in the view. Collection
 
 Call filters combine: `{ kind: "tool", name: "search", turnId }` requires all three to match. Filter returned observations by `state` or `outcome` when you need only completed or failed calls. Task filters accept `"working"`, `"idle"`, or `"ended"`; these describe work served by the task, not just its stored running/ended status.
 
-`callState(view, callId)` distinguishes `approval` and `blocked` from running work. `call(view, callId)?.output` follows shared output ownership. Use `callOutputSource(view, callId)` when you need the producing call itself. `callLabel(observation)` reads a call's display label. Calls include `turnId`, `runId`, and `taskId` when known, so you do not need to join calls to model runs to find their turn.
+`callState(view, callId)` distinguishes `approval` and `blocked` from running work. `call(view, callId)?.output` follows shared output ownership. Use `callOutputSource(view, callId)` when you need the producing call itself. `callLabel(observation)` reads a call's display label, and `showsActivity(observation)` reports whether an activity display should show the call. It excludes task controls and calls marked `hidden: true` by a tool with [`label: false`](../tools#label-tool-activity). Calls include `turnId`, `runId`, and `taskId` when known, so you do not need to join calls to model runs to find their turn.
 
 `reply` selects the turn's answer, not narration or reasoning. Use `parts` for other content, such as `parts(view, { kind: "reasoning" })` for reasoning blocks. Values can be referenced rather than inline; selectors do not fetch referenced payloads.
 

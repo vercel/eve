@@ -204,7 +204,7 @@ Prewarming creates the session before the first message so the first reply start
 - The first message passes through the channel's `onMessage` hook and supplies identity and context for initialization and the first turn.
 - The session timeout starts at creation, so an unused prewarmed session can expire. eve deletes its sandbox when it ends.
 - `prewarm()` resolves when the server accepts creation, without waiting for initialization. The composer stays `"idle"`, and `prepareSend` doesn't run.
-- A concurrent `send()` waits for creation to be accepted. While the inbox starts, the client retries `409 session_not_ready` with backoff for up to 20 seconds, and your abort signal cancels the wait.
+- A concurrent `send()` waits for creation to be accepted, and your abort signal cancels the wait.
 
 ### Existing sessions on Vercel
 
@@ -232,7 +232,7 @@ For an existing idle session, `prewarm()` can move it to the deployment that acc
 | `newSession()` | Clears the local conversation and reuses the hook. The old session keeps running on the server |
 | `end()`        | Retires the server-side session and returns its delivery                                       |
 
-After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
+After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. While a send or `prewarm()` is still creating the session, `end()`, `clear()`, and `compact()` wait for it and then act on that session. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
 
 ## Resume a saved session
 

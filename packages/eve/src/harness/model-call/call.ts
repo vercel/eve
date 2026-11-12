@@ -297,9 +297,9 @@ export class ModelCaller {
       : options.extraSystemNote;
     return {
       instructions: modelInstructions({
-        anthropicCache: this.profile.anthropicCache,
         extraSystemNote,
         instructions: this.system,
+        profile: this.profile,
       }),
       messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
     };
@@ -509,8 +509,8 @@ export class ModelCaller {
   }
 
   /**
-   * Runs the response's local calls, unless it ended early: then they don't run, and
-   * `answerSkippedToolCalls` tells the model so.
+   * Runs the response's local calls, unless it ended early: then neither they nor its workflow
+   * calls run, and `answerSkippedToolCalls` tells the model so.
    */
   private async runInlineCalls(
     stepResult: HarnessStepResult,

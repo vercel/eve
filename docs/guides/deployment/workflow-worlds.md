@@ -17,13 +17,17 @@ On the local and Postgres worlds, a new build on the same eve version resumes ex
 
 All three support compaction handoff, which moves a session to a fresh run while keeping its ID, event stream, and addresses; the Postgres world needs `@workflow/world-postgres` 5.0.4 or later. Vercel Workflow also supports moving eligible idle sessions between deployments. See [Execution model and durability](../../concepts/execution-model-and-durability#compaction-handoff).
 
+eve needs a world with atomic start hooks, so a new session takes its channel address as it starts. All three worlds provide them; the Postgres world needs `@workflow/world-postgres` 5.1.1 or later. On a world without them, starting a session fails with an error that names this requirement.
+
 ## Use the local world
 
 The local world is the default for `eve start` and needs no configuration. It stores run state under `.eve/.workflow-data` in the app directory. Mount that directory on persistent storage so runs survive process and container replacement.
 
 Each `eve start` process accepts queue messages only from its own queue. Don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer, because another replica rejects forwarded messages with HTTP 401. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
 
-On startup, `eve start` queues pending and running local workflow runs again. Runs that were active when the previous process stopped continue when the eve version is unchanged. `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` doesn't disable this recovery.
+On startup, `eve start` queues pending and running local workflow runs again. Runs that were active when the previous process stopped continue when the eve version is unchanged. A step that was running when the previous process stopped, such as a model call, runs again right away. In a [spec 8 run](#set-the-workflow-spec-version), that interrupted attempt counts toward the step's retries, so a step that allows no retries fails instead. `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` doesn't disable this recovery.
+
+Run one eve process, `eve start` or `eve dev`, per `.eve/.workflow-data` directory. Both use `.eve` in the app directory. Recovery treats steps started before it booted as abandoned, so a second live process on the same directory runs them twice.
 
 ## Use the Postgres world
 

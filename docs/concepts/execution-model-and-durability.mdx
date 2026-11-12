@@ -52,12 +52,12 @@ A session is stranded when a different eve version built the workflow run that h
 
 eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session there never runs again:
 
-| World                        | When a session is stranded                                                                                                                                                            |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                 |
-| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                       |
-| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                          |
-| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery). |
+| World                        | When a session is stranded                                                                                                                                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments. See [Sessions on a deleted Vercel deployment](#sessions-on-a-deleted-vercel-deployment). |
+| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                                                                |
+| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                                                                   |
+| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery).                                          |
 
 eve ends a stranded session without running any of its code. When it ends depends on the kind of run:
 
@@ -147,6 +147,18 @@ The timeout is the session's own timer, which keeps running after the upgrade. A
 Ending a root session doesn't immediately cancel its subagent sessions and workflow tool runs. Each is retired when a delivery for it reaches the current deployment, and the runtime logs identify the stranded run. A run that never receives a delivery, such as one in a dormant `eve dev` generation, can stay active. Cancel it in your Workflow world if needed. Cancellation doesn't run authored cleanup or hooks, undo side effects, or stop independent external jobs. Results and approvals don't carry over to a replacement session.
 
 Runs that recorded no eve version are treated as stranded.
+
+#### Sessions on a deleted Vercel deployment
+
+On Vercel Workflow, a session's run executes only on the deployment that started it. If that deployment is deleted, for example by a deployment retention policy, the run can't execute again. eve detects this when a channel address reaches the session:
+
+- A channel message, such as a new message in a Slack thread, ends the session and starts a fresh one at the same address. The message becomes its first turn, and the fresh session names the session it replaced.
+- `end()` on the address ends the session, and `create()` throws `SessionStrandedError`.
+- The replaced session's recorded history can be unreadable, because its encryption key belonged to the deleted deployment. An instruction that reads the predecessor's stream should handle that error.
+
+eve doesn't detect a deleted deployment on other paths. A send by session ID can be accepted and never processed. The session timeout doesn't end the session, because its timer ran on the deleted deployment too.
+
+A session that handed off to a newer deployment still records its events on the deployment that started it. If only that first deployment is deleted, the session's current run is still live, so eve doesn't replace it, and its turns fail when they record events. To avoid both cases, keep deployments longer than the session timeout.
 
 #### Sessions from session-driver releases
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
+  answerLabelOf,
   buildAnsweredBlocks,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
@@ -417,6 +418,36 @@ describe("renderInteractionBlocks", () => {
     expect(widget.type).toBe("static_select");
     expect(widget.action_id).toBe(`${ANSWER_ACTION_PREFIX}call_abc123`);
     expect(widget.options).toHaveLength(8);
+  });
+
+  it.each([
+    ["radio_buttons", 2],
+    ["static_select", 8],
+  ])("preselects initialOptionId on %s and adds a button that submits it", (type, count) => {
+    const options = Array.from({ length: count }, (_, i) => ({
+      id: `team_${i}`,
+      label: `Team ${i}`,
+    }));
+    const blocks = renderInteractionBlocks(
+      makeRequest({ display: "select", options, initialOptionId: "team_1" }),
+    );
+
+    const actions = blocks[1] as {
+      block_id: string;
+      elements: [
+        { type: string; initial_option: unknown; options: unknown[] },
+        { action_id: string; style: string; text: { text: string }; value: string },
+      ];
+    };
+    const [widget, button] = actions.elements;
+    expect(widget.type).toBe(type);
+    expect(widget.initial_option).toEqual(widget.options[1]);
+    expect(button).toMatchObject({ style: "primary", text: { text: "Use Team 1" } });
+    expect(answerFromSlackAction({ actionId: button.action_id, value: button.value })).toEqual({
+      response: { interactionId: "call_abc123", optionId: "team_1" },
+    });
+    // A click on the button reads as the option it submits, not as the button's text.
+    expect(answerLabelOf({ blockId: actions.block_id, label: button.text.text })).toBe("Team 1");
   });
 
   it("renders a 'Type your answer' freeform button when the request has no options", () => {

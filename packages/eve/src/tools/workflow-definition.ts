@@ -264,8 +264,8 @@ export interface WorkflowServeToolDefinition<
 }
 
 /**
- * A static tool whose entry point runs as a durable workflow and must start
- * with "use workflow". It defines exactly one entry point.
+ * A tool whose entry point runs as a durable workflow and must start with
+ * "use workflow". It defines exactly one entry point.
  */
 export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowExecuteToolDefinition<TInput, TOutput>
@@ -410,12 +410,14 @@ export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEnt
   );
 }
 
-const ENTRY_POINT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
-
 function assertOneEntryPoint(definition: object): void {
   const defined = readWorkflowToolEntryPoints(definition);
   if (defined.length === 1) return;
-  const found = defined.length === 0 ? "none" : ENTRY_POINT_LIST.format(defined);
+  // Built here rather than at module scope, so loading this module stays off the locale-data path.
+  const found =
+    defined.length === 0
+      ? "none"
+      : new Intl.ListFormat("en", { type: "conjunction" }).format(defined);
   throw new Error(
     `Define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx); this tool defines ${found}.`,
   );

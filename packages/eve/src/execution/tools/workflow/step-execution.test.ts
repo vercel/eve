@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
+import {
+  withWorkflowStepAuthorization,
+  withWorkflowStepScope,
+} from "#execution/tools/workflow/step-execution.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import {
@@ -15,6 +18,7 @@ import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { defineState } from "#public/definitions/state.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
@@ -262,6 +266,39 @@ describe("workflow step authorization", () => {
       ),
     });
     expect(starts).toEqual([]);
+  });
+
+  it.each([
+    { called: "with ctx", run: (step: () => unknown) => runStep(step) },
+    {
+      called: "without ctx",
+      run: async (step: () => unknown) => await withWorkflowStepScope(step)(),
+    },
+    {
+      // `eve dev` runs a step inside the delivery's context, which is never saved.
+      called: "without ctx in development",
+      run: (step: () => unknown) =>
+        withDevelopmentWorkflowGeneration(
+          {
+            generationId: "generation-1",
+            source: createDiskRuntimeCompiledArtifactsSource("/app"),
+          },
+          async () => await withWorkflowStepScope(step)(),
+        ),
+    },
+  ])("fails defineState() reads and writes $called without retrying the step", async ({ run }) => {
+    const notes = defineState("step-test.notes", () => ["initial"]);
+    for (const access of [
+      () => notes.get(),
+      () => notes.update((current) => [...current, "step"]),
+    ]) {
+      await expect(run(access)).rejects.toMatchObject({
+        fatal: true,
+        message: expect.stringContaining(
+          'defineState() get() and update() are unavailable inside a "use step" function.',
+        ),
+      });
+    }
   });
 
   it("accepts its own copy of the session's environment and leaves stopping and deleting to the session", async () => {

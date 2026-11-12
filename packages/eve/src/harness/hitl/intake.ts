@@ -20,6 +20,7 @@ import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/t
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
+import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
   dispatch,
@@ -33,7 +34,8 @@ import {
   withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";
-import { runApprovedCalls } from "./approved-calls.js";
+import { runApprovedCalls, signInReports } from "./approved-calls.js";
+import { SignInCompletedKey } from "#harness/authorization.js";
 import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
@@ -98,7 +100,14 @@ export async function admitHumanInput(
     );
   }
   if (weighed.challenges.length > 0) {
-    await step.apply(requireSignIn(step.view(), { challenges: weighed.challenges, queued: input }));
+    await applyEndingSignIns(
+      step,
+      requireSignIn(step.view(), {
+        challenges: weighed.challenges,
+        callsBack: stepCallsBack(step),
+        queued: input,
+      }),
+    );
     return { kind: "stop", result: await park(step) };
   }
   const typedAnswers = config.typedAnswers !== false;
@@ -289,7 +298,12 @@ async function runApproved(
     ),
   );
   if (calls.length === 0) return undefined;
-  const executed = await Promise.all(
+  // One reporter for every group: a group's call can complete a sign-in another group's call
+  // stopped on, and each attempt settles once. It stays until every group has finished, so a
+  // group that fails doesn't take it from a sibling still running.
+  const signIns = signInReports({ publish: step.publish, view: () => step.view() });
+  step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
+  const groups = await Promise.allSettled(
     local.map(async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };
       const view = step.view().projection.view;
@@ -314,11 +328,17 @@ async function runApproved(
         publish: step.publish,
         responderOf: (approval) => approval.responder,
         telemetry: attempt?.telemetry,
+        signIns,
         tools,
         view: () => step.view(),
       });
     }),
   );
+  step.ctx.delete(SignInCompletedKey);
+  const executed = groups.map((group) => {
+    if (group.status === "rejected") throw group.reason;
+    return group.value;
+  });
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
@@ -328,13 +348,15 @@ async function runApproved(
   if (signIn === undefined) return undefined;
   // A stopped call keeps the approval it ran on, so it runs on it again after the sign-in.
   const byCallId = new Map(calls.map((approval) => [approval.call.callId, approval]));
-  await step.apply(
+  await applyEndingSignIns(
+    step,
     requireSignIn(step.view(), {
       calls: signIn.calls.map((stopped) => {
         const approval = byCallId.get(stopped.call.callId);
         return approval === undefined ? stopped : { ...stopped, approval };
       }),
       challenges: signIn.challenges,
+      callsBack: stepCallsBack(step),
     }),
     step.session.history,
   );
@@ -386,12 +408,12 @@ async function withdrawSteeredSignIns(
 ): Promise<HarnessStepInput | undefined> {
   const names = [...new Set(step.view().signIns.map((challenge) => challenge.name))];
   if (names.length === 0) return input;
-  await step.apply(withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
+  await applyEndingSignIns(step, withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
   return {
     ...input,
     context: [
       ...(input?.context ?? []),
-      `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
+      `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead, and it won't be asked for again in this turn. If the new message still needs it, tell the user the action needs that access and that they can ask again to sign in.`,
     ],
   };
 }

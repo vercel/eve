@@ -105,6 +105,8 @@ For Agent Runs sampling defaults and existing-deployment setup, see
 ## Instrument Node.js dependencies
 
 Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.
+Enable only the instrumentations you use, because each one loads when an instance starts. See
+[Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 For example, install the PostgreSQL instrumentation alongside `pg`:
 
 ```bash
@@ -168,31 +170,40 @@ An ordinary agent turn produces this trace:
 
 ```text
 invoke_agent <agent>
-  └── agent.step
-        ├── chat <model>
-        └── execute_tool <tool>
+  ├── agent.step
+  │     ├── chat <model>
+  │     └── execute_tool <tool>
+  │           └── agent.approval
+  ├── chat <model>
+  └── agent.approval
 ```
+
+A `chat` span directly under `invoke_agent` is a [compaction](../concepts/execution-model-and-durability#compaction-handoff) summary request made during the turn. It carries `ai.settings.context.eve.compaction.request=summary`, so you can sum or exclude compaction usage and cost. A compaction between turns, such as one `session.compact()` starts, has no turn and exports no span.
 
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.
 
 A remote child starts a separate trace with a root `invoke_agent` span. Its first turn links to the caller with `eve.link.type=agent.dispatch`, and the receiving deployment applies its own sampler. Local dispatches have no dispatch link, so query them by `parentSpanId`, or by `agent.parent_run.id` and `agent.parent_call.id`.
 
-| Attribute                | Use                                                         |
-| ------------------------ | ----------------------------------------------------------- |
-| `gen_ai.conversation.id` | Find the root session and its child sessions across traces. |
-| `agent.run.id`           | Identify one agent session, not the full conversation.      |
-| `gen_ai.tool.call.id`    | Match tool spans with their approval spans.                 |
-| `error.type`             | Classify tool failures.                                     |
-| `gen_ai.usage.*`         | Token counts on model and activation spans.                 |
-| `agent.usage.*`          | Token counts on step and tool spans.                        |
+| Attribute                | Use                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `gen_ai.conversation.id` | Find the root session and its child sessions across traces.                          |
+| `agent.run.id`           | Identify one agent session, not the full conversation.                               |
+| `gen_ai.tool.call.id`    | Match tool spans with their approval spans.                                          |
+| `error.type`             | Classify tool failures.                                                              |
+| `gen_ai.usage.*`         | Token counts on model and activation spans.                                          |
+| `agent.usage.*`          | Token counts on step and tool spans.                                                 |
+| `gen_ai.memory.store.id` | Find every recall, capture, and memory provider tool call for one memory scope.      |
+| `agent.memory.slot`      | The memory slot on memory spans and on the tool spans of that slot's provider tools. |
 
 The trace schema is version 4.
+
+Memory spans (`search_memory` for recall, `upsert_memory` for capture) and the `execute_tool` spans of a slot's provider tools carry `gen_ai.memory.store.id` and `agent.memory.slot` whatever the content policy. The store ID is the slot's opaque memory scope key, never the raw scope values, so it identifies which calls share memory without revealing who they belong to.
 
 eve adds `gen_ai.conversation.id` to spans created during model, tool, and memory work, including spans from third-party instrumentation. The conversation ID grants no access to message history, agent state, or credentials, and no authorization. Remote requests carry it in W3C Baggage. `trustedForwarders` controls whether the receiver accepts parent session data and the trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
 
 Gateway-routed model calls pass the configured OpenTelemetry context on each provider request. eve removes its own baggage first. AI Gateway decides whether its spans are sampled and which destinations receive them.
 
-When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity) for a model call, the `agent.step` span records it, even when the trace content policy omits outputs.
+When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity) for a model call, the `agent.step` span records it, or the `chat` span for a compaction's summary request, even when the trace content policy omits outputs.
 
 `vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for affinity. It isn't the eve session ID, which `vercel.session_id` records. Unless you set `gateway.sessionId` yourself, it equals `gen_ai.conversation.id`. AI Gateway hashes a conversation ID longer than 256 characters. eve records an authored `gateway.sessionId` exactly as written, so don't put personal data in it.
 

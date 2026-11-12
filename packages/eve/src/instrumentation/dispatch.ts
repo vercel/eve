@@ -1,5 +1,5 @@
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { instrumentationScope, traceStepIndex } from "#instrumentation/scope.js";
+import { copyScopeMarks, isTurnScope } from "#instrumentation/scope.js";
 import {
   abandonInstrumentationState,
   instrumentationStateSlot,
@@ -61,6 +61,14 @@ export function createInstrumentationDispatcher(
       (decision) => decision.action === "record" && decision.recordOutputs,
     );
     const capturesContent = capturesInputs || capturesOutputs;
+    // eve's own providers run serially and apply their own decisions; only authored files count.
+    const authored = groups.parallel.map((provider) => decisions.get(provider));
+    const authoredCapturesInputs = authored.some(
+      (decision) => decision?.action === "record" && decision.recordInputs,
+    );
+    const authoredCapturesOutputs = authored.some(
+      (decision) => decision?.action === "record" && decision.recordOutputs,
+    );
 
     const publish = async (event: InstrumentationEvent): Promise<void> => {
       const snapshot = snapshotInstrumentationEvent(
@@ -132,6 +140,8 @@ export function createInstrumentationDispatcher(
     };
 
     return {
+      authoredCapturesInputs,
+      authoredCapturesOutputs,
       capturesContent,
       capturesInputs,
       capturesOutputs,
@@ -164,7 +174,7 @@ function snapshotInstrumentationEvent(
   if (existing !== undefined) return existing as InstrumentationEvent;
   const snapshot = snapshotPlainValue(event, snapshots) as InstrumentationEvent;
   if ("scope" in source && "scope" in snapshot) {
-    instrumentationScope(snapshot.scope, traceStepIndex(source.scope));
+    copyScopeMarks(source.scope, snapshot.scope);
   }
   snapshots.set(source, snapshot);
   return snapshot;
@@ -232,6 +242,7 @@ async function dispatchToProvider(
     event.type === "delivery.consumed" ||
     event.type === "call.requested" ||
     event.type === "interaction.opened";
+  if ("scope" in event && isTurnScope(event.scope) && provider.receivesTurnScopes !== true) return;
   const owner = stateOwner(event);
   const providerName = provider.name;
   const stateNamespace = provider.stateNamespace ?? providerName;
