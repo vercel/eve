@@ -22,7 +22,8 @@ import { mockModel } from "eve/evals";
 const model = mockModel(async (request) => {
   const last = request.lastUserMessage ?? "";
   if (last.includes("A2A-SLOW")) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    // A long one keeps its task working well past a loaded runner's slowest follow-up.
+    await new Promise((resolve) => setTimeout(resolve, last.includes("A2A-SLOW-LONG") ? 8_000 : 2_000));
     return "A2A-SLOW-DONE";
   }
   if (last.startsWith("A2A-ECHO")) return \`ECHO:\${last}\`;
@@ -536,7 +537,7 @@ describe("A2A channel", () => {
     async () => {
       const slow = await sendTask("alice", {
         configuration: { returnImmediately: true },
-        message: userMessage("w-1", "A2A-SLOW"),
+        message: userMessage("w-1", "A2A-SLOW-LONG"),
       });
       await waitForState("alice", slow.id, "TASK_STATE_WORKING");
       const steered = await sendTask("alice", {
