@@ -140,7 +140,7 @@ how they capture it.
 | [Upstash AgentKit](#upstash-agentkit)   | `@upstash/agentkit-eve` | Ranked Redis Search recall or a Redis document backend | Automatic user-message capture or model-driven tools |
 | [Kybernesis Arcana](#kybernesis-arcana) | `@kybernesis/arcana`    | Semantic search and brain notes                        | Model-driven tools or optional automatic capture     |
 | [memco](#memco)                         | `@memco/eve`            | Briefing and reminders; search through tools           | Model-driven tools only                              |
-| [claude-mem](#claude-mem)               | `claude-mem`            | Newest memory and matching records before every turn   | Automatic after each turn, plus `remember`           |
+| [claude-mem](#claude-mem)               | `claude-mem`            | Scope's newest memory and matching records each turn   | Automatic after each turn, plus `remember`           |
 | [Your own provider](#build-your-own)    | Your code               | Whatever your store returns                            | Whatever rules you implement                         |
 
 ### File memory
@@ -282,9 +282,10 @@ setups, and deployment boundaries.
 ### claude-mem
 
 [claude-mem](https://docs.claude-mem.ai/eve-integration) connects a slot to your
-hosted claude-mem memory on cmem.ai. Before every turn, it adds your newest memory
-and records that match the message. It records each completed turn, and gives the
-model tools to search, browse, and save notes.
+hosted claude-mem memory on cmem.ai. By default, each scope gets its own project.
+Before every turn, the provider adds that project's newest memory and records that
+match the message. It records each completed turn, and gives the model tools to
+search, browse, and save notes.
 
 ```bash
 eve add memory/claude-mem
@@ -304,8 +305,9 @@ export default defineMemory({
 });
 ```
 
-Recording spends the key owner's cmem.ai allowance for every caller. Pass
-`capture: false` to turn it off. See the
+Recording spends the key owner's cmem.ai allowance for every caller and needs a
+key with write access. Pass `capture: false` to turn it off. To recall your Claude
+Code and Codex work, a single-owner agent can set `searchAllProjects: true`. See the
 [claude-mem integration page](/integrations/claude-mem) for options and the
 security boundaries of `searchAllProjects`.
 

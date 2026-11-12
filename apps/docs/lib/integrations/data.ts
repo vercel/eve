@@ -2087,7 +2087,7 @@ See the [provider README](https://github.com/memcoai/eve-memco#readme) for save-
       "cmem.ai",
       "claude-mem",
     ],
-    install: `Give your eve agent the memory you build in Claude Code, Codex, and your other claude-mem clients, and record the agent's own work the same way they do.
+    install: `Give your eve agent long-term memory on hosted claude-mem. By default, each eve scope gets its own claude-mem project, and the provider records every completed turn into it. Single-owner agents can opt in to recall the memory you build in Claude Code, Codex, and your other claude-mem clients.
 
 Install the claude-mem provider:
 
@@ -2116,16 +2116,16 @@ export default defineMemory({
 });
 \`\`\`
 
-The filename creates the \`claude-mem\` slot. Before every turn, the provider adds your newest memory as session context and recalls records that match the user's message. The model also gets \`claude-mem__search\`, \`claude-mem__timeline\`, and \`claude-mem__get_observations\` to look further back, and \`claude-mem__remember\` to save a note. Saving needs a Pro key with write access.`,
+The filename creates the \`claude-mem\` slot. Before every turn, the provider adds the newest memory in this scope's project as session context and recalls records from that project that match the user's message. The model also gets \`claude-mem__search\`, \`claude-mem__timeline\`, and \`claude-mem__get_observations\` to look further back, and \`claude-mem__remember\` to save a note. Saving and recording need a Pro key with write access. With a read-only key, pass \`capture: false\`.`,
     configure: `By default, each eve scope reads and writes its own claude-mem project, derived from eve's scope key, and recording is on. After each completed turn, the provider sends the prompt, each tool call, and a turn summary to cmem.ai. Each recorded tool call and summary spends the key owner's cmem.ai observer allowance, for every caller the scope admits. Pass \`capture: false\` to keep recall, search, and \`remember\` without recording:
 
 \`\`\`ts title="agent/memory/claude-mem.ts"
 provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY, capture: false }),
 \`\`\`
 
-Before anything is sent, the provider removes \`<private>\` regions and redacts secret-shaped text. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
+Before a turn is recorded or recalled, the provider removes \`<private>\` regions and redacts secret-shaped text. Notes saved with \`remember\` and model-written \`search\` queries are sent as written. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
 
-\`searchAllProjects: true\` lets session context, recall, \`search\`, and \`timeline\` read every project the key can see, so the agent recalls work from your other claude-mem clients. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. \`get_observations\` fetches by ID across the key's whole memory regardless of project; give callers separate keys when they must never see each other's memory. Other options are \`project\` and \`baseUrl\`.
+To recall work from Claude Code, Codex, and your other claude-mem clients, set \`searchAllProjects: true\`. Session context, recall, \`search\`, and \`timeline\` then read every project the key can see. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. \`get_observations\` fetches by ID across the key's whole memory regardless of project; give callers separate keys when they must never see each other's memory. Other options are \`project\` and \`baseUrl\`.
 
 Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source control. See the [claude-mem eve guide](https://docs.claude-mem.ai/eve-integration) for the one-click personal agent template, owner-only scoping, and the full option and tool reference.`,
   },

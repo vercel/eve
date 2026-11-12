@@ -400,7 +400,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "claude-mem",
     kind: "memory",
     tagline:
-      "Recall what you did in Claude Code, Codex, and other claude-mem clients, and record the agent's own work.",
+      "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
