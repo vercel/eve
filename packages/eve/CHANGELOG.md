@@ -1,5 +1,18 @@
 # eve
 
+## 1.0.0-rc.13
+
+Released 2026-11-12 · [Compare with 1.0.0-rc.12](https://github.com/vercel/eve/compare/eve%401.0.0-rc.12...eve%401.0.0-rc.13)
+
+### Features
+
+- eve now targets Node.js 26: new projects pin `engines.node` and `@types/node` to `26.x`, so Vercel deploys them on the `nodejs26.x` runtime, and the default sandbox image and generated Discord relay Dockerfile run Node.js 26.
+  eve still supports Node.js 24 and later. When eve updates the `package.json` of an existing project that pins `engines.node` to another major, such as `24.x`, it now sets `26.x` and prints a warning. SvelteKit apps deployed to Vercel need `@sveltejs/adapter-vercel` 6.3.5 or later to build on Node.js 26. ([#6304](https://github.com/vercel/eve/pull/6304))
+
+### Bug Fixes
+
+- `eve dev` no longer answers every second request with an empty `400 Bad Request` when the client sends `Connection: close` and the agent replies with a keep-alive response such as an MCP SSE stream, as happens behind the `vercel dev` proxy. ([#6298](https://github.com/vercel/eve/pull/6298))
+
 ## 1.0.0-rc.12
 
 Released 2026-11-12 · [Compare with 1.0.0-rc.11](https://github.com/vercel/eve/compare/eve%401.0.0-rc.11...eve%401.0.0-rc.12)
