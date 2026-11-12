@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -13,8 +12,8 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
@@ -101,7 +100,7 @@ describe("workflowEntry cancelled sign-in", () => {
       ],
     });
     const send = (runId: string, message: string) =>
-      resumeHook(sessionInboxHookToken(sessionCommandHookToken(runId)), {
+      resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(runId)), {
         auth: alice,
         kind: "send",
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -109,18 +108,16 @@ describe("workflowEntry cancelled sign-in", () => {
       });
 
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Create an issue." },
-          serializedContext: buildSerializedContext({
-            auth: alice,
-            channelKind: "http",
-            continuationToken: "http:workflow-entry-sign-in-cancelled",
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Create an issue." },
+        serializedContext: buildSerializedContext({
+          auth: alice,
+          channelKind: "http",
+          continuationToken: "http:workflow-entry-sign-in-cancelled",
+        }),
+      });
       const stream = captureEvents(run);
 
       try {

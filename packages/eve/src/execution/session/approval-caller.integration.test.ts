@@ -1,5 +1,5 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { markMockModel } from "#internal/mock-model-identity.js";
@@ -12,7 +12,6 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#public/definitions/model.js";
 import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -20,14 +19,17 @@ import {
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
-import { reportCallerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import {
+  REPORT_CALLER_BODY,
+  reportCallerWorkflow,
+} from "#internal/testing/workflow-tool-fixtures.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 
 // Scripted model: calls each tool the first message names, in the order it
@@ -197,7 +199,8 @@ async function withChainRun(
   const stages: Stage[] = [];
 
   await runtime.run(async () => {
-    const run = await startSessionOwner(workflowEntry, [
+    const run = await startTestSession(
+      "in-process",
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",
@@ -212,7 +215,8 @@ async function withChainRun(
             : { [STUB_CONTEXT_KEY]: { token: `${name}-stubs`, rules: options.stubs } }),
         },
       },
-    ]);
+      { workflows: [REPORT_CALLER_BODY] },
+    );
     const commandInbox = sessionInboxHookToken(sessionCommandHookToken(run.runId));
     const stream = captureTurnEvents(run);
     const next = async (label: string) => {
@@ -230,7 +234,7 @@ async function withChainRun(
             .filter((entry) => toolName === undefined || entry.toolName === toolName)
             .at(toolName === undefined ? -1 : 0);
           expect(request).toBeDefined();
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth: approver,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -250,7 +254,7 @@ async function withChainRun(
           return await next("approved");
         },
         async deliver(auth, payload, until) {
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -267,7 +271,7 @@ async function withChainRun(
           return await next("delivered");
         },
         async send(auth, message) {
-          await resumeHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

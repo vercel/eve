@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
@@ -43,7 +43,7 @@ async function compactions(input: { readonly dynamic: boolean; readonly window: 
     },
   });
   return await test.run(async () => {
-    const runtime = createWorkflowRuntime({
+    const runtime = createInProcessRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     });
     const alice = createChannelAddress({

@@ -13,6 +13,7 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowStepToolContext, WorkflowToolContext } from "#tools/workflow-definition.js";
+import { workflowBodyOf, type WorkflowBody } from "#tools/workflow-body.js";
 import { defineChannel, POST } from "#public/channels/index.js";
 import {
   ConnectionAuthorizationFailedError,
@@ -199,6 +200,24 @@ export async function waitingForCleanupWorkflow(): Promise<void> {
   await workflowSleep("1h");
 }
 
+/**
+ * `waitingForCleanupWorkflow` in process: it waits an hour, or until its call is stopped, which
+ * on Workflow cancels its run outright.
+ */
+export const WAITING_FOR_CLEANUP_BODY = plainBodyOf(
+  "waitingForCleanupWorkflow",
+  waitingForCleanupWorkflow as (input: unknown, ctx: WorkflowToolContext) => Promise<void>,
+  async (_input: unknown, ctx: WorkflowToolContext) => {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 3_600_000);
+      ctx.abortSignal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  },
+);
+
 export async function answerWithResponderWorkflow(
   _input: DeployInput,
   ctx: WorkflowToolContext,
@@ -214,15 +233,26 @@ export async function answerWithResponderWorkflow(
 }
 
 /** Returns `ctx.ask()`'s answer as-is; a selected option carries `text: undefined`. */
-export async function returnAskAnswerWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
-  "use workflow";
-
+async function returnAskAnswer(_input: DeployInput, ctx: WorkflowToolContext) {
   return await ctx.ask({
     display: "confirmation",
     options: [{ id: "approve", label: "Approve" }],
     prompt: "Apply this change?",
   });
 }
+
+export async function returnAskAnswerWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  return await returnAskAnswer(input, ctx);
+}
+
+/** `returnAskAnswerWorkflow`'s plain body; see {@link plainBodyOf}. */
+export const RETURN_ASK_ANSWER_BODY = plainBodyOf(
+  "returnAskAnswerWorkflow",
+  returnAskAnswerWorkflow,
+  returnAskAnswer,
+);
 
 /** Asks two questions at once, so answering one leaves the other pending. */
 export async function confirmTwoStepsWorkflow(
@@ -326,9 +356,37 @@ export async function receiveDelegatedResultWorkflow(token: string): Promise<unk
   return await result;
 }
 
-export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolContext) {
-  "use workflow";
+async function reportCaller(_input: unknown, ctx: WorkflowToolContext) {
   return { caller: ctx.session.auth.current?.principalId ?? null };
+}
+
+export async function reportCallerWorkflow(input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await reportCaller(input, ctx);
+}
+
+/** `reportCallerWorkflow`'s plain body; see {@link plainBodyOf}. */
+export const REPORT_CALLER_BODY = plainBodyOf(
+  "reportCallerWorkflow",
+  reportCallerWorkflow,
+  reportCaller,
+);
+
+/**
+ * A fixture workflow's plain body, as the in-process host runs it, under the id the test tier's
+ * bundler gives its `"use workflow"` twin: this module's path and the function's name.
+ */
+function plainBodyOf<F extends (...args: never[]) => Promise<unknown>>(
+  name: string,
+  workflow: F,
+  body: F,
+): WorkflowBody {
+  return (
+    workflowBodyOf(workflow, body) ?? {
+      body,
+      workflowId: `workflow//./src/internal/testing/workflow-tool-fixtures//${name}`,
+    }
+  );
 }
 
 export async function failingServeWorkflow(): Promise<never> {

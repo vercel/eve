@@ -2,7 +2,6 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -13,11 +12,13 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
+  RETURN_ASK_ANSWER_BODY,
+  WAITING_FOR_CLEANUP_BODY,
   returnAskAnswerWorkflow,
   waitingForCleanupWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { defineTool } from "#tools/definition.js";
@@ -130,7 +131,8 @@ async function withDynamicRun(
   const continuationToken = `http:${name}`;
 
   await runtime.run(async () => {
-    const run = await startSessionOwner(workflowEntry, [
+    const run = await startTestSession(
+      "in-process",
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",
@@ -140,7 +142,8 @@ async function withDynamicRun(
           "eve.capabilities": { requestInput: true },
         },
       },
-    ]);
+      { workflows: [RETURN_ASK_ANSWER_BODY, WAITING_FOR_CLEANUP_BODY] },
+    );
     const stream = captureTurnEvents(run);
     const delivery = createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" });
     try {
@@ -148,7 +151,7 @@ async function withDynamicRun(
         offered,
         first: () => withTimeout(stream.nextTurn(), "first turn"),
         async deliver(message) {
-          await resumeHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
             auth: ALICE,
             kind: "send",
             delivery,
@@ -158,7 +161,7 @@ async function withDynamicRun(
         async answer(stage) {
           const question = questionsIn(stage)[0];
           expect(question).toBeDefined();
-          await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
             auth: ALICE,
             kind: "send",
             delivery,
@@ -169,7 +172,7 @@ async function withDynamicRun(
           return await withTimeout(stream.nextTurn(), "answered");
         },
         async send(message) {
-          await resumeHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
             auth: ALICE,
             kind: "send",
             delivery,

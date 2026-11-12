@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
@@ -139,7 +139,7 @@ async function deliverSlackEvent(
   const operations = createChannelOperations<unknown>({
     adapter: resolved.adapter,
     channelName: "slack",
-    runtime: createWorkflowRuntime({
+    runtime: createInProcessRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     }),
   });
