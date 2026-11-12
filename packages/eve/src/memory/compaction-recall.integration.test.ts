@@ -1,4 +1,5 @@
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
+import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
@@ -7,7 +8,6 @@ import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { defineAgent } from "#public/definitions/agent.js";
@@ -32,24 +32,65 @@ function isSummaryRequest(prompt: LanguageModelV4Prompt): boolean {
   return JSON.stringify(prompt).includes("CONTEXT CHECKPOINT COMPACTION");
 }
 
-/** Each turn calls `fetch_report` once and then replies; a compaction gets a summary. */
+type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
+type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
+
+/** A response that reports the prompt's size as its input tokens, as a provider would. */
+function respond(prompt: LanguageModelV4Prompt, parts: readonly StreamPart[]): StreamResult {
+  const inputTokens = Math.ceil(JSON.stringify(prompt).length / 4);
+  const finishReason = parts.some((part) => part.type === "tool-call") ? "tool-calls" : "stop";
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start", warnings: [] },
+        ...parts,
+        {
+          finishReason: { raw: undefined, unified: finishReason },
+          type: "finish",
+          usage: {
+            inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: inputTokens, total: inputTokens },
+            outputTokens: { reasoning: 0, text: 1, total: 1 },
+          },
+        },
+      ] satisfies StreamPart[],
+    }),
+  };
+}
+
+function text(prompt: LanguageModelV4Prompt, value: string): StreamResult {
+  return respond(prompt, [
+    { id: "answer", type: "text-start" },
+    { delta: value, id: "answer", type: "text-delta" },
+    { id: "answer", type: "text-end" },
+  ]);
+}
+
+/**
+ * The first turn fetches the report twice, so the call after the second fetch is measured over
+ * the threshold and compacts; later calls answer. A compaction gets a summary.
+ */
 function scriptedModel(log: string[], prompts: LanguageModelV4Prompt[]) {
+  let calls = 0;
   return markMockModel(
     new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         if (isSummaryRequest(prompt)) {
           log.push("call:summary");
-          return textStreamResult(SUMMARY);
+          return text(prompt, SUMMARY);
         }
         log.push("call:turn");
         prompts.push(prompt);
-        return prompt.at(-1)?.role === "tool"
-          ? textStreamResult("The report is in.")
-          : toolCallStreamResult({
-              input: "{}",
-              toolCallId: `call-${log.length}`,
-              toolName: "fetch_report",
-            });
+        calls += 1;
+        return calls <= 2
+          ? respond(prompt, [
+              {
+                input: "{}",
+                toolCallId: `fetch-${calls}`,
+                toolName: "fetch_report",
+                type: "tool-call",
+              },
+            ])
+          : text(prompt, "The report is in.");
       },
       modelId: "scripted-model",
       provider: "eve-test",
@@ -211,7 +252,8 @@ describe("memory recall after a compaction", () => {
 
     // The call after the compaction reads the turn's recall with the new message added and the
     // `index` message replaced, each once.
-    const afterCompaction = userTexts(prompts[1]!);
+    const callsBefore = log.slice(0, recalledAt).filter((entry) => entry === "call:turn").length;
+    const afterCompaction = userTexts(prompts[callsBefore]!);
     expect(afterCompaction).toContain("Alice prefers short answers.");
     expect(afterCompaction).toContain("Index: one line.");
     expect(afterCompaction).not.toContain("Index: a large block.");
@@ -242,7 +284,8 @@ describe("memory recall after a compaction", () => {
     expect(log).toContain("context:compaction:completed");
     expect(log.filter((entry) => entry === "recall:compaction")).toHaveLength(1);
     expect(log).toContain("turn:failed");
-    // Only the call that fetched the report ran: the one after the compaction never did.
-    expect(log.filter((entry) => entry === "call:turn")).toHaveLength(1);
+    // The calls before the compaction ran; the one after it never did.
+    const compactedAt = log.indexOf("context:compaction:completed");
+    expect(log.indexOf("call:turn", compactedAt)).toBe(-1);
   }, 120_000);
 });
