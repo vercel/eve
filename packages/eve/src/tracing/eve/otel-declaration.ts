@@ -1,5 +1,8 @@
 import { PROVIDER, type InstrumentationProvider } from "#instrumentation/provider.js";
-import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
+import type {
+  InstrumentationModelStartedInput,
+  InstrumentationSession,
+} from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
@@ -76,6 +79,23 @@ export interface OtelOptions {
    * but does not delete exported traces.
    */
   readonly tracePolicy?: TraceCapturePolicy;
+  /**
+   * Chooses the `gen_ai.conversation.id` that eve's spans, and third-party
+   * spans started inside them, record, such as your app's own thread ID.
+   * Defaults to the root session ID.
+   *
+   * eve calls it at the start of each step with the step's caller in
+   * `session.auth.current`. When a step keeps a running turn's caller, such
+   * as for another person's approval, the turn keeps its conversation ID too.
+   * Return a string of at most 1,024 bytes without control characters.
+   * Returning `undefined` or an invalid ID, or throwing, keeps the current
+   * ID; a throw logs a warning. Synchronous: a returned Promise is ignored.
+   * It changes only telemetry: the AI Gateway session ID and the ID child
+   * sessions inherit stay the root session ID.
+   */
+  readonly conversationId?: (input: {
+    readonly session: InstrumentationSession;
+  }) => string | undefined;
   /**
    * Resource attributes merged into eve's own, which already carry the
    * service name.
@@ -245,6 +265,7 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
 
 /** What the harness reads at turn time, as opposed to at registration. */
 export interface OtelHarnessSettings {
+  readonly conversationId?: OtelOptions["conversationId"];
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
   readonly tracePolicy?: TraceCapturePolicy;
@@ -314,6 +335,9 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   };
   if (options.tracePolicy !== undefined) {
     Object.assign(settings, { tracePolicy: options.tracePolicy });
+  }
+  if (options.conversationId !== undefined) {
+    Object.assign(settings, { conversationId: options.conversationId });
   }
   return {
     declared,

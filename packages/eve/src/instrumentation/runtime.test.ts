@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   AuthKey,
@@ -12,6 +13,7 @@ import {
   ScheduleIdKey,
   SessionTitleKey,
   SessionTraceSeedKey,
+  TraceConversationIdKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -35,6 +37,9 @@ import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
+import type { OtelHarnessSettings } from "#tracing/eve/otel-declaration.js";
+import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -479,6 +484,73 @@ describe("bindInstrumentationRuntime", () => {
     ctx.set(ConversationIdKey, "original-conversation");
     bindInstrumentationRuntime(runtime, ctx, boundSession);
     expect(ctx.get(ConversationIdKey)).toBe("original-conversation");
+  });
+
+  describe("trace conversation ID", () => {
+    const caller = (threadId?: string): SessionAuthContext => ({
+      attributes: threadId === undefined ? {} : { threadId },
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    });
+    const byThread: OtelHarnessSettings["conversationId"] = ({ session }) => {
+      const threadId = session.auth.current?.attributes.threadId;
+      return typeof threadId === "string" ? threadId : undefined;
+    };
+    const bind = (ctx: ContextContainer, conversationId: OtelHarnessSettings["conversationId"]) =>
+      bindInstrumentationRuntime(
+        {
+          ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+          otelSettings: { conversationId, traceChannelRequests: false },
+        },
+        ctx,
+        boundSession,
+      );
+    const traceConversation = (ctx: ContextContainer) =>
+      contextStorage.run(ctx, () => ({
+        gateway: resolveConversationId(boundSession.rootSessionId),
+        trace: eveTurnIdentity({ sessionId: boundSession.sessionId, turnId: "turn-1" })
+          .conversationId,
+      }));
+
+    it("follows the step's caller in spans while the Gateway session stays the root", () => {
+      const ctx = createContext();
+      ctx.set(AuthKey, caller("thread-1"));
+      bind(ctx, byThread);
+      expect(traceConversation(ctx)).toEqual({ gateway: "session-1", trace: "thread-1" });
+
+      ctx.set(AuthKey, caller("thread-2"));
+      bind(ctx, byThread);
+      expect(traceConversation(ctx)).toEqual({ gateway: "session-1", trace: "thread-2" });
+      expect(ctx.get(ConversationIdKey)).toBe("session-1");
+    });
+
+    it.each([
+      ["returns nothing", () => undefined],
+      ["returns an invalid ID", () => "thread\n2"],
+      [
+        "throws",
+        () => {
+          throw new Error("Bob's attributes are not loaded yet.");
+        },
+      ],
+    ])("keeps the current ID when the resolver %s", (_name, resolver) => {
+      const ctx = createContext();
+      ctx.set(AuthKey, caller("thread-1"));
+      bind(ctx, byThread);
+      const logs = captureLogRecords();
+      bind(ctx, resolver);
+      expect(traceConversation(ctx).trace).toBe("thread-1");
+      expect(ctx.get(TraceConversationIdKey)).toBe("thread-1");
+      expect(logs.records.some((record) => record.level === "warn")).toBe(_name === "throws");
+    });
+
+    it("defaults to the root session ID", () => {
+      const ctx = createContext();
+      ctx.set(AuthKey, caller());
+      bind(ctx, byThread);
+      expect(traceConversation(ctx)).toEqual({ gateway: "session-1", trace: "session-1" });
+    });
   });
 
   it("keeps the durable audience when projection metadata changes", async () => {

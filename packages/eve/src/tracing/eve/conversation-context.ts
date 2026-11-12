@@ -1,6 +1,6 @@
 import { createContextKey, type Context } from "#compiled/@opentelemetry/api/index.js";
 import { readBaggageMember, replaceBaggageMember } from "#protocol/baggage.js";
-import { readConversationId, resolveConversationId } from "#shared/conversation-identity.js";
+import { readConversationId, resolveTraceConversationId } from "#shared/conversation-identity.js";
 
 const BAGGAGE_KEY = "eve.conversation.id";
 const CONVERSATION_KEY = createContextKey("eve.trace.conversation.id");
@@ -21,7 +21,7 @@ export function traceSessionIdOf(scope: OperationConversation): string {
 }
 
 export function operationConversationId(input: OperationConversation): string {
-  return resolveConversationId(input.rootSessionId ?? input.sessionId);
+  return resolveTraceConversationId(input.rootSessionId ?? input.sessionId);
 }
 
 export function withOperationTraceContext(context: Context, input: OperationConversation): Context {

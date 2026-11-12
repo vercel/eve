@@ -88,6 +88,11 @@ export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
+/**
+ * The conversation id telemetry records when `otel({ conversationId })` chose one. Unlike
+ * {@link ConversationIdKey}, it is not the Gateway session id and child sessions don't inherit it.
+ */
+export const TraceConversationIdKey = new ContextKey<string>("eve.traceConversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 /** Every channel continuation address requested for this session, in claim order. */

@@ -1,5 +1,5 @@
 import { contextStorage } from "#context/container.js";
-import { ConversationIdKey } from "#context/keys.js";
+import { ConversationIdKey, TraceConversationIdKey } from "#context/keys.js";
 
 const MAX_ID_BYTES = 1024;
 const encoder = new TextEncoder();
@@ -24,4 +24,12 @@ export function readConversationId(value: unknown): string | undefined {
 
 export function resolveConversationId(fallback: string): string {
   return readConversationId(contextStorage.getStore()?.get(ConversationIdKey)) ?? fallback;
+}
+
+/** The conversation id telemetry records: the one `otel({ conversationId })` chose, else the session's. */
+export function resolveTraceConversationId(fallback: string): string {
+  return (
+    readConversationId(contextStorage.getStore()?.get(TraceConversationIdKey)) ??
+    resolveConversationId(fallback)
+  );
 }

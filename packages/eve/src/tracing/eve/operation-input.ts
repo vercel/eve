@@ -1,4 +1,4 @@
-import { resolveConversationId } from "#shared/conversation-identity.js";
+import { resolveTraceConversationId } from "#shared/conversation-identity.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import {
   createAgentRun,
@@ -24,7 +24,7 @@ export function eveTurnIdentity(input: {
   readonly turnId: string;
 }) {
   return {
-    conversationId: resolveConversationId(input.rootSessionId ?? input.sessionId),
+    conversationId: resolveTraceConversationId(input.rootSessionId ?? input.sessionId),
     runId: input.sessionId,
     turnId: input.turnId,
   };

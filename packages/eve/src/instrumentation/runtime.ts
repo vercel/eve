@@ -30,7 +30,7 @@ import {
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
 import type { HandleEventFn } from "#harness/types.js";
-import { recordErrorOnSpan } from "#internal/logging.js";
+import { createLogger, formatError, recordErrorOnSpan } from "#internal/logging.js";
 import {
   prepareTurnTraceContext,
   type PrepareTurnTraceContextInput,
@@ -43,7 +43,7 @@ import {
   createMemoryInstrumentation,
   type MemoryInstrumentation,
 } from "#instrumentation/memory.js";
-import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
+import { ConversationIdKey, ParentSessionKey, TraceConversationIdKey } from "#context/keys.js";
 import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
 import type { AgentRun } from "#compiled/@vercel/agent-runs/index.js";
 import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
@@ -61,6 +61,7 @@ import { initializeSessionInstrumentation } from "#instrumentation/session-init.
 import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
 import { createGatewayTraceContextHeaders } from "#tracing/eve/gateway.js";
 
+const log = createLogger("harness.instrumentation-runtime");
 export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
@@ -190,6 +191,7 @@ export function bindInstrumentationRuntime(
     );
   }
   if (runtime === undefined) return undefined;
+  bindTraceConversationId(runtime.otelSettings?.conversationId, ctx, boundSession.sessionId);
   let deliveryInput: DeliverHookPayload | undefined;
   const baseHooks = runtime.hooks;
   const traceSessionId = boundSession.traceSessionId;
@@ -503,6 +505,33 @@ export function bindInstrumentationRuntime(
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),
   };
+}
+
+/** Sets the step's trace conversation ID from `otel({ conversationId })` and its caller. */
+function bindTraceConversationId(
+  resolve: OtelHarnessSettings["conversationId"],
+  ctx: ContextContainer,
+  sessionId: string,
+): void {
+  if (resolve === undefined) return;
+  const snapshot = snapshotInstrumentationRuntimeContext(ctx);
+  let resolved: unknown;
+  try {
+    resolved = resolve({
+      session: {
+        auth: { current: snapshot.currentAuth, initiator: snapshot.initiatorAuth },
+        id: sessionId,
+        parent: snapshot.parent,
+      },
+    });
+  } catch (error) {
+    log.warn("keeping the trace conversation ID after its resolver failed", {
+      error: formatError(error),
+    });
+    return;
+  }
+  const conversationId = readConversationId(resolved);
+  if (conversationId !== undefined) ctx.set(TraceConversationIdKey, conversationId);
 }
 
 export function bindSessionInstrumentation(input: {

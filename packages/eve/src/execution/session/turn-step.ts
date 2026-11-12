@@ -30,6 +30,7 @@ import {
   ChannelInstrumentationKey,
   HandleEventKey,
   ToolChannelKey,
+  TraceConversationIdKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -256,6 +257,7 @@ async function runSessionStepBody(
     }
   }
   const previousAuth = ctx.get(AuthKey);
+  const previousTraceConversationId = ctx.get(TraceConversationIdKey);
   const hadInitiator = ctx.has(InitiatorAuthKey);
 
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
@@ -419,13 +421,19 @@ async function runSessionStepBody(
     // correction and other input without a message keep a running turn's
     // identity; a message joining it may update only its principal's claims.
     let turnAuth = ctx.get(AuthKey);
-    if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
+    let keepsTurnCaller = answers !== undefined || ignoredActiveDelivery;
+    if (keepsTurnCaller) turnAuth = previousAuth;
     else if (delivery !== undefined && !startedBetweenTurns) {
-      turnAuth =
-        resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+      keepsTurnCaller = resolved?.message === undefined;
+      turnAuth = keepsTurnCaller ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
+    // Instrumentation bound with the delivering caller; the turn keeps its own trace conversation.
+    if (keepsTurnCaller) {
+      if (previousTraceConversationId === undefined) ctx.delete(TraceConversationIdKey);
+      else ctx.set(TraceConversationIdKey, previousTraceConversationId);
+    }
     if (ignoredActiveDelivery) {
       // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;

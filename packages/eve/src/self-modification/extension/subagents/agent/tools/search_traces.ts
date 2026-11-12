@@ -3,7 +3,7 @@ import { defineTool } from "eve/tools";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local/trace-query.js";
 import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
-import { resolveConversationId } from "#shared/conversation-identity.js";
+import { resolveTraceConversationId } from "#shared/conversation-identity.js";
 import {
   localTraceConversationMarker,
   localTraceIndexedMarker,
@@ -54,7 +54,7 @@ const searchTracesTool = defineTool({
   async execute(input, ctx) {
     const parsed = parseInput(input);
     const currentTraceId = trace.getSpan(context.active())?.spanContext().traceId;
-    const conversationId = resolveConversationId(
+    const conversationId = resolveTraceConversationId(
       ctx.session.parent?.rootSessionId ?? ctx.session.id,
     );
     const sandbox = await ctx.getSandbox();

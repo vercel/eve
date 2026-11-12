@@ -202,7 +202,7 @@ Gateway-routed model calls pass the configured OpenTelemetry context on each pro
 
 When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity) for a model call, the `agent.step` span records it, even when the trace content policy omits outputs.
 
-`vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for affinity. It isn't the eve session ID, which `vercel.session_id` records. Unless you set `gateway.sessionId` yourself, it equals `gen_ai.conversation.id`. AI Gateway hashes a conversation ID longer than 256 characters. eve records an authored `gateway.sessionId` exactly as written, so don't put personal data in it.
+`vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for affinity. It isn't the eve session ID, which `vercel.session_id` records. Unless you set `gateway.sessionId` or `otel({ conversationId })` yourself, it equals `gen_ai.conversation.id`. AI Gateway hashes a conversation ID longer than 256 characters. eve records an authored `gateway.sessionId` exactly as written, so don't put personal data in it.
 
 | Attribute                                       | Value                                                           |
 | ----------------------------------------------- | --------------------------------------------------------------- |
@@ -211,6 +211,25 @@ When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/mo
 | `vercel.ai_gateway.affinity.outcome`            | What affinity did, such as `promoted`, `confirmed`, or `no_pin` |
 | `vercel.ai_gateway.affinity.pinned_provider`    | Provider the session's pin named                                |
 | `vercel.ai_gateway.affinity.displaced_provider` | Provider that would have gone first, when the pin moved it      |
+
+## Set the conversation ID
+
+`gen_ai.conversation.id` defaults to the root session ID. When your app has its own conversation, such as a thread that several sessions serve over time, return its ID from `conversationId` so trace backends group spans by it:
+
+```ts title="agent/instrumentation/otel.ts"
+import { otel } from "eve/instrumentation/otel";
+
+export default otel({
+  conversationId: ({ session }) => {
+    const threadId = session.auth.current?.attributes.threadId;
+    return typeof threadId === "string" ? threadId : undefined;
+  },
+});
+```
+
+eve calls `conversationId` at the start of each step, with the step's caller in `session.auth.current`, and uses the ID for that step's spans, including third-party spans started inside them. When a step keeps a running turn's caller, such as when another person approves a tool call, the turn keeps its conversation ID. Returning `undefined` or an invalid ID, or throwing, keeps the current ID; a throw logs a warning. An ID must be a string of at most 1,024 bytes without control characters.
+
+The option changes only telemetry. The AI Gateway session ID and the conversation ID that subagents and remote agents inherit stay the root session ID, so model requests are unchanged. Each session calls `conversationId` for its own steps.
 
 ## Session handover events
 
