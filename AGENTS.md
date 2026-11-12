@@ -171,7 +171,7 @@ CI.
 11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
     spec, one ordered plugin list, and one route table. Follow the foundation
     invariants in
-    [`research/nitro-3-rc-migration.md`](./research/nitro-3-rc-migration.md#foundation-invariants)
+    [`packages/eve/src/internal/nitro/AGENTS.md`](./packages/eve/src/internal/nitro/AGENTS.md)
     when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which

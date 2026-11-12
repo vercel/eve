@@ -8,7 +8,7 @@ last_updated: "2026-10-29"
 
 ## Summary
 
-[Deferred tools and skills](./deferred-tools.md) (#4400) gave every agent one
+[Deferred tools and skills](../docs/concepts/built-in-tools.md) (#4400) gave every agent one
 catalog of tools, agents, connection tools, and skills, reached through fixed
 tools that never change the `tools` array. That work reserved one more name
 for code mode. This doc fills it in.
@@ -335,7 +335,7 @@ closest names, or with `"<name>" is in your tool list; call it directly.`
 - **Input.** The input is the agent tool's input without `taskId`, plus an
   optional `outputSchema`. The program is a caller, like `ctx.agent`, and
   `outputSchema` stays a caller-side option, as
-  [tasks](./eve-tasks.md) requires. Every call starts a new child session, as
+  [tasks](../docs/tools/tasks.md) requires. Every call starts a new child session, as
   `workflow()` does today.
 - **Owned by the call.** Child sessions belong to the `eve__execute` call, not
   to the model's task table. `eve__task_wait` doesn't see them, and they end
@@ -500,7 +500,22 @@ protocol docs.
 
 ### Cache invariants
 
-These extend the six in [deferred tools](./deferred-tools.md#cache-invariants):
+These extend the six from deferred tools (#4400):
+
+- **Fixed tools.** The `tools` array is identical on every step of a session:
+  same names, descriptions, schemas, and order. Catalog changes never touch it.
+- **No session-specific text** in the system prompt or any tool description.
+- **Append-only history.** Listing changes only append messages, and earlier
+  messages are never rewritten.
+- **No system-message fallback.** Announcements are always messages appended
+  to history, including on the step that runs approved calls.
+- **Deterministic rendering.** Listings are sorted, and a signature is a pure
+  function of its schema. `eve__search` renders signatures only for the
+  results it returns.
+- **Calling an entry adds nothing.** An `eve__tool` call, skill load,
+  approval, park, sign-in, child session, or resume never adds a definition.
+
+Code mode adds:
 
 1. **Fixed tools.** The presence, schema, and description of `eve__execute`
    depend only on `codeMode` and the eve version.
