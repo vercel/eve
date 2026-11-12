@@ -20,6 +20,8 @@ export async function dispatchScheduledOccurrence(input: {
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly payload: ScheduleCollectionPayload<unknown>;
+  /** The namespace a provider delivered the occurrence from, after `verifyDelivery` checks it. */
+  readonly namespace?: string;
   readonly verifyDelivery?: () => Promise<void>;
 }): Promise<void> {
   const occurrence = {
@@ -27,8 +29,8 @@ export async function dispatchScheduledOccurrence(input: {
     displayName: scheduleDisplayName(input.occurrence.name),
   };
   const { provider } = input.definition;
-  // The stored scope names where this schedule lives. No caller is present to authorize, and
-  // the callback only reaches the schedule that fired it.
+  // The delivered namespace, or else the stored scope, names where this schedule lives. No
+  // caller is present to authorize, and the callback only reaches the schedule that fired it.
   const providerContext = () =>
     createScheduleProviderContext({
       abortSignal: new AbortController().signal,
@@ -36,6 +38,7 @@ export async function dispatchScheduledOccurrence(input: {
       bundle: () => input.bundle,
       collection: input.collection,
       definition: input.definition,
+      namespace: input.namespace,
       operationId: randomUUID(),
       scope: input.payload.envelope.scope,
     });
@@ -79,13 +82,16 @@ export function createScheduleProviderContext(input: {
   readonly bundle: () => ScheduleDispatchBundle;
   readonly collection: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
+  /** Overrides the namespace derived from `scope`, for a schedule whose namespace is already known. */
+  readonly namespace?: string;
   readonly operationId: string;
   readonly scope: ScheduleScopeValue;
 }): ScheduleProviderContext {
   return {
     abortSignal: input.abortSignal,
     collection: input.collection,
-    namespace: deriveScheduleNamespace(input.application, input.collection, input.scope),
+    namespace:
+      input.namespace ?? deriveScheduleNamespace(input.application, input.collection, input.scope),
     operationId: input.operationId,
     target: {
       key: input.application,

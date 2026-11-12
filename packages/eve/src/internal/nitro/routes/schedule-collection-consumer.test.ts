@@ -7,6 +7,7 @@ import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.
 const mocks = vi.hoisted(() => ({
   admit: vi.fn(),
   auth: vi.fn(),
+  disable: vi.fn(),
   failed: vi.fn(),
   run: vi.fn(),
 }));
@@ -25,7 +26,7 @@ vi.mock("#runtime/loaders/manifest.js", () => ({
 vi.mock("#runtime/schedules/load-collection.js", () => ({
   ScheduleCollectionNotDeployedError: class extends Error {},
   loadScheduleCollectionDefinition: async () => ({
-    provider: {},
+    provider: { disable: mocks.disable },
     preparePayload: (value: unknown) => value,
     auth: mocks.auth,
     run: mocks.run,
@@ -155,6 +156,22 @@ describe("schedule collection consumer", () => {
       reason: expect.stringContaining("no longer authorized"),
       type: "occurrence.failed",
     });
+  });
+
+  it("addresses the schedule handle to the namespace the occurrence was delivered from", async () => {
+    mocks.admit.mockImplementationOnce(dispatchScheduledOccurrence);
+    mocks.auth.mockImplementationOnce(async ({ schedule }) => {
+      await schedule.disable();
+      return null;
+    });
+
+    await deliver(1);
+
+    expect(mocks.disable).toHaveBeenCalledTimes(1);
+    expect(mocks.disable.mock.calls[0]).toEqual([
+      expect.objectContaining({ collection: "requests", namespace: "eve-namespace" }),
+      "weekly",
+    ]);
   });
 
   it("retries an occurrence whose auth throws", async () => {
