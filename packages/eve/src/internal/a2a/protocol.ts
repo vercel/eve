@@ -11,14 +11,6 @@ import type { JsonValue } from "#shared/json.js";
 /** The `Major.Minor` protocol version this module speaks. */
 export const A2A_PROTOCOL_VERSION = "1.0";
 
-/**
- * eve's interactions extension: an interrupted task's status message also carries its questions
- * and approvals as data, and a message answers them with data parts. A client activates it with
- * the `A2A-Extensions` header or, on a message it sends, the message's `extensions`.
- */
-export const EVE_INTERACTIONS_EXTENSION =
-  "https://github.com/vercel/eve/blob/main/docs/channels/a2a.mdx#interactions-extension";
-
 /** The version an empty `A2A-Version` means (spec 3.2.6): 0.3 clients predate the header. */
 export const A2A_ABSENT_VERSION = "0.3";
 

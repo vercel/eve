@@ -2,7 +2,7 @@ import type { AgentDescription } from "#channel/agent-description.js";
 import type { OAuthResourceOptions, UnauthorizedChallenge } from "#channel/auth/definitions.js";
 import type { JsonValue } from "#shared/json.js";
 
-import { A2A_PROTOCOL_VERSION, EVE_INTERACTIONS_EXTENSION } from "./protocol.js";
+import { A2A_PROTOCOL_VERSION } from "./protocol.js";
 
 /** An `AgentSkill`: what the card advertises, not an eve skill file. */
 export interface A2aAgentSkill {
@@ -71,15 +71,6 @@ export function buildAgentCard(input: BuildAgentCardInput): Record<string, JsonV
   const card = {
     capabilities: {
       extendedAgentCard: false,
-      extensions: [
-        {
-          description:
-            "Interrupted tasks also list their questions and approvals as data, and a message " +
-            "answers them with data parts { interactionId, optionId?, text? }.",
-          required: false,
-          uri: EVE_INTERACTIONS_EXTENSION,
-        },
-      ],
       pushNotifications: false,
       streaming: true,
     },

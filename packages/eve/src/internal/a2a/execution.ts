@@ -32,7 +32,7 @@ import {
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
-import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { parseAnswer } from "#shared/input.js";
 import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
@@ -48,7 +48,6 @@ import {
 import {
   A2A_JSON_RPC_ERRORS,
   A2aError,
-  EVE_INTERACTIONS_EXTENSION,
   isSettledForBlocking,
   isTerminalState,
   type CancelTaskRequest,
@@ -90,8 +89,6 @@ export interface A2aExecutionOptions {
 /** Who is calling, and what the request carries beside its params. */
 export interface A2aCallContext {
   readonly auth: SessionAuthContext | null;
-  /** Extension URIs the client activated in `A2A-Extensions`. */
-  readonly extensions: ReadonlySet<string>;
   /** Aborts when the client goes away. */
   readonly signal: AbortSignal;
 }
@@ -114,11 +111,7 @@ export class A2aTaskExecution {
    */
   async sendMessage(request: SendMessageRequest, call: A2aCallContext): Promise<Task> {
     const sent = await this.#deliver(request, call);
-    const options = this.#projection(
-      call,
-      { historyLength: request.configuration?.historyLength },
-      request.message,
-    );
+    const options = this.#projection({ historyLength: request.configuration?.historyLength });
     if (request.configuration?.returnImmediately === true) {
       const view = await readSessionView(sent.ref.sessionId);
       return projectTask(view, reachedRef(view, sent), options);
@@ -146,39 +139,28 @@ export class A2aTaskExecution {
     call: A2aCallContext,
   ): Promise<AsyncIterable<StreamResponse>> {
     const sent = await this.#deliver(request, call);
-    const options = this.#projection(
-      call,
-      { historyLength: request.configuration?.historyLength },
-      request.message,
-    );
+    const options = this.#projection({ historyLength: request.configuration?.historyLength });
     return this.#stream(sent, options, call.signal, { closeOnInterrupt: true });
   }
 
-  /**
-   * `SubscribeToTask`: the task now, then its changes until it is terminal (A2A §3.1.6) or reaches
-   * its next interrupted state, as a streaming send ends there (§11.7). A task interrupted when the
-   * subscription opens is followed past that pause, which the subscriber may be about to answer.
-   */
+  /** `SubscribeToTask`: the task now, then its changes until it is terminal. */
   async subscribe(
     request: SubscribeToTaskRequest,
     call: A2aCallContext,
   ): Promise<AsyncIterable<StreamResponse>> {
     const { ref, view } = await this.#readTask(request.id, call.auth);
-    const options = this.#projection(call);
-    const task = projectTask(view, ref, { ...options, historyLength: 0 });
+    const task = projectTask(view, ref, { historyLength: 0 });
     if (isTerminalState(task.status.state)) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.unsupportedOperation, "Task is already terminal.");
     }
-    // The pause it opened on doesn't end the stream; one that differs from it does.
-    const sent: SentDelivery = isSettledForBlocking(task.status.state)
-      ? { answering: statusKey(task), deliveryId: ref.deliveryId, ref }
-      : { deliveryId: ref.deliveryId, ref };
-    return this.#stream(sent, options, call.signal, { closeOnInterrupt: true });
+    return this.#stream({ deliveryId: ref.deliveryId, ref }, this.#projection(), call.signal, {
+      closeOnInterrupt: false,
+    });
   }
 
   async getTask(request: GetTaskRequest, call: A2aCallContext): Promise<Task> {
     const { ref, view } = await this.#readTask(request.id, call.auth);
-    return projectTask(view, ref, this.#projection(call, { historyLength: request.historyLength }));
+    return projectTask(view, ref, this.#projection({ historyLength: request.historyLength }));
   }
 
   /**
@@ -187,7 +169,7 @@ export class A2aTaskExecution {
    */
   async cancelTask(request: CancelTaskRequest, call: A2aCallContext): Promise<Task> {
     const { ref, token, view } = await this.#readTask(request.id, call.auth);
-    const task = projectTask(view, ref, this.#projection(call));
+    const task = projectTask(view, ref, this.#projection());
     if (isTerminalState(task.status.state)) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.taskNotCancelable, "Task is already terminal.");
     }
@@ -203,11 +185,7 @@ export class A2aTaskExecution {
     await this.#options.from(token).cancel({ auth: call.auth, turnId });
     const signal = AbortSignal.any([call.signal, AbortSignal.timeout(CANCEL_SETTLE_MS)]);
     let latest = task;
-    const follow = this.#follow(
-      { deliveryId: ref.deliveryId, ref },
-      this.#projection(call),
-      signal,
-    );
+    const follow = this.#follow({ deliveryId: ref.deliveryId, ref }, this.#projection(), signal);
     for await (const update of follow) {
       latest = update.task;
       if (isTerminalState(latest.status.state)) break;
@@ -239,7 +217,7 @@ export class A2aTaskExecution {
     if (run === undefined) return empty;
 
     const view = await readSessionView(request.contextId);
-    const options = this.#projection(call, {
+    const options = this.#projection({
       historyLength: request.historyLength,
       includeArtifacts: request.includeArtifacts ?? false,
     });
@@ -371,7 +349,7 @@ export class A2aTaskExecution {
     const sent: SentDelivery = { deliveryId: delivery.deliveryId, followUp: true, ref, view };
     if (hasDelivery(view, delivery.deliveryId)) return sent;
     // Projected as the follow will be, so the status it waits to move past compares equal.
-    const task = projectTask(view, ref, this.#projection(call, { historyLength: 0 }, message));
+    const task = projectTask(view, ref, this.#projection({ historyLength: 0 }));
     if (isTerminalState(task.status.state)) {
       throw new A2aError(
         A2A_JSON_RPC_ERRORS.unsupportedOperation,
@@ -392,19 +370,12 @@ export class A2aTaskExecution {
       ? { ...sent, answering: statusKey(task) }
       : sent;
 
-    const structured = this.#interactions(call, message) ? structuredAnswers(message) : undefined;
-    if (structured !== undefined && task.status.state !== "TASK_STATE_INPUT_REQUIRED") {
-      throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "Task is not waiting for input.");
-    }
     if (task.status.state === "TASK_STATE_INPUT_REQUIRED") {
-      // Answer this task's own questions. eve's typed-answer intake would match the text against
-      // the session's first open prompt, which can belong to another turn, and would pass text
-      // that matches no option through as a message the waiting turn never reads.
-      const answers =
-        structured === undefined
-          ? [this.#answerFor(view, turnId, message)]
-          : validStructuredAnswers(structured, openPromptsForTurn(view, turnId));
-      await this.#options.from(token).respond(answers.map(parseAnswer), {
+      // Answer this task's own first question. eve's typed-answer intake would match the text
+      // against the session's first open prompt, which can belong to another turn, and would
+      // pass text that matches no option through as a message the waiting turn never reads.
+      const answer = this.#answerFor(view, turnId, message);
+      await this.#options.from(token).respond([parseAnswer(answer)], {
         ...delivery,
         auth: call.auth,
       } as RespondOptions);
@@ -422,25 +393,9 @@ export class A2aTaskExecution {
     return answering;
   }
 
-  /** Whether the caller activated eve's interactions extension, for the request or `message`. */
-  #interactions(call: A2aCallContext, message?: Message): boolean {
-    return (
-      call.extensions.has(EVE_INTERACTIONS_EXTENSION) ||
-      message?.extensions?.includes(EVE_INTERACTIONS_EXTENSION) === true
-    );
-  }
-
-  /** How this call projects tasks: `options`, plus the channel's and the caller's choices. */
-  #projection(
-    call: A2aCallContext,
-    options: ProjectTaskOptions = {},
-    message?: Message,
-  ): ProjectTaskOptions {
-    return {
-      ...options,
-      interactions: this.#interactions(call, message),
-      toolActivity: this.#options.toolActivity,
-    };
+  /** How this channel projects tasks: `options`, plus the channel's own choices. */
+  #projection(options: ProjectTaskOptions = {}): ProjectTaskOptions {
+    return { ...options, toolActivity: this.#options.toolActivity };
   }
 
   /** The answer a typed message gives the first question `turnId` waits on. */
@@ -582,10 +537,7 @@ interface SentDelivery {
   readonly deliveryId: string;
   /** It continued `ref` from outside: it may have started a task of its own instead. */
   readonly followUp?: boolean;
-  /**
-   * The interrupted status (`statusKey`) the message answers, when it continued one, or the one a
-   * subscription opened on: reaching it again isn't news.
-   */
+  /** The interrupted status (`statusKey`) the message answers, when it continued one. */
   readonly answering?: string;
   /** The session as delivering the message last read it, when it did. */
   readonly view?: SessionView;
@@ -623,98 +575,6 @@ function contextEnded(): A2aError {
 function statusKey(task: Task): string {
   const { timestamp: _timestamp, ...status } = task.status;
   return JSON.stringify(status);
-}
-
-/** An answer the interactions extension carries: one data part per open question or approval. */
-interface StructuredAnswer {
-  readonly interactionId: string;
-  readonly optionId?: string;
-  readonly text?: string;
-}
-
-/**
- * The answers a message carries as data parts `{ interactionId, optionId?, text? }`, or undefined
- * when it carries none and answers by text instead. A message answers with data or with text,
- * not both.
- */
-function structuredAnswers(message: Message): readonly StructuredAnswer[] | undefined {
-  const answers = message.parts.filter((part) => isAnswerData(part.data));
-  if (answers.length === 0) return undefined;
-  if (answers.length !== message.parts.length) {
-    throw new A2aError(
-      A2A_JSON_RPC_ERRORS.invalidParams,
-      "A message that answers with data parts carries only those parts.",
-    );
-  }
-  return answers.map((part) => {
-    const data = part.data as Record<string, unknown>;
-    const { interactionId, optionId, text } = data;
-    if (
-      (optionId !== undefined && typeof optionId !== "string") ||
-      (text !== undefined && typeof text !== "string") ||
-      (optionId === undefined && text === undefined)
-    ) {
-      throw new A2aError(
-        A2A_JSON_RPC_ERRORS.invalidParams,
-        "An answer is { interactionId, optionId?, text? } with an optionId, a text, or both.",
-      );
-    }
-    return {
-      interactionId: interactionId as string,
-      ...(optionId !== undefined && { optionId: optionId as string }),
-      ...(text !== undefined && { text: text as string }),
-    };
-  });
-}
-
-function isAnswerData(data: unknown): boolean {
-  return (
-    data !== null &&
-    typeof data === "object" &&
-    !Array.isArray(data) &&
-    typeof (data as { interactionId?: unknown }).interactionId === "string"
-  );
-}
-
-/** Answers that each name one of the turn's open questions, an option it offers, or free text it takes. */
-function validStructuredAnswers(
-  answers: readonly StructuredAnswer[],
-  open: readonly InteractionRow[],
-): readonly StructuredAnswer[] {
-  const seen = new Set<string>();
-  for (const answer of answers) {
-    const row = open.find(
-      (prompt) =>
-        prompt.interactionId === answer.interactionId && prompt.request.kind !== "sign-in",
-    );
-    if (row === undefined) {
-      throw new A2aError(
-        A2A_JSON_RPC_ERRORS.invalidParams,
-        `Interaction ${answer.interactionId} isn't an open question or approval on this task.`,
-      );
-    }
-    if (seen.has(answer.interactionId)) {
-      throw new A2aError(
-        A2A_JSON_RPC_ERRORS.invalidParams,
-        `Interaction ${answer.interactionId} is answered twice.`,
-      );
-    }
-    seen.add(answer.interactionId);
-    const options = row.request.options ?? [];
-    if (answer.optionId !== undefined && !options.some((option) => option.id === answer.optionId)) {
-      throw new A2aError(
-        A2A_JSON_RPC_ERRORS.invalidParams,
-        `Interaction ${answer.interactionId} has no option ${answer.optionId}.`,
-      );
-    }
-    if (answer.optionId === undefined && options.length > 0 && row.request.allowFreeform !== true) {
-      throw new A2aError(
-        A2A_JSON_RPC_ERRORS.invalidParams,
-        `Interaction ${answer.interactionId} takes one of its options, not free text alone.`,
-      );
-    }
-  }
-  return answers;
 }
 
 /** A2A parts as eve message content. Data parts become JSON text the model reads. */

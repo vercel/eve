@@ -5,7 +5,6 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { httpBasic, none } from "#public/channels/auth.js";
-import { EVE_INTERACTIONS_EXTENSION } from "#internal/a2a/protocol.js";
 import { A2A_AGENT_CARD_PATH, a2aChannel } from "#public/channels/a2a.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 
@@ -130,18 +129,6 @@ describe("a2aChannel", () => {
     );
     expect(await card.json()).toMatchObject({
       supportedInterfaces: [{ url: "https://agent.internal/eve/v1/a2a" }],
-    });
-  });
-
-  it("declares eve's interactions extension on the card", async () => {
-    const response = await handler(a2aChannel({ auth: none() }), "GET")(
-      new Request(`http://127.0.0.1${A2A_AGENT_CARD_PATH}`, { headers: { host: "127.0.0.1" } }),
-      routeArgs(),
-    );
-    expect(await response.json()).toMatchObject({
-      capabilities: {
-        extensions: [{ required: false, uri: EVE_INTERACTIONS_EXTENSION }],
-      },
     });
   });
 });

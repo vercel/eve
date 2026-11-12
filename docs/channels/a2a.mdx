@@ -114,11 +114,11 @@ The response's `result.task` carries the `id` and `contextId` to use in later ca
 | `GetTask`              | Reads a task. `historyLength` limits the user messages in `history`.                                                                          |
 | `ListTasks`            | Lists one context's tasks, newest status first, with cursor pagination. `contextId` is required.                                              |
 | `CancelTask`           | Cancels a working or interrupted task, then waits up to five seconds for it to reach `TASK_STATE_CANCELED`.                                   |
-| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal, or until its next interruption.                                      |
+| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal.                                                                      |
 
 A blocking `SendMessage` can't wait longer than one request. When `maxBlockingMs` passes first, eve returns the task as it is, usually `TASK_STATE_WORKING`; call `GetTask` or `SubscribeToTask` to follow it. For long tasks, prefer `SendStreamingMessage`.
 
-A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state. Like a streaming send, a subscription closes when the task is next interrupted. A subscription that opens on an interrupted task stays open through that pause, so you can answer it and watch the task continue.
+A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state. Unlike a streaming send, a subscription stays open through questions and approvals until the task is terminal: watch for `TASK_STATE_INPUT_REQUIRED` in its status updates, answer with `SendMessage`, and the same subscription follows the task on.
 
 ## Answer questions and approvals
 
@@ -137,59 +137,6 @@ When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: ea
 ```
 
 Each message answers one prompt and carries only text parts, which eve joins into one answer; the task's history records the answer as that one text part. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
-
-### Interactions extension
-
-A client that renders questions itself, or answers several at once, can use eve's interactions extension. The Agent Card declares it, with the URI `https://github.com/vercel/eve/blob/main/docs/channels/a2a.mdx#interactions-extension`. Activate it with the `A2A-Extensions` header, and eve echoes the header back. An interrupted task's status message then lists its open questions and approvals in a data part after the text:
-
-```json
-{
-  "data": {
-    "interactions": [
-      {
-        "interactionId": "wrun_01J...-ask-1",
-        "kind": "question",
-        "prompt": "Proceed with the delegated work?",
-        "options": [
-          { "id": "yes", "label": "Yes", "description": "Continue the delegated work." },
-          { "id": "no", "label": "No" }
-        ],
-        "allowFreeform": false
-      }
-    ]
-  },
-  "mediaType": "application/json"
-}
-```
-
-`kind` is `question`, `approval`, or `budget`, and a newer eve can add one. A sign-in isn't listed: it is answered by signing in.
-
-Answer with one data part per interaction, `{ interactionId, optionId?, text? }`, on a message that activates the extension, in the header or in the message's own `extensions`:
-
-```json
-{
-  "message": {
-    "messageId": "0d7e2c61-3b9f-4c1e-8f25-6a4b9d2e1c70",
-    "role": "ROLE_USER",
-    "contextId": "wrun_01J...",
-    "taskId": "d3J1bl8w...",
-    "extensions": [
-      "https://github.com/vercel/eve/blob/main/docs/channels/a2a.mdx#interactions-extension"
-    ],
-    "parts": [
-      {
-        "data": {
-          "interactionId": "wrun_01J...-ask-1",
-          "optionId": "yes",
-          "text": "Go ahead, and log it."
-        }
-      }
-    ]
-  }
-}
-```
-
-An answer can carry an option, free text, or both, such as an approval with a note. Free text alone answers only a question with no options or `allowFreeform: true`. A message that answers with data carries only answer parts. eve refuses with `InvalidParams` an answer to an interaction that isn't open on the task, an option the interaction doesn't offer, and data answers to a task that isn't waiting for input.
 
 ## Authentication
 
