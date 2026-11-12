@@ -118,6 +118,8 @@ export async function runApprovedCalls(input: {
   readonly view: () => Pick<SessionView, "projection">;
   /** The batch's sign-in reports, shared by every group of calls resumed together. */
   readonly signIns?: SignInReports;
+  /** The agent's tool output budget in bytes; unset when it has none. */
+  readonly toolOutputBytes?: number;
 }): Promise<{
   readonly settled: readonly CallResult[];
   readonly signIns: readonly ToolSignIn[];

@@ -19,7 +19,7 @@ export interface DynamicSubagentAgentConfig {
   };
   readonly description: string;
   /** Serialized into workflow input, so it can't carry the `sessionUsage` function. */
-  readonly limits?: Pick<AgentLimitsDefinition, "sessionTimeoutMs">;
+  readonly limits?: Pick<AgentLimitsDefinition, "sessionTimeoutMs" | "toolOutputTokens">;
   readonly model: DynamicSubagentModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly tool?: AgentToolExposure;

@@ -17,6 +17,7 @@ import {
   removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { boundToolOutput } from "#harness/tool-output-budget.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
@@ -60,10 +61,14 @@ export function forgetFinishedRuns(
   return { requestIds, session: next };
 }
 
-/** Each runtime result as the model reads it, beside the result the stream reports. */
+/**
+ * Each runtime result as the model reads it, beside the result the stream reports. A tool's
+ * result is kept within `toolOutputBytes` of text, unless eve's own tool bounded it already.
+ */
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
   tools: HarnessToolLookup | undefined,
+  toolOutputBytes?: number,
 ): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
@@ -81,16 +86,21 @@ export async function runtimeResultCalls(
           result,
         });
         continue;
-      case "tool-result":
+      case "tool-result": {
+        const definition = tools?.get(result.toolName);
+        const output = await projectToolResultOutput(result, definition);
         settled.push({
           part: toolResult(
             result,
             result.toolName,
-            await projectToolResultOutput(result, tools?.get(result.toolName)),
+            toolOutputBytes === undefined || definition?.frameworkTool === true
+              ? output
+              : boundToolOutput(output, toolOutputBytes),
           ),
           result,
         });
         continue;
+      }
     }
     throw new Error(`Unsupported runtime action result kind "${String(result)}".`);
   }

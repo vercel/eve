@@ -156,7 +156,7 @@ Annotations are hints, not guarantees. Trust them only as far as you trust the s
 
 ## Control result size
 
-An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections have no per-result transform like an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections have no per-result transform like an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput), but the agent's [tool output limit](/docs/tools#tool-output-limit) still applies: a result over it keeps its start and end around a truncation notice.
 
 When a remote tool returns more than the model needs, narrow the result at the server. Add a search or summary tool, or return a handle another call can use to fetch a smaller slice.
 

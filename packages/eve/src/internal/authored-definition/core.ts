@@ -166,7 +166,7 @@ function normalizeAgentLimitsDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["limits"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["sessionTimeoutMs", "sessionUsage"], message);
+  expectOnlyKnownKeys(record, ["sessionTimeoutMs", "sessionUsage", "toolOutputTokens"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
   if (record.sessionTimeoutMs !== undefined) {
@@ -180,6 +180,12 @@ function normalizeAgentLimitsDefinition(
       record.sessionUsage === false
         ? false
         : expectFunction<SessionUsageLimit>(record.sessionUsage, message);
+  }
+  if (record.toolOutputTokens !== undefined) {
+    normalizedDefinition.toolOutputTokens = expectPositiveIntegerOrFalse(
+      record.toolOutputTokens,
+      message,
+    );
   }
   return normalizedDefinition;
 }

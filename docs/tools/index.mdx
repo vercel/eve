@@ -110,7 +110,7 @@ See [Human-in-the-loop](./human-in-the-loop) for the `auto`, `always`, `once`, a
 
 ## Shape what the model sees with `toModelOutput`
 
-Omit `toModelOutput` to give the model the full `execute` return. When a channel needs rich data but the model needs only the gist, return a smaller value:
+Omit `toModelOutput` to give the model the `execute` return, up to the agent's [tool output limit](#tool-output-limit). When a channel needs rich data but the model needs only the gist, return a smaller value:
 
 ```ts
 toModelOutput(output) {
@@ -123,6 +123,18 @@ toModelOutput(output) {
 Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object. Return `{ type: "error-text", value }`, or `toolOutput.errorText(value)`, to show the model a failure, such as a command that exited non-zero. Providers mark it as an error result, and so does the MCP channel (`isError`). The call still completes, so channels and hooks get the full output.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before you return them.
+
+### Tool output limit
+
+Each result enters history and is sent again with every later model call, so eve caps how much text one result can put in front of the model. The cap is about 12,000 tokens (48,000 UTF-8 bytes) by default. It applies after `toModelOutput`, to authored, [MCP](/docs/connections/mcp#control-result-size), and workflow tools alike:
+
+- Text over the limit keeps its start and end, with a notice in the middle saying how many bytes eve cut. The notice counts toward the limit.
+- JSON over the limit becomes text, cut the same way. Smaller JSON keeps its shape.
+- The text parts of a `content` output share one limit and one notice. File parts don't count toward it.
+
+The cap only changes what the model reads. Channels, hooks, and `call.settled` still get the full output. eve's built-in tools, such as `bash` and `read_file`, bound their own output and aren't cut again. A tool that returns less than the limit is unaffected, so the cap is a floor, not a replacement for returning only what the model needs.
+
+Set [`limits.toolOutputTokens`](/docs/agent-config#tool-output-limit) to change the limit for an agent, or `false` to send every result whole.
 
 ### Send images to the model with content parts
 

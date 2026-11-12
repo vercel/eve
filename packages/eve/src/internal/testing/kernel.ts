@@ -53,7 +53,10 @@ function agentBundle(agent: TestKernelConfig["agent"]) {
     modelMetadata: async () => ({}),
     nodeId: "root",
     resolvedAgent: {
-      config: { compaction: { thresholdPercent: agent.thresholdPercent } },
+      config: {
+        compaction: { thresholdPercent: agent.thresholdPercent },
+        limits: { toolOutputTokens: agent.toolOutputTokens },
+      },
       definitions: [],
       instructions: [],
       skills: [],

@@ -7,7 +7,10 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const bundle = {
   resolvedAgent: {
-    config: { compaction: { thresholdPercent: 0.9 }, limits: { sessionTimeoutMs: 60_000 } },
+    config: {
+      compaction: { thresholdPercent: 0.9 },
+      limits: { sessionTimeoutMs: 60_000, toolOutputTokens: 4_000 },
+    },
   },
   turnAgent: {
     compactionModel: { id: "openai/gpt-5.4-mini" },
@@ -28,8 +31,9 @@ describe("the agent's settings", () => {
       compactionModel: { id: "openai/gpt-5.4-mini" },
       reasoning: "low",
       thresholdPercent: 0.9,
+      toolOutputTokens: 4_000,
     });
-    expect(agentLimits(bundle, ctx)).toEqual({ sessionTimeoutMs: 60_000 });
+    expect(agentLimits(bundle, ctx)).toEqual({ sessionTimeoutMs: 60_000, toolOutputTokens: 4_000 });
   });
 
   it("are a dynamic subagent config's, in its session", () => {
@@ -38,7 +42,7 @@ describe("the agent's settings", () => {
     ctx.set(DynamicSubagentAgentConfigKey, {
       compaction: { model: { id: "anthropic/claude-sonnet-4.5" }, thresholdPercent: 0.75 },
       description: "Perform deep research.",
-      limits: { sessionTimeoutMs: 120_000 },
+      limits: { sessionTimeoutMs: 120_000, toolOutputTokens: false },
       model: { id: "anthropic/claude-opus-4.6" },
       reasoning: "high",
     });
@@ -47,7 +51,11 @@ describe("the agent's settings", () => {
       compactionModel: { id: "anthropic/claude-sonnet-4.5" },
       reasoning: "high",
       thresholdPercent: 0.75,
+      toolOutputTokens: false,
     });
-    expect(agentLimits(bundle, ctx)).toEqual({ sessionTimeoutMs: 120_000 });
+    expect(agentLimits(bundle, ctx)).toEqual({
+      sessionTimeoutMs: 120_000,
+      toolOutputTokens: false,
+    });
   });
 });

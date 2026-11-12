@@ -83,6 +83,16 @@ describe("compiled agent manifest v50", () => {
     expect(parsed.config.limits).toEqual({ sessionTimeoutMs: 1_000 });
   });
 
+  it("round-trips the tool output limit", async () => {
+    const { manifest } = await compileFromMemory({
+      agent: { limits: { toolOutputTokens: false }, model: "openai/gpt-5.4" },
+      model: "openai/gpt-5.4",
+    });
+    const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
+
+    expect(parsed.config.limits?.toolOutputTokens).toBe(false);
+  });
+
   it("round-trips agent tool configuration and disabled tool names", async () => {
     const { manifest } = await compileFromMemory({
       agent: { model: "openai/gpt-5.4", tool: false },

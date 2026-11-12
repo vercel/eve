@@ -103,6 +103,8 @@ export async function executeToolCall(
     readonly view?: () => Pick<SessionView, "projection">;
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
+    /** The agent's tool output budget in bytes; unset when it has none. */
+    readonly toolOutputBytes?: number;
     /**
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
@@ -274,7 +276,7 @@ export async function executeToolCall(
       part: {
         output: failed
           ? { type: "error-text", value: failure }
-          : await toolCallModelOutput(definition, output, callId),
+          : await toolCallModelOutput(definition, output, callId, input.toolOutputBytes),
         toolCallId: callId,
         toolName,
         type: "tool-result",
@@ -501,6 +503,8 @@ export async function executeInlineCalls(input: {
   readonly modelCallId?: string;
   /** Runs just before each tool does, so steering no longer interrupts the step. */
   readonly beforeExecute: () => void;
+  /** The agent's tool output budget in bytes; unset when it has none. */
+  readonly toolOutputBytes?: number;
 }): Promise<InlineCallResults> {
   const calls = input.toolCalls.filter(
     (call) =>

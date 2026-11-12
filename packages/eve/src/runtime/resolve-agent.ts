@@ -287,7 +287,11 @@ function createResolvedAgentConfig(
   }
 
   if (manifest.config.limits !== undefined) {
-    config.limits = { sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs, sessionUsage };
+    config.limits = {
+      sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
+      sessionUsage,
+      toolOutputTokens: manifest.config.limits.toolOutputTokens,
+    };
   }
 
   if (manifest.config.dynamicModel !== undefined) {

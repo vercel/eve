@@ -51,6 +51,7 @@ import {
   readGatewayGenerationId,
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
+import { toolOutputBytes } from "#harness/tool-output-budget.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
@@ -533,6 +534,7 @@ export class ModelCaller {
       publish: step.publish,
       telemetry: options.telemetry,
       toolCalls: (stepResult.toolCalls ?? []) as TypedToolCall<ToolSet>[],
+      toolOutputBytes: toolOutputBytes(step),
       tools: this.input.catalog,
     });
     // A cancelled turn settles its calls itself, so whatever a cut call returned is dropped.

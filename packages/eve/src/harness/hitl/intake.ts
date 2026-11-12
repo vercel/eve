@@ -20,6 +20,7 @@ import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/t
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
+import { toolOutputBytes } from "#harness/tool-output-budget.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
@@ -329,6 +330,7 @@ async function runApproved(
         responderOf: (approval) => approval.responder,
         telemetry: attempt?.telemetry,
         signIns,
+        toolOutputBytes: toolOutputBytes(step),
         tools,
         view: () => step.view(),
       });

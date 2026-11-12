@@ -244,6 +244,21 @@ export default defineAgent({
 
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
+## Tool output limit
+
+`limits.toolOutputTokens` caps the text one tool result can put in front of the model, in approximate tokens of four UTF-8 bytes each. It defaults to `12_000`, about 48,000 bytes. A result over the limit keeps its start and end around a truncation notice, so one large API response or MCP result doesn't fill every later request until compaction caps it:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  limits: {
+    toolOutputTokens: 4_000, // default 12_000; false sends every result whole
+  },
+});
+```
+
+The limit applies to authored, MCP, and workflow tool results, not to eve's built-in tools, which bound their own output. Channels, hooks, and `call.settled` still get the full result. See [Tool output limit](./tools#tool-output-limit) for how results are cut.
+
 ## Runtime limits
 
 `limits` sets eve's runtime caps. `sessionUsage` receives the session's usage

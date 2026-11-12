@@ -219,6 +219,19 @@ export interface AgentLimitsDefinition {
    * @default ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000
    */
   readonly sessionUsage?: SessionUsageLimit | false;
+  /**
+   * The most text one tool result can put in front of the model, in approximate
+   * tokens of four UTF-8 bytes each. A larger result keeps its start and end around
+   * a truncation notice; JSON over the limit becomes truncated text, and file parts
+   * are not counted. Applies to authored, connection (MCP), and workflow tool results,
+   * not to eve's own tools, which bound their output themselves. Raw results in tool
+   * events are unchanged.
+   *
+   * `false` sends every result whole.
+   *
+   * @default 12_000 (about 48,000 bytes)
+   */
+  readonly toolOutputTokens?: number | false;
 }
 
 /**
@@ -373,6 +386,7 @@ export type InternalAgentDefinition = {
 export interface CompiledAgentLimitsDefinition {
   readonly sessionTimeoutMs?: number | false;
   readonly sessionUsage?: boolean;
+  readonly toolOutputTokens?: number | false;
 }
 
 /**

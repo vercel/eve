@@ -160,6 +160,7 @@ export async function compileAgentConfig(
         typeof definition.limits.sessionUsage === "function"
           ? true
           : definition.limits.sessionUsage,
+      toolOutputTokens: definition.limits.toolOutputTokens,
     };
   }
 

@@ -9,6 +9,7 @@ import {
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { normalizeToolModelOutput, type ToolModelOutputValue } from "#harness/tool-model-output.js";
+import { boundToolOutput } from "#harness/tool-output-budget.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -78,17 +79,19 @@ function isIssue(value: unknown): value is StandardSchemaV1.Issue {
 
 /**
  * What the model sees for a tool's output: pending sign-in text, the
- * author's `toModelOutput`, or the output as text or JSON.
+ * author's `toModelOutput`, or the output as text or JSON, kept within
+ * `maxBytes` of text. eve's own tools bound their output themselves.
  */
 export async function toolCallModelOutput(
-  definition: Pick<HarnessToolDefinition, "name" | "toModelOutput">,
+  definition: Pick<HarnessToolDefinition, "frameworkTool" | "name" | "toModelOutput">,
   output: unknown,
   toolCallId: string | undefined,
+  maxBytes?: number,
 ): Promise<ToolModelOutputValue> {
-  return await observeToolOutput(
+  const modelOutput = await observeToolOutput(
     definition.name,
     toolCallId === undefined ? [] : [{ callId: toolCallId }],
-    async () => {
+    async (): Promise<ToolModelOutputValue> => {
       if (isAuthorizationPendingModelOutput(output)) {
         return { type: "text", value: authorizationPendingModelText(output.connections) };
       }
@@ -107,4 +110,6 @@ export async function toolCallModelOutput(
       });
     },
   );
+  if (maxBytes === undefined || definition.frameworkTool === true) return modelOutput;
+  return boundToolOutput(modelOutput, maxBytes);
 }

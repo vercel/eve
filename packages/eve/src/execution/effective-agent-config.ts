@@ -16,6 +16,8 @@ export interface AgentSettings {
   readonly compactionModel?: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly thresholdPercent?: number;
+  /** `limits.toolOutputTokens`: unset for the default, `false` for no limit. */
+  readonly toolOutputTokens?: number | false;
 }
 
 /** The settings of the agent the step runs: `agent.ts`'s, or a dynamic subagent config's. */
@@ -28,6 +30,7 @@ export function agentSettings(step: {
       compactionModel: config.compaction?.model,
       reasoning: config.reasoning,
       thresholdPercent: config.compaction?.thresholdPercent,
+      toolOutputTokens: config.limits?.toolOutputTokens,
     };
   }
   const bundle = step.ctx.require(BundleKey);
@@ -35,6 +38,7 @@ export function agentSettings(step: {
     compactionModel: bundle.turnAgent.compactionModel,
     reasoning: bundle.turnAgent.reasoning,
     thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
+    toolOutputTokens: bundle.resolvedAgent.config?.limits?.toolOutputTokens,
   };
 }
 

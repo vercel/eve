@@ -4,9 +4,10 @@
  * Every framework tool that can return unbounded text output (bash,
  * grep, glob, read_file, web_fetch) uses these helpers to enforce
  * consistent size limits inside its executor before the result enters
- * conversation history. Authored tools are expected to do the same —
- * bounding at the source keeps the contract simple: whatever `execute`
- * returns is what the model sees.
+ * conversation history. Other tools' results are cut to the agent's
+ * `limits.toolOutputTokens` where they become model text; framework tools
+ * are exempt from that cut, so their own line-aware truncation decides what
+ * the model sees.
  */
 
 /**

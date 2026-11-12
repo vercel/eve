@@ -309,6 +309,7 @@ export const compiledAgentLimitsDefinitionSchema = z
   .object({
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
     sessionUsage: z.boolean().optional(),
+    toolOutputTokens: z.union([z.number().int().positive(), z.literal(false)]).optional(),
   })
   .strict();
 
