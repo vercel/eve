@@ -1,4 +1,4 @@
-import { APICallError } from "ai";
+import { APICallError, StreamProviderError, TypeValidationError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +12,7 @@ import {
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import { modelCallErrorInfo } from "#harness/model-call/failure.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
@@ -225,6 +226,30 @@ describe("classifyModelCallError", () => {
 
     expect(classifyModelCallError(normalizeModelStreamError(payload))).toBe("retry");
     expect(classifyModelCallError(payload)).toBe("retry");
+  });
+
+  it("returns retry for a stream chunk that failed the provider schema", () => {
+    const error = new TypeValidationError({
+      cause: new Error("Invalid input: expected string, received undefined"),
+      value: { type: "response.output_text.delta" },
+    });
+
+    expect(classifyModelCallError(normalizeModelStreamError(error))).toBe("retry");
+  });
+
+  it("returns retry for an AI Gateway stream the provider ended before its finish", () => {
+    const message = "Upstream stream ended before terminal chunk";
+
+    expect(
+      classifyModelCallError(
+        normalizeModelStreamError(
+          new StreamProviderError({ code: "gateway_stream_terminated", message }),
+        ),
+      ),
+    ).toBe("retry");
+    expect(
+      classifyModelCallError(normalizeModelStreamError(new StreamProviderError({ message }))),
+    ).toBe("retry");
   });
 
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {
@@ -785,5 +810,105 @@ describe("extractModelCallErrorDetails", () => {
       upstreamStatusCode: 400,
       upstreamType: "invalid_request_error",
     });
+  });
+});
+
+/**
+ * An AI Gateway error whose reported failure is the Gateway's retry on its own (`system`)
+ * credential, after the request failed on the caller's BYOK credential for the same provider.
+ */
+function maskedByokError(input: {
+  readonly byok: { readonly error?: string; readonly statusCode?: number };
+  readonly reported?: {
+    readonly message: string;
+    readonly statusCode: number;
+    readonly type: string;
+  };
+  readonly retryProvider?: string;
+}): Error {
+  const reported = input.reported ?? {
+    message: "The encrypted content could not be verified.",
+    statusCode: 400,
+    type: "invalid_request_error",
+  };
+  const data = {
+    error: { code: "invalid_encrypted_content", message: reported.message, type: reported.type },
+    providerMetadata: {
+      gateway: {
+        routing: {
+          modelAttempts: [
+            {
+              providerAttempts: [
+                { credentialType: "byok", provider: "azure", success: false, ...input.byok },
+                {
+                  credentialType: "system",
+                  error: reported.message,
+                  provider: input.retryProvider ?? "azure",
+                  statusCode: reported.statusCode,
+                  success: false,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  };
+  const upstream = Object.assign(new Error(reported.message), {
+    data,
+    isRetryable: false,
+    name: "AI_APICallError",
+    responseBody: JSON.stringify(data),
+    statusCode: reported.statusCode,
+  });
+  return Object.assign(new Error(reported.message, { cause: upstream }), {
+    isRetryable: false,
+    name: "GatewayInvalidRequestError",
+    statusCode: reported.statusCode,
+    type: reported.type,
+  });
+}
+
+describe("a BYOK failure masked by AI Gateway's system-credential retry", () => {
+  const downloadTimeout = "Unable to download content from the provided URL before the timeout.";
+
+  it("retries when the BYOK attempt failed transiently", () => {
+    expect(
+      classifyModelCallError(
+        maskedByokError({ byok: { error: "Service unavailable", statusCode: 503 } }),
+      ),
+    ).toBe("retry");
+    // A DNS failure reaching the provider carries no status.
+    expect(
+      classifyModelCallError(maskedByokError({ byok: { error: "getaddrinfo ENOTFOUND" } })),
+    ).toBe("retry");
+  });
+
+  it("classifies a BYOK client error as the reported error", () => {
+    expect(
+      classifyModelCallError(
+        maskedByokError({ byok: { error: downloadTimeout, statusCode: 400 } }),
+      ),
+    ).toBe("terminal");
+  });
+
+  it("names the failure by the BYOK attempt, not the Gateway's retry", () => {
+    const error = maskedByokError({
+      byok: { error: downloadTimeout, statusCode: 400 },
+      reported: { message: "Rate limit exceeded", statusCode: 429, type: "rate_limit_exceeded" },
+    });
+
+    expect(modelCallErrorInfo(error).message).toBe(downloadTimeout);
+    expect(extractUpstreamRejectionMessage(error)?.message).toBe(downloadTimeout);
+  });
+
+  it("leaves a fallback to another provider to its own error", () => {
+    const error = maskedByokError({
+      byok: { error: "Service unavailable", statusCode: 503 },
+      retryProvider: "openai",
+    });
+
+    expect(classifyModelCallError(error)).toBe("terminal");
+    expect(modelCallErrorInfo(error).message).not.toBe("Service unavailable");
   });
 });

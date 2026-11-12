@@ -41,6 +41,15 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Review the request and its context against your model provider's content policy.",
   },
   {
+    // A stream chunk that failed the provider adapter's schema, such as an upstream event AI
+    // Gateway relayed without a field the adapter requires. A fresh request gets past it.
+    id: "model-response-malformed",
+    name: "Model response malformed",
+    tags: ["model-provider", "transient"],
+    when: nameIs("AI_TypeValidationError"),
+    message: "The model provider sent a response the SDK could not parse.",
+  },
+  {
     // A 400 that would otherwise end the session; only the refused prompt fails.
     id: "model-request-cyber-policy-refused",
     name: "Model request refused",

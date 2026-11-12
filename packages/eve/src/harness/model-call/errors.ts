@@ -59,6 +59,11 @@ interface ModelCallErrorSignals {
  * `null` when the error carries nothing better than its raw message.
  */
 export function extractUpstreamRejectionMessage(error: unknown): UpstreamRejectionSummary | null {
+  const masked = findMaskedByokFailure(error);
+  if (masked !== undefined) {
+    return { name: "Model provider API error", message: masked.message };
+  }
+
   const signals = readModelCallErrorSignals(error);
 
   // Transient upstream failures (throttles, overloads) keep the generic
@@ -305,6 +310,11 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     return "recoverable";
   }
 
+  // The reported error belongs to AI Gateway's own retry, not the request eve sent.
+  if (findMaskedByokFailure(error)?.transient === true) {
+    return "retry";
+  }
+
   // `APICallError` exposes `isRetryable`, populated by provider
   // adapters that already know what's transient on their side. We
   // read it via duck typing so the check survives a minor-version
@@ -362,6 +372,71 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
   }
 
   return "recoverable";
+}
+
+/** A failed attempt on the caller's own (BYOK) credential that AI Gateway's retry hid. */
+export interface MaskedByokFailure {
+  readonly message: string;
+  readonly transient: boolean;
+}
+
+/**
+ * The BYOK attempt behind an AI Gateway error, when the Gateway retried it on its own (`system`)
+ * credential for the same provider and reported that retry's failure instead. The retry runs on
+ * another account, so it can fail for reasons the request eve sent never had, such as encrypted
+ * items minted on the BYOK credential. A fallback to another provider or model is not masked:
+ * its error is its own.
+ */
+export function findMaskedByokFailure(error: unknown): MaskedByokFailure | undefined {
+  for (const candidate of walkCauseChain(error)) {
+    const attempts = readGatewayProviderAttempts(candidate);
+    if (attempts === undefined) continue;
+    const last = attempts.at(-1);
+    if (!isObject(last) || last.success !== false || last.credentialType !== "system") {
+      return undefined;
+    }
+    const byok = attempts.findLast(
+      (attempt) =>
+        isObject(attempt) &&
+        attempt.provider === last.provider &&
+        attempt.credentialType === "byok" &&
+        attempt.success === false,
+    );
+    if (!isObject(byok)) return undefined;
+    const status = readStatusCode(byok);
+    return {
+      message:
+        readStringField(byok, "error") ??
+        `The model provider request failed${status === undefined ? "" : ` (HTTP ${status})`}.`,
+      transient:
+        status === undefined || status === 408 || status === 409 || status === 429 || status >= 500,
+    };
+  }
+  return undefined;
+}
+
+/** The provider attempts of the last model AI Gateway tried, from an error's response body. */
+function readGatewayProviderAttempts(error: unknown): readonly unknown[] | undefined {
+  let body: unknown = readObjectField(error, "data");
+  if (body === undefined) {
+    const responseBody = readStringField(error, "responseBody");
+    if (responseBody === undefined) return undefined;
+    try {
+      body = JSON.parse(responseBody);
+    } catch {
+      return undefined;
+    }
+  }
+  const routing = readObjectField(
+    readObjectField(readObjectField(body, "providerMetadata"), "gateway"),
+    "routing",
+  );
+  const modelAttempts = routing?.modelAttempts;
+  const lastModelAttempt = Array.isArray(modelAttempts) ? modelAttempts.at(-1) : undefined;
+  const providerAttempts = isObject(lastModelAttempt)
+    ? lastModelAttempt.providerAttempts
+    : undefined;
+  return Array.isArray(providerAttempts) ? providerAttempts : undefined;
 }
 
 function hasRetryableFlag(error: unknown): boolean {
