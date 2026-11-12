@@ -2,6 +2,8 @@
 "eve": patch
 ---
 
-A question that an agent task's child asked before eve 1.0 now reads as a current relayed question: it names the task it came from and carries the child's session, request, and the call it asks about.
+A question or approval that a subagent relayed before eve 1.0 now reads as a current relayed request: it names the task it came from when there is one, and carries the subagent's session, request, and the call it asks about.
+
+A relayed approval no longer reads as an approval of the parent's own subagent call.
 
 Thanks @zackleman for reporting this in #5933.

@@ -634,13 +634,15 @@ class Translator {
               ? { turnId }
               : undefined;
       if (subject === undefined) return [];
-      if (callId !== undefined && request.kind === "tool-approval")
+      const origin = this.originOf(interactionId, action, relayedBy, taskId);
+      // A relayed approval clears the child's call, never the call that serves the child here.
+      if (callId !== undefined && request.kind === "tool-approval" && origin === undefined)
         this.interactionCalls.set(interactionId, callId);
       return [
         {
           data: {
             interactionId,
-            origin: this.originOf(interactionId, action, relayedBy, taskId),
+            origin,
             request: v26InteractionRequest(request),
             subject,
           },

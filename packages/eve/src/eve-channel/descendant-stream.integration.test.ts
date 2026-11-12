@@ -108,6 +108,8 @@ function deployment(origin: string, token: string) {
         },
         async *stream(options): AsyncIterable<SessionStreamEvent> {
           const records = legacy.get(sessionId);
+          // As in production, v26 history converts from its first line whatever the cursor.
+          if (records !== undefined) lineReads.push({ sessionId, startIndex: 0 });
           const events =
             records === undefined
               ? linesOf(histories.get(sessionId)!, at).flatMap((line, position) =>

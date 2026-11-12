@@ -338,6 +338,48 @@ describe("createV26HistoryReader", () => {
       ).toEqual([expect.objectContaining({ origin: origin(1), subject: { callId: "call-2" } })]);
     });
 
+    it("does not clear a subagent call with the approval its child relayed", () => {
+      const subagentCall = delegate(0, "call-1", true).filter(
+        (record) => record.type !== "task.started",
+      );
+      const approval = {
+        action: { callId: "child-gate", input: {}, kind: "tool-call", toolName: "gate" },
+        kind: "tool-approval",
+        options: [{ id: "approve", label: "Approve" }],
+        prompt: "Approve Gate?",
+        requestId: "child-approval",
+      };
+      const { events, violations } = read([
+        { data: {}, meta: { at }, type: "session.started" },
+        ...subagentCall,
+        {
+          data: step(0, { callId: "call-1", requests: [approval] }),
+          meta: { at },
+          type: "input.requested",
+        },
+        {
+          data: step(0, {
+            resolutions: [{ outcome: "approved", requestId: "child-approval", response: {} }],
+          }),
+          meta: { at },
+          type: "input.resolved",
+        },
+        {
+          data: step(0, {
+            result: { callId: "call-1", kind: "tool-result", output: "Done.", toolName: "helper" },
+            status: "completed",
+          }),
+          meta: { at },
+          type: "action.result",
+        },
+      ]);
+      expect(violations).toEqual([]);
+      const started = events.find(
+        (event) => event.type === "call.started" && event.data.callId === "call-1",
+      );
+      expect(started?.data).not.toHaveProperty("clearedBy");
+    });
+
     it("writes no origin for the agent's own question", () => {
       const [own] = opened([
         ...delegate(0, "call-1", true),
