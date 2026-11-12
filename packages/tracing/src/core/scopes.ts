@@ -289,6 +289,8 @@ export function createScopes(input: {
       recordOutputs: actualCapture.emit && sampled && actualCapture.recordOutputs,
     };
     actualData = capturedData(actualData, actualCapture);
+    // A turn's messages are its steps' model calls, not ones it makes outside them, such as a summary.
+    const turnContentParent = parent?.type === "step" ? parent : undefined;
     let finished = binding.finished ?? false;
     let terminalResult = binding.terminal;
     const children = new Map<string, LiveOperation>();
@@ -410,7 +412,7 @@ export function createScopes(input: {
         const content = result.model.content;
         if (capture.recordOutputs && actualCapture.recordOutputs && content !== undefined) {
           const output = serializer.outputMessages(content, result.model.finishReason);
-          if (output !== undefined) parent?.turnContent({ output });
+          if (output !== undefined) turnContentParent?.turnContent({ output });
         }
       }
       operation.end(result.endTimeMs);
@@ -702,7 +704,7 @@ export function createScopes(input: {
       operation.addEvent("step.started", undefined, startTimeMs);
     const inputMessages = prepared.attributes["gen_ai.input.messages"];
     if (!finished && actualData.type === "model" && typeof inputMessages === "string")
-      parent?.turnContent({ input: inputMessages });
+      turnContentParent?.turnContent({ input: inputMessages });
     return runtime;
   }
 

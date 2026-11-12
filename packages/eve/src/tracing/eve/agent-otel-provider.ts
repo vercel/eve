@@ -226,20 +226,21 @@ export function createAgentOtelInstrumentation(
   const onModelCallTerminal = async (
     event: InstrumentationModelCallTerminalEvent,
   ): Promise<void> => {
-    const attempt = steps.get(attemptIdempotencyKey(event.scope));
-    if (event.outcome === "completed" && attempt !== undefined) {
-      // Vercel AI Gateway reports per-call cost and session affinity routing in providerMetadata.gateway;
-      // attributes exist only when it was actually the gateway serving the call.
-      const cost = readGatewayCostData(event.providerMetadata);
-      if (cost !== undefined) attempt.attributes(gatewayCostAttributes(cost));
-      const routing = gatewayRoutingAttributes(event.providerMetadata);
-      if (routing !== undefined) attempt.attributes(routing);
-    }
     const models = modelSpans.get(attemptIdempotencyKey(event.scope));
     const operation = models?.get(event.idempotencyKey);
     models?.delete(event.idempotencyKey);
     // A run that isn't a step has no attempt end to drain its calls.
     if (models?.size === 0) modelSpans.delete(attemptIdempotencyKey(event.scope));
+    // A call outside any step, such as a compaction's, has only its own span to carry its cost.
+    const target = steps.get(attemptIdempotencyKey(event.scope)) ?? operation;
+    if (event.outcome === "completed" && target !== undefined) {
+      // Vercel AI Gateway reports per-call cost and session affinity routing in providerMetadata.gateway;
+      // attributes exist only when it was actually the gateway serving the call.
+      const cost = readGatewayCostData(event.providerMetadata);
+      if (cost !== undefined) target.attributes(gatewayCostAttributes(cost));
+      const routing = gatewayRoutingAttributes(event.providerMetadata);
+      if (routing !== undefined) target.attributes(routing);
+    }
     if (operation === undefined) return;
     if (event.outcome === "failed") await operation.fail(event.error);
     else

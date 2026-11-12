@@ -121,6 +121,7 @@ function session(
           doGenerate: async () => ({
             content: [{ text: summary, type: "text" }],
             finishReason: { raw: undefined, unified: "stop" },
+            providerMetadata: { gateway: { cost: "0.0042" } },
             usage: {
               inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1200, total: 1200 },
               outputTokens: { reasoning: 0, text: 80, total: 80 },
@@ -709,9 +710,14 @@ describe("a session's spans, from its committed lines", () => {
     expect(summary?.attributes).toMatchObject({
       "agent.turn.id": "turn_0",
       "ai.settings.context.eve.compaction.request": "summary",
+      "gen_ai.usage.cost": 0.0042,
       "gen_ai.usage.input_tokens": 1200,
       "gen_ai.usage.output_tokens": 80,
     });
+    // The summary's prompt and reply are not the conversation's, so the turn doesn't take them.
+    const invocation = exported.find((span) => span.name === "invoke_agent weather");
+    expect(invocation?.attributes["gen_ai.input.messages"]).toBeUndefined();
+    expect(invocation?.attributes["gen_ai.output.messages"]).toBeUndefined();
   });
 
   it("fails the step a failed turn's end cuts short", async () => {
