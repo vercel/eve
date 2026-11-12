@@ -89,7 +89,7 @@ export interface ScheduleCollectionDispatchInput {
  *
  * Returns a {@link ScheduleDispatchResult} carrying any sessions the
  * handler started (for telemetry / task-result observability) and the
- * `waitUntil` promises the handler registered. Subscription callbacks resolve
+ * `waitUntil` promises the handler registered. Dynamic schedule callbacks resolve
  * creator auth and await their registered work before returning; their channel
  * sends start fresh, unattended sessions rather than resume a conversation.
  */
