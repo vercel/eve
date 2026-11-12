@@ -434,6 +434,22 @@
       ]
     },
     {
+      "name": "memory/claude-mem",
+      "type": "registry:item",
+      "title": "claude-mem",
+      "description": "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
+      "dependencies": ["claude-mem"],
+      "envVars": { "CLAUDE_MEM_API_KEY": "" },
+      "meta": { "eve": { "requires": ">=0.84.0" } },
+      "files": [
+        {
+          "path": "registry/memory/claude-mem.ts",
+          "type": "registry:file",
+          "target": "agent/memory/claude-mem.ts"
+        }
+      ]
+    },
+    {
       "name": "tool/agent",
       "type": "registry:item",
       "title": "Agent",
