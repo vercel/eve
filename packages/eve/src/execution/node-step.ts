@@ -128,12 +128,14 @@ export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIde
   const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
   const gitBranch = process.env.VERCEL_GIT_COMMIT_REF?.trim();
   const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT?.trim();
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
 
-  if (gitSha || gitBranch || deployedAt) {
+  if (gitSha || gitBranch || deployedAt || deploymentId) {
     return {
       ...identity,
       build: {
         deployedAt: deployedAt || undefined,
+        deploymentId: deploymentId || undefined,
         gitBranch: gitBranch || undefined,
         gitSha: gitSha || undefined,
       },

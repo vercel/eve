@@ -1,3 +1,4 @@
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import type { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveStoppedTurnMessage } from "#execution/cancelled-model-call-batch.js";
@@ -148,6 +149,8 @@ export async function recoverInterruptedStep(input: {
   };
   /** The error the step's last attempt threw, when every attempt failed. */
   readonly failed?: { readonly error: unknown };
+  /** The eve instance running the step, which a turn it opens records. */
+  readonly runtime?: RuntimeIdentity;
 }): Promise<
   | { readonly result: DurableStepResult }
   | { readonly session: HarnessSession; readonly stepInput: HarnessStepInput | undefined }
@@ -281,7 +284,8 @@ export async function recoverInterruptedStep(input: {
   const deliveries = (input.stepInput?.deliveries ?? []).filter(
     ({ deliveryId }) => currentProjection(ctx).view.deliveries[deliveryId]?.status === "admitted",
   );
-  if (deliveries.length > 0) await publish(commitTransitions([receive(view(), { deliveries })]));
+  if (deliveries.length > 0)
+    await publish(commitTransitions([receive(view(), { deliveries, runtime: input.runtime })]));
   const failing = activeTurnIdOf(currentProjection(ctx));
   if (failing === undefined) return finish({ next: null, session });
   session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);

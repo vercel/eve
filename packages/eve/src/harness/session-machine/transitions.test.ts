@@ -18,6 +18,7 @@ import {
   discardAttempt,
   fail,
   matchSignIns,
+  receive,
   relay,
   routeAnswer,
   runnableCalls,
@@ -71,6 +72,40 @@ function runningCall(): HarnessSession {
     { data: { callId: "probe" }, scope: { turnId }, type: "call.started" },
   ]);
 }
+
+describe("receive", () => {
+  it("records the eve instance that runs each turn, which the turn row doesn't keep", () => {
+    const runtime = (deploymentId: string) => ({
+      agentId: "weather",
+      build: { deploymentId, gitSha: "abc123" },
+      eveVersion: "1.0.0",
+    });
+    const turn = (session: HarnessSession, deliveryId: string, deploymentId: string) => {
+      const admitted = withPublished(session, [
+        { data: { deliveryId }, type: "delivery.admitted" },
+      ]);
+      const { events } = receive(viewOf(admitted), {
+        deliveries: [{ deliveryId, parts: [{ kind: "text", text: "Alice asks." }] }],
+        runtime: runtime(deploymentId),
+      });
+      const opened = events.find((event) => event.type === "turn.started")!;
+      const turnId = (opened.data as { readonly turnId: string }).turnId;
+      const settled = withPublished(admitted, [
+        ...events,
+        { data: { outcome: "completed", turnId }, type: "turn.settled" },
+      ]);
+      return { opened, session: settled, turnId };
+    };
+    const first = turn(withPublished(BASE, [{ data: {}, type: "session.started" }]), "d1", "dpl_a");
+    // After a deploy moves the session, its next turn runs on the new deployment.
+    const second = turn(first.session, "d2", "dpl_b");
+    expect(first.opened.data).toMatchObject({ runtime: runtime("dpl_a") });
+    expect(second.opened.data).toMatchObject({ runtime: runtime("dpl_b") });
+    expect(viewOf(second.session).projection.view.turns[second.turnId]).not.toHaveProperty(
+      "runtime",
+    );
+  });
+});
 
 describe("the budget prompt", () => {
   it("refuses an answer that is neither Continue nor Stop, and keeps asking", () => {

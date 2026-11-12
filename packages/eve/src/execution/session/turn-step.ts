@@ -527,7 +527,10 @@ async function runSessionStepBody(
       );
       if (waiting.length === 0) return;
       const received = commitTransitions([
-        receive(sessionView(projection, initialSession.state), { deliveries: waiting }),
+        receive(sessionView(projection, initialSession.state), {
+          deliveries: waiting,
+          runtime: buildRuntimeIdentity(effectiveNode),
+        }),
       ]);
       // The turn is already stopping, so this commit's hooks have nothing left to cancel.
       const emit = createTurnEventHandler({
@@ -591,6 +594,7 @@ async function runSessionStepBody(
             : { delivery: input.input.controlDelivery, kind: input.input.control },
         ctx,
         failed: input.recover,
+        runtime: runtimeIdentity,
         publish: async (events, session) => {
           const scoped = await withContextScope(ctx, session, async (current) => {
             await prepareDefinitions(current);

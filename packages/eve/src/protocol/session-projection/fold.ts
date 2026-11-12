@@ -345,7 +345,8 @@ const LIFECYCLE: Partial<
   "task.ended": { status: "ended", table: "tasks" },
   "task.started": { status: "running", table: "tasks" },
   "turn.settled": { rename: { cause: "endedBy" }, status: "settled", table: "turns" },
-  "turn.started": { omit: ["trace"], status: "running", table: "turns" },
+  // The identity and trace live on the stream line, so projections don't grow with every turn.
+  "turn.started": { omit: ["runtime", "trace"], status: "running", table: "turns" },
 };
 
 const FOLD_FIELDS = new Set([

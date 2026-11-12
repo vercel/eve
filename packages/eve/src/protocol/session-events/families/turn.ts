@@ -2,13 +2,18 @@ import { z } from "#compiled/zod/index.js";
 
 import { cause, conforming, envelopeOf, errorInfo, id, known } from "../common.js";
 import type { Cause, Envelope, ErrorInfo } from "../envelope.js";
-import type { TraceContext } from "./session.js";
+import { type RuntimeIdentity, runtimeIdentity, type TraceContext } from "./session.js";
 
 export interface TurnStartedData {
   readonly turnId: string;
   readonly cause: Cause;
   /** The turn whose context this one continues; `null` after a clear, or for the first turn. */
   readonly follows: string | null;
+  /**
+   * The eve instance that runs the turn. A session moves between deployments only between turns,
+   * so the latest `turn.started` names the deployment of every model call after it.
+   */
+  readonly runtime?: RuntimeIdentity;
   readonly trace?: TraceContext;
 }
 
@@ -65,6 +70,7 @@ export const turnSchemas = {
       z.object({
         cause,
         follows: id.nullable(),
+        runtime: runtimeIdentity.optional(),
         trace: z
           .object({ spanId: z.string(), traceFlags: z.number().int(), traceId: z.string() })
           .optional(),

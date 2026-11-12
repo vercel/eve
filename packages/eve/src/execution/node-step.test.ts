@@ -4,7 +4,7 @@ import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runt
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
-import { createNodeHarnessTools } from "#execution/node-step.js";
+import { buildRuntimeIdentity, createNodeHarnessTools } from "#execution/node-step.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import {
   AGENT_TOOL_DESCRIPTION,
@@ -200,5 +200,16 @@ describe("createNodeHarnessTools", () => {
       expect(tools.get(name)?.execute).toBeUndefined();
       expect(tools.get(name)?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
     }
+  });
+});
+
+describe("buildRuntimeIdentity", () => {
+  it("records the Vercel deployment, which tells apart two deployments of one commit", () => {
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "abc123");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_redeploy");
+    expect(buildRuntimeIdentity(createTestNode(createTestTurnAgent()))).toMatchObject({
+      agentId: "test-agent",
+      build: { deploymentId: "dpl_redeploy", gitSha: "abc123" },
+    });
   });
 });

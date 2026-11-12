@@ -163,7 +163,9 @@ export function receive(
     events.push(fact("session.started", { parent, predecessor, runtime, trace }));
   }
   if (position.turnId === "") {
-    events.push(fact("turn.started", { cause, follows: followedTurn(projection), trace, turnId }));
+    events.push(
+      fact("turn.started", { cause, follows: followedTurn(projection), runtime, trace, turnId }),
+    );
   }
   events.push(...deliveries.map((delivery) => consumed(delivery, turnId)));
   return unchanged(view, events);

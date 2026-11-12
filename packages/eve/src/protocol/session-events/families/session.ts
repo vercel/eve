@@ -3,13 +3,15 @@ import { z } from "#compiled/zod/index.js";
 import { cause, conforming, envelopeOf, errorInfo, id, known } from "../common.js";
 import type { Cause, Envelope, ErrorInfo } from "../envelope.js";
 
-/** The eve instance serving a session, for eval reporters. */
+/** The eve instance serving a session or a turn, for eval reporters and debugging. */
 export interface RuntimeIdentity {
   readonly agentId: string;
   readonly agentName?: string;
   readonly eveVersion: string;
   readonly build?: {
     readonly deployedAt?: string;
+    /** The Vercel deployment, which tells apart two deployments of one commit. */
+    readonly deploymentId?: string;
     readonly gitBranch?: string;
     readonly gitSha?: string;
   };
@@ -56,24 +58,26 @@ export type SessionStarted = Envelope<"session.started", SessionStartedData>;
 export type SessionEnded = Envelope<"session.ended", SessionEndedData>;
 export type SessionFact = SessionStarted | SessionEnded;
 
+/** The schema of a {@link RuntimeIdentity}. */
+export const runtimeIdentity = z.object({
+  agentId: z.string(),
+  agentName: z.string().optional(),
+  build: z
+    .object({
+      deployedAt: z.string().optional(),
+      deploymentId: z.string().optional(),
+      gitBranch: z.string().optional(),
+      gitSha: z.string().optional(),
+    })
+    .optional(),
+  eveVersion: z.string(),
+});
+
 const sessionStartedData = conforming<SessionStartedData>()(
   z.object({
     parent: z.object({ callId: id, sessionId: id }).optional(),
     predecessor: z.object({ sessionId: id }).optional(),
-    runtime: z
-      .object({
-        agentId: z.string(),
-        agentName: z.string().optional(),
-        build: z
-          .object({
-            deployedAt: z.string().optional(),
-            gitBranch: z.string().optional(),
-            gitSha: z.string().optional(),
-          })
-          .optional(),
-        eveVersion: z.string(),
-      })
-      .optional(),
+    runtime: runtimeIdentity.optional(),
     trace: z
       .object({ spanId: z.string(), traceFlags: z.number().int(), traceId: z.string() })
       .optional(),

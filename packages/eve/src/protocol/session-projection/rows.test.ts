@@ -15,7 +15,7 @@ type Undeclared<T extends FactOf<any>["type"], K extends TableName, Renamed = ne
 
 describe("rows", () => {
   it("declare every field the fold copies onto them", () => {
-    expectTypeOf<Undeclared<"turn.started", "turns", "trace">>().toEqualTypeOf<never>();
+    expectTypeOf<Undeclared<"turn.started", "turns", "runtime" | "trace">>().toEqualTypeOf<never>();
     expectTypeOf<Undeclared<"turn.settled", "turns", "cause">>().toEqualTypeOf<never>();
     expectTypeOf<Undeclared<"delivery.admitted", "deliveries">>().toEqualTypeOf<never>();
     expectTypeOf<Undeclared<"delivery.consumed", "deliveries", "history">>().toEqualTypeOf<never>();
