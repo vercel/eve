@@ -28,6 +28,7 @@ import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import { isSlackCodeChannel } from "#public/channels/slack/code-channel.js";
 import { dispatchSignInCancel } from "#public/channels/slack/sign-in-cancel.js";
 import {
+  answerLabelOf,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlResponse,
@@ -569,7 +570,8 @@ async function dispatchBlockAnswers(input: {
   );
   if (response.outcome === "delivered" && input.interaction.ephemeral) {
     // The session can't edit an ephemeral card, so its click shows the answer right away.
-    const label = input.submission.actions[0]?.label ?? "Answered";
+    const [action] = input.submission.actions;
+    const label = (action && answerLabelOf(action)) ?? "Answered";
     await settleHitlCard(input.interaction, input.deps, { label, text: label }).catch(
       (error: unknown) => log.warn("failed to show the answer on an ephemeral card", { error }),
     );

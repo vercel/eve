@@ -245,13 +245,29 @@ describe("slackChannel ephemeral request press", () => {
       .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
   }
 
-  it("replaces the card with the answer through its response URL once delivered", async () => {
+  it.each([
+    {
+      action: {
+        action_id: `${ANSWER_ACTION_PREFIX}${route}q_team`,
+        selected_option: { text: { text: "Acme", type: "plain_text" }, value: "team_acme" },
+        type: "radio_buttons",
+      },
+      name: "a picked option",
+    },
+    {
+      // Keeping the preselected option submits it with the select's **Use Acme** button.
+      action: {
+        action_id: `${ANSWER_ACTION_PREFIX}${route}q_team:button:0`,
+        block_id: "eve_use:q_team",
+        text: { text: "Use Acme", type: "plain_text" },
+        type: "button",
+        value: "team_acme",
+      },
+      name: "the kept preselected option",
+    },
+  ])("replaces the card with $name through its response URL once delivered", async ({ action }) => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
-    const press = ephemeralPress({
-      action_id: `${ANSWER_ACTION_PREFIX}${route}q_team`,
-      selected_option: { text: { text: "Acme", type: "plain_text" }, value: "team_acme" },
-      type: "radio_buttons",
-    });
+    const press = ephemeralPress(action);
 
     await firePost(slackChannel({ credentials: { botToken: "xoxb-test" } }), press, send);
 

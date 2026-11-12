@@ -678,7 +678,7 @@ export default slackChannel({
 
 The callback receives the request (an `Interaction`) and the `SessionContext`. Omit it to keep every request in the thread. For `"ephemeral"` and `"direct-message"`, the thread shows a `Waiting on` note naming the person instead of the request. If eve can't find the Slack user, it logs the request and posts nothing, so private requests fail closed. `onAnswers` or the tool's approval policy still decides who may answer.
 
-Slack can't edit an ephemeral message after posting it, so an ephemeral card changes only when the person uses it. Their click replaces the card with their answer. If a policy refuses the answer, eve posts the card again. Slack doesn't keep ephemeral messages across reloads, so use `"direct-message"` for a request the person may answer later.
+Slack can't edit an ephemeral message after posting it, so an ephemeral card changes only when the person uses it. Their click replaces the card with eve's answered line, not an `interactionCard` rendering. If a policy refuses the answer, eve posts the card again. When the request ends without a click, only the thread note changes. Slack doesn't keep ephemeral messages across reloads, so use `"direct-message"` for a request the person may answer later.
 
 Each approval, question, and budget prompt card updates as its request changes:
 

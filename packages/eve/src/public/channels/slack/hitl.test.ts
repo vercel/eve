@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
+  answerLabelOf,
   buildAnsweredBlocks,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
@@ -431,20 +432,22 @@ describe("renderInteractionBlocks", () => {
       makeRequest({ display: "select", options, initialOptionId: "team_1" }),
     );
 
-    const [widget, button] = (
-      blocks[1] as {
-        elements: [
-          { type: string; initial_option: unknown; options: unknown[] },
-          { action_id: string; style: string; text: { text: string }; value: string },
-        ];
-      }
-    ).elements;
+    const actions = blocks[1] as {
+      block_id: string;
+      elements: [
+        { type: string; initial_option: unknown; options: unknown[] },
+        { action_id: string; style: string; text: { text: string }; value: string },
+      ];
+    };
+    const [widget, button] = actions.elements;
     expect(widget.type).toBe(type);
     expect(widget.initial_option).toEqual(widget.options[1]);
     expect(button).toMatchObject({ style: "primary", text: { text: "Use Team 1" } });
     expect(answerFromSlackAction({ actionId: button.action_id, value: button.value })).toEqual({
       response: { interactionId: "call_abc123", optionId: "team_1" },
     });
+    // A click on the button reads as the option it submits, not as the button's text.
+    expect(answerLabelOf({ blockId: actions.block_id, label: button.text.text })).toBe("Team 1");
   });
 
   it("renders a 'Type your answer' freeform button when the request has no options", () => {

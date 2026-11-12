@@ -229,12 +229,23 @@ async function postPrivateCard(
   if (destination === "ephemeral") {
     // Slack hides an ephemeral in a thread without replies, so the note goes first.
     announcementTs = await announcePrivateRequest(request, reviewer, ctx);
-    delivery = await deliverEphemeralInteraction({
-      card,
-      channelId: channel.slack.channelId,
-      reviewer,
-      thread: channel.thread,
-    });
+    try {
+      delivery = await deliverEphemeralInteraction({
+        card,
+        channelId: channel.slack.channelId,
+        reviewer,
+        thread: channel.thread,
+      });
+    } catch (error) {
+      // Nothing would ever update a note whose card never posted.
+      if (announcementTs !== undefined && channel.state.channelId !== null) {
+        await callSlack(channel, "chat.delete", request.interactionId, {
+          channel: channel.state.channelId,
+          ts: announcementTs,
+        });
+      }
+      throw error;
+    }
   } else {
     delivery = await deliverPrivateInteraction({
       card,

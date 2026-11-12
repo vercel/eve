@@ -482,6 +482,20 @@ describe("Slack input request cards", () => {
     expect(channel.state.interactionCards).toEqual([]);
   });
 
+  it("removes an ephemeral request's thread note when its card can't be posted", async () => {
+    const { ask, calls, channel } = harness({
+      approvalChannel: () => "ephemeral",
+      fails: ({ method }) => (method === "chat.postEphemeral" ? "ratelimited" : undefined),
+    });
+
+    await expect(ask(dayQuestion())).rejects.toThrow("Slack refused the ephemeral");
+
+    expect(calls("chat.delete").map((call) => [call.body.channel, call.body.ts])).toEqual([
+      ["C1", "ts_1"],
+    ]);
+    expect(channel.state.interactionCards ?? []).toEqual([]);
+  });
+
   it("posts an ephemeral approval's controls again when its answer is refused", async () => {
     const { answer, ask, calls, commit } = harness({ approvalChannel: () => "ephemeral" });
     await ask(approval("a_deploy", "deploy", { target: "production" }));
