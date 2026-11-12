@@ -43,11 +43,7 @@ import {
   endRetiredTaskRunsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import {
-  preV27Projection,
-  withProjection,
-  type PreV27Usage,
-} from "#execution/session/pre-v27-checkpoint.js";
+import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
 import type { TaskRunAddress } from "#execution/tasks/table.js";
 import {
   HANDOFF_LEASE_RETENTION,
@@ -265,8 +261,6 @@ interface PreparedSuccessor {
   readonly serializedContext: Record<string, unknown>;
   /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
   readonly importedTurnCount?: number;
-  /** What an owner before v27 counted the session spent. */
-  readonly importedUsage?: PreV27Usage;
   /** Task runs the successor leaves behind, which it ends once it holds the session. */
   readonly retiredTaskRuns?: readonly TaskRunAddress[];
 }
@@ -315,11 +309,10 @@ async function prepareSuccessor(
       serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
     };
   }
-  const { checkpoint, retiredRuns, turnCount, usage } = migration.imported;
+  const { checkpoint, retiredRuns, turnCount } = migration.imported;
   return {
     checkpoint,
     importedTurnCount: turnCount,
-    importedUsage: usage,
     retiredTaskRuns: retiredRuns,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
@@ -335,11 +328,7 @@ async function placeImportedSession(
 ): Promise<PreparedSuccessor> {
   if (prepared.importedTurnCount === undefined) return prepared;
   const tailIndex = await readSessionStreamTailStep({ sessionId });
-  const projection = preV27Projection(
-    tailIndex,
-    prepared.importedTurnCount,
-    prepared.importedUsage,
-  );
+  const projection = preV27Projection(tailIndex, prepared.importedTurnCount);
   return { ...prepared, checkpoint: withProjection(prepared.checkpoint, projection) };
 }
 

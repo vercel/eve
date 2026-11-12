@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
-import { preV27Projection } from "#execution/session/pre-v27-checkpoint.js";
 import { digestOf } from "#definitions/state.js";
 
 function checkpoint(version: number) {
@@ -236,48 +235,6 @@ describe("migrateSessionCheckpoint from an owner before v27", () => {
         kind: "busy",
       });
     });
-  });
-
-  it("carries what the session spent and the budget window Alice approved", () => {
-    const totals = (inputTokens: number, costUsd: number) => ({
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      costUsd,
-      inputTokens,
-      outputTokens: inputTokens / 10,
-      sawCost: true,
-    });
-    const result = migrateSessionCheckpoint(
-      eve083Checkpoint({
-        "eve.harness.reportedSessionUsage": totals(900, 0.9),
-        "eve.harness.sessionUsageWindowIndex": 1,
-        "eve.harness.sessionUsageWindowStart": totals(800, 0.8),
-        "eve.harness.turnUsage": {
-          ...totals(100, 0.1),
-          session: totals(1000, 1),
-          turnId: "turn_2",
-        },
-      }),
-    );
-    if (result.kind !== "pre-v27") throw new Error(JSON.stringify(result));
-    const usage = (inputTokens: number, costUsd: number) => ({
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      costUsd,
-      inputTokens,
-      outputTokens: inputTokens / 10,
-    });
-    const { checkpoint, turnCount, usage: imported } = result.imported;
-    expect(imported).toEqual({
-      total: usage(1000, 1),
-      window: { index: 1, start: usage(800, 0.8) },
-    });
-    expect(checkpoint.sessionState.snapshot.session.state).toEqual({
-      "eve.harness.reportedSessionUsage": usage(900, 0.9),
-    });
-    const projection = preV27Projection(10, turnCount, imported);
-    expect(projection.view.usage.total).toEqual(usage(1000, 1));
-    expect(projection.usageWindow).toMatchObject({ index: 1, start: usage(800, 0.8) });
   });
 });
 

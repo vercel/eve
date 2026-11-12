@@ -10,39 +10,24 @@ import {
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 } from "#context/key-names.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
-import {
-  EARLIER_TURN_USAGE_KEY,
-  REPORTED_USAGE_KEY,
-  earlierUsage,
-} from "#execution/earlier-session-usage.js";
 import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import type { TaskRunAddress } from "#execution/tasks/table.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
-import { withModelUsage } from "#harness/session-usage.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isObject } from "#shared/guards.js";
-import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface PreV27Checkpoint<C = SessionCheckpoint> {
   /** The checkpoint in v27's shape, without its session projection. */
   readonly checkpoint: C;
   /** Turns the earlier owner numbered: the next turn takes the next number. */
   readonly turnCount: number;
-  /** What the earlier owner counted the session spent, so its usage limit keeps counting. */
-  readonly usage?: PreV27Usage;
   /**
    * Runs of idle resumable tasks the import leaves behind. The successor sends each an end
    * control once it holds the session; the model starts a new task on this build when it needs one.
    */
   readonly retiredRuns?: readonly TaskRunAddress[];
-}
-
-export interface PreV27Usage {
-  readonly total: TokenUsage;
-  /** The window the latest approved continuation started, as `limits.sessionUsage` sees it. */
-  readonly window?: { readonly index: number; readonly start: TokenUsage };
 }
 
 export type PreV27CheckpointImport =
@@ -82,21 +67,12 @@ export function importPreV27Checkpoint(
  * The projection of a session whose earlier lines a v27 writer never folded: it writes after
  * `tailIndex`, and its next turn follows the earlier owner's last. An empty stream has not opened.
  */
-export function preV27Projection(
-  tailIndex: number,
-  turnCount: number,
-  usage?: PreV27Usage,
-): SessionProjection {
+export function preV27Projection(tailIndex: number, turnCount: number): SessionProjection {
   const projection = initialSessionProjection();
-  const view = usage === undefined ? projection.view : withModelUsage(projection.view, usage.total);
   return {
     ...projection,
-    // The earlier owner records no budget prompt this build reads: the window keeps only its start.
-    ...(usage?.window !== undefined && {
-      usageWindow: { ...usage.window, interactionId: "pre-v27" },
-    }),
     view: {
-      ...view,
+      ...projection.view,
       position: tailIndex + 1,
       session: {
         status: tailIndex < 0 ? "new" : "open",
@@ -132,8 +108,6 @@ export function withProjection(
 type CheckpointRecord = Record<string, unknown>;
 
 const LEGACY_REMOTE_CALLER_KEY = "eve.legacyRemoteAgentCaller";
-const USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
-const USAGE_WINDOW_INDEX_KEY = "eve.harness.sessionUsageWindowIndex";
 
 function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<CheckpointRecord> {
   const sessionState = readRecord(checkpoint, "sessionState");
@@ -142,8 +116,6 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   const state = session.state === undefined ? {} : readRecord(session, "state");
   const turnCount = readTurnCount(sessionState, state);
   const retiredRuns = retireIdleTasks(state["eve.taskTable"]);
-  const usage = importUsage(state);
-  const reported = earlierUsage(state[REPORTED_USAGE_KEY]);
   // eve 0.69 kept history in the durable snapshot.
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
@@ -184,14 +156,10 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
             continuationToken: session.continuationToken,
             sessionId: session.sessionId,
             ...pick(session, ["outputSchema", "rootSessionId", "sandboxState"]),
-            // Authored and extension state; the earlier build's framework records stay behind,
-            // but for the spend a parent was already told.
-            state: {
-              ...Object.fromEntries(
-                Object.entries(state).filter(([key]) => !key.startsWith("eve.")),
-              ),
-              ...(reported !== undefined && { [REPORTED_USAGE_KEY]: reported }),
-            },
+            // Authored and extension state; the earlier build's framework records stay behind.
+            state: Object.fromEntries(
+              Object.entries(state).filter(([key]) => !key.startsWith("eve.")),
+            ),
           },
         },
         version: DURABLE_SESSION_VERSION,
@@ -200,24 +168,8 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
       version: SESSION_CHECKPOINT_VERSION,
     },
     turnCount,
-    ...(usage !== undefined && { usage }),
     ...(retiredRuns.length > 0 && { retiredRuns }),
   };
-}
-
-/** The session total and approved window the earlier owner counted, as the legacy import reads them. */
-function importUsage(state: CheckpointRecord): PreV27Usage | undefined {
-  const turnUsage = state[EARLIER_TURN_USAGE_KEY];
-  const total = earlierUsage(isObject(turnUsage) ? turnUsage.session : undefined);
-  if (total === undefined) return undefined;
-  const index = state[USAGE_WINDOW_INDEX_KEY];
-  const start = earlierUsage(state[USAGE_WINDOW_START_KEY]);
-  return typeof index === "number" &&
-    Number.isSafeInteger(index) &&
-    index > 0 &&
-    start !== undefined
-    ? { total, window: { index, start } }
-    : { total };
 }
 
 /** Turns the earlier owner numbered, from its projection (eve 0.70+) or its emission state. */
