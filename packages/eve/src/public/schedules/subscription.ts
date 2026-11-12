@@ -235,7 +235,18 @@ export type ScheduleApprovals<TPrepared> = Partial<
 };
 
 /** What `auth` returns: the creator's current attributes, a full context for the creator, or `null`. */
-type ScheduleAuthResult = SessionAuthContext | Pick<SessionAuthContext, "attributes"> | null;
+export type ScheduleAuthResult = SessionAuthContext | Pick<SessionAuthContext, "attributes"> | null;
+
+/**
+ * Controls the schedule that fired an occurrence. Acts without calling `scope`, which authorizes
+ * callers, because an occurrence has none.
+ */
+export interface ScheduleHandle {
+  /** Pauses future runs of the schedule that fired this occurrence. */
+  disable(): Promise<void>;
+  /** Deletes the schedule that fired this occurrence. */
+  delete(): Promise<void>;
+}
 
 /** Execution context; `to` starts fresh, unattended sessions as the resolved creator. */
 export interface DynamicSchedulesRunArgs<TPayload> extends Pick<ScheduleHandlerArgs, "waitUntil"> {
@@ -243,16 +254,8 @@ export interface DynamicSchedulesRunArgs<TPayload> extends Pick<ScheduleHandlerA
   readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly auth: SessionAuthContext;
-  /**
-   * The schedule that fired this occurrence. Acts without calling `scope`, which authorizes
-   * callers, because an occurrence has none.
-   */
-  readonly schedule: {
-    /** Pauses future runs of the schedule that fired this occurrence. */
-    disable(): Promise<void>;
-    /** Deletes the schedule that fired this occurrence. */
-    delete(): Promise<void>;
-  };
+  /** The schedule that fired this occurrence. */
+  readonly schedule: ScheduleHandle;
 }
 
 /** Defines dynamically created schedules whose occurrences invoke authored code. */

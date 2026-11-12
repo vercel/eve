@@ -203,7 +203,7 @@ For fixed cron jobs without runtime management, use [Schedules](../schedules).
 
 `to(channel, target).send(message, options)` runs as the resolved creator and takes no auth argument. `options` takes `context`, `history`, `idempotencyKey`, `outputSchema`, and `title`, as on a route handler's [`to().send()`](../channels/custom#cross-channel-hand-off). It takes no `turnPolicy`, because a send only reaches sessions the schedule started. It always starts a new session with no one present, through one of your channels, even when the target names an existing thread. Those sessions can't wait for approvals or questions, so configure tools to match.
 
-`schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish.
+`schedule` controls the schedule that fired the occurrence. `schedule.disable()` pauses its future runs, and `schedule.delete()` deletes it. Neither one calls `scope`, because an occurrence has no caller to authorize. Neither one stops the current run. On Vercel, a deleted schedule's occurrence isn't retried, so call `schedule.delete()` after the work that must finish. The handle's type, `ScheduleHandle`, is exported from `eve/experimental/schedules`.
 
 ```ts
 async run({ payload, schedule, to }) {
@@ -233,7 +233,7 @@ Callbacks run at least once. Provider retries, including after an `events` handl
 | `null`                      | The occurrence fails without a retry, and `run` isn't called.                                                                         |
 | A thrown error              | The provider retries the occurrence. Throw when a lookup fails, so an outage doesn't read as a denial.                                |
 
-A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead.
+A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/experimental/schedules`.
 
 eve never falls back to app identity. Manual `invoke` runs as the creator, not the caller. Tool and connection authorization still applies during the run.
 
