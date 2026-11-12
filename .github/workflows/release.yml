@@ -241,11 +241,11 @@ jobs:
             gh release edit "eve@$version" --latest
           fi
 
-      # `latest` serves authors who reference the image directly; eve pins its
-      # own tag. The tag comes from the published eve package, not this commit,
-      # so `latest` never points at an unreleased image. Every main run
+      # `latest` serves authors who reference an image directly; eve pins its
+      # own tags. The tags come from the published eve package, not this
+      # commit, so `latest` never points at an unreleased image. Every main run
       # converges, so a failed move heals on the next push.
-      - name: Point latest sandbox image tags at the released eve image
+      - name: Point latest sandbox image tags at the released eve images
         if: github.ref == 'refs/heads/main'
         timeout-minutes: 20
         env:
@@ -271,59 +271,57 @@ jobs:
             sleep 10
           done
 
-          tag="$(curl -fsSL "$tarball" | tar -xzO --wildcards 'package/dist/*.js' | { grep -aoE 'dockerfile-[0-9a-f]{12}' || true; } | sort -u)"
-          if [[ -z "$tag" ]]; then
-            echo "eve@${version} predates content-tagged sandbox images; leaving latest unchanged."
-            exit 0
-          fi
-          if [[ "$tag" == *$'\n'* ]]; then
-            echo "::error::eve@${version} contains more than one sandbox image tag: ${tag//$'\n'/, }" >&2
-            exit 1
-          fi
+          dist="$(mktemp)"
+          curl -fsSL "$tarball" | tar -xzO --wildcards 'package/dist/*.js' >"$dist"
+
+          # Prints the one tag matching a pattern in the released package, or
+          # nothing when the package predates that image.
+          pinned_tag() {
+            local found
+            found="$({ grep -aowE "$1" "$dist" || true; } | sort -u)"
+            if [[ "$found" == *$'\n'* ]]; then
+              echo "::error::eve@${version} contains more than one sandbox image tag: ${found//$'\n'/, }" >&2
+              return 1
+            fi
+            printf '%s' "$found"
+          }
 
           # Retag with buildx rather than skopeo: skopeo annotates indexes of
           # zstd layers, which `--preserve-digests` rejects
           # (containers/skopeo#2627). With one source, buildx pushes the source
           # manifest bytes unchanged; `--prefer-index=false` keeps VCR's
           # single-platform manifest from being wrapped in an index.
-          for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
+          point_latest() {
+            local image="$1" tag="$2" wanted current moved
             wanted="$(docker buildx imagetools inspect --raw "${image}:${tag}" | sha256sum)"
             current="$(docker buildx imagetools inspect --raw "${image}:latest" 2>/dev/null | sha256sum || true)"
             if [[ "$wanted" == "$current" ]]; then
               echo "${image}:latest already serves ${tag}."
-            else
-              docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${tag}"
-              moved="$(docker buildx imagetools inspect --raw "${image}:latest" | sha256sum)"
-              if [[ "$moved" != "$wanted" ]]; then
-                echo "::error::${image}:latest does not match ${image}:${tag} byte for byte after retagging." >&2
-                exit 1
-              fi
-              echo "Moved ${image}:latest to ${tag} (eve@${version})."
+              return
             fi
+            docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${tag}"
+            moved="$(docker buildx imagetools inspect --raw "${image}:latest" | sha256sum)"
+            if [[ "$moved" != "$wanted" ]]; then
+              echo "::error::${image}:latest does not match ${image}:${tag} byte for byte after retagging." >&2
+              exit 1
+            fi
+            echo "Moved ${image}:latest to ${tag} (eve@${version})."
+          }
+
+          tag="$(pinned_tag 'dockerfile-[0-9a-f]{12}')"
+          if [[ -z "$tag" ]]; then
+            echo "eve@${version} predates content-tagged sandbox images; leaving latest unchanged."
+            exit 0
+          fi
+          for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
+            point_latest "$image" "$tag"
           done
 
-      # No eve code pins the eve-git image, so `latest` follows main: it moves
-      # to the tag this commit's Dockerfiles produce, once that tag is published.
-      - name: Point latest eve-git image tags at the newest eve-git image
-        if: github.ref == 'refs/heads/main'
-        timeout-minutes: 20
-        env:
-          GIT_TAG: ${{ steps.image-tags.outputs.git-tag }}
-        run: |
-          set -euo pipefail
-
+          git_tag="$(pinned_tag 'git-[0-9a-f]{12}')"
+          if [[ -z "$git_tag" ]]; then
+            echo "eve@${version} predates the eve-git image; leaving its latest unchanged."
+            exit 0
+          fi
           for image in "$GHCR_GIT_IMAGE" "$VCR_GIT_IMAGE"; do
-            wanted="$(docker buildx imagetools inspect --raw "${image}:${GIT_TAG}" | sha256sum)"
-            current="$(docker buildx imagetools inspect --raw "${image}:latest" 2>/dev/null | sha256sum || true)"
-            if [[ "$wanted" == "$current" ]]; then
-              echo "${image}:latest already serves ${GIT_TAG}."
-            else
-              docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${GIT_TAG}"
-              moved="$(docker buildx imagetools inspect --raw "${image}:latest" | sha256sum)"
-              if [[ "$moved" != "$wanted" ]]; then
-                echo "::error::${image}:latest does not match ${image}:${GIT_TAG} byte for byte after retagging." >&2
-                exit 1
-              fi
-              echo "Moved ${image}:latest to ${GIT_TAG}."
-            fi
+            point_latest "$image" "$git_tag"
           done

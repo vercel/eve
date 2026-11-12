@@ -59,6 +59,21 @@ Set `image`, `source`, `tags`, project credentials, and `fetch` on the environme
 
 If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, or it stopped and its snapshot expired, eve runs the selector again to start a fresh sandbox. Files from the old sandbox are not kept.
 
+## The eve-git image
+
+eve's [default image](/docs/sandbox/docker#eves-default-image) doesn't include the GitHub CLI (`gh`). To start sandboxes from the default image plus `gh`, set `image` to `VERCEL_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/vercel`. Each eve release pins its tag, and `installCodeTooling` from `eve/extensions/code/sandbox` then finds `gh` instead of installing it with `apt-get`.
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { VERCEL_EVE_GIT_SANDBOX_IMAGE, VercelSandbox } from "eve/sandbox/vercel";
+
+const environment = VercelSandbox.environment({ image: VERCEL_EVE_GIT_SANDBOX_IMAGE });
+
+export default defineSandbox(() => environment.open());
+```
+
+Use the exported constant instead of `vcr.vercel.com/vercel/eve/git:latest`. The template key includes the image string, not the image's contents, so a snapshot built from `:latest` is reused after `latest` moves and never picks up the new image.
+
 ## Snapshot preparation
 
 During build, eve prepares its base runtime in a temporary Vercel Sandbox, writes managed workspace and skill files, and runs the authored `prepare` callback. A `prepare` callback that breaks the base runtime fails the build. eve creates each new session sandbox from the captured snapshot.
