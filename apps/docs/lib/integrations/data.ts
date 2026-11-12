@@ -2109,14 +2109,24 @@ import { claudeMem } from "claude-mem/eve";
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY });
+
 export default defineMemory({
   description: "Recall and save durable context for the current user.",
-  provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY }),
+  provider: {
+    ...provider,
+    // get_observations fetches by ID across every project the key can see, so it
+    // would let one principal read another's memory through the shared key.
+    async tools(context) {
+      const { get_observations: _unscoped, ...tools } = (await provider.tools?.(context)) ?? {};
+      return tools;
+    },
+  },
   scope: byPrincipal,
 });
 \`\`\`
 
-The filename creates the \`claude-mem\` slot. Before every turn, the provider adds the newest memory in this scope's project as session context and recalls records from that project that match the user's message. The model also gets \`claude-mem__search\`, \`claude-mem__timeline\`, and \`claude-mem__get_observations\` to look further back, and \`claude-mem__remember\` to save a note. Saving and recording need a Pro key with write access. With a read-only key, pass \`capture: false\`.`,
+The filename creates the \`claude-mem\` slot. Before every turn, the provider adds the newest memory in this scope's project as session context and recalls records from that project that match the user's message. The model also gets \`claude-mem__search\` and \`claude-mem__timeline\` to look further back, and \`claude-mem__remember\` to save a note. The registry omits the provider's \`get_observations\` tool: it fetches observations by ID across every project the key can see, with no project filter, so a caller with another principal's observation ID could read that memory through the shared key. Saving and recording need a Pro key with write access. With a read-only key, pass \`capture: false\`.`,
     configure: `By default, each eve scope reads and writes its own claude-mem project, derived from eve's scope key, and recording is on. After each completed turn, the provider sends the prompt, each tool call, and a turn summary to cmem.ai. Each recorded tool call and summary spends the key owner's cmem.ai observer allowance, for every caller the scope admits. Pass \`capture: false\` to keep recall, search, and \`remember\` without recording:
 
 \`\`\`ts title="agent/memory/claude-mem.ts"
@@ -2125,7 +2135,7 @@ provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY, capture: false }),
 
 Before a turn is recorded or recalled, the provider removes \`<private>\` regions and redacts secret-shaped text. Notes saved with \`remember\` and model-written \`search\` queries are sent as written. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
 
-To recall work from Claude Code, Codex, and your other claude-mem clients, set \`searchAllProjects: true\`. Session context, recall, \`search\`, and \`timeline\` then read every project the key can see. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. \`get_observations\` fetches by ID across the key's whole memory regardless of project; give callers separate keys when they must never see each other's memory. Other options are \`project\` and \`baseUrl\`.
+To recall work from Claude Code, Codex, and your other claude-mem clients, set \`searchAllProjects: true\`. Session context, recall, \`search\`, and \`timeline\` then read every project the key can see. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. A single-owner agent can also keep \`get_observations\` by using \`claudeMem(...)\` directly as the provider; follow the owner-only \`scope\` in the [claude-mem agent template](https://github.com/thedotmack/claude-mem/tree/main/integrations/eve/template). Do not restore it while the scope admits more than one principal. Other options are \`project\` and \`baseUrl\`.
 
 Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source control. See the [claude-mem eve guide](https://docs.claude-mem.ai/eve-integration) for the one-click personal agent template, owner-only scoping, and the full option and tool reference.`,
   },

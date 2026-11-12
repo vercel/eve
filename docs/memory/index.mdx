@@ -298,12 +298,25 @@ import { claudeMem } from "claude-mem/eve";
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY });
+
 export default defineMemory({
   description: "Recall and save durable context for the current user.",
-  provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY }),
+  provider: {
+    ...provider,
+    // get_observations fetches by ID across every project the key can see, so it
+    // would let one principal read another's memory through the shared key.
+    async tools(context) {
+      const { get_observations: _unscoped, ...tools } = (await provider.tools?.(context)) ?? {};
+      return tools;
+    },
+  },
   scope: byPrincipal,
 });
 ```
+
+The slot omits the provider's `get_observations` tool, which has no project filter
+and would let one caller read another caller's observations by ID.
 
 Recording spends the key owner's cmem.ai allowance for every caller and needs a
 key with write access. Pass `capture: false` to turn it off. To recall your Claude

@@ -120,6 +120,12 @@ for (const item of items) {
     if (item.meta?.eve?.requires !== ">=0.84.0") {
       throw new Error('Registry item "memory/claude-mem" must require eve >=0.84.0.');
     }
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (!/get_observations:\s*_unscoped/.test(source)) {
+      throw new Error(
+        'Registry item "memory/claude-mem" must omit the unscoped get_observations tool.',
+      );
+    }
     if (!("CLAUDE_MEM_API_KEY" in (item.envVars ?? {}))) {
       throw new Error(
         'Registry item "memory/claude-mem" must declare CLAUDE_MEM_API_KEY as an environment variable.',
