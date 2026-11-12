@@ -49,18 +49,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * runs, so the turn decides once: its tool calls, steering, and compaction don't decide again.
  */
 function turnState(turn: DynamicTurn): TurnState {
-  const input = turnInputText(turn);
-  // Longer input can't be routed.
-  return { input: input.length > MAX_ROUTING_CHARACTERS ? null : input, turnId: turn.id };
+  return { input: turnInputText(turn), turnId: turn.id };
 }
 
-const MAX_ROUTING_CHARACTERS = 16_000;
-
-type TurnState = { readonly input: string | null; readonly turnId: string };
+type TurnState = { readonly input: string; readonly turnId: string };
 
 /**
  * What the decision reads: the turn's input, after up to seven earlier user and assistant text
- * messages from before it, capped at 16,000 characters.
+ * messages from before it. The decision provider enforces its input limits.
  */
 function routingState(
   turn: TurnState,
@@ -85,18 +81,11 @@ function routingState(
       break;
     }
   }
-  if (turn.input === null) {
-    throw new Error("The latest message is too long for auto routing.");
-  }
   const messages: { role: string; text: string }[] = turn.input.trim()
     ? [{ role: "user", text: turn.input }]
     : [];
-  let characters = turn.input.length;
   for (let index = end - 1; index >= 0 && messages.length < 8; index--) {
-    const message = texts[index]!;
-    if (message.text.length + characters > MAX_ROUTING_CHARACTERS) break;
-    characters += message.text.length;
-    messages.unshift(message);
+    messages.unshift(texts[index]!);
   }
   return { messages };
 }
