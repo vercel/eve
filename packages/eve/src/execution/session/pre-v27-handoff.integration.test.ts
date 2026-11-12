@@ -14,7 +14,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import {
-  parkedAnchorWorkflow,
+  parkedTaskRunWorkflow,
   sessionCommandInboxWorkflow,
 } from "#internal/testing/session-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -92,7 +92,7 @@ it("moves a session past an idle subagent and ends the subagent's run on the ear
   await runtime.run(async () => {
     // The helper answered Alice earlier; on 0.83 its run stays parked on its control hook.
     const hookToken = `helper-control:${crypto.randomUUID()}`;
-    const helper = await start(parkedAnchorWorkflow, [{ token: hookToken }]);
+    const helper = await start(parkedTaskRunWorkflow, [{ token: hookToken }]);
     await waitForHook(helper, { token: hookToken });
     const task = {
       calls: [],
@@ -113,8 +113,8 @@ it("moves a session past an idle subagent and ends the subagent's run on the ear
       await readTurn(sessionId, KITCHEN_SINK.length);
       const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
-      // The successor told the old run to end.
-      await expect(helper.returnValue).resolves.toBeUndefined();
+      // The successor told the old run to end; a cancel would leave a resumable task parked.
+      await expect(helper.returnValue).resolves.toMatchObject({ kind: "end" });
     } finally {
       await successor.cancel().catch(() => {});
       await owner.cancel().catch(() => {});
