@@ -57,9 +57,11 @@ its turn is therefore a new task, named by its own delivery.
 - **What a status shows.** A failure keeps its first line and support id, since an error's message
   can carry an upstream page or stack frames. `toolActivity: false` keeps tool names out of
   working statuses, for agents whose callers are another organization's.
-- **Streams close at a pause.** `SubscribeToTask` ends at a terminal or interrupted state, as a
-  streaming send does (§11.7), so a client that waits for a stream's end to act doesn't wait on a
-  question it has to answer.
+- **Streams close at the next pause.** `SubscribeToTask` ends at a terminal state (§3.1.6) or at
+  its next interrupted state, as a streaming send does (§11.7), so a client that waits for a
+  stream's end to act doesn't wait on a question it has to answer. One that opens on a paused task
+  follows it past that pause: the TCK's STREAM-SUB-002 subscribes to an `INPUT_REQUIRED` task,
+  answers it, and requires the stream to stay open until it completes.
 - **Ownership.** Sessions are read through `readOwnedInvocationRun`, shared with the MCP channel;
   unknown, expired, and foreign tasks are all `TaskNotFoundError`. The public card derives
   `securitySchemes` from the auth policy without calling it (`admitsAnonymousCallers`,

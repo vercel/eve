@@ -114,11 +114,11 @@ The response's `result.task` carries the `id` and `contextId` to use in later ca
 | `GetTask`              | Reads a task. `historyLength` limits the user messages in `history`.                                                                          |
 | `ListTasks`            | Lists one context's tasks, newest status first, with cursor pagination. `contextId` is required.                                              |
 | `CancelTask`           | Cancels a working or interrupted task, then waits up to five seconds for it to reach `TASK_STATE_CANCELED`.                                   |
-| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal or interrupted.                                                       |
+| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal, or until its next interruption.                                      |
 
 A blocking `SendMessage` can't wait longer than one request. When `maxBlockingMs` passes first, eve returns the task as it is, usually `TASK_STATE_WORKING`; call `GetTask` or `SubscribeToTask` to follow it. For long tasks, prefer `SendStreamingMessage`.
 
-A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state. Like a streaming send, a subscription closes when the task is interrupted: answer the question, then subscribe again to follow the task on.
+A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state. Like a streaming send, a subscription closes when the task is next interrupted. A subscription that opens on an interrupted task stays open through that pause, so you can answer it and watch the task continue.
 
 ## Answer questions and approvals
 

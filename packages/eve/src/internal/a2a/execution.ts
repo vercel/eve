@@ -155,21 +155,25 @@ export class A2aTaskExecution {
   }
 
   /**
-   * `SubscribeToTask`: the task now, then its changes until it is terminal or interrupted, as a
-   * streaming send ends (A2A §11.7). A client answers an interrupted task, then subscribes again.
+   * `SubscribeToTask`: the task now, then its changes until it is terminal (A2A §3.1.6) or reaches
+   * its next interrupted state, as a streaming send ends there (§11.7). A task interrupted when the
+   * subscription opens is followed past that pause, which the subscriber may be about to answer.
    */
   async subscribe(
     request: SubscribeToTaskRequest,
     call: A2aCallContext,
   ): Promise<AsyncIterable<StreamResponse>> {
     const { ref, view } = await this.#readTask(request.id, call.auth);
-    const task = projectTask(view, ref, { historyLength: 0 });
+    const options = this.#projection(call);
+    const task = projectTask(view, ref, { ...options, historyLength: 0 });
     if (isTerminalState(task.status.state)) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.unsupportedOperation, "Task is already terminal.");
     }
-    return this.#stream({ deliveryId: ref.deliveryId, ref }, this.#projection(call), call.signal, {
-      closeOnInterrupt: true,
-    });
+    // The pause it opened on doesn't end the stream; one that differs from it does.
+    const sent: SentDelivery = isSettledForBlocking(task.status.state)
+      ? { answering: statusKey(task), deliveryId: ref.deliveryId, ref }
+      : { deliveryId: ref.deliveryId, ref };
+    return this.#stream(sent, options, call.signal, { closeOnInterrupt: true });
   }
 
   async getTask(request: GetTaskRequest, call: A2aCallContext): Promise<Task> {
@@ -578,7 +582,10 @@ interface SentDelivery {
   readonly deliveryId: string;
   /** It continued `ref` from outside: it may have started a task of its own instead. */
   readonly followUp?: boolean;
-  /** The interrupted status (`statusKey`) the message answers, when it continued one. */
+  /**
+   * The interrupted status (`statusKey`) the message answers, when it continued one, or the one a
+   * subscription opened on: reaching it again isn't news.
+   */
   readonly answering?: string;
   /** The session as delivering the message last read it, when it did. */
   readonly view?: SessionView;

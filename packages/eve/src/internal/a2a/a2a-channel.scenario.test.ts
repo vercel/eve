@@ -507,16 +507,21 @@ describe("A2A channel", () => {
       );
       const first = requiredRecord(interrupted[0]?.task, "task");
 
-      // Subscribing to a paused task shows it, then closes, as a streaming send does at a pause.
-      const atPause = await streamEvents("alice", "SubscribeToTask", { id: first.id });
-      expect(atPause).toHaveLength(1);
-      expect(taskState(atPause[0])).toBe("TASK_STATE_INPUT_REQUIRED");
+      // A subscription opened at a pause follows the answer on, to the task's end.
+      const subscription = streamEvents("alice", "SubscribeToTask", { id: first.id });
+      // Let the subscription open before the answer lands; it must report the change either way.
+      await new Promise((resolve) => setTimeout(resolve, 500));
       await sendTask("alice", {
         message: { ...userMessage("s-3", "Yes"), contextId: first.contextId, taskId: first.id },
       });
+      const answered = await subscription;
+      expect(Object.keys(answered[0] ?? {})).toEqual(["task"]);
+      expect(answered.at(-1)).toMatchObject({
+        statusUpdate: { status: { state: "TASK_STATE_COMPLETED" }, taskId: first.id },
+      });
       expect(rpcErrorCode(await rpc("alice", "SubscribeToTask", { id: first.id }))).toBe(-32004);
 
-      // A subscription follows a working task to its next pause, then closes there.
+      // One opened on a working task closes at its next pause, as a streaming send does.
       const working = await sendTask("alice", {
         configuration: { returnImmediately: true },
         message: userMessage("s-4", "A2A-SLOWASK"),
