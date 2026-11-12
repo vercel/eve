@@ -18,6 +18,7 @@ const step = (input: { readonly window?: number; readonly thresholdPercent?: num
 describe("compactionConfig", () => {
   it("compacts past a share of the model's context window", () => {
     expect(compactionConfig(step({ window: 1_000_000 }))).toEqual({
+      contextWindowTokens: 1_000_000,
       lastKnownInputTokens: 321,
       lastKnownPromptMessageCount: 7,
       recentWindowSize: 10,

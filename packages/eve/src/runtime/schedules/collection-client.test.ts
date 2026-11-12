@@ -51,7 +51,7 @@ function setup() {
 }
 const input = { name: "report", expression: { type: "delay" as const, minutes: 5 }, payload };
 
-describe("schedule subscription client", () => {
+describe("dynamic schedules client", () => {
   it("allows repeated display names while returning distinct management names", async () => {
     const { client } = setup();
     const first = await client.create(input);

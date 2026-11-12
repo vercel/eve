@@ -63,6 +63,7 @@ import { initialSessionProjection, type SessionProjection } from "#protocol/sess
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { endSession } from "#harness/session-machine/deliveries.js";
+import { SessionStreamWriteError } from "#harness/session-stream-write-error.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { readSessionAuth } from "#context/session-auth.js";
@@ -652,7 +653,9 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
   };
   return {
     async write(bytes) {
-      await streamWriter.write(bytes);
+      await streamWriter.write(bytes).catch((error: unknown) => {
+        throw new SessionStreamWriteError(error);
+      });
     },
     close: async () => {
       try {

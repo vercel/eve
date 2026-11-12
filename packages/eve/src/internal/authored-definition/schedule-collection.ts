@@ -35,6 +35,7 @@ const PROVIDER_METHODS = PROVIDER_KEYS.filter(
   (key): key is Exclude<(typeof PROVIDER_KEYS)[number], "kind"> => key !== "kind",
 );
 const DEFINITION_KEYS = [
+  "id",
   "description",
   "provider",
   "scope",
@@ -47,6 +48,9 @@ const DEFINITION_KEYS = [
   "approval",
 ] as const;
 
+// A path-derived name joins file segments with "/"; the rest is what a tool name accepts.
+const SCHEDULE_COLLECTION_ID_PATTERN = /^(?=.{1,64}$)[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/u;
+
 export function normalizeScheduleCollectionDefinition(
   value: unknown,
   message: string,
@@ -54,6 +58,13 @@ export function normalizeScheduleCollectionDefinition(
   if (!isScheduleCollectionDefinition(value)) throw new Error(message);
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(record, DEFINITION_KEYS, message);
+  if (
+    record.id !== undefined &&
+    (typeof record.id !== "string" || !SCHEDULE_COLLECTION_ID_PATTERN.test(record.id))
+  )
+    throw new Error(
+      `${message} "id" must be 1 to 64 ASCII letters, digits, underscores, and dashes, with "/" only between segments.`,
+    );
   if (
     record.description !== undefined &&
     (typeof record.description !== "string" || record.description.trim() === "")

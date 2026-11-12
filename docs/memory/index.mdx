@@ -120,6 +120,22 @@ Read the caller's identity from trusted authentication or channel metadata,
 never from model input. Each time `scope` returns `null`, eve turns off the
 slot. It skips the provider and its tools, and it never falls back to a shared scope.
 
+To share one memory with everyone in a Slack channel or another shared place,
+return the conversation's [space](/docs/channels#spaces):
+
+```ts title="agent/memory/channel.ts"
+import { defineMemory } from "eve/memory";
+import { fileMemory } from "eve/memory/file";
+
+export default defineMemory({
+  provider: fileMemory(),
+  scope: (ctx) => {
+    const space = ctx.conversation?.space;
+    return space?.type === "shared" ? space.id : null;
+  },
+});
+```
+
 `byPrincipal` from `eve/memory/scope` covers the common case. It gives each
 signed-in caller from `auth.current` separate memory. It turns memory off for
 anonymous callers and for runtime callers such as schedules. In local development, it

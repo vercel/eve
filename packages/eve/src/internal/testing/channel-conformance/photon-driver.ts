@@ -104,6 +104,7 @@ export function photonDriver(): ChannelDriver {
 
   return {
     name: "photon",
+    space: { id: `imessage:${chatGuid}`, type: "direct", visibility: "private" },
     personId: PERSON,
     capabilities: ["attachments", "text-replies"],
     surface: "private",

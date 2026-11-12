@@ -43,6 +43,8 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
+import { stopRuns } from "#execution/stop-runs.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 
 const log = createLogger("execution.handoff");
 
@@ -352,4 +354,24 @@ export async function readSessionStreamTailStep(input: {
 }): Promise<number> {
   "use step";
   return await readSessionStreamTailIndex(input.sessionId);
+}
+
+/**
+ * Ends the runs of tasks a successor retired, so a subagent the model calls again runs this
+ * build. Doesn't wait for them to end; a run that can't be told is cancelled outright.
+ */
+export async function endRetiredTaskRunsStep(input: {
+  readonly runs: readonly TaskRunAddress[];
+  readonly sessionId: string;
+}): Promise<void> {
+  "use step";
+  log.info("ending task runs retired by a session handoff", {
+    runIds: input.runs.map((run) => run.runId),
+    sessionId: input.sessionId,
+  });
+  await stopRuns(
+    input.runs.map((run) => ({ ends: true, run })),
+    { kind: "end", reason: "The session moved to a new deployment." },
+    { waitForEnd: false },
+  );
 }

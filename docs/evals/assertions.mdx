@@ -29,30 +29,7 @@ Scoped assertions take no value and are gates by default. Call them on `t` to ch
 
 `succeeded()` passes when the session ended or is waiting for the next message. It fails when the run failed, an event reports an error, or the run is parked. Structured output assertions exist only on turns and sessions, where one output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
 
-`awaitingInput()` passes whenever the run parked, whatever it waits for. To check what it waits for, read the open requests from the turn's view with `openInteractions` from `eve/events`, the same selector a frontend uses, and grade them with [`t.check`](#value-assertions-with-tcheck). This eval passes when the turn finishes, or when it parks only on approvals for the `deploy` tool:
-
-```ts
-import { openInteractions } from "eve/events";
-import { satisfies } from "eve/evals/expect";
-
-const turn = await t.send("Triage the new GitHub issues.");
-if (turn.status === "awaiting-input") {
-  const open = openInteractions(turn.view);
-  t.check(
-    open,
-    satisfies(
-      (rows: typeof open) =>
-        rows.length > 0 &&
-        rows.every((row) => row.request.kind === "approval" && row.call?.name === "deploy"),
-      "parked only on deploy approvals",
-    ),
-  );
-} else {
-  turn.succeeded();
-}
-```
-
-Keep the `rows.length > 0` check: `every` passes on an empty list, and the list is empty when the eval didn't read the events that opened the requests, such as after attaching at a later `startIndex`.
+`awaitingInput()` passes whenever the run parked, whatever it waits for. To check what it waits for, [select the open interactions from its view](#check-what-a-parked-turn-waits-for).
 
 ```ts
 await t.send("What is the weather in Brooklyn?");
@@ -77,6 +54,64 @@ attached.messageIncludes("Sunny");
 A call through [`eve__tool`](../concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported under the name and input of the tool it reaches, such as `linear__list_issues`. Assert on that tool. `eve__search` calls count toward `t.usedNoTools()` and `t.maxToolCalls(n)`; skill loads don't.
 
 The tool-name assertions and `turn.requireToolCall` throw a `TypeError` for `eve__tool`, `eve__skill`, and built-in names such as `load_skill`. The error says what to assert instead. eve accepts a name like `load_skill` when the root agent declares a tool by that name or has a dynamic tool resolver.
+
+## Assert on session state with selectors
+
+Whenever an eval has a view and needs to know what is happening in the session, use selectors from `eve/events`. Read `turn.view`, `session.view`, or `live.view`, select the facts you need, and grade them with `t.check`, `t.require`, or `t.score`. These are the same selectors used in hooks, channels, dynamic capabilities, and clients, not an eval-specific API.
+
+Keep scoped assertions such as `turn.calledTool(...)` when they already express the check. Selectors let you compose checks over calls, tasks, replies, interactions, usage, and other recorded state without rebuilding it from events. For example, this eval requires at least one task and checks that every observed task ended successfully:
+
+```ts
+import { tasks } from "eve/events";
+import { satisfies } from "eve/evals/expect";
+
+const turn = await t.send("Run the report tasks and wait for them to finish.");
+turn.succeeded();
+const observed = tasks(turn.view);
+t.check(
+  observed,
+  satisfies(
+    (rows: typeof observed) =>
+      rows.length > 0 && rows.every((row) => row.status === "ended" && row.outcome === "completed"),
+    "all report tasks ended successfully",
+  ),
+);
+```
+
+Keep these scope rules in mind:
+
+- `turn.view` is a snapshot of the whole session when the turn returned, not a view filtered to that turn. Filter by turn ID for turn-specific checks. `activeTurn` returns only an open turn, so don't use it to find a completed one.
+- A view knows only the events its reader observed. Attaching at a later `startIndex` can omit the events that opened a call or request.
+- Each view belongs to one session. Run-level assertions on `t` can span several sessions; check each session's view separately.
+
+See [Session views & selectors](../concepts/session-views-and-selectors) for the full selector catalog and scope guarantees.
+
+### Check what a parked turn waits for
+
+`awaitingInput()` checks that a run parked, not why. Select the open requests with `openInteractions` and check their kinds, associated calls, or answers. This eval passes when the turn finishes, or when it parks only on approvals for the `deploy` tool:
+
+```ts
+import { openInteractions } from "eve/events";
+import { satisfies } from "eve/evals/expect";
+
+const turn = await t.send("Triage the new GitHub issues.");
+if (turn.status === "awaiting-input") {
+  const open = openInteractions(turn.view);
+  t.check(
+    open,
+    satisfies(
+      (rows: typeof open) =>
+        rows.length > 0 &&
+        rows.every((row) => row.request.kind === "approval" && row.call?.name === "deploy"),
+      "parked only on deploy approvals",
+    ),
+  );
+} else {
+  turn.succeeded();
+}
+```
+
+Keep the `rows.length > 0` check: `every` passes on an empty list, and the list is empty when the eval didn't read the events that opened the requests. Open doesn't mean unanswered: a request can already have an `answer` while eve still processes it.
 
 ## Value assertions with `t.check`
 
@@ -199,9 +234,7 @@ const request = session.requireInteraction({
 
 ## Run state and derived facts
 
-Assertions read what happened from `session.events`: tool calls with their name, input, output, and status, subagent calls, and approvals and questions.
-
-The event assertions match by presence, absence, a numeric or predicate count, partial event data, and order:
+For custom checks about where the session stands, [query a view with selectors](#assert-on-session-state-with-selectors). Use event assertions when an event's presence, payload, count, or ordering is itself the contract under test:
 
 ```ts
 turn.notEvent("content.completed", { data: { kind: "result" } });
@@ -211,40 +244,42 @@ turn.eventOrder([
 ]);
 ```
 
-To check a rule that spans several events, use `eventsSatisfy`:
+For a custom predicate over event-level information, use `eventsSatisfy`. For example, check that at least one content part streamed before it completed:
 
 ```ts
-t.eventsSatisfy("assistant reply includes the marker", (events) =>
+t.eventsSatisfy("content streamed before completion", (events) =>
   events.some(
-    (e) =>
-      e.type === "content.completed" &&
-      e.data.phase === "reply" &&
-      typeof e.data.value === "string" &&
-      e.data.value.includes(marker),
+    (event, index) =>
+      event.type === "content.completed" &&
+      events
+        .slice(0, index)
+        .some(
+          (earlier) =>
+            earlier.type === "content.delta" && earlier.data.partId === event.data.partId,
+        ),
   ),
 );
 ```
 
 ### Assert and score reasoning
 
-When the model provider exposes reasoning, eve records each completed block as a `reasoning.completed` event. Assert on its text with `turn.event(...)`, or join the blocks and pass them to a judge:
+When the model provider exposes reasoning, eve records it as `content.completed` with `kind: "reasoning"`. Select the blocks with `parts`, join their inline text, and grade it or pass it to a judge:
 
 ```ts
-turn.event("reasoning.completed", {
-  data: { reasoning: /checks? the units/i },
-});
+import { parts } from "eve/events";
+import { includes } from "eve/evals/expect";
 
-const reasoning = turn.events
-  .filter((event) => event.type === "reasoning.completed")
-  .map((event) => event.data.reasoning)
+const reasoning = parts(turn.view, { kind: "reasoning" })
+  .flatMap((part) => (typeof part.value === "string" ? [part.value] : []))
   .join("\n\n");
 
+t.check(reasoning, includes(/checks? the units/i));
 t.judge("The reasoning checks its assumptions before concluding.", {
   on: reasoning,
 }).atLeast(0.8);
 ```
 
-A provider that doesn't expose reasoning emits no `reasoning.completed` event, so the `turn.event` gate fails and the judge grades an empty string. The default judge input and `session.transcript` exclude reasoning, so pass it with `on`.
+This reads reasoning across the snapshot; add a `turnId` or `runId` filter for a narrower check. Referenced values are not fetched by the selector. A provider that doesn't expose reasoning leaves the string empty, so the `includes` gate fails and the judge grades an empty string. The default judge input and `session.transcript` exclude reasoning, so pass it with `on`.
 
 ## Required preconditions
 

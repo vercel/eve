@@ -55,8 +55,9 @@ export type RuntimeEvent =
  * eagerly so a proxied child can receive the answer it is blocked on.
  *
  * The pump signals cancellation and eligible steering immediately. Cancellation
- * aborts the turn; steering only interrupts generation before assistant output
- * or local tool execution. Both retain ordered admission at the next boundary.
+ * aborts the turn; steering only interrupts generation before assistant output,
+ * a tool call's streamed input, or local tool execution. Both retain ordered
+ * admission at the next boundary.
  */
 export class ActiveTurn {
   private readonly admitted = new Set<number>();

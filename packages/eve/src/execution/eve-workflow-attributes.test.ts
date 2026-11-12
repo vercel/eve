@@ -17,12 +17,14 @@ import {
 import {
   ChannelInstrumentationKey,
   ChannelRequestIdKey,
+  OtelTraceEnabledKey,
   ScheduleIdKey,
   SessionTitleKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { resolveTracePolicy } from "#shared/trace-policy.js";
 
 const publicConversation = {
   audience: "public",
@@ -152,6 +154,43 @@ describe("isWorkflowTraceContentVisible", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it("lets a root session's trace policy withhold content, never reveal it", () => {
+    const privateConversation = { ...publicConversation, audience: "private" } as const;
+    const seed = (
+      conversation: typeof publicConversation | typeof privateConversation,
+      policy: Parameters<typeof resolveTracePolicy>[0],
+      otelTraceEnabled = true,
+    ) => ({
+      [ConversationContextKey.name]: conversation,
+      [OtelTraceEnabledKey.name]: otelTraceEnabled,
+      [SessionTraceSeedKey.name]: {
+        decision: resolveTracePolicy(policy, { agentName: "weather", ...conversation }),
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
+    });
+    const recordAll = () => ({ emit: true, recordInputs: true, recordOutputs: true }) as const;
+
+    expect(isWorkflowTraceContentVisible(seed(publicConversation, undefined))).toBe(true);
+    for (const decision of [
+      { emit: true, recordInputs: false, recordOutputs: false },
+      { emit: true, recordInputs: true, recordOutputs: false },
+      { emit: true, recordInputs: false, recordOutputs: true },
+      { emit: false },
+    ] as const) {
+      expect(isWorkflowTraceContentVisible(seed(publicConversation, () => decision))).toBe(false);
+    }
+    // Only the author's own OpenTelemetry policy withholds; a caller's unsampled trace does not.
+    expect(
+      isWorkflowTraceContentVisible(seed(publicConversation, () => ({ emit: false }), false)),
+    ).toBe(true);
+    // Agent Runs may redact a private session's spans, so its run data stays hidden.
+    expect(
+      buildSessionAttributes({ serializedContext: seed(privateConversation, recordAll) }),
+    ).toMatchObject({ "$eve.is_trace_content_visible": false });
   });
 
   it("does not infer forwarded acceptance from projected metadata", () => {

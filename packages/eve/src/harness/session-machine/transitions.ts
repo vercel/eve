@@ -39,7 +39,7 @@ import type {
 import type { ControlDelivery } from "#harness/types.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, Principal, UserPart } from "#protocol/session-events/envelope.js";
+import type { Cause, Principal, Usage, UserPart } from "#protocol/session-events/envelope.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import {
@@ -224,6 +224,8 @@ export function fail(
     readonly details?: JsonObject;
     readonly message: string;
     readonly terminal?: true;
+    /** What the open run's discarded answer spent. */
+    readonly usage?: Usage;
   },
 ): Transition {
   // The calls a sign-in stopped never run: the model reads that they stopped. Calls that wait
@@ -236,7 +238,9 @@ export function fail(
   // A terminal failure ends the session, which ends the turn with it, in one commit.
   const runId = turnId === undefined ? undefined : openRunOf(view.projection, turnId);
   const events = [
-    ...(runId === undefined ? [] : runSettledFacts({ runId, outcome: "failed", error })),
+    ...(runId === undefined
+      ? []
+      : runSettledFacts({ runId, outcome: "failed", error, usage: failure.usage })),
     ...(failure.terminal === undefined
       ? turnSettled(view.projection, { error, outcome: "failed" })
       : sessionEndedFacts(view.projection, {
@@ -300,14 +304,14 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
  * A model-call attempt ends without its response reaching history, in one commit with the calls
  * it announced. A retry replaces it: eve can't tell whether those calls ran, so they and the run
  * settle `abandoned`. Steering cut it off: the calls are interrupted, and the run completed what
- * it streamed, with what it spent.
+ * it streamed. Either way the run records what the provider billed for the attempt.
  */
 export function discardAttempt(
   view: SessionView,
   input: {
     readonly runId: string;
     readonly ending: "retried" | "steered";
-    readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
+    readonly usage?: Usage;
   },
 ): Transition {
   const tables = view.projection.view;

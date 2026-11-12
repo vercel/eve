@@ -27,5 +27,14 @@ If more than one person can reach a session, such as a Slack thread or a
 GitHub issue, read the Shared sessions section of
 `node_modules/eve/docs/concepts/security-model.md` before writing tools.
 
+## One rule to know before reading
+
+A `defineDynamic` function runs before every model call, not once per turn.
+Wrap every network request, database query, API call, and sandbox read inside
+it in `ctx.memo(key, fn)`, or that work repeats on every model call. See
+`node_modules/eve/docs/dynamic-configuration/index.md`.
+
+## Install
+
 If `eve` is not installed yet, install it (`npm install eve`) or scaffold a new
 agent with `npx eve init <agent-name>`, then read the bundled docs.

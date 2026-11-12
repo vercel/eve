@@ -261,6 +261,7 @@ function commitScopeContext(ctx: DefinitionContext): ScopeContext {
   return {
     abortSignal: ctx.signal,
     channel: channelOf(ctx.container),
+    ...(frame.conversation !== undefined && { conversation: frame.conversation }),
     ctx: ctx.container as ContextContainer,
     session: { auth: frame.session.auth, id: frame.session.id },
   };
@@ -406,6 +407,7 @@ export function accumulate(
 export interface ScopeContext {
   readonly abortSignal: AbortSignal;
   readonly channel: SessionFrame["channel"];
+  readonly conversation?: SessionFrame["conversation"];
   readonly ctx: InternalContext["ctx"];
   readonly session: Pick<SessionFrame["session"], "auth" | "id">;
 }
@@ -420,6 +422,7 @@ export async function resolveMemoryScope(
       ? await memory.scope({
           abortSignal: ctx.abortSignal,
           channel: ctx.channel,
+          ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
           session: { auth: ctx.session.auth, id: ctx.session.id },
         })
       : memory.scope;

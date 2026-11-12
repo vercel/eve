@@ -1,5 +1,15 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.6
+
+Released 2026-11-12 · [Compare with 1.0.0-rc.5](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.5...%40vercel%2Fagent-runs%401.0.0-rc.6)
+
+### Bug Fixes
+
+- A context compaction's summary request during a turn now exports its own `chat <model>` span under the turn's `invoke_agent` span, with its token usage, cost, and `ai.settings.context.eve.compaction.request=summary`, so traces no longer undercount compacting turns.
+  Model spans now also carry `agent.turn.id`. `@vercel/agent-runs` adds `TurnOperation.modelCall` for model calls a turn makes outside its steps.
+  Thanks @zackleman for reporting this in #5922. ([#6251](https://github.com/vercel/eve/pull/6251))
+
 ## 1.0.0-rc.5
 
 Released 2026-11-10 · [Compare with 1.0.0-rc.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.4...%40vercel%2Fagent-runs%401.0.0-rc.5)

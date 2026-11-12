@@ -207,6 +207,12 @@ function chatSdkDriverWith(input: {
   return {
     name: input.name,
     personId: PERSON.userId,
+    // The thread id already names the adapter, so the space doesn't repeat it.
+    space:
+      input.surface === "private"
+        ? { id: threadId, type: "direct", visibility: "private" }
+        : // The fake adapter reports a workspace-visible channel.
+          { id: threadId, type: "shared", visibility: "public" },
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";

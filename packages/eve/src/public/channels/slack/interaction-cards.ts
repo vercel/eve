@@ -75,7 +75,9 @@ function blockContainsActionId(block: unknown, actionId: string): boolean {
   if (!isObjectRecord(block)) return false;
   return (
     actionsContainActionId(block.elements, actionId) ||
-    actionsContainActionId(block.actions, actionId)
+    actionsContainActionId(block.actions, actionId) ||
+    (Array.isArray(block.child_blocks) &&
+      block.child_blocks.some((child) => blockContainsActionId(child, actionId)))
   );
 }
 
@@ -84,12 +86,24 @@ function actionsContainActionId(actions: unknown, actionId: string): boolean {
   return actions.some((element) => isObjectRecord(element) && element.action_id === actionId);
 }
 
-/** Retires an answered `card` in place: same single block, buttons replaced by the answer. */
+/**
+ * Retires an answered `card` or approval `container` in place: same single block, buttons
+ * replaced by the answer. A container keeps its title and input preview as the record of what
+ * was decided.
+ */
 export function answeredBlocksFromActionBlock(input: {
   readonly answerLabel: string;
   readonly block: unknown;
   readonly userId?: string;
 }): unknown[] | undefined {
+  if (isObjectRecord(input.block) && input.block.type === "container") {
+    const { subtitle: _subtitle, ...container } = withoutContainerActions(input.block);
+    const answer = {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: formatAnsweredCardSubtext(input) }],
+    };
+    return [{ ...container, child_blocks: [...container.child_blocks, answer] }];
+  }
   if (!isObjectRecord(input.block) || input.block.type !== "card") return undefined;
 
   const { actions: _actions, subtext: _subtext, ...blockWithoutActions } = input.block;
@@ -123,7 +137,18 @@ function formatAnsweredCardSubtext(input: {
   );
 }
 
+function withoutContainerActions(
+  block: Record<string, unknown>,
+): Record<string, unknown> & { child_blocks: unknown[] } {
+  const children = Array.isArray(block.child_blocks) ? block.child_blocks : [];
+  return {
+    ...block,
+    child_blocks: children.filter((child) => !isObjectRecord(child) || child.type !== "actions"),
+  };
+}
+
 function promptBlocksFromActionBlock(block: unknown): unknown[] {
+  if (isObjectRecord(block) && block.type === "container") return [withoutContainerActions(block)];
   if (!isObjectRecord(block) || block.type !== "card") return [];
 
   const { actions: _actions, ...blockWithoutActions } = block;

@@ -27,6 +27,45 @@ When a channel creates a session, it sets the session's audience: `public`, `pri
 
 Route auth decides who may call the channel and identifies the caller. See [Auth & route protection](/docs/guides/auth-and-route-protection) for caller types and authorization. See the [default eve HTTP channel](/docs/channels/eve#audience) for its mapping, or [custom channels](/docs/channels/custom#conversation-audience) to classify your own.
 
+## Spaces
+
+A space is the place on a platform where a conversation happens, such as a Slack channel. Every session in that place reports the same space, so tools, dynamic values, and memory scopes can share data per place. Read it as `ctx.conversation.space`:
+
+```ts title="agent/tools/channel_notes.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+const notesBySpace = new Map<string, string[]>(); // use a database in production
+
+export default defineTool({
+  description: "Read the notes shared with everyone in this conversation.",
+  inputSchema: z.object({}),
+  async execute(_input, ctx) {
+    const space = ctx.conversation?.space;
+    if (space?.type !== "shared") return { notes: [], reason: "Not in a shared conversation." };
+    return { notes: notesBySpace.get(space.id) ?? [] };
+  },
+});
+```
+
+A space has a stable `id`, namespaced by platform and workspace so it is unique across channels, a `type`, and, when the platform has one, a `workspaceId`. The `type` is `direct` for a one-to-one conversation with the agent and `shared` for any place with more people, such as a channel, a group DM, or a group chat. `space` is absent when the channel can't tell where the conversation happens.
+
+`visibility` says who can find and join the space: `public` for anyone in the workspace, such as a public Slack channel, or `private` for its members, such as a DM, a group DM, or a private channel. It is absent when the platform doesn't say, so treat a missing value as unknown, not public. Unlike the [audience](#audience), which reads `private` whenever a channel is unsure so traces stay conservative, `visibility` reports only what the platform said. Slack and Chat SDK adapters report both; Discord, Teams, Telegram, Linq, and Photon report `private` for DMs and private chats and leave shared channels unknown, since their messages don't say.
+
+| Channel  | Space                                                                                              | `workspaceId`          |
+| -------- | -------------------------------------------------------------------------------------------------- | ---------------------- |
+| Slack    | The Slack channel, DM, or group DM a thread is in: `slack:<team>:<channel>`.                       | The app's installation |
+| Discord  | The Discord channel, thread, DM, or group DM: `discord:<guild>:<channel>`, or `discord:<channel>`. | The guild              |
+| Teams    | The Teams channel, or the personal or group chat: `teams:<tenant>:<id>`.                           | The tenant             |
+| Telegram | The chat: `telegram:<chat>`.                                                                       | None                   |
+| Linq     | The iMessage or SMS chat: `linq:<chat>`.                                                           | None                   |
+| Photon   | The iMessage chat: `imessage:<chat>`.                                                              | None                   |
+| Chat SDK | The adapter's channel: `<adapter>:<channel>`.                                                      | None                   |
+
+A session started with `receive()` reports a space only when its target names the workspace, such as Slack's `installationTeamId` or Teams' `tenantId`, so it never reports a different space than the conversations already in that place. Discord sessions started with `receive()` report none, and so do Chat SDK sessions started from a thread ID whose adapter can't tell DMs apart. Other built-in channels report no space. A [custom channel](/docs/channels/custom#conversation-space) reports its own. Like the audience, the space is fixed when the session is created, and a local subagent inherits its parent's.
+
+A space identifies a place, not who may act there. Check the caller in `ctx.session.auth.current` before you let them change data that everyone in the space shares.
+
 ## Sign-ins
 
 When a tool needs a connection the person hasn't authorized, the built-in channels show a sign-in. Its link or code is a credential: whoever completes it connects their account. So it appears only where the person signing in reads it alone:
@@ -43,7 +82,7 @@ Linear uses its native sign-in prompt. A sign-in that an approval's responder ne
 
 Channels default to `turnPolicy: "steer"`, which adds a new message to the running turn. The turn ID stays the same. A message from anyone the channel lets in joins, and the turn keeps its caller. While the turn waits on an approval or sign-in, the message joins too, and the approval or sign-in card stays usable. After someone else's message joins, eve asks the caller to approve a call that uses their identity. A tool that authorizes from the caller alone acts with the caller's access, so set `approval: steered()` in `agent.ts` to ask the caller before any call. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
 
-- Before assistant answer output or local tool execution begins, the message interrupts pending model generation and the turn continues with the correction.
+- Until answer output or a local tool call's input starts streaming, the message interrupts pending model generation and the turn continues with the correction.
 - Executing tools finish and keep their results before steering reaches the next model call.
 - After answer output starts, steering waits until the current model step finishes.
 

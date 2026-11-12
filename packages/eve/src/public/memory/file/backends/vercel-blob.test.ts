@@ -72,6 +72,19 @@ describe("Vercel Blob file-memory backend", () => {
     });
   });
 
+  it("reads a key with a slash from the pathname it was written under", async () => {
+    vi.mocked(get).mockResolvedValue(getBlobResult("# Memory", "etag-1"));
+    vi.mocked(put).mockResolvedValue(putBlobResult("etag-1"));
+    const backend = vercelBlob();
+
+    await backend.write({ content: "# Memory", expectedVersion: null, key: "team/notes", signal });
+    await backend.read({ key: "team/notes", signal });
+
+    // `put` takes the pathname as a query value; `get` puts it in a URL path the store decodes once.
+    expect(vi.mocked(put).mock.calls[0]?.[0]).toBe("eve/memory/file/team%2Fnotes/MEMORY.md");
+    expect(vi.mocked(get).mock.calls[0]?.[0]).toBe("eve/memory/file/team%252Fnotes/MEMORY.md");
+  });
+
   it("creates and conditionally replaces deterministic private objects", async () => {
     vi.mocked(put).mockResolvedValue(putBlobResult("etag-next"));
     const backend = vercelBlob();

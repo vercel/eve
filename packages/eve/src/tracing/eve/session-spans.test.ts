@@ -6,6 +6,8 @@ import {
   SimpleSpanProcessor,
   type ReadableSpan,
 } from "@opentelemetry/sdk-trace-base";
+import { generateText } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { AgentSpanIdGenerator, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
@@ -19,12 +21,14 @@ import {
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
   type InstrumentationScope,
 } from "#instrumentation/lifecycle.js";
 import {
+  attemptScopeOf,
   createInstrumentationHandleEvent,
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
@@ -106,6 +110,36 @@ function session(
       contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
     /** Runs a tool's `execute` the way the AI SDK bridge does, inside its call's span. */
     runTool: otel.runInContext,
+    /** Runs a compaction's summary call for the turn, as its run outside any step reports it. */
+    async summarize(summary: string) {
+      const scope = attemptScopeOf(
+        { channelAudience: audience, functionId: "weather", sessionId: "s", ...child },
+        { attempt: 0, runId: "run_compaction", turnId: "turn_0" },
+      );
+      await generateText({
+        model: new MockLanguageModelV3({
+          doGenerate: async () => ({
+            content: [{ text: summary, type: "text" }],
+            finishReason: { raw: undefined, unified: "stop" },
+            providerMetadata: { gateway: { cost: "0.0042" } },
+            usage: {
+              inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1200, total: 1200 },
+              outputTokens: { reasoning: 0, text: 80, total: 80 },
+            },
+            warnings: [],
+          }),
+        }),
+        prompt: "Summarize Alice's conversation so far.",
+        telemetry: {
+          integrations: [
+            createAiSdkHookBridge(scope, hooks, otel.runInContext, {
+              "eve.compaction.request": "summary",
+            }),
+          ],
+          isEnabled: true,
+        },
+      });
+    },
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();
@@ -653,6 +687,37 @@ describe("a session's spans, from its committed lines", () => {
     ]);
     const failed = exported.find((span) => span.name === "execute_tool weather");
     expect(failed?.attributes["error.type"]).toBe("TOOL_FAILED");
+  });
+
+  it("exports a compaction's summary call during a turn as a model span under the turn", async () => {
+    const { commit, spans, summarize } = session();
+    await commit(...opening);
+    await commit({
+      data: { outcome: "completed", runId: "run_0" },
+      scope: run,
+      type: "model.settled",
+    } as SessionEvent);
+    await summarize("Alice is planning a trip to Oslo.");
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const exported = await spans();
+    expect(tree(exported)).toEqual([
+      "invoke_agent weather completed",
+      "  agent.step",
+      "  chat mock-model-id",
+    ]);
+    const summary = exported.find((span) => span.name === "chat mock-model-id");
+    expect(summary?.attributes).toMatchObject({
+      "agent.turn.id": "turn_0",
+      "ai.settings.context.eve.compaction.request": "summary",
+      "gen_ai.usage.cost": 0.0042,
+      "gen_ai.usage.input_tokens": 1200,
+      "gen_ai.usage.output_tokens": 80,
+    });
+    // The summary's prompt and reply are not the conversation's, so the turn doesn't take them.
+    const invocation = exported.find((span) => span.name === "invoke_agent weather");
+    expect(invocation?.attributes["gen_ai.input.messages"]).toBeUndefined();
+    expect(invocation?.attributes["gen_ai.output.messages"]).toBeUndefined();
   });
 
   it("fails the step a failed turn's end cuts short", async () => {

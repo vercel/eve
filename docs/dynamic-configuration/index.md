@@ -8,6 +8,8 @@ url: /guides/dynamic-capabilities
 
 eve runs the function before every ordinary model call, including when a turn continues after steering, a sign-in, or an approval. It doesn't run for compaction's summary call or `auto()`'s routing call. Introspection reads the values it last returned.
 
+Because the function runs before every model call, not once per turn, a turn with 20 model calls runs it 20 times. Wrap every network request, database query, API call, and sandbox read in [`ctx.memo`](#context-and-memoization). Outside a memo, each of those calls adds its latency to every model call and counts against the service's rate limits every time. Choose the memo key for how long the result should stay fixed; see [Choose a lifetime](#choose-a-lifetime).
+
 The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](/docs/reference/typescript-api#authored-module-lifecycle).
 
 ## Context and memoization
@@ -19,6 +21,7 @@ Every dynamic function receives:
 | `ctx.session`             | Session ID, authenticated caller, initiator, latest sender, and optional schedule and predecessor.                                                   |
 | `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
 | `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
+| `ctx.conversation`        | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                  |
 | `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
 | `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                           |
 | `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                              |
@@ -28,6 +31,8 @@ Every dynamic function receives:
 | `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
 
 `ctx.session.auth.current` is the turn's caller, the person whose message started the turn. In a session several people share, such as a Slack thread, another person's message can join the turn, and `ctx.session.auth.sender` names who sent the latest one. eve runs the function again before the model reads that message. A function that offers something from the caller's attributes alone offers it to that person too, so check `auth.sender` as well, as the [dynamic subagent](#dynamic-subagents) example does. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
+
+For session state inside a dynamic function, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
 
 Before a model call, `ctx.messages()` includes the task results and `[Tasks]` note that call will receive. A dynamic model can react to a background task's result in the same step, without waiting for another call.
 

@@ -73,6 +73,32 @@ describe("composeSlackRenderers", () => {
     expect(fallback).toHaveBeenCalledOnce();
   });
 
+  it("hands renderers a call's streaming input, which eve's default leaves alone", async () => {
+    const deltas: string[] = [];
+    const chain = composeSlackRenderers(
+      [
+        defineSlackRenderer({
+          events: {
+            async "call.input"(event, _ctx, next) {
+              deltas.push(event.data.delta);
+              await next();
+            },
+          },
+        }),
+      ],
+      { events: {}, received: async () => undefined, taskCard: () => null },
+    );
+    const input: ChannelEventOf<"call.input"> = {
+      data: { callId: "call_0", delta: '{"root":', kind: "tool", name: "card" },
+      scope: { runId: "run_0", turnId: "turn_0" },
+      type: "call.input",
+    };
+
+    await invoke(chain.events["call.input"], input);
+
+    expect(deltas).toEqual(['{"root":']);
+  });
+
   it("hands a sign-in's renderer only the private delivery surface", async () => {
     let seen: unknown;
     const chain = composeSlackRenderers(

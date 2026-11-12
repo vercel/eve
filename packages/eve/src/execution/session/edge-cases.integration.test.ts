@@ -299,6 +299,35 @@ function signedInTool(name: string, approval?: true): ToolSpec {
   };
 }
 
+/** A tool call whose input streams part of the way, then waits for `release` to finish. */
+function heldToolInput(toolName: string, release: Promise<void>): StreamResult {
+  const id = "call_held";
+  return {
+    stream: new ReadableStream({
+      async start(controller) {
+        controller.enqueue({ type: "stream-start", warnings: [] });
+        controller.enqueue({ id, toolName, type: "tool-input-start" });
+        controller.enqueue({ delta: '{"contents":"#!/bin/sh', id, type: "tool-input-delta" });
+        await release;
+        controller.enqueue({ delta: '\\necho done"}', id, type: "tool-input-delta" });
+        controller.enqueue({ id, type: "tool-input-end" });
+        controller.enqueue({
+          input: '{"contents":"#!/bin/sh\\necho done"}',
+          toolCallId: id,
+          toolName,
+          type: "tool-call",
+        });
+        controller.enqueue({
+          finishReason: { raw: undefined, unified: "tool-calls" },
+          type: "finish",
+          usage,
+        });
+        controller.close();
+      },
+    }) as StreamResult["stream"],
+  };
+}
+
 interface ToolSpec {
   readonly name: string;
   readonly approval?: boolean;
@@ -1491,6 +1520,39 @@ describe("calls in flight", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
     expect(captured).toEqual(row.captured.map((pattern) => expect.stringMatching(pattern)));
     expect(compacted).toBe(row.compacted);
+  });
+
+  it("finishes a tool call whose input is streaming, and reads a message sent meanwhile after it runs", async () => {
+    const release = gate();
+    let writes = 0;
+    let finalPrompt = "";
+    const { events, ran } = await withSession(
+      "edge-steer-during-tool-input",
+      {
+        message: "Write a long script.",
+        model: scriptedModel((_, raw) => {
+          if (raw.some((message) => message.role === "tool")) {
+            finalPrompt = JSON.stringify(raw);
+            return "Saved the script.";
+          }
+          writes += 1;
+          return heldToolInput("write_file", release.wait);
+        }),
+        tools: [{ name: "write_file" }],
+      },
+      async (session) => {
+        await session.until("writing", (event) => event.type === "call.input");
+        await session.send("Also add a comment at the top.");
+        setTimeout(release.open, 500);
+        await session.until("done", (event) => event.type === "turn.settled");
+      },
+    );
+
+    // The input already streamed is kept: the model writes it once, and the tool runs.
+    expect(writes).toBe(1);
+    expect(ran).toEqual(["write_file"]);
+    expect(finalPrompt).toContain("Also add a comment at the top.");
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 });
 
