@@ -282,6 +282,16 @@ describe("recallChannel own messages", () => {
       undefined,
     );
   });
+
+  it("drops each chunk of a long message when they echo back under another name", async () => {
+    const meeting = liveChannel({ botId: "bot_1", platform: "google_meet" });
+    const reply = `${"a".repeat(500)} b`;
+    await meeting.send(reply);
+
+    for (const chunk of ["a".repeat(500), "b"]) {
+      expect(await meeting.hear(chat(chunk, "everyone", { name: "Alice Smith" }))).toBe(undefined);
+    }
+  });
 });
 
 describe("recallChannel spoken answers", () => {

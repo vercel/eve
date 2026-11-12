@@ -26,6 +26,7 @@ import {
   recallSupportsDirectMessages,
   resolveRecallWebhookUrl,
   sendRecallChatMessage,
+  splitRecallChatMessage,
   startRecallOutputMedia,
   stopRecallOutputMedia,
   type RecallApiOptions,
@@ -594,15 +595,20 @@ function buildRecallHandle(
         (state.outbox ??= []).push(to === undefined ? { message } : { message, to });
         return true;
       }
+      const platform = state.platform ?? undefined;
+      // Each chunk echoes back on its own, possibly before the send returns.
+      state.sentChat = [
+        ...(state.sentChat ?? []),
+        ...splitRecallChatMessage(message, platform),
+      ].slice(-MAX_SENT_CHAT);
       try {
         await sendRecallChatMessage({
           ...api,
           botId: botId(),
           message,
-          platform: state.platform ?? undefined,
+          platform,
           to: to === "everyone" ? undefined : to,
         });
-        state.sentChat = [...(state.sentChat ?? []), message.trim()].slice(-MAX_SENT_CHAT);
         return true;
       } catch (error) {
         log.error("Recall chat message failed", { error });

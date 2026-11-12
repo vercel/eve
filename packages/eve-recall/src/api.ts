@@ -103,9 +103,14 @@ export interface RecallSendChatMessageInput extends RecallApiOptions {
   readonly platform?: string;
 }
 
+/** Splits a chat message into the messages Recall posts on `platform`. */
+export function splitRecallChatMessage(message: string, platform: string | undefined): string[] {
+  return chunkText(message, chatLimitsOf(platform).maxChars);
+}
+
 /** Posts a message to the meeting chat, split to fit the platform's limit. */
 export async function sendRecallChatMessage(input: RecallSendChatMessageInput): Promise<void> {
-  for (const chunk of chunkText(input.message, chatLimitsOf(input.platform).maxChars)) {
+  for (const chunk of splitRecallChatMessage(input.message, input.platform)) {
     await callRecallApi({
       ...input,
       body: input.to === undefined ? { message: chunk } : { message: chunk, to: input.to },
