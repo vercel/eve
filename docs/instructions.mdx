@@ -45,7 +45,7 @@ A root `agent/instructions.md` (or `.ts`) can sit beside the directory, and the 
 
 ## Dynamic instructions
 
-To compute instructions from auth, tenant, channel, or external data, use `defineDynamic((ctx) => ...)` and return `defineInstructions(...)` or `null`. The function runs before each ordinary model call. Use `ctx.memo(key, fn)` to keep a JSON result fixed for a key.
+To compute instructions from auth, tenant, channel, or external data, use `defineDynamic((ctx) => ...)` and return `defineInstructions(...)` or `null`. The function runs before each ordinary model call, not once per turn, so wrap every fetch, database query, and API call in `ctx.memo(key, fn)` to run it once per key. See [Dynamic capabilities](./guides/dynamic-capabilities#choose-a-lifetime) to choose a key.
 
 A dynamic system instruction applies, outside history, while the function returns it.
 
