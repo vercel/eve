@@ -1,5 +1,46 @@
 # eve
 
+## 1.0.0-rc.10
+
+Released 2026-11-11 · [Compare with 1.0.0-rc.9](https://github.com/vercel/eve/compare/eve%401.0.0-rc.9...eve%401.0.0-rc.10)
+
+### Features
+
+- `defineDynamic()` in `agent/tools/` can return a `defineWorkflowTool()` held by a top-level `const`, so a workflow tool can be offered only on some model calls.
+  Its entry point can be written inline or reference a top-level `"use workflow"` function. The build fails when a workflow tool's entry point lacks `"use workflow"` or the tool is created inside the dynamic function. ([#6235](https://github.com/vercel/eve/pull/6235))
+- Agents deployed to Vercel, including agents added to an app with `withEve`, now run schedules with Vercel Schedules through a private function instead of Vercel Cron Jobs.
+  Each Vercel schedule is named after its file, such as `eve.billing.sweep` for `schedules/billing/sweep.ts`, and `withEve` agents add the agent's name, such as `eve.billing.heartbeat`. Building a `withEve` project requires Vercel CLI 65.14.0 or later. ([#6087](https://github.com/vercel/eve/pull/6087))
+- Bundle the server faster in `eve build` and `eve dev` by resolving dependency imports and CommonJS path globals inside Rolldown instead of eve's JavaScript plugin hooks.
+  `eve build` also no longer repeats the authored module builds after sandbox prewarm. ([#6209](https://github.com/vercel/eve/pull/6209))
+- Anthropic models on AI Gateway now cache the system prompt across sessions, and can cache it for 1 hour.
+  eve adds `gateway.cacheAnchorMessageIndex: 0` next to `caching: "auto"`, so a resumed session whose cache expired reads the shared system prompt from cache instead of writing it again. An authored `cacheAnchorMessageIndex`, or `caching` set to anything other than `"auto"`, is left as it is.
+  On Anthropic models, eve now sends the base part of the system prompt as its own system message with the cache breakpoint, and the sections that differ by session (dynamic instructions, tasks and approvals) after it. Sessions with different channel or user instructions no longer write the shared base again.
+  `modelOptions.promptCache.anthropic.ttl: "1h"` now also applies to Anthropic models through Gateway. eve then turns Gateway's automatic caching off, because Gateway ignores a 1-hour TTL under it, and places its own breakpoints for 1 hour, as it does on a directly called model. The default stays `5m`. ([#6151](https://github.com/vercel/eve/pull/6151))
+- Speed up `eve build` and `eve dev` by parsing each workflow source once and, when eve is installed, reusing eve's own workflow driver bundle across builds. ([#6215](https://github.com/vercel/eve/pull/6215))
+- Sessions store much less as conversations grow: each session step now returns its changed values as frozen immer versions of the values it was given, so Workflow stores each step's input as a reference and its output as only what changed, instead of a full copy of the history every step. ([#6219](https://github.com/vercel/eve/pull/6219))
+- Slack `onInteraction` actions now include `responseUrl`, the click's `response_url`.
+  POST to it to replace or delete the message the click came from, including an ephemeral message, which `chat.update` and `chat.delete` can't change. ([#6247](https://github.com/vercel/eve/pull/6247))
+- Update the bundled Workflow runtime and worlds to the Workflow 5.5.0 release. ([#6219](https://github.com/vercel/eve/pull/6219))
+
+### Bug Fixes
+
+- AI SDK telemetry integrations such as Sentry's now receive model and `decide()` prompts and responses whenever the `otel()` trace policy or any instrumentation file's `tracePolicy` allows content, without an `otelIntegration()` destination.
+  Starting with `ai@7.0.163`, the AI SDK removes content from telemetry when a call disables `recordInputs` or `recordOutputs`. Before this release, eve disabled both on every model call in apps without an OpenTelemetry destination, so a Sentry-only setup lost prompts, responses, and token usage. Apps that added an empty `otelIntegration({})` only to work around this can remove it.
+  In apps without OpenTelemetry, `decide()` calls previously left these settings unset, so AI SDK integrations received decision content for every conversation. They now follow the same rules as model calls: content for public conversations and in development by default, and otherwise only when a trace policy allows it. ([#6234](https://github.com/vercel/eve/pull/6234))
+- Sessions that switch back to a model now check its retained token measurement as well as the latest measurement, reducing compaction between steps.
+  Different models' tokenizers can count the same history very differently. eve judged each call by the token count the previous call reported, so after switching to a model whose tokenizer counts higher, the history could cross the compaction threshold during the turn's first step and be rewritten before the next step, invalidating the prompt cache a second time in one turn. eve now keeps each model's latest measurement until history is rewritten. Before each call, eve uses the larger count after estimating additions from both the selected model's measurement and the latest measurement. A model without a retained measurement still falls back to the latest one. ([#6186](https://github.com/vercel/eve/pull/6186))
+- Dynamic values evaluated before a model call now see the task results and `[Tasks]` note that call delivers, so a dynamic model can react to a background task's result in the same step. ([#6185](https://github.com/vercel/eve/pull/6185))
+- Update vulnerable dependencies and bound MCP tool input validation to prevent excessive memory use. ([#6177](https://github.com/vercel/eve/pull/6177))
+- An agent or `serve` tool call whose `taskId` is the placeholder string `"undefined"` or `"null"` now starts a new task instead of failing with `UNKNOWN_TASK`.
+  Some models send these placeholders instead of omitting the optional `taskId`. An empty `taskId` already started a new task. ([#6183](https://github.com/vercel/eve/pull/6183))
+- Replace the vendored Turndown dependency with a small linear-time HTML-to-Markdown converter for web fetch and Microsoft Teams messages. ([#6220](https://github.com/vercel/eve/pull/6220))
+- AI SDK telemetry integrations no longer receive tool arguments, results, or raw errors for a call whose `recordInputs` or `recordOutputs` setting is off.
+  eve runs agent tools itself, so the AI SDK does not filter their telemetry events. eve now removes the excluded content before it calls each integration, the same way the AI SDK filters the events it sends. Integrations that ignore the per-call settings, such as Sentry's eve integration, previously recorded tool arguments for private conversations. ([#6238](https://github.com/vercel/eve/pull/6238))
+- Vercel builds without `VERCEL_OIDC_TOKEN` no longer fail for agents whose sandbox templates have nothing to prepare, such as a freshly scaffolded agent with no sandbox, skills, or workspace files.
+  Templates with a `prepare` callback, managed workspace or skill files, or a Vercel `source` still require the token. Builds without it fail with the instruction to run `vercel link` and `vercel pull`. Unrelated provider preparation errors retain their original messages. ([#6184](https://github.com/vercel/eve/pull/6184))
+- Fixed a session on `VercelSandbox` failing every turn after its stopped sandbox's snapshot expired. eve now starts a fresh sandbox for the session, as it does when the sandbox is gone.
+  Thanks @BilalAtique for reporting this in #4393 and @mahirhir for the reproduction. ([#6182](https://github.com/vercel/eve/pull/6182))
+
 ## 1.0.0-rc.9
 
 Released 2026-11-10 · [Compare with 1.0.0-rc.8](https://github.com/vercel/eve/compare/eve%401.0.0-rc.8...eve%401.0.0-rc.9)
