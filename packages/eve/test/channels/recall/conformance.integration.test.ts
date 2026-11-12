@@ -13,6 +13,11 @@ const RECALL_BROKEN = {
         "the queue turn policy holds the message until the turn ends, but the turn is waiting on the question",
       symptom: /Timed out waiting for a reply to/u,
     },
+  "completing a sign-in stops showing its link and code": {
+    reason:
+      "Recall can't delete a chat message it sent, so the challenge stays in the meeting chat",
+    symptom: /the sign-in prompt is still shown after signing in/u,
+  },
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const RECALL_SPEECH_ONE_LINE =
@@ -29,6 +34,7 @@ const RECALL_PRIVATE_CHAT =
 const RECALL_NO_PRIVATE_CHAT = {
   "a sign-in names the service and shows its sign-in link": RECALL_PRIVATE_CHAT,
   "a sign-in shows its confirmation code": RECALL_PRIVATE_CHAT,
+  "completing a sign-in stops showing its link and code": RECALL_PRIVATE_CHAT,
 } satisfies Partial<Record<ContractRuleName, string>>;
 
 describeConformance([
