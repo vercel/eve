@@ -76,8 +76,38 @@ async function runTurn(
       ],
     ]),
   })(session, { message: "Alice asks for the weekly summary." });
-  return events.filter((event) => event.type.startsWith("model."));
+  return events.filter(
+    (event) => event.type.startsWith("model.") || event.type === "usage.recorded",
+  );
 }
+
+const spent = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 };
+
+/** An answer with no text and no calls, which the provider billed with an AI Gateway cost. */
+const billedEmpty = (
+  finish: "other" | "content-filter",
+  before: readonly StreamPart[] = [],
+): StreamResult =>
+  streamOf([
+    { type: "stream-start", warnings: [] },
+    ...before,
+    {
+      finishReason: { raw: undefined, unified: finish },
+      providerMetadata: { gateway: { cost: "0.05" } },
+      type: "finish",
+      usage: {
+        inputTokens: { cacheRead: 2_000, cacheWrite: 0, noCache: 10_000, total: 12_000 },
+        outputTokens: { reasoning: 0, text: 300, total: 300 },
+      },
+    },
+  ]);
+const billed = {
+  cacheReadTokens: 2_000,
+  cacheWriteTokens: 0,
+  costUsd: 0.05,
+  inputTokens: 12_000,
+  outputTokens: 300,
+};
 
 /** AI Gateway's provider stream closed before its finish (#5912). */
 const terminated = (before: readonly StreamPart[] = []): StreamResult =>
@@ -136,6 +166,7 @@ describe("model attempts", () => {
         },
         { attempt: 1, runId: "run_0", type: "model.started" },
         { outcome: "completed", runId: "run_0", type: "model.settled" },
+        { owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
       ]);
     },
   );
@@ -165,6 +196,64 @@ describe("model attempts", () => {
       { runId: "run_1", type: "model.requested" },
       { attempt: 1, runId: "run_1", type: "model.started" },
       { outcome: "completed", runId: "run_1", type: "model.settled" },
+      { owner: { runId: "run_1" }, type: "usage.recorded", usage: spent },
+    ]);
+  });
+
+  // The provider billed the answers eve discards, so the run counts them, as a steered one does.
+  it("records what an empty answer it reissued spent, beside the kept answer's usage", async () => {
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockResolvedValueOnce(billedEmpty("other"))
+      .mockImplementation(async () => streamOf(reply("Here it is.")));
+
+    const facts = await runTurn(doStream);
+
+    expect(facts.map(({ data, type }) => ({ type, ...data }))).toEqual([
+      { owner: { turnId: "turn_0" }, runId: "run_0", type: "model.requested" },
+      { attempt: 0, modelId: "m", runId: "run_0", type: "model.started" },
+      { attempt: 0, error: expect.anything(), runId: "run_0", type: "model.retried" },
+      { kind: "model", owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
+      { attempt: 1, modelId: "m", runId: "run_0", type: "model.started" },
+      expect.objectContaining({ outcome: "completed", runId: "run_0", type: "model.settled" }),
+      { kind: "model", owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
+    ]);
+  });
+
+  it("records what an empty answer that published reasoning spent on the run it gave up", async () => {
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockResolvedValueOnce(
+        // Its reasoning reached the stream, so the reissue needs a new run.
+        billedEmpty("other", [
+          { id: "r", type: "reasoning-start" },
+          { delta: "Checking the report.", id: "r", type: "reasoning-delta" },
+          { id: "r", type: "reasoning-end" },
+        ]),
+      )
+      .mockImplementation(async () => streamOf(reply("Here it is.")));
+
+    const facts = await runTurn(doStream);
+
+    expect(facts.map(({ data, type }) => ({ type, ...data }))).toMatchObject([
+      { runId: "run_0", type: "model.requested" },
+      { attempt: 0, runId: "run_0", type: "model.started" },
+      { outcome: "abandoned", runId: "run_0", type: "model.settled" },
+      { owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
+      { runId: "run_1", type: "model.requested" },
+      { attempt: 1, runId: "run_1", type: "model.started" },
+      { outcome: "completed", runId: "run_1", type: "model.settled" },
+      { owner: { runId: "run_1" }, type: "usage.recorded", usage: spent },
+    ]);
+  });
+
+  it("fails the run with what the answer it discarded spent", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const facts = await runTurn(async () => billedEmpty("content-filter"));
+
+    expect(facts.slice(-2).map(({ data, type }) => ({ type, ...data }))).toMatchObject([
+      { outcome: "failed", runId: "run_0", type: "model.settled" },
+      { owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
     ]);
   });
 });

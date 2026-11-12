@@ -33,7 +33,6 @@ import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.j
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { usageOf } from "#harness/facts.js";
 import { retryRun } from "#harness/session-machine/runs.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
@@ -49,6 +48,7 @@ import {
   emitStepActions,
   type HarnessStepResult,
   readGatewayGenerationId,
+  runUsageOf,
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -77,7 +77,8 @@ import {
   type InlineCallResults,
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
-import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
+import { extractGatewayCostUsd } from "./usage.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 
@@ -133,8 +134,11 @@ export class ModelCaller {
   requestEnvelopeTokens = 0;
   /** The step's system prompt, from its harness's plan. */
   private system: string | readonly string[] = "";
-  /** Usage of a call steering interrupted, which the steered step still counts. */
-  private interruptedUsage: TokenUsageDelta | undefined;
+  /**
+   * What the latest attempt's answer spent, until the step keeps it. The provider billed an answer
+   * eve discards, so a retry, a failure, or steering records it against the run.
+   */
+  private unkeptUsage: Usage | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
   /** Tries at this model step, across the runs a retry after output replaced. */
   private attemptIndex = 0;
@@ -205,15 +209,16 @@ export class ModelCaller {
     const runId = step.position().runId;
     const attempt = this.started;
     this.started = undefined;
+    const usage = this.takeUnkeptUsage();
     if (runId === undefined) return;
     if (this.acceptedOutput) {
-      await step.apply(discardAttempt(step.view(), { ending: "retried", runId }));
+      await step.apply(discardAttempt(step.view(), { ending: "retried", runId, usage }));
       this.acceptedOutput = false;
       await this.input.newRun();
       return;
     }
     if (attempt === undefined) return;
-    await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId }));
+    await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId, usage }));
   }
 
   /**
@@ -243,11 +248,7 @@ export class ModelCaller {
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
-        discardAttempt(step.view(), {
-          ending: "steered",
-          runId,
-          usage: this.interruptedUsage === undefined ? undefined : usageOf(this.interruptedUsage),
-        }),
+        discardAttempt(step.view(), { ending: "steered", runId, usage: this.takeUnkeptUsage() }),
       );
     }
     return {
@@ -257,9 +258,11 @@ export class ModelCaller {
     };
   }
 
-  /** The step's result counted its usage, so an interrupted call's usage no longer applies. */
-  clearInterruptedUsage(): void {
-    this.interruptedUsage = undefined;
+  /** What the latest attempt's discarded answer spent, which its run's next fact records. */
+  takeUnkeptUsage(): Usage | undefined {
+    const usage = this.unkeptUsage;
+    this.unkeptUsage = undefined;
+    return usage;
   }
 
   /** The call's system prompt and messages, from the step's harness. */
@@ -411,7 +414,7 @@ export class ModelCaller {
       ),
       onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
         if (generation.interrupted) return;
-        this.interruptedUsage = extractTokenUsageDelta({
+        this.unkeptUsage = runUsageOf({
           costUsd: extractGatewayCostUsd(event.providerMetadata),
           usage: event.usage,
         });
@@ -498,6 +501,8 @@ export class ModelCaller {
       telemetry,
     });
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
+    // The run's settlement records the kept answer's usage.
+    this.unkeptUsage = undefined;
     await emitStepActions(step.publish, step.position(), stepResult, notRun);
     return withCallResults({
       answers: [...trailingInlineToolResultParts, ...notRun],
