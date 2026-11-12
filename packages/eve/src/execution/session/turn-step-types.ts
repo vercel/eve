@@ -46,7 +46,7 @@ export interface TurnStepInput {
    * Every attempt of this step failed, the last with `error`: recover what they published and
    * fail the turn, or cancel it when it was `stopped` meanwhile.
    */
-  readonly recover?: { readonly error: unknown; readonly stopped?: true };
+  readonly recover?: { readonly error: { readonly name?: string }; readonly stopped?: true };
 }
 
 /** The session state every step result carries. */

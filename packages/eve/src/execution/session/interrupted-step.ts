@@ -35,7 +35,6 @@ import type {
   StepResult,
 } from "#harness/types.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
-import { isObject, readNonEmptyString } from "#shared/guards.js";
 import { eventsOfLine } from "#protocol/session-lines.js";
 import type { SessionOutcome } from "#protocol/session-events/families/session.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -150,7 +149,7 @@ export async function recoverInterruptedStep(input: {
    * The error the step's last attempt threw, when every attempt failed; `stopped` when the turn
    * was cancelled meanwhile.
    */
-  readonly failed?: { readonly error: unknown; readonly stopped?: true };
+  readonly failed?: { readonly error: { readonly name?: string }; readonly stopped?: true };
 }): Promise<
   | { readonly result: DurableStepResult }
   | { readonly session: HarnessSession; readonly stepInput: HarnessStepInput | undefined }
@@ -307,9 +306,7 @@ export async function recoverInterruptedStep(input: {
         };
   log.error("turn failed", {
     code: failure.code,
-    errorName: isObject(input.failed?.error)
-      ? readNonEmptyString(input.failed.error.name)
-      : undefined,
+    errorName: input.failed?.error.name,
     errorId: failure.details.errorId,
     sessionId: session.sessionId,
     turnId: failing,

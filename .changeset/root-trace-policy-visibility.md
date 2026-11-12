@@ -2,8 +2,8 @@
 "eve": patch
 ---
 
-A root session whose `otel({ tracePolicy })` explicitly records inputs and outputs for its audience now tags its workflow run as content-visible, so Agent Runs shows the content its spans already record instead of a private run.
+A root session whose `otel({ tracePolicy })` withholds inputs or outputs, or drops the trace, no longer tags its workflow run as content-visible, so observability stops showing run data the policy excludes.
 
-The run's visibility follows the session's own trace decision the way instrumentation applies it: an explicit decision counts only for the audience the policy evaluated, and a session whose policy drops the trace stays hidden. Sessions without OpenTelemetry keep the audience default.
+A trace policy can only hide content its audience would show by default. A private or unknown-audience run stays hidden even when its policy records content, because Agent Runs' `exportPolicy` may still redact those spans. Sessions without OpenTelemetry keep the audience default.
 
-Thanks @zackleman for reporting this in #5931.
+Thanks @zackleman for reporting the related visibility gap in #5931.

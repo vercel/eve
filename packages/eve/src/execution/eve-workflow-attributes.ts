@@ -48,10 +48,7 @@ import {
 } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import {
-  applyAudienceCeiling,
-  shouldCaptureInstrumentationContent,
-} from "#shared/instrumentation-content.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
   ConversationContextKey,
@@ -144,12 +141,17 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
     audience: conversation?.audience ?? "unknown",
     environment: conversation?.environment ?? "production",
   };
-  // A root session's own decision counts only for the audience its policy evaluated, as
-  // instrumentation applies it, so an explicit recording policy shows what its spans record.
-  if (traceState?.decision !== undefined) {
-    return recordsAllContent(applyAudienceCeiling(traceState.decision, content));
+  const visibleByDefault = shouldCaptureInstrumentationContent(content);
+  // A root session's own trace policy can withhold content its audience shows by default, but
+  // never reveal content its audience hides: Agent Runs' exportPolicy redacts spans, not run data.
+  if (
+    !visibleByDefault ||
+    traceState?.decision === undefined ||
+    !isWorkflowOtelTraceEnabled(serializedContext)
+  ) {
+    return visibleByDefault;
   }
-  return shouldCaptureInstrumentationContent(content);
+  return recordsAllContent(traceState.decision);
 }
 
 function recordsAllContent(decision: InstrumentationDecision | undefined): boolean {

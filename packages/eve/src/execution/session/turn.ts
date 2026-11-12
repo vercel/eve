@@ -48,7 +48,8 @@ import type {
   TurnStepPayload,
 } from "#execution/session/turn-step-types.js";
 import { turnStep } from "#execution/session/turn-step.js";
-import { exhaustedStepError, normalizeSerializableError } from "#execution/workflow-errors.js";
+import { exhaustedStepError } from "#execution/workflow-errors.js";
+import { isObject, readNonEmptyString } from "#shared/guards.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
 import type { TurnControl } from "#execution/session/turn-control.js";
 import {
@@ -217,12 +218,16 @@ export class SessionExecution {
             recover,
             steeringSignal: turn.steeringSignal,
           });
-        return run().catch((error: unknown) =>
-          run({
-            error: normalizeSerializableError(exhaustedStepError(error)),
+        return run().catch((error: unknown) => {
+          // What the step threw can carry request content, and the recovery step's input is
+          // stored, so recovery gets only the error's class.
+          const thrown = exhaustedStepError(error);
+          const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
+          return run({
+            error: name === undefined ? {} : { name },
             ...(turn.signal.aborted && { stopped: true as const }),
-          }),
-        );
+          });
+        });
       });
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;

@@ -206,7 +206,7 @@ Before the next model request, eve repairs a local tool call in saved history th
 
 A failed model run, turn, or session carries `error: { code, message, id?, hint? }` on its `model.settled`, `turn.settled`, or `session.ended`. `id` is a support id that eve's server logs also carry, and `hint` is a remedy when eve recognizes the failure.
 
-When a turn's step fails every Workflow retry with an error outside the model and tool paths, such as a storage write that keeps failing, the turn settles `failed` with code `TURN_FAILED`, a fixed message, and an `id`. The thrown error can carry request content, so eve keeps its message and details off both the stream and its server logs. The server log records the failure under that `id` with the error's class name. A turn cancelled while its step was retrying settles `cancelled` instead.
+When a turn's step fails every Workflow retry with an error outside the model and tool paths, such as a storage write that keeps failing, the turn settles `failed` with code `TURN_FAILED`, a fixed message, and an `id`. The thrown error can carry request content, so eve keeps its message and details off the stream and off its own log line for the failure, which records that `id` and the error's class name. Workflow's own step-failure log still includes the error's stack. A turn cancelled while its step was retrying settles `cancelled` instead.
 
 A turn that ends closes what it left open in the same line. Running calls and open requests for input end `interrupted`, and their pending answers end `withdrawn`. A task can outlive its turn and stays open.
 
