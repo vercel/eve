@@ -9,6 +9,7 @@ import {
   isSteeringDelivery,
   isSteeringMessage,
   type SteeringOptions,
+  steeringPolicyOf,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
@@ -66,7 +67,7 @@ export class ActiveTurn {
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
-  private readonly identity: SteeringTurn;
+  private readonly owner: Omit<SteeringTurn, "steer">;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
@@ -90,7 +91,7 @@ export class ActiveTurn {
     this.input = input;
     this.caller = owner.caller;
     this.#control = owner.control === true;
-    this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
+    this.owner = { callerCallId: owner.caller?.callId, principal: owner.principal };
     this.expectedTurnId = activeTurnId(
       turnPosition(storedProjection(readDurableSession(input.cursor.sessionState).state)),
     );
@@ -115,6 +116,12 @@ export class ActiveTurn {
     )
       this.steeringController.abort();
   };
+
+  /** Who steers the turn now: its owner, as the harness's latest `admit` lets them. */
+  private get identity(): SteeringTurn {
+    const { state } = readDurableSession(this.input.cursor.sessionState);
+    return { ...this.owner, steer: steeringPolicyOf(state) };
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;

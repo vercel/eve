@@ -61,7 +61,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 56;
+export const COMPILED_AGENT_MANIFEST_VERSION = 57;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -244,6 +244,7 @@ export type CompiledToolDefinition = InternalToolDefinition &
 /** The kinds of file eve asks at runtime, each a definition of the agent's. */
 export type CompiledDefinitionKind =
   | "connection"
+  | "harness"
   | "hook"
   | "instructions"
   | "memory"
@@ -252,12 +253,15 @@ export type CompiledDefinitionKind =
 
 /**
  * A file the agent declares that eve asks at runtime: a `defineDynamic()` tool, skill,
- * connection, or instructions file, a hook, or a memory. Its module holds the code; this holds
+ * connection, or instructions file, a hook, a memory, or a harness layer. Its module holds the code; this holds
  * what reading the agent needs without loading it.
  */
 export interface CompiledDefinition extends ModuleSourceRef {
   readonly kind: CompiledDefinitionKind;
-  /** Its name, from its path: `tools/weather.ts` is `"weather"`, `memory/notes.ts` `"notes"`. */
+  /**
+   * Its name, from its path: `tools/weather.ts` is `"weather"`, `memory/notes.ts` `"notes"`,
+   * `harness.ts` `"harness"`, and an extension's `harness/<namespace>.ts` `"<namespace>"`.
+   */
   readonly slug: string;
   /** An extension's namespace, which the names of what a map returns take. */
   readonly extensionNamespace?: string;

@@ -429,6 +429,12 @@
       "import": "./dist/src/public/experimental/workspace/index.js",
       "default": "./dist/src/public/experimental/workspace/index.js"
     },
+    "./experimental/harness": {
+      "eve-source": "./src/public/experimental/harness/index.ts",
+      "types": "./dist/src/public/experimental/harness/index.d.ts",
+      "import": "./dist/src/public/experimental/harness/index.js",
+      "default": "./dist/src/public/experimental/harness/index.js"
+    },
     "./experimental/sandbox/just-bash": {
       "eve-source": "./src/public/experimental/sandbox/just-bash.ts",
       "types": "./dist/src/public/experimental/sandbox/just-bash.d.ts",

@@ -9,6 +9,7 @@ import type { SessionAgent, SessionAgentSettings } from "#runtime/sessions/sessi
 import { declared, type ResolvedScheduleCollection } from "#runtime/types.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import { type AgentContents, settingsOf } from "./agent-definitions.js";
+import { type HarnessStack, stackOf } from "./harness/stack.js";
 import { createSessionAgent } from "./session-agent.js";
 import { connectionDefinition } from "./connections.js";
 import type { Definition } from "./definition.js";
@@ -110,6 +111,7 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
         .map(scheduleToolsDefinition),
     },
     instructions: declared(agent, "instructions").map(instructionsDefinition),
+    harness: compiledHarness(bundle),
     model: [staticModel, model].filter((definition) => definition !== undefined),
     skills: declared(agent, "skill").map(skillDefinition),
     // Its declared subagents are tools in its tool table, eve's `staticTools`.
@@ -126,4 +128,15 @@ function scheduleToolsDefinition(collection: ResolvedScheduleCollection): Defini
     const { scheduleCollectionTools } = await import("#context/schedule-collection-tools.js");
     return scheduleCollectionTools(collection.definition, collection.name);
   });
+}
+
+/** `agent/harness.ts`, then each mounted extension's `extension/harness.ts`, outermost first. */
+function compiledHarness(bundle: CompiledBundle): HarnessStack {
+  return stackOf(
+    declared(bundle.resolvedAgent, "harness").map((file) => ({
+      harness: file.harness,
+      label: file.logicalPath,
+      ...(file.extensionNamespace !== undefined && { namespace: file.extensionNamespace }),
+    })),
+  );
 }

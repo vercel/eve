@@ -8,6 +8,7 @@ import {
   dynamicEvaluate,
   isDynamicSentinel,
 } from "#dynamic/definition.js";
+import { harnessMismatch, normalizeHarness } from "#internal/authored-definition/harness.js";
 import { normalizeHookHandlers } from "#internal/authored-definition/hook.js";
 import { memoryMismatch, normalizeMemoryDefinition } from "#internal/authored-definition/memory.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
@@ -43,6 +44,12 @@ export async function resolveDefinition(
       kindLabel: definition.kind,
     });
     switch (definition.kind) {
+      case "harness":
+        return {
+          ...ref,
+          harness: normalizeHarness(value, harnessMismatch(definition)),
+          kind: "harness",
+        };
       case "hook":
         return { ...ref, events: normalizeHookHandlers(value, definition), kind: "hook" };
       case "memory":

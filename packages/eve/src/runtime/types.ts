@@ -46,6 +46,7 @@ import type { ToolSchema } from "#tools/schema.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { DynamicSchedulesDefinition } from "#public/schedules/subscription.js";
 import type { MemoryDefinition } from "#public/memory/index.js";
+import type { Harness } from "#public/definitions/harness.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -375,6 +376,19 @@ export type ResolvedMemoryDefinition = Readonly<
     }
 >;
 
+/**
+ * A harness layer the agent declares, with its `defineHarness()` value reattached: the agent's
+ * own `harness.ts` (slug `"harness"`), a local subagent's, or a mounted extension's
+ * `extension/harness.ts`, which composes at `harness/<namespace>.ts` (slug `"<namespace>"`) and
+ * carries its `extensionNamespace`.
+ */
+export interface ResolvedHarnessDefinition extends ResolvedModuleSourceRef {
+  readonly harness: Harness;
+  readonly slug: string;
+  /** The mounted extension that contributed this layer; absent for the agent's own file. */
+  readonly extensionNamespace?: string;
+}
+
 /** An `agent/schedules/` collection, with its definition reattached and stamped. */
 export interface ResolvedScheduleCollection extends Readonly<ModuleSourceRef> {
   readonly name: string;
@@ -399,6 +413,7 @@ export interface ResolvedDynamicDefinition<
 /** A file the agent declares that eve asks at runtime, with its code reattached. */
 export type ResolvedDefinition =
   | { [K in DynamicDefinitionKind]: ResolvedDynamicDefinition<K> }[DynamicDefinitionKind]
+  | (ResolvedHarnessDefinition & { readonly kind: "harness" })
   | (ResolvedHookDefinition & { readonly kind: "hook" })
   | (ResolvedMemoryDefinition & { readonly kind: "memory" })
   | (ResolvedScheduleCollection & { readonly kind: "schedules" });

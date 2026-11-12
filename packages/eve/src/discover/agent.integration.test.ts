@@ -142,6 +142,53 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("discovers a root harness module beside the agent's other slots", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "harness.mts": "export default {};",
+        "hooks/audit.ts": "export default {};",
+        "instructions.md": "Run.",
+        "memory.ts": "export default {};",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(sourcesOf(result.manifest, "harness")).toEqual([
+      { logicalPath: "harness.mts", sourceId: "harness.mts", sourceKind: "module" },
+    ]);
+    expect(result.manifest.sources.map((source) => source.logicalPath)).toEqual([
+      "hooks/audit.ts",
+      "harness.mts",
+      "memory.ts",
+      "instructions.md",
+    ]);
+  });
+
+  it("rejects more than one root harness module", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "harness.js": "export default {};",
+        "harness.ts": "export default {};",
+        "instructions.md": "Run.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(sourcesOf(result.manifest, "harness")).toEqual([]);
+  });
+
   it("rejects mixed flat/directory memory and invalid slot names", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -1043,6 +1090,40 @@ describe("discoverAgent (memory)", () => {
       DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
     );
     expect(sourcesOf(result.manifest.resolvedExtensions[0]!.manifest, "memory")).toEqual([]);
+  });
+
+  it("keeps a harness declared by a mounted extension", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/harness.ts": "export default {};",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "harness.ts": "export default {};",
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(sourcesOf(result.manifest, "harness").map((source) => source.logicalPath)).toEqual([
+      "harness.ts",
+    ]);
+    expect(
+      sourcesOf(result.manifest.resolvedExtensions[0]!.manifest, "harness").map(
+        (source) => source.logicalPath,
+      ),
+    ).toEqual(["harness.ts"]);
   });
 
   it("reports an unresolved mount when the extension package is missing", async () => {

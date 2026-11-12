@@ -44,6 +44,7 @@ import { labelCallbacks } from "#internal/testing/tool-labels.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
+import { defineHarness } from "#public/definitions/harness.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { webSearch, type WebSearchToolInput } from "#tools/provided/web-search.js";
@@ -1546,6 +1547,61 @@ describe("compileAgentManifest source graph", () => {
     expect(declared(resolved, "memory")).toEqual([
       expect.objectContaining({ offersTools: true, slot: "profile" }),
     ]);
+  });
+
+  it("compiles the agent's harness.ts and resolves it as a declared harness", async () => {
+    const harness = defineHarness({ instructions: "Be brief." });
+    const sourceRegistry = registry([
+      { logicalPath: "harness.ts", loadNamespace: async () => ({ default: harness }) },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const [definition] = compiledOf(compiled, "harness");
+    expect(definition).toEqual({
+      kind: "harness",
+      logicalPath: "harness.ts",
+      slug: "harness",
+      sourceId: "test:application:harness.ts",
+      sourceKind: "module",
+    });
+    expect(() => compiledAgentManifestSchema.parse(compiled)).not.toThrow();
+    expect(compiled.bindings[definition!.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    expect(declared(resolved, "harness")).toEqual([
+      {
+        harness,
+        kind: "harness",
+        logicalPath: "harness.ts",
+        slug: "harness",
+        sourceId: "test:application:harness.ts",
+        sourceKind: "module",
+      },
+    ]);
+  });
+
+  it("rejects a harness.ts whose default export isn't a defineHarness() value", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "harness.ts",
+        loadNamespace: async () => ({ default: { instructions: "Be brief." } }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Expected the default export of "harness.ts" to be created with defineHarness().',
+    );
   });
 
   it("lets an application tool replace a memory's provider tools", async () => {

@@ -128,7 +128,9 @@ export async function stepMessages(
   draft: Draft,
   input: {
     readonly call: CallInput;
-    readonly project: (record: readonly HarnessModelMessage[]) => HarnessModelMessage[];
+    readonly project: (
+      record: readonly HarnessModelMessage[],
+    ) => HarnessModelMessage[] | Promise<HarnessModelMessage[]>;
   },
 ): Promise<CallRecord & { readonly view: readonly HarnessModelMessage[] }> {
   const drafted = { historyState: input.call.historyState, record: input.call.record };
@@ -141,6 +143,6 @@ export async function stepMessages(
   const record = announce(drafted, input.call.currentInput, announcements);
   return {
     ...record,
-    view: placeAnchored(input.project(record.record), await draft.context()),
+    view: placeAnchored(await input.project(record.record), await draft.context()),
   };
 }

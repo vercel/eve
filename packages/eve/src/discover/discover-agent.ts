@@ -194,6 +194,10 @@ export async function discoverAgentRoot(input: {
     ? []
     : found(await discoverScheduleSources({ agentRoot: rootPath, rootEntries, source })).schedules;
   const { connections } = found(await discoverConnectionSources({ rootEntries, rootPath, source }));
+  // `harness.ts`: one root module, the agent's (or extension's, or subagent's) harness layer.
+  const harness = found(
+    discoverFlatModuleSource({ rootEntries, rootPath, slotName: "harness" }),
+  ).module;
   const { memories } = found(await discoverMemorySources({ rootEntries, rootPath, source }));
   const sandbox = found(await discoverSandboxSource({ rootEntries, rootPath, source }));
   const tools = found(
@@ -230,6 +234,7 @@ export async function discoverAgentRoot(input: {
     ...channels,
     ...connections,
     ...hooks,
+    ...(harness === undefined ? [] : [harness]),
     ...memories,
     ...(sandbox.sandbox === null ? [] : [sandbox.sandbox]),
     ...tools,

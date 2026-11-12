@@ -66,6 +66,7 @@ export type AgentSourceKind = keyof AgentSourceRefs;
 interface AgentSourceRefs {
   readonly channel: ModuleSourceRef;
   readonly connection: ConnectionSourceRef;
+  readonly harness: ModuleSourceRef;
   readonly hook: ModuleSourceRef;
   readonly instructions: InstructionsSourceRef;
   readonly memory: MemorySourceRef;
@@ -78,6 +79,7 @@ interface AgentSourceRefs {
 const SOURCE_KIND_BY_SLOT_ROOT: Readonly<Record<string, AgentSourceKind>> = {
   channels: "channel",
   connections: "connection",
+  harness: "harness",
   hooks: "hook",
   instructions: "instructions",
   memory: "memory",
@@ -241,8 +243,8 @@ export interface AgentSourceManifest {
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
   /**
    * Every authored module and resource the agent's slots hold, other than its config module: its
-   * channels, connections, hooks, memory, sandbox, tools, instructions, schedules, and skills, in
-   * that order. A source's slot names its kind; see {@link sourcesOf}.
+   * channels, connections, hooks, harness, memory, sandbox, tools, instructions, schedules, and
+   * skills, in that order. A source's slot names its kind; see {@link sourcesOf}.
    */
   sources: AgentSourceRef[];
   /**

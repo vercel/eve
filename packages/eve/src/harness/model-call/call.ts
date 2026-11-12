@@ -66,6 +66,7 @@ import {
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
 import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
+import { projectHistory } from "#harness/stack/kernel.js";
 import { modelInstructions, type RequestMessages, withTrailingUserNote } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
@@ -277,7 +278,9 @@ export class ModelCaller {
     this.system = await stepSystem(step, draft);
     const messages = await stepMessages(draft, {
       call,
-      project: (record) => projectPrompt({ ...prompt, messages: [...record] }),
+      // What the model reads of the record: the prompt's projection, then the harness's.
+      project: async (record) =>
+        await projectHistory(step, projectPrompt({ ...prompt, messages: [...record] })),
     });
     this.request = {
       history: messages.record,

@@ -35,6 +35,7 @@ export type ProjectedModuleSource =
         | "channel"
         | "config"
         | "extension"
+        | "harness"
         | "hook"
         | "instructions"
         | "memory"
@@ -446,6 +447,10 @@ export function qualifyExtensionContributionLogicalPath(
     const slot = stripLogicalPathExtension(logicalPath);
     if (slot === "instructions" || slot === "system") {
       return `instructions/${namespace}${logicalPath.slice(logicalPath.lastIndexOf("."))}`;
+    }
+    // An extension's `harness.ts` is one layer of the consuming agent's harness, under its mount.
+    if (slot === "harness") {
+      return `harness/${namespace}${logicalPath.slice(logicalPath.lastIndexOf("."))}`;
     }
     throw new Error(`Extension source slot "${logicalPath}" cannot be namespace-scoped.`);
   }

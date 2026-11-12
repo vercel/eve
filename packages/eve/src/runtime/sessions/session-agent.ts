@@ -1,3 +1,4 @@
+import type { HarnessStack } from "#definitions/harness/stack.js";
 import type { AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { ContextReader } from "#context/key.js";
@@ -82,6 +83,11 @@ export interface SessionAgent {
    */
   readonly revision: () => Promise<string>;
   readonly definitions: () => Promise<readonly Definition[]>;
+  /**
+   * Its harness stack: `agent/harness.ts`, then each extension's, outermost first. `undefined`:
+   * eve's own behavior alone.
+   */
+  readonly harness?: () => Promise<HarnessStack>;
   readonly settings: SessionAgentSettings;
   /** The channel adapters a session's channel rehydrates from at each step. */
   readonly adapters: RuntimeAdapterRegistry;

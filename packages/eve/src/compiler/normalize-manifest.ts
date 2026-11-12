@@ -48,7 +48,12 @@ import {
 } from "#compiler/normalize-helpers.js";
 import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-subagent.js";
 import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
-import { compileHookEntry, compileMemoryDefinition } from "#compiler/normalize-definitions.js";
+import {
+  compileHarnessDefinition,
+  compileHookEntry,
+  compileMemoryDefinition,
+  orderHarnessDefinitions,
+} from "#compiler/normalize-definitions.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
@@ -520,6 +525,22 @@ class AgentGraphCompiler {
           state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         }
+        case "harness": {
+          // An extension's layer (`harness/<namespace>.ts`) keeps its namespace, even when the
+          // mount directory's own `harness.ts` overrides it.
+          const definition = await compileHarnessDefinition(entry.source, {
+            binding: binding!,
+            loadNamespace,
+          });
+          definitions.push(
+            candidate.layer === "extension-override" &&
+              definition.logicalPath.startsWith("harness/")
+              ? { ...definition, extensionNamespace: definition.slug }
+              : withExtensionNamespace(definition, candidate.owner),
+          );
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          break;
+        }
         case "hook":
           definitions.push(
             await compileHookEntry(entry.source, { binding: binding!, loadNamespace }),
@@ -658,7 +679,7 @@ class AgentGraphCompiler {
       channelRoutes,
       connections,
       diagnosticsSummary: summarizeCompilerDiagnostics(this.diagnostics),
-      definitions,
+      definitions: orderHarnessDefinitions(definitions),
       extensionMounts,
       instructions,
       sandbox,

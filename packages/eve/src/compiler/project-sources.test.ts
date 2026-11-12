@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   projectAgentSources,
+  projectSelectedSources,
   qualifyExtensionContributionLogicalPath,
 } from "#compiler/project-sources.js";
 import {
@@ -14,6 +15,8 @@ describe("qualifyExtensionContributionLogicalPath", () => {
   it.each([
     ["channels/webhook.ts", "channels/crm__webhook.ts"],
     ["connections/api.ts", "connections/crm__api.ts"],
+    ["harness.ts", "harness/crm.ts"],
+    ["harness.mjs", "harness/crm.mjs"],
     ["hooks/audit.ts", "hooks/crm__audit.ts"],
     ["instructions.md", "instructions/crm.md"],
     ["instructions/policy.md", "instructions/crm__policy.md"],
@@ -109,6 +112,49 @@ describe("qualifyExtensionContributionLogicalPath", () => {
         },
       ]);
     }
+  });
+
+  it("projects the agent's harness.ts ahead of each mounted extension's, by namespace", () => {
+    const extension = (namespace: string) => ({
+      namespace,
+      specifier: `@acme/${namespace}`,
+      packageName: `@acme/${namespace}`,
+      packageRoot: `/packages/${namespace}`,
+      sourceRoot: `/packages/${namespace}/extension`,
+      manifest: createAgentSourceManifest({
+        agentRoot: `/packages/${namespace}/extension`,
+        appRoot: `/packages/${namespace}`,
+        sources: [createModuleSourceRef({ logicalPath: "harness.ts" })],
+      }),
+      externalDependencies: [],
+    });
+    const manifest = createAgentSourceManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      resolvedExtensions: [extension("zeta"), extension("crm")],
+      sources: [createModuleSourceRef({ logicalPath: "harness.ts" })],
+    });
+
+    const projected = projectAgentSources({
+      externalDependencies: [],
+      manifest,
+      nodeId: "root",
+      nodePath: "",
+    });
+
+    expect(
+      projectSelectedSources({ candidates: projected.candidates, resources: [] }).map(
+        ({ candidate, kind }) => ({
+          kind,
+          logicalPath: candidate.logicalPath,
+          owner: candidate.owner.kind,
+        }),
+      ),
+    ).toEqual([
+      { kind: "harness", logicalPath: "harness.ts", owner: "application" },
+      { kind: "harness", logicalPath: "harness/crm.ts", owner: "extension" },
+      { kind: "harness", logicalPath: "harness/zeta.ts", owner: "extension" },
+    ]);
   });
 
   it("applies the selected extension projector to canonical path overrides", () => {

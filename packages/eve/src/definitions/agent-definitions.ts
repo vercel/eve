@@ -19,6 +19,8 @@ import {
 import { parentModel } from "./model.js";
 import { skills as eveSkills } from "./skills.js";
 import { staticTools } from "./tools.js";
+import { harnessDefinitions } from "./harness/definition.js";
+import type { HarnessStack } from "./harness/stack.js";
 
 // One path from an agent's contents to the definitions its sessions run. An agent compiled from an
 // `agent/` directory maps its node's files to them (`#definitions/compiled-agent.js`); any other
@@ -56,6 +58,12 @@ export interface AgentContents {
   /** Leave out eve's runtime definitions (instructions, connections, catalog, ...). */
   readonly bare?: boolean;
   /**
+   * `agent/harness.ts` and each extension's, outermost first. Its request stages arrange the call
+   * after eve's builtins and before its catalog; a naked one (`extends: false`) leaves out eve's
+   * skills listing, builtins and catalog, so the agent's own contents are all that's below it.
+   */
+  readonly harness?: HarnessStack;
+  /**
    * What only an `agent/` directory declares, with no `defineAgent` field yet, at the positions
    * its files take. Internal: nothing public builds these.
    */
@@ -80,6 +88,8 @@ export interface AgentContents {
  *   before tools and subagents check names against them.
  * - eve's skills listing, approvals, builtins and catalog come after everything the agent
  *   declares, so they see all of it: the catalog indexes the final tool table.
+ * - The harness arranges the call after the builtins, so it sees eve's task tools, and before the
+ *   catalog, so what it drops can't be searched for.
  * - The last model choice wins, and a parent's choice comes last, so it's the one the session runs.
  * - Among the contents' fields, one definition per id: a later one takes an earlier one's place,
  *   as an agent's own `bash` replaces eve's default (`definitions: eve.defaults()`) where it stood.
@@ -88,6 +98,10 @@ export interface AgentContents {
 export function agentDefinitionsOf(contents: AgentContents): readonly Definition[] {
   const eve = (definition: Definition): readonly Definition[] =>
     contents.bare === true ? [] : [definition];
+  // What a naked harness takes the place of: eve's own layers over the agent's contents. The
+  // approval gate and connections stay: they're the kernel's, whatever the harness.
+  const eveLayer = (definition: Definition): readonly Definition[] =>
+    contents.harness?.naked === true ? [] : eve(definition);
   const own = overriding([
     contents.model,
     contents.instructions,
@@ -119,10 +133,11 @@ export function agentDefinitionsOf(contents: AgentContents): readonly Definition
     ...own(contents.subagents),
     ...(files?.scheduleTools ?? []),
     ...own(contents.skills),
-    ...eve(eveSkills),
+    ...eveLayer(eveSkills),
     ...eve(approvals),
-    ...eve(builtins),
-    ...eve(catalog),
+    ...eveLayer(builtins),
+    ...harnessDefinitions(contents.harness ?? { layers: [], naked: false }),
+    ...eveLayer(catalog),
     ...eve(parentModel),
   ];
 }

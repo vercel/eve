@@ -271,6 +271,25 @@ export interface SteeringTurn {
   /** The call id of the delegated caller the turn answers, if any. */
   readonly callerCallId: string | undefined;
   readonly principal: string;
+  /**
+   * Who the session's harness lets steer a running turn, as its `admit` stage last said:
+   * `"caller"` (eve's own rule) or `"nobody"`. It can only narrow eve's rule: a turn waiting on
+   * its own person still hears them, or it could never end.
+   */
+  readonly steer?: SteeringPolicy;
+}
+
+/** Who may steer a running turn. */
+export type SteeringPolicy = "caller" | "nobody";
+
+/** Where a step records what the harness's `admit` stage decided, for the session loop to read. */
+export const STEERING_POLICY_STATE_KEY = "eve.harness.steer";
+
+/** The steering policy a session's state records, eve's own when none is. */
+export function steeringPolicyOf(
+  state: Readonly<Record<string, unknown>> | undefined,
+): SteeringPolicy {
+  return state?.[STEERING_POLICY_STATE_KEY] === "nobody" ? "nobody" : "caller";
 }
 
 export interface SteeringOptions {
@@ -296,7 +315,8 @@ export function isSteeringDelivery(
   options?: { readonly heldOnPerson?: boolean },
 ): boolean {
   return (
-    (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
+    (options?.heldOnPerson === true ||
+      ((delivery.turnPolicy ?? "steer") === "steer" && turn.steer !== "nobody")) &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
