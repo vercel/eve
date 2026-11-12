@@ -44,3 +44,8 @@ export function compactionConfig(
     thresholdPercent,
   };
 }
+
+/** `config` measured against the model's whole window instead of the threshold. */
+export function againstWindow(config: CompactionConfig, window: number): CompactionConfig {
+  return { ...config, target: Math.floor(window * TARGET_SHARE), threshold: window };
+}

@@ -13,7 +13,7 @@ import {
 } from "#harness/messages.js";
 import { type Step, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
-import { compactionConfig } from "#harness/compaction/config.js";
+import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
@@ -169,7 +169,7 @@ export async function historyBeforeCall(
         scope,
       );
       try {
-        return await compactUnder(step, input, prompt, { ...config, threshold: window });
+        return await compactUnder(step, input, prompt, againstWindow(config, window));
       } catch (overWindow) {
         if (!(overWindow instanceof CompactionOverLimitError)) throw overWindow;
       }

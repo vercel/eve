@@ -81,10 +81,13 @@ const lookupTool: HarnessToolDefinition = {
   inputSchema: jsonSchema({ type: "object" }),
   name: "lookup",
 };
-/** A tool description no compaction can shrink: over a quarter of a 20k window, far under all of it. */
+/**
+ * A tool description no compaction can shrink: over a quarter of a 20k window, yet small enough
+ * that a compaction against the window can keep the recent tail.
+ */
 const policyTool: HarnessToolDefinition = {
   ...lookupTool,
-  description: "Protected policy. ".repeat(1_500),
+  description: "Protected policy. ".repeat(1_200),
 };
 const overThresholdAgent = {
   model: { contextWindowTokens: 20_000, id: "step-model" },
@@ -263,12 +266,17 @@ describe("compaction summary call", () => {
       "Which sources back the second claim?",
     );
 
-    // Both steps send the summary, not the notes, and only the first one summarizes.
+    // Both steps send the summary, not the notes, and only the first one summarizes. The window
+    // has room for the recent tail, so it stays word for word beside the summary.
     expect(summaries).toHaveBeenCalledOnce();
     expect(turnPrompts).toHaveLength(2);
     for (const prompt of turnPrompts) {
       expect(JSON.stringify(prompt)).toContain("Alice asked for the quarterly report.");
       expect(JSON.stringify(prompt)).not.toContain("Earlier notes. Earlier notes.");
+      expect(prompt).toContainEqual({
+        content: [{ text: "Noted.", type: "text" }],
+        role: "assistant",
+      });
     }
     expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
       { data: { outcome: "completed" } },
