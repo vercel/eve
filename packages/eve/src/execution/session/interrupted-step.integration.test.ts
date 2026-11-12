@@ -1,5 +1,5 @@
 import { commitOf } from "#harness/session-machine/commit.js";
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import {
@@ -63,6 +63,8 @@ it("fails the turn with a fixed failure, never what a step's last attempt threw"
   const { ctx, session } = openTurnSession("exhausted-session");
   enterSessionProjection(ctx, session.state);
   const published: SessionEvent[] = [];
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => logged.mockRestore());
   const result = await recoverInterruptedStep({
     admission: commitOf([]),
     attempt: readInterruptedAttempt(0, []),
@@ -83,6 +85,10 @@ it("fails the turn with a fixed failure, never what a step's last attempt threw"
   });
   expect(JSON.stringify(published)).not.toContain("4242");
   expect(result).toMatchObject({ result: { settled: { isError: true, output: message } } });
+  // The id on the stream finds the cause in the server log.
+  const errorId = (settled!.data as { readonly error: { readonly id: string } }).error.id;
+  expect(JSON.stringify(logged.mock.calls)).toContain(errorId);
+  expect(JSON.stringify(logged.mock.calls)).toContain("4242");
 });
 
 it("leaves a turn stopped while its step kept failing open for its cancel", async () => {

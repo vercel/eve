@@ -158,14 +158,14 @@ describe("tool loop cancellation (real AI SDK)", () => {
       (event) => event.type === "turn.settled" || event.type === "session.ended",
     );
     expect(endings.map((event) => event.type)).toEqual(["turn.settled", "session.ended"]);
-    const [settled, ended] = endings;
-    expect(settled?.data).toMatchObject({
+    const settled = endings[0]!.data as { readonly error: object; readonly turnId: string };
+    expect(settled).toMatchObject({
       error: { code: "MODEL_SELECTION_FAILED" },
       outcome: "failed",
     });
-    expect(ended?.data).toMatchObject({
-      cause: { turnId: (settled?.data as { turnId: string }).turnId },
-      error: (settled?.data as { error: object }).error,
+    expect(endings[1]!.data).toMatchObject({
+      cause: { turnId: settled.turnId },
+      error: settled.error,
       outcome: "failed",
     });
   });
