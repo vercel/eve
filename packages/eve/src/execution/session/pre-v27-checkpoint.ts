@@ -10,12 +10,16 @@ import {
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 } from "#context/key-names.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
+import {
+  EARLIER_TURN_USAGE_KEY,
+  REPORTED_USAGE_KEY,
+  earlierUsage,
+} from "#execution/earlier-session-usage.js";
 import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import type { TaskRunAddress } from "#execution/tasks/table.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
-import { usageOf } from "#harness/facts.js";
 import { withModelUsage } from "#harness/session-usage.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isObject } from "#shared/guards.js";
@@ -128,8 +132,6 @@ export function withProjection(
 type CheckpointRecord = Record<string, unknown>;
 
 const LEGACY_REMOTE_CALLER_KEY = "eve.legacyRemoteAgentCaller";
-const TURN_USAGE_KEY = "eve.harness.turnUsage";
-const REPORTED_USAGE_KEY = "eve.harness.reportedSessionUsage";
 const USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
 const USAGE_WINDOW_INDEX_KEY = "eve.harness.sessionUsageWindowIndex";
 
@@ -141,7 +143,7 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   const turnCount = readTurnCount(sessionState, state);
   const retiredRuns = retireIdleTasks(state["eve.taskTable"]);
   const usage = importUsage(state);
-  const reported = legacyUsage(state[REPORTED_USAGE_KEY]);
+  const reported = earlierUsage(state[REPORTED_USAGE_KEY]);
   // eve 0.69 kept history in the durable snapshot.
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
@@ -205,11 +207,11 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
 
 /** The session total and approved window the earlier owner counted, as the legacy import reads them. */
 function importUsage(state: CheckpointRecord): PreV27Usage | undefined {
-  const turnUsage = state[TURN_USAGE_KEY];
-  const total = legacyUsage(isObject(turnUsage) ? turnUsage.session : undefined);
+  const turnUsage = state[EARLIER_TURN_USAGE_KEY];
+  const total = earlierUsage(isObject(turnUsage) ? turnUsage.session : undefined);
   if (total === undefined) return undefined;
   const index = state[USAGE_WINDOW_INDEX_KEY];
-  const start = legacyUsage(state[USAGE_WINDOW_START_KEY]);
+  const start = earlierUsage(state[USAGE_WINDOW_START_KEY]);
   return typeof index === "number" &&
     Number.isSafeInteger(index) &&
     index > 0 &&
@@ -267,19 +269,6 @@ function retireIdleTasks(table: unknown): TaskRunAddress[] {
     )
       throw new SessionBusy("session holds a running task");
     return [{ hookToken: run.hookToken, runId: run.runId }];
-  });
-}
-
-/** A usage total an earlier owner kept: its counts, and its cost only when a provider reported one. */
-function legacyUsage(raw: unknown): TokenUsage | undefined {
-  if (!isObject(raw)) return undefined;
-  const count = (field: string) => (typeof raw[field] === "number" ? raw[field] : 0);
-  return usageOf({
-    cacheReadTokens: count("cacheReadTokens"),
-    cacheWriteTokens: count("cacheWriteTokens"),
-    costUsd: raw.sawCost === true && typeof raw.costUsd === "number" ? raw.costUsd : undefined,
-    inputTokens: count("inputTokens"),
-    outputTokens: count("outputTokens"),
   });
 }
 

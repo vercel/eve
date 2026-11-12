@@ -3,21 +3,21 @@ import { withModelUsage } from "#harness/session-usage.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
-import { usageOf } from "#harness/facts.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  EARLIER_TURN_USAGE_KEY,
+  REPORTED_USAGE_KEY,
+  earlierUsage,
+} from "#execution/earlier-session-usage.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
-import type { TokenUsage } from "#shared/token-usage.js";
 
 export type LegacySession = DurableSession & { readonly history: ModelMessage[] };
 
 const LEGACY_EMISSION_KEY = "eve.harness.emission";
 
 const PRESERVED_FRAMEWORK_STATE = new Set(["eve.harness.sessionRuntimeTokenLimit"]);
-/** What a legacy driver counted the session spent, and how much of it a parent was told. */
-const LEGACY_USAGE_KEY = "eve.harness.turnUsage";
-const REPORTED_USAGE_KEY = "eve.harness.reportedSessionUsage";
 
 /** Reads the driver's embedded snapshot; every supported driver carries one. */
 export function readLegacySnapshot(
@@ -47,7 +47,7 @@ export function importConversation(session: LegacySession): {
       ([key]) => !key.startsWith("eve.") || PRESERVED_FRAMEWORK_STATE.has(key),
     ),
   );
-  const reported = legacyUsage(session.state?.[REPORTED_USAGE_KEY]);
+  const reported = earlierUsage(session.state?.[REPORTED_USAGE_KEY]);
   if (reported !== undefined) state[REPORTED_USAGE_KEY] = reported;
   return {
     history: normalizeHistory(history),
@@ -73,9 +73,9 @@ export function importConversation(session: LegacySession): {
 export function importProjection(session: LegacySession): SessionProjection {
   const raw = session.state?.[LEGACY_EMISSION_KEY];
   const initial = initialSessionProjection();
-  const spent = legacyUsage(
-    isObject(session.state?.[LEGACY_USAGE_KEY])
-      ? session.state[LEGACY_USAGE_KEY].session
+  const spent = earlierUsage(
+    isObject(session.state?.[EARLIER_TURN_USAGE_KEY])
+      ? session.state[EARLIER_TURN_USAGE_KEY].session
       : undefined,
   );
   const projection =
@@ -106,17 +106,4 @@ export function importProjection(session: LegacySession): SessionProjection {
       turns: { [turnId]: turn },
     },
   };
-}
-
-/** A legacy usage total: its counts, and its cost only when a provider reported one. */
-function legacyUsage(raw: unknown): TokenUsage | undefined {
-  if (!isObject(raw)) return undefined;
-  const count = (field: string) => (typeof raw[field] === "number" ? raw[field] : 0);
-  return usageOf({
-    cacheReadTokens: count("cacheReadTokens"),
-    cacheWriteTokens: count("cacheWriteTokens"),
-    costUsd: raw.sawCost === true && typeof raw.costUsd === "number" ? raw.costUsd : undefined,
-    inputTokens: count("inputTokens"),
-    outputTokens: count("outputTokens"),
-  });
 }
