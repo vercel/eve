@@ -364,6 +364,26 @@ export function recordTaskRunUsage(table: TaskTable, taskId: string, usage: Toke
   );
 }
 
+/**
+ * Retires idle resumable tasks, as a deployment handoff does so that the subagents and `serve`
+ * tools a session uses run the current build: the model can no longer reach one by its id, and
+ * starts a new task when it needs one. Each record keeps its run and results until the run
+ * reports its end, so spend it still reports counts and no result is lost. Returns the retired
+ * runs, which the caller ends.
+ */
+export function retireIdleResumableTasks(table: TaskTable): {
+  readonly retired: readonly TaskRunAddress[];
+  readonly table: TaskTable;
+} {
+  const retired: TaskRunAddress[] = [];
+  const tasks = table.tasks.map((record) => {
+    if (!isResumableTaskIdle(record) || record.run === undefined) return record;
+    retired.push({ hookToken: record.run.hookToken, runId: record.run.runId });
+    return { ...record, resumable: false };
+  });
+  return { retired, table: retired.length === 0 ? table : { tasks } };
+}
+
 /** The task's run finished; nothing is left to cancel. */
 export function finishTaskRun(table: TaskTable, taskId: string, runId: string): TaskTable {
   return updateTask(table, taskId, (record) => {

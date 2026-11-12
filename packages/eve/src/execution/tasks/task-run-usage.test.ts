@@ -13,6 +13,8 @@ import {
   createTask,
   readTaskTable,
   recordTaskRun,
+  retireIdleResumableTasks,
+  settleTaskCalls,
   writeTaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
@@ -81,6 +83,8 @@ function sessionWithTask(input: {
   readonly name: string;
   readonly ownInputTokens: number;
   readonly cancelled?: boolean;
+  /** The task answered, went idle, and a deployment handoff retired it. */
+  readonly retired?: boolean;
 }): {
   readonly cursor: SessionStateCursor;
   readonly execution: SessionExecution;
@@ -99,9 +103,18 @@ function sessionWithTask(input: {
     hookToken: `${runId}-control`,
     runId,
   });
+  const answered = settleTaskCalls(table, {
+    callIds: [`${input.name}-call`],
+    outcome: { output: "The plan looks ready.", status: "completed" },
+    taskId: created.taskId,
+  }).table;
   const snapshot = writeTaskTable(
     withSessionUsage(base.snapshot.session, usage(input.ownInputTokens)),
-    input.cancelled ? cancelTask(table, created.taskId).table : table,
+    input.cancelled
+      ? cancelTask(table, created.taskId).table
+      : input.retired
+        ? retireIdleResumableTasks(answered).table
+        : table,
   );
   const inbox = {
     claimSessionHooks: vi.fn(),
@@ -244,6 +257,32 @@ describe("delegated agent usage", () => {
     const task = readTaskTable(committed(alice.cursor).state).tasks[0];
     expect(task?.calls).toEqual([]);
     expect(task?.run).toBeUndefined();
+  });
+
+  it("counts what a run a deployment handoff retired still reports, then ends its task", async () => {
+    const alice = sessionWithTask({ name: "reviewer", ownInputTokens: 100, retired: true });
+    publishedFacts.length = 0;
+    await alice.execution.handleWorkflowMessage({
+      from: alice.from,
+      kind: "usage",
+      usage: usage(300, 0.25),
+    });
+    expect(spent(alice.cursor)).toEqual(usage(400, 0.25));
+
+    // The end control the successor sent stops the run, which reports its outcome.
+    await alice.execution.handleWorkflowMessage({
+      from: alice.from,
+      kind: "outcome",
+      result: { output: "Stopped.", status: "completed" },
+      usage: usage(500, 0.4),
+    });
+    expect(spent(alice.cursor)).toEqual(usage(600, 0.4));
+    const task = readTaskTable(committed(alice.cursor).state).tasks[0];
+    expect(task?.run).toBeUndefined();
+    // The answer the model hadn't read yet stays; the run's end adds none.
+    expect(task?.results).toEqual([
+      expect.objectContaining({ output: "The plan looks ready.", status: "completed" }),
+    ]);
   });
 
   it("reclaims a run address once stopping it confirms outright cancellation", async () => {

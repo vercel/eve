@@ -36,6 +36,8 @@ If the target deployment rejects the session, the previous deployment keeps it. 
 
 eve doesn't move live work between deployments. A session stays on its current deployment while it has a running turn, pending human input or authorization, queued messages, or active tasks and subagents. After that work finishes, the next delivery can move the idle session.
 
+An idle resumable task, such as a subagent that already answered or a `serve` tool waiting for its next call, doesn't keep the session on its deployment, and it doesn't move with it. Its run executes the build that started it, so when the session moves to another deployment, eve ends that run and drops the task from the [`[Tasks]` note](../tools/tasks). The model's next call to that subagent or tool starts a new task on the new deployment, without the old task's conversation or state; a call by the old `taskId` fails with `UNKNOWN_TASK`. A result the model hasn't read yet is still delivered, and spend the old run reports as it stops still counts against the session. A [compaction handoff](#compaction-handoff) stays on the same deployment and keeps its idle tasks.
+
 ### Compaction handoff
 
 After [compaction](./default-harness#compaction) rewrites the history, eve moves the session to a fresh workflow run on its current deployment. This keeps the run history of a long session bounded. It applies to automatic compaction and to compaction a client or channel requested.

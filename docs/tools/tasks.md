@@ -275,7 +275,9 @@ each task's start and end instead. See
 - **Ownership.** Tasks belong to the session's open turn, not to the caller that started them. A
   session has at most one open turn, so `eve__task_wait`, `eve__task_cancel`, task results, and the
   `[Tasks]` note cover every task in the session. Any later turn can continue an idle resumable task
-  by its `taskId`, and that call runs with its own caller's auth. Only the turn's own caller steers
+  by its `taskId`, and that call runs with its own caller's auth. A deploy that moves the session to a
+  new deployment ends its idle resumable tasks, so the next call starts a new task on the new build
+  ([Execution model](/docs/concepts/execution-model-and-durability#sessions-turns-and-steps)). Only the turn's own caller steers
   it; anonymous callers share one identity. eve doesn't check which caller started a task. In a session with several people, such as a
   shared Slack thread, the model working for one person can continue or `eve__task_cancel` another
   person's task. A continued `serve` task keeps the state its body built for earlier calls.

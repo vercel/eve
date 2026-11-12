@@ -5,6 +5,12 @@ import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { holdsHitlRequests } from "#harness/hitl/view.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  readTaskTable,
+  retireIdleResumableTasks,
+  writeTaskTable,
+  type TaskRunAddress,
+} from "#execution/tasks/table.js";
 
 /** Parses retained work with this deployment's code before deciding whether it can move. */
 export function isSessionStateIdleForHandoff(input: {
@@ -25,4 +31,28 @@ export function isSessionStateIdleForHandoff(input: {
     openSignIns(projection.view).length === 0 &&
     queuedInput(state) === undefined
   );
+}
+
+/**
+ * A deployment handoff retires the session's idle resumable tasks: their runs execute the build
+ * that started them, so the model's next call to such a subagent or `serve` tool starts a new
+ * task on the new build instead. Returns the retired runs, which the successor ends.
+ */
+export function retireIdleTasksForHandoff<C extends { readonly sessionState: DurableSessionState }>(
+  checkpoint: C,
+): { readonly checkpoint: C; readonly retiredTaskRuns?: readonly TaskRunAddress[] } {
+  const session = readDurableSession(checkpoint.sessionState);
+  const { retired, table } = retireIdleResumableTasks(readTaskTable(session.state));
+  if (retired.length === 0) return { checkpoint };
+  const { sessionState } = checkpoint;
+  return {
+    checkpoint: {
+      ...checkpoint,
+      sessionState: {
+        ...sessionState,
+        snapshot: { ...sessionState.snapshot, session: writeTaskTable(session, table) },
+      },
+    },
+    retiredTaskRuns: retired,
+  };
 }

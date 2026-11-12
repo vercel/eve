@@ -150,7 +150,7 @@ The parent passes only the `message` to a child. Don't include sensitive data un
 
 ## Agent messaging
 
-After it answers, a child waits with its conversation intact. To continue it in any later turn, call the same subagent tool with the child's `taskId` and a new `message`. Omit `taskId` to start a new child. A `taskId` for a task that ended, or that belongs to another tool, fails with `UNKNOWN_TASK`.
+After it answers, a child waits with its conversation intact. To continue it in any later turn, call the same subagent tool with the child's `taskId` and a new `message`. Omit `taskId` to start a new child. A `taskId` for a task that ended, or that belongs to another tool, fails with `UNKNOWN_TASK`. When a deploy moves the session to a new deployment, eve ends its waiting children, so the next call starts a new child on the new deployment; see [Execution model](./concepts/execution-model-and-durability#sessions-turns-and-steps).
 
 - **Correct work in progress:** call with the `taskId` of a working child. The message joins the child's current turn, or starts its next turn if the current one ends first, and one reply answers both calls.
 - **Cancel:** call `eve__task_cancel` with the `taskId`, or cancel the turn that called the child. Start a new task to delegate again.
