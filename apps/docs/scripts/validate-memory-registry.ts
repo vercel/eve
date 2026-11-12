@@ -113,6 +113,24 @@ for (const item of items) {
         'Registry item "memory/memco" must declare MEMCO_API_TOKEN as an environment variable.',
       );
     }
+  } else if (slug === "claude-mem") {
+    if (!item.dependencies?.includes("claude-mem")) {
+      throw new Error('Registry item "memory/claude-mem" must depend on claude-mem.');
+    }
+    if (item.meta?.eve?.requires !== ">=0.84.0") {
+      throw new Error('Registry item "memory/claude-mem" must require eve >=0.84.0.');
+    }
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (!/get_observations:\s*_unscoped/.test(source)) {
+      throw new Error(
+        'Registry item "memory/claude-mem" must omit the unscoped get_observations tool.',
+      );
+    }
+    if (!("CLAUDE_MEM_API_KEY" in (item.envVars ?? {}))) {
+      throw new Error(
+        'Registry item "memory/claude-mem" must declare CLAUDE_MEM_API_KEY as an environment variable.',
+      );
+    }
   } else if (slug === "memanto") {
     if (!item.dependencies?.some((dependency) => dependency.startsWith("@moorcheh-ai/memanto@"))) {
       throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto.');

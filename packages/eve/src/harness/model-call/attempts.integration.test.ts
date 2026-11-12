@@ -1,4 +1,4 @@
-import { APICallError, jsonSchema } from "ai";
+import { APICallError, jsonSchema, TypeValidationError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -39,14 +39,16 @@ const reply = (text: string): StreamPart[] => [
 ];
 
 /** A provider overloaded mid-stream, which eve retries and the AI SDK doesn't. */
-const overloaded = (before: readonly StreamPart[] = []): StreamResult =>
+const overloaded = (): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
-    ...before,
     { error: { message: "Overloaded", type: "overloaded_error" }, type: "error" },
   ]);
 
-async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<SessionEvent[]> {
+async function runTurn(
+  doStream: MockLanguageModelV3["doStream"],
+  execute = async () => "The weekly summary.",
+): Promise<SessionEvent[]> {
   vi.spyOn(Math, "random").mockReturnValue(0);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const events: SessionEvent[] = [];
@@ -67,7 +69,7 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
         "lookup",
         {
           description: "Looks up a report.",
-          execute: async () => "The weekly summary.",
+          execute,
           inputSchema: jsonSchema({ type: "object" }),
           name: "lookup",
         },
@@ -107,41 +109,86 @@ const billed = {
   outputTokens: 300,
 };
 
-describe("model attempts", () => {
-  it("retries an attempt that published nothing in the same run, and says so", async () => {
-    const doStream = vi
-      .fn<MockLanguageModelV3["doStream"]>()
-      .mockResolvedValueOnce(overloaded())
-      .mockImplementation(async () => streamOf(reply("Here it is.")));
-
-    const facts = await runTurn(doStream);
-
-    expect(facts.map(({ data, type }) => ({ type, ...data }))).toMatchObject([
-      { runId: "run_0", type: "model.requested" },
-      { attempt: 0, runId: "run_0", type: "model.started" },
-      {
-        attempt: 0,
-        error: { code: "MODEL_CALL_FAILED", message: expect.stringContaining("overloaded") },
-        runId: "run_0",
-        type: "model.retried",
+/** AI Gateway's provider stream closed before its finish (#5912). */
+const terminated = (before: readonly StreamPart[] = []): StreamResult =>
+  streamOf([
+    { type: "stream-start", warnings: [] },
+    ...before,
+    {
+      error: {
+        code: "gateway_stream_terminated",
+        message: "Upstream stream ended before terminal chunk",
+        origin: "gateway",
+        upstream_finish_received: false,
       },
-      { attempt: 1, runId: "run_0", type: "model.started" },
-      { outcome: "completed", runId: "run_0", type: "model.settled" },
-      { owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
-    ]);
-  });
+      type: "error",
+    },
+  ]);
+
+/** A stream chunk the provider adapter could not parse (#5911). */
+const malformed = (): StreamResult => ({
+  stream: new ReadableStream<StreamPart>({
+    start(controller) {
+      controller.enqueue({ type: "stream-start", warnings: [] });
+      controller.error(
+        new TypeValidationError({
+          cause: new Error("Invalid input: expected string, received undefined"),
+          value: { type: "response.output_text.delta" },
+        }),
+      );
+    },
+  }),
+});
+
+describe("model attempts", () => {
+  it.each([
+    { failure: overloaded, message: "overloaded" },
+    { failure: terminated, message: "ended before the response finished" },
+    { failure: malformed, message: "Type validation failed" },
+  ])(
+    "retries an attempt that published nothing in the same run, and says so ($message)",
+    async ({ failure, message }) => {
+      const doStream = vi
+        .fn<MockLanguageModelV3["doStream"]>()
+        .mockResolvedValueOnce(failure())
+        .mockImplementation(async () => streamOf(reply("Here it is.")));
+
+      const facts = await runTurn(doStream);
+
+      expect(facts.map(({ data, type }) => ({ type, ...data }))).toMatchObject([
+        { runId: "run_0", type: "model.requested" },
+        { attempt: 0, runId: "run_0", type: "model.started" },
+        {
+          attempt: 0,
+          error: { code: "MODEL_CALL_FAILED", message: expect.stringContaining(message) },
+          runId: "run_0",
+          type: "model.retried",
+        },
+        { attempt: 1, runId: "run_0", type: "model.started" },
+        { outcome: "completed", runId: "run_0", type: "model.settled" },
+        { owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
+      ]);
+    },
+  );
 
   it("gives up a run whose attempt published output, and its replacement counts on", async () => {
+    const execute = vi.fn(async () => "The weekly summary.");
     const doStream = vi
       .fn<MockLanguageModelV3["doStream"]>()
       .mockResolvedValueOnce(
-        // The call it announced is output: a retry can't take it back.
-        overloaded([{ input: "{}", toolCallId: "call_0", toolName: "lookup", type: "tool-call" }]),
+        // The text and the call it announced are output: a retry can't take them back.
+        terminated([
+          { id: "t", type: "text-start" },
+          { delta: "Looking", id: "t", type: "text-delta" },
+          { input: "{}", toolCallId: "call_0", toolName: "lookup", type: "tool-call" },
+        ]),
       )
       .mockImplementation(async () => streamOf(reply("Here it is.")));
 
-    const facts = await runTurn(doStream);
+    const facts = await runTurn(doStream, execute);
 
+    // The response never finished, so the call it announced never runs.
+    expect(execute).not.toHaveBeenCalled();
     expect(facts.map(({ data, type }) => ({ type, ...data }))).toMatchObject([
       { runId: "run_0", type: "model.requested" },
       { attempt: 0, runId: "run_0", type: "model.started" },

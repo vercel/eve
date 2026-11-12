@@ -1,3 +1,4 @@
+import { sendSlackResponseUrl } from "#compiled/@chat-adapter/slack/api.js";
 import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { callSlackApi } from "#public/channels/slack/api.js";
 import { buildAnsweredBlocks, isHitlAction } from "#public/channels/slack/hitl.js";
@@ -157,6 +158,7 @@ export async function settleHitlCard(
     deps,
     installationTeamId: interaction.installationTeamId,
     messageTs: hitlAction.messageTs,
+    responseUrl: interaction.ephemeral ? hitlAction.responseUrl : undefined,
   });
 }
 
@@ -167,6 +169,8 @@ export async function settleFreeformCard(input: {
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId?: string;
   readonly messageTs: string;
+  /** The `response_url` of the click that opened the modal, when the card was ephemeral. */
+  readonly responseUrl?: string;
 }): Promise<void> {
   await updateSettledCard({
     ...input,
@@ -185,7 +189,17 @@ async function updateSettledCard(input: {
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId?: string;
   readonly messageTs: string;
+  readonly responseUrl?: string | undefined;
 }): Promise<void> {
+  if (input.responseUrl !== undefined) {
+    // Slack's own host, so the transport's `fetch`, confined to the configured bases, stays out.
+    await sendSlackResponseUrl(input.responseUrl, {
+      blocks: input.blocks,
+      replaceOriginal: true,
+      text: input.card.text,
+    });
+    return;
+  }
   await callSlackApi({
     api: input.deps.api,
     botToken: input.deps.config.credentials?.botToken,
