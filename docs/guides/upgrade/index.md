@@ -40,10 +40,12 @@ Sessions that started on eve 0.69 through 0.83 move to the new deployment on the
 
 Two kinds of session stay on the old deployment:
 
-- A session with a background task, including an idle resumable one, stays until the task finishes.
+- A session with a background task that is still working, or whose results the model hasn't read yet, stays until that clears.
 - A session that started on a release before 0.69 never moves.
 
-When a session moves, eve compacts its earlier conversation. The model continues from a summary, and the stored transcript stays intact. Remembered tool approvals and usage limits start over, so people may be asked to approve a tool again.
+An idle resumable task, such as a subagent that already answered, doesn't keep a session on the old deployment. When the session moves, eve ends the task's run on the old deployment, and the model starts a new task on the new deployment the next time it needs one. The new task doesn't continue the old task's conversation.
+
+When a session moves, eve compacts its earlier conversation. The model continues from a summary, and the stored transcript stays intact. Remembered tool approvals start over, so people may be asked to approve a tool again. Usage limits keep counting: `limits.sessionUsage` sees the session's earlier spend in `total`, and a budget a person already approved stays the start of `window`.
 
 On worlds without deployment routing, follow the [stranded-session recovery guidance](/docs/concepts/execution-model-and-durability#stranded-sessions).
 

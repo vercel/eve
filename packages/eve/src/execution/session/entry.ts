@@ -40,9 +40,15 @@ import {
   prepareSuccessorStep,
   readSessionStreamTailStep,
   signalSessionOwnerActivationStep,
+  endRetiredTaskRunsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
+import {
+  preV27Projection,
+  withProjection,
+  type PreV27Usage,
+} from "#execution/session/pre-v27-checkpoint.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -259,6 +265,10 @@ interface PreparedSuccessor {
   readonly serializedContext: Record<string, unknown>;
   /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
   readonly importedTurnCount?: number;
+  /** What an owner before v27 counted the session spent. */
+  readonly importedUsage?: PreV27Usage;
+  /** Task runs the successor leaves behind, which it ends once it holds the session. */
+  readonly retiredTaskRuns?: readonly TaskRunAddress[];
 }
 
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
@@ -305,10 +315,12 @@ async function prepareSuccessor(
       serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
     };
   }
-  const { checkpoint, turnCount } = migration.imported;
+  const { checkpoint, retiredRuns, turnCount, usage } = migration.imported;
   return {
     checkpoint,
     importedTurnCount: turnCount,
+    importedUsage: usage,
+    retiredTaskRuns: retiredRuns,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
 }
@@ -323,7 +335,11 @@ async function placeImportedSession(
 ): Promise<PreparedSuccessor> {
   if (prepared.importedTurnCount === undefined) return prepared;
   const tailIndex = await readSessionStreamTailStep({ sessionId });
-  const projection = preV27Projection(tailIndex, prepared.importedTurnCount);
+  const projection = preV27Projection(
+    tailIndex,
+    prepared.importedTurnCount,
+    prepared.importedUsage,
+  );
   return { ...prepared, checkpoint: withProjection(prepared.checkpoint, projection) };
 }
 
@@ -394,6 +410,9 @@ async function bootHandoffOwner(
     return undefined;
   }
   abandonHandoverIfRunEnds(inbox, { attemptKey, sourceRunId });
+  // Their runs answer the session's addresses, which this run now holds.
+  if (prepared.retiredTaskRuns !== undefined && prepared.retiredTaskRuns.length > 0)
+    await endRetiredTaskRunsStep({ runs: prepared.retiredTaskRuns, sessionId });
   return await startSuccessor(input, inbox, prepared);
 }
 
