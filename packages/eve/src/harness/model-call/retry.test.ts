@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SessionStreamWriteError } from "#harness/session-stream-write-error.js";
+
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 
 // Skip the real backoff between attempts.
@@ -9,6 +11,18 @@ const session = { sessionId: "session-alice", turnId: "turn-1" };
 const busy = () => Object.assign(new Error("The provider is busy."), { isRetryable: true });
 
 describe("runModelCallWithRetries", () => {
+  it("doesn't retry a dead session stream, even when its cause reads as transient", async () => {
+    const dead = new SessionStreamWriteError(busy());
+    const call = vi.fn(async () => {
+      throw new Error("The model call failed.", { cause: dead });
+    });
+    const onRetry = vi.fn(async () => {});
+
+    await expect(runModelCallWithRetries(call, { ...session, onRetry })).rejects.toBe(dead);
+    expect(call).toHaveBeenCalledOnce();
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
   it("doesn't retry a failure eve's policies stop, whatever another policy allows", async () => {
     const call = vi.fn(async () => {
       throw new Error("The request is malformed.");

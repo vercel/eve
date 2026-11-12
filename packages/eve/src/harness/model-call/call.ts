@@ -52,6 +52,7 @@ import {
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
@@ -188,6 +189,7 @@ export class ModelCaller {
           this.input.generation.signal,
         );
       } catch (error) {
+        throwIfSessionStreamDead(error);
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
@@ -442,6 +444,8 @@ export class ModelCaller {
     try {
       return await this.stream(agent, callMessages, hooks.stepResult, attempt?.telemetry);
     } catch (error) {
+      // An aborted write is not a stalled model stream, and steering can't claim a dead stream.
+      throwIfSessionStreamDead(error);
       generation.check();
       // Only the output timeout above aborts the stream without aborting our signal.
       if (isAbortError(error) && !generation.signal.aborted) {

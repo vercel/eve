@@ -52,6 +52,7 @@ import {
 } from "#harness/session-machine/context-changes.js";
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 
 const log = createLogger("harness.tool-loop");
 /**
@@ -266,6 +267,8 @@ async function summarizeHistory(
     // Dropping tool activity alone rewrites the history without a summary call.
     if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
+    // The change it opened can't settle on a dead stream; the retried step recovers it.
+    throwIfSessionStreamDead(error);
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
     if (change.opened) {
