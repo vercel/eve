@@ -1638,15 +1638,16 @@ describe("models that fail", () => {
       },
     );
 
-    // The session failed, so its end closes the turn, which carries no error of its own: a
-    // channel posts one notice, and the turn's failure reads as the session's error.
-    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled"]);
+    // The turn fails with the error, then the session ends with it, in the same line.
+    expect(turnOutcomes(events)).toEqual(["turn_0:failed"]);
+    const [settled] = ofType(events, "turn.settled");
     const [ended] = ofType(events, "session.ended");
     expect(ended?.data).toMatchObject({
       cause: { turnId: "turn_0" },
       error: { message: expect.stringContaining("Invalid API key") },
       outcome: "failed",
     });
+    expect(settled?.data.error).toEqual(ended?.data.error);
     expect(events.at(-1)?.type).toBe("session.ended");
     expect(failure(viewOfEvents(events).view, "turn_0")?.message).toContain("Invalid API key");
   });

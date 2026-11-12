@@ -1,5 +1,5 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
-import { errorHintOf } from "#public/channels/reply.js";
+import { errorHintOf, sessionFailed } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
@@ -674,13 +674,14 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   // A reply clears the status, but a turn ended by an `endsTurn` tool posts
   // none, and Slack would otherwise show the status until it times out.
-  async "turn.settled"({ data }, { channel }) {
+  async "turn.settled"({ data }, { channel, view }) {
     if (data.outcome !== "failed") {
       await clearStatus(channel);
       return;
     }
     // A thread's status clears when the error posts; a code channel's session stays `processing`.
     if (channel.state.codeChannel === true) await clearStatus(channel);
+    if (sessionFailed(view)) return;
     const hint = data.error?.hint;
     if (data.error !== undefined && hint !== undefined) {
       await channel.thread.post(

@@ -35,7 +35,6 @@ import type {
   StepResult,
 } from "#harness/types.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
-import { summarizeFailure } from "#execution/failure-summary.js";
 import { eventsOfLine } from "#protocol/session-lines.js";
 import type { SessionOutcome } from "#protocol/session-events/families/session.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -146,8 +145,11 @@ export async function recoverInterruptedStep(input: {
     readonly kind: "clear" | "compact";
     readonly delivery?: ControlDelivery;
   };
-  /** The error the step's last attempt threw, when every attempt failed. */
-  readonly failed?: { readonly error: unknown };
+  /**
+   * The error the step's last attempt threw, when every attempt failed; `stopped` when the turn
+   * was cancelled meanwhile.
+   */
+  readonly failed?: { readonly error: unknown; readonly stopped?: true };
 }): Promise<
   | { readonly result: DurableStepResult }
   | { readonly session: HarnessSession; readonly stepInput: HarnessStepInput | undefined }
@@ -263,7 +265,10 @@ export async function recoverInterruptedStep(input: {
   session = saveTransition(session, stop);
   const note = interruptedAttemptNote(attempt.calls);
   if (note !== undefined) session = changeHistory(session, { append: [note] });
-  if (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS) {
+  // A turn stopped while its step kept failing goes on to its cancel, which settles it
+  // `cancelled` and keeps its input in history as any cancel before the model read it does.
+  const stopped = input.failed?.stopped === true;
+  if (stopped || (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS)) {
     // The answers the attempt applied leave the input.
     const { settledInteractions } = attempt;
     const answers = input.stepInput?.answers?.filter(
@@ -285,6 +290,8 @@ export async function recoverInterruptedStep(input: {
   const failing = activeTurnIdOf(currentProjection(ctx));
   if (failing === undefined) return finish({ next: null, session });
   session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
+  // What the step threw can carry request content, so the turn reports a fixed failure; the
+  // error itself stays in the Workflow step's record.
   const failure =
     input.failed === undefined
       ? {
@@ -292,7 +299,11 @@ export async function recoverInterruptedStep(input: {
           details: { errorId: createErrorId() },
           message: "This turn was interrupted too many times to continue.",
         }
-      : summarizeFailure(input.failed.error, "STEP_FAILED");
+      : {
+          code: "TURN_FAILED",
+          details: { errorId: createErrorId() },
+          message: "This turn failed before it finished. Send another message to continue.",
+        };
   log.error("turn failed", {
     code: failure.code,
     errorId: failure.details.errorId,

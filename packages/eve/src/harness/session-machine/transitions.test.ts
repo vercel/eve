@@ -244,6 +244,30 @@ describe("closing what a turn leaves open", () => {
     }
   });
 
+  it("fails the turn, then ends the session, when the failure is terminal", () => {
+    const error = { code: "BOOM", message: "It broke." };
+    const events = committed(viewOf(busyTurn()), (view) =>
+      fail(view, { ...error, terminal: true }),
+    );
+
+    expect(settledBy(events)).toMatchObject({
+      "call.settled:tool": "interrupted",
+      "model.settled:test_turn_0_0": "failed",
+      "session.ended:": "failed",
+      "task.ended:task-1": "cancelled",
+      "turn.settled:turn_0": "failed",
+    });
+    const ended = events.findIndex((event) => event.type === "session.ended");
+    expect(ended).toBe(events.length - 1);
+    expect(events.findIndex((event) => event.type === "turn.settled")).toBeLessThan(ended);
+    expect(events.filter((event) => event.type === "turn.settled")).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ error, outcome: "failed" }) }),
+    ]);
+    expect(events[ended]).toMatchObject({
+      data: { cause: { turnId }, error, outcome: "failed" },
+    });
+  });
+
   it("cancels the turn, interrupting what it asked and stopping its work", () => {
     const events = committed(viewOf(busyTurn()), (view) =>
       cancel(view, { cause: { deliveryId: "cancel-1" } }),
@@ -294,6 +318,9 @@ describe("closing what a turn leaves open", () => {
     const seed = storedProjection(session.state).view;
     for (const events of [
       committed(viewOf(session), (view) => fail(view, { code: "BOOM", message: "It broke." })),
+      committed(viewOf(session), (view) =>
+        fail(view, { code: "BOOM", message: "It broke.", terminal: true }),
+      ),
       committed(viewOf(session), (view) => cancel(view)),
       cascade(seed, sessionEndedFacts(storedProjection(session.state), { outcome: "completed" })),
     ]) {

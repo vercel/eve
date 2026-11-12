@@ -19,7 +19,7 @@ import type {
   ChannelEventOf,
   CommittedLine,
 } from "#public/definitions/channel.js";
-import { failureNotice, replyTextOf } from "#public/channels/reply.js";
+import { failureNotice, replyTextOf, sessionFailed } from "#public/channels/reply.js";
 
 /** What a channel can do in its conversation, in its platform's terms. */
 export interface ChannelSurface<TChannel> {
@@ -110,7 +110,8 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
     async "content.completed"({ data }, { channel }) {
       await post(channel, replyTextOf(data));
     },
-    async "turn.settled"({ data }, { channel }) {
+    async "turn.settled"({ data }, { channel, view }) {
+      if (data.outcome === "failed" && sessionFailed(view)) return;
       await post(channel, failureNotice(data, "turn"));
     },
     async "session.ended"({ data }, { channel }) {
