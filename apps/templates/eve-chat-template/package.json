@@ -63,5 +63,5 @@
     "drizzle-kit": "0.31.10",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "pnpm@12.17.0"
 }
