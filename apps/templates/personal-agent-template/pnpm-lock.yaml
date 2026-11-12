@@ -240,7 +240,7 @@ importers:
         specifier: ^1.2.93
         version: 1.2.93
       '@types/node':
-        specifier: 26.2.0
+        specifier: 26.x
         version: 26.2.0
       rolldown:
         specifier: ~1.2.5

@@ -47,12 +47,15 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^25.9.5",
+    "@types/node": "26.x",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "drizzle-kit": "0.31.10",
     "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": "26.x"
   },
   "packageManager": "pnpm@12.17.0"
 }

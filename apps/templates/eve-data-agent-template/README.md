@@ -17,7 +17,7 @@ to use it.
 
 ## Run locally
 
-Prerequisites: Node.js 24 or newer, pnpm 12, and [uv](https://docs.astral.sh/uv/).
+Prerequisites: Node.js 26, pnpm 12, and [uv](https://docs.astral.sh/uv/).
 The data command uses Python 3.13 through uv. No Docker daemon or warehouse
 account is needed for the local database; the agent's default workspace uses
 just-bash. Model calls require an AI Gateway credential or Vercel project OIDC.
