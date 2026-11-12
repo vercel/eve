@@ -26,7 +26,11 @@ const spent = { inputTokens: 10, outputTokens: 2 };
 /** One turn: the message `deliveryId` asks, a run that replies, and its usage. */
 function turnLines(
   index: number,
-  options: { readonly opensSession?: boolean; readonly parts?: readonly UserPart[] } = {},
+  options: {
+    readonly opensSession?: boolean;
+    readonly parts?: readonly UserPart[];
+    readonly usage?: object;
+  } = {},
 ): StoredLine[] {
   const turnId = `turn_${index}`;
   const runId = `run_${index}`;
@@ -59,7 +63,11 @@ function turnLines(
         type: "content.completed",
       },
       { data: { outcome: "completed", runId }, scope, type: "model.settled" },
-      { data: { kind: "model", owner: { runId }, usage: spent }, scope, type: "usage.recorded" },
+      {
+        data: { kind: "model", owner: { runId }, usage: options.usage ?? spent },
+        scope,
+        type: "usage.recorded",
+      },
     ),
     commit(
       {
@@ -254,23 +262,9 @@ describe("the shared fold", () => {
 
   it("sums usage as plain counts, without a record's unreported mark", () => {
     const counts = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 };
-    const lines = turnLines(0, { opensSession: true }).map((line) => ({
-      ...line,
-      facts: line.facts.map((fact) =>
-        (fact as { readonly type: string }).type === "usage.recorded"
-          ? {
-              ...fact,
-              data: {
-                kind: "model",
-                owner: { runId: "run_0" },
-                usage: { ...counts, cacheReadUnreported: true },
-              },
-            }
-          : fact,
-      ),
-    })) as StoredLine[];
-
-    const view = folded(lines);
+    const view = folded(
+      turnLines(0, { opensSession: true, usage: { ...counts, cacheReadUnreported: true } }),
+    );
     expect(view.runs.run_0?.usage).toEqual(counts);
     expect(view.usage.byKind.model).toEqual(counts);
     expect(view.usage.total).toEqual(counts);
