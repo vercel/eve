@@ -229,8 +229,6 @@ export function createAgentOtelInstrumentation(
     const models = modelSpans.get(attemptIdempotencyKey(event.scope));
     const operation = models?.get(event.idempotencyKey);
     models?.delete(event.idempotencyKey);
-    // A run that isn't a step has no attempt end to drain its calls.
-    if (models?.size === 0) modelSpans.delete(attemptIdempotencyKey(event.scope));
     // A call outside any step, such as a compaction's, has only its own span to carry its cost.
     const target = steps.get(attemptIdempotencyKey(event.scope)) ?? operation;
     if (event.outcome === "completed" && target !== undefined) {
