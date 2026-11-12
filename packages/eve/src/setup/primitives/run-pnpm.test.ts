@@ -305,7 +305,7 @@ describe("pnpmPackageManager", () => {
 
   test("uses PATH pnpm under pnpm when npm_execpath is not available", () => {
     vi.stubEnv("PNPM_HOME", "/old/pnpm-home");
-    vi.stubEnv("npm_config_user_agent", "pnpm/11.5.2 npm/? node/v24.15.0 darwin arm64");
+    vi.stubEnv("npm_config_user_agent", "pnpm/11.5.2 npm/? node/v26.13.1 darwin arm64");
     mockedExistsSync.mockReturnValue(true);
 
     expect(pnpmPackageManager.resolveInvocation(["install"])).toEqual({

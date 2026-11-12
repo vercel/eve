@@ -28,7 +28,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
   await mkdir(functionDirectory, { recursive: true });
   await writeFile(
     join(functionDirectory, ".vc-config.json"),
-    `${JSON.stringify({ runtime: "nodejs24.x" }, null, 2)}\n`,
+    `${JSON.stringify({ runtime: "nodejs26.x" }, null, 2)}\n`,
   );
   await writeFile(
     join(outputDir, "config.json"),
@@ -83,7 +83,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
         {
           experimentalTriggers: [{ topic: "eve-test", type: "queue/v2beta" }],
           maxDuration: "max",
-          runtime: "nodejs24.x",
+          runtime: "nodejs26.x",
         },
         null,
         2,

@@ -56,13 +56,13 @@
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.124",
     "@iconify-json/simple-icons": "^1.2.93",
-    "@types/node": "26.2.0",
+    "@types/node": "26.x",
     "rolldown": "~1.2.5",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.10"
   },
   "engines": {
-    "node": ">=24"
+    "node": "26.x"
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "pnpm@12.17.0"
 }

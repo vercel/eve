@@ -885,13 +885,13 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(output.messages.join("\n")).toContain(
       `⚠ Updated workspace root configuration at ${join(workspaceRoot, "pnpm-workspace.yaml")}`,
     );
     expect(output.messages.join("\n")).toContain(
-      `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "24.x"`,
+      `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "26.x"`,
     );
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -932,7 +932,7 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -977,7 +977,7 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.overrides).toBeUndefined();
     expect(projectPackageJson.resolutions).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -1033,7 +1033,7 @@ describe("runInitCommand", () => {
         overrides?: unknown;
         resolutions?: unknown;
       };
-      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
@@ -1174,7 +1174,7 @@ describe("runInitCommand", () => {
     // than a stale dashboard pin.
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
       dependencies: { "@vercel/connect": "0.2.2", ai: "7.0.0", eve: "^0.6.0", zod: "^3.25.0" },
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -1235,10 +1235,10 @@ describe("runInitCommand", () => {
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x", npm: ">=10" },
+      engines: { node: "26.x", npm: ">=10" },
     });
     expect(output.messages.join("\n")).toContain(
-      '⚠ Overrode package.json engines.node from ">=22" to "24.x"',
+      '⚠ Overrode package.json engines.node from ">=22" to "26.x"',
     );
   });
 
@@ -1254,10 +1254,10 @@ describe("runInitCommand", () => {
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x", npm: ">=10" },
+      engines: { node: "26.x", npm: ">=10" },
     });
     expect(output.messages.join("\n")).toContain(
-      '⚠ Overrode package.json engines.node from ">=24" to "24.x"',
+      '⚠ Overrode package.json engines.node from ">=24" to "26.x"',
     );
   });
 
@@ -1435,7 +1435,7 @@ describe("runInitCommand", () => {
     expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
     expect(projectPackageJson.engines).toBeUndefined();
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
-      engines: { node: "24.x" },
+      engines: { node: "26.x" },
     });
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",

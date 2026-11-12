@@ -1168,7 +1168,7 @@ describe("compactMessages: deferred provider tool results", () => {
         toolName: "web_search",
         type: "tool-result",
       },
-      { text: "Node 24 is LTS.", type: "text" },
+      { text: "Node 26 is LTS.", type: "text" },
     ],
     role: "assistant",
   };
