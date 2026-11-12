@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
 export type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -231,7 +235,7 @@ export interface TwilioChannelConfig {
     transcription: TwilioVoiceTranscription,
   ): TwilioInboundResult | Promise<TwilioInboundResult>;
 
-  readonly events?: TwilioChannelEvents;
+  readonly events?: ComposableChannelEvents<TwilioChannelEvents>;
 }
 
 /** Low-level Twilio handle exposed to hooks and event handlers. */
@@ -279,7 +283,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
   const onText = config.onText ?? defaultOnText;
   const onVoice = config.onVoice ?? defaultOnVoice;
   const onVoiceTranscription = config.onVoiceTranscription ?? defaultOnVoiceTranscription;
-  const mergedEvents: TwilioChannelEvents = { ...defaultEvents, ...config.events };
+  const mergedEvents = composeChannelEvents("twilioChannel", defaultEvents, config.events);
   const messages = handleTwilioMessages({ config, onText });
   const voice = handleTwilioVoice({ config, onVoice, routes });
   const transcription = handleTwilioTranscription({ config, onVoiceTranscription, routes });

@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type {
   ChannelEventContext,
@@ -173,7 +177,7 @@ export type LinearInboundResult = {
 export interface LinearChannelConfig {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
-  readonly events?: LinearChannelEvents;
+  readonly events?: ComposableChannelEvents<LinearChannelEvents>;
   /** Max allowed webhook timestamp skew in milliseconds. Defaults to 60 seconds. */
   readonly maxSkewMs?: number;
   readonly route?: string;
@@ -200,10 +204,11 @@ export interface LinearChannel extends Channel<
 /** Linear channel factory for Linear Agent Session webhooks and Agent Activities. */
 export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
   const onAgentSession = config.onAgentSession ?? defaultOnAgentSession;
-  const mergedEvents: LinearChannelEvents = {
-    ...createDefaultEvents({ api: config.api, credentials: config.credentials }),
-    ...config.events,
-  };
+  const mergedEvents = composeChannelEvents(
+    "linearChannel",
+    createDefaultEvents({ api: config.api, credentials: config.credentials }),
+    config.events,
+  );
 
   return defineChannel<
     LinearChannelState,

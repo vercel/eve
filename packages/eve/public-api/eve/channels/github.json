@@ -22,6 +22,7 @@
   "GitHubDelivery",
   "GitHubEventContext",
   "GitHubHandle",
+  "GitHubHandlers",
   "GitHubInboundContext",
   "GitHubInboundResult",
   "GitHubInstallationToken",
@@ -43,6 +44,7 @@
   "GitHubWebhookVerifier",
   "GitHubWorkflowRunEvent",
   "defaultGitHubAuth",
+  "defineGitHubHandlers",
   "githubChannel",
   "githubContinuationToken"
 ]

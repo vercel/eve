@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -173,7 +177,7 @@ export interface TelegramChannelConfig {
   /** Bot token and inbound webhook verification settings. */
   readonly credentials?: TelegramChannelCredentials;
   /** Per-event handler overrides. See {@link TelegramChannelEvents}. */
-  readonly events?: TelegramChannelEvents;
+  readonly events?: ComposableChannelEvents<TelegramChannelEvents>;
   /** Handler for non-HITL callback queries. */
   readonly onCallbackQuery?: (
     ctx: TelegramContext,
@@ -237,7 +241,7 @@ export interface TelegramChannel extends Channel<
 export function telegramChannel(config: TelegramChannelConfig = {}): TelegramChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const onMessage = config.onMessage ?? defaultOnMessage;
-  const mergedEvents: TelegramChannelEvents = { ...defaultEvents, ...config.events };
+  const mergedEvents = composeChannelEvents("telegramChannel", defaultEvents, config.events);
 
   const channel = defineChannel<
     TelegramChannelState,

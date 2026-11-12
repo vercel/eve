@@ -16,6 +16,8 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
+import { defineGitHubHandlers } from "#public/channels/github/handlers.js";
+import { afterDefault, beforeDefault, replaceDefault } from "#public/channels/compose-events.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -1140,5 +1142,280 @@ describe("githubChannel", () => {
     expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
       "https://github.test/repos/vercel/eve/issues/comments/11/reactions",
     );
+  });
+});
+
+describe("githubChannel event composition", () => {
+  const headSha = "a".repeat(40);
+  const conversation = {
+    conversationKind: "issue" as const,
+    headSha,
+    installationId: 55,
+    issueNumber: 5,
+    owner: "vercel",
+    repo: "eve",
+    repositoryId: 123,
+  };
+
+  function checkoutSandbox(): MockSandbox {
+    return mockSandbox({
+      run(options) {
+        if (options.command.includes("git rev-parse HEAD 2>/dev/null")) {
+          return { exitCode: 128, stderr: "", stdout: "" };
+        }
+        if (options.command.includes("git rev-parse HEAD")) {
+          return { exitCode: 0, stderr: "", stdout: `${headSha}\n` };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+  }
+
+  function setup(
+    events: Parameters<typeof githubChannel>[0] extends infer C
+      ? C extends { events?: infer E }
+        ? E
+        : never
+      : never,
+  ) {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ id: 77 }))));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+          events,
+          progress: { reactions: false },
+        }),
+      ),
+      conversation,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const commentPosts = () =>
+      fetchMock.mock.calls.filter(
+        (call) =>
+          String((call as unknown[])[0]) ===
+          "https://github.test/repos/vercel/eve/issues/5/comments",
+      ).length;
+    return { adapter, commentPosts, ctx };
+  }
+
+  const failed = { error: { code: "X", id: "err_1", message: "boom" }, outcome: "failed" };
+
+  it("adding status handlers keeps checkout, reply delivery and failure comments", async () => {
+    const order: string[] = [];
+    const status = (name: string) => async () => {
+      order.push(name);
+    };
+    const { adapter, commentPosts, ctx } = setup({
+      "turn.started": [
+        beforeDefault(status("started:before")),
+        afterDefault(status("started:after")),
+      ],
+      "content.completed": afterDefault(status("completed")),
+      "turn.settled": afterDefault(status("turn.settled")),
+      "session.ended": beforeDefault(status("session.ended")),
+    });
+
+    const sandbox = checkoutSandbox();
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 0, turnId: "t1" }),
+      ctx,
+      sandbox,
+    );
+    expect(ctx.state.checkoutPath).toBe("/workspace");
+    expect(sandbox.commandLog.filter((c: string) => c.includes("git fetch")).length).toBe(1);
+
+    await callEvent(
+      adapter,
+      makeEvent("content.completed", { kind: "text", phase: "reply", value: "Done." }),
+      ctx,
+    );
+    await callEvent(adapter, makeEvent("turn.settled", { ...failed, turnId: "t1" }), ctx);
+    await callEvent(adapter, makeEvent("session.ended", failed), ctx);
+
+    expect(commentPosts()).toBe(3);
+    expect(order).toEqual([
+      "started:before",
+      "started:after",
+      "completed",
+      "turn.settled",
+      "session.ended",
+    ]);
+  });
+
+  it("a failing added handler does not stop the default", async () => {
+    const logs = captureLogRecords();
+    const { adapter, commentPosts, ctx } = setup({
+      "content.completed": beforeDefault(() => {
+        throw new Error("status service down");
+      }),
+    });
+    await callEvent(
+      adapter,
+      makeEvent("content.completed", { kind: "text", phase: "reply", value: "Done." }),
+      ctx,
+    );
+    expect(commentPosts()).toBe(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: expect.stringContaining("beforeDefault handler for content.completed failed"),
+      }),
+    );
+  });
+
+  it("replaceDefault drops the built-in handler", async () => {
+    const custom = vi.fn();
+    const { adapter, commentPosts, ctx } = setup({ "content.completed": replaceDefault(custom) });
+    await callEvent(
+      adapter,
+      makeEvent("content.completed", { kind: "text", phase: "reply", value: "Done." }),
+      ctx,
+    );
+    expect(custom).toHaveBeenCalledTimes(1);
+    expect(commentPosts()).toBe(0);
+  });
+
+  it("a plain handler still replaces the built-in and warns", async () => {
+    const logs = captureLogRecords();
+    const custom = vi.fn();
+    const { adapter, commentPosts, ctx } = setup({ "content.completed": custom });
+    await callEvent(
+      adapter,
+      makeEvent("content.completed", { kind: "text", phase: "reply", value: "Done." }),
+      ctx,
+    );
+    expect(custom).toHaveBeenCalledTimes(1);
+    expect(commentPosts()).toBe(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: expect.stringContaining("replaceDefault()"),
+      }),
+    );
+  });
+
+  it("rejects two replacements for one event", () => {
+    expect(() =>
+      githubChannel({
+        events: { "content.completed": [replaceDefault(vi.fn()), replaceDefault(vi.fn())] },
+      }),
+    ).toThrow(/more than one replaceDefault/);
+  });
+});
+
+describe("githubChannel contributed handlers", () => {
+  const pullRequestPayload = () =>
+    basePayload({
+      action: "opened",
+      pull_request: {
+        base: { ref: "main", repo: { default_branch: "main" }, sha: "b".repeat(40) },
+        head: { ref: "feature", sha: "a".repeat(40) },
+        number: 7,
+        title: "Add webhook PR handling",
+      },
+    });
+
+  function channelWith(handlers: Parameters<typeof defineGitHubHandlers>[0][], extra = {}) {
+    return githubChannel({
+      api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+      handlers,
+      ...extra,
+    });
+  }
+
+  it("fans one pull_request event out to every contributor in order", async () => {
+    const seen: string[] = [];
+    const review = defineGitHubHandlers({
+      name: "review",
+      onPullRequest(ctx, pr) {
+        seen.push(`review:${pr.action}`);
+        return { auth: defaultGitHubAuth(ctx), context: ["review"] };
+      },
+    });
+    const triage = defineGitHubHandlers({
+      name: "triage",
+      onPullRequest(_ctx, pr) {
+        seen.push(`triage:${pr.action}`);
+        return null;
+      },
+    });
+    const { send } = await firePost(
+      channelWith([review, triage], {
+        onPullRequest() {
+          seen.push("app");
+          return null;
+        },
+      }),
+      signedRequest("pull_request", pullRequestPayload()),
+    );
+    expect(seen).toEqual(["app", "review:opened", "triage:opened"]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates a throwing contributor", async () => {
+    const logs = captureLogRecords();
+    const { send } = await firePost(
+      channelWith([
+        { name: "broken", onPullRequest: () => Promise.reject(new Error("nope")) },
+        { name: "review", onPullRequest: (ctx) => ({ auth: defaultGitHubAuth(ctx) }) },
+      ]),
+      signedRequest("pull_request", pullRequestPayload()),
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: 'GitHub onPullRequest handler "broken" failed',
+      }),
+    );
+  });
+
+  it("dispatches at most one turn and logs dropped results", async () => {
+    const logs = captureLogRecords();
+    const second = vi.fn((ctx) => ({ auth: defaultGitHubAuth(ctx) }));
+    const { send } = await firePost(
+      channelWith([
+        {
+          name: "review",
+          onPullRequest: (ctx) => ({ auth: defaultGitHubAuth(ctx), title: "review" }),
+        },
+        { name: "ci", onPullRequest: second },
+      ]),
+      signedRequest("pull_request", pullRequestPayload()),
+    );
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1]).toMatchObject({ title: "review" });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: 'GitHub onPullRequest handler "ci" result dropped; "review" already dispatched',
+      }),
+    );
+  });
+
+  it("keeps the default mention gate first for comments", async () => {
+    const observer = vi.fn(() => null);
+    const { send } = await firePost(
+      channelWith([{ name: "mentions", onComment: observer }], { botName: "eve-bot" }),
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@eve-bot please look",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5, title: "Bug" },
+        }),
+      ),
+    );
+    expect(observer).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
