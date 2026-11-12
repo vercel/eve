@@ -75,7 +75,7 @@ If you do not want to use the scaffold, install the runtime dependencies:
 npm install eve@latest ai zod
 ```
 
-Declare Node.js 26 in `package.json`, then create `agent/instructions.md` and, when you need runtime configuration, `agent/agent.ts`.
+Pin Node.js 26 with `"engines": { "node": "26.x" }` in `package.json`, then create `agent/instructions.md` and, when you need runtime configuration, `agent/agent.ts`.
 
 The installed package's `node_modules/eve/CHANGELOG.md` contains that version's release notes and a link to the full changelog through that version. For an upgrade across multiple releases, review each version between the installed and target versions in the target version's changelog at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
 
