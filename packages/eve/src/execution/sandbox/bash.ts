@@ -405,12 +405,7 @@ function formatStream(
     totalLines === undefined
       ? `showing last ${result.outputLines} lines`
       : `showing last ${result.outputLines} of ${totalLines} lines`;
-  const rest =
-    outputDirectory === undefined
-      ? totalLines === undefined
-        ? "; earlier output omitted"
-        : ""
-      : `; full output: ${outputDirectory}/${name}`;
+  const rest = outputDirectory === undefined ? "" : `; full output: ${outputDirectory}/${name}`;
   return { output: `[${name} truncated: ${shown}${rest}]\n${result.output}`, truncated: true };
 }
 

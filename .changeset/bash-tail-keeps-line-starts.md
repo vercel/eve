@@ -2,8 +2,8 @@
 "eve": patch
 ---
 
-`bash` results for a command that ends with a very long line again keep the start of that line and the lines before it, as `truncateTail` would from the whole output, while memory stays bounded however much the command prints.
+When a finished `bash` command's output is truncated, the result again keeps the start of a very long last line and the lines before it.
 
-The truncation note on a finished command again reads `showing last N of M lines` instead of `earlier output omitted`.
+The truncation note again gives the whole output's line count (`showing last N of M lines`), and memory stays bounded however much the command prints.
 
-Thanks @zackleman for reporting this in #5925.
+Thanks @zackleman for reporting this in #5925 and for the implementation plan this fix follows.
