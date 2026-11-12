@@ -59,7 +59,7 @@ body:
       render: shell
       placeholder: |
         OS: macOS 15.5 (arm64)
-        Node: v24.1.0
+        Node: v26.13.1
         Package manager: pnpm@10.x
 
         $ eve info

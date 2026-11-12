@@ -12,7 +12,7 @@ import {
 
 const ENVIRONMENT: DevEnvironmentInfo = {
   eveVersion: "0.9.9",
-  nodeVersion: "v24.0.0",
+  nodeVersion: "v26.0.0",
   platform: "darwin arm64",
   vercelCliVersion: "48.1.0",
   vercelCliPath: "/usr/local/bin/vercel",

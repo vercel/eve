@@ -92,7 +92,7 @@ export default discordChannel({
 </TabContent>
 <TabContent order={2}>
 
-Run `runDiscordGatewayRelay` on any host that keeps a Node.js 24 process up, with exactly one relay per bot. Generate a shared secret, set it as `DISCORD_RELAY_SECRET` on both the agent and the relay host, and accept it on the Gateway route:
+Run `runDiscordGatewayRelay` on any host that keeps a Node.js 26 process up, with exactly one relay per bot. Generate a shared secret, set it as `DISCORD_RELAY_SECRET` on both the agent and the relay host, and accept it on the Gateway route:
 
 ```ts title="agent/channels/discord.ts"
 import { httpBasic, localDev } from "eve/channels/auth";
