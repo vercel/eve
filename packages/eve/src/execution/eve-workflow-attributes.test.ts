@@ -23,7 +23,6 @@ import {
 } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
-import { resolveTracePolicy } from "#shared/trace-policy.js";
 
 const publicConversation = {
   audience: "public",
@@ -152,39 +151,6 @@ describe("isWorkflowTraceContentVisible", () => {
           traceId: "2".repeat(32),
         },
       }),
-    ).toBe(false);
-  });
-
-  it("follows a root session's own explicit trace policy", () => {
-    const privateConversation = { ...unknownConversation, audience: "private" } as const;
-    const seed = (decision: unknown) => ({
-      [ConversationContextKey.name]: privateConversation,
-      [SessionTraceSeedKey.name]: {
-        decision,
-        spanId: "1".repeat(16),
-        traceFlags: 1,
-        traceId: "2".repeat(32),
-      },
-    });
-    const recorded = resolveTracePolicy(
-      () => ({ emit: true, recordInputs: true, recordOutputs: true }),
-      { agentName: "weather", ...privateConversation },
-    );
-
-    expect(isWorkflowTraceContentVisible(seed(recorded))).toBe(true);
-    expect(buildSessionAttributes({ serializedContext: seed(recorded) })).toMatchObject({
-      "$eve.is_trace_content_visible": true,
-    });
-    expect(
-      isWorkflowTraceContentVisible({
-        ...seed(recorded),
-        [ConversationContextKey.name]: unknownConversation,
-      }),
-    ).toBe(false);
-    expect(
-      isWorkflowTraceContentVisible(
-        seed(resolveTracePolicy(undefined, { agentName: "weather", ...privateConversation })),
-      ),
     ).toBe(false);
   });
 

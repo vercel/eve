@@ -48,11 +48,7 @@ import {
 } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import {
-  applyAudienceCeiling,
-  shouldCaptureInstrumentationContent,
-} from "#shared/instrumentation-content.js";
-import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import {
   ConversationContextKey,
   normalizeConversationContext,
@@ -130,30 +126,21 @@ export function readChannelKind(serializedContext: Record<string, unknown>): str
 
 export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
-  const traceState = seed === undefined ? undefined : resolveForwardedTraceSeed(seed)!;
-  if (traceState !== undefined) {
+  if (seed !== undefined) {
+    const traceState = resolveForwardedTraceSeed(seed)!;
     if (
       traceState.forwardedTracePolicy !== undefined ||
       readParentSessionId(serializedContext) !== undefined
     ) {
-      return recordsAllContent(traceState.decision);
+      const decision = traceState.decision;
+      return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
     }
   }
   const conversation = normalizeConversationContext(serializedContext[ConversationContextKey.name]);
-  const content = {
+  return shouldCaptureInstrumentationContent({
     audience: conversation?.audience ?? "unknown",
     environment: conversation?.environment ?? "production",
-  };
-  // A root session's own decision counts only for the audience its policy evaluated, as
-  // instrumentation applies it, so an explicit recording policy shows what its spans record.
-  if (traceState?.decision !== undefined) {
-    return recordsAllContent(applyAudienceCeiling(traceState.decision, content));
-  }
-  return shouldCaptureInstrumentationContent(content);
-}
-
-function recordsAllContent(decision: InstrumentationDecision | undefined): boolean {
-  return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
+  });
 }
 
 function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
