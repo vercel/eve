@@ -337,7 +337,7 @@ const refusesStyled = ({ body }: Sent) =>
   JSON.stringify(body).includes("Styled") ? "invalid_blocks" : undefined;
 
 describe("Slack input request cards", () => {
-  it("posts a two-approval batch as one details message and one controls message", async () => {
+  it("posts a renderer's details before one controls message that carries each approval's input", async () => {
     const plan = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
@@ -353,7 +353,8 @@ describe("Slack input request cards", () => {
     const [details, controls, ...rest] = calls("thread.post");
     expect(rest).toEqual([]);
     expect(JSON.stringify(details?.body)).toContain("1. Draft the plan");
-    expect(JSON.stringify(details?.body)).toContain("prod");
+    expect(JSON.stringify(details?.body)).not.toContain("prod");
+    expect(JSON.stringify(controls?.body)).toContain("prod");
     expect(eveActionIds(details?.body)).toEqual([]);
     expect(blocksOf(controls)).toHaveLength(2);
     expect(eveActionIds(controls?.body)).toHaveLength(4);
@@ -403,6 +404,26 @@ describe("Slack input request cards", () => {
     expect(neighbor).toEqual(blocksOf(posted)[1]);
   });
 
+  it("retires an approval container in place, keeping what was approved", async () => {
+    const { answer, ask, blocksOf, calls } = harness();
+    await ask(approval("a_deploy", "deploy", { env: "prod" }));
+
+    await answer("a_deploy", { optionId: "approve" });
+
+    const [answered, ...rest] = blocksOf(calls("chat.update")[0]) as [
+      { child_blocks: Array<{ type: string }>; subtitle?: unknown; type: string },
+    ];
+    expect(rest).toEqual([]);
+    expect(answered.type).toBe("container");
+    expect(answered.subtitle).toBeUndefined();
+    expect(answered.child_blocks.map((child) => child.type)).toEqual(["rich_text", "context"]);
+    expect(JSON.stringify(answered)).toContain("prod");
+    expect(JSON.stringify(answered.child_blocks[1])).toContain(
+      ":white_check_mark: *Approve* by <@U_BOB>",
+    );
+    expect(eveActionIds(answered)).toEqual([]);
+  });
+
   it.each([
     { name: "an answered approval", outcome: "accepted" as const, shows: "Done: approve U_BOB" },
     { name: "an approval no longer needed", outcome: "withdrawn" as const, shows: "Done: none" },
@@ -421,8 +442,7 @@ describe("Slack input request cards", () => {
 
     // The settlement renders what the admitted answer already showed, so it updates nothing.
     expect(calls("chat.update").map((update) => blocksOf(update))).toEqual([[section(shows)]]);
-    // The details message posted first, as `ts_1`.
-    expect(calls("chat.delete").map((call) => call.body.ts)).toEqual(["ts_1"]);
+    expect(calls("chat.delete")).toEqual([]);
     expect(channel.state.interactionCards).toEqual([]);
   });
 
@@ -801,7 +821,10 @@ describe("Slack input request cards", () => {
       interactionCard(card, next) {
         const parts = next(card);
         if (card.interaction.status !== "open") return parts;
-        return controls(parts, [...parts.controls.blocks, section("Needs an owner")]);
+        return {
+          ...controls(parts, [...parts.controls.blocks, section("Needs an owner")]),
+          details: { blocks: [section("Deploy plan")], text: "Deploy plan" },
+        };
       },
     });
     const { ask, calls, channel, commit, settle } = harness({ renderers: [tall] });
