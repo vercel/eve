@@ -197,7 +197,7 @@ A step publishes session events before it saves its checkpoint. A retried step c
 - A clear the interrupted attempt finished still empties history. An unfinished clear or compaction ends `interrupted`, and the clear or compact request ends `failed` instead of running again. A completed compaction keeps its recorded outcome, but its lost private summary is not reconstructed. The checkpoint history remains available for a later compaction.
 - Hooks and channel handlers do not run again for the events the interrupted attempt wrote. New events from recovery use normal hooks and instrumentation.
 
-A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, or with `STEP_FAILED` when one of its steps fails on every retry. The session stays open for the next message.
+A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, or with `TURN_FAILED` when one of its steps fails on every retry. A turn stopped while its step was retrying settles `cancelled` instead. The session stays open for the next message.
 
 Terminal cleanup keeps recorded outcomes and closes any remaining work. It doesn't run authored hooks, and it notifies the channel only when eve can restore the channel context. Don't rely on a terminal hook for guaranteed external cleanup. A hook interrupted after publication may have completed, partly completed, or never run its side effect.
 

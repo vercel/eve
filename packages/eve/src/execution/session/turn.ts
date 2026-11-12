@@ -44,6 +44,7 @@ import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
+  TurnStepInput,
   TurnStepPayload,
 } from "#execution/session/turn-step-types.js";
 import { turnStep } from "#execution/session/turn-step.js";
@@ -206,7 +207,7 @@ export class SessionExecution {
       // ends the session. What fails once a step has returned, such as adopting its state, is
       // not the step's failure, so it is not recovered.
       const result = await cursor.advanceWithHistory((state) => {
-        const run = (recover?: { readonly error: unknown }) =>
+        const run = (recover?: TurnStepInput["recover"]) =>
           turnStep({
             ...state,
             handover,
@@ -217,7 +218,10 @@ export class SessionExecution {
             steeringSignal: turn.steeringSignal,
           });
         return run().catch((error: unknown) =>
-          run({ error: normalizeSerializableError(exhaustedStepError(error)) }),
+          run({
+            error: normalizeSerializableError(exhaustedStepError(error)),
+            ...(turn.signal.aborted && { stopped: true as const }),
+          }),
         );
       });
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
