@@ -13,7 +13,6 @@ import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineMemory, type MemoryProvider } from "#public/memory/index.js";
-import { defineTool } from "#tools/definition.js";
 
 // A memory that recalls after a compaction inside a turn: the turn's next model call reads what
 // it brought, joined to the turn's recall.
@@ -26,7 +25,9 @@ const ALICE = {
   principalType: "user" as const,
 };
 const SUMMARY = "Alice asked for the quarterly report.";
-const REPORT = `Quarterly report. ${"Revenue grew in every region. ".repeat(10_000)}`;
+// About 140k tokens: over the compaction threshold of a 150k window, so the turn compacts before
+// its first model call.
+const NOTES = "Alice's notes on the quarterly release. ".repeat(14_000);
 
 function isSummaryRequest(prompt: LanguageModelV4Prompt): boolean {
   return JSON.stringify(prompt).includes("CONTEXT CHECKPOINT COMPACTION");
@@ -38,14 +39,13 @@ type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Pa
 /** A response that reports the prompt's size as its input tokens, as a provider would. */
 function respond(prompt: LanguageModelV4Prompt, parts: readonly StreamPart[]): StreamResult {
   const inputTokens = Math.ceil(JSON.stringify(prompt).length / 4);
-  const finishReason = parts.some((part) => part.type === "tool-call") ? "tool-calls" : "stop";
   return {
     stream: simulateReadableStream({
       chunks: [
         { type: "stream-start", warnings: [] },
         ...parts,
         {
-          finishReason: { raw: undefined, unified: finishReason },
+          finishReason: { raw: undefined, unified: "stop" },
           type: "finish",
           usage: {
             inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: inputTokens, total: inputTokens },
@@ -65,12 +65,8 @@ function text(prompt: LanguageModelV4Prompt, value: string): StreamResult {
   ]);
 }
 
-/**
- * The first turn fetches the report twice, so the call after the second fetch is measured over
- * the threshold and compacts; later calls answer. A compaction gets a summary.
- */
+/** Answers every turn call; a compaction gets a summary. */
 function scriptedModel(log: string[], prompts: LanguageModelV4Prompt[]) {
-  let calls = 0;
   return markMockModel(
     new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
@@ -80,17 +76,7 @@ function scriptedModel(log: string[], prompts: LanguageModelV4Prompt[]) {
         }
         log.push("call:turn");
         prompts.push(prompt);
-        calls += 1;
-        return calls <= 2
-          ? respond(prompt, [
-              {
-                input: "{}",
-                toolCallId: `fetch-${calls}`,
-                toolName: "fetch_report",
-                type: "tool-call",
-              },
-            ])
-          : text(prompt, "The report is in.");
+        return text(prompt, "Noted.");
       },
       modelId: "scripted-model",
       provider: "eve-test",
@@ -109,7 +95,7 @@ async function untilSettled(log: readonly string[], count: number): Promise<void
   }
 }
 
-/** A session whose first turn's report pushes its next call over a small window. */
+/** A session whose first message is over the compaction threshold, then a short second turn. */
 async function runSession(
   name: string,
   provider: MemoryProvider,
@@ -117,30 +103,18 @@ async function runSession(
   prompts: LanguageModelV4Prompt[],
   secondTurn: boolean,
 ): Promise<void> {
-  let fetched = 0;
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        compaction: { threshold: 1 },
         model: scriptedModel(log, prompts),
-        modelContextWindowTokens: 50_000,
-      } as never),
+        modelContextWindowTokens: 150_000,
+      }),
       name,
     },
     modules: [
       {
         loadNamespace: async () => ({ default: defineMemory({ provider, scope: "test" }) }),
         logicalPath: "memory/archive.ts",
-      },
-      {
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Fetch the quarterly report.",
-            execute: async () => (fetched++ === 0 ? REPORT : "No changes since."),
-            inputSchema: {},
-          }),
-        }),
-        logicalPath: "tools/fetch_report.ts",
       },
       {
         loadNamespace: async () => ({
@@ -165,7 +139,7 @@ async function runSession(
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",
-        input: { message: "Fetch the quarterly report." },
+        input: { message: NOTES },
         serializedContext: buildSerializedContext({
           auth: ALICE,
           channelKind: "http",
@@ -180,7 +154,7 @@ async function runSession(
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
-          payload: { message: "Fetch it again." },
+          payload: { message: "And the second part?" },
         });
         await untilSettled(log, 2);
       }
@@ -213,7 +187,7 @@ describe("memory recall after a compaction", () => {
             log.push(`recall:compaction:operation:${operationId}`);
             return {
               messages: [
-                { content: "The report Alice fetched is archived; search the archive for it." },
+                { content: "Alice's earlier notes are archived; search the archive for them." },
                 { content: "Index: one line.", id: "index" },
               ],
             };
@@ -258,7 +232,7 @@ describe("memory recall after a compaction", () => {
     expect(afterCompaction).toContain("Index: one line.");
     expect(afterCompaction).not.toContain("Index: a large block.");
     expect(
-      afterCompaction.filter((text) => text.startsWith("The report Alice fetched is archived")),
+      afterCompaction.filter((text) => text.startsWith("Alice's earlier notes are archived")),
     ).toHaveLength(1);
   }, 120_000);
 
@@ -284,7 +258,7 @@ describe("memory recall after a compaction", () => {
     expect(log).toContain("context:compaction:completed");
     expect(log.filter((entry) => entry === "recall:compaction")).toHaveLength(1);
     expect(log).toContain("turn:failed");
-    // The calls before the compaction ran; the one after it never did.
+    // The turn compacted before its first model call, which never ran.
     const compactedAt = log.indexOf("context:compaction:completed");
     expect(log.indexOf("call:turn", compactedAt)).toBe(-1);
   }, 120_000);
