@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { A2A_REQUEST_BODY_MAX_BYTES, handleA2aJsonRpc, type A2aOperations } from "./json-rpc.js";
-import { A2aError, type StreamResponse } from "./protocol.js";
+import { A2aError, EVE_INTERACTIONS_EXTENSION, type StreamResponse } from "./protocol.js";
 
 const task = {
   contextId: "ctx",
@@ -232,6 +232,31 @@ describe("handleA2aJsonRpc", () => {
       ],
     });
     expect(JSON.stringify(hidden)).not.toContain("password");
+  });
+
+  it("passes requested extensions through and echoes the one it activates", async () => {
+    const exec = execution();
+    const { response } = await call(
+      { id: 7, jsonrpc: "2.0", method: "GetTask", params: { id: "task" } },
+      {
+        "a2a-extensions": `https://other.example/ext, ${EVE_INTERACTIONS_EXTENSION}`,
+        "a2a-version": "1.0",
+      },
+      exec,
+    );
+    expect(response.headers.get("a2a-extensions")).toBe(EVE_INTERACTIONS_EXTENSION);
+    const context = vi.mocked(exec.getTask).mock.calls[0]![1];
+    expect([...context.extensions]).toEqual([
+      "https://other.example/ext",
+      EVE_INTERACTIONS_EXTENSION,
+    ]);
+
+    const plain = await call(
+      { id: 8, jsonrpc: "2.0", method: "GetTask", params: { id: "task" } },
+      { "a2a-extensions": "https://other.example/ext", "a2a-version": "1.0" },
+      execution(),
+    );
+    expect(plain.response.headers.get("a2a-extensions")).toBeNull();
   });
 
   it("streams each event as a JSON-RPC response, and a failure as a final error event", async () => {

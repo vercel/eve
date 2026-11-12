@@ -24,6 +24,7 @@ import type {
   SessionView,
   TurnRow,
 } from "#protocol/session-projection/tables.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import { isV26Line } from "#protocol/v26-lines.js";
 
 import { encodeTaskId, messageIdOfDelivery, type TaskRef } from "./ids.js";
@@ -31,6 +32,7 @@ import {
   A2A_JSON_RPC_ERRORS,
   A2aError,
   a2aTimestamp,
+  EVE_INTERACTIONS_EXTENSION,
   type Artifact,
   type Message,
   type Part,
@@ -126,6 +128,10 @@ export interface ProjectTaskOptions {
   readonly historyLength?: number;
   /** Defaults to true; `ListTasks` omits artifacts unless asked. */
   readonly includeArtifacts?: boolean;
+  /** The caller activated eve's interactions extension: prompts also carry their data. */
+  readonly interactions?: boolean;
+  /** A working status names the tool the task is running. Defaults to true. */
+  readonly toolActivity?: boolean;
 }
 
 /** The A2A task a delivery started. */
@@ -141,7 +147,7 @@ export function projectTask(
   const task: { -readonly [K in keyof Task]: Task[K] } = {
     contextId,
     id,
-    status: taskStatus(view, delivery, turn, { contextId, taskId: id }),
+    status: taskStatus(view, delivery, turn, { contextId, taskId: id }, options),
   };
   if (
     task.status.state === "TASK_STATE_COMPLETED" &&
@@ -175,6 +181,7 @@ function taskStatus(
   delivery: DeliveryRow | undefined,
   turn: TurnRow | undefined,
   address: TaskAddress,
+  options: ProjectTaskOptions,
 ): TaskStatus {
   // Not yet visible on the stream: the session hasn't admitted the message.
   if (delivery === undefined) return { state: "TASK_STATE_SUBMITTED" };
@@ -192,7 +199,8 @@ function taskStatus(
         : delivery.outcome === "failed"
           ? "TASK_STATE_FAILED"
           : "TASK_STATE_COMPLETED";
-    return status(state, address, delivery.endedAt, delivery.reason);
+    const reason = state === "TASK_STATE_FAILED" ? failureText(delivery.reason) : delivery.reason;
+    return status(state, address, delivery.endedAt, reason);
   }
 
   // Open prompts outrank how the turn ended: a pending batch can outlive a settled turn.
@@ -200,7 +208,7 @@ function taskStatus(
   if (prompts.length > 0) {
     const asking = prompts.some((row) => row.request.kind !== "sign-in");
     return {
-      message: promptMessage(view, prompts, address),
+      message: promptMessage(view, prompts, address, options.interactions === true),
       state: asking ? "TASK_STATE_INPUT_REQUIRED" : "TASK_STATE_AUTH_REQUIRED",
       timestamp: a2aTimestamp(latest(prompts.map((row) => row.startedAt))),
     };
@@ -219,13 +227,18 @@ function taskStatus(
       "TASK_STATE_WORKING",
       address,
       resumedAt(view, turn),
-      workingLabel(view, turn.turnId),
+      options.toolActivity === false ? undefined : workingLabel(view, turn.turnId),
     );
   }
 
   const error = failure(view, turn.turnId);
   if (error !== undefined || turn.outcome === "failed") {
-    return status("TASK_STATE_FAILED", address, turn.endedAt, error?.message ?? "The task failed.");
+    return status(
+      "TASK_STATE_FAILED",
+      address,
+      turn.endedAt,
+      failureText(error?.message, error?.id),
+    );
   }
   if (turn.outcome === "cancelled") return status("TASK_STATE_CANCELED", address, turn.endedAt);
   return status("TASK_STATE_COMPLETED", address, turn.endedAt);
@@ -288,8 +301,9 @@ export function openPromptsForTurn(view: SessionView, turnId: string): readonly 
 
 /**
  * The status message for an interrupted task: the prompts as text any client can answer by typing
- * (eve's typed-answer intake resolves option IDs, labels, and numbers). eve's interaction JSON
- * stays off the wire: it's an internal format, and text is what every A2A client can answer.
+ * (eve's typed-answer intake resolves option IDs, labels, and numbers). Under eve's interactions
+ * extension, a data part also lists the questions and approvals, for a client to render and answer
+ * with data; a sign-in is answered by signing in, so it stays text.
  *
  * A sign-in's link and code are credentials, but an A2A context has one principal, its owner, so
  * they go in the message as they would in a direct message.
@@ -298,8 +312,10 @@ function promptMessage(
   view: SessionView,
   rows: readonly InteractionRow[],
   address: TaskAddress,
+  interactions: boolean,
 ): Message {
   const text: string[] = [];
+  const data: A2aInteraction[] = [];
   for (const row of rows) {
     const asked = interaction(view, row.interactionId);
     if (asked === undefined) continue;
@@ -307,12 +323,75 @@ function promptMessage(
     text.push(
       signIn === undefined ? renderTextInteraction(asked.request) : signInChallengeText(signIn),
     );
+    if (signIn === undefined) data.push(a2aInteraction(row.interactionId, asked.request));
   }
-  return agentMessage(
+  const parts: Part[] = [{ mediaType: "text/plain", text: text.join("\n\n") }];
+  const message = agentMessage(
     address,
     `${address.taskId}:prompt:${rows.map((row) => row.interactionId).join(",")}`,
-    [{ mediaType: "text/plain", text: text.join("\n\n") }],
+    interactions && data.length > 0
+      ? [...parts, { data: { interactions: data }, mediaType: "application/json" }]
+      : parts,
   );
+  return interactions && data.length > 0
+    ? { ...message, extensions: [EVE_INTERACTIONS_EXTENSION] }
+    : message;
+}
+
+/** One open question or approval as the interactions extension shows it. */
+export type A2aInteraction = {
+  readonly interactionId: string;
+  /** `"question"`, `"approval"`, or `"budget"`; a newer eve can add a kind. */
+  readonly kind: string;
+  readonly prompt: string;
+  readonly title?: string;
+  readonly options?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly description?: string;
+  }[];
+  /** Free text answers it, alone or beside an option. */
+  readonly allowFreeform?: boolean;
+};
+
+function a2aInteraction(interactionId: string, request: InteractionRequest): A2aInteraction {
+  const shown: { -readonly [K in keyof A2aInteraction]: A2aInteraction[K] } = {
+    interactionId,
+    kind: request.kind,
+    prompt: request.prompt,
+  };
+  if (request.title !== undefined) shown.title = request.title;
+  if (request.options !== undefined && request.options.length > 0) {
+    shown.options = request.options.map((option) =>
+      option.description === undefined
+        ? { id: option.id, label: option.label }
+        : { description: option.description, id: option.id, label: option.label },
+    );
+  }
+  if (request.allowFreeform !== undefined) shown.allowFreeform = request.allowFreeform;
+  return shown;
+}
+
+/** Longest failure text a status carries. */
+const MAX_FAILURE_TEXT_LENGTH = 300;
+
+/**
+ * What a failed status says: the error's first line, bounded, with its support id. An error's
+ * message can carry an upstream HTML page or stack frames, which are internal to this agent and
+ * don't help the caller; the server's logs keep the whole error under the same id.
+ */
+export function failureText(message: string | undefined, id?: string): string {
+  const firstLine = (message ?? "")
+    .split(/\r?\n/u)[0]!
+    .replace(/<!doctype[\s\S]*$|<html[\s\S]*$/iu, "")
+    .trim();
+  const brief =
+    firstLine.length === 0
+      ? "The task failed."
+      : firstLine.length > MAX_FAILURE_TEXT_LENGTH
+        ? `${firstLine.slice(0, MAX_FAILURE_TEXT_LENGTH - 1)}…`
+        : firstLine;
+  return id === undefined ? brief : `${brief} (error id: ${id})`;
 }
 
 function workingLabel(view: SessionView, turnId: string): string | undefined {

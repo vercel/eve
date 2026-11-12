@@ -14,6 +14,8 @@ const SCENARIO_ENV = { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" };
 const SETUP_TIMEOUT_MS = 360_000;
 const TEST_TIMEOUT_MS = 60_000;
 const OPERATION_TIMEOUT_MS = 30_000;
+const INTERACTIONS_EXTENSION =
+  "https://github.com/vercel/eve/blob/main/docs/channels/a2a.mdx#interactions-extension";
 const A2A_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.ts": `import { defineAgent } from "eve";
@@ -21,6 +23,23 @@ import { mockModel } from "eve/evals";
 
 const model = mockModel(async (request) => {
   const last = request.lastUserMessage ?? "";
+  const asked = request.toolResults.some((result) => result.name === "ask_question");
+  if (last.includes("A2A-SLOWASK") && !asked) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    return {
+      toolCalls: [{
+        id: "question-slow",
+        input: {
+          options: [
+            { description: "Go on.", label: "Yes" },
+            { description: "Stop here.", label: "No" },
+          ],
+          question: "Proceed after the wait?",
+        },
+        name: "ask_question",
+      }],
+    };
+  }
   if (last.includes("A2A-SLOW")) {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     return "A2A-SLOW-DONE";
@@ -33,7 +52,9 @@ const model = mockModel(async (request) => {
   }
   const prompt = JSON.stringify(request.messages);
   if (prompt.includes("A2A-FAILURE-PROBE")) {
-    throw new Error("A2A-FAILURE-PROBE: provider rejected the request.");
+    throw new Error(
+      "A2A-FAILURE-PROBE: provider rejected the request.\\n<!DOCTYPE html><html><body>edge-internal-7f</body></html>",
+    );
   }
   const answered = request.toolResults.some((result) => result.name === "ask_question");
   if (prompt.includes("A2A-ASK") && !answered) {
@@ -359,6 +380,81 @@ describe("A2A channel", () => {
   );
 
   it(
+    "lists prompts as data and takes data answers under the interactions extension",
+    async () => {
+      const ext = { extensions: INTERACTIONS_EXTENSION };
+      const asking = await rpc(
+        "alice",
+        "SendMessage",
+        { message: userMessage("ix-1", "A2A-ASK") },
+        ext,
+      );
+      expect(asking.headers.get("a2a-extensions")).toBe(INTERACTIONS_EXTENSION);
+      const task = taskOf(asking);
+      const message = requiredRecord(requiredRecord(task.status, "status").message, "message");
+      expect(message.extensions).toEqual([INTERACTIONS_EXTENSION]);
+      const parts = message.parts as Record<string, unknown>[];
+      expect(parts[0]?.text).toContain("Proceed with the delegated work?");
+      const [question] = requiredRecord(parts[1]?.data, "data").interactions as Record<
+        string,
+        unknown
+      >[];
+      expect(question).toMatchObject({
+        kind: "question",
+        options: [
+          { description: "Continue the delegated work.", label: "Yes" },
+          { description: "Stop before the delegated work.", label: "No" },
+        ],
+        prompt: "Proceed with the delegated work?",
+      });
+      const interactionId = requiredString(question?.interactionId, "interactionId");
+      const optionId = requiredString(
+        (question?.options as Record<string, unknown>[])[0]?.id,
+        "optionId",
+      );
+      const answer = (id: string, data: Record<string, unknown>) =>
+        rpc(
+          "alice",
+          "SendMessage",
+          {
+            message: {
+              ...userMessage(id, "answer"),
+              contextId: task.contextId,
+              extensions: [INTERACTIONS_EXTENSION],
+              parts: [{ data, mediaType: "application/json" }],
+              taskId: task.id,
+            },
+          },
+          // Declared on the message alone: the message activates it for its own answers.
+        );
+
+      // Without the extension, a prompt is plain text alone.
+      const plain = requiredRecord((await rpc("alice", "GetTask", { id: task.id })).result, "task");
+      expect(
+        (
+          requiredRecord(requiredRecord(plain.status, "status").message, "message")
+            .parts as unknown[]
+        ).length,
+      ).toBe(1);
+
+      expect(rpcErrorCode(await answer("ix-2", { interactionId: "stale", optionId }))).toBe(-32602);
+      expect(rpcErrorCode(await answer("ix-3", { interactionId, optionId: "not-an-option" }))).toBe(
+        -32602,
+      );
+      // An option and a note together, which typed text can't say.
+      const done = taskOf(
+        await answer("ix-4", { interactionId, optionId, text: "Go ahead, and log it." }),
+      );
+      expect(done).toMatchObject({
+        artifacts: [{ parts: [{ text: "A2A-LIFECYCLE-COMPLETE" }] }],
+        id: task.id,
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "cancels an interrupted task and reports a failed one",
     async () => {
       const asked = await sendTask("alice", { message: userMessage("c-1", "A2A-ASK") });
@@ -372,6 +468,11 @@ describe("A2A channel", () => {
         message: userMessage("f-1", "Trigger A2A-FAILURE-PROBE."),
       });
       expect(failed.status).toMatchObject({ state: "TASK_STATE_FAILED" });
+      // Only the error's first line reaches the caller: no upstream page, no stack frames.
+      const failure = statusText(failed);
+      expect(failure).toContain("A2A-FAILURE-PROBE: provider rejected the request.");
+      expect(failure).not.toContain("edge-internal");
+      expect(failure).not.toContain("\n");
       expect(JSON.stringify(failed)).not.toMatch(/\n\s+at /);
     },
     TEST_TIMEOUT_MS,
@@ -406,23 +507,26 @@ describe("A2A channel", () => {
       );
       const first = requiredRecord(interrupted[0]?.task, "task");
 
-      const subscription = streamEvents("alice", "SubscribeToTask", { id: first.id });
-      // Let the subscription open before the answer lands; it must report the change either way.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Subscribing to a paused task shows it, then closes, as a streaming send does at a pause.
+      const atPause = await streamEvents("alice", "SubscribeToTask", { id: first.id });
+      expect(atPause).toHaveLength(1);
+      expect(taskState(atPause[0])).toBe("TASK_STATE_INPUT_REQUIRED");
       await sendTask("alice", {
-        message: {
-          ...userMessage("s-3", "Yes"),
-          contextId: first.contextId,
-          taskId: first.id,
-        },
+        message: { ...userMessage("s-3", "Yes"), contextId: first.contextId, taskId: first.id },
       });
-      const followed = await subscription;
-      expect(Object.keys(followed[0] ?? {})).toEqual(["task"]);
-      expect(followed.at(-1)).toMatchObject({
-        statusUpdate: { status: { state: "TASK_STATE_COMPLETED" }, taskId: first.id },
-      });
-
       expect(rpcErrorCode(await rpc("alice", "SubscribeToTask", { id: first.id }))).toBe(-32004);
+
+      // A subscription follows a working task to its next pause, then closes there.
+      const working = await sendTask("alice", {
+        configuration: { returnImmediately: true },
+        message: userMessage("s-4", "A2A-SLOWASK"),
+      });
+      const followed = await streamEvents("alice", "SubscribeToTask", { id: working.id });
+      expect(Object.keys(followed[0] ?? {})).toEqual(["task"]);
+      expect(taskState(followed[0])).not.toBe("TASK_STATE_INPUT_REQUIRED");
+      expect(followed.at(-1)).toMatchObject({
+        statusUpdate: { status: { state: "TASK_STATE_INPUT_REQUIRED" }, taskId: working.id },
+      });
     },
     TEST_TIMEOUT_MS,
   );
@@ -618,13 +722,14 @@ async function rpc(
   principal: string,
   method: string,
   params: Readonly<Record<string, unknown>>,
-  options: { readonly version?: string | null } = {},
+  options: { readonly version?: string | null; readonly extensions?: string } = {},
 ): Promise<RpcResult> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
     "x-test-principal": principal,
   };
   if (options.version !== null) headers["a2a-version"] = options.version ?? "1.0";
+  if (options.extensions !== undefined) headers["a2a-extensions"] = options.extensions;
   const response = await fetch(new URL("/eve/v1/a2a", url()), {
     body: JSON.stringify({ id: crypto.randomUUID(), jsonrpc: "2.0", method, params }),
     headers,
@@ -637,6 +742,11 @@ async function rpc(
 
 function rpcErrorCode(envelope: Record<string, unknown>): unknown {
   return requiredRecord(envelope.error, "error").code;
+}
+
+function statusText(task: Record<string, unknown>): string {
+  const message = requiredRecord(requiredRecord(task.status, "status").message, "message");
+  return (message.parts as { text?: string }[]).map((part) => part.text ?? "").join("");
 }
 
 function taskOf(envelope: Record<string, unknown>): Record<string, unknown> {

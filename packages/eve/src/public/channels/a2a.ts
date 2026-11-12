@@ -16,6 +16,7 @@ import { A2aTaskExecution } from "#internal/a2a/execution.js";
 import { handleA2aJsonRpc } from "#internal/a2a/json-rpc.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
+  clientUrl,
   validateHttpEndpointRequest,
   validateHttpMetadataRequest,
 } from "#internal/http/request-guards.js";
@@ -59,6 +60,23 @@ export interface A2aChannelConfig {
    * `ContentTypeNotSupportedError`. @default 25 MB, any media type
    */
   readonly uploadPolicy?: UploadPolicyInput;
+  /**
+   * Whether a working task's status names the tool it is running. Turn it off to keep the
+   * agent's tool names from callers, who then see the working state alone.
+   * @default true
+   */
+  readonly toolActivity?: boolean;
+  /**
+   * When a request that reached eve over plain HTTP is accepted. `"loopback"` accepts it only
+   * from a loopback host, such as a local `eve dev`. `"forwarded-https"` also accepts it when
+   * `X-Forwarded-Proto` says the client used HTTPS, for a proxy that terminates TLS and sets
+   * the header itself; any client can send the header, so use it only when every request passes
+   * through such a proxy. `"allow"` accepts it from any host, for a network kept private some
+   * other way, such as calls between services in one cluster. The Host and Origin checks apply
+   * either way.
+   * @default "loopback"
+   */
+  readonly plainHttp?: "loopback" | "forwarded-https" | "allow";
 }
 
 export type A2aChannel = Channel;
@@ -96,12 +114,15 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   };
 
   const card = async (request: Request, args: RouteHandlerArgs) => {
-    const failure = validateHttpMetadataRequest(request, "A2A");
+    const failure = validateHttpMetadataRequest(request, "A2A", input.plainHttp);
     if (failure !== undefined) return failure;
     // Public metadata by design: discovery happens before a client has credentials.
     const body = buildAgentCard({
       described: await args.describe(),
-      endpointUrl: new URL(path, publicOrigin ?? new URL(request.url).origin).toString(),
+      endpointUrl: new URL(
+        path,
+        publicOrigin ?? clientUrl(request, input.plainHttp).origin,
+      ).toString(),
       eveVersion: resolveInstalledPackageInfo().version,
       fileInputModes: fileInputModes(uploadPolicy),
       options: input.card,
@@ -115,7 +136,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   };
 
   const rpc = async (request: Request, args: RouteHandlerArgs) => {
-    const failure = validateHttpEndpointRequest(request, "A2A");
+    const failure = validateHttpEndpointRequest(request, "A2A", input.plainHttp);
     if (failure !== undefined) return failure;
     const auth = await routeAuth(request, input.auth);
     if (auth instanceof Response) return auth;
@@ -128,6 +149,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
       from: args.from,
       maxBlockingMs,
       resolveSession: args.resolveSession,
+      toolActivity: input.toolActivity ?? true,
       uploadPolicy,
     });
     return await handleA2aJsonRpc(request, sessionAuthFromResult(auth), execution);
@@ -137,7 +159,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
     routes: [
       GET(A2A_AGENT_CARD_PATH, card),
       OPTIONS(A2A_AGENT_CARD_PATH, async (request) => {
-        const failure = validateHttpMetadataRequest(request, "A2A");
+        const failure = validateHttpMetadataRequest(request, "A2A", input.plainHttp);
         return failure ?? new Response(null, { headers: CARD_CORS, status: 204 });
       }),
       POST(path, rpc),

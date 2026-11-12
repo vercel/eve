@@ -5,6 +5,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { httpBasic, none } from "#public/channels/auth.js";
+import { EVE_INTERACTIONS_EXTENSION } from "#internal/a2a/protocol.js";
 import { A2A_AGENT_CARD_PATH, a2aChannel } from "#public/channels/a2a.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 
@@ -101,6 +102,47 @@ describe("a2aChannel", () => {
       routeArgs(),
     );
     expect(crossOrigin.status).toBe(403);
+  });
+
+  it("takes plain HTTP as plainHttp says, and advertises the URL the client used", async () => {
+    const plain = (headers: Record<string, string> = {}) =>
+      new Request("http://agent.internal:3000/eve/v1/a2a", {
+        body: "{}",
+        headers: { "a2a-version": "1.0", host: "agent.internal:3000", ...headers },
+        method: "POST",
+      });
+    const forwarded = a2aChannel({ auth: none(), plainHttp: "forwarded-https" });
+    expect((await handler(forwarded, "POST")(plain(), routeArgs())).status).toBe(403);
+    // Past the guard, an empty body is the JSON-RPC layer's to refuse.
+    const proxied = await handler(forwarded, "POST")(
+      plain({ "x-forwarded-proto": "https" }),
+      routeArgs(),
+    );
+    expect(proxied.status).not.toBe(403);
+    const allowed = a2aChannel({ auth: none(), plainHttp: "allow" });
+    expect((await handler(allowed, "POST")(plain(), routeArgs())).status).not.toBe(403);
+
+    const card = await handler(forwarded, "GET")(
+      new Request(`http://agent.internal:3000${A2A_AGENT_CARD_PATH}`, {
+        headers: { host: "agent.internal:3000", "x-forwarded-proto": "https" },
+      }),
+      routeArgs(),
+    );
+    expect(await card.json()).toMatchObject({
+      supportedInterfaces: [{ url: "https://agent.internal/eve/v1/a2a" }],
+    });
+  });
+
+  it("declares eve's interactions extension on the card", async () => {
+    const response = await handler(a2aChannel({ auth: none() }), "GET")(
+      new Request(`http://127.0.0.1${A2A_AGENT_CARD_PATH}`, { headers: { host: "127.0.0.1" } }),
+      routeArgs(),
+    );
+    expect(await response.json()).toMatchObject({
+      capabilities: {
+        extensions: [{ required: false, uri: EVE_INTERACTIONS_EXTENSION }],
+      },
+    });
   });
 });
 

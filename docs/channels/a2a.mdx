@@ -41,6 +41,8 @@ The Agent Card path is fixed by the A2A specification, so an application can hav
 | `card`          | Derived         | Agent Card fields to set or override: `name`, `description`, `skills`, `provider`, `version`, `documentationUrl`, `iconUrl`, `securitySchemes`, and `securityRequirements`. |
 | `maxBlockingMs` | `25_000`        | The longest a blocking `SendMessage` waits before returning a working task. Keep it under the host's request timeout.                                                       |
 | `uploadPolicy`  | 25 MB, any type | Limits on inbound file parts, as for the [eve HTTP channel](./eve).                                                                                                         |
+| `toolActivity`  | `true`          | Whether a working task's status names the tool it is running. Set `false` to keep the agent's tool names from callers.                                                      |
+| `plainHttp`     | `"loopback"`    | When a plain HTTP request is accepted; see [HTTP security](#http-security).                                                                                                 |
 
 By default, the Agent Card takes its name and description from the agent, lists the agent's [skills](../skills) as A2A skills, and reports the installed eve version as the agent version.
 
@@ -68,11 +70,11 @@ A context another caller owns, or one that doesn't exist, is refused with `Inval
 | State                       | Meaning                                                                                                             |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `TASK_STATE_SUBMITTED`      | The session accepted the message and hasn't started it yet.                                                         |
-| `TASK_STATE_WORKING`        | The turn is running. The status message names the running tool call, when there is one.                             |
+| `TASK_STATE_WORKING`        | The turn is running. The status message names the running tool call, when there is one and `toolActivity` is on.    |
 | `TASK_STATE_INPUT_REQUIRED` | The turn waits on a question or approval.                                                                           |
 | `TASK_STATE_AUTH_REQUIRED`  | The turn waits only on a [connection sign-in](../connections). The status message carries the sign-in link or code. |
 | `TASK_STATE_COMPLETED`      | The turn finished. The reply is the task's artifact: structured output as a data part, otherwise text.              |
-| `TASK_STATE_FAILED`         | The turn failed. The status message carries the error message, without stack traces.                                |
+| `TASK_STATE_FAILED`         | The turn failed. The status message carries the error's first line and its support id; the server logs the rest.    |
 | `TASK_STATE_CANCELED`       | The turn was cancelled.                                                                                             |
 | `TASK_STATE_REJECTED`       | The session refused the message without starting a turn.                                                            |
 
@@ -112,11 +114,11 @@ The response's `result.task` carries the `id` and `contextId` to use in later ca
 | `GetTask`              | Reads a task. `historyLength` limits the user messages in `history`.                                                                          |
 | `ListTasks`            | Lists one context's tasks, newest status first, with cursor pagination. `contextId` is required.                                              |
 | `CancelTask`           | Cancels a working or interrupted task, then waits up to five seconds for it to reach `TASK_STATE_CANCELED`.                                   |
-| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal.                                                                      |
+| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal or interrupted.                                                       |
 
 A blocking `SendMessage` can't wait longer than one request. When `maxBlockingMs` passes first, eve returns the task as it is, usually `TASK_STATE_WORKING`; call `GetTask` or `SubscribeToTask` to follow it. For long tasks, prefer `SendStreamingMessage`.
 
-A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state.
+A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state. Like a streaming send, a subscription closes when the task is interrupted: answer the question, then subscribe again to follow the task on.
 
 ## Answer questions and approvals
 
@@ -135,6 +137,59 @@ When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: ea
 ```
 
 Each message answers one prompt and carries only text parts, which eve joins into one answer; the task's history records the answer as that one text part. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
+
+### Interactions extension
+
+A client that renders questions itself, or answers several at once, can use eve's interactions extension. The Agent Card declares it, with the URI `https://github.com/vercel/eve/blob/main/docs/channels/a2a.mdx#interactions-extension`. Activate it with the `A2A-Extensions` header, and eve echoes the header back. An interrupted task's status message then lists its open questions and approvals in a data part after the text:
+
+```json
+{
+  "data": {
+    "interactions": [
+      {
+        "interactionId": "wrun_01J...-ask-1",
+        "kind": "question",
+        "prompt": "Proceed with the delegated work?",
+        "options": [
+          { "id": "yes", "label": "Yes", "description": "Continue the delegated work." },
+          { "id": "no", "label": "No" }
+        ],
+        "allowFreeform": false
+      }
+    ]
+  },
+  "mediaType": "application/json"
+}
+```
+
+`kind` is `question`, `approval`, or `budget`, and a newer eve can add one. A sign-in isn't listed: it is answered by signing in.
+
+Answer with one data part per interaction, `{ interactionId, optionId?, text? }`, on a message that activates the extension, in the header or in the message's own `extensions`:
+
+```json
+{
+  "message": {
+    "messageId": "0d7e2c61-3b9f-4c1e-8f25-6a4b9d2e1c70",
+    "role": "ROLE_USER",
+    "contextId": "wrun_01J...",
+    "taskId": "d3J1bl8w...",
+    "extensions": [
+      "https://github.com/vercel/eve/blob/main/docs/channels/a2a.mdx#interactions-extension"
+    ],
+    "parts": [
+      {
+        "data": {
+          "interactionId": "wrun_01J...-ask-1",
+          "optionId": "yes",
+          "text": "Go ahead, and log it."
+        }
+      }
+    ]
+  }
+}
+```
+
+An answer can carry an option, free text, or both, such as an approval with a note. Free text alone answers only a question with no options or `allowFreeform: true`. A message that answers with data carries only answer parts. eve refuses with `InvalidParams` an answer to an interaction that isn't open on the task, an option the interaction doesn't offer, and data answers to a task that isn't waiting for input.
 
 ## Authentication
 
@@ -163,9 +218,11 @@ The Agent Card then advertises no security schemes. Every caller shares the anon
 
 The JSON-RPC endpoint validates each request before authentication, as the MCP channel does:
 
-- Remote endpoints require HTTPS; HTTP is accepted only on loopback.
+- Remote endpoints require HTTPS. By default, HTTP is accepted only on loopback.
 - `Host` must match the request URL.
 - Browser requests must have an exact same-origin `Origin`.
+
+Behind a proxy that terminates TLS, set `plainHttp: "forwarded-https"`. eve then accepts plain HTTP when `X-Forwarded-Proto` is `https`, and the Agent Card advertises the `https` URL the client used. Any client can send that header, so use this only when every request passes through such a proxy. For callers on a network that is private by other means, such as services in one cluster, `plainHttp: "allow"` accepts plain HTTP from any host. The `Host` and `Origin` checks apply under every setting, and the [MCP channel](./mcp#http-security) takes the same option.
 
 Request bodies are limited to 32 MB. File parts accept only `https` and `http` URLs or inline `raw` bytes, held to `uploadPolicy`; a disallowed media type is refused with `ContentTypeNotSupportedError`. A file URL's size and actual type are known only once it downloads, so those are checked when the file is staged for the agent. A file that fails then reaches the agent as a note that it wasn't accepted, rather than as an error to the caller.
 

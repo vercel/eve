@@ -46,11 +46,20 @@ its turn is therefore a new task, named by its own delivery.
 - **Reading a message.** Blocking calls and streams follow the session stream. A message is read
   once its delivery is consumed or its answer admitted and, for an answer, once the status moves
   past the prompt it answered: the answer is admitted a line before its prompt settles.
-- **Prompts are text.** Status messages render prompts as on any text channel. The channel matches
-  a typed answer against the task's own first question and sends it with `respond()`: eve's
-  typed-answer intake matches the session's first open prompt, possibly another turn's, and passes
-  unmatched text through as a message. eve's interaction JSON stays off the wire; a structured A2A
-  extension would be a versioned public contract, deferred until callers need one.
+- **Prompts are text, and data on request.** Status messages render prompts as on any text
+  channel. The channel matches a typed answer against the task's own first question and sends it
+  with `respond()`: eve's typed-answer intake matches the session's first open prompt, possibly
+  another turn's, and passes unmatched text through as a message. Under the interactions
+  extension, which a client activates, the prompt also carries a data part. Its shape is the
+  channel's own, a subset of the interaction request rather than eve's internal JSON, and data
+  answers `{ interactionId, optionId?, text? }` reach `respond()` as they are, so an option and a
+  note can travel together. A typed answer can't carry both.
+- **What a status shows.** A failure keeps its first line and support id, since an error's message
+  can carry an upstream page or stack frames. `toolActivity: false` keeps tool names out of
+  working statuses, for agents whose callers are another organization's.
+- **Streams close at a pause.** `SubscribeToTask` ends at a terminal or interrupted state, as a
+  streaming send does (§11.7), so a client that waits for a stream's end to act doesn't wait on a
+  question it has to answer.
 - **Ownership.** Sessions are read through `readOwnedInvocationRun`, shared with the MCP channel;
   unknown, expired, and foreign tasks are all `TaskNotFoundError`. The public card derives
   `securitySchemes` from the auth policy without calling it (`admitsAnonymousCallers`,
