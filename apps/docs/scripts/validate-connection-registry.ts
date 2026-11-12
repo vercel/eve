@@ -45,6 +45,7 @@ const expectedSlugs = connectionEntries()
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
 const API_KEY_CONNECTIONS: Readonly<Record<string, readonly string[]>> = {
   "browser-use": ["BROWSER_USE_API_KEY"],
+  context7: ["CONTEXT7_API_KEY"],
   dataforseo: ["DATAFORSEO_USERNAME", "DATAFORSEO_PASSWORD"],
   firecrawl: ["FIRECRAWL_API_KEY"],
   stacktree: ["STACKTREE_API_KEY"],
