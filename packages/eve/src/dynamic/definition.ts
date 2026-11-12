@@ -50,7 +50,7 @@ export type DynamicKey = unknown;
  * Code outside a memo runs again at every evaluation, which is every model call. Put every
  * network request, database query, API call, and sandbox read inside a memo. The key sets how
  * long the result stays fixed: `ctx.turn?.id ?? null` for once per turn, `ctx.session.id` for once
- * per session, or a tenant or channel ID for once per value.
+ * per session, or a tenant or channel ID to keep it until that ID changes.
  */
 export type Memo = <T>(
   key: DynamicKey,
