@@ -52,6 +52,10 @@ import {
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  sessionStreamWriteErrorOf,
+  throwIfSessionStreamDead,
+} from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
@@ -184,6 +188,7 @@ export class ModelCaller {
           this.input.generation.signal,
         );
       } catch (error) {
+        throwIfSessionStreamDead(error);
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
@@ -352,7 +357,19 @@ export class ModelCaller {
     const { generation, model } = this.input;
     const tools = await this.compact(options, await this.prepare(options));
     const attemptIndex = this.attemptIndex++;
-    await this.input.startRun(attemptIndex);
+    try {
+      await this.input.startRun(attemptIndex);
+    } catch (error) {
+      // The attempt's start never reached the stream; its hooks still hear that it failed.
+      const dead = sessionStreamWriteErrorOf(error);
+      if (dead !== undefined) {
+        await this.failAttempt(
+          step.instrumentation?.prepareAttempt(this.attemptPlace(attemptIndex)),
+          dead,
+        );
+      }
+      throw error;
+    }
     this.started = attemptIndex;
     // New announcements join durable history, so they must not inflate the
     // envelope baseline and hide instruction growth on the next step.
@@ -379,14 +396,10 @@ export class ModelCaller {
     // Label a reissued call's telemetry; otherwise a retry shows only as a second span.
     if (options.retryReason) runtimeContext["eve.retry.reason"] = options.retryReason;
 
-    const position = step.position();
     const attempt = step.instrumentation?.prepareAttempt({
+      ...this.attemptPlace(attemptIndex),
       isFrameworkTool: (name) => step.frameworkToolNames.has(name),
-      runId: position.runId!,
-      attempt: attemptIndex,
       runtimeContext,
-      stepIndex: position.stepIndex,
-      turnId: activeTurnId(position),
     });
 
     const hooks = buildStepHooks({
@@ -439,6 +452,13 @@ export class ModelCaller {
     try {
       return await this.stream(agent, callMessages, hooks.stepResult, attempt?.telemetry);
     } catch (error) {
+      // A dead stream cut the attempt: no stall, no retry. Its hooks hear it failed, since no
+      // `model.settled` can reach the stream.
+      const dead = sessionStreamWriteErrorOf(error);
+      if (dead !== undefined) {
+        await this.failAttempt(attempt, dead);
+        throw dead;
+      }
       generation.check();
       // Only the output timeout above aborts the stream without aborting our signal.
       if (isAbortError(error) && !generation.signal.aborted) {
@@ -446,6 +466,27 @@ export class ModelCaller {
       }
       return rethrowNoOutputAsEmptyResponse(error);
     }
+  }
+
+  /** Where attempt `attempt` of the step's run is, for its instrumentation. */
+  private attemptPlace(attempt: number) {
+    const position = this.step.position();
+    return {
+      attempt,
+      runId: position.runId!,
+      stepIndex: position.stepIndex,
+      turnId: activeTurnId(position),
+    };
+  }
+
+  /** Tells the attempt's hooks it failed; their failure can't change the step's. */
+  private async failAttempt(
+    attempt: { readonly fail: (error: unknown) => Promise<void> } | undefined,
+    error: unknown,
+  ): Promise<void> {
+    await attempt?.fail(error).catch((hookError: unknown) => {
+      logError(log, "instrumentation failed to hear a failed model call attempt", hookError);
+    });
   }
 
   /**

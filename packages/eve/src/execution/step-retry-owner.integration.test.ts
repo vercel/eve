@@ -498,9 +498,9 @@ it("fails the turn, not the session, when a step fails every attempt", async () 
         {
           data: {
             error: {
-              code: "STEP_FAILED",
+              code: "SessionStreamWriteError",
               id: expect.any(String),
-              message: "The session stream is unavailable",
+              message: "A session stream write failed: The session stream is unavailable",
             },
             outcome: "failed",
           },

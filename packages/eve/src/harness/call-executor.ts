@@ -27,6 +27,7 @@ import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { callProgress } from "#harness/call-facts.js";
@@ -297,6 +298,8 @@ export async function executeToolCall(
     );
     return { settled, toolResults };
   } catch (error) {
+    // A settlement that couldn't reach the stream can't be settled again there.
+    throwIfSessionStreamDead(error);
     if (input.abortSignal?.aborted === true) {
       if (!started) throwIfTurnAborted(input.abortSignal);
       if (completed !== undefined) return { settled: [completed], toolResults };
@@ -530,6 +533,7 @@ export async function executeInlineCalls(input: {
               : undefined;
           return { call, executed, approval };
         } catch (error) {
+          throwIfSessionStreamDead(error);
           throwIfTurnAborted(input.abortSignal);
           const failed = failedCall({ ...action, message: toError(error) });
           await input.publish(settleCall(failed.result));

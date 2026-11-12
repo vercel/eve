@@ -29,6 +29,7 @@ import {
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
@@ -101,6 +102,7 @@ export async function runModelStep(
   try {
     result = await caller.call();
   } catch (error) {
+    throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
@@ -127,6 +129,7 @@ export async function runModelStep(
       result,
     });
   } catch (error) {
+    throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     throw error;
@@ -150,6 +153,7 @@ async function requestRun(
       validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
+    throwIfSessionStreamDead(error);
     return { failed: await failBoundaryEvent(step, error) };
   }
   try {
