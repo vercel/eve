@@ -1,20 +1,34 @@
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /**
+ * When a protocol endpoint accepts a request that reached eve over plain HTTP:
+ *
+ * - `"loopback"`: only from a loopback host, such as a local `eve dev`.
+ * - `"forwarded-https"`: also when `X-Forwarded-Proto` says the client used HTTPS, for a proxy
+ *   that terminates TLS and sets the header itself. Any client can send the header, so use this
+ *   only when every request passes through such a proxy.
+ * - `"allow"`: from any host, for a network kept private some other way, such as calls between
+ *   services in one cluster.
+ */
+export type PlainHttpPolicy = "loopback" | "forwarded-https" | "allow";
+
+/**
  * Applies the fetch-native HTTP guards in front of a protocol endpoint, such as MCP's. `protocol`
  * names it in error messages.
  *
  * Non-browser clients normally omit `Origin`; browser requests are restricted
- * to the endpoint's exact origin. Plain HTTP is accepted only on loopback.
+ * to the endpoint's exact origin. Plain HTTP is accepted as `plainHttp` says, by default only
+ * on loopback.
  */
 export function validateHttpEndpointRequest(
   request: Request,
   protocol: string,
+  plainHttp: PlainHttpPolicy = "loopback",
 ): Response | undefined {
-  const baseFailure = validateTransportAndHost(request, protocol);
+  const baseFailure = validateTransportAndHost(request, protocol, plainHttp);
   if (baseFailure !== undefined) return baseFailure;
 
-  const target = new URL(request.url);
+  const target = clientUrl(request, plainHttp);
   const originHeader = request.headers.get("origin");
   if (originHeader === null || originHeader.length === 0) return undefined;
 
@@ -38,11 +52,16 @@ export function validateHttpEndpointRequest(
 export function validateHttpMetadataRequest(
   request: Request,
   protocol: string,
+  plainHttp: PlainHttpPolicy = "loopback",
 ): Response | undefined {
-  return validateTransportAndHost(request, protocol);
+  return validateTransportAndHost(request, protocol, plainHttp);
 }
 
-function validateTransportAndHost(request: Request, protocol: string): Response | undefined {
+function validateTransportAndHost(
+  request: Request,
+  protocol: string,
+  plainHttp: PlainHttpPolicy,
+): Response | undefined {
   let target: URL;
   try {
     target = new URL(request.url);
@@ -50,9 +69,10 @@ function validateTransportAndHost(request: Request, protocol: string): Response 
     return securityError(`Invalid ${protocol} request URL.`, 400);
   }
 
+  const scheme = clientUrl(request, plainHttp).protocol;
   if (
-    target.protocol !== "https:" &&
-    !(target.protocol === "http:" && isLoopbackHostname(target.hostname))
+    scheme !== "https:" &&
+    !(scheme === "http:" && (plainHttp === "allow" || isLoopbackHostname(target.hostname)))
   ) {
     return securityError(`${protocol} endpoints require HTTPS except on loopback.`);
   }
@@ -60,6 +80,24 @@ function validateTransportAndHost(request: Request, protocol: string): Response 
   const hostFailure = validateHostHeader(request, target);
   if (hostFailure !== undefined) return hostFailure;
   return undefined;
+}
+
+/**
+ * The request's URL as its client addressed it: under `"forwarded-https"`, an HTTP request that
+ * `X-Forwarded-Proto` says arrived over HTTPS reads as HTTPS, on the default port. Use it for
+ * URLs an endpoint advertises back to the client. Only the scheme and port change; the Host
+ * check compares the URL eve received.
+ */
+export function clientUrl(request: Request, plainHttp: PlainHttpPolicy = "loopback"): URL {
+  const url = new URL(request.url);
+  if (plainHttp !== "forwarded-https" || url.protocol !== "http:") return url;
+  // The first value is the hop nearest the client.
+  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (forwarded !== "https") return url;
+  const client = new URL(url);
+  client.protocol = "https:";
+  client.port = "";
+  return client;
 }
 
 function validateHostHeader(request: Request, target: URL): Response | undefined {

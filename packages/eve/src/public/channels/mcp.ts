@@ -34,6 +34,8 @@ import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
 import {
+  clientUrl,
+  type PlainHttpPolicy,
   validateHttpEndpointRequest,
   validateHttpMetadataRequest,
 } from "#internal/http/request-guards.js";
@@ -94,6 +96,16 @@ export interface McpChannelConfig {
    * @default false
    */
   readonly skills?: boolean;
+  /**
+   * When a request that reached eve over plain HTTP is accepted. `"loopback"` accepts it only
+   * from a loopback host, such as a local `eve dev`. `"forwarded-https"` also accepts it when
+   * `X-Forwarded-Proto` says the client used HTTPS, for a proxy that terminates TLS and sets
+   * the header itself; any client can send the header, so use it only when every request passes
+   * through such a proxy. `"allow"` accepts it from any host, for a network kept private some
+   * other way. The Host and Origin checks apply either way.
+   * @default "loopback"
+   */
+  readonly plainHttp?: "loopback" | "forwarded-https" | "allow";
 }
 
 /** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its tools and skills. */
@@ -130,21 +142,27 @@ export function mcpChannel(input: McpChannelConfig): McpChannel {
     await authenticateMcpRequest(request, args, input, oauth, publish);
   const routes = [GET(path, handle), POST(path, handle), DELETE(path, handle)];
   if (oauth !== undefined) {
-    routes.unshift(...protectedResourceMetadataRoutes(oauth, path));
+    routes.unshift(...protectedResourceMetadataRoutes(oauth, path, input.plainHttp));
   }
   return defineChannel({ routes });
 }
 
-function protectedResourceMetadataRoutes(options: OAuthResourceOptions, resourcePath: string) {
+function protectedResourceMetadataRoutes(
+  options: OAuthResourceOptions,
+  resourcePath: string,
+  plainHttp: PlainHttpPolicy | undefined,
+) {
   const metadataPath = protectedResourceMetadataPath(options, resourcePath);
   return [
     GET(metadataPath, async (request) =>
-      protectedResourceMetadataResponse(request, options, resourcePath, false),
+      protectedResourceMetadataResponse(request, options, resourcePath, false, plainHttp),
     ),
     HEAD(metadataPath, async (request) =>
-      protectedResourceMetadataResponse(request, options, resourcePath, true),
+      protectedResourceMetadataResponse(request, options, resourcePath, true, plainHttp),
     ),
-    OPTIONS(metadataPath, async (request) => protectedResourceMetadataOptionsResponse(request)),
+    OPTIONS(metadataPath, async (request) =>
+      protectedResourceMetadataOptionsResponse(request, plainHttp),
+    ),
   ] as const;
 }
 
@@ -164,11 +182,12 @@ function protectedResourceMetadataResponse(
   options: OAuthResourceOptions,
   resourcePath: string,
   head: boolean,
+  plainHttp: PlainHttpPolicy | undefined,
 ): Response {
-  const securityFailure = validateHttpMetadataRequest(request, "MCP");
+  const securityFailure = validateHttpMetadataRequest(request, "MCP", plainHttp);
   if (securityFailure !== undefined) return securityFailure;
   const resource =
-    options.resource ?? new URL(resourcePath, new URL(request.url).origin).toString();
+    options.resource ?? new URL(resourcePath, clientUrl(request, plainHttp).origin).toString();
   const authorizationServers =
     options.issuer !== undefined ? [options.issuer] : options.authorizationServers;
   const response = Response.json(
@@ -189,8 +208,11 @@ function protectedResourceMetadataResponse(
     : response;
 }
 
-function protectedResourceMetadataOptionsResponse(request: Request): Response {
-  const securityFailure = validateHttpMetadataRequest(request, "MCP");
+function protectedResourceMetadataOptionsResponse(
+  request: Request,
+  plainHttp: PlainHttpPolicy | undefined,
+): Response {
+  const securityFailure = validateHttpMetadataRequest(request, "MCP", plainHttp);
   if (securityFailure !== undefined) return securityFailure;
   const headers = new Headers({
     "access-control-allow-methods": "GET, HEAD, OPTIONS",
@@ -209,10 +231,11 @@ function addResourceChallenge(
   response: Response,
   request: Request,
   options: OAuthResourceOptions,
+  plainHttp: PlainHttpPolicy | undefined,
 ): Response {
   if (response.status !== 401 && response.status !== 403) return response;
   const metadataPath = protectedResourceMetadataPath(options, new URL(request.url).pathname);
-  const publicBase = options.resource ?? new URL(request.url).origin;
+  const publicBase = options.resource ?? clientUrl(request, plainHttp).origin;
   const metadataUrl = new URL(metadataPath, publicBase).toString();
   const headers = new Headers(response.headers);
   const existing = headers.get("www-authenticate");
@@ -378,11 +401,11 @@ async function authenticateMcpRequest(
   oauth: OAuthResourceOptions | undefined,
   publish: McpPublishOptions,
 ): Promise<Response> {
-  const securityFailure = validateHttpEndpointRequest(request, "MCP");
+  const securityFailure = validateHttpEndpointRequest(request, "MCP", input.plainHttp);
   if (securityFailure !== undefined) return securityFailure;
   const auth = await routeAuth(request, input.auth);
   if (auth instanceof Response) {
-    return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
+    return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth, input.plainHttp);
   }
   const sessionAuth = sessionAuthFromResult(auth);
   const principals = await resolveMcpRequestPrincipals(

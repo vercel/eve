@@ -213,6 +213,32 @@ describe("mcpChannel", () => {
     expect(authenticate).not.toHaveBeenCalled();
   });
 
+  it("refuses plain HTTP off loopback unless plainHttp accepts it", async () => {
+    const authenticate = vi.fn(() => principal);
+    const plain = (headers: Record<string, string> = {}) =>
+      requestWithHost("http://agent.internal/mcp", {
+        body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          ...headers,
+        },
+        method: "POST",
+      });
+    const handler = (plainHttp?: "loopback" | "forwarded-https" | "allow") => {
+      const route = mcpChannel({ auth: authenticate, plainHttp }).routes[1]!;
+      if (route.transport === "websocket") throw new Error("expected HTTP route");
+      return route.handler;
+    };
+
+    expect((await handler()(plain(), routeArgs())).status).toBe(403);
+    expect(authenticate).not.toHaveBeenCalled();
+    expect((await handler("forwarded-https")(plain(), routeArgs())).status).toBe(403);
+    const forwarded = plain({ "x-forwarded-proto": "https" });
+    expect((await handler("forwarded-https")(forwarded, routeArgs())).status).toBe(200);
+    expect((await handler("allow")(plain(), routeArgs())).status).toBe(200);
+  });
+
   it("rejects oversized UTF-8 messages and input responses before starting work", async () => {
     const createSession = vi.fn();
     const channel = mcpChannel({ auth: none() });

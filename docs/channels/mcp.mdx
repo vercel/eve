@@ -98,6 +98,7 @@ With `none()`, every caller is the same anonymous user, so the random invocation
 | `tools`             | `false`                       | Also [publishes the agent's tools](#publish-the-agents-tools).                      |
 | `skills`            | `false`                       | Also [publishes the agent's skills](#publish-the-agents-skills).                    |
 | `trustedForwarders` | Refuses the header with `403` | Lets a [router name the user](#forwarded-principals) that a published tool runs as. |
+| `plainHttp`         | `"loopback"`                  | When a plain HTTP request is accepted; see [HTTP security](#http-security).         |
 
 ## Interactive OAuth
 
@@ -213,9 +214,19 @@ Anyone can then invoke the agent. See [Invocation ownership](#invocation-ownersh
 
 The MCP endpoint checks each request before authentication:
 
-- Remote endpoints require HTTPS. HTTP is accepted only on loopback.
+- Remote endpoints require HTTPS. By default, HTTP is accepted only on loopback.
 - `Host` must match the request URL.
 - Browser protocol requests must have an exact same-origin `Origin`.
+
+When eve runs behind a proxy, or serves callers on a private network, `plainHttp` accepts plain HTTP from more places:
+
+| `plainHttp`         | Accepts plain HTTP                                                             |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `"loopback"`        | Only from a loopback host, such as a local `eve dev`.                          |
+| `"forwarded-https"` | Also when `X-Forwarded-Proto` is `https`, from a proxy that terminates TLS.    |
+| `"allow"`           | From any host, for a network kept private some other way, such as one cluster. |
+
+Any client can send `X-Forwarded-Proto`, so use `"forwarded-https"` only when every request passes through a proxy that sets it. Under it, the OAuth metadata and challenges advertise the `https` URL the client used. The `Host` and `Origin` checks apply under every setting.
 
 Only the metadata endpoint allows cross-origin requests. For a browser application, put a same-origin backend or authenticated server-side proxy in front of the MCP endpoint.
 

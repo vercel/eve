@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clientUrl,
   validateHttpEndpointRequest,
   validateHttpMetadataRequest,
 } from "#internal/http/request-guards.js";
@@ -99,6 +100,79 @@ describe("HTTP request guards", () => {
     expect(validateHttpEndpointRequest(request("http://agent.example/mcp"), "MCP")?.status).toBe(
       403,
     );
+  });
+
+  it("accepts plain HTTP X-Forwarded-Proto says arrived as HTTPS, only under forwarded-https", () => {
+    const forwarded = (headers: Record<string, string> = {}) =>
+      request("http://agent.internal:3000/a2a", { "x-forwarded-proto": "https", ...headers });
+
+    expect(validateHttpEndpointRequest(forwarded(), "A2A")?.status).toBe(403);
+    expect(validateHttpEndpointRequest(forwarded(), "A2A", "forwarded-https")).toBeUndefined();
+    // The first value is the client's hop.
+    expect(
+      validateHttpEndpointRequest(
+        forwarded({ "x-forwarded-proto": "http, https" }),
+        "A2A",
+        "forwarded-https",
+      )?.status,
+    ).toBe(403);
+    expect(
+      validateHttpEndpointRequest(
+        request("http://agent.internal:3000/a2a"),
+        "A2A",
+        "forwarded-https",
+      )?.status,
+    ).toBe(403);
+    // A browser behind the proxy sends its HTTPS origin, which is the one it addressed.
+    expect(
+      validateHttpEndpointRequest(
+        forwarded({ origin: "https://agent.internal" }),
+        "A2A",
+        "forwarded-https",
+      ),
+    ).toBeUndefined();
+    expect(
+      validateHttpEndpointRequest(
+        forwarded({ origin: "http://agent.internal:3000" }),
+        "A2A",
+        "forwarded-https",
+      )?.status,
+    ).toBe(403);
+    // Host is still checked against the URL eve received.
+    expect(
+      validateHttpEndpointRequest(forwarded({ host: "attacker.example" }), "A2A", "forwarded-https")
+        ?.status,
+    ).toBe(403);
+    expect(validateHttpMetadataRequest(forwarded(), "A2A", "forwarded-https")).toBeUndefined();
+  });
+
+  it("reads the client's URL as HTTPS only when forwarded-https trusts the header", () => {
+    const forwarded = request("http://agent.internal:3000/mcp?x=1", {
+      "x-forwarded-proto": "https",
+    });
+    expect(clientUrl(forwarded, "forwarded-https").href).toBe("https://agent.internal/mcp?x=1");
+    expect(clientUrl(forwarded).href).toBe("http://agent.internal:3000/mcp?x=1");
+    expect(clientUrl(forwarded, "allow").href).toBe("http://agent.internal:3000/mcp?x=1");
+  });
+
+  it("accepts plain HTTP from any host under allow, keeping the Host and Origin checks", () => {
+    const internal = request("http://agent.svc.cluster.local/a2a");
+    expect(validateHttpEndpointRequest(internal, "A2A", "allow")).toBeUndefined();
+    expect(validateHttpMetadataRequest(internal, "A2A", "allow")).toBeUndefined();
+    expect(
+      validateHttpEndpointRequest(
+        request("http://agent.svc.cluster.local/a2a", { host: "attacker.example" }),
+        "A2A",
+        "allow",
+      )?.status,
+    ).toBe(403);
+    expect(
+      validateHttpEndpointRequest(
+        request("http://agent.svc.cluster.local/a2a", { origin: "https://attacker.example" }),
+        "A2A",
+        "allow",
+      )?.status,
+    ).toBe(403);
   });
 });
 
