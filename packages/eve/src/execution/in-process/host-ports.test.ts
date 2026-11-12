@@ -5,6 +5,7 @@ import type { SessionCommand } from "#channel/types.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { createMemoryInboxRegistry } from "./inbox-transport.js";
 import { createMemoryLineStore } from "./line-store.js";
+import { structuredCloneBoundary } from "./step-boundary.js";
 
 const send = (text: string): SessionCommand => ({ kind: "send", payload: { message: text } });
 
@@ -40,14 +41,17 @@ describe("the in-process line store", () => {
 
 describe("the in-process inbox transport", () => {
   it("delivers to the session that holds an address, in order", async () => {
-    const registry = createMemoryInboxRegistry();
+    const registry = createMemoryInboxRegistry(structuredCloneBoundary);
     const inbox = createSessionInbox(registry.transportFor("session-alice"));
-    expect(registry.deliver("alice", send("before"))).toBeUndefined();
+    await expect(registry.deliver("alice", send("before"))).resolves.toBeUndefined();
 
     await inbox.claimSessionHook("alice");
     expect(registry.holder("alice")).toBe("session-alice");
-    expect(registry.deliver("alice", send("first"))).toEqual({ sessionId: "session-alice" });
-    registry.deliver("alice", send("second"));
+    await expect(registry.deliver("alice", send("first"))).resolves.toEqual({
+      kind: "delivered",
+      owner: "session-alice",
+    });
+    await registry.deliver("alice", send("second"));
 
     await expect(inbox.next()).resolves.toEqual(send("first"));
     await expect(inbox.next()).resolves.toEqual(send("second"));
@@ -56,7 +60,7 @@ describe("the in-process inbox transport", () => {
   });
 
   it("refuses an address another session holds", async () => {
-    const registry = createMemoryInboxRegistry();
+    const registry = createMemoryInboxRegistry(structuredCloneBoundary);
     const alice = createSessionInbox(registry.transportFor("session-alice"));
     const bob = createSessionInbox(registry.transportFor("session-bob"));
     await alice.claimSessionHook("shared");
@@ -69,7 +73,7 @@ describe("the in-process inbox transport", () => {
   });
 
   it("ends every reader when the registry closes", async () => {
-    const registry = createMemoryInboxRegistry();
+    const registry = createMemoryInboxRegistry(structuredCloneBoundary);
     const inbox = createSessionInbox(registry.transportFor("session-alice"));
     await inbox.claimSessionHook("alice");
     const next = inbox.next();

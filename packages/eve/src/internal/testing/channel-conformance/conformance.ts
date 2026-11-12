@@ -380,8 +380,6 @@ function inProcessGap(rule: string): string | undefined {
     return "it cancels the session's Workflow run, which an in-process session doesn't have";
   if (rule.startsWith("a file sent earlier"))
     return "a file sent earlier isn't found on a later message in process yet";
-  if (/question|option/.test(rule))
-    return "its questions are workflow tools, which an in-process session can't run yet";
   return undefined;
 }
 

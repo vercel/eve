@@ -1,3 +1,4 @@
+import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
@@ -375,19 +376,24 @@ describe("the in-process runtime", () => {
     });
   });
 
-  it("fails a call that needs a durable run, saying what it needs", async () => {
+  it("runs a call that needs a run of its own: the agent tool's child session", async () => {
+    const firstMessage = (prompt: LanguageModelV4CallOptions["prompt"]) =>
+      JSON.stringify(prompt.find((message) => message.role === "user")?.content ?? "");
     const delegating = markMockModel(
       new MockLanguageModelV4({
         doStream: async ({ prompt }) =>
-          prompt.some((message) => message.role === "tool")
-            ? textStreamResult("Alice, I couldn't start that.")
-            : toolCallsStreamResult([
-                {
-                  input: JSON.stringify({ message: "Summarize Bob's notes." }),
-                  toolCallId: "call-agent",
-                  toolName: "agent",
-                },
-              ]),
+          // The child the agent tool opens answers; its parent hears it.
+          firstMessage(prompt).includes("Summarize Bob's notes.")
+            ? textStreamResult("Bob's notes say ship on Friday.")
+            : prompt.some((message) => message.role === "tool")
+              ? textStreamResult("Alice, the helper is on it.")
+              : toolCallsStreamResult([
+                  {
+                    input: JSON.stringify({ message: "Summarize Bob's notes." }),
+                    toolCallId: "call-agent",
+                    toolName: "agent",
+                  },
+                ]),
         modelId: "in-process-delegating",
         provider: "eve-test",
       }),
@@ -409,21 +415,13 @@ describe("the in-process runtime", () => {
           await address(runtime, "alice-durable-runs").send("Ask a helper.", { auth: null })
         ).result();
         expect(result).toMatchObject({
-          reply: "Alice, I couldn't start that.",
+          reply: "Alice, the helper is on it.",
           status: "completed",
         });
         const events = await recorded(runtime, result.sessionId);
-        expect(events.filter(({ type }) => type === "call.settled")).toMatchObject([
-          {
-            data: {
-              callId: "call-agent",
-              outcome: "failed",
-              output:
-                "The `agent` tool needs a durable run, which an in-process session doesn't have. Run the agent with `eve dev` or deploy it.",
-            },
-          },
-        ]);
-        expect(events.map(({ type }) => type)).not.toContain("task.started");
+        const settled = events.filter(({ type }) => type === "call.settled");
+        expect(settled).toHaveLength(1);
+        expect(settled[0]).not.toMatchObject({ data: { outcome: "failed" } });
         await expect(violations(runtime, result.sessionId)).resolves.toEqual([]);
       } finally {
         await runtime.dispose();
