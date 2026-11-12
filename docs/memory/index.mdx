@@ -140,6 +140,7 @@ how they capture it.
 | [Upstash AgentKit](#upstash-agentkit)   | `@upstash/agentkit-eve` | Ranked Redis Search recall or a Redis document backend | Automatic user-message capture or model-driven tools |
 | [Kybernesis Arcana](#kybernesis-arcana) | `@kybernesis/arcana`    | Semantic search and brain notes                        | Model-driven tools or optional automatic capture     |
 | [memco](#memco)                         | `@memco/eve`            | Briefing and reminders; search through tools           | Model-driven tools only                              |
+| [claude-mem](#claude-mem)               | `claude-mem`            | Newest memory and matching records before every turn   | Automatic after each turn, plus `remember`           |
 | [Your own provider](#build-your-own)    | Your code               | Whatever your store returns                            | Whatever rules you implement                         |
 
 ### File memory
@@ -277,6 +278,36 @@ the token's stored memory. For separate customers, use API client credentials an
 `eve >=0.84.1 <1`, which excludes eve 1.0 prereleases. See the
 [memco integration page](/integrations/memco) for credentials, both identity
 setups, and deployment boundaries.
+
+### claude-mem
+
+[claude-mem](https://docs.claude-mem.ai/eve-integration) connects a slot to your
+hosted claude-mem memory on cmem.ai. Before every turn, it adds your newest memory
+and records that match the message. It records each completed turn, and gives the
+model tools to search, browse, and save notes.
+
+```bash
+eve add memory/claude-mem
+```
+
+The command installs `claude-mem` and writes a `claude-mem` slot:
+
+```ts title="agent/memory/claude-mem.ts"
+import { claudeMem } from "claude-mem/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and save durable context for the current user.",
+  provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY }),
+  scope: byPrincipal,
+});
+```
+
+Recording spends the key owner's cmem.ai allowance for every caller. Pass
+`capture: false` to turn it off. See the
+[claude-mem integration page](/integrations/claude-mem) for options and the
+security boundaries of `searchAllProjects`.
 
 ### Build your own
 
