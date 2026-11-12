@@ -1009,7 +1009,7 @@ const USE_CASES: UseCase[] = [
     id: "data-agent",
     name: "Data agent",
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
-    template: "eve-company-brain-template",
+    template: "eve-data-agent-template",
     cta: "Use the data agent template",
     features: [
       { title: "Answers in Slack", text: "Only for the people and channels you allow." },
