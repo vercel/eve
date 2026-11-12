@@ -25,6 +25,7 @@
   "ScheduleProviderContext",
   "ScheduleRecord",
   "ScheduleScopeContext",
+  "ScheduleScopeResolverContext",
   "ScheduleScopeResolverResult",
   "ScheduleState",
   "ScheduleTiming",

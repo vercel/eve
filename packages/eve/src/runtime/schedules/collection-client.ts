@@ -14,6 +14,7 @@ import type {
   SchedulePage,
   SchedulePrincipalReference,
   ScheduleScopeContext,
+  ScheduleScopeResolverContext,
   ScheduleScopeValue,
 } from "#public/schedules/subscription.js";
 import { projectScheduleRecord } from "#runtime/schedules/record.js";
@@ -78,9 +79,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   const contextFor = (
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
-  ): ScheduleScopeContext & {
-    readonly operation: NonNullable<ScheduleScopeContext["operation"]>;
-  } => {
+  ): ScheduleScopeResolverContext => {
     const context = { ...callContext, operation } as ScheduleScopeContext & {
       operation: NonNullable<ScheduleScopeContext["operation"]>;
       name?: string;

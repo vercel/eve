@@ -243,6 +243,11 @@ export interface DynamicSchedulesRunArgs<TPayload> extends Pick<ScheduleHandlerA
   readonly auth: SessionAuthContext;
 }
 
+/** Trusted caller context passed to `scope`, which always names the operation it authorizes. */
+export type ScheduleScopeResolverContext = ScheduleScopeContext & {
+  readonly operation: ScheduleOperation;
+};
+
 /**
  * Trusted caller context passed to `preparePayload`. `name` is the display label on create
  * and the unique management name on update.
@@ -293,7 +298,7 @@ export interface DynamicSchedulesDefinition<
   ) => TPrepared | Promise<TPrepared>;
   /** Authorizes every management operation. Defaults to `byPrincipal`. */
   readonly scope?: (
-    context: ScheduleScopeContext & { readonly operation: ScheduleOperation },
+    context: ScheduleScopeResolverContext,
   ) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>;
   /** Resolves the captured creator to current execution auth; return `null` to deny. */
   readonly auth: (context: {

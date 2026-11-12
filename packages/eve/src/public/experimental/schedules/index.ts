@@ -25,6 +25,7 @@ export {
   type ScheduleProvider,
   type ScheduleRecord,
   type ScheduleScopeContext,
+  type ScheduleScopeResolverContext,
   type ScheduleScopeResolverResult,
   type ScheduleOperation,
   type ScheduleState,
