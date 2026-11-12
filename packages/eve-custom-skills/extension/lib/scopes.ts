@@ -65,13 +65,13 @@ export function spaceScope(ctx: SkillScopeContext): SkillScope | null {
   return {
     name: "channel",
     key: `space:${space.id}`,
-    label: space.type === "group" ? "everyone in this conversation" : "everyone in this channel",
+    label: "everyone in this conversation",
     shared: true,
     loadPrefix: "channel",
   };
 }
 
-/** Personal skills everywhere, plus the shared skills of the conversation's channel or group. */
+/** Personal skills everywhere, plus the shared skills of the conversation's space. */
 export const defaultScopes: SkillScopeResolver = (ctx) =>
   [personalScope(ctx), spaceScope(ctx)].filter((scope): scope is SkillScope => scope !== null);
 

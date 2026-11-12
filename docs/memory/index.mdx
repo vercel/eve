@@ -129,7 +129,7 @@ export default defineMemory({
   provider: fileMemory(),
   scope: (ctx) => {
     const space = ctx.conversation?.space;
-    return space?.type === "channel" ? space.id : null;
+    return space?.type === "shared" ? space.id : null;
   },
 });
 ```

@@ -29,7 +29,7 @@ const inChannel: ConversationContext = {
   channel: { kind: "channel:slack", name: "slack" },
   environment: "production",
   principalType: "user",
-  space: { id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" },
+  space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
 };
 
 function mount(options: { rule?: SkillApprovalRule; storage?: MemoryDocumentBackend } = {}) {
@@ -111,7 +111,7 @@ test("a shared first version asks, shows its content, and goes live only once ap
   assert.equal(status, "user-approval");
   assert.match(
     prompt,
-    /^Save and turn on "deploy" v1 for everyone in this channel, loaded on demand\?/,
+    /^Save and turn on "deploy" v1 for everyone in this conversation, loaded on demand\?/,
   );
   assert.match(prompt, /Instructions:\nCheck the build\./);
 

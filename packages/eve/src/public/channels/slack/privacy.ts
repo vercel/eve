@@ -77,11 +77,11 @@ function readConversationInfoSpaceType(
   if (response.ok !== true || !isRecord(response.channel)) return undefined;
   const channel = response.channel;
   if (channel.is_im === true) return "direct";
-  if (channel.is_mpim === true) return "group";
-  return channel.is_channel === true ||
+  return channel.is_mpim === true ||
+    channel.is_channel === true ||
     channel.is_group === true ||
     typeof channel.is_private === "boolean"
-    ? "channel"
+    ? "shared"
     : undefined;
 }
 

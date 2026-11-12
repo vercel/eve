@@ -15,7 +15,7 @@ describe("teamsConversationSpace", () => {
       }),
     ).toEqual({
       id: "teams:t1:19:general@thread.tacv2",
-      type: "channel",
+      type: "shared",
       workspaceId: "teams:t1",
     });
   });
@@ -26,7 +26,7 @@ describe("teamsConversationSpace", () => {
     ).toMatchObject({ id: "teams:t1:a:1", type: "direct", visibility: "private" });
     expect(
       teamsConversationSpace({ ...base, conversationId: "19:g", conversationType: "groupChat" }),
-    ).toMatchObject({ id: "teams:t1:19:g", type: "group", visibility: "private" });
+    ).toMatchObject({ id: "teams:t1:19:g", type: "shared", visibility: "private" });
   });
 
   it("reports none without a tenant", () => {

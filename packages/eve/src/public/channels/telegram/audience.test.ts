@@ -10,10 +10,10 @@ function space(input: Partial<TelegramChannelState>) {
 describe("telegram space", () => {
   it.each([
     ["private", { type: "direct", visibility: "private" }],
-    ["group", { type: "group", visibility: "private" }],
+    ["group", { type: "shared", visibility: "private" }],
     // A supergroup or channel may have a public link, which the chat type doesn't say.
-    ["supergroup", { type: "channel" }],
-    ["channel", { type: "channel" }],
+    ["supergroup", { type: "shared" }],
+    ["channel", { type: "shared" }],
   ] as const)("reports a %s chat as %o", (chatType, expected) => {
     expect(space({ chatId: "42", chatType })).toEqual({ id: "telegram:42", ...expected });
   });

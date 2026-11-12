@@ -17,7 +17,7 @@ const alice = {
   principalType: "user",
 };
 
-function context(space?: { id: string; type: "direct" | "group" | "channel" }): SkillScopeContext {
+function context(space?: { id: string; type: "direct" | "shared" }): SkillScopeContext {
   return {
     session: { id: "s1", auth: { current: alice, initiator: alice } },
     conversation: {
@@ -46,17 +46,14 @@ test("personal scopes key by eve's full principal identity", () => {
 test("the shared scope comes from the conversation's space, not from DMs", async () => {
   assert.equal(spaceScope(context({ id: "slack:T1:D1", type: "direct" })), null);
   assert.equal(spaceScope(context()), null);
-  const channel = spaceScope(context({ id: "slack:T1:C1", type: "channel" }));
+  const channel = spaceScope(context({ id: "slack:T1:C1", type: "shared" }));
   assert.deepEqual(
     [channel?.name, channel?.key, channel?.shared, channel?.loadPrefix],
     ["channel", "space:slack:T1:C1", true, "channel"],
   );
-  assert.equal(
-    spaceScope(context({ id: "teams:t:g", type: "group" }))?.label,
-    "everyone in this conversation",
-  );
+  assert.equal(channel?.label, "everyone in this conversation");
   assert.deepEqual(
-    (await defaultScopes(context({ id: "discord:g:c", type: "channel" }))).map(({ name }) => name),
+    (await defaultScopes(context({ id: "discord:g:c", type: "shared" }))).map(({ name }) => name),
     ["personal", "channel"],
   );
 });
@@ -77,7 +74,7 @@ test("runtime and anonymous principals have no personal scope", () => {
 });
 
 test("omitting the scope means the personal one, never a shared one", () => {
-  const channel = spaceScope(context({ id: "slack:T1:C1", type: "channel" }))!;
+  const channel = spaceScope(context({ id: "slack:T1:C1", type: "shared" }))!;
   const personal = personalScope(context())!;
   assert.equal(requireScope([channel, personal], undefined), personal);
   assert.equal(requireScope([channel, personal], "channel"), channel);

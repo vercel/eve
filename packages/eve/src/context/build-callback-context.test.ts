@@ -26,7 +26,7 @@ describe("buildCallbackContext", () => {
       channel: { kind: "channel:slack", name: "slack" },
       environment: "production",
       principalType: "user",
-      space: { id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" },
+      space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
     };
 
     expect(

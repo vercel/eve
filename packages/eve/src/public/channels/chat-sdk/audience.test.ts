@@ -16,7 +16,7 @@ describe("chat SDK space", () => {
   it("namespaces the channel by adapter once", () => {
     expect(space({ adapterName: "slack", channelId: "slack:C1", isDM: false })).toEqual({
       id: "slack:C1",
-      type: "channel",
+      type: "shared",
     });
     expect(space({ adapterName: "whatsapp", channelId: "123", isDM: true })).toEqual({
       id: "whatsapp:123",
@@ -32,13 +32,6 @@ describe("chat SDK space", () => {
     );
     expect(space({ ...thread, channelVisibility: "private" } as never)?.visibility).toBe("private");
     expect(space(thread)).not.toHaveProperty("visibility");
-  });
-
-  it("reports a messaging app's shared chats as groups", () => {
-    expect(space({ adapterName: "linq", channelId: "linq:chat-1", isDM: false })).toEqual({
-      id: "linq:chat-1",
-      type: "group",
-    });
   });
 
   it("reports none without a thread, or when a thread ID can't say whether it is a DM", () => {

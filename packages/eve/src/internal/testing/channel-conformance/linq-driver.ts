@@ -89,7 +89,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
   return {
     name: group ? "linq" : "linq-dm",
     space: group
-      ? { id: `linq:${chatId}`, type: "group" }
+      ? { id: `linq:${chatId}`, type: "shared" }
       : { id: `linq:${chatId}`, type: "direct", visibility: "private" },
     personId: PERSON.id,
     capabilities: ["attachments", "text-replies"],

@@ -212,7 +212,7 @@ function chatSdkDriverWith(input: {
       input.surface === "private"
         ? { id: threadId, type: "direct", visibility: "private" }
         : // The fake adapter reports a workspace-visible channel.
-          { id: threadId, type: "channel", visibility: "public" },
+          { id: threadId, type: "shared", visibility: "public" },
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";
