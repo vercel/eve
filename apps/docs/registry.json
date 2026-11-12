@@ -13,6 +13,7 @@
       ],
       "meta": {
         "eve": {
+          "hidden": true,
           "requires": ">=0.62.0",
           "install": {
             "pnpm": {
@@ -95,6 +96,27 @@
           "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
           "target": "agent/extensions/self-modification/extension.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/code",
+      "type": "registry:item",
+      "title": "Code",
+      "description": "Add coding instructions, project AGENTS.md or CLAUDE.md, and investigation and review skills to an eve agent.",
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=0.76.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/code.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/code.ts"
         }
       ]
     },
