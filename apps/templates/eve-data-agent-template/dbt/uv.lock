@@ -164,7 +164,7 @@ wheels = [
 ]
 
 [[package]]
-name = "company-brain-data"
+name = "data-agent-dbt"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [

@@ -3,7 +3,7 @@ import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
 import { canReadModels } from "../lib/access.ts";
 
 export default slackChannel({
-  credentials: connectSlackCredentials(process.env.SLACK_CONNECTOR ?? "slack/company-brain"),
+  credentials: connectSlackCredentials(process.env.SLACK_CONNECTOR ?? "slack/data-agent"),
   onAppMention(ctx, message) {
     const auth = defaultSlackAuth(message, ctx);
     return canReadModels(auth, process.env) ? { auth } : null;

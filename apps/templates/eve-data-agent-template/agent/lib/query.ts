@@ -59,7 +59,7 @@ export async function querySql(sql: string, signal?: AbortSignal) {
     const query = sql.trim().replace(/;$/u, "");
     // One extra row reveals truncation without counting the full result.
     const reader = await connection.streamAndRead(
-      `SELECT * FROM (\n${query}\n) AS company_brain_result LIMIT ${MAX_ROWS + 1}`,
+      `SELECT * FROM (\n${query}\n) AS data_agent_result LIMIT ${MAX_ROWS + 1}`,
     );
     if (reader.columnCount > MAX_COLUMNS) throw new QueryError("Select at most 32 columns.");
     const columns = reader

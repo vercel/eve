@@ -1,7 +1,7 @@
 name: jaffle_shop
 version: "1.0.0"
 config-version: 2
-profile: company_brain
+profile: data_agent
 
 model-paths: [models]
 seed-paths: [seeds]
@@ -11,7 +11,7 @@ models:
   jaffle_shop:
     +materialized: table
     customers:
-      +tags: [company_brain]
+      +tags: [data_agent]
       +meta:
         grain: One row per customer, including customers with no orders.
         joins:
@@ -20,7 +20,7 @@ models:
           customer_lifetime_value: "Lifetime payment amount in AUD across all orders, including returned orders; not net revenue. Use orders.amount for date-filtered totals."
           number_of_orders: "All orders placed by the customer, regardless of status."
     orders:
-      +tags: [company_brain]
+      +tags: [data_agent]
       +meta:
         grain: One row per order.
         joins:

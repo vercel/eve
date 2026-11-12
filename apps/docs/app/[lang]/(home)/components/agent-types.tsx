@@ -200,7 +200,7 @@ const BRAIN_ROWS = [
 ];
 
 const DANA: Author = { name: "Dana" };
-const BRAIN: Author = { name: "company-brain", icon: IconBrain };
+const BRAIN: Author = { name: "data-agent", icon: IconBrain };
 
 /**
  * How long each stage of the demo waits before it shows: Dana's question, the agent working,
@@ -262,11 +262,11 @@ function RunSteps({
 }
 
 /**
- * The hero's Slack thread, with the company brain on its own avatar color. In the demo it
+ * The hero's Slack thread, with the data agent on its own avatar color. In the demo it
  * builds up stage by stage (`stage` counts the stages shown); otherwise it shows up to the
  * follow-up.
  */
-function CompanyBrainPreview({ stage }: { stage?: number }) {
+function DataAgentPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? FOLLOW_UP - 1;
   const list = useRef<HTMLDivElement>(null);
@@ -329,7 +329,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             time="9:41 AM"
           >
             <p>
-              <Mention>company-brain</Mention> how are repeat orders trending this quarter?
+              <Mention>data-agent</Mention> how are repeat orders trending this quarter?
             </p>
           </SlackMessage>
         ) : null}
@@ -431,7 +431,7 @@ function CompanyBrainPreview({ stage }: { stage?: number }) {
             time="9:44 AM"
           >
             <p>
-              <Mention>company-brain</Mention> can you split October by payment method?
+              <Mention>data-agent</Mention> can you split October by payment method?
             </p>
             {shown >= FOLLOW_UP + 1 ? <ThreadReply demo={demo} /> : null}
           </SlackMessage>
@@ -1006,11 +1006,11 @@ interface UseCase {
 
 const USE_CASES: UseCase[] = [
   {
-    id: "company-brain",
-    name: "Company brain",
+    id: "data-agent",
+    name: "Data agent",
     text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
     template: "eve-company-brain-template",
-    cta: "Use the company brain template",
+    cta: "Use the data agent template",
     features: [
       { title: "Answers in Slack", text: "Only for the people and channels you allow." },
       { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
@@ -1018,7 +1018,7 @@ const USE_CASES: UseCase[] = [
     ],
     demo: BRAIN_DEMO,
     action: "Ask a question",
-    preview: (stage) => <CompanyBrainPreview stage={stage} />,
+    preview: (stage) => <DataAgentPreview stage={stage} />,
   },
   {
     id: "software-factory",
