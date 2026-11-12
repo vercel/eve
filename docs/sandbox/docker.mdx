@@ -73,7 +73,7 @@ To run a different published tag, set `EVE_SANDBOX_IMAGE_TAG` in both the build 
 
 `ghcr.io/vercel/eve-git` is eve's default image plus the GitHub CLI (`gh`), for agents that clone repositories, push branches, or open pull requests. [Vercel Sandbox](/docs/sandbox/vercel) pulls the same image from `vcr.vercel.com/vercel/eve/git`. eve doesn't use it unless you select it.
 
-Each eve release pins one tag of the image, like the default image. `DEFAULT_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/docker`, is the reference with that tag. Pass it as `image`:
+Each eve release pins one tag of the image, like the default image. `DEFAULT_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/docker` and from `eve/extensions/git/sandbox`, is the reference with that tag. Pass it as `image`:
 
 ```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";

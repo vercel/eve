@@ -61,7 +61,7 @@ If initialization fails, eve keeps the sandbox and runs the selector against it 
 
 ## The eve-git image
 
-eve's [default image](/docs/sandbox/docker#eves-default-image) doesn't include the GitHub CLI (`gh`). To start sandboxes from the default image plus `gh`, set `image` to `VERCEL_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/vercel`. Each eve release pins its tag, and `installCodeTooling` from `eve/extensions/code/sandbox` then finds `gh` instead of installing it with `apt-get`.
+eve's [default image](/docs/sandbox/docker#eves-default-image) doesn't include the GitHub CLI (`gh`). To start sandboxes from the default image plus `gh`, set `image` to `VERCEL_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/vercel` and from `eve/extensions/git/sandbox`. Each eve release pins its tag, and `installCodeTooling` from `eve/extensions/code/sandbox` then finds `gh` instead of installing it with `apt-get`.
 
 ```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
