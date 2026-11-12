@@ -10,29 +10,56 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const templatesDirectory = join(repoRoot, "apps", "templates");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibility-"));
 
+// Each template is checked in its own copy under `temporaryDirectory` with its
+// own lockfile-resolved `node_modules`, so the checks share no mutable state:
+// the eve tarball is packed once up front and only read afterwards, and the one
+// template that boots a server (`personal-agent-template`'s smoke test) is the
+// only one that binds a port. That makes it safe to run several templates at
+// once, bounded so an install/build-heavy template cannot starve the others on
+// a 4-vCPU CI runner.
+const MAX_CONCURRENT_TEMPLATES = 3;
+
 // Vercel Framework Preset slugs a template web service may deploy under. Vercel rejects unknown
 // slugs at deploy time, and eve's own host names differ from them (Nuxt is "nuxtjs", not "nuxt").
 const VERCEL_WEB_FRAMEWORKS = new Set(["nextjs", "nuxtjs", "sveltekit", "tanstack-start"]);
 
-const run = (command, args, options = {}) => {
-  process.stdout.write(`$ ${command} ${args.join(" ")}\n`);
-  execFileSync(command, args, { cwd: repoRoot, stdio: "inherit", ...options });
-};
+const run = (template, command, args, options = {}) =>
+  new Promise((resolvePromise, rejectPromise) => {
+    process.stdout.write(`[${template}] $ ${command} ${args.join(" ")}\n`);
+    // `spawn` (not `execFile`) so concurrent templates stream their output
+    // instead of buffering it until the command exits.
+    const child = spawn(command, args, { cwd: repoRoot, stdio: "inherit", ...options });
+    child.once("error", rejectPromise);
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+      rejectPromise(
+        new Error(
+          `[${template}] ${command} ${args.join(" ")} ${signal === null ? `exited with code ${code}` : `was killed by ${signal}`}`,
+        ),
+      );
+    });
+  });
 
 /**
  * Deploy with Vercel clones a template from main and installs its committed lockfile, so the
  * template must typecheck with the published eve release that lockfile pins, not only with the
  * packed eve checked afterwards.
  */
-const checkCommittedLockfile = (destination) => {
-  run("pnpm", ["install", "--frozen-lockfile"], { cwd: destination });
-  run("pnpm", ["typecheck"], { cwd: destination });
+const checkCommittedLockfile = async (template, destination) => {
+  await run(template, "pnpm", ["install", "--frozen-lockfile"], { cwd: destination });
+  await run(template, "pnpm", ["typecheck"], { cwd: destination });
 };
 
 /**
@@ -40,19 +67,18 @@ const checkCommittedLockfile = (destination) => {
  * root-only pnpm install puts no framework binary on PATH. The template's own `pnpm build` runs
  * from the project root and cannot catch a service that only builds there.
  */
-const checkVercelServices = (template, destination) => {
+const checkVercelServices = async (template, destination) => {
   if (!existsSync(join(destination, "vercel.ts"))) return;
-  const services = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        'const { default: config } = await import("./vercel.ts"); console.log(JSON.stringify(config.services ?? {}));',
-      ],
-      { cwd: destination, encoding: "utf8" },
-    ),
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      'const { default: config } = await import("./vercel.ts"); console.log(JSON.stringify(config.services ?? {}));',
+    ],
+    { cwd: destination, encoding: "utf8" },
   );
+  const services = JSON.parse(stdout);
   const path = process.env.PATH?.split(delimiter)
     .filter((entry) => !entry.includes("node_modules"))
     .join(delimiter);
@@ -73,8 +99,8 @@ const checkVercelServices = (template, destination) => {
         `${label} has no package.json in ${service.root}, so Vercel cannot find the framework binary. Set buildCommand to run it from the root node_modules.`,
       );
     }
-    process.stdout.write(`$ (cd ${service.root} && ${service.buildCommand})\n`);
-    execFileSync("sh", ["-c", service.buildCommand], {
+    process.stdout.write(`[${template}] $ (cd ${service.root} && ${service.buildCommand})\n`);
+    await execFileAsync("sh", ["-c", service.buildCommand], {
       cwd: serviceRoot,
       env: { ...process.env, PATH: path },
       stdio: "inherit",
@@ -82,10 +108,69 @@ const checkVercelServices = (template, destination) => {
   }
 };
 
+const checkTemplate = async (template, tarball, tarballName) => {
+  const source = join(templatesDirectory, template);
+  const destination = join(temporaryDirectory, template);
+  cpSync(source, destination, {
+    filter: (path) =>
+      !["node_modules", ".next", ".nuxt", ".output", ".eve", ".vercel"].includes(basename(path)),
+    recursive: true,
+  });
+
+  const manifestPath = join(destination, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (!manifest.dependencies?.eve) {
+    throw new Error(`Template "${template}" does not declare eve in dependencies`);
+  }
+
+  process.stdout.write(`\n[${template}] Checking ${template} with its committed lockfile\n`);
+  await checkCommittedLockfile(template, destination);
+
+  manifest.dependencies.eve = `file:${tarball}`;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  // The shipped Discord template pins the old gateway API. Exercise its documented
+  // 1.0 migration only in the upgraded copy, after checking the lockfile unchanged.
+  if (template === "eve-discord-agent-template") {
+    const daemonPath = join(destination, "daemon", "main.ts");
+    const daemon = readFileSync(daemonPath, "utf8")
+      .replace('"eve/channels/discord/gateway"', '"eve/experimental/channels/discord/gateway"')
+      .replaceAll("experimental_runDiscordGatewayRelay", "runDiscordGatewayRelay");
+    writeFileSync(daemonPath, daemon);
+  }
+
+  process.stdout.write(`\n[${template}] Checking ${template} against ${tarballName}\n`);
+  await run(template, "pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
+  await run(template, "pnpm", ["typecheck"], { cwd: destination });
+  // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
+  // check does not have. Such templates build with `eve build` alone.
+  const sandboxPath = join(destination, "agent", "sandbox.ts");
+  const vercelSandbox =
+    existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
+  if (vercelSandbox) {
+    await run(template, "pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], {
+      cwd: destination,
+    });
+  } else {
+    await run(template, "pnpm", ["exec", "eve", "build"], { cwd: destination });
+    await run(template, "pnpm", ["build"], { cwd: destination });
+  }
+  await checkVercelServices(template, destination);
+  if (manifest.scripts?.["test:smoke"]) {
+    await run(template, "pnpm", ["test:smoke"], { cwd: destination });
+  }
+};
+
 try {
   const packageDirectory = join(repoRoot, "packages", "eve");
   const packedDirectory = join(temporaryDirectory, "packed");
-  run("pnpm", ["--dir", packageDirectory, "pack", "--pack-destination", packedDirectory]);
+  await run("eve", "pnpm", [
+    "--dir",
+    packageDirectory,
+    "pack",
+    "--pack-destination",
+    packedDirectory,
+  ]);
 
   const tarballs = readdirSync(packedDirectory).filter((file) => file.endsWith(".tgz"));
   if (tarballs.length !== 1) {
@@ -104,55 +189,30 @@ try {
     .sort();
   if (templates.length === 0) throw new Error(`No templates found in ${templatesDirectory}`);
 
-  for (const template of templates) {
-    const source = join(templatesDirectory, template);
-    const destination = join(temporaryDirectory, template);
-    cpSync(source, destination, {
-      filter: (path) =>
-        !["node_modules", ".next", ".nuxt", ".output", ".eve", ".vercel"].includes(basename(path)),
-      recursive: true,
-    });
+  const failures = [];
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(MAX_CONCURRENT_TEMPLATES, templates.length) },
+    async () => {
+      while (nextIndex < templates.length) {
+        const template = templates[nextIndex++];
+        try {
+          await checkTemplate(template, tarball, tarballs[0]);
+        } catch (error) {
+          process.stdout.write(`\n[${template}] FAILED\n`);
+          failures.push({ template, error });
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
 
-    const manifestPath = join(destination, "package.json");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    if (!manifest.dependencies?.eve) {
-      throw new Error(`Template "${template}" does not declare eve in dependencies`);
-    }
-
-    process.stdout.write(`\nChecking ${template} with its committed lockfile\n`);
-    checkCommittedLockfile(destination);
-
-    manifest.dependencies.eve = `file:${tarball}`;
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-
-    // The shipped Discord template pins the old gateway API. Exercise its documented
-    // 1.0 migration only in the upgraded copy, after checking the lockfile unchanged.
-    if (template === "eve-discord-agent-template") {
-      const daemonPath = join(destination, "daemon", "main.ts");
-      const daemon = readFileSync(daemonPath, "utf8")
-        .replace('"eve/channels/discord/gateway"', '"eve/experimental/channels/discord/gateway"')
-        .replaceAll("experimental_runDiscordGatewayRelay", "runDiscordGatewayRelay");
-      writeFileSync(daemonPath, daemon);
-    }
-
-    process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
-    run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
-    run("pnpm", ["typecheck"], { cwd: destination });
-    // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
-    // check does not have. Such templates build with `eve build` alone.
-    const sandboxPath = join(destination, "agent", "sandbox.ts");
-    const vercelSandbox =
-      existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
-    if (vercelSandbox) {
-      run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], { cwd: destination });
-    } else {
-      run("pnpm", ["exec", "eve", "build"], { cwd: destination });
-      run("pnpm", ["build"], { cwd: destination });
-    }
-    checkVercelServices(template, destination);
-    if (manifest.scripts?.["test:smoke"]) {
-      run("pnpm", ["test:smoke"], { cwd: destination });
-    }
+  if (failures.length > 0) {
+    const failed = failures.map(({ template }) => template).join(", ");
+    throw new AggregateError(
+      failures.map(({ error }) => error),
+      `Template compatibility checks failed for: ${failed}`,
+    );
   }
 } finally {
   rmSync(temporaryDirectory, { force: true, recursive: true });

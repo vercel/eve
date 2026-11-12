@@ -109,12 +109,19 @@ jobs:
         run: pnpm test:eval-benchmark
 
   test-integration:
-    name: test-integration (${{ matrix.os }})
+    # The Windows leg carries ~2.5 min of runner setup on top of a 6 min test
+    # step, so it is the leg worth splitting; Ubuntu stays a single job.
+    name: test-integration (${{ matrix.os }}${{ matrix.shard && format(', {0}/2', matrix.shard) || '' }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+            shard: 1
+          - os: windows-latest
+            shard: 2
 
     steps:
       - name: Checkout code
@@ -134,11 +141,33 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Sharded legs cannot use `pnpm test:integration`: turbo appends extra
+      # arguments to every task, and other packages run `node --test` there,
+      # which rejects `--shard`. Build the same `build` dependency turbo would
+      # run, cover the sibling packages' suites, then shard eve's vitest.
+      - name: Build the packages under test
+        if: matrix.shard != ''
+        run: pnpm exec turbo run build --filter=eve
+
+      - name: Run integration tests for the other packages
+        if: matrix.shard != ''
+        run: pnpm exec turbo run test:integration --filter=!eve
+
+      - name: Run integration tests (shard ${{ matrix.shard }}/2)
+        if: matrix.shard != ''
+        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts --shard=${{ matrix.shard }}/2
+
       - name: Run integration tests
+        if: matrix.shard == ''
         run: pnpm test:integration
 
   test-scenario:
+    name: test-scenario (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -167,8 +196,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run scenario tests
-        run: pnpm test:scenario
+      # `test:scenario` dependsOn `build` (packages/eve/turbo.json) and turbo's
+      # argument passthrough would hand `--shard` to the sibling packages'
+      # `node --test` suites, so replicate the build and shard only eve's vitest.
+      - name: Build the packages under test
+        run: pnpm exec turbo run build --filter=eve
+
+      - name: Run scenario tests for the other packages
+        run: pnpm exec turbo run test:scenario --filter=!eve
+
+      - name: Run scenario tests (shard ${{ matrix.shard }}/2)
+        run: pnpm --filter eve exec vitest run --config vitest.scenario.config.ts --shard=${{ matrix.shard }}/2
 
   # The desktop job installs apt packages and pulls agent-desktop from npm, so it
   # runs only when its package changes. It skips at the job level instead of
