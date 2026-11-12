@@ -84,9 +84,9 @@ function validateTransportAndHost(
 
 /**
  * The request's URL as its client addressed it: under `"forwarded-https"`, an HTTP request that
- * `X-Forwarded-Proto` says arrived over HTTPS reads as HTTPS, on the default port. Use it for
- * URLs an endpoint advertises back to the client. Only the scheme and port change; the Host
- * check compares the URL eve received.
+ * `X-Forwarded-Proto` says arrived over HTTPS reads as HTTPS, on the port `X-Forwarded-Port`
+ * names, or the default one. Use it for URLs an endpoint advertises back to the client. Only the
+ * scheme and port change; the Host check compares the URL eve received.
  */
 export function clientUrl(request: Request, plainHttp: PlainHttpPolicy = "loopback"): URL {
   const url = new URL(request.url);
@@ -96,7 +96,9 @@ export function clientUrl(request: Request, plainHttp: PlainHttpPolicy = "loopba
   if (forwarded !== "https") return url;
   const client = new URL(url);
   client.protocol = "https:";
-  client.port = "";
+  const port = request.headers.get("x-forwarded-port")?.split(",")[0]?.trim();
+  // A port that isn't one is ignored rather than trusted into a URL.
+  client.port = port !== undefined && /^\d{1,5}$/u.test(port) && Number(port) <= 65_535 ? port : "";
   return client;
 }
 

@@ -155,6 +155,35 @@ describe("HTTP request guards", () => {
     expect(clientUrl(forwarded, "allow").href).toBe("http://agent.internal:3000/mcp?x=1");
   });
 
+  it("keeps the client's port from X-Forwarded-Port, for Origin and advertised URLs", () => {
+    const behind = (port: string) =>
+      request("http://agent.internal:3000/mcp", {
+        "x-forwarded-port": port,
+        "x-forwarded-proto": "https",
+      });
+    expect(clientUrl(behind("8443"), "forwarded-https").origin).toBe("https://agent.internal:8443");
+    // The default port drops out, and a value that isn't a port is ignored.
+    expect(clientUrl(behind("443"), "forwarded-https").origin).toBe("https://agent.internal");
+    expect(clientUrl(behind("8443, 443"), "forwarded-https").origin).toBe(
+      "https://agent.internal:8443",
+    );
+    expect(clientUrl(behind("99999"), "forwarded-https").origin).toBe("https://agent.internal");
+    expect(clientUrl(behind("evil.example"), "forwarded-https").origin).toBe(
+      "https://agent.internal",
+    );
+    expect(
+      validateHttpEndpointRequest(
+        request("http://agent.internal:3000/mcp", {
+          origin: "https://agent.internal:8443",
+          "x-forwarded-port": "8443",
+          "x-forwarded-proto": "https",
+        }),
+        "MCP",
+        "forwarded-https",
+      ),
+    ).toBeUndefined();
+  });
+
   it("accepts plain HTTP from any host under allow, keeping the Host and Origin checks", () => {
     const internal = request("http://agent.svc.cluster.local/a2a");
     expect(validateHttpEndpointRequest(internal, "A2A", "allow")).toBeUndefined();

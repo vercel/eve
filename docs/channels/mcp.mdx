@@ -226,7 +226,7 @@ When eve runs behind a proxy, or serves callers on a private network, `plainHttp
 | `"forwarded-https"` | Also when `X-Forwarded-Proto` is `https`, from a proxy that terminates TLS.    |
 | `"allow"`           | From any host, for a network kept private some other way, such as one cluster. |
 
-Any client can send `X-Forwarded-Proto`, so use `"forwarded-https"` only when every request passes through a proxy that sets it. Under it, the OAuth metadata and challenges advertise the `https` URL the client used. The `Host` and `Origin` checks apply under every setting.
+Any client can send `X-Forwarded-Proto`, so use `"forwarded-https"` only when every request passes through a proxy that sets it. Under it, the OAuth metadata and challenges advertise the `https` URL the client used, on the port `X-Forwarded-Port` names when the proxy sends it. The `Host` and `Origin` checks apply under every setting.
 
 Only the metadata endpoint allows cross-origin requests. For a browser application, put a same-origin backend or authenticated server-side proxy in front of the MCP endpoint.
 
