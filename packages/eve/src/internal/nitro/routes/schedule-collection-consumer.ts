@@ -97,6 +97,7 @@ export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): 
           definition,
           occurrence,
           payload,
+          namespace: queue.namespace,
           verifyDelivery: async () =>
             verifyScheduleDelivery(
               queue,

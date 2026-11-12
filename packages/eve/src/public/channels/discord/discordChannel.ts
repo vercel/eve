@@ -82,7 +82,11 @@ import {
 import type { ValidatedAnswer } from "#shared/input.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
+import {
+  discordAudience,
+  discordConversationSpace,
+  discordInstrumentationMetadata,
+} from "./audience.js";
 
 const log = createLogger("discord.channel");
 
@@ -301,6 +305,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
     audience: ({ state }) => state.audience ?? "unknown",
+    space: ({ state }) => discordConversationSpace(state),
     fetchFile: createDiscordFetchFile(config.api?.fetch),
 
     context(state, session) {

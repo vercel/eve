@@ -5,9 +5,10 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createAgentRun, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
+import { ContextContainer } from "#context/container.js";
 import { defineTool } from "#tools/definition.js";
 
 import {
@@ -156,5 +157,34 @@ describe("memoryTools", () => {
       manager.disable();
       await tracing.shutdown();
     }
+  });
+});
+
+describe("resolveMemoryScope", () => {
+  it("lets a scope resolver key memory by the conversation's space", async () => {
+    const conversation = {
+      audience: "private",
+      channel: { kind: "channel:slack", name: "slack" },
+      environment: "production",
+      principalType: "user",
+      space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
+    } as const;
+
+    const resolver = vi.fn(
+      (ctx: { conversation?: typeof conversation }) => ctx.conversation?.space?.id ?? null,
+    );
+    const scope = await resolveMemoryScope(
+      { namespace: "team", scope: resolver as never, slot: "notes" },
+      {
+        abortSignal: new AbortController().signal,
+        channel: { kind: "channel:slack", metadata: {} },
+        conversation,
+        ctx: new ContextContainer() as never,
+        session: { auth: { current: null, initiator: null }, id: "session-1" },
+      },
+    );
+
+    expect(resolver).toHaveReturnedWith("slack:T1:C1");
+    expect(scope).not.toBeNull();
   });
 });

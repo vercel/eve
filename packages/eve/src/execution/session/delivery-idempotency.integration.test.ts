@@ -427,6 +427,7 @@ describe("delivery idempotency", () => {
                 principal: { type: "user", authenticator: "test", principalId: "alice" },
               },
             }),
+            schedule: { disable: async () => {}, delete: async () => {} },
           })
         ).sessions[0]!;
 

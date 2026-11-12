@@ -139,7 +139,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 Each text part's `content.completed.data.phase` is `"reply"` for the turn's answer. It's `"narration"` for text written on the way to more work, such as before a tool call. `turn.settled.data.reply` lists the reply's part ids, so a reader that needs only the answer can wait for the turn to end. In a hook or channel handler, `reply(ctx.view, turnId)` returns them. A turn that requested an output schema reports the structured result as a `content.completed` with `kind: "result"`.
 
-`usage.recorded` records spend once per model run (`owner: { runId }`). It also records once per delegated call for what the called agent spent (`owner: { callId }`). A compaction summary run belongs to its context change. Its usage stays counted even when a hook cancels the turn as compaction finishes. Spend a task reports after its calls end has no `owner` and has `kind: "delegated-late"`. `usage(view).total` returns the sum of the session's records. `costUsd` is absent when no record reported a cost. The usage window that [`limits.sessionUsage`](../agent-config#runtime-limits) reads starts at that total on the line where the session's own budget prompt is accepted.
+`usage.recorded` records spend once per answer a model run receives (`owner: { runId }`). An answer eve discards still counts, since the provider billed it: an empty answer eve asks for again records its usage with the `model.retried`, and an answer that fails the run, such as a `content-filter` one, records its usage after the failed `model.settled`. `usage.recorded` also records once per delegated call for what the called agent spent (`owner: { callId }`). A compaction summary run belongs to its context change. Its usage stays counted even when a hook cancels the turn as compaction finishes. Spend a task reports after its calls end has no `owner` and has `kind: "delegated-late"`. `usage(view).total` returns the sum of the session's records. `costUsd` is absent when no record reported a cost. The usage window that [`limits.sessionUsage`](../agent-config#runtime-limits) reads starts at that total on the line where the session's own budget prompt is accepted.
 
 ### Deliveries and responses
 
@@ -222,58 +222,13 @@ A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAI
 
 OpenAI's `cyber_policy` and `bio_policy` refusals also fail only their turn, with `MODEL_CALL_FAILED`, and the session can receive another message.
 
+A provider's rejection of a request longer than the model's context window also fails only its turn, with `MODEL_CALL_FAILED` and a `hint`. [Compaction](./default-harness#compaction) explains how eve keeps requests under the window.
+
 ## Query session state
 
-`SessionView` from `eve/events` is an opaque, immutable snapshot derived from the stream. Read it with queries:
+Whenever you have a `SessionView`, use selectors from `eve/events` to inspect session state instead of reconstructing it from events. The same selectors work in evals, hooks, channel handlers, dynamic capabilities, and clients.
 
-```ts
-import { activeTurn, call, calls, openInteractions, usage } from "eve/events";
-
-const currentTurn = activeTurn(agent.view);
-const tools = calls(agent.view, { kind: "tool", turnId: currentTurn?.turnId });
-const pending = openInteractions(agent.view);
-const totals = usage(agent.view);
-const observed = call(agent.view, callId);
-if (observed?.state === "failed") console.error(observed.error.message);
-```
-
-`callOutputSource(view, callId)` returns the call that produced a call's output. `call(view, callId)?.output` already follows `outputOf`, so use `callOutputSource` when you need the producing call itself, such as its `callId` or label.
-
-Calls include their resolved `turnId`, `runId`, and `taskId` when known, so you don't join calls to runs to find their turn. `turns`, `deliveries`, `tasks`, `runs`, `parts`, and `children` return curated observations, and `turn`, `delivery`, `task`, and `interaction` look one up by ID. `waiting`, `activity`, and `reply` answer the status questions that built-in clients and channels use. Queries are synchronous and perform no I/O; referenced payloads stay references until explicitly read.
-
-| `waiting(view, turnId)` returns       | When                                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `{ on: "session" }`                   | The session can make progress.                                                              |
-| `{ on: "interaction", interactions }` | Answers are needed.                                                                         |
-| `{ on: "work", calls, tasks }`        | Calls or tasks hold the turn.                                                               |
-| `undefined`                           | The turn is absent or ended, or the session has ended, even if a degraded end left it open. |
-
-`openInteractions(view, { about })` filters by what holds the work:
-
-| `about`          | Includes                                                                                                     |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `{ callId }`     | The call's approval, questions relayed through it, and requests from its task.                               |
-| `{ taskId }`     | That task's requests.                                                                                        |
-| `{ turnId }`     | The turn's requests, including those of its inline calls and responses, but not ones from independent tasks. |
-| `{ responseId }` | That response.                                                                                               |
-
-Read `interaction.subject` to match the subject itself. An answered request that a response policy still weighs stays in `openInteractions` until it ends. `callState(view, callId)` distinguishes `approval` and `blocked` from running work. Both selectors return immutable observations.
-
-Query results can't change the view, and a snapshot you retain doesn't change when later events arrive. Request observations omit private sign-in callback URLs, including in `waiting`, `activity`, and `openInteractions` results. Use `callPreview(view, callId)` and `contentPreviews(view)` for transient progress held by a client or a custom fold; recorded values stay separate. Hook and channel snapshots always describe a whole recorded line.
-
-A custom reader uses the same fold:
-
-```ts
-import { emptySessionView, foldEvents, calls } from "eve/events";
-
-let view = emptySessionView();
-for await (const event of session.stream()) {
-  view = foldEvents(view, [event]);
-  render(calls(view, { kind: "tool" }));
-}
-```
-
-`foldEvents` returns a new snapshot without changing its input. It holds incomplete lines until their final event arrives and absorbs overlapping replay. The view isn't a serialization format; persist events and session cursors to reconstruct it.
+See [Session views & selectors](./session-views-and-selectors) for where to get a view, which selector answers each question, snapshot scope and completeness, and how to fold a stream yourself.
 
 ## Positions
 

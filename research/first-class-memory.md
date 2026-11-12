@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-09-01"
+last_updated: "2026-11-09"
 ---
 
 # First-class memory
@@ -412,32 +412,27 @@ every request as the shared `local-dev` principal, so one development machine
 resolves one scope.
 
 Principal scope follows the same authenticated caller across channels. Memory
-that is safe only within one channel or conversation must include the trusted
-channel coordinates explicitly. Use `isChannel` to narrow authored channel
-metadata before reading it:
+that is safe only within one channel or conversation must include where the
+conversation happens explicitly. `ctx.conversation.space` names that place for
+every channel that reports one, such as the Slack channel a thread is in, with
+an ID namespaced by platform and workspace:
 
 ```ts title="agent/memory/channel.ts"
-import { isChannel } from "eve/channels";
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
-import slack from "../channels/slack";
 import { customMemory } from "../lib/custom-memory";
 
 export default defineMemory({
   provider: customMemory,
   scope: (ctx) => {
-    if (!isChannel(ctx.channel, slack)) return null;
-
     const principal = byPrincipal(ctx);
-    const { channelId, teamId } = ctx.channel.metadata;
-    return principal === null || channelId === null || teamId === null
-      ? null
-      : [principal, teamId, channelId];
+    const space = ctx.conversation?.space;
+    return principal === null || space === undefined ? null : [principal, space.id];
   },
 });
 ```
 
-The returned array is a three-component tuple. Components may contain any
+The returned array is a two-component tuple. Components may contain any
 characters, including delimiters, without colliding with another scope. Include
 a thread or conversation identifier as another component when the provider's
 data must not cross that boundary. Resolver output is evaluated once when eve

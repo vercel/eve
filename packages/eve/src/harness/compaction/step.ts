@@ -13,7 +13,7 @@ import {
 } from "#harness/messages.js";
 import { type Step, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
-import { compactionConfig } from "#harness/compaction/config.js";
+import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
@@ -52,6 +52,7 @@ import {
 } from "#harness/session-machine/context-changes.js";
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 
 const log = createLogger("harness.tool-loop");
 /**
@@ -66,7 +67,7 @@ export function assertFixedPartFits(input: {
   const fixed = input.requestEnvelopeTokens + input.protectedTokens;
   if (fixed >= input.threshold) {
     throw new CompactionOverLimitError(
-      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory.`,
+      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory, or raise \`compaction.threshold\`.`,
     );
   }
 }
@@ -119,29 +120,74 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   return { next: null, session: step.session };
 }
 
+interface HistoryBeforeCallInput {
+  /** The durable messages the history becomes. */
+  readonly messages: readonly HarnessModelMessage[];
+  /** The prompt as the model reads it, which the call's size measures. */
+  readonly promptMessages: readonly HarnessModelMessage[];
+  readonly model: LanguageModel;
+  readonly requestEnvelopeTokens: number;
+}
+
 /**
  * The history the next model call reads, committed: summarized when the call would pass the
  * threshold, a share of the model's window (`agent.ts`'s `compaction.threshold`), counting the
  * summary prompt's own overhead. Returns the messages the call reads, or `undefined` when the
- * history stays. A failure is rethrown, after settling any change it opened; `step.session`
- * counts the summary calls that finished.
+ * history stays. Throws {@link CompactionOverLimitError} only when the request can't fit the
+ * model's window; any other failure is rethrown, after settling any change it opened.
+ * `step.session` counts the summary calls that finished.
  */
 export async function historyBeforeCall(
   step: Step,
-  input: {
-    /** The durable messages the history becomes. */
-    readonly messages: readonly HarnessModelMessage[];
-    /** The prompt as the model reads it, which the call's size measures. */
-    readonly promptMessages: readonly HarnessModelMessage[];
-    readonly model: LanguageModel;
-    readonly requestEnvelopeTokens: number;
-  },
+  input: HistoryBeforeCallInput,
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
   const config = compactionConfig(step, {
     messages: prompt,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
   });
+  try {
+    return await compactUnder(step, input, prompt, config);
+  } catch (error) {
+    // Over the limit only when what the agent sends besides the history leaves it no room: once
+    // anything fits, a summary always does.
+    if (!(error instanceof CompactionOverLimitError)) throw error;
+    const window = config.contextWindowTokens;
+    const scope = { sessionId: step.session.sessionId, turnId: step.position().turnId };
+    if (window === undefined) {
+      log.warn(
+        `${error.message} eve doesn't know this model's context window, so it sends the request as it is. Set \`modelContextWindowTokens\` in \`agent.ts\` to compact against it.`,
+        scope,
+      );
+      return undefined;
+    }
+    // The threshold is headroom on eve's estimate, not the model's limit. Against the window, the
+    // session keeps working, and a summary runs only when the request outgrows the window, not on
+    // every step the fixed part alone is over the threshold.
+    if (window > config.threshold) {
+      log.warn(
+        `${error.message} eve compacts against the model's ~${window}-token context window instead.`,
+        scope,
+      );
+      try {
+        return await compactUnder(step, input, prompt, againstWindow(config, window));
+      } catch (overWindow) {
+        if (!(overWindow instanceof CompactionOverLimitError)) throw overWindow;
+      }
+    }
+    throw new CompactionOverLimitError(
+      `The agent's system prompt, tools, memory and context leave no room for the conversation in this model's ~${window}-token context window. Shorten the instructions, remove tools or trim memory.`,
+    );
+  }
+}
+
+/** Compacts the history when the request passes `config.threshold`. */
+async function compactUnder(
+  step: Step,
+  input: HistoryBeforeCallInput,
+  prompt: HarnessModelMessage[],
+  config: CompactionConfig,
+): Promise<HarnessModelMessage[] | undefined> {
   const previousEnvelope = config.requestEnvelopeTokens;
   if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
@@ -266,6 +312,8 @@ async function summarizeHistory(
     // Dropping tool activity alone rewrites the history without a summary call.
     if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
+    // The change it opened can't settle on a dead stream; the retried step recovers it.
+    throwIfSessionStreamDead(error);
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
     if (change.opened) {
@@ -378,6 +426,7 @@ async function summaryExecutor(
     telemetry: step.instrumentation?.prepareAttempt({
       attempt: 0,
       runId: input.change.runId,
+      runtimeContext: { "eve.compaction.request": "summary" },
       ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
     }).telemetry,
   };

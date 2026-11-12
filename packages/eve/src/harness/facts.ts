@@ -148,10 +148,13 @@ export interface RunSettlement {
 export function runSettledFacts(input: RunSettlement): SessionEvent[] {
   const { usage, ...settled } = input;
   const facts: SessionEvent[] = [fact("model.settled", settled)];
-  if (usage !== undefined) {
-    facts.push(fact("usage.recorded", { kind: "model", owner: { runId: input.runId }, usage }));
-  }
+  if (usage !== undefined) facts.push(runUsageRecorded(input.runId, usage));
   return facts;
+}
+
+/** What one of a run's answers spent, kept or discarded. */
+export function runUsageRecorded(runId: string, usage: Usage): SessionEvent {
+  return fact("usage.recorded", { kind: "model", owner: { runId }, usage });
 }
 
 /**

@@ -1,4 +1,4 @@
-/** Experimental dynamic schedule subscriptions. APIs may change without notice. */
+/** Experimental dynamic schedules. APIs may change without notice. */
 export { schedules } from "#public/experimental/schedules/client.js";
 export {
   defineDynamicSchedules,
@@ -8,12 +8,15 @@ export {
   type DynamicSchedulesToFn,
   type ScheduleCreateApproval,
   type ScheduleApprovals,
+  type ScheduleAuthResult,
   type ScheduleClient,
   type ScheduleClientCreate,
   type ScheduleClientUpdate,
   type SchedulePatch,
+  type SchedulePreparePayloadContext,
   type ScheduleCreate,
   type ScheduleExpression,
+  type ScheduleHandle,
   type ScheduleTiming,
   type ScheduleList,
   type ScheduleOccurrence,
@@ -24,6 +27,7 @@ export {
   type ScheduleProvider,
   type ScheduleRecord,
   type ScheduleScopeContext,
+  type ScheduleScopeResolverContext,
   type ScheduleScopeResolverResult,
   type ScheduleOperation,
   type ScheduleState,

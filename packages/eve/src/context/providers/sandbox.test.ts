@@ -57,7 +57,6 @@ describe("sandboxProvider", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
     });
   });
@@ -97,7 +96,6 @@ describe("sandboxProvider", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(null),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
     });
     ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
@@ -146,7 +144,6 @@ describe("sandboxProvider", () => {
       release,
       open: vi.fn(),
       prepare: vi.fn(),
-      resumeRecorded: vi.fn(),
       settle: vi.fn(),
       stop: vi.fn(),
     });
