@@ -193,6 +193,6 @@ guide for an end-to-end walkthrough.
 
 `auto` decides once per turn, before the first model call. The choice holds for the turn's later model calls, including in a fresh process. A new turn makes a new choice, and child sessions route from their own prompts.
 
-The decider receives the turn's opening text and up to seven earlier user and assistant text messages. eve does not truncate this text or impose a character limit; the decision provider's input limits apply. Larger inputs can increase decision cost and latency. A request without user text fails before provider I/O.
+The decider receives the turn's opening text and up to seven earlier user and assistant text messages, subject to the decision provider's input limits. Larger inputs can increase decision cost and latency. A request without user text fails before provider I/O.
 
 Without `fallback`, a decider error fails the turn; with it, eve uses the fallback model for the rest of the turn. Cancelling the turn aborts the decision and keeps no routed or fallback choice. Validation, retries, provider errors, and model resolution follow AI SDK semantics.
