@@ -8,6 +8,8 @@ url: /guides/dynamic-capabilities
 
 eve runs the function before every ordinary model call, including when a turn continues after steering, a sign-in, or an approval. It doesn't run for compaction's summary call or `auto()`'s routing call. Introspection reads the values it last returned.
 
+Because the function runs before every model call, not once per turn, a turn with 20 model calls runs it 20 times. Wrap every network request, database query, API call, and sandbox read in [`ctx.memo`](#context-and-memoization). Outside a memo, each of those calls adds its latency to every model call and counts against the service's rate limits every time. Choose the memo key for how long the result should stay fixed; see [Choose a lifetime](#choose-a-lifetime).
+
 The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](/docs/reference/typescript-api#authored-module-lifecycle).
 
 ## Context and memoization

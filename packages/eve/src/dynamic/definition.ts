@@ -45,7 +45,12 @@ export type DynamicKey = unknown;
  * Runs `fn` the first time the session sees `key` from this definition, keeps the JSON it returns,
  * and returns the kept result for the same key afterwards, in any process. Only the keys the
  * latest successful evaluation used stay kept, and a deployment change discards them: a key used
- * again after either runs `fn` again. Code outside a memo runs again at every evaluation.
+ * again after either runs `fn` again.
+ *
+ * Code outside a memo runs again at every evaluation, which is every model call. Put every
+ * network request, database query, API call, and sandbox read inside a memo. The key sets how
+ * long the result stays fixed: `ctx.turn?.id ?? null` for once per turn, `ctx.session.id` for once
+ * per session, or a tenant or channel ID for once per value.
  */
 export type Memo = <T>(
   key: DynamicKey,
@@ -140,7 +145,10 @@ export type DefineDynamic<TResult, TContext = DynamicContext> = (
  * installs what it returns, or nothing for `null`. The folder or field decides what it returns:
  * tools in `agent/tools/`, skills in `agent/skills/`, a model in an agent's `model` field.
  *
- * Work that shouldn't repeat goes in `ctx.memo(key, fn)`: `fn` runs once per key, and a later
+ * The function runs before every model call, not once per turn: a turn with 20 model calls runs
+ * it 20 times. Wrap every network request, database query, API call, and sandbox read in
+ * `ctx.memo(key, fn)`. Outside a memo, that work adds its latency to every model call and counts
+ * against the service's rate limits on each one. Inside, `fn` runs once per key, and a later
  * evaluation, in any process, gets the result it kept.
  *
  * ```ts
