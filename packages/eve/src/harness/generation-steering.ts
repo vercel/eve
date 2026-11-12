@@ -63,8 +63,8 @@ export class GenerationSteering {
       event.type === "turn.settled"
     )
       this.effectsStarted = true;
-    // A tool call's streaming input is output too: a reader has shown it, and cutting the call
-    // would make the model write it again.
+    // A tool call's streaming input keeps this call: a reader has shown it, and a cut would make
+    // the model write it again. The turn's output stays unstarted, so a later call can still be cut.
     if (
       event.type === "call.input" ||
       (event.type === "content.delta" &&

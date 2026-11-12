@@ -6,4 +6,4 @@ Steering no longer discards a model call that is streaming a tool call's input, 
 
 The call finishes, the tool runs, and the new message applies at the next step boundary in the same turn.
 
-Thanks @zackleman for reporting this in #5929.
+Thanks @zackleman for reporting this and proposing the fix in #5929.

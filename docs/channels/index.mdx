@@ -43,7 +43,7 @@ Linear uses its native sign-in prompt. A sign-in that an approval's responder ne
 
 Channels default to `turnPolicy: "steer"`, which adds a new message to the running turn. The turn ID stays the same.
 
-- Before assistant answer output or local tool execution begins, the message interrupts pending model generation and the turn continues with the correction.
+- Until answer output or a local tool call's input starts streaming, the message interrupts pending model generation and the turn continues with the correction.
 - Executing tools finish and keep their results before steering reaches the next model call.
 - After answer output starts, steering waits until the current model step finishes.
 
