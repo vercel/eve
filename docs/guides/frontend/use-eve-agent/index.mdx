@@ -291,7 +291,7 @@ Show "Approved" or "Denied" only for `accepted` and `declined`. For any other ou
 
 ## Use eve's answers
 
-Read session state from `view` with selectors from `eve/events`, instead of scanning `events` or keeping your own copy. [Session views and selectors](/docs/concepts/session-views-and-selectors) maps common questions to the right selector.
+Read session state from `view` with selectors from `eve/events`, instead of scanning `events` or keeping your own copy. [Session views & selectors](/docs/concepts/session-views-and-selectors) maps common questions to the right selector.
 
 For one request's `status`, `outcome`, `reply`, `interactions`, and `error`, use `delivery.result()`. It is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
 

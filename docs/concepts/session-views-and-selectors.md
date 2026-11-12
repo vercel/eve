@@ -32,7 +32,7 @@ The explicit check for `current` matters: an omitted or `undefined` filter means
 
 | Surface                                                                        | View                                                  | When it reflects the session                                          |
 | ------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------- |
-| [Evals](../evals/cases#the-drive-api)                                          | `session.view`                                        | History and events recorded by that session handle so far             |
+| [Eval sessions](../evals/cases#the-drive-api)                                  | `session.view`                                        | Everything the session handle has recorded so far                     |
 | [Completed eval turns](../evals/cases#the-drive-api)                           | `turn.view`                                           | Fixed session snapshot captured when the eval driver returns the turn |
 | [In-flight eval turns](../evals/cases#in-flight-turns)                         | `live.view`                                           | Initial session snapshot plus events the live reader has observed     |
 | [Hooks](../guides/hooks#hook-structure-and-context)                            | `ctx.view`                                            | The whole recorded line containing the handler's event                |
@@ -66,9 +66,9 @@ Ask a question about the session, then select the relevant observations:
 | What tasks and model runs exist?            | `tasks(view, { status? })` / `task(view, taskId)` / `runs(view, { turnId? })`  | Execution observations and their outcomes                                  |
 | Which child sessions were opened?           | `children(view)`                                                               | Child session links, not their event histories                             |
 | What usage was recorded?                    | `usage(view)`                                                                  | Session totals and totals by kind; inspect `runs` for per-turn model usage |
-| Why did a turn fail?                        | `failure(view, turnId)`                                                        | Turn failure, falling back to session failure, or `undefined`              |
+| Why did a turn or the session fail?         | `failure(view, turnId?)`                                                       | Turn failure, falling back to session failure, or `undefined`              |
 | Has the session ended?                      | `session(view)`                                                                | Session status, outcome, error, identity, and timing                       |
-| Is there work the session can do now?       | `idle(view)`                                                                   | Whether the session is idle; a turn waiting only on a person can be idle   |
+| Is the session idle?                        | `idle(view)`                                                                   | `true` when no work can run now; a turn waiting on a person can be idle    |
 | Where does this snapshot resume?            | `position(view)`                                                               | The next durable line position, not an event count                         |
 
 ID lookups can return `undefined` when the entity is not in the view. Collection selectors return arrays; an empty result describes this snapshot, not necessarily the session's entire history.
@@ -107,7 +107,7 @@ An open interaction can already have an `answer` while a response policy still w
 
 Prefer a scoped assertion such as `turn.calledTool(...)` when it already expresses your check. For custom state checks, select observations from a view and grade them with `t.check`, `t.require`, or `t.score`. The selectors are the same ones used by hooks and clients; no eval-specific state reconstruction is needed.
 
-For example, inspect recorded task outcomes, or check exactly which requests remain open. See [Assert on session state with selectors](../evals/assertions#assert-on-session-state-with-selectors) for examples.
+See [Assert on session state with selectors](../evals/assertions#assert-on-session-state-with-selectors) for examples that check task outcomes and which requests a parked turn waits on.
 
 `turn.view` is a session snapshot at that eval boundary, not a view filtered to that turn. Collection queries can include earlier turns. Use explicit IDs and supported filters when your check is turn-specific. `activeTurn` finds an open turn, not a completed one; use an ID observed in the events or a retained turn observation to inspect a completed turn.
 

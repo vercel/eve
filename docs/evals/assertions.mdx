@@ -78,9 +78,13 @@ t.check(
 );
 ```
 
-`turn.view` captures the session at that eval boundary, including earlier observed turns; it is not filtered to the returned turn. Use explicit IDs and selector filters for turn-specific checks. Do not use `activeTurn` to find a completed turn: it returns only an open turn. `session.view` reflects recorded session history, while `live.view` includes events observed by the in-flight reader. A snapshot you save stays fixed.
+Keep these scope rules in mind:
 
-A view only knows the events its reader observed. Attaching at a later `startIndex` can omit the events that opened a request or call. Run-level assertions on `t` can cover several sessions, but each view belongs to one session. See [Session views & selectors](../concepts/session-views-and-selectors) for the selector catalog and scope guarantees.
+- `turn.view` is a snapshot of the whole session when the turn returned, not a view filtered to that turn. Filter by turn ID for turn-specific checks. `activeTurn` returns only an open turn, so don't use it to find a completed one.
+- A view knows only the events its reader observed. Attaching at a later `startIndex` can omit the events that opened a call or request.
+- Each view belongs to one session. Run-level assertions on `t` can span several sessions; check each session's view separately.
+
+See [Session views & selectors](../concepts/session-views-and-selectors) for the full selector catalog and scope guarantees.
 
 ### Check what a parked turn waits for
 
@@ -107,7 +111,7 @@ if (turn.status === "awaiting-input") {
 }
 ```
 
-Keep the `rows.length > 0` check: `every` passes on an empty list, and the list is empty when the eval didn't read the events that opened the requests. An open request can already have an `answer` while its response is still being processed; open does not necessarily mean unanswered.
+Keep the `rows.length > 0` check: `every` passes on an empty list, and the list is empty when the eval didn't read the events that opened the requests. Open doesn't mean unanswered: a request can already have an `answer` while eve still processes it.
 
 ## Value assertions with `t.check`
 
