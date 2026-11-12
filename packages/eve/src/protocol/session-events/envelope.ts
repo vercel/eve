@@ -189,7 +189,13 @@ export interface ErrorInfo {
 export interface Usage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** 0 when `cacheReadUnreported` is set. */
   readonly cacheReadTokens: number;
+  /**
+   * The provider didn't report cache reads, so `cacheReadTokens` is unknown rather than none.
+   * Absent when it reported them, and on totals.
+   */
+  readonly cacheReadUnreported?: true;
   readonly cacheWriteTokens: number;
   /** Absent when the provider reported no cost. */
   readonly costUsd?: number;

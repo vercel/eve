@@ -184,6 +184,33 @@ describe("createV26HistoryReader", () => {
     expect(Object.values(tables.interactions).map((row) => row.status)).toEqual(["settled"]);
   });
 
+  // v26 wrote only the counts a provider reported, so a missing cache read isn't a reported 0.
+  it("marks cache reads a v26 step didn't record, and records no usage for a step that had none", () => {
+    let steps = 0;
+    const records = KITCHEN_SINK.map((record) => {
+      const line = record as { readonly type: string; readonly data: object };
+      if (line.type !== "step.completed") return record;
+      steps += 1;
+      if (steps > 2) return record;
+      return { ...line, data: { ...line.data, usage: steps === 1 ? { inputTokens: 316 } : {} } };
+    });
+    const recordedUsage = (input: readonly unknown[]) =>
+      read(input)
+        .events.filter((event) => event.type === "usage.recorded")
+        .map((event) => event.data.usage);
+    const recorded = recordedUsage(records);
+
+    expect(recorded).toHaveLength(recordedUsage(KITCHEN_SINK).length - 1);
+    expect(recorded[0]).toEqual({
+      cacheReadTokens: 0,
+      cacheReadUnreported: true,
+      cacheWriteTokens: 0,
+      inputTokens: 316,
+      outputTokens: 0,
+    });
+    expect(recorded.slice(1).every((usage) => usage.cacheReadUnreported === undefined)).toBe(true);
+  });
+
   it("reads nothing from a record that isn't a line", () => {
     expect(createV26HistoryReader().read("not a record", 0)).toBeUndefined();
   });

@@ -12,6 +12,7 @@
 // Delete once no session a v27 deployment serves was recorded before v27.
 
 import { cascade } from "#harness/session-machine/cascade.js";
+import { usageOf } from "#harness/facts.js";
 import { FACT_CATALOG } from "#protocol/session-events/catalog.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import {
@@ -428,20 +429,18 @@ class Translator {
         type: "model.settled",
       },
     ];
-    const usage = isRecord(data.usage) ? data.usage : undefined;
-    if (usage !== undefined) {
+    // v26 wrote only the counts the provider reported.
+    const usage = isRecord(data.usage) ? data.usage : {};
+    const reported = {
+      cacheReadTokens: finite(usage.cacheReadTokens),
+      cacheWriteTokens: finite(usage.cacheWriteTokens),
+      costUsd: typeof usage.costUsd === "number" ? usage.costUsd : undefined,
+      inputTokens: finite(usage.inputTokens),
+      outputTokens: finite(usage.outputTokens),
+    };
+    if (Object.values(reported).some((count) => count !== undefined)) {
       facts.push({
-        data: {
-          kind: "model",
-          owner: { runId },
-          usage: {
-            cacheReadTokens: num(usage.cacheReadTokens),
-            cacheWriteTokens: num(usage.cacheWriteTokens),
-            costUsd: typeof usage.costUsd === "number" ? usage.costUsd : undefined,
-            inputTokens: num(usage.inputTokens),
-            outputTokens: num(usage.outputTokens),
-          },
-        },
+        data: { kind: "model", owner: { runId }, usage: usageOf(reported) },
         type: "usage.recorded",
       });
     }
@@ -895,8 +894,8 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function num(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function finite(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function json(value: unknown): JsonValue | undefined {

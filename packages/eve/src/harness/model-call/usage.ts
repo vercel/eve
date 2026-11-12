@@ -20,22 +20,23 @@ export function gatewayModelId(model: LanguageModel): string | undefined {
   }
 }
 
+/**
+ * What a model call reported spending, or `undefined` when it reported nothing: the AI SDK always
+ * passes a usage, with every count it didn't get left undefined.
+ */
 export function extractTokenUsageDelta(input: {
   readonly costUsd: number | undefined;
   readonly usage: HarnessStepResult["usage"] | undefined;
 }): TokenUsageDelta | undefined {
-  const usage = input.usage;
-  if (usage === undefined && input.costUsd === undefined) {
-    return undefined;
-  }
-
-  return {
+  const { usage } = input;
+  const delta = {
     cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
     cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
     costUsd: input.costUsd,
     inputTokens: usage?.inputTokens,
     outputTokens: usage?.outputTokens,
   };
+  return Object.values(delta).some((value) => value !== undefined) ? delta : undefined;
 }
 
 export function extractGatewayCostUsd(

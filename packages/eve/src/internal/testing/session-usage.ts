@@ -1,6 +1,6 @@
 import { usageOf } from "#harness/facts.js";
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "#harness/session-machine/view.js";
-import { withModelUsage } from "#harness/session-usage.js";
+import { NO_USAGE, withModelUsage } from "#harness/session-usage.js";
 import { advance } from "#harness/session-machine/current.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionStateMap } from "#harness/types.js";
@@ -18,7 +18,8 @@ export function withSessionUsage<T extends { readonly state?: SessionStateMap }>
       ...session.state,
       [SESSION_PROJECTION_STATE_KEY]: {
         ...projection,
-        view: withModelUsage(projection.view, usageOf(usage)),
+        // A total counts what it omits as none: it never carries an unreported mark.
+        view: withModelUsage(projection.view, usageOf({ ...NO_USAGE, ...usage })),
       },
     },
   };

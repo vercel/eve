@@ -9,6 +9,7 @@ import type {
   ToolResultPart,
 } from "ai";
 import { usageOf } from "#harness/facts.js";
+import { extractTokenUsageDelta } from "#harness/model-call/usage.js";
 import { createRuntimeToolResultFromMessagePart } from "#harness/action-result-helpers.js";
 import { toJsonValue } from "#harness/call-facts.js";
 import { settleCall } from "#harness/session-machine/calls.js";
@@ -255,20 +256,13 @@ function finalOutputOf(step: HarnessStepResult) {
   return call === undefined ? undefined : toJsonValue(call.input);
 }
 
-/** A run's usage as `usage.recorded` carries it, or `undefined` when the SDK reported none. */
+/** A run's usage as `usage.recorded` carries it, or `undefined` when the provider reported none. */
 export function runUsageOf(input: {
   readonly costUsd: number | undefined;
   readonly usage: LanguageModelUsage | undefined;
 }): Usage | undefined {
-  const { usage } = input;
-  if (usage === undefined && input.costUsd === undefined) return undefined;
-  return usageOf({
-    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
-    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
-    costUsd: input.costUsd,
-    inputTokens: usage?.inputTokens,
-    outputTokens: usage?.outputTokens,
-  });
+  const delta = extractTokenUsageDelta(input);
+  return delta === undefined ? undefined : usageOf(delta);
 }
 
 export function extractGatewayCostUsd(

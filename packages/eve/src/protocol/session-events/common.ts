@@ -109,6 +109,7 @@ const count = z.number().int().nonnegative();
 export const usage = conforming<Usage>()(
   z.object({
     cacheReadTokens: count,
+    cacheReadUnreported: z.literal(true).optional(),
     cacheWriteTokens: count,
     costUsd: z.number().finite().nonnegative().optional(),
     inputTokens: count,

@@ -105,11 +105,10 @@ export async function runModelStep(
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
-    return reportModelCallFailure(step, error);
+    return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
   await recordModelUsage(step, { model: run.model, tools: catalog.advertised.size });
-  caller.clearInterruptedUsage();
 
   let stepResult: StepResult;
   try {

@@ -404,7 +404,10 @@ function countSummaryUsage(step: Step, betweenTurns: true | undefined, usage: Us
 function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage | undefined {
   const spent = deltas.filter((delta) => delta !== undefined);
   if (spent.length === 0) return undefined;
-  return spent.reduce<Usage>((total, delta) => addTokenUsage(total, usageOf(delta)), NO_USAGE);
+  const total = spent.reduce<Usage>((sum, delta) => addTokenUsage(sum, usageOf(delta)), NO_USAGE);
+  // A call that left its cache reads unreported leaves the record's count unknown too.
+  const unreported = spent.some((delta) => delta.cacheReadTokens === undefined);
+  return usageOf({ ...total, cacheReadUnreported: unreported ? true : undefined });
 }
 
 /**

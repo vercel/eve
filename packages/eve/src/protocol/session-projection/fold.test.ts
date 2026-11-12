@@ -252,6 +252,30 @@ describe("the shared fold", () => {
     expect(view.position).toBe(lines.length);
   });
 
+  it("sums usage as plain counts, without a record's unreported mark", () => {
+    const counts = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 };
+    const lines = turnLines(0, { opensSession: true }).map((line) => ({
+      ...line,
+      facts: line.facts.map((fact) =>
+        (fact as { readonly type: string }).type === "usage.recorded"
+          ? {
+              ...fact,
+              data: {
+                kind: "model",
+                owner: { runId: "run_0" },
+                usage: { ...counts, cacheReadUnreported: true },
+              },
+            }
+          : fact,
+      ),
+    })) as StoredLine[];
+
+    const view = folded(lines);
+    expect(view.runs.run_0?.usage).toEqual(counts);
+    expect(view.usage.byKind.model).toEqual(counts);
+    expect(view.usage.total).toEqual(counts);
+  });
+
   it("preserves authored call labels through progress and settlement", () => {
     const view = emptySessionView();
     const previews = emptyPreviews();

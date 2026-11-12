@@ -9,7 +9,7 @@ import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
 import type { StepResult } from "#harness/types.js";
-import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import type { ErrorInfo, Usage } from "#protocol/session-events/envelope.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
@@ -31,8 +31,15 @@ export function modelCallErrorInfo(error: unknown): ErrorInfo {
   return { code: "MODEL_CALL_FAILED", message };
 }
 
-/** Exhausted model calls fail the turn; terminal errors end its session as well. */
-export async function reportModelCallFailure(step: Step, error: unknown): Promise<StepResult> {
+/**
+ * Exhausted model calls fail the turn; terminal errors end its session as well. `usage` is what
+ * the last attempt's discarded answer spent, which the failed run records.
+ */
+export async function reportModelCallFailure(
+  step: Step,
+  error: unknown,
+  usage?: Usage,
+): Promise<StepResult> {
   // The AI SDK's span omits the cause chain and upstream response body.
   step.instrumentation?.recordError(error);
   if (step.emit === undefined) throw error;
@@ -52,6 +59,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
         code: "WORKFLOW_STREAM_WRITE_FAILED",
         details: { ...streamWriteDetails, errorId },
         message: toErrorMessage(error),
+        usage,
       }),
     );
     return { next: null, session: step.session };
@@ -97,6 +105,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       details,
       message,
       ...(terminal && { terminal: true }),
+      usage,
     }),
   );
   if (terminal)

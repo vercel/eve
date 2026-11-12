@@ -74,8 +74,34 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
       ],
     ]),
   })(session, { message: "Alice asks for the weekly summary." });
-  return events.filter((event) => event.type.startsWith("model."));
+  return events.filter(
+    (event) => event.type.startsWith("model.") || event.type === "usage.recorded",
+  );
 }
+
+const spent = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 };
+
+/** An answer with no text and no calls, which the provider billed with an AI Gateway cost. */
+const billedEmpty = (finish: "other" | "content-filter"): StreamResult =>
+  streamOf([
+    { type: "stream-start", warnings: [] },
+    {
+      finishReason: { raw: undefined, unified: finish },
+      providerMetadata: { gateway: { cost: "0.05" } },
+      type: "finish",
+      usage: {
+        inputTokens: { cacheRead: 2_000, cacheWrite: 0, noCache: 10_000, total: 12_000 },
+        outputTokens: { reasoning: 0, text: 300, total: 300 },
+      },
+    },
+  ]);
+const billed = {
+  cacheReadTokens: 2_000,
+  cacheWriteTokens: 0,
+  costUsd: 0.05,
+  inputTokens: 12_000,
+  outputTokens: 300,
+};
 
 describe("model attempts", () => {
   it("retries an attempt that published nothing in the same run, and says so", async () => {
@@ -97,6 +123,7 @@ describe("model attempts", () => {
       },
       { attempt: 1, runId: "run_0", type: "model.started" },
       { outcome: "completed", runId: "run_0", type: "model.settled" },
+      { owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
     ]);
   });
 
@@ -118,7 +145,75 @@ describe("model attempts", () => {
       { runId: "run_1", type: "model.requested" },
       { attempt: 1, runId: "run_1", type: "model.started" },
       { outcome: "completed", runId: "run_1", type: "model.settled" },
+      { owner: { runId: "run_1" }, type: "usage.recorded", usage: spent },
     ]);
+  });
+
+  // The provider billed the answers eve discards, so the run counts them, as a steered one does.
+  it("records what an empty answer it reissued spent, beside the kept answer's usage", async () => {
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockResolvedValueOnce(billedEmpty("other"))
+      .mockImplementation(async () => streamOf(reply("Here it is.")));
+
+    const facts = await runTurn(doStream);
+
+    expect(facts.map(({ data, type }) => ({ type, ...data }))).toEqual([
+      { owner: { turnId: "turn_0" }, runId: "run_0", type: "model.requested" },
+      { attempt: 0, modelId: "m", runId: "run_0", type: "model.started" },
+      { attempt: 0, error: expect.anything(), runId: "run_0", type: "model.retried" },
+      { kind: "model", owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
+      { attempt: 1, modelId: "m", runId: "run_0", type: "model.started" },
+      expect.objectContaining({ outcome: "completed", runId: "run_0", type: "model.settled" }),
+      { kind: "model", owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
+    ]);
+  });
+
+  it("fails the run with what the answer it discarded spent", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const facts = await runTurn(async () => billedEmpty("content-filter"));
+
+    expect(facts.slice(-2).map(({ data, type }) => ({ type, ...data }))).toMatchObject([
+      { outcome: "failed", runId: "run_0", type: "model.settled" },
+      { owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
+    ]);
+  });
+});
+
+describe("unreported usage", () => {
+  const answer = (usage: Extract<StreamPart, { type: "finish" }>["usage"]) =>
+    streamOf([...reply("Here it is.").slice(0, -1), { ...reply("").at(-1)!, usage } as StreamPart]);
+
+  it("marks cache reads the provider didn't report, so they don't read as a miss", async () => {
+    const facts = await runTurn(async () =>
+      answer({
+        inputTokens: { cacheRead: undefined, cacheWrite: undefined, noCache: 10, total: 10 },
+        outputTokens: { reasoning: undefined, text: 2, total: 2 },
+      }),
+    );
+
+    expect(facts.find((event) => event.type === "usage.recorded")?.data).toEqual({
+      kind: "model",
+      owner: { runId: "run_0" },
+      usage: { ...spent, cacheReadUnreported: true },
+    });
+  });
+
+  it("records no usage for an answer whose provider reported none", async () => {
+    const facts = await runTurn(async () =>
+      answer({
+        inputTokens: {
+          cacheRead: undefined,
+          cacheWrite: undefined,
+          noCache: undefined,
+          total: undefined,
+        },
+        outputTokens: { reasoning: undefined, text: undefined, total: undefined },
+      }),
+    );
+
+    expect(facts.at(-1)).toMatchObject({ data: { outcome: "completed" }, type: "model.settled" });
+    expect(facts.filter((event) => event.type === "usage.recorded")).toEqual([]);
   });
 });
 
