@@ -17,20 +17,13 @@ export class SessionStreamWriteError extends Error {
   }
 }
 
-/** The {@link SessionStreamWriteError} `error` is, or carries on its cause chain. */
-export function sessionStreamWriteErrorOf(error: unknown): SessionStreamWriteError | undefined {
+/** Rethrows the {@link SessionStreamWriteError} `error` is, or carries on its cause chain. */
+export function throwIfSessionStreamDead(error: unknown): void {
   const seen = new Set<unknown>();
   for (let current = error; typeof current === "object" && current !== null;) {
-    if (current instanceof SessionStreamWriteError) return current;
-    if (seen.has(current)) return undefined;
+    if (current instanceof SessionStreamWriteError) throw current;
+    if (seen.has(current)) return;
     seen.add(current);
     current = (current as { readonly cause?: unknown }).cause;
   }
-  return undefined;
-}
-
-/** Rethrows the {@link SessionStreamWriteError} `error` is, or carries on its cause chain. */
-export function throwIfSessionStreamDead(error: unknown): void {
-  const dead = sessionStreamWriteErrorOf(error);
-  if (dead !== undefined) throw dead;
 }

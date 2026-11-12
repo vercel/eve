@@ -236,6 +236,8 @@ export async function executeToolCall(
         { error, input: args, toolCallId: callId, toolName, type: "tool-error" },
         executionMs,
       );
+      // `call.started` or a progress write failed: the call can't settle on that stream.
+      throwIfSessionStreamDead(error);
       throwIfTurnAborted(input.abortSignal);
       logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;

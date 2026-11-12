@@ -153,7 +153,6 @@ async function requestRun(
       validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
-    throwIfSessionStreamDead(error);
     return { failed: await failBoundaryEvent(step, error) };
   }
   try {

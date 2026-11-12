@@ -3,15 +3,15 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionStreamWriteError } from "#harness/session-stream-write-error.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
 // Once a session stream write fails, the stream is errored and every later write fails too. The
 // step rethrows the write's error at once, so Workflow retries it with a fresh stream: no
-// further provider request, no further write, and the cut attempt's hooks still hear it failed.
+// further provider request and no further write.
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -50,6 +50,15 @@ const reply = (text: string): StreamPart[] => [
   finish("stop"),
 ];
 
+/** Reasoning first: steering can still cut a call that has shown no text. */
+const reasonedReply = (text: string): StreamPart[] => [
+  { type: "stream-start", warnings: [] },
+  { id: "r", type: "reasoning-start" },
+  { delta: "Alice wants this week's numbers.", id: "r", type: "reasoning-delta" },
+  { id: "r", type: "reasoning-end" },
+  ...reply(text).slice(1),
+];
+
 /** A stream that closes without output or a finish, which eve reissues once. */
 const empty = (): StreamPart[] => [{ type: "stream-start", warnings: [] }];
 
@@ -67,7 +76,9 @@ async function runDeadStep(options: {
   readonly doStream: MockLanguageModelV3["doStream"];
   /** The write the stream dies at. */
   readonly diesAt: (event: SessionEvent) => boolean;
+  readonly agent?: Parameters<typeof createTestKernel>[0]["agent"];
   readonly cause?: () => unknown;
+  readonly history?: HarnessModelMessage[];
   /** Runs as the stream dies, before the write rejects. */
   readonly onDeath?: () => void;
   readonly steeringSignal?: AbortSignal;
@@ -76,35 +87,14 @@ async function runDeadStep(options: {
   vi.spyOn(console, "error").mockImplementation(() => {});
   let dead: SessionStreamWriteError | undefined;
   let writesAfterDeath = 0;
-  const failedAttempts: unknown[] = [];
-  const instrumentation: SessionInstrumentation = {
-    installAiSdkWarningLogger: () => {},
-    runStep: (input, execute) =>
-      execute({
-        createHandleEvent: ({ handleEvent }) => handleEvent,
-        prepareAttempt: () => ({
-          fail: async (error) => {
-            failedAttempts.push(error);
-          },
-          scope: {} as never,
-          telemetry: undefined,
-        }),
-        preparePreamble: async () => undefined,
-        recordError: () => {},
-        resolveRuntimeContext: () => undefined,
-        session: input.session,
-        setTurnId: () => {},
-        telemetry: () => undefined,
-      }),
-  };
   const session: HarnessSession = {
     compaction: {},
     continuationToken: "http:dead-stream",
-    history: [],
+    history: options.history ?? [],
     sessionId: "dead-stream",
   };
   const step = createTestKernel({
-    agent: { model: { id: "m" } },
+    agent: options.agent ?? { model: { id: "m" } },
     handleEvent: eachEvent(async (event) => {
       if (dead !== undefined) {
         writesAfterDeath += 1;
@@ -116,7 +106,6 @@ async function runDeadStep(options: {
         throw dead;
       }
     }),
-    instrumentation,
     resolveModel: async () => new MockLanguageModelV3({ doStream: options.doStream }),
     steeringSignal: options.steeringSignal,
     tools: new Map([
@@ -135,7 +124,7 @@ async function runDeadStep(options: {
     () => ({ rejected: undefined }),
     (error: unknown) => ({ rejected: error }),
   );
-  return { dead, failedAttempts, rejected: outcome.rejected, writesAfterDeath };
+  return { dead, rejected: outcome.rejected, writesAfterDeath };
 }
 
 describe("a session stream that dies during a model step", () => {
@@ -149,7 +138,6 @@ describe("a session stream that dies during a model step", () => {
     expect(run.rejected).toBe(run.dead);
     expect(doStream).toHaveBeenCalledOnce();
     expect(run.writesAfterDeath).toBe(0);
-    expect(run.failedAttempts).toEqual([run.dead]);
   });
 
   it("rethrows when the recovery call after an empty response can't write", async () => {
@@ -165,12 +153,11 @@ describe("a session stream that dies during a model step", () => {
     expect(run.rejected).toBe(run.dead);
     expect(doStream).toHaveBeenCalledTimes(2);
     expect(run.writesAfterDeath).toBe(0);
-    expect(run.failedAttempts).toEqual([run.dead]);
   });
 
-  it("rethrows a dead stream even when steering arrives during the write", async () => {
+  it("rethrows a dead stream even when steering cuts the call during the write", async () => {
     const steering = new AbortController();
-    const doStream = vi.fn(async () => streamOf(reply("Here is your summary.")));
+    const doStream = vi.fn(async () => streamOf(reasonedReply("Here is your summary.")));
     const run = await runDeadStep({
       diesAt: (event) => event.type.startsWith("content."),
       doStream,
@@ -181,7 +168,6 @@ describe("a session stream that dies during a model step", () => {
     expect(run.rejected).toBe(run.dead);
     expect(doStream).toHaveBeenCalledOnce();
     expect(run.writesAfterDeath).toBe(0);
-    expect(run.failedAttempts).toEqual([run.dead]);
   });
 
   it("rethrows an aborted write as is, not as a stalled model stream", async () => {
@@ -196,10 +182,9 @@ describe("a session stream that dies during a model step", () => {
     expect(run.rejected).toMatchObject({ name: "AbortError" });
     expect(doStream).toHaveBeenCalledOnce();
     expect(run.writesAfterDeath).toBe(0);
-    expect(run.failedAttempts).toEqual([run.dead]);
   });
 
-  it("rethrows when the attempt's start can't write, and its hooks hear it failed", async () => {
+  it("rethrows when the attempt's start can't write, without retrying it", async () => {
     const doStream = vi.fn(async () => streamOf(reply("Here is your summary.")));
     const run = await runDeadStep({
       diesAt: (event) => event.type === "model.started",
@@ -209,30 +194,39 @@ describe("a session stream that dies during a model step", () => {
     expect(run.rejected).toBe(run.dead);
     expect(doStream).not.toHaveBeenCalled();
     expect(run.writesAfterDeath).toBe(0);
-    expect(run.failedAttempts).toEqual([run.dead]);
   });
 
-  it("rethrows when the run's request can't write", async () => {
+  it.each(["call.started", "call.settled"])(
+    "rethrows when an inline call's %s can't write, without settling it again",
+    async (diesAt) => {
+      const doStream = vi.fn(async () => streamOf(lookupCall()));
+      const run = await runDeadStep({ diesAt: (event) => event.type === diesAt, doStream });
+
+      expect(run.rejected).toBe(run.dead);
+      expect(doStream).toHaveBeenCalledOnce();
+      expect(run.writesAfterDeath).toBe(0);
+    },
+  );
+
+  it("rethrows when a compaction's start can't write, without failing the compaction", async () => {
     const doStream = vi.fn(async () => streamOf(reply("Here is your summary.")));
     const run = await runDeadStep({
-      diesAt: (event) => event.type === "model.requested",
+      agent: {
+        compactionModel: { id: "compaction-model" },
+        model: { contextWindowTokens: 2_000, id: "m" },
+        thresholdPercent: 1,
+      },
+      diesAt: (event) => event.type === "context.started",
       doStream,
+      // Long enough that it compacts before the turn's first model call.
+      history: [
+        { content: "Alice's weekly notes. ".repeat(2_000), kind: "user", role: "user" },
+        { content: "Noted.", role: "assistant" },
+      ],
     });
 
     expect(run.rejected).toBe(run.dead);
     expect(doStream).not.toHaveBeenCalled();
-    expect(run.writesAfterDeath).toBe(0);
-  });
-
-  it("rethrows when an inline call's settlement can't write, without settling it again", async () => {
-    const doStream = vi.fn(async () => streamOf(lookupCall()));
-    const run = await runDeadStep({
-      diesAt: (event) => event.type === "call.settled",
-      doStream,
-    });
-
-    expect(run.rejected).toBe(run.dead);
-    expect(doStream).toHaveBeenCalledOnce();
     expect(run.writesAfterDeath).toBe(0);
   });
 });

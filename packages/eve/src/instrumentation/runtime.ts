@@ -3,7 +3,6 @@ import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
-import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type {
   InstrumentationScope,
   InstrumentationContextRunner,
@@ -113,11 +112,6 @@ export interface InstrumentationStepScope<TSession> {
 export interface PreparedInstrumentationAttempt {
   readonly scope: InstrumentationScope;
   readonly telemetry: TelemetryOptions | undefined;
-  /**
-   * Tells the hooks the attempt failed, with a failed `model.settled` for its scope, when no
-   * `model.settled` can reach the stream: a dead stream cut it.
-   */
-  readonly fail: (error: unknown) => Promise<void>;
 }
 
 export interface BoundInstrumentationSession {
@@ -432,16 +426,6 @@ export function bindInstrumentationRuntime(
                 attemptInput.isFrameworkTool,
               );
               return {
-                fail: (error) =>
-                  hooks.publish(
-                    Object.freeze({
-                      error,
-                      idempotencyKey: attemptIdempotencyKey(scope),
-                      outcome: "failed",
-                      scope,
-                      type: "model.settled",
-                    } as const),
-                  ),
                 scope,
                 telemetry: telemetry({
                   bridgeIntegration,

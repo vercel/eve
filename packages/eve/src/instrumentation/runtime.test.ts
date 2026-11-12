@@ -663,38 +663,6 @@ describe("bindInstrumentationRuntime", () => {
     expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
   });
 
-  it("tells the hooks an attempt failed when no model.settled can reach the stream", async () => {
-    const publish = vi.fn(async () => {});
-    const instrumentation = bindInstrumentationRuntime(
-      createRuntime({ capturesContent: true, publish }),
-      createContext("private"),
-      boundSession,
-    );
-    const error = new Error("A session stream write failed: HTTP 503");
-
-    await instrumentation?.prepareExecution().runStep(
-      {
-        environment: "test",
-        eveVersion: "0.0.0",
-        hasInput: true,
-        session: { sessionId: "session-1" },
-      },
-      async (scope) =>
-        scope
-          .prepareAttempt({ runId: "run_0", attempt: 1, stepIndex: 0, turnId: "turn-1" })
-          .fail(error),
-    );
-
-    expect(publish).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error,
-        outcome: "failed",
-        scope: expect.objectContaining({ attempt: 1, runId: "run_0", turnId: "turn-1" }),
-        type: "model.settled",
-      }),
-    );
-  });
-
   // AI SDK integrations such as Sentry's read content from the call, not from an eve destination.
   it.each([
     ["public", true],
