@@ -13,6 +13,7 @@ import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
 import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isObject } from "#shared/guards.js";
@@ -22,6 +23,11 @@ export interface PreV27Checkpoint<C = SessionCheckpoint> {
   readonly checkpoint: C;
   /** Turns the earlier owner numbered: the next turn takes the next number. */
   readonly turnCount: number;
+  /**
+   * Runs of idle resumable tasks the import leaves behind. The successor sends each an end
+   * control once it holds the session; the model starts a new task on this build when it needs one.
+   */
+  readonly retiredRuns?: readonly TaskRunAddress[];
 }
 
 export type PreV27CheckpointImport =
@@ -40,8 +46,8 @@ export function isPreV27CheckpointVersion(version: unknown): version is number {
 
 /**
  * Reads a pre-v27 checkpoint in v27's shape. Pure, so the session workflow can run it before
- * validation. The earlier owner only hands off an idle session; a task it still tracks keeps the
- * session on that owner.
+ * validation. The earlier owner only hands off an idle session. An idle resumable task doesn't
+ * keep it there; a task still working, or with results the model hasn't read, does.
  */
 export function importPreV27Checkpoint(
   checkpoint: Readonly<Record<string, unknown>>,
@@ -109,8 +115,7 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
   if (typeof sessionState.sessionId !== "string") refuse("session id is missing");
   const state = session.state === undefined ? {} : readRecord(session, "state");
   const turnCount = readTurnCount(sessionState, state);
-  if (holdsRunningTask(state["eve.taskTable"]))
-    throw new SessionBusy("session holds a running task");
+  const retiredRuns = retireIdleTasks(state["eve.taskTable"]);
   // eve 0.69 kept history in the durable snapshot.
   const history = Array.isArray(checkpoint.history) ? checkpoint.history : session.history;
   if (!Array.isArray(history)) refuse("session history is missing");
@@ -163,6 +168,7 @@ function importCheckpoint(checkpoint: CheckpointRecord): PreV27Checkpoint<Checkp
       version: SESSION_CHECKPOINT_VERSION,
     },
     turnCount,
+    ...(retiredRuns.length > 0 && { retiredRuns }),
   };
 }
 
@@ -186,18 +192,42 @@ function readCount(value: unknown): number {
 }
 
 /**
- * Earlier owners hand off with tasks still running, including idle resumable ones; their runs
- * answer only the old owner.
+ * The runs of the earlier owner's idle resumable tasks, which this build leaves behind: on an
+ * earlier owner such a task keeps its run for the life of the session, so it never finishes.
+ * Results the model hasn't read, a task still working, or one whose run can't take an end control
+ * yet keep the session on its owner until that clears.
  */
-function holdsRunningTask(table: unknown): boolean {
-  if (table === undefined) return false;
+function retireIdleTasks(table: unknown): TaskRunAddress[] {
+  if (table === undefined) return [];
   if (!isObject(table) || !Array.isArray(table.tasks)) refuse("task table is malformed");
-  return table.tasks.some(
-    (task) =>
+  const tasks: readonly unknown[] = table.tasks;
+  // A finished task keeps its results, without a run, until the owner's next model step.
+  if (
+    tasks.some((task) => isObject(task) && Array.isArray(task.results) && task.results.length > 0)
+  )
+    throw new SessionBusy("session holds task results the model hasn't read");
+  return tasks.flatMap((task) => {
+    if (isObject(task) && task.run === undefined && !isWorking(task)) return [];
+    const run = isObject(task) ? task.run : undefined;
+    if (
       !isObject(task) ||
-      task.run !== undefined ||
-      (Array.isArray(task.held) && task.held.length > 0) ||
-      (Array.isArray(task.calls) && task.calls.length > 0),
+      isWorking(task) ||
+      task.resumable !== true ||
+      task.cancelled === true ||
+      !isObject(run) ||
+      run.started !== true ||
+      typeof run.hookToken !== "string" ||
+      typeof run.runId !== "string"
+    )
+      throw new SessionBusy("session holds a running task");
+    return [{ hookToken: run.hookToken, runId: run.runId }];
+  });
+}
+
+function isWorking(task: CheckpointRecord): boolean {
+  return (
+    (Array.isArray(task.held) && task.held.length > 0) ||
+    (Array.isArray(task.calls) && task.calls.length > 0)
   );
 }
 
