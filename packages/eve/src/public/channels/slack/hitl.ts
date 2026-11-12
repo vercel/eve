@@ -341,6 +341,8 @@ export type HitlFreeformModalMetadata = SlackSessionTarget & {
   readonly messageChannelId?: string;
   readonly messageTs: string;
   readonly requestId: string;
+  /** The click's `response_url`, when the card is ephemeral and only it can replace the card. */
+  readonly responseUrl?: string;
 };
 
 /**

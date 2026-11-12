@@ -82,6 +82,8 @@ interface ParsedBlockActionsPayload {
    * interactive controls are stripped.
    */
   readonly messageBlocks: readonly unknown[];
+  /** Whether the click came from an ephemeral message, which only its `response_url` can change. */
+  readonly ephemeral: boolean;
 }
 
 /**
@@ -140,11 +142,16 @@ export function parseBlockActionsPayload(
       user,
     })),
     channelId: channel,
+    ephemeral: isEphemeralClick(rawBody),
     installationTeamId: readInstallationTeamId(rawBody),
     threadTs,
     teamId,
     messageBlocks,
   };
+}
+
+function isEphemeralClick(raw: Record<string, unknown>): boolean {
+  return isObjectRecord(raw.container) && raw.container.is_ephemeral === true;
 }
 
 function isSharedBlockActionsPayload(
@@ -175,6 +182,7 @@ function parseSharedBlockActionsPayload(
       },
     })),
     channelId: body.channelId,
+    ephemeral: isEphemeralClick(body.raw),
     installationTeamId: readInstallationTeamId(body.raw),
     threadTs: body.threadTs,
     teamId: body.user?.teamId ?? body.teamId,
@@ -559,6 +567,13 @@ async function dispatchBlockAnswers(input: {
     },
     log,
   );
+  if (response.outcome === "delivered" && input.interaction.ephemeral) {
+    // The session can't edit an ephemeral card, so its click shows the answer right away.
+    const label = input.submission.actions[0]?.label ?? "Answered";
+    await settleHitlCard(input.interaction, input.deps, { label, text: label }).catch(
+      (error: unknown) => log.warn("failed to show the answer on an ephemeral card", { error }),
+    );
+  }
   if (response.outcome === "inactive") {
     await Promise.all([
       response.retirement,
@@ -638,6 +653,11 @@ async function openFreeformModal(input: {
     messageChannelId: input.interaction.channelId,
     messageTs,
     requestId,
+    // The submission carries no `response_url`, and only the click's can change an ephemeral card.
+    ...(input.interaction.ephemeral &&
+      input.freeformAction.responseUrl !== undefined && {
+        responseUrl: input.freeformAction.responseUrl,
+      }),
   };
 
   const promptText = readPromptTextFromBlocks(input.interaction.messageBlocks);
@@ -752,24 +772,30 @@ async function dispatchViewAnswer(input: {
   if (result === null) return;
 
   const cardChannelId = input.metadata.messageChannelId ?? channelId;
+  const settleCard = (label: string) =>
+    settleFreeformCard({
+      card: { label, text: label },
+      channelId: cardChannelId,
+      deps: input.deps,
+      installationTeamId: input.installationTeamId,
+      messageTs: input.metadata.messageTs,
+      responseUrl: input.metadata.responseUrl,
+    });
   const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx.from(input.metadata.continuationToken).respond(input.submission.answers, {
         auth: result.auth,
         state: withSlackResponder(undefined, input.submission.user.id),
       }),
-    {
-      retirePrompt: (label) =>
-        settleFreeformCard({
-          card: { label, text: label },
-          channelId: cardChannelId,
-          deps: input.deps,
-          installationTeamId: input.installationTeamId,
-          messageTs: input.metadata.messageTs,
-        }),
-    },
+    { retirePrompt: settleCard },
     log,
   );
+  if (response.outcome === "delivered" && input.metadata.responseUrl !== undefined) {
+    const text = input.submission.answers[0]?.text ?? "Answered";
+    await settleCard(text).catch((error: unknown) =>
+      log.warn("failed to show the answer on an ephemeral card", { error }),
+    );
+  }
   if (response.outcome === "inactive") {
     await Promise.all([
       response.retirement,
