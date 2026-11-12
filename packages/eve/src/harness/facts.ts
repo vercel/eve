@@ -24,17 +24,10 @@ export function fact<T extends Fact["type"]>(type: T, data: FactOf<T>["data"]): 
   return { data: defined(data as object), type } as FactOf<T>;
 }
 
-/**
- * Spend as `usage.recorded` carries it: every count, zero when unreported, a known cost, and
- * whether the cache reads went unreported, since readers would take that 0 as a reported miss.
- */
+/** Spend as `usage.recorded` carries it: every count, zero when unreported, and a known cost. */
 export function usageOf(counts: Partial<Usage>): Usage {
   return defined({
     cacheReadTokens: counts.cacheReadTokens ?? 0,
-    cacheReadUnreported:
-      counts.cacheReadTokens === undefined || counts.cacheReadUnreported === true
-        ? true
-        : undefined,
     cacheWriteTokens: counts.cacheWriteTokens ?? 0,
     costUsd: counts.costUsd,
     inputTokens: counts.inputTokens ?? 0,

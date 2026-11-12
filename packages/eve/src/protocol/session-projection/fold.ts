@@ -667,9 +667,8 @@ function withholdLarge(view: MutableView, row: SessionView["calls"][string]): vo
   };
 }
 
-/** Sums are plain counts: an unreported mark describes one record, never a total. */
-function addUsage(total: Usage | undefined, b: Usage): Usage {
-  const a = total ?? ZERO;
+function addUsage(a: Usage | undefined, b: Usage): Usage {
+  if (a === undefined) return b;
   const sum: { -readonly [K in keyof Usage]: Usage[K] } = {
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,

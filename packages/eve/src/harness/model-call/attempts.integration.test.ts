@@ -180,43 +180,6 @@ describe("model attempts", () => {
   });
 });
 
-describe("unreported usage", () => {
-  const answer = (usage: Extract<StreamPart, { type: "finish" }>["usage"]) =>
-    streamOf([...reply("Here it is.").slice(0, -1), { ...reply("").at(-1)!, usage } as StreamPart]);
-
-  it("marks cache reads the provider didn't report, so they don't read as a miss", async () => {
-    const facts = await runTurn(async () =>
-      answer({
-        inputTokens: { cacheRead: undefined, cacheWrite: undefined, noCache: 10, total: 10 },
-        outputTokens: { reasoning: undefined, text: 2, total: 2 },
-      }),
-    );
-
-    expect(facts.find((event) => event.type === "usage.recorded")?.data).toEqual({
-      kind: "model",
-      owner: { runId: "run_0" },
-      usage: { ...spent, cacheReadUnreported: true },
-    });
-  });
-
-  it("records no usage for an answer whose provider reported none", async () => {
-    const facts = await runTurn(async () =>
-      answer({
-        inputTokens: {
-          cacheRead: undefined,
-          cacheWrite: undefined,
-          noCache: undefined,
-          total: undefined,
-        },
-        outputTokens: { reasoning: undefined, text: undefined, total: undefined },
-      }),
-    );
-
-    expect(facts.at(-1)).toMatchObject({ data: { outcome: "completed" }, type: "model.settled" });
-    expect(facts.filter((event) => event.type === "usage.recorded")).toEqual([]);
-  });
-});
-
 describe("run attributes", () => {
   it("tags the turn's run with what its model call spent, through the sink it's given", async () => {
     const setAttributes = vi.fn(async () => {});
