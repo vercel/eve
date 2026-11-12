@@ -5,8 +5,9 @@ import { toErrorMessage } from "#shared/errors.js";
 
 // RFC 9110 hop-by-hop fields. Forwarded to the worker, they describe the
 // client's connection, not the pooled one to the worker: a client's
-// `Connection: close` meeting a response's `Connection: keep-alive` leaves the
-// worker socket half-closed in the pool, and the next request on it fails.
+// `Connection: close` meeting a response's `Connection: keep-alive` pools a
+// socket the worker already marked closing, so the next request on it gets an
+// empty 400.
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
