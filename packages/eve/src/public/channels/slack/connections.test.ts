@@ -9,6 +9,7 @@ import {
 import {
   parseSignInCancelTarget,
   SIGN_IN_CANCEL_ACTION_ID,
+  SIGN_IN_CONNECT_ACTION_ID,
 } from "#public/channels/slack/sign-in-cancel.js";
 
 describe("formatConnectionDisplayName", () => {
@@ -102,6 +103,7 @@ describe("buildAuthEphemeralBlocks", () => {
         elements: [
           {
             type: "button",
+            action_id: SIGN_IN_CONNECT_ACTION_ID,
             text: { type: "plain_text", text: "Connect Linear" },
             url: "https://connect.example.com/authorize/sca_abc",
             style: "primary",
