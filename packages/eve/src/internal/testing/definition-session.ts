@@ -126,6 +126,7 @@ export function definitionSession(
       })),
       preparedTools: [],
       subagentsByName: new Map(),
+      subagentsByNodeId: new Map(),
     },
     toolRegistry: { toolsByName },
     turnAgent: { id: "agent", model: input.model },

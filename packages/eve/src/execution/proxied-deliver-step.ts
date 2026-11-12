@@ -9,11 +9,11 @@ import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
-import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import { AuthKey, SenderAuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { isSteeringDelivery } from "#execution/session/input-queue.js";
+import { isCallerDelivery } from "#execution/session/input-queue.js";
 import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
   type PublishedSessionEvents,
@@ -87,18 +87,17 @@ async function routeProxiedDeliver(
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: RoutedDeliverPayload["parentAction"];
-  // A typed answer joins the open turn, so only the turn's own principal may
-  // send one, as only they steer it, and never a hook's continuation. Anyone
-  // else's text waits for the turn to end; their button answers still settle a
-  // request as its responder.
+  // A typed answer runs as the turn's caller, so only the turn's own principal
+  // may send one, and never a hook's continuation. Anyone else's text is a
+  // message for the turn; their button answers still settle a request as its
+  // responder.
   const resolveMessage =
     !hasDelegatedSessionContext(serializedContext) &&
     !(sourceDelivery.deliveryMetadata ?? []).some((metadata) => metadata.hook !== undefined) &&
-    isSteeringDelivery(
-      sourceDelivery,
-      { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },
-      { heldOnPerson: true },
-    );
+    isCallerDelivery(sourceDelivery, {
+      callerCallId: undefined,
+      principal: resolveTurnPrincipal(undefined, serializedContext),
+    });
   // Every payload routes against the same state, so a request a `ctx.ask()`
   // answer or typed reply resolved in an earlier payload is hidden from later
   // ones; it takes one answer, and later messages must reach the parent instead.
@@ -412,6 +411,9 @@ function joinAnswerToTurn(
       serializedContext[AuthKey.name] as DeliverHookPayload["auth"],
       answer.auth,
     );
+    // Only the turn's own caller types an answer into it, and text they type makes them the
+    // last to speak.
+    delete joined[SenderAuthKey.name];
   }
   if (answer.deliveryIds.length > 0) {
     const current = (joined[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];

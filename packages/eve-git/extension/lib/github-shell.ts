@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { getToken } from "@vercel/connect";
-import type { SessionAuthContext } from "eve/context";
+import { samePrincipal, type SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolAuthProvider, ToolContext } from "eve/tools";
 
@@ -57,7 +57,11 @@ interface GitHubConfigBase {
 
 /** Mints GitHub App installation tokens scoped to the declared repository or owner. */
 export interface GitHubAppConfig extends GitHubConfigBase {
-  /** The only access control: commands run only when it returns `true`. */
+  /**
+   * The only access control: commands run only when it returns `true`. In a shared session it
+   * is asked about the turn's caller and, when someone else spoke last, about that person too.
+   * The command runs only when it returns `true` for both.
+   */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
   /**
    * Installation permissions each minted token carries, such as `"contents:write"`.
@@ -80,7 +84,10 @@ export type GitHubConfig = GitHubAppConfig | GitHubUserConfig;
 export interface GitHubUserAuthorizeRequest {
   /** The parsed command, such as `["gh", "pr", "view", "7", "--repo", "acme/widgets"]`. */
   readonly argv: readonly string[];
-  /** The session's current caller, or `null` when the session has none. */
+  /**
+   * The person the command is checked for, or `null` when the session has none: the turn's
+   * caller, and with app tokens also whoever spoke last, when that is someone else.
+   */
   readonly auth: SessionAuthContext | null;
   /** Always `null`: user tokens cannot be restricted to the declared repository. Use app tokens for repository allowlists. */
   readonly repository: null;
@@ -117,6 +124,8 @@ interface GitHubShellDependencies {
   /** The calling tool's context, passed to `attribution`. */
   readonly context?: ToolContext;
   readonly auth?: SessionAuthContext | null;
+  /** Who sent the latest message the turn read; the tool's `ctx.session.auth.sender`. */
+  readonly sender?: SessionAuthContext | null;
   readonly getConnectToken?: (
     connector: string,
     params: {
@@ -210,6 +219,7 @@ export async function executeGitHubShell(
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const auth = dependencies.auth ?? null;
+  const sender = dependencies.sender === undefined ? auth : dependencies.sender;
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
   if (config.principalType === "user") {
@@ -238,6 +248,7 @@ export async function executeGitHubShell(
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
+  const scope = repository ? ` on ${repository}` : owner ? ` for ${owner}` : "";
   // The declaration is model-controlled and cannot narrow a user token.
   // Never let it satisfy a repository allowlist for an unrestricted lease.
   const allowed =
@@ -245,8 +256,19 @@ export async function executeGitHubShell(
       ? await config.authorize({ argv, auth, repository: null, token })
       : await config.authorize({ argv, auth, owner: owner!, repository, token });
   if (!allowed) {
+    throw new Error(`The current caller is not authorized to run this command${scope}.`);
+  }
+  // An app token is nobody's own, so `authorize` is the only check on who asks for the command.
+  // Another person's message can ask for it in the caller's turn, so they must pass it too. A
+  // user token is the caller's own: `ctx.getToken` hands it out only once the caller spoke last,
+  // or approved this call or an earlier one since anyone else spoke.
+  if (
+    config.principalType !== "user" &&
+    !samePrincipal(auth, sender) &&
+    !(await config.authorize({ argv, auth: sender, owner: owner!, repository, token }))
+  ) {
     throw new Error(
-      `The current caller is not authorized to run this command${repository ? ` on ${repository}` : owner ? ` for ${owner}` : ""}.`,
+      `The person who spoke last in this turn is not authorized to run this command${scope}. Ask the person whose message started this turn to confirm it, and retry only after a reply from them that plainly confirms it.`,
     );
   }
   const coAuthor =

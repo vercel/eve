@@ -584,7 +584,7 @@ describe("SessionExecution checkpoints", () => {
 
   // #4923: another person's answer can resume a parked turn; the turn stays
   // its owner's, so only the owner's text steers it.
-  it("keeps a resumed turn's owner when someone else's answer resumes it", async () => {
+  it("lets another person's message interrupt generation in a turn someone else's answer resumed", async () => {
     const alice: SessionAuthContext = {
       attributes: {},
       authenticator: "test",
@@ -641,7 +641,7 @@ describe("SessionExecution checkpoints", () => {
         payloads: [{ answers: [{ interactionId: "limit-1", optionId: "continue" }] }],
       },
     });
-    expect(steered).toEqual([false, true]);
+    expect(steered).toEqual([true, true]);
   });
 
   it.each([
@@ -1664,7 +1664,7 @@ describe("SessionExecution checkpoints", () => {
     });
   });
 
-  it("keeps another principal's message out of a turn held on its task until the task reports", async () => {
+  it("lets another principal's message steer a turn held on its task", async () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -1752,10 +1752,74 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "park", settled: { output: "Here is the research." } });
 
-    // Alice's turn resumes only once her task reported, with no new delivery, so it keeps her auth.
-    expect(resumed).toEqual([{ input: undefined, reportedTaskIds: [created.taskId] }]);
-    // Bob's message waits for a turn of its own, which carries his auth.
-    expect(queue.takeNext()).toMatchObject({ delivery: bobsMessage, kind: "turn" });
+    // Bob's message interrupts the wait and joins Alice's turn, as hers would.
+    expect(resumed).toMatchObject([{ input: { delivery: bobsMessage } }]);
+    expect(queue.takeNext()).toBeUndefined();
+  });
+
+  it("reads each person's queued message that joined a turn waiting on a request, one step each", async () => {
+    const sessionState = state("");
+    const person = (principalId: string) => ({
+      attributes: {},
+      authenticator: "slack",
+      principalId,
+      principalType: "user" as const,
+    });
+    const message = (principalId: string, text: string): DeliverHookPayload => ({
+      auth: person(principalId),
+      kind: "deliver",
+      payloads: [{ message: text }],
+      turnPolicy: "queue",
+    });
+    // Both arrive while the step that asks for the approval runs.
+    const arrived: SessionInboxPayload[] = [
+      message("BOB", "Use staging."),
+      message("CAROL", "Bump the version."),
+    ];
+    const inbox: SessionInbox = { ...idleInbox(), drain: () => arrived.splice(0) };
+    const inputs: TurnStepInput["input"][] = [];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          attemptIds: [],
+          on: "interaction",
+          requestIds: ["approval-1"],
+          serializedContext: input.serializedContext,
+          sessionState,
+        })),
+      )
+      .mockImplementation(
+        turnStepWork(async (input) => {
+          inputs.push(input.input);
+          return input.input?.inputOnly === true
+            ? { action: "continue", serializedContext: input.serializedContext, sessionState }
+            : {
+                action: "done",
+                output: "done",
+                serializedContext: input.serializedContext,
+                sessionState,
+              };
+        }),
+      );
+
+    await expect(
+      createExecution({ capabilities: { requestInput: true }, inbox, sessionState }).runTurn({
+        delivery: {
+          auth: person("ALICE"),
+          kind: "deliver",
+          payloads: [{ message: "Deploy." }],
+        },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    // Bob's step only reads, and Carol's message joins the next instead of waiting for the turn
+    // to end.
+    expect(inputs).toEqual([
+      { delivery: expect.objectContaining({ auth: person("BOB") }), inputOnly: true },
+      { delivery: expect.objectContaining({ auth: person("CAROL") }) },
+    ]);
   });
 
   it("cancels the tasks still working when a turn ends anyway, so none outlives it", async () => {
@@ -1958,6 +2022,71 @@ describe("SessionExecution checkpoints", () => {
     const [announced] = vi.mocked(applyRunMessagesStep).mock.invocationCallOrder;
     const [cancelled] = vi.mocked(cancelTasksStep).mock.invocationCallOrder;
     expect(announced).toBeLessThan(cancelled!);
+  });
+
+  it("keeps a queued message sent once a turn stopped waiting on a request for the next turn", async () => {
+    const sessionState = state("");
+    const person = (principalId: string) => ({
+      attributes: {},
+      authenticator: "slack",
+      principalId,
+      principalType: "user" as const,
+    });
+    const message = (principalId: string, text: string): DeliverHookPayload => ({
+      auth: person(principalId),
+      kind: "deliver",
+      payloads: [{ message: text }],
+      turnPolicy: "queue",
+    });
+    // Bob and Carol write while the step that asks for the approval runs.
+    const arrived: SessionInboxPayload[] = [
+      message("BOB", "Use staging."),
+      message("CAROL", "Bump the version."),
+    ];
+    const inbox: SessionInbox = { ...idleInbox(), drain: () => arrived.splice(0) };
+    const queue = new SessionInputQueue([]);
+    const inputs: TurnStepInput["input"][] = [];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          attemptIds: [],
+          on: "interaction",
+          requestIds: ["approval-1"],
+          serializedContext: input.serializedContext,
+          sessionState,
+        })),
+      )
+      .mockImplementation(
+        turnStepWork(async (input) => {
+          inputs.push(input.input);
+          // Dave writes once Bob's message joined the turn and it no longer waits on the approval.
+          if (inputs.length === 1) arrived.push(message("DAVE", "Add the changelog."));
+          return input.input?.inputOnly === true
+            ? { action: "continue", serializedContext: input.serializedContext, sessionState }
+            : {
+                action: "done",
+                output: "done",
+                serializedContext: input.serializedContext,
+                sessionState,
+              };
+        }),
+      );
+
+    await expect(
+      createExecution({ capabilities: { requestInput: true }, inbox, queue, sessionState }).runTurn(
+        {
+          delivery: { auth: person("ALICE"), kind: "deliver", payloads: [{ message: "Deploy." }] },
+        },
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(inputs).toEqual([
+      { delivery: expect.objectContaining({ auth: person("BOB") }), inputOnly: true },
+      { delivery: expect.objectContaining({ auth: person("CAROL") }) },
+    ]);
+    expect(queue.takeNext()).toMatchObject({ delivery: { auth: person("DAVE") } });
   });
 });
 

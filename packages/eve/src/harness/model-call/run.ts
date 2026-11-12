@@ -72,6 +72,10 @@ export async function runModelStep(
   const failed = await prepareModelCall(step, prepared);
   if (failed !== undefined) return failed;
   const prompt = commitTurnInput(step, prepared);
+  // More input waits to be read: the model runs once the turn has read it all.
+  if (step.config.inputOnly === true) {
+    return { next: step.runStep, session: step.session, steered: true };
+  }
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;

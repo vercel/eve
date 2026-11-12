@@ -3,7 +3,7 @@ import type { EveEvalAssertions, EveEvalContext, EveEvalSession, EveEvalTurn } f
 
 import { SAY } from "../../agent/lib/hitl/respond.ts";
 
-export { REPLY, SAY } from "../../agent/lib/hitl/respond.ts";
+export { REPLY, SAY, taskResultsReply } from "../../agent/lib/hitl/respond.ts";
 
 export const ALICE = "alice";
 export const BOB = "bob";
@@ -31,6 +31,11 @@ export function aliceSession(t: EveEvalContext): Promise<EveEvalSession> {
 
 export const asAlice = as(ALICE);
 export const asBob = as(BOB);
+/**
+ * Bob in the session, sending as a channel does by default: his message joins a running turn.
+ * The eval client queues messages unless asked to steer.
+ */
+export const bobSteers = { ...asBob, turnPolicy: "steer" as const };
 export const asReleaseManager = as(RELEASE_MANAGER);
 
 /** The one approval request `turn` raised for `toolName`. */
@@ -50,9 +55,10 @@ export function answers(optionId: string, ...requests: readonly Interaction[]) {
 }
 
 /**
- * The model never runs while a request of the turn's own is open: no
+ * With no new message, the model never runs while a request of the turn's own is open: no
  * `model.started` falls between the request's `interaction.opened` and its
- * `interaction.settled` (or the end of the stream, while it is still open).
+ * `interaction.settled` (or the end of the stream, while it is still open). A message that joins
+ * the turn lets the model run while the request stays open; see {@link expectWaitsAsTask}.
  */
 export function expectNoModelCallWhileOpen(on: EveEvalAssertions, interactionId: string) {
   on.eventsSatisfy(`no model run starts while ${interactionId} is open`, (events) =>
@@ -151,6 +157,29 @@ export async function budgetQuestion(t: EveEvalContext) {
   const held = await session.send(SAY.statusNote, asAlice);
   const request = approvalFor(held, "budget");
   return { held, request, session };
+}
+
+/**
+ * A message joined the turn while `request` waited: the request stays open, its call hasn't
+ * settled, and the turn pauses on it again without settling.
+ */
+export function expectWaitsAsTask(
+  turn: EveEvalTurn,
+  request: Pick<Interaction, "call" | "interactionId">,
+) {
+  turn.notEvent("interaction.settled", { data: { interactionId: request.interactionId } });
+  if (request.call !== undefined) {
+    turn.notEvent("call.settled", { data: { callId: request.call.callId } });
+  }
+  turn.event("turn.paused", {
+    data: {
+      awaiting: (awaiting) =>
+        awaiting.some(
+          (entry) => "interactionId" in entry && entry.interactionId === request.interactionId,
+        ),
+    },
+  });
+  turn.notEvent("turn.settled");
 }
 
 /** The turn is held on a person: it pauses for an interaction, and doesn't settle. */

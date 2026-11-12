@@ -3,6 +3,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { runInWorkflowStep } from "#context/workflow-step.js";
 import type { SessionContext } from "#context/session-context.js";
+import { recordSender } from "#execution/session/principal.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -43,6 +44,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     const context = new ContextContainer();
     context.set(AuthKey, input.session.auth.current);
     context.set(InitiatorAuthKey, input.session.auth.initiator);
+    recordSender(context, input.session.auth.current, input.session.auth.sender);
     context.set(SessionIdKey, input.session.id);
     context.setVirtualContext(SessionKey, { ...input.session, sessionId: input.session.id });
     context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));

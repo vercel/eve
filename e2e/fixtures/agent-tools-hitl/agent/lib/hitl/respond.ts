@@ -17,7 +17,11 @@ export const SAY = {
   checkAndPublish: "Alice asks to check her access and publish the draft together.",
   publish: "Alice asks to publish the draft.",
   hello: "Alice changes her mind and asks for a short hello instead.",
+  dropB: "Alice says change B is no longer needed.",
   bobStatus: "Bob asks for a status update.",
+  bobSpeakers: "Bob adds a note and asks who is speaking.",
+  bobCallerToken: "Bob adds that the release should go out with Alice's release token.",
+  bobReleaseNote: "Bob adds that the release note should be posted now.",
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
   deadline: "Alice adds that the note should mention the deadline.",
@@ -25,7 +29,7 @@ export const SAY = {
 
 export const REPLY = {
   hello: "Hello, Alice.",
-  helloAfterAuthorization: "Hello, Alice. I dropped the authorization you no longer need.",
+  droppedB: "Dropped change B.",
   bobStatus: "Bob's status update is ready.",
   summary: "Summary written.",
   statusNote: "Status note ready.",
@@ -35,7 +39,12 @@ export const REPLY = {
 
 const STALE_ANSWER_PREFIX =
   "The user submitted the following response to an earlier interactive prompt.";
-const SIGN_IN_DROPPED = "was cancelled because the user sent a new message instead";
+const TASK_RESULT = /<task_result id="[^"]+" tool="([^"]+)" status="([^"]+)">/gu;
+
+/** The reply to `task.result` messages: each task's tool and status. */
+export function taskResultsReply(results: readonly (readonly [tool: string, status: string])[]) {
+  return `Task results: ${results.map(([tool, status]) => `${tool} ${status}`).join(", ")}.`;
+}
 
 /** Each attempt at a scripted call gets a new id, as a provider's would: `<id>.<attempt>`. */
 let attempts = 0;
@@ -63,8 +72,6 @@ export function respond(request: MockModelRequest): MockModelResponse {
     const missing = calls.filter((tool) => result(scriptId(tool.id!)) === undefined);
     return missing.length > 0 ? { toolCalls: missing } : { text: answer() };
   };
-  const allText = request.messages.map((message) => message.text).join("\n");
-
   const scripts: Record<string, () => MockModelResponse> = {
     [SAY.changeA]: () => run([call("a", "change-a")], () => `Change A: ${outcome("a")}.`),
     [SAY.changesAB]: () =>
@@ -120,10 +127,26 @@ export function respond(request: MockModelRequest): MockModelResponse {
         [call("probe", "auth-probe", { marker: "hitl" }), call("publish", "publish-draft")],
         () => `Access check: ${outcome("probe")}. Publish: ${outcome("publish")}.`,
       ),
-    [SAY.hello]: () => ({
-      text: allText.includes(SIGN_IN_DROPPED) ? REPLY.helloAfterAuthorization : REPLY.hello,
-    }),
+    [SAY.hello]: () => ({ text: REPLY.hello }),
+    // Drops change B, which waits for its approval as a task, by the id its receipt names.
+    [SAY.dropB]: () =>
+      run(
+        [call("drop-b", "eve__task_cancel", { taskId: receiptTaskId(result("b")?.output) })],
+        () => REPLY.droppedB,
+      ),
     [SAY.bobStatus]: () => ({ text: REPLY.bobStatus }),
+    [SAY.bobSpeakers]: () =>
+      run([call("speakers", "speakers")], () => `Speakers: ${outcome("speakers")}.`),
+    [SAY.bobCallerToken]: () =>
+      run(
+        [call("caller-token", "caller-token")],
+        () => `Caller token: ${outcome("caller-token")}.`,
+      ),
+    [SAY.bobReleaseNote]: () =>
+      run(
+        [call("release-note", "release-note")],
+        () => `Release note: ${outcome("release-note")}.`,
+      ),
     [SAY.spendBudget]: () => ({
       text: REPLY.summary,
       usage: { inputTokens: 1, outputTokens: 1_000_000 },
@@ -136,12 +159,27 @@ export function respond(request: MockModelRequest): MockModelResponse {
   };
   scripts[SAY.deadline] = scripts[SAY.statusNote]!;
 
+  // A call that waited on a person as a task reports in a `task.result` message once it runs or
+  // is denied; `userMessages` leaves those out, and the `[Tasks]` note follows them.
+  const latest = [...request.messages]
+    .reverse()
+    .find((message) => message.role === "user" && !message.text.startsWith("[Tasks]"));
+  const results = [...(latest?.text.matchAll(TASK_RESULT) ?? [])].map(
+    ([, tool, status]) => [tool!, status!] as const,
+  );
+  if (results.length > 0) return reply({ text: taskResultsReply(results) });
+
   for (const message of [...request.userMessages].reverse()) {
     if (message.startsWith(STALE_ANSWER_PREFIX)) return reply({ text: REPLY.staleAnswer });
     const script = scripts[message];
     if (script !== undefined) return reply(script());
   }
   throw new Error(`No hitl script for: ${JSON.stringify(request.userMessages)}`);
+}
+
+/** The task id a waiting call's receipt names. */
+function receiptTaskId(output: unknown): string | undefined {
+  return /Started task ([\w-]+)\./u.exec(JSON.stringify(output ?? ""))?.[1];
 }
 
 function scriptId(id: string): string {

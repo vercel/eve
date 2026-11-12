@@ -8,7 +8,7 @@ import { resolveToolCallInputObject } from "#harness/coordination.js";
 export interface StoppedCall {
   readonly call: ApprovedCall["call"];
   readonly connections: readonly string[];
-  readonly approval?: Pick<ApprovedCall, "interactionId" | "responder">;
+  readonly approval?: Pick<ApprovedCall, "confirmedBy" | "interactionId" | "responder">;
 }
 
 /** Resolves the sign-ins that stopped calls. */

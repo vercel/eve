@@ -7,8 +7,19 @@ const READ_STATUS =
   `Alice is checking her draft. Call the read-draft-status tool exactly once with marker "${MARKER}". ` +
   "After the tool returns, tell Alice the status and marker from its result.";
 
-/** The order a completed status read ends `turnId` in: its call, then a reply naming the status. */
-function statusReadOrder(turnId: string, callId: string): EveEvalEventMatch[] {
+/**
+ * The order a status read ends `turnId` in: its call, then a reply naming the status, then the
+ * turn's end. A turn whose approval still waits pauses on it instead of settling.
+ */
+function statusReadOrder(
+  turnId: string,
+  callId: string,
+  end: EveEvalEventMatch = {
+    type: "turn.settled",
+    data: { turnId, outcome: "completed" },
+    count: 1,
+  },
+): EveEvalEventMatch[] {
   return [
     { type: "call.settled", data: { callId, outcome: "completed" }, scope: { turnId }, count: 1 },
     {
@@ -22,7 +33,7 @@ function statusReadOrder(turnId: string, callId: string): EveEvalEventMatch[] {
       scope: { turnId },
       count: 1,
     },
-    { type: "turn.settled", data: { turnId, outcome: "completed" }, count: 1 },
+    end,
   ];
 }
 
@@ -57,7 +68,7 @@ export default [
   }),
   defineEval({
     description:
-      "An ungated tool follow-up steers a held approval, cancels it, and completes (#3494).",
+      "An ungated tool follow-up joins a held approval's turn and gets its reply, and the approval stays open (#3494).",
     tags: ["hitl", "continuation", "regression", "user-message", "tool-result"],
     timeoutMs: 120_000,
     async test(t) {
@@ -72,7 +83,7 @@ export default [
       t.log(`Original gate approval is pending: ${approval.interactionId}`);
 
       // When the user moves on and asks to read the draft status instead. The
-      // approval holds the turn, so this message steers it.
+      // approval holds the turn, so this message joins it.
       const live = await session.start(
         `Alice will review the account change later. ${READ_STATUS}`,
       );
@@ -81,7 +92,6 @@ export default [
       t.log(`Follow-up tool completed before waiting for its reply: ${JSON.stringify(result)}`);
       const received = await live.waitForEvent("delivery.consumed");
       const { turnId } = received.data;
-      await live.waitForEvent("turn.settled", { data: { turnId } });
       const followup = await live.result();
       followup.expectOk();
       followup.calledTool("read-draft-status", { status: "completed", count: 1 });
@@ -90,16 +100,14 @@ export default [
       followup.eventOrder([
         // The follow-up joins the held turn instead of starting one.
         { type: "delivery.consumed", data: { turnId }, count: 1 },
-        ...statusReadOrder(turnId, result.callId),
+        ...statusReadOrder(turnId, result.callId, { type: "turn.paused", data: { turnId } }),
       ]);
       followup.calledTool("gate", { status: "completed", count: 0 });
       followup.notEvent("interaction.opened");
-      // Then the steer cancelled the account change instead of leaving it open.
-      followup.event("interaction.settled", {
-        count: 1,
-        data: { interactionId: approval.interactionId, outcome: "withdrawn" },
-      });
-      t.check(session.pendingInteractions.length, equals(0));
+      // Then the account change still waits for its approval, and the turn doesn't end.
+      followup.notEvent("interaction.settled", { data: { interactionId: approval.interactionId } });
+      followup.notEvent("turn.settled");
+      t.check(session.pendingInteractions.length, equals(1));
     },
   }),
 ];

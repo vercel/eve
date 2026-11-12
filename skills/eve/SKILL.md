@@ -23,6 +23,10 @@ Start with `node_modules/eve/docs/README.md`. It contains the full
 index and recommended reading order. Before writing any eve code, read the
 relevant guide there first.
 
+If more than one person can reach a session, such as a Slack thread or a
+GitHub issue, read the Shared sessions section of
+`node_modules/eve/docs/concepts/security-model.md` before writing tools.
+
 ## One rule to know before reading
 
 A `defineDynamic` function runs before every model call, not once per turn.

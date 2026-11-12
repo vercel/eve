@@ -520,14 +520,15 @@ During `eve dev`, packages listed in `externalDependencies` use normal Node.js r
 
 ## Where adjacent settings live
 
-| Concern                       | Lives in                                                                         |
-| ----------------------------- | -------------------------------------------------------------------------------- |
-| Instructions prompt           | `agent/instructions.md`, [Instructions](./instructions)                          |
-| Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools)                                             |
-| Agent-wide approval policy    | `approval` in `agent.ts`, [Human-in-the-Loop](./human-in-the-loop)               |
-| Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection) |
-| Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox)                                           |
-| Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./observability/instrumentation)     |
+| Concern                       | Lives in                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| Instructions prompt           | `agent/instructions.md`, [Instructions](./instructions)                                           |
+| Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools)                                                              |
+| Agent-wide approval policy    | `approval` in `agent.ts`, [Human-in-the-Loop](./human-in-the-loop)                                |
+| Shared sessions               | `approval: steered()` in `agent.ts`, [Shared sessions](./concepts/security-model#shared-sessions) |
+| Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection)                  |
+| Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox)                                                            |
+| Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./observability/instrumentation)                      |
 
 ## What to read next
 

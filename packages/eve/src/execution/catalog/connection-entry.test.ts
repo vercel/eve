@@ -190,7 +190,7 @@ describe("connection tool call", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: user("alice"), initiator: user("alice") },
+      auth: { current: user("alice"), initiator: user("alice"), sender: user("alice") },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });

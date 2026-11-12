@@ -23,19 +23,20 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ tenantId: z.string(), chargeId: z.string(), amount: z.number() }),
-  approval: auto(), // or always() / once() / never() / a policy
+  approval: auto(), // or always() / once() / never() / steered() / a policy
   async execute(input) {
     return refund(input);
   },
 });
 ```
 
-| Helper     | Behavior                                                                     |
-| ---------- | ---------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                           |
-| `once()`   | Remember approval for this tool for the rest of the session.                 |
-| `always()` | Require approval before every call.                                          |
-| `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
+| Helper                                                   | Behavior                                                                                |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `never()`                                                | Never require approval (the default when omitted).                                      |
+| `once()`                                                 | Remember approval for this tool for the rest of the session.                            |
+| `always()`                                               | Require approval before every call.                                                     |
+| `auto()`                                                 | Ask a decision model whether to run the exact call or require user approval.            |
+| [`steered()`](#ask-the-caller-after-someone-else-speaks) | In a shared session, ask the turn's caller before a call made after someone else spoke. |
 
 Rules:
 
@@ -107,13 +108,17 @@ Channels show this prompt in their approval UI. Slack shows it as the title of o
 
 When the decision depends on the input, pass a function. It receives `session`, the same as `ctx.session` in `execute`, plus `{ toolName, toolInput, callId, abortSignal }`. Connection tools also get `toolAnnotations`.
 
-This policy denies cross-tenant calls, then requires approval only above an amount:
+This policy denies cross-tenant calls, then requires approval only above an amount. It checks the person who sent the latest message too, because in a shared session that can be someone other than the caller:
 
 ```ts
 approval: ({ session, toolInput }) => {
   const callerTenant = session.auth.current?.attributes.tenantId;
+  const senderTenant = session.auth.sender?.attributes.tenantId;
   if (callerTenant === undefined || callerTenant !== toolInput?.tenantId) {
     return { type: "denied", reason: "Caller cannot access this tenant." };
+  }
+  if (senderTenant !== callerTenant) {
+    return { type: "denied", reason: "The latest message came from outside this tenant." };
   }
   return (toolInput?.amount ?? 0) > 1000 ? "user-approval" : "not-applicable";
 },
@@ -132,7 +137,7 @@ The policy returns an `ApprovalStatus`, directly or as a promise:
 When you write a policy:
 
 - Pass `abortSignal` to asynchronous work, so the work stops with the turn.
-- Check `session.auth.current` for the caller of the current turn, or `session.auth.initiator` for the caller that started the session.
+- Check `session.auth.current` for the caller of the current turn, and `session.auth.sender` for who sent the latest message. They differ in a [shared session](/docs/concepts/security-model#shared-sessions). `session.auth.initiator` is the caller that started the session.
 - Handle a `toolInput` of `undefined`.
 
 A denied call never starts, including when the policy denies an approved call on its recheck. Its `call.settled` event has `outcome: "rejected"`, `cause: { policy: "approval" }`, and a `TOOL_EXECUTION_DENIED` output. A tool that runs and throws ends with `outcome: "failed"` instead.
@@ -177,6 +182,19 @@ const askOnce = once();
 approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx) : undefined),
 ```
 
+To ask the turn's caller before any call made after someone else spoke, set `approval: steered()` in `agent.ts`, as in [Ask the caller after someone else speaks](#ask-the-caller-after-someone-else-speaks). A policy of your own can call `steered()` and still return its own status, because `steered()` marks the call whatever status wins:
+
+```ts
+import { steered } from "eve/tools/approval";
+
+const askCaller = steered();
+// ...
+approval: (ctx) => {
+  askCaller(ctx); // ask the caller after someone else speaks
+  return ctx.toolName.startsWith("billing__") ? "user-approval" : undefined;
+},
+```
+
 `auto()` works here too, but it runs a decision model before every call, including reads, and asks a person when the model errors, times out, or the input is over 64 KB. A direct `invokeTool` call it would ask about is rejected. Put cheap rules first and call `auto()` only for the calls that need it.
 
 - Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
@@ -193,6 +211,7 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 - A later denial of a `once()` prompt replaces the approval, so the next call asks again.
 - When one message answers several of those prompts, a denial among the answers wins.
 - A `once()` approval covers later calls, not other approvals already waiting. Each waiting approval needs its own answer.
+- A `once()` approval doesn't depend on who spoke. In a shared session it keeps covering the tool after someone else speaks; use [`steered()`](#ask-the-caller-after-someone-else-speaks) for consent that ends when someone else speaks.
 
 eve remembers only prompts that `once()`'s own status asked for. It remembers nothing for an `always()` prompt, or for a wrapping policy that calls `once()` but returns a different status. When you wrap `once()`, pass the policy context through and return its status object unchanged.
 
@@ -240,22 +259,13 @@ The `response` policy receives:
 
 The policy runs for both decisions, so a rejected responder can neither approve nor deny. `{ status: "rejected", reason }` keeps the request open for another eligible responder. When a policy only checks who approves, allow every `deny`, so anyone can dismiss the request.
 
-In a shared thread, `session.initiator`, who started the session, can differ from `request.principal`, who asked for this call. To let only the requester answer, compare every identity field of the two:
+In a shared thread, `session.initiator`, who started the session, can differ from `request.principal`, who asked for this call. To let only the requester answer, compare the two with `samePrincipal` from `eve/context`. It compares people the way eve's own checks do: by `authenticator`, `issuer`, `principalType`, and `principalId`.
 
 ```ts title="agent/tools/publish_release.ts"
+import { samePrincipal } from "eve/context";
 import { defineTool } from "eve/tools";
-import type { SessionAuthContext } from "eve/context";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
-
-function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {
-  return (
-    a.authenticator === b.authenticator &&
-    a.issuer === b.issuer &&
-    a.principalType === b.principalType &&
-    a.principalId === b.principalId
-  );
-}
 
 export default defineTool({
   description: "Publish a release.",
@@ -312,6 +322,47 @@ Traces record both people:
 | Tool     | `agent.tool.approver.type`, `agent.tool.approver.id`           | The approver of an approved call |
 
 The ids are recorded only when the trace policy records both inputs and outputs, and the conversation is public or runs in development. Otherwise, only the type is recorded.
+
+### Approvals for a person's identity
+
+In a [shared session](/docs/concepts/security-model#shared-sessions), a call that needs the caller's identity after someone else spoke asks the caller first. Such a call reads a user-scoped token or calls a `forwardPrincipal` connection. eve opens an ordinary approval, with `request.kind: "approval"`, for the caller:
+
+- The prompt names the call by its tool's title, never by text the model wrote. It quotes the latest message from someone else in the turn, then lists the input the call runs with: `Approve Deploy with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. The latest message from someone else, from "bob", reads: "ship it". It runs with "env": "prod".` The sender's ID, the quote, input keys, and values are JSON-escaped, and the quote and input are shortened, so none of them can pass for eve's text.
+- The prompt shows every top-level input field. A long value is cut on its own, and inside an array or object each item is cut on its own, with a note of how many characters are hidden, so it can't hide what comes after it. Only an input with more than 100 fields is cut short, with a note that counts the fields left out and names the first five.
+- In a local subagent, the quote can come from the turn that delegated to it, since the subagent's own messages come from the delegating agent.
+- Slack shows the whole prompt beside the approval card, whose body holds only its start.
+- The event's `audience.principalIds` names that person. Only they can approve it, whatever the tool's `response` policy. Anyone signed in can cancel it.
+- Approving runs the tool again from its first line, with that person's identity. Anything the tool did before it asked for the token runs again.
+- Cancelling fails the call. The model reads that the request was cancelled, and that anything the call did before it needed the identity already happened.
+
+The call starts before it asks, so a client sees `call.started`, then the approval's `interaction.opened` about the same `callId`, then `turn.paused`. After the approval, the call emits `call.started` again and ends with one `call.settled`. Cancelling ends it with a failed `call.settled`.
+
+The caller's approval covers that call and later calls that use the caller's identity, until anyone other than the caller sends a message. The next message from someone else, including the same person again, makes eve ask again. Approving a request after someone else's newer message covers only that call. No approval changes `ctx.session.auth.sender`; only a call the caller approves reads the caller there.
+
+A message that arrives while the request is open leaves it open, like any approval, and the call waits as a task. Where the session can't ask for input, and in workflow tools, the call fails with `reason: "confirmation_required"` instead. A remote agent call fails with a terminal error.
+
+### Ask the caller after someone else speaks
+
+`steered()` applies the rule from [Approvals for a person's identity](#approvals-for-a-persons-identity) to any call, whether or not it uses credentials: after someone else's message joins the turn, the call asks the turn's caller before it runs. Set it in `agent.ts` to cover every call the model makes, or on one tool:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { steered } from "eve/tools/approval";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: steered(),
+});
+```
+
+- In a session with one person, `steered()` never asks.
+- After someone else spoke, eve asks before the call starts, with the same request as for the caller's identity: the same prompt, quoting the latest message from someone else, and `audience.principalIds` naming the caller. Only the caller can approve it, and anyone signed in can cancel it. A client sees the approval's `interaction.opened` with no `call.started` before it.
+- An approved call runs and reads the caller as `ctx.session.auth.sender`. The approval also covers the caller's later calls, including ones that use their identity, until anyone other than the caller sends a message. Those later calls still read the other person as `auth.sender`, so a tool's own sender check can still refuse them.
+- Cancelling denies the call, which never ran: it ends with a rejected `call.settled` and `TOOL_EXECUTION_DENIED`.
+- In a session that can't request input, eve denies the call instead, and the model reads that it should ask the caller to confirm. The turn goes on.
+- A tool's own `approval` still applies. When the caller answers it, eve doesn't ask again. When someone else answers it, eve asks the caller before the call runs.
+
+`steered()` gates new calls only. It doesn't stop the model from answering from what is already in the conversation, or work that started before someone else spoke. An agent-wide `steered()` doesn't gate the calls that no agent policy gates, listed in [Gate every call from one policy](#gate-every-call-from-one-policy).
 
 ### Skipping approval for schedule-dispatched turns
 
@@ -394,11 +445,17 @@ For `ctx.ask()` questions and prompts passed up from subagents, a follow-up mess
 
 A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call that the turn waits on. A question from such a call, such as `ask_question`'s, ends as `withdrawn`. The model reads the message after those calls finish.
 
-For approvals, a follow-up message that matches no option steers the turn, even with `turnPolicy: "queue"`, because the turn can't end until the person acts:
+Only the person the turn serves answers a request by text. Text from anyone else that matches an option is an ordinary message.
 
-- eve withdraws every unanswered approval. The request ends as `withdrawn`, its call ends as `rejected` without running, and the model reads the message next.
-- Approvals that already have an answer use that answer, so approved calls still run.
-- A message from anyone other than the person the turn serves waits until the turn ends.
+While the turn waits on an approval or a sign-in it asked for, a message that answers nothing joins the turn, even with `turnPolicy: "queue"`, because the turn can't end until the person acts. The message joins whoever sends it, as long as the channel lets them into the session:
+
+- Approvals that already have an answer use that answer, so approved calls run before the model reads the message.
+- Each unanswered approval and each sign-in stays open, and its card keeps working. The call that waits on it becomes a [task](/docs/tools/tasks#calls-that-wait-on-a-person). The model reads a receipt as the call's result, beside the results of the step's other calls, and then reads the message.
+- When the person approves or completes the sign-in, the call runs, and its result reaches the model as a `task.result` message. A denial reaches the model the same way and says the call didn't run.
+- The model can drop a waiting call with `eve__task_cancel`. Its approval or sign-in ends as `withdrawn`, and the call doesn't run.
+- The turn doesn't end while a call waits. Cancelling the turn ends the approvals as `interrupted`.
+
+A call that waits runs as the model made it. It reads the person who spoke last before the call as `ctx.session.auth.sender`, whoever spoke since. When the turn's caller approves the call, it runs as the caller. Completing a sign-in isn't an approval, so a call that waited only for a sign-in keeps the sender it was asked under. A call that needs the caller's identity asks them first; see [Approvals for a person's identity](#approvals-for-a-persons-identity).
 
 ### Request kinds
 
@@ -414,7 +471,7 @@ When a subagent asks for input, its parent session passes the request on as its 
 
 A message from the parent agent never answers a subagent's tool approval or session-limit request, even when its text matches an option. Only a person's structured answer, sent through the parent session, answers these requests. The subagent receives the parent's message as an ordinary message:
 
-- The message steers the turn past a waiting approval, which ends as `withdrawn`.
+- The message joins the turn, and a waiting approval stays open until a person answers it.
 - The message waits behind a session-limit request until a person answers that request.
 
 ### Several requests at once

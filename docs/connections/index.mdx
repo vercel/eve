@@ -247,7 +247,7 @@ eve gets the current user's token before each tool call. If that user hasn't sig
 
 `eve__search` never asks for sign-in. When a server refuses to list tools without a token, search shows the connection as one result named after it, such as `linear`. Calling that name or any of its tools asks for sign-in. See [When eve asks for sign-in](/docs/connections/mcp#when-eve-asks-for-sign-in).
 
-A sign-in keeps the turn open until the user connects, the turn is cancelled, or the user sends another message. That message steers the turn: the sign-in ends as `withdrawn`, and the model reads the message next. Messages from other people in a shared thread wait until the turn ends. A completed sign-in continues the turn as the person who started it.
+A sign-in keeps the turn open until the user connects or the turn is cancelled. A message sent meanwhile, by the user or by anyone else in a shared thread, joins the turn and leaves the sign-in open. The call that needs the sign-in waits as a [task](/docs/tools/tasks#calls-that-wait-on-a-person), and the model reads the message. Once the user connects, the call runs, and its result reaches the model as a `task.result` message. A later call that needs the same sign-in waits on the same one. A completed sign-in continues the turn as the person who started it.
 
 When a local subagent at any depth needs sign-in, the root session's channel gets it as the parent's own `interaction.opened`. Completing it continues the child, and the parent's turn continues under the same `turnId` after the subagent returns.
 
@@ -324,7 +324,7 @@ Throw these error classes from `eve/connections` in `getToken` or `completeAutho
 
 Omit `retryable` to allow retries. Set it to `false` when retrying can't help, such as when the user denies access. `interaction.settled` then carries `response.retryable: false`. Later calls in the same turn that need the same grant for the same user fail without asking again. The next turn asks again.
 
-A sign-in that ends without being completed, such as one cancelled because the user sent a new message while it was open, works the same way. Later calls in that turn that need the same grant fail with `reason: "sign_in_cancelled"` and tell the model to say the action needs that access. The next turn asks again.
+A sign-in that ends without being completed, such as one the user cancelled or one whose call the model dropped with `eve__task_cancel`, works the same way. Later calls in that turn that need the same grant fail with `reason: "sign_in_cancelled"` and tell the model to say the action needs that access. The next turn asks again.
 
 A turn a schedule started never asks for a sign-in, because no one asked for the work and the prompt would repeat on every firing. Calls that need one fail with `reason: "sign_in_unavailable"`, and the model is told to say the action needs that access. A scheduled send into an existing conversation counts as scheduled too.
 
@@ -420,12 +420,14 @@ Tools from a dynamic connection can require approval, including an `approval.res
 
 ### Troubleshooting Vercel Connect auth
 
-| What you see                                      | What to do                                                                                                                                                                                                 |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "principal_required"`                    | A per-user connection ran with no signed-in user, such as in a schedule, a same-project runtime token, or `localDev()` run. Return `principalType: "user"` from the channel's route auth, or use app auth. |
-| A sign-in `interaction.opened` event, but no UI   | Render the sign-in from the stream event, and continue the same session after the callback.                                                                                                                |
-| OAuth works locally but fails after deploy        | Run Connect setup from the project that uses it, deploy again, and check the connector UID, because the project may lack the link or OIDC scope.                                                           |
-| Sign-in ends on a Vercel login or protection page | Have the user sign in to Vercel with project access, or add a Deployment Protection Exception for the domain.                                                                                              |
+| What you see                                      | What to do                                                                                                                                                                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason: "principal_required"`                    | A per-user connection ran with no signed-in user, such as in a schedule, a same-project runtime token, or `localDev()` run. Return `principalType: "user"` from the channel's route auth, or use app auth.                                                                |
+| `reason: "confirmation_required"`                 | Someone else spoke after the turn's caller in a session that can't ask for input, or in a workflow tool, so eve didn't hand out the caller's token. The call works after the caller's next message. See [Shared sessions](/docs/concepts/security-model#shared-sessions). |
+| An approval asks the caller to use their identity | Someone else spoke after the turn's caller, so the call waits for the caller's approval before it gets their token. Render it like any approval; only the caller can approve it.                                                                                          |
+| A sign-in `interaction.opened` event, but no UI   | Render the sign-in from the stream event, and continue the same session after the callback.                                                                                                                                                                               |
+| OAuth works locally but fails after deploy        | Run Connect setup from the project that uses it, deploy again, and check the connector UID, because the project may lack the link or OIDC scope.                                                                                                                          |
+| Sign-in ends on a Vercel login or protection page | Have the user sign in to Vercel with project access, or add a Deployment Protection Exception for the domain.                                                                                                                                                             |
 
 ## What to read next
 

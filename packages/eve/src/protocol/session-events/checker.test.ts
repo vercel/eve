@@ -270,7 +270,7 @@ describe("createStreamChecker", () => {
     expect(rulesOf(lines)).toEqual(["serves-running-task"]);
   });
 
-  it("refuses an approval decided apart from the rest of its batch", () => {
+  describe("an approval decided apart from the rest of its batch", () => {
     const approval = (callId: string, interactionId: string) => [
       {
         data: { callId, capability: { kind: "tool", name: "deploy" }, owner: { runId: "run_0" } },
@@ -286,14 +286,101 @@ describe("createStreamChecker", () => {
         type: "interaction.opened",
       },
     ];
-    const lines = repliedTurn().slice(0, 4);
-    lines.push(
+    const decidedApart = () => [
+      ...repliedTurn().slice(0, 4),
       ...commits(
         [...approval("c_0", "i_0"), ...approval("c_1", "i_1")],
         [{ data: { interactionId: "i_0", outcome: "accepted" }, type: "interaction.settled" }],
       ),
-    );
-    expect(rulesOf(lines)).toEqual(["batch-settles-together"]);
+    ];
+    const batchRules = (lines: readonly StoredLine[]) =>
+      rulesOf(lines).filter((rule) => rule === "batch-settles-together");
+
+    const message = (deliveryId: string) => [
+      [{ data: { deliveryId }, type: "delivery.admitted" }],
+      [
+        {
+          data: { deliveryId, parts: [{ kind: "text", text: "Also" }], turnId: "turn_0" },
+          scope: turn,
+          type: "delivery.consumed",
+        },
+      ],
+    ];
+
+    it("is refused at once when no message joined its turn", () => {
+      expect(batchRules(decidedApart())).toEqual(["batch-settles-together"]);
+    });
+
+    it("is refused when the turn reads a message only after it", () => {
+      const lines = decidedApart();
+      lines.push(...commits(...message("d_1")));
+      expect(batchRules(lines)).toEqual(["batch-settles-together"]);
+    });
+
+    // The answer and a message arrive in one delivery, which the turn reads after deciding and
+    // after any `between` commits.
+    const answeredWith = (parts: readonly object[], between: readonly unknown[][] = []) => [
+      ...repliedTurn().slice(0, 4),
+      ...commits(
+        [...approval("c_0", "i_0"), ...approval("c_1", "i_1")],
+        [
+          { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
+          {
+            data: { deliveryId: "d_1", interactionId: "i_0", responseId: "r_0", value: {} },
+            type: "response.submitted",
+          },
+          { data: { responseId: "r_0" }, type: "response.admitted" },
+        ],
+        [
+          {
+            data: { cause: { responseId: "r_0" }, interactionId: "i_0", outcome: "accepted" },
+            type: "interaction.settled",
+          },
+        ],
+        ...between,
+        [
+          {
+            data: { deliveryId: "d_1", parts, turnId: "turn_0" },
+            scope: turn,
+            type: "delivery.consumed",
+          },
+        ],
+      ),
+    ];
+
+    it("is fine when the deciding answer's delivery brings a message", () => {
+      expect(batchRules(answeredWith([{ kind: "text", text: "Also" }]))).toEqual([]);
+    });
+
+    it("is refused once the deciding answer's delivery is read without a message", () => {
+      expect(batchRules(answeredWith([]))).toEqual(["batch-settles-together"]);
+    });
+
+    it("is refused as the step runs a call before reading the message", () => {
+      const lines = answeredWith(
+        [{ kind: "text", text: "Also" }],
+        [[{ data: { callId: "c_0", clearedBy: { interactionId: "i_0" } }, type: "call.started" }]],
+      );
+      const checker = createStreamChecker();
+      const positions = lines.flatMap((line, position) =>
+        checker
+          .check(line, position)
+          .filter((violation) => violation.rule === "batch-settles-together")
+          .map((violation) => violation.position),
+      );
+      // Known when the call starts, before the message the next step reads.
+      expect(positions).toEqual([lines.length - 2]);
+    });
+
+    it("is fine when the turn read a message while the batch waited", () => {
+      const lines = [
+        ...repliedTurn().slice(0, 4),
+        ...commits([...approval("c_0", "i_0"), ...approval("c_1", "i_1")], ...message("d_1"), [
+          { data: { interactionId: "i_0", outcome: "accepted" }, type: "interaction.settled" },
+        ]),
+      ];
+      expect(batchRules(lines)).toEqual([]);
+    });
   });
 
   describe("a call a person was asked about", () => {

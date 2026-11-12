@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 import {
-  expectApprovalCancelled,
+  expectApprovalStillOpen,
   scriptedSession,
   expectChangeStillUnexecuted,
   expectReply,
@@ -21,11 +21,11 @@ export default defineEval({
     // When the user asks to read the draft.
     const live = await session.start("Read the draft status.");
 
-    // Then the reply reports ready and completes; the message cancelled A, which never runs.
+    // Then the reply reports ready; A stays open and never runs.
     await expectToolResult(t, live, "read-draft");
     const turn = await expectReply(t, live, "Draft status: ready.");
     turn.calledTool("read-draft", { status: "completed", count: 1 });
     expectChangeStillUnexecuted(session);
-    expectApprovalCancelled(session, approval);
+    expectApprovalStillOpen(session, approval);
   },
 });

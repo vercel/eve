@@ -30,7 +30,7 @@ const STUB_ADAPTER_CTX: ChannelAdapterContext = {
   state: {},
   session: {
     id: "",
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
   },
 };
 

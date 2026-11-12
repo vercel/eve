@@ -30,7 +30,7 @@ import {
   dispatchWorkflowSessionCommand,
   resolveContinuation,
 } from "#execution/workflow-runtime.js";
-import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
+import type { DelegatedIdentity, SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -62,6 +62,10 @@ import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
 import { readAgentToolModels } from "#tools/agent-models.js";
 import { selectionModel } from "#models/options.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import {
+  callerConfirmationMessage,
+  callerIdentityReleased,
+} from "#runtime/connections/caller-confirmation.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 const log = createLogger("execution.agent-sessions");
@@ -123,6 +127,8 @@ export interface AgentSessionReceipt {
  */
 export interface AgentSessionMessage {
   readonly auth: SessionAuth;
+  /** Who had spoken in the sending session and the callers' standing approvals, as of the call. */
+  readonly identity?: DelegatedIdentity;
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly replyTo: string;
@@ -175,6 +181,7 @@ export async function openAgentSessionStep(
         });
   const start = {
     auth: input.auth,
+    identity: input.identity,
     bundle,
     context,
     key: input.key,
@@ -303,6 +310,7 @@ export async function sendAgentSessionMessageStep(
   const { address, context } = input;
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
+    requireCallerConfirmationToForward(remote, input);
     return await continueRemoteAgentSession({
       auth: input.auth.current,
       callback: {
@@ -332,6 +340,8 @@ export async function sendAgentSessionMessageStep(
       caller: {
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
+        senderAuth: input.auth.sender,
+        ...(input.identity !== undefined && { identity: input.identity }),
         subagentName: address.name,
       },
       kind: "send",
@@ -461,6 +471,7 @@ async function commandLocalSession<TCommand extends SessionCommand>(
 
 interface SessionStart<Target extends SubagentStartTarget> {
   readonly auth: SessionAuth;
+  readonly identity?: DelegatedIdentity;
   readonly bundle: CompiledBundle;
   readonly context: AgentSessionContext;
   readonly key: string;
@@ -484,6 +495,8 @@ async function startLocalSession(
     graph: bundle.graph,
     inheritedConversation: context.conversation,
     initiatorAuth: auth.initiator,
+    senderAuth: auth.sender,
+    delegatedIdentity: input.identity,
     parent: createParentContext(context, input.replyTo),
     sandboxSessionId: context.sandbox.sessionId,
     selfAgent: target.source.type === "runtime",
@@ -550,6 +563,7 @@ async function startRemoteSession(
     registry: bundle.subagentRegistry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
+  requireCallerConfirmationToForward(remote, input);
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
     action,
@@ -649,4 +663,29 @@ async function loadAgentSessionBundle(context: AgentSessionContext): Promise<Com
 
 function agentDeliveryId(kind: string, sessionId: string): string {
   return `agent-session:${getWorkflowMetadata().workflowRunId}:${getStepMetadata().stepId}:${sessionId}:${kind}`;
+}
+
+/**
+ * A remote agent that forwards the principal acts as the caller, so it decides by the same rule
+ * as every guard of the caller's identity: after someone else spoke it runs for a call the caller
+ * approved, whose dispatch names the caller as the sender, or after the caller approved a call
+ * since someone else last spoke.
+ */
+function requireCallerConfirmationToForward(
+  remote: { readonly forwardPrincipal?: boolean; readonly name: string },
+  message: Pick<AgentSessionMessage, "auth" | "identity">,
+): void {
+  if (remote.forwardPrincipal !== true) return;
+  const { auth, identity } = message;
+  const released = callerIdentityReleased({
+    approved: false,
+    current: auth.current,
+    remembered: (key) => identity?.confirmed.includes(key) === true,
+    sender: auth.sender,
+  });
+  if (released) return;
+  // Terminal, where a connection's refusal is a `ConnectionAuthorizationFailedError`: a step
+  // retries any other error, and retrying can't change who spoke last. The message reaches the
+  // model as the call's error, so it asks the caller instead.
+  throw new FatalError(callerConfirmationMessage(`identity with the "${remote.name}" agent`));
 }

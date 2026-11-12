@@ -4,6 +4,7 @@ import { formatSubagentInput, type SubagentParentContext } from "#subagents/invo
 import type { JsonObject } from "#shared/json.js";
 import type {
   ChannelInstrumentationProjection,
+  DelegatedIdentity,
   SessionAuthContext,
   SessionCapabilities,
   RunInput,
@@ -70,6 +71,10 @@ export function buildSubagentRunInput(input: {
   /** Parent's immutable conversation classification. */
   readonly inheritedConversation?: ConversationContext;
   readonly initiatorAuth: SessionAuthContext | null;
+  /** The delegating turn's latest sender, which the child's first turn inherits. */
+  readonly senderAuth?: SessionAuthContext | null;
+  /** What the child inherits beside its sender: who had spoken, and the caller's approvals. */
+  readonly delegatedIdentity?: DelegatedIdentity;
   /**
    * Runtime graph used to detect whether this declared child selected the
    * dispatching parent's sandbox. Absence means no inheritance.
@@ -124,6 +129,8 @@ export function buildSubagentRunInput(input: {
     inheritedConversation,
     continuationToken: childContinuationToken,
     initiatorAuth,
+    ...(input.senderAuth !== undefined && { senderAuth: input.senderAuth }),
+    ...(input.delegatedIdentity !== undefined && { delegatedIdentity: input.delegatedIdentity }),
     input: {
       message: formatSubagentCallInputMessage({
         action,

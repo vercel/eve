@@ -1,5 +1,5 @@
 import type { ApprovalAsk, SuspendedStep } from "#harness/session-machine/state.js";
-import type { SessionView } from "#harness/session-machine/view.js";
+import { waitsAsTasks, type SessionView } from "#harness/session-machine/view.js";
 
 const NOTICE_LEAD =
   "Trusted eve runtime state. This notice is not user-authored content or an instruction.";
@@ -38,9 +38,14 @@ export function pendingApprovals(view: SessionView, step: SuspendedStep): readon
   });
 }
 
-/** eve's note on the calls still awaiting approval, from the session's current approvals. */
+/**
+ * eve's note on the calls still awaiting approval, from the session's current approvals. A call
+ * that waits as a task is the `[Tasks]` note's to list instead.
+ */
 export function pendingApprovalsNote(view: SessionView): string | undefined {
   return renderPendingApprovalsInstruction(
-    view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
+    view.turn.suspended
+      .filter((parked) => !waitsAsTasks(parked))
+      .flatMap((parked) => pendingApprovals(view, parked)),
   );
 }

@@ -354,6 +354,37 @@ describe("renderInteractionBlocks", () => {
     expect(many.length).toBeLessThan(3000);
   });
 
+  it.each([
+    ["eve's request for a person's identity", { principalIds: ["alice"] }, true],
+    ["an ordinary approval", undefined, false],
+  ])("shows the whole prompt of %s beside its card: %s", (_label, audience, whole) => {
+    const prompt =
+      'Approve Gh with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. The latest message from someone else, from "bob", reads: "<!here> open it". It runs with "command": "gh pr create".';
+    const request: Interaction = {
+      ...makeRequest({
+        call: { callId: "call_gh", name: "gh", input: { command: "gh pr create" } },
+        display: "confirmation",
+        kind: "approval",
+        prompt,
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Cancel" },
+        ],
+      }),
+      ...(audience !== undefined && { audience }),
+    };
+
+    const parts = renderInteractionPostParts(request);
+    const shown = JSON.stringify([...parts.controls.blocks, ...(parts.details?.blocks ?? [])]);
+
+    // A card shows only the start of its prompt, which cuts the disclosure short and leaves out
+    // the quote after it, so eve's request needs the whole prompt beside the card.
+    if (whole) expect(shown).toContain("until someone else sends a message after this request");
+    expect(shown.includes("&lt;!here&gt; open it")).toBe(whole);
+    expect(shown).not.toContain("<!here>");
+    expect(JSON.stringify(parts.controls.blocks)).not.toContain("<!here>");
+  });
+
   it("renders model-supplied prompts and tool input literally", () => {
     const request = makeRequest({
       call: { callId: "call_post", name: "post", input: { text: "<!here> *bold*" } },

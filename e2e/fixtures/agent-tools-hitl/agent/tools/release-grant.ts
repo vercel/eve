@@ -1,14 +1,8 @@
-import { defineTool, type ToolAuthProvider } from "eve/tools";
+import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
 
-/** A per-user credential: each person's token names them, so the result shows whose was used. */
-const releaseAuth: ToolAuthProvider = {
-  principalType: "user",
-  async getToken({ principal }) {
-    return { token: `release-token:${principal.type === "user" ? principal.id : "app"}` };
-  },
-};
+import { releaseAuth } from "../lib/hitl/release-auth.ts";
 
 export default defineTool({
   description: "Grant release access with the approver's credentials, on the requester's behalf.",

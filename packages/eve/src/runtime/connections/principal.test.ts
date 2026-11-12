@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
-import { AuthKey, type SessionAuthContext } from "#context/keys.js";
+import { AuthKey, SenderAuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   ConnectionAuthorizationFailedError,
   isConnectionAuthorizationFailedError,
@@ -262,5 +262,34 @@ describe("resolveConnectionPrincipal", () => {
       expect(err.message).toMatch(/outside an eve context/);
       expect(err.message).toContain("credentials shared by the agent");
     }
+  });
+});
+
+describe("resolveConnectionPrincipal after someone other than the caller spoke", () => {
+  const alice = userAuth({ principalId: "alice" });
+  const bob = userAuth({ principalId: "bob" });
+  const ctx = () => {
+    const container = ctxWithAuth(alice);
+    container.set(SenderAuthKey, bob);
+    return container;
+  };
+
+  it("refuses the caller's own credentials and tells the model to ask them", () => {
+    expect.assertions(4);
+    try {
+      contextStorage.run(ctx(), () => resolveConnectionPrincipal("github", userAuthDef));
+    } catch (error) {
+      const err = error as ConnectionAuthorizationFailedError;
+      expect(isConnectionAuthorizationFailedError(err)).toBe(true);
+      expect(err.reason).toBe("confirmation_required");
+      expect(err.retryable).toBe(false);
+      expect(err.message).toContain("Retry only after a reply from them that plainly confirms it.");
+    }
+  });
+
+  it("leaves app credentials alone", () => {
+    expect(contextStorage.run(ctx(), () => resolveConnectionPrincipal("github", appAuth))).toEqual({
+      type: "app",
+    });
   });
 });

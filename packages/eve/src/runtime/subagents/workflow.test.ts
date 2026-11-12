@@ -84,6 +84,7 @@ const agentContext = {
 const alice: SessionAuth = {
   current: { attributes: {}, authenticator: "test", principalId: "alice", principalType: "user" },
   initiator: null,
+  sender: { attributes: {}, authenticator: "test", principalId: "alice", principalType: "user" },
 };
 
 const input: WorkflowBodyInput = {

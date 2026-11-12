@@ -301,9 +301,13 @@ export function renderInteractionBlocks(
 
   if (options && options.length > 0) {
     const input = renderToolInputPreviewBlock(request);
-    return input === undefined
-      ? [renderInteractionCardBlock(request, actionId)]
-      : [renderApprovalContainerBlock(request, actionId, input)];
+    const card =
+      input === undefined
+        ? renderInteractionCardBlock(request, actionId)
+        : renderApprovalContainerBlock(request, actionId, input);
+    // The card shows only the start of its prompt. eve's request for a person's identity says who
+    // else spoke and what approving remembers after that, so its whole prompt goes beside the card.
+    return isIdentityRequest(request) ? [card, prompt] : [card];
   }
 
   if (acceptsFreeform) {
@@ -638,4 +642,9 @@ function formatToolInputDetails(request: Interaction): string | undefined {
 
 function isApprovalRequest(request: Interaction): boolean {
   return request.request.kind === "approval";
+}
+
+/** eve's request for a person's identity: an approval only the person it names may give. */
+function isIdentityRequest(request: Interaction): boolean {
+  return isApprovalRequest(request) && request.audience !== undefined;
 }

@@ -180,7 +180,7 @@ describe("resolveMemoryScope", () => {
         channel: { kind: "channel:slack", metadata: {} },
         conversation,
         ctx: new ContextContainer() as never,
-        session: { auth: { current: null, initiator: null }, id: "session-1" },
+        session: { auth: { current: null, initiator: null, sender: null }, id: "session-1" },
       },
     );
 

@@ -12,7 +12,7 @@ describe("buildCallbackContext", () => {
   function contextWith(conversation?: ConversationContext): ContextContainer {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });

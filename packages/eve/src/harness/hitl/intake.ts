@@ -1,4 +1,6 @@
-import { approvedClearance } from "#harness/clearance.js";
+import { approvedClearance, type Clearance } from "#harness/clearance.js";
+import { principalOf } from "#context/session-auth.js";
+import { sessionCaller, withAskedSender } from "#runtime/connections/caller-confirmation.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { stepCatalog } from "#definitions/step.js";
@@ -7,22 +9,23 @@ import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
 import {
+  type ApprovalAsk,
   type ApprovedCall,
   type SessionView,
   type SuspendedStep,
 } from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
-import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
+import { canAskPerson, type Step } from "#harness/step/context.js";
+import { blocked, park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
+  askForIdentity,
   dispatch,
   approvalMemory,
   openLimit,
@@ -31,12 +34,11 @@ import {
   type RunnableCall,
   settleApprovals,
   settleLimit,
-  withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";
 import { runApprovedCalls, signInReports } from "./approved-calls.js";
 import { SignInCompletedKey } from "#harness/authorization.js";
-import { publishDenial, type CallResult } from "#harness/call-executor.js";
+import { publishDenial, steeredGate, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
   compactInput,
@@ -66,7 +68,7 @@ export type HumanInputIntake =
       readonly consumedMessage: boolean;
       /** The delivery carries input for a turn. */
       readonly opensTurn: boolean;
-      /** A message steers the turn past what it waits on. */
+      /** A message joins the turn, so what it waits on a person for waits as tasks. */
       readonly steer: boolean;
     };
 
@@ -118,20 +120,19 @@ export async function admitHumanInput(
   // A typed approval answers like a press, so the approval's response policy decides it.
   const typed = typedAnswers ? resolveTypedApproval(step.view(), delivered.input) : delivered.input;
   const limit = openLimit(step.view());
-  // A new message steers the held turn, unless it waits behind the budget prompt. A typed answer
+  // A new message joins the held turn, unless it waits behind the budget prompt. A typed answer
   // is not a new message. A message queued behind a policy's answer or a responder's sign-in
-  // still steers: without it, the turn re-runs a step that parks again, forever.
+  // still joins: without it, the turn re-runs a step that parks again, forever.
   const messaged =
     (delivered.input?.message !== undefined && typed?.message !== undefined) ||
     delivered.displayMessage !== undefined;
   const steer = messaged && limit === undefined;
-  const steered = steer ? await withdrawSteeredSignIns(step, typed) : typed;
 
   // A typed answer to the budget prompt is an answer like a press.
   const answered: ResolvedStepInput | undefined =
     limit === undefined || !typedAnswers
-      ? steered
-      : resolveTextInput(step.view().projection.view, steered);
+      ? typed
+      : resolveTextInput(step.view().projection.view, typed);
   // Who gave each answer decides whether it stands now, waits for a response policy, or is
   // refused.
   const check = checkResponders(step.view(), answered, Date.now());
@@ -148,7 +149,7 @@ export async function admitHumanInput(
     input: withoutResponses(answered),
     kind: "run",
     message: consumedMessage ? undefined : (delivered.displayMessage ?? delivered.input?.message),
-    opensTurn: hasTurnInput(delivered.input) || hasTurnInput(steered),
+    opensTurn: hasTurnInput(delivered.input) || hasTurnInput(typed),
     steer: steer && !consumedMessage,
   };
 }
@@ -166,8 +167,9 @@ export interface HumanDecisions {
 
 /**
  * The person's standing answers decide what they answer: the budget prompt settles, and each
- * step's approvals settle together once each has an answer, or when a message steers past them.
- * A call a sign-in stopped runs once its sign-ins have called back, as the call that asked.
+ * step's approvals settle together once each has an answer, or each on its own when a message
+ * reads past them or their calls wait as tasks. A call a sign-in stopped runs once its sign-ins
+ * have called back, as the call that asked.
  */
 export async function settleHumanInput(
   step: Step,
@@ -223,12 +225,21 @@ async function runApproved(
   }
   const tasks: RuntimeWorkflowTaskRequest[] = [];
   const denied: CallResult[] = [];
-  const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
+  const local: {
+    approvals: ApprovedCall[];
+    sender: SuspendedStep["sender"];
+    tools: HarnessToolLookup;
+  }[] = [];
   const claimed = new Set<string>();
+  const callerApproved = new Set<string>();
+  // Workflow and agent calls `steered()` marks that someone else approved: eve asks the caller
+  // before their runs start.
+  const asks: ApprovalAsk[] = [];
   for (const [parked, approvals] of byStep) {
     const tools = await toolsOf(step);
-    const workflows = new Map<string, { approval: ApprovedCall; clearedBy?: ClearedBy }>();
+    const workflows = new Map<string, { approval: ApprovedCall; clearance?: Clearance }>();
     for (const approval of approvals) {
+      if (approvedByCaller(approval)) callerApproved.add(approval.call.callId);
       const tool = tools.get(approval.call.toolName);
       if (tool?.workflowId === undefined) continue;
       if (changedSinceOffered(approval.call, tool)) {
@@ -245,12 +256,27 @@ async function runApproved(
         callId: approval.call.callId,
         input: approval.call.input,
       });
-      if (recheck.denied) {
+      // A run can't stop to ask once it starts, so eve asks the caller about a call `steered()`
+      // marks before it starts, and denies it where it can't ask.
+      const steering =
+        recheck.steered === true && !approvedByCaller(approval)
+          ? withAskedSender(parked.sender, () =>
+              steeredGate(approval.call, {
+                approvalMemory: approvalMemory(step.view()),
+                canAsk: canAskPerson(step),
+                confirmed: approval.confirmedBy ?? [],
+                responder: approval.responder,
+              }),
+            )
+          : undefined;
+      if (steering?.ask !== undefined) {
+        asks.push(steering.ask);
+      } else if (recheck.denied || steering !== undefined) {
         denied.push(
           ...(
             await publishDenial(approval.call, {
               publish: step.publish,
-              reason: recheck.reason,
+              reason: recheck.denied ? recheck.reason : steering?.reason,
             })
           ).settled,
         );
@@ -258,13 +284,14 @@ async function runApproved(
         // A person's acceptance clears the call; the recheck only confirms it still may run.
         const clearance =
           approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
-        workflows.set(approval.call.callId, { approval, clearedBy: clearance?.clearedBy });
+        workflows.set(approval.call.callId, { approval, clearance });
       }
     }
     local.push({
       approvals: approvals
         .filter((approval) => tools.get(approval.call.toolName)?.workflowId === undefined)
         .map((approval) => reportingOnce(step.view(), approval, claimed)),
+      sender: parked.sender,
       tools,
     });
     if (workflows.size === 0) continue;
@@ -280,14 +307,21 @@ async function runApproved(
     });
     step.session = dispatched.session;
     tasks.push(
-      ...dispatched.workflowRequests.map((task) => ({
-        ...task,
-        clearedBy: workflows.get(task.callId)?.clearedBy,
-      })),
+      ...dispatched.workflowRequests.map((task) => {
+        // A call the caller approved runs with the caller as its sender, whoever spoke last, and
+        // a call that waited on a person with the sender it was asked under.
+        const sender = callerApproved.has(task.callId) ? sessionCaller() : parked.sender;
+        return {
+          ...task,
+          clearedBy: workflows.get(task.callId)?.clearance?.clearedBy,
+          ...(sender !== undefined && { sender }),
+        };
+      }),
     );
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length > 0) await step.apply(dispatch(step.view(), { tasks }));
+  if (asks.length > 0) await step.apply(askForIdentity(step.view(), { asks }));
 
   const calls = local.flatMap(({ approvals }) => approvals);
   step.frameworkToolNames = new Set(
@@ -297,15 +331,17 @@ async function runApproved(
         .filter((name) => tools.get(name)?.frameworkTool === true),
     ),
   );
-  if (calls.length === 0) return undefined;
+  if (calls.length === 0) {
+    return asks.length > 0 && blocked(step.view(), step.session.state) ? park(step) : undefined;
+  }
   // One reporter for every group: a group's call can complete a sign-in another group's call
   // stopped on, and each attempt settles once. It stays until every group has finished, so a
   // group that fails doesn't take it from a sibling still running.
   const signIns = signInReports({ publish: step.publish, view: () => step.view() });
   step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
   const groups = await Promise.allSettled(
-    local.map(async ({ approvals, tools }) => {
-      if (approvals.length === 0) return { settled: [], signIns: [] };
+    local.map(async ({ approvals, sender, tools }) => {
+      if (approvals.length === 0) return { identities: [], settled: [], signIns: [] };
       const view = step.view().projection.view;
       const call = view.calls[approvals[0]!.call.callId];
       const runId = call === undefined ? undefined : callRun(view, call);
@@ -320,18 +356,23 @@ async function runApproved(
               turnId: runTurn(view, run.runId),
               isFrameworkTool: (name) => step.frameworkToolNames.has(name),
             });
-      return await runApprovedCalls({
-        abortSignal: step.config.abortSignal,
-        approvalMemory: approvalMemory(step.view()),
-        approvals,
-        messages: step.session.history,
-        publish: step.publish,
-        responderOf: (approval) => approval.responder,
-        telemetry: attempt?.telemetry,
-        signIns,
-        tools,
-        view: () => step.view(),
-      });
+      // Each call runs as it was asked, with the sender it had then.
+      return await withAskedSender(sender, () =>
+        runApprovedCalls({
+          abortSignal: step.config.abortSignal,
+          approvalMemory: approvalMemory(step.view()),
+          approvals,
+          messages: step.session.history,
+          publish: step.publish,
+          responderOf: (approval) => approval.responder,
+          callerApprovedOf: (approval) => callerApproved.has(approval.call.callId),
+          canAsk: canAskPerson(step),
+          telemetry: attempt?.telemetry,
+          signIns,
+          tools,
+          view: () => step.view(),
+        }),
+      );
     }),
   );
   step.ctx.delete(SignInCompletedKey);
@@ -342,10 +383,17 @@ async function runApproved(
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
+  const identities = executed.flatMap((run) => run.identities);
+  if (identities.length > 0) await step.apply(askForIdentity(step.view(), { asks: identities }));
   const signIn = resolveInlineAuthorizationInterrupt({
     signIns: executed.flatMap((run) => run.signIns),
   });
-  if (signIn === undefined) return undefined;
+  if (signIn === undefined) {
+    // A call that waits as a task waits for its person without holding the turn.
+    return (identities.length > 0 || asks.length > 0) && blocked(step.view(), step.session.state)
+      ? park(step)
+      : undefined;
+  }
   // A stopped call keeps the approval it ran on, so it runs on it again after the sign-in.
   const byCallId = new Map(calls.map((approval) => [approval.call.callId, approval]));
   await applyEndingSignIns(
@@ -360,7 +408,8 @@ async function runApproved(
     }),
     step.session.history,
   );
-  return park(step);
+  // A call that waits as a task waits for its sign-in without holding the turn.
+  return blocked(step.view(), step.session.state) ? park(step) : undefined;
 }
 
 /**
@@ -396,30 +445,28 @@ function toolsOf(step: Step): Promise<StepCatalog> {
   return tools;
 }
 
-const STEERED_SIGN_IN_REASON = "Cancelled because a new message arrived.";
-
-/**
- * A message steers the held turn: the sign-ins it waits on end, declined, and the model learns
- * why. The answers responders still wait on close with the approvals they answer.
- */
-async function withdrawSteeredSignIns(
-  step: Step,
-  input: HarnessStepInput | undefined,
-): Promise<HarnessStepInput | undefined> {
-  const names = [...new Set(step.view().signIns.map((challenge) => challenge.name))];
-  if (names.length === 0) return input;
-  await applyEndingSignIns(step, withdrawSignIns(step.view(), STEERED_SIGN_IN_REASON));
-  return {
-    ...input,
-    context: [
-      ...(input?.context ?? []),
-      `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead, and it won't be asked for again in this turn. If the new message still needs it, tell the user the action needs that access and that they can ask again to sign in.`,
-    ],
-  };
-}
-
 /** Whether the input carries user-facing turn input. */
 function hasTurnInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.answers?.length ?? 0) > 0;
+}
+
+/**
+ * Whether the caller approved the call: it then runs with their identity whoever spoke last.
+ * Another person's approval, which a response policy allowed, doesn't release it, and a call
+ * that only stopped for a sign-in was asked nothing: it runs with the sender it was asked under,
+ * who passed the caller's confirmation before the sign-in opened.
+ */
+function approvedByCaller(approval: ApprovedCall): boolean {
+  // eve asked a person for their identity: the call has the caller's when the caller approved.
+  if (approval.confirmedBy !== undefined)
+    return approval.confirmedBy.some(
+      (person) => principalOf(person) === principalOf(sessionCaller()),
+    );
+  if (approval.interactionId === undefined) return false;
+  // With no response policy, no responder is named: the requester, who is the caller, answered.
+  return (
+    approval.responder === undefined ||
+    principalOf(approval.responder) === principalOf(sessionCaller())
+  );
 }

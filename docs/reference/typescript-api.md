@@ -156,7 +156,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types, `TokenUsage`                             |
 | `eve/tools`                                                                       | `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, tool types                                    |
 | `eve/tools/{bash,read_file,write_file,edit_file,web_fetch,glob,grep}`             | Individual reusable tool definitions                                                                              |
-| `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |
+| `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`, `steered`                                                   |
 | `eve/tools/ask_question`                                                          | Opt-in `askQuestion` tool definition                                                                              |
 | `eve/tools/web_search`                                                            | Provider-managed `webSearch` configuration                                                                        |
 | `eve/tools/workflow`                                                              | Runtime-generated `workflow` tool factory                                                                         |
@@ -177,7 +177,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/memory/scope`                                                                | `byPrincipal` and memory scope helpers                                                                            |
 | `eve/memory/file`                                                                 | `fileMemory`, `inMemory`, and the conditional document backend contract                                           |
 | `eve/memory/file/vercel`                                                          | `vercelBlob` and Vercel Blob backend options                                                                      |
-| `eve/context`                                                                     | `defineState`, session and state types                                                                            |
+| `eve/context`                                                                     | `defineState`, `samePrincipal`, session and state types                                                           |
 | `eve/sandbox`                                                                     | `defineSandbox`, `defineParentSandbox`, `DefaultSandbox`, and sandbox session and network policy types            |
 | [`eve/sandbox/provider`](../sandbox/custom-providers)                             | `defineSandboxProvider`, provider errors, `SANDBOX_AGENT_ENV`, and connection and lifecycle types                 |
 | [`eve/sandbox/docker`](../sandbox/docker)                                         | `DockerSandbox` and Docker environment and session types                                                          |

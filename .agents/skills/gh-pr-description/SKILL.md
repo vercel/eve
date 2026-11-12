@@ -12,9 +12,15 @@ changesets. When updating a PR, read its current body first.
 
 ## Write
 
-Fill in the Summary section of `.github/pull_request_template.md`. Never add a
-Validation, Test plan, or Checklist section, and delete them from an existing
-body when you update it. Write for a reviewer, not a changelog:
+Fill in the sections of `.github/pull_request_template.md`: the Summary, and
+the Public API section when the PR adds, changes, deprecates, or removes a
+public API. Delete the Public API section when it has nothing to list. Never add
+a Validation, Test plan, or Checklist section, and delete them from an existing
+body when you update it.
+
+### Summary
+
+Write the Summary for a reviewer, not a changelog:
 
 - Follow these ASD-STE100 rules where they apply:
   - Use approved words from the ASD-STE100 dictionary, with one meaning per
@@ -36,6 +42,26 @@ body when you update it. Write for a reviewer, not a changelog:
   equivalent when one exists. Do not create an issue solely for a PR.
 - Do not list checks you ran or suggest checks for reviewers to run. CI runs
   them on every PR.
+- Leave the list of API additions and changes to the Public API section.
+
+### Public API
+
+List every public API change, one bullet each:
+
+- A public API is anything an author imports, calls, configures, or handles
+  from eve's entry points: exports and their types, definition fields, `ctx`
+  members, CLI commands and flags, stream events, and error reasons. The
+  [stability policy](../../../docs/reference/typescript-api.md#stability-policy)
+  defines which surfaces are stable.
+- Name each item as an author writes it, with its entry point, such as
+  `steered()` from `eve/tools/approval`. Follow it with one short sentence
+  about what it does.
+- Cover additions, changed behavior or types, deprecations, and removals.
+  Prefix a breaking item with "Breaking:", and mark an `experimental` field or
+  `eve/experimental/*` API as experimental.
+- Check the list against the diff. Export changes show in
+  `packages/eve/public-api/`; new fields, options, and error reasons show in
+  the changed type definitions.
 
 ## Publish
 

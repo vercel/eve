@@ -69,6 +69,7 @@ async function dispatchCoordination(
   input: CoordinationDispatchInput,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
+    ...(input.callIds !== undefined && { callIds: input.callIds }),
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
@@ -98,6 +99,8 @@ async function dispatchCoordination(
       auth: {
         current: prepared.auth,
         initiator: prepared.initiatorAuth,
+        // A call that waited on a person keeps the sender its approval gave it.
+        sender: task.sender === undefined ? prepared.senderAuth : task.sender,
       },
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,

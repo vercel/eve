@@ -20,7 +20,7 @@ import { always } from "#tools/approval/policies.js";
 async function session(input: Parameters<typeof catalogContext>[0]) {
   const context = await catalogContext(input);
   context.ctx.set(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "catalog-session",
     turn: { id: "turn-1", sequence: 0 },
   });

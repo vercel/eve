@@ -153,7 +153,7 @@ export interface StepInfo {
   readonly endsTurn: boolean;
   /** The session's reader sees only its final reply: a child's caller or a schedule. */
   readonly finalReplyOnly: boolean;
-  readonly session: Pick<HarnessSession, "rootSessionId">;
+  readonly session: Pick<HarnessSession, "rootSessionId" | "state">;
   /** The session as the step sees it, where a step runs. */
   readonly view?: () => SessionView;
 }

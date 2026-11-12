@@ -19,7 +19,7 @@ const alice = {
 
 function context(space?: { id: string; type: "direct" | "shared" }): SkillScopeContext {
   return {
-    session: { id: "s1", auth: { current: alice, initiator: alice } },
+    session: { id: "s1", auth: { current: alice, initiator: alice, sender: alice } },
     conversation: {
       audience: "private",
       channel: { kind: "channel:slack", name: "slack" },
@@ -38,7 +38,9 @@ test("personal scopes key by eve's full principal identity", () => {
   );
   assert.equal(scope?.shared, false);
   assert.equal(
-    personalScope({ session: { id: "s1", auth: { current: null, initiator: null } } }),
+    personalScope({
+      session: { id: "s1", auth: { current: null, initiator: null, sender: null } },
+    }),
     null,
   );
 });
@@ -67,7 +69,7 @@ test("runtime and anonymous principals have no personal scope", () => {
   for (const principalType of ["runtime", "anonymous"]) {
     const app = { ...alice, principalId: "eve:app", principalType };
     assert.equal(
-      personalScope({ session: { id: "s1", auth: { current: app, initiator: app } } }),
+      personalScope({ session: { id: "s1", auth: { current: app, initiator: app, sender: app } } }),
       null,
     );
   }

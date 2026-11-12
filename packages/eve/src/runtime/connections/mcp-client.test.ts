@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SenderAuthKey,
+  SessionKey,
+  type SessionAuthContext,
+} from "#context/keys.js";
 import {
   ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationFailedError,
@@ -11,6 +17,7 @@ import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionCallbackContext } from "#shared/connection-types.js";
 import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
+import { withCallerIdentity } from "#runtime/connections/caller-confirmation.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
   isMcpAuthChallengeResult,
@@ -32,7 +39,7 @@ function ctxWithAuth(current: SessionAuthContext | null): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, current);
   ctx.set(SessionKey, {
-    auth: { current, initiator: current },
+    auth: { current, initiator: current, sender: current },
     sessionId: "session-1",
     turn: { id: "turn-1", sequence: 0 },
   });
@@ -217,6 +224,30 @@ describe("McpConnectionClient", () => {
 
       const large = { ...userAuth("alice"), attributes: { blob: "a".repeat(16 * 1024) } };
       await expect(send(large)).rejects.toThrow(/Connection "test" cannot forward.*16384-byte/u);
+    } finally {
+      sent.mockRestore();
+    }
+  });
+
+  it("with forwardPrincipal, sends the caller after someone else spoke only for a call the caller approved", async () => {
+    createMCPClient.mockResolvedValue({ close: vi.fn() });
+    await new McpConnectionClient(makeConnection({ forwardPrincipal: true })).connect();
+    const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
+    const sent = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+    const ctx = ctxWithAuth(userAuth("alice"));
+    ctx.set(SenderAuthKey, userAuth("bob"));
+    try {
+      await expect(
+        contextStorage.run(ctx, () => fetch("https://mcp.example.com", {})),
+      ).rejects.toMatchObject({ reason: "confirmation_required" });
+      expect(sent).not.toHaveBeenCalled();
+
+      await contextStorage.run(ctx, () =>
+        withCallerIdentity(() => fetch("https://mcp.example.com", {})),
+      );
+      expect(new Headers(sent.mock.calls[0]![1]!.headers).has("eve-forwarded-principal")).toBe(
+        true,
+      );
     } finally {
       sent.mockRestore();
     }

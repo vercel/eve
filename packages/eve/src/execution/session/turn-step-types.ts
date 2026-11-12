@@ -27,6 +27,11 @@ export interface TurnStepPayload {
   /** The delivery the control arrived as. */
   readonly controlDelivery?: ControlDelivery;
   readonly delivery?: DeliverHookPayload;
+  /**
+   * The step only reads `delivery`: a message from someone else waits behind it, and the model
+   * runs once the turn has read them all.
+   */
+  readonly inputOnly?: true;
   readonly runtimeResults?: RuntimeActionResultStepInput;
 }
 

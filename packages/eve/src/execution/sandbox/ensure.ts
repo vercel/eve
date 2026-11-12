@@ -151,7 +151,7 @@ export async function ensureSandboxAccess(
     const activeSession =
       contextStorage.getStore() === undefined
         ? {
-            auth: { current: null, initiator: null },
+            auth: { current: null, initiator: null, sender: null },
             id: input.sessionId,
             turn: { id: turnId, sequence: 0 },
           }

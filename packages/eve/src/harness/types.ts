@@ -305,6 +305,11 @@ export interface KernelConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /**
+   * The step reads its input into the turn and stops before the model runs: another person's
+   * message is waiting, and the model answers once the turn has read them all.
+   */
+  readonly inputOnly?: boolean;
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;

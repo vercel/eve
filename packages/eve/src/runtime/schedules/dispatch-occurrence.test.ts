@@ -17,6 +17,12 @@ import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurre
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const bundle = { compiledArtifactsSource: {}, graph: { root: { channels: [] } } } as never;
+const alice = {
+  attributes: {},
+  authenticator: "test",
+  principalId: "alice",
+  principalType: "user",
+};
 const callContext: ScheduleBoundCallContext = {
   abortSignal: new AbortController().signal,
   application: "fixture",
@@ -24,15 +30,7 @@ const callContext: ScheduleBoundCallContext = {
   channel: { kind: "unknown", metadata: {} },
   session: {
     id: "session-alice",
-    auth: {
-      current: {
-        attributes: {},
-        authenticator: "test",
-        principalId: "alice",
-        principalType: "user",
-      },
-      initiator: null,
-    },
+    auth: { current: alice, initiator: null, sender: alice },
   },
 };
 const expression = { type: "cron" as const, cron: "0 9 * * *" };

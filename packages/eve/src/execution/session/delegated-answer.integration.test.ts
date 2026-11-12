@@ -98,12 +98,14 @@ describe("delegated agent approval answers", () => {
           }),
         ).resolves.toMatchObject({ sessionId: child.runId, status: "accepted" });
 
-        // The parent's message steers the held turn, so it withdraws the approval instead of answering it.
+        // The parent's message joins the held turn as a message: the approval stays open, and the
+        // turn pauses on it again once the model has read the message.
         const resumed = await withTimeout(stream.nextTurn(), "delegated approval answer");
-        const outcomes = filterEventsByType(resumed, "interaction.settled")
-          .filter(({ data }) => data.interactionId === approval!.data.interactionId)
-          .map(({ data }) => data.outcome);
-        expect({ executions, outcomes }).toEqual({ executions: [], outcomes: ["withdrawn"] });
+        expect(filterEventsByType(resumed, "interaction.settled")).toEqual([]);
+        expect(filterEventsByType(resumed, "turn.paused").at(-1)).toMatchObject({
+          data: { awaiting: [{ interactionId: approval!.data.interactionId }] },
+        });
+        expect(executions).toEqual([]);
       } finally {
         stream.dispose();
         await child.cancel();

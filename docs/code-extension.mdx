@@ -111,26 +111,31 @@ Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in
 
 ### Control access with `authorize`
 
-`github.authorize` is the agent's only access control. A command runs only when it returns `true`; otherwise the token never reaches the sandbox. It runs before every `gh` call and receives the parsed `argv`, the caller's `auth`, `repository`, and the minted `token`. What the token can reach depends on `principalType`:
+`github.authorize` is the agent's only access control. A command runs only when it returns `true`; otherwise the token never reaches the sandbox. It runs before every `gh` call and receives the parsed `argv`, the caller's `auth`, `repository`, and the minted `token`. With app tokens, `authorize` is the only check on who may drive a command, so it should read `auth`. What the token can reach depends on `principalType`:
 
 | `principalType` | Token                                                                                                                                                          | `authorize` also receives      |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | `"app"`         | A GitHub App installation token for the declared repository, or for the whole installation when the call declares only an owner.                               | `owner`                        |
 | `"user"`        | The caller's own token, which reaches everything the caller can reach on GitHub. eve asks the caller to sign in when needed and when GitHub rejects the token. | `repository: null`, no `owner` |
 
+With app tokens in a [shared session](/docs/concepts/security-model#shared-sessions), eve also calls `authorize` for the person who spoke last when that isn't the caller, and the command runs only when both calls return `true`. A command the caller approves itself reads the caller as the person who spoke last, so `authorize` runs only for the caller.
+
+With `"user"` in a shared session, each command runs with the caller's own token, whoever asked for it. After someone else speaks, eve asks the caller to approve the command before it uses that token; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity).
+
 With `"user"`, `authorize` always receives `repository: null`, even when the command declares a repository. Repository allowlists therefore deny user-token calls. Use `"app"` with a full `owner/name` declaration when your policy restricts repository access. Use `"user"` only when your policy permits the caller's full GitHub access, and authorize the caller through `auth`.
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";
 
-import { brokerGitHubLease } from "../lib/github";
+import { brokerGitHubLease, isAcmeEngineer } from "../lib/github";
 
 export default git({
   github: {
     connector: "github/my-agent",
     broker: brokerGitHubLease,
     principalType: "app",
-    authorize: ({ owner }) => owner.toLowerCase() === "acme",
+    // Check who asks, not only where the command goes.
+    authorize: ({ auth, owner }) => owner.toLowerCase() === "acme" && isAcmeEngineer(auth),
   },
 });
 ```
@@ -148,14 +153,14 @@ For example, resolve the author through your application's user mapping:
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";
-import { brokerGitHubLease, coAuthorFor } from "../lib/github";
+import { brokerGitHubLease, coAuthorFor, isAcmeEngineer } from "../lib/github";
 
 export default git({
   github: {
     connector: "github/my-agent",
     broker: brokerGitHubLease,
     principalType: "app",
-    authorize: ({ owner }) => owner.toLowerCase() === "acme",
+    authorize: ({ auth, owner }) => owner.toLowerCase() === "acme" && isAcmeEngineer(auth),
     attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
   },
 });

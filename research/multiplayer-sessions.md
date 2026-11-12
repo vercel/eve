@@ -1,0 +1,327 @@
+---
+issue: https://github.com/vercel/eve/pull/6199
+status: implemented
+last_updated: "2026-11-12"
+---
+
+# Multiplayer sessions
+
+## Problem
+
+Several people share one session when they work in the same Slack thread, code channel, or GitHub
+issue. Three things go wrong today.
+
+**Other people's messages wait.** Only a turn's own caller steers it. A message from anyone else
+waits for the turn to end and then runs as its own turn. The agent goes quiet for everyone but one
+person, and the model never gets to decide whether a comment changes what it's doing.
+
+**A turn that waits on a person blocks.** While a turn waits on an approval or a sign-in, it takes
+only the answer and its caller's messages. The caller's own message cancels what the turn waited
+on: the approval is withdrawn, the sign-in is withdrawn and can't be asked for again in the turn,
+and the work the call was doing is lost.
+
+**The agent can act as the wrong person.** Alice asked for a pull request and the turn ended
+without one. Bob replied "oh this is flaky". His reply started a turn as Bob, the model picked up
+Alice's request from the history, and the pull request opened with Bob's GitHub account. eve had
+no way to run that call as Alice. This plan doesn't change that; see
+[Out of scope](#out-of-scope).
+
+[#6199](https://github.com/vercel/eve/pull/6199) proposed steering by anyone with approval helpers
+that ask the caller on a mismatch. Review found that it paused turns more often while other people
+still couldn't steer a paused turn, and that the approval flags it added composed badly. This plan
+replaces it.
+
+## Rules
+
+1. **A turn has one caller.** The caller is the sender of the message that started the turn, and
+   never changes while the turn runs. Unchanged from today.
+2. **No message waits on a person.** A message from anyone the channel admits joins the running
+   turn, including a turn that waits on an approval or a sign-in. It changes what the model reads,
+   never who the caller is.
+3. **A call gets the caller's identity only from the caller.** eve hands the caller's identity to
+   a call when the caller was the last to speak as the model made the call, or when they approved
+   that call. Their approval also covers their later calls until someone else speaks. Otherwise
+   eve asks them, or refuses the call where it can't ask. A tool can't name anyone else to act
+   for.
+4. **The model is told who is speaking.** eve names the sender when the speaker changes, on every
+   channel.
+
+A session with one person never reaches rules 2 to 4.
+
+## Parts
+
+The plan lands in one pull request, built in three parts.
+
+| Part            | Adds                                                                                      |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| 1. Steering     | Anyone steers a running turn, `auth.sender`, the sender line, and rule 3 as a refusal.    |
+| 2. Open waits   | A turn that waits on a person takes messages, and what it waited on stays open as a task. |
+| 3. Ask a person | eve asks instead of refusing.                                                             |
+
+## API
+
+```ts
+interface SessionAuth {
+  readonly initiator: SessionAuthContext | null; // who started the session
+  readonly current: SessionAuthContext | null; // the turn's caller
+  /** Who sent the latest message the turn read. Equal to `current` until someone else speaks. */
+  readonly sender: SessionAuthContext | null;
+}
+```
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { steered } from "eve/tools/approval";
+
+// Every call the model makes after someone else spoke asks the caller first.
+export default defineAgent({ approval: steered() });
+```
+
+`ConnectionAuthorizationFailedError` gains `reason: "confirmation_required"`. `eve/tools/approval`
+gains `steered()`, an approval policy that puts any call under the identity rule, and
+`eve/context` gains `samePrincipal(a, b)`, which compares two people as eve's own checks do.
+Nothing is added to agent, connection, or channel definitions.
+
+## Semantics
+
+### Steering
+
+`turnPolicy: "steer"` joins the running turn whoever sent the message, on every channel.
+`"queue"` still waits for the turn to end.
+
+- `auth.current`, the turn's memory scope, its hooks, and its dynamic functions stay the caller's.
+- `auth.sender` changes only as a step reads a message, so every call the model makes in one step
+  sees the same value. Only a message changes it. Text the caller types counts, even when it
+  answers a request. A pressed answer doesn't: it puts no words in front of the model.
+- When messages from several people are waiting, eve adds them to the conversation in the order
+  they arrived, each as its sender's. The model runs once it has read them all.
+- Principals are compared by identity, as steering compares them today. Unauthenticated and
+  anonymous senders are one person.
+- A delivery without `auth` isn't another person. It acts as the turn's identity and leaves
+  `auth.sender` unchanged, so a channel that admits several people must set `auth`. A hook's
+  continuation is one: the turn it starts keeps the last sender.
+- Another person's delivery without a message only answers requests. The context and history
+  sent with it don't reach the model.
+
+### Who is speaking
+
+When a message's sender differs from the sender of the session's previous message, eve adds one
+line of context before it that names both by `principalId`. The line is part of the conversation,
+so it stays the same on later steps. It doesn't appear in `delivery.consumed`. Channels keep
+adding what they know, such as Slack's display names.
+
+The model needs this to follow rule 3's refusal.
+
+### The identity rule
+
+A call acts as a person when it reads a token for a `principalType: "user"` provider or
+connection, calls a `forwardPrincipal` connection, or calls a remote agent that forwards the
+caller. That person is always the caller: a tool can't name anyone else.
+
+eve hands out the caller's identity when the caller was the last to speak as the model made the
+call. After someone else's message joins the turn, the call needs the caller's approval:
+
+- **Asked.** Where eve can ask, the call stops and eve asks the caller. See
+  [Asking a person](#asking-a-person).
+- **Refused.** Where eve can't ask, a token or connection call fails with
+  `ConnectionAuthorizationFailedError`, `reason: "confirmation_required"`, `retryable: false`, and
+  a remote agent call fails with a terminal error carrying the same instruction. A remote agent
+  call never asks, even where eve could: it runs outside the session step, so `steered()` is how
+  an agent has eve ask first. Nothing pauses. The message tells the
+  model that someone else has spoken, and to ask the caller to confirm before it retries. The
+  caller's next message makes them the last to speak.
+- **Approved.** A call the caller approved runs with their identity, whoever spoke last, and
+  reads the caller as `auth.sender`. The caller approves a call by answering its approval.
+  Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender
+  it was asked under. An approval doesn't change `auth.sender`. Approving eve's request for their
+  identity also covers the caller's later calls until anyone else sends a message; see
+  [Asking a person](#asking-a-person). Another person's approval, allowed by a `response` policy,
+  doesn't release the caller's identity.
+
+A call that waits on a person runs as it was asked. It keeps the sender it had then, and messages
+read while it waited don't change what it gets.
+
+`steered()` puts any call under this rule, whether or not it uses credentials. Set on a tool or as
+the agent's policy, it marks the call however the other policy decides, and eve checks the rule
+before the call starts: it runs, eve asks the caller with the same request, or, where eve can't
+ask, the call is denied with the same instruction to the model. The caller's approval is the same
+standing approval. Cancelling denies the call, which never started. A workflow or agent call that
+someone else approved asks the caller before its run starts, since the run can't stop to ask.
+
+Listing a connection's tools uses the caller's identity even after someone else spoke: it runs
+nothing the model chose. A local subagent inherits the sender of the call that started it, the
+people who had spoken, and the caller's standing approval. Rule 3
+doesn't cover app-scoped connections or tools that use no credentials. A tool that decides from
+the caller's role reads `auth.sender` as well as `auth.current`. eve's own checks do: `gh` with
+app tokens and deployed self-modification ask `authorize` about both people, whether or not the
+caller approved. `openCodeChannel()`, which opens a session as the caller, follows rule 3
+as a call that uses the caller's identity does: eve asks the caller, and it returns `unavailable`
+only where eve can't ask. Creating a dynamic schedule or replacing its payload, and starting a
+connection event watch, record the caller for work that later runs as them, so they follow rule 3
+the same way.
+
+### Waiting on a person
+
+A turn that waits on an approval or a sign-in stays open, as today. With no new message, nothing
+changes: the answer runs the call, and the call's result is its tool result.
+
+A message from anyone joins the waiting turn, and what the turn waited on stays open:
+
+```text
+turn.started                      Alice: "deploy to staging"
+  deploy asks for approval        interaction.opened, turn.paused
+Bob: "also update the changelog"  joins the turn; deploy becomes task t1, its request still open
+  the model edits the changelog   turn.paused: t1 waits on Alice
+Alice approves                    deploy runs as Alice; its result arrives as task.result
+  the model replies               turn.settled
+```
+
+- Each call the turn waited on becomes a [task](../docs/tools/tasks.md). The call's result in the
+  conversation is a receipt, and the `[Tasks]` note lists what the task waits on.
+- The request stays open and its card stays usable. Approving runs the call as it was asked, and
+  its result arrives in a `task.result` message. A denial arrives the same way.
+- A sign-in stays open too. Once the person connects, the call runs as it was asked, with the
+  sender it had then.
+- The model can drop a call the message made unnecessary with `eve__task_cancel`. The request is
+  withdrawn and the call doesn't run.
+- The turn can't end while such a task waits, as with any task. Cancelling the turn interrupts
+  its request, as today.
+- While a request is open, a `"queue"` message joins too, because the turn can't end until the
+  person acts. This matches today's rule for the caller's own message.
+
+Unchanged: the budget prompt still takes its answer before any message. A message still stops an
+`execute` workflow call, so a question from `ask_question` ends `withdrawn` and the model asks
+again if it still needs the answer. Only the caller's text answers a request by text; another
+person's text is a message.
+
+### Asking a person
+
+Where the session can request input (`capabilities.requestInput`) and the call runs in the session
+step, eve asks instead of refusing. The call stops without a result, as it does for a sign-in, and
+eve opens an ordinary approval (`request.kind: "approval"`) for the caller, with
+`audience.principalIds` naming them.
+
+- The prompt names the call by its tool's title, never by a label the model wrote. In order, it
+  says what is asked; that approving also lets later actions use the caller's identity, on any
+  account, until someone else sends a message after the request; the latest message in the turn
+  from a named sender other than the caller, or in a local child from the turn that delegated to
+  it; and every top-level input field. Each value, and each item inside
+  one, is cut on its own after escaping, with a note of how much is hidden; keys are quoted.
+  Quote and input are JSON-escaped so they can't pass for eve's text. With no such message, it has
+  no quote. It never carries secrets or attributes. Slack shows the whole prompt beside the card.
+- Only the caller can approve it, checked before any tool `response` policy, which doesn't govern
+  this request. Anyone the channel admits who is signed in can cancel it. Another person can only
+  press, never type, an answer.
+- Approving runs the call again from the top with the caller's identity, and keeps the caller's
+  approval of the tool itself. Work the tool did before it asked runs again. Approving doesn't
+  change `auth.sender`: only a message does.
+- The call had started, so a client sees `call.started`, then `interaction.opened` about the same
+  call, then `turn.paused`. Approving emits `call.started` again and one `call.settled`.
+- Cancelling fails the call with a result saying the request was cancelled and that what the call
+  did before then already happened. The model can also drop it with `eve__task_cancel`.
+- The request doesn't hold the turn. It is a wait like any other, so other people keep steering,
+  and a message that joins leaves it open with the call waiting as a task.
+- A delegated child session relays the request to its parent like any approval.
+- Where eve can't ask, the call is refused: sessions without `requestInput`, workflow-step tools,
+  and remote agents, which run outside the session step.
+
+The caller's approval stands until someone else speaks. eve remembers it in the session's approval
+memory under an eve-owned key for the caller, and the next message from anyone other than the
+caller, including the person who spoke before, forgets it. That message also stops an open request
+for the caller's identity from being remembered: it was asked before the message, so approving it
+covers only its own call. Only approving a request is remembered; a message isn't. Every guard
+decides by one rule. A remote agent that forwards the caller reads the approval the session
+remembered when the model called it, and a local subagent keeps it. A workflow tool, which runs
+outside the session step, doesn't read the memory and keeps refusing. The approval governs identity
+only: it doesn't change `auth.sender`, and eve's own role checks still ask about both people.
+
+## Scenarios
+
+| Scenario                                                             | Result                                                                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Alice's turn is running. Bob adds "it's the retry logic in foo.ts".  | Joins the turn. The next `gh` call asks Alice, quoting Bob, and the pull request opens as her.                                  |
+| Alice's turn waits on her approval. Bob says "wait, use staging".    | Joins the turn. The model cancels the waiting call and asks again for staging.                                                  |
+| Alice's turn waits on her sign-in. She adds "also bump the version". | Joins the turn. The sign-in stays open, and its call runs once she connects.                                                    |
+| Alice's turn is running. Bob asks for his own open pull requests.    | Joins the turn. `gh` uses the caller's token, so eve asks Alice, and the list is hers. With `"queue"` it waits and runs as Bob. |
+| Alice's request failed. Bob replies "oh this is flaky".              | Bob's turn. The pull request opens with Bob's account, as today.                                                                |
+| An outsider comments on a GitHub issue during a maintainer's turn.   | Joins the turn. A call that uses the maintainer's identity asks the maintainer first.                                           |
+| One person, any channel.                                             | Nothing changes.                                                                                                                |
+
+## Security model
+
+eve hands the caller's identity to a call in two cases:
+
+- the caller was the last to speak as the model made the call, or
+- the caller approved that call: its approval, or eve's request for their identity.
+
+A tool can't name anyone else to act for. The only other identity a call can use is that of a
+person who approved it, through `ctx.approval.responder.getToken`: their answer bound them.
+
+An approval of eve's request covers that call only, and doesn't make the person the last to speak.
+
+Both are decided from who sent which message and who pressed which button, never from what the
+model said. A sender line a person types into their own message can mislead the model, but it
+can't change either fact. Memory capture follows the same facts: eve saves people's words only to
+a memory scope that belongs to all of them. It resolves the slot's scope as each person other
+than the caller who spoke, and skips the capture when one of them gets a different scope.
+
+What remains:
+
+- A turn's first calls. The caller just spoke, so their identity is available to whatever the
+  model does next, including a request someone else made earlier in the conversation.
+- Calls the caller's approval covers before anyone else speaks. The approval request says so, and
+  the next message from someone else ends it.
+- Checks that read only `auth.current`. Another person's message can now reach a tool in the
+  caller's turn, so a role check also reads `auth.sender`, or the agent sets `approval: steered()`.
+- What `steered()` can't gate: the model answering from what is already in the conversation, and
+  work that started before someone else spoke, such as a credential a tool already put in the
+  sandbox.
+
+## Alternatives considered
+
+| Alternative                                                                | Why not                                                                                                                                                               |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Approval helpers that ask on a mismatch (#6199)                            | Two mechanisms for one rule, more pauses, and flags that had to compose with every other approval feature.                                                            |
+| Let anyone's message withdraw what the turn waits on                       | The work is lost, cards churn in a busy thread, and a withdrawn sign-in can't be asked for again.                                                                     |
+| Any answer from the caller makes them the last to speak                    | Approving an old or unrelated card would release their identity for what someone else said since.                                                                     |
+| Act as whoever spoke last                                                  | Alice's work would finish as Bob. This is the incident.                                                                                                               |
+| Switch the turn's caller to the latest sender                              | The same, with the caller's memory scope and hooks changing mid-turn.                                                                                                 |
+| A tool names the person it acts for, with `ctx.getToken(provider, { as })` | eve released a named person's token unasked once they had spoken last, so a request ran with the access of whoever spoke next. It was built and removed before merge. |
+| eve adds an `actor` argument to every tool                                 | The same, and eve would change schemas the author wrote.                                                                                                              |
+| A third turn policy that keeps other people waiting                        | Steering is the goal. An agent that needs every message to wait has `"queue"`.                                                                                        |
+
+## Compatibility and validation
+
+- **Steering.** Another person's message joins the running turn on every channel. `"queue"` is the
+  way to make messages wait.
+- **Identity.** In a turn someone else has joined, a call that uses the caller's identity is
+  refused or asks first. Sessions with one person don't change.
+- **Waits.** A message no longer withdraws an approval or a sign-in. Clients that render requests
+  need no change: the request stays `open`, and a later `turn.paused` names it again.
+- **Role checks.** The auth, security, and Slack docs tell authors to read `auth.sender` in checks
+  that used `auth.current` alone, and the changeset says so.
+- **Additive API.** `SessionAuth.sender` and the `confirmation_required` reason.
+
+Each part carries its own evals under `agent-tools-hitl/evals/hitl/multiplayer`, with unit
+and integration tests for what the fixtures can't reach:
+
+1. Another person's message joins a running turn; a tool reads `auth.sender`; messages from two
+   people are both read before the model answers; the caller's token is refused after someone else
+   speaks and released by the caller's reply; a call the caller approved keeps their token; a
+   session with one person never changes.
+2. A message joins a turn that waits on an approval and the approval stays open; approving later
+   runs the call and delivers `task.result`; the model cancels a waiting call; a sign-in survives
+   its caller's message.
+3. eve asks the caller and quotes the message; only the caller approves; the approval covers later
+   calls until someone else speaks, but not when it answers a request someone spoke after.
+
+## Out of scope
+
+- Acting for someone other than the caller. A reply that starts a turn still runs as its sender,
+  so the incident in [Problem](#problem) can happen as it does today. Naming a person is safe
+  only once eve stops releasing an identity because its person spoke last.
+- An agent or channel setting that changes when eve asks the caller, such as trusting everyone a
+  channel admits. eve asks until real agents show the need.
+- Keeping an `ask_question` open through a new message. A task already does this.
+- Recording the sender on each tool call's trace beside the turn's caller.
+- A per-session access list. Channels still decide who reaches a session.

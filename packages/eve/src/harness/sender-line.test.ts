@@ -1,0 +1,125 @@
+import { describe, expect, it } from "vitest";
+
+import type { SessionAuthContext } from "#channel/types.js";
+import { ContextContainer } from "#context/container.js";
+import {
+  enterParticipants,
+  forgetSender,
+  participantsOf,
+  rememberSender,
+  senderLine,
+  unrecordedSpeakers,
+} from "#harness/sender-line.js";
+
+function user(principalId: string): SessionAuthContext {
+  return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
+}
+
+type Session = { state?: Record<string, unknown> };
+
+/** `session` after messages from `speakers`, all in one turn. */
+function spoken(speakers: readonly (SessionAuthContext | null)[], session: Session = {}) {
+  return speakers.reduce((current, auth) => rememberSender(current, auth, "turn_0"), session);
+}
+
+/** The line the model reads before `next`'s message, after messages from `earlier`. */
+function lineAfter(
+  earlier: readonly (SessionAuthContext | null)[],
+  next: SessionAuthContext | null,
+) {
+  return senderLine(spoken(earlier).state, next);
+}
+
+describe("senderLine", () => {
+  it.each([
+    ["a session's first message", [], user("alice")],
+    ["the same person speaking again", [user("alice")], user("alice")],
+    [
+      "the same person with new claims",
+      [user("alice")],
+      { ...user("alice"), attributes: { a: "b" } },
+    ],
+  ] as const)("adds nothing before %s", (_label, earlier, next) => {
+    expect(lineAfter(earlier, next)).toBeUndefined();
+  });
+
+  it("names the sender and the one before by principal id when the speaker changes", () => {
+    expect(lineAfter([user("alice"), user("bob")], user("alice"))).toBe(
+      "The next message is from a different person than the message before it. " +
+        'It is from "alice". The message before it was from "bob".',
+    );
+  });
+
+  it("adds nothing after the conversation was cleared", () => {
+    const session = forgetSender(spoken([user("alice")]));
+    expect(senderLine(session.state, user("bob"))).toBeUndefined();
+    expect(participantsOf(session.state, undefined)).toEqual([]);
+  });
+
+  it("names someone who isn't signed in without an id", () => {
+    expect(lineAfter([user("alice")], null)).toContain(
+      'It is from someone who isn\'t signed in. The message before it was from "alice".',
+    );
+  });
+});
+
+describe("participants", () => {
+  it("records who has spoken without their attributes, the most recent last", () => {
+    const slack = {
+      ...user("bob"),
+      attributes: { action_token: "xoxa-secret" },
+      authenticator: "slack",
+      subject: "U_BOB",
+    };
+    const session = spoken([user("alice"), slack, null, user("alice")]);
+
+    expect(participantsOf(session.state, undefined)).toEqual([
+      { authenticator: "slack", principalId: "bob", principalType: "user", subject: "U_BOB" },
+      { authenticator: "test", principalId: "alice", principalType: "user" },
+    ]);
+    expect(JSON.stringify(session.state)).not.toContain("xoxa-secret");
+  });
+
+  it("keeps the 50 people who spoke most recently", () => {
+    const people = Array.from({ length: 52 }, (_, index) => user(`person-${index}`));
+    const session = spoken(people);
+
+    const kept = participantsOf(session.state, undefined).map((person) => person.principalId);
+    expect(kept).toHaveLength(50);
+    expect(kept[0]).toBe("person-2");
+    expect(kept.at(-1)).toBe("person-51");
+  });
+
+  it.each([
+    ["only people who aren't signed in", [null, null], {}],
+    [
+      "someone who isn't signed in before a signed-in person",
+      [null, user("alice")],
+      { anonymous: true },
+    ],
+  ] as const)("notes, after %s, %j", (_label, speakers, expected) => {
+    const ctx = new ContextContainer();
+    const session = spoken(speakers);
+    enterParticipants(ctx, () => session.state);
+
+    expect(unrecordedSpeakers(ctx)).toEqual(expected);
+  });
+
+  it("notes who spoke whom the participants don't record, until the conversation is cleared", () => {
+    const ctx = new ContextContainer();
+    let session = spoken([user("alice"), null]);
+    enterParticipants(ctx, () => session.state);
+    expect(unrecordedSpeakers(ctx)).toEqual({ anonymous: true, anonymousTurnId: "turn_0" });
+
+    const people = Array.from({ length: 50 }, (_, index) => user(`person-${index}`));
+    session = spoken(people, session);
+    expect(unrecordedSpeakers(ctx)).toEqual({
+      anonymous: true,
+      anonymousTurnId: "turn_0",
+      dropped: true,
+    });
+
+    session = forgetSender(session);
+    expect(unrecordedSpeakers(ctx)).toEqual({});
+  });
+});

@@ -4,7 +4,7 @@ const decide = vi.hoisted(() => vi.fn());
 vi.mock("#ai/decide.js", () => ({ decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
-import { always, auto, never, once } from "#tools/approval/policies.js";
+import { always, auto, never, once, steered } from "#tools/approval/policies.js";
 
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
   return {
@@ -12,7 +12,7 @@ function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalCont
     callId: "call-1",
     getSandbox: vi.fn(),
     session: {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     },
@@ -140,5 +140,34 @@ describe("dynamic tool approval helpers", () => {
       // @ts-expect-error once() remembers the tool, not a selected input scope.
       once({ key: (input: { environment: string }) => input.environment });
     }).toThrow("once() does not accept options");
+  });
+
+  it.each([
+    ["the caller spoke last", "alice", "not-applicable"],
+    ["someone else spoke last", "bob", "user-approval"],
+  ] as const)(
+    "steered(), called outside eve's evaluation, asks only when %s",
+    async (_label, sender, expected) => {
+      const person = (principalId: string) => ({
+        attributes: {},
+        authenticator: "test",
+        principalId,
+        principalType: "user" as const,
+      });
+      const context = approvalContext();
+      const session = {
+        ...context.session,
+        auth: { current: person("alice"), initiator: person("alice"), sender: person(sender) },
+      };
+
+      expect(await steered()({ ...context, session })).toBe(expected);
+    },
+  );
+
+  it("rejects options for steered()", () => {
+    expect(() => {
+      // @ts-expect-error steered() follows who spoke last, not an input.
+      steered({ key: "environment" });
+    }).toThrow("steered() does not accept options");
   });
 });

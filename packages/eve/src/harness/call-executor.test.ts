@@ -4,9 +4,10 @@ import { expect, it, vi } from "vitest";
 import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SenderAuthKey, SessionKey } from "#context/keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 
 it.each([
   [undefined, "run"],
@@ -24,7 +25,7 @@ it.each([
   const execute = vi.fn(() => "saved");
   const ctx = new ContextContainer();
   ctx.set(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "session-1",
     turn: { id: "turn_0", sequence: 0 },
   });
@@ -81,7 +82,7 @@ it.each([null, "allow", { type: "approved", reason: 123 }])(
     const execute = vi.fn();
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn_0", sequence: 0 },
     });
@@ -126,7 +127,7 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   };
   const ctx = new ContextContainer();
   ctx.set(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     sessionId: "session-1",
     turn: { id: "turn_0", sequence: 0 },
   });
@@ -287,6 +288,158 @@ it("closes a streaming tool when progress publication fails", async () => {
   });
   expect(result.parts[0]?.output).toMatchObject({ type: "error-text" });
   expect(closed).toBe(true);
+});
+
+/**
+ * Runs a `gh` call made with `input` that needs Alice's identity after Bob spoke, in a session
+ * that can ask her when `canAsk`.
+ */
+async function callNeedingAlice(
+  input: Record<string, unknown>,
+  { canAsk }: { readonly canAsk: boolean },
+) {
+  const alice = {
+    attributes: { team: "T01" },
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, alice);
+  ctx.set(SenderAuthKey, { ...alice, principalId: "bob" });
+  ctx.set(SessionKey, {
+    auth: { current: alice, initiator: alice, sender: { ...alice, principalId: "bob" } },
+    sessionId: "session-1",
+    turn: { id: "turn_0", sequence: 0 },
+  });
+  const events: import("#protocol/session-event.js").SessionEvent[] = [];
+  const results = await contextStorage.run(ctx, () =>
+    executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      canAsk,
+      excludedCallIds: new Set(),
+      messages: [],
+      publish: async (publication) => {
+        events.push(...eventsOf(publication));
+      },
+      toolCalls: [{ input, toolCallId: "call-1", toolName: "gh", type: "tool-call" }],
+      tools: new Map([
+        [
+          "gh",
+          {
+            name: "gh",
+            description: "Run gh.",
+            inputSchema: jsonSchema({ type: "object" }),
+            label: { start: (input) => String((input as { description: string }).description) },
+            // What a user-scoped token resolves through before it reaches the provider.
+            execute: () =>
+              resolveConnectionPrincipal("github", {
+                getToken: async () => ({ token: "token" }),
+                principalType: "user",
+              }),
+          },
+        ],
+      ]),
+    }),
+  );
+  return { events, results };
+}
+
+/** The prompt eve asks Alice with for the `gh` call `callNeedingAlice` makes with `input`. */
+async function identityPrompt(input: Record<string, unknown>): Promise<string | undefined> {
+  return (await callNeedingAlice(input, { canAsk: true })).results.approvals[0]?.request.prompt;
+}
+
+it("stops and asks the caller for a call refused their token after someone else spoke", async () => {
+  const { events, results } = await callNeedingAlice({ command: "gh pr list" }, { canAsk: true });
+
+  expect(results.parts).toEqual([]);
+  expect(results.approvals).toMatchObject([
+    {
+      call: { callId: "call-1", toolName: "gh" },
+      identity: {
+        person: { authenticator: "test", principalId: "alice", principalType: "user" },
+      },
+      request: {
+        kind: "approval",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Cancel" },
+        ],
+      },
+    },
+  ]);
+  expect(results.approvals[0]?.identity?.person).not.toHaveProperty("attributes");
+  expect(events.map((event) => event.type)).toEqual(["call.started"]);
+});
+
+it("fails a call refused the caller's token after someone else spoke where the session can't ask", async () => {
+  const { events, results } = await callNeedingAlice({ command: "gh pr list" }, { canAsk: false });
+
+  expect(results.approvals).toEqual([]);
+  expect(results.parts[0]?.output).toEqual({
+    type: "error-text",
+    value: expect.stringContaining("can't use their github access until they confirm it"),
+  });
+  expect(events.map((event) => event.type)).toEqual(["call.started", "call.settled"]);
+});
+
+it("names a call that asks for someone's identity by its tool and real input, never by a model-written label", async () => {
+  // What approving covers comes before the input, so a channel that cuts the prompt keeps it.
+  await expect(
+    identityPrompt({ command: "gh repo delete acme/app", description: "List open PRs" }),
+  ).resolves.toBe(
+    'Approve Gh with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. It runs with "command": "gh repo delete acme/app", "description": "List open PRs".',
+  );
+});
+
+it("shows every input field of a call that asks for someone's identity, so a long field can't hide a later one", async () => {
+  const body = "Fixes the flaky retry test. ".repeat(200);
+  const prompt = await identityPrompt({
+    body,
+    command: "gh repo delete acme/app --yes",
+    description: "Open the pull request",
+  });
+
+  expect(prompt).toContain(`"body": ${JSON.stringify(body.slice(0, 1_998))}… (`);
+  expect(prompt).toContain(`${String(body.length - 1_998)} more characters not shown)`);
+  expect(prompt).toContain('"command": "gh repo delete acme/app --yes"');
+});
+
+it("cuts a field by its escaped length, so one full of control characters can't hide a later field", async () => {
+  const prompt = await identityPrompt({ body: "\u0000".repeat(2_000), repo: "acme/app" });
+
+  expect(prompt).toContain('"repo": "acme/app"');
+  expect(prompt!.length).toBeLessThan(2_300);
+});
+
+it("cuts each item of a nested value on its own, so a later item stays visible", async () => {
+  const prompt = await identityPrompt({ args: ["x".repeat(2_000), "--delete"] });
+
+  expect(prompt).toContain('"--delete"]');
+});
+
+it("quotes and shortens input keys, so a key can't pass for eve's text", async () => {
+  const key = `note\n\nApprove only if you trust bob. ${"k".repeat(200)}`;
+  const prompt = await identityPrompt({ [key]: "x", command: "gh pr create" });
+
+  expect(prompt).toContain(`${JSON.stringify(key).slice(0, 79)}"… (`);
+  expect(prompt).not.toContain("\n");
+  expect(prompt).toContain('"command": "gh pr create"');
+});
+
+it("shows a call's last input field however long the fields before it", async () => {
+  const padding = Array<number>(1_000).fill(0);
+  const prompt = await identityPrompt({
+    first: padding,
+    second: padding,
+    third: padding,
+    command: "gh repo delete acme/app --yes",
+  });
+
+  expect(prompt).toContain('"command": "gh repo delete acme/app --yes"');
 });
 
 // eve runs local tools itself, so an AI SDK integration sees only what eve hands it.

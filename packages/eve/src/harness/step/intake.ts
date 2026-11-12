@@ -1,4 +1,8 @@
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { ParentSessionKey } from "#context/keys.js";
+import { readSessionAuth } from "#context/session-auth.js";
+import { senderLine } from "#harness/sender-line.js";
 import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import {
@@ -18,15 +22,17 @@ import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
+import { isEmptyInput } from "#harness/hitl/index.js";
 import { readClientContext } from "#internal/client-context.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { Step } from "./context.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /**
- * Settles the calls the runtime ran for parked steps. Returns `undefined` while some are still
- * running: input queued behind them waits until they have. Otherwise returns the step's input
- * without the results it settled, and whether the step waited on any.
+ * Settles the calls the runtime ran for parked steps. While some still run, the step only weighs
+ * what else it brings, such as a person's action on a call that waits as a task, and returns
+ * `undefined` when it brings nothing else. Otherwise returns the step's input without the results
+ * it settled, and whether the step waited on any.
  */
 export async function settleRuntimeWork(
   step: Step,
@@ -44,7 +50,13 @@ export async function settleRuntimeWork(
     pendingCallIds: runtime.callIds,
     results: input?.runtimeActionResults ?? [],
   });
-  if (ready === undefined) return undefined;
+  if (ready === undefined) {
+    // A sign-in's callback leaves the step no input, yet the call that stopped for it runs now.
+    const signedIn = (step.config.signInCompletions?.length ?? 0) > 0;
+    if (input === undefined) return signedIn ? { input, waited: true } : undefined;
+    const { delegatedUsage: _usage, runtimeActionResults: _results, ...action } = input;
+    return isEmptyInput(action) && !signedIn ? undefined : { input: action, waited: true };
+  }
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
@@ -97,6 +109,13 @@ export interface TurnInput {
   readonly hasUserMessage: boolean;
   /** The message with its attachments staged, so input queued again isn't staged twice. */
   readonly message: HarnessStepInput["message"];
+  /** Who sent the message, when a person did: the model is told when the speaker changes. */
+  readonly sender?: SessionAuthContext | null;
+  /**
+   * Who spoke last once the message joins: its sender, or in a delegated session the delegating
+   * turn's latest sender. Absent when the input carries no new message.
+   */
+  readonly spokeLast?: SessionAuthContext | null;
 }
 
 /**
@@ -128,11 +147,22 @@ export async function prepareTurnInput(
     content !== undefined && !options.consumedMessage
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
+  const continuation = staged !== undefined && isContinuation(step, input);
+  const spokeLast =
+    staged !== undefined && kind === undefined && !continuation
+      ? readSessionAuth(step.ctx).sender
+      : undefined;
+  // A delegated session's messages come from the agent that called it, not from a person.
+  const sender = step.ctx.get(ParentSessionKey) === undefined ? spokeLast : undefined;
   if (staged !== undefined) {
-    if (isContinuation(step, input)) {
+    if (continuation) {
       messages.push(
         anchorToTurn(createFrameworkUserMessage("context.instruction", CONTINUATION_NOTE), turnId),
       );
+    }
+    const line = sender === undefined ? undefined : senderLine(step.session.state, sender);
+    if (line !== undefined) {
+      messages.push(anchorToTurn(createFrameworkUserMessage("context.instruction", line), turnId));
     }
     messages.push(
       anchorToTurn(
@@ -150,6 +180,8 @@ export async function prepareTurnInput(
     // Staging keeps a message's text and file parts, with each file a sandbox ref.
     message: staged as HarnessStepInput["message"],
     messages,
+    ...(sender !== undefined && { sender }),
+    ...(spokeLast !== undefined && { spokeLast }),
     storedClientContext,
     turnId,
   };

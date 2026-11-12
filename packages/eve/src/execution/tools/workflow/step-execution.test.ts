@@ -147,7 +147,7 @@ function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext 
     abortSignal: new AbortController().signal,
     session: {
       id: "session-1",
-      auth: { current: auth, initiator: auth },
+      auth: { current: auth, initiator: auth, sender: auth },
       turn: { id: "turn-1", sequence: 1 },
     },
     callId: "call-1",

@@ -546,21 +546,19 @@ describe("compileAgentManifest source graph", () => {
         ],
       });
       const { application, name } = compiled.scheduleCollections[0]!;
+      const alice = {
+        attributes: {},
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user",
+      };
       await createScheduleCollectionClient(collection, {
         abortSignal: new AbortController().signal,
         application,
         channel: { kind: "unknown", metadata: {} },
         collection: name,
         session: {
-          auth: {
-            current: {
-              attributes: {},
-              authenticator: "test",
-              principalId: "alice",
-              principalType: "user",
-            },
-            initiator: null,
-          },
+          auth: { current: alice, initiator: null, sender: alice },
           id: "session-alice",
         },
       }).create({

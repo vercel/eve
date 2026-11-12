@@ -134,6 +134,9 @@ class RunAgentSession implements AgentSession {
     const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
     const sending: AgentSessionMessage = {
       auth: this.#run.auth,
+      ...(this.#run.agentContext.identity !== undefined && {
+        identity: this.#run.agentContext.identity,
+      }),
       message,
       outputSchema,
       replyTo: reply.hook.token,

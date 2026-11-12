@@ -259,7 +259,7 @@ test("a shared draft save stays a draft when the skill is deleted before it comm
 
   const admin = documentRepository({ backend });
   const channel = spaceScope({
-    session: { id: "s", auth: { current: alice, initiator: alice } },
+    session: { id: "s", auth: { current: alice, initiator: alice, sender: alice } },
     conversation: inChannel,
   })!;
   deleteBeforeNextVersion = async () => void (await admin.remove(channel, [String(original.id)]));
@@ -374,7 +374,7 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
   await run(create, { ...deploy }, context());
 
   const loaded = await loadTurnSkills({
-    session: { id: "session-1", auth: { current: alice, initiator: alice } },
+    session: { id: "session-1", auth: { current: alice, initiator: alice, sender: alice } },
     conversation: inChannel,
     turnId: "turn-9",
   });

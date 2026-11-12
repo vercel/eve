@@ -60,6 +60,8 @@ interface CreateExecutionNodeStepInput {
   readonly clearOnly?: boolean;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
+  /** See `KernelConfig.inputOnly`. */
+  readonly inputOnly?: boolean;
   readonly controlDelivery?: KernelConfig["controlDelivery"];
   /**
    * Runtime constructor used by the subagent tool executor to start
@@ -91,6 +93,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
+    inputOnly: input.inputOnly,
     controlDelivery: input.controlDelivery,
     handleEvent: input.handleEvent,
     instrumentation: sessionInstrumentation,

@@ -1,7 +1,7 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import {
   textStreamResult,
@@ -10,8 +10,9 @@ import {
 } from "#internal/testing/approval-resume.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineDynamic } from "#public/definitions/model.js";
-import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
+import type { Approval, ApprovalPolicy, ApprovalResponsePolicy } from "#approval/definition.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
@@ -21,13 +22,16 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { always } from "#tools/approval/policies.js";
-import { defineTool } from "#tools/definition.js";
+import { always, steered } from "#tools/approval/policies.js";
+import { defineTool, type ToolAuthProvider } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
-import { reportCallerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import {
+  reportCallerWorkflow,
+  reportSenderWorkflow,
+} from "#internal/testing/workflow-tool-fixtures.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 
 // Scripted model: calls each tool the first message names, in the order it
@@ -116,6 +120,50 @@ function recordingTool(
   };
 }
 
+/** A per-user credential: each person's token names them, so a result shows whose was used. */
+const CALLER_TOKEN: ToolAuthProvider = {
+  principalType: "user",
+  getToken: async ({ principal }) => ({
+    token: `token:${principal.type === "user" ? principal.id : "app"}`,
+  }),
+};
+
+/** A tool that returns the caller's token, and who it reads as the last to speak. */
+function tokenTool(name: string, { approval }: { approval?: Approval } = {}) {
+  return {
+    loadNamespace: async () => ({
+      default: defineTool({
+        approval,
+        description: `Run ${name} with the caller's token.`,
+        execute: async (_input, ctx) => {
+          const { token } = await ctx.getToken(CALLER_TOKEN);
+          return `${token}, sender ${ctx.session.auth.sender?.principalId}`;
+        },
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: `tools/${name}.ts`,
+  };
+}
+
+/** A workflow tool anyone may approve, which runs `execute`. */
+function workflowTool(
+  name: string,
+  execute: typeof reportCallerWorkflow | typeof reportSenderWorkflow,
+) {
+  return {
+    loadNamespace: async () => ({
+      default: defineWorkflowTool({
+        approval: { request: always(), response: anyoneResponds },
+        description: `Run ${name}.`,
+        execute: execute as WorkflowExecuteToolDefinition["execute"],
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: `tools/${name}.ts`,
+  };
+}
+
 type User = ReturnType<typeof testUser>;
 type Stage = Awaited<ReturnType<ReturnType<typeof captureTurnEvents>["nextTurn"]>>;
 
@@ -141,6 +189,8 @@ interface ChainRun {
     until?: "response.settled",
   ) => Promise<Stage>;
   readonly send: (auth: User, message: string) => Promise<Stage>;
+  /** Completes the sign-in `attemptId` for `connectionName`, as its provider's redirect does. */
+  readonly signIn: (attemptId: string, connectionName: string) => Promise<Stage>;
   readonly stages: Stage[];
 }
 
@@ -152,6 +202,8 @@ async function withChainRun(
   name: string,
   body: (run: ChainRun) => Promise<void>,
   options: {
+    /** The agent's approval policy, which every call runs under. */
+    readonly approval?: ApprovalPolicy;
     readonly firstApproval?: Approval;
     readonly message?: string;
     readonly stubs?: readonly ToolStub[];
@@ -173,6 +225,7 @@ async function withChainRun(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
+        ...(options.approval !== undefined && { approval: options.approval }),
         model: defineDynamic(() => ({
           model: options.model ?? scriptedModel,
           modelContextWindowTokens: 200_000,
@@ -266,6 +319,21 @@ async function withChainRun(
           }
           return await next("delivered");
         },
+        async signIn(attemptId, connectionName) {
+          await resumeHook(commandInbox, {
+            kind: "authorization-callback",
+            payloads: [
+              {
+                authorizationCallback: {
+                  attemptId,
+                  callback: { method: "GET", params: { code: "oauth-code" } },
+                  connectionName,
+                },
+              },
+            ],
+          });
+          return await next("signed in");
+        },
         async send(auth, message) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
             auth,
@@ -319,6 +387,33 @@ function outputsOf(stages: readonly Stage[], callId: string) {
     );
 }
 
+/** eve's requests for a person's identity the stages opened, oldest first. */
+function identityAsks(stages: readonly Stage[]) {
+  return filterEventsByType(stages.flat(), "interaction.opened")
+    .filter((event) => event.data.audience !== undefined && event.data.request.kind === "approval")
+    .map((event) => ({
+      audience: event.data.audience,
+      callId: "callId" in event.data.subject ? event.data.subject.callId : undefined,
+      interactionId: event.data.interactionId,
+      prompt: event.data.request.prompt,
+    }));
+}
+
+/** Answers eve's request for a person's identity about `callId`. */
+function answerIdentity(
+  run: ChainRun,
+  callId: string,
+  auth: User,
+  optionId: "approve" | "deny",
+  until?: "response.settled",
+) {
+  const ask = identityAsks(run.stages)
+    .filter((entry) => entry.callId === callId)
+    .at(-1);
+  expect(ask).toBeDefined();
+  return run.deliver(auth, { answers: [{ interactionId: ask!.interactionId, optionId }] }, until);
+}
+
 describe("approval caller", () => {
   it.each([false, true])(
     "runs a call another person approves as its requester (unmatched stub: %s)",
@@ -364,28 +459,101 @@ describe("approval caller", () => {
     60_000,
   );
 
-  it("lets the requester steer the turn after someone else approves a call", async () => {
-    const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {
-      await run.approve(BOB);
-      // The turn is still Alice's, so her message steers past publish_change.
-      const steered = await run.send(ALICE, "Never mind, skip publishing.");
-      expect(
-        filterEventsByType(steered, "interaction.settled").map((event) => event.data.outcome),
-      ).toEqual(["withdrawn"]);
-    });
+  it("after someone else speaks, hands the caller's token to a call the caller approved, which reads the caller as its sender", async () => {
+    const { stages } = await withChainRun(
+      "approval-caller-token-approved",
+      async (run) => {
+        // Bob's message joins Alice's turn while deploy_change waits on her approval, which
+        // waits as a task: he spoke last from then on.
+        await run.send(BOB, "Bob adds a note.");
+        await run.approve(ALICE, "use_token");
+      },
+      {
+        message: "Use deploy_change, then use_token, then use_token_again.",
+        modules: [tokenTool("use_token", { approval: always() }), tokenTool("use_token_again")],
+      },
+    );
 
-    expect(stages.map(turnBoundaries)).toEqual([
-      ["turn.started turn_0"],
-      [],
-      ["turn.settled turn_0"],
+    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
+    // Approving the tool covers only its call; only approving eve's request for her identity
+    // covers her later calls. So the next one asks Alice for her identity.
+    expect(identityAsks(stages)).toMatchObject([
+      { callId: "call-use_token_again", audience: { principalIds: ["alice"] } },
     ]);
-    expect(seen).toEqual([
-      { tool: "deploy_change", caller: "alice" },
-      { tool: "read_notes", caller: "alice" },
-    ]);
+    expect(outputsOf(stages, "call-use_token_again")).toEqual([]);
   }, 60_000);
 
-  it("lets a message delivered with one answer steer past the step's other approval", async () => {
+  it("hands the caller's token to a call that waited on their approval after someone else spoke", async () => {
+    const { stages } = await withChainRun(
+      "approval-caller-waiting-token",
+      async (run) => {
+        // use_token was asked while Alice spoke last. Bob's message joins, and the call waits.
+        await run.send(BOB, "Bob adds a note.");
+        await run.approve(ALICE, "use_token");
+      },
+      { message: "Use use_token.", modules: [tokenTool("use_token", { approval: always() })] },
+    );
+
+    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
+  }, 60_000);
+
+  it("asks the caller for a call someone else approved, which waited as a task with the sender it was asked under", async () => {
+    const { stages } = await withChainRun(
+      "approval-caller-asked-sender",
+      async (run) => {
+        // use_token is asked after Bob spoke; Alice's message, read before anyone approves it,
+        // doesn't change that.
+        await run.send(BOB, "Bob adds a note.");
+        await run.send(ALICE, "Alice agrees.");
+        // Bob approves it through the response policy, which doesn't release Alice's token: the
+        // call stops and asks her.
+        await run.approve(BOB, "use_token");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        message: "Use deploy_change, then use_token.",
+        modules: [
+          tokenTool("use_token", { approval: { request: always(), response: anyoneResponds } }),
+        ],
+      },
+    );
+
+    expect(identityAsks(stages)).toMatchObject([
+      { callId: "call-use_token", audience: { principalIds: ["alice"] } },
+    ]);
+    expect(outputsOf(stages, "call-use_token")).toEqual([]);
+  }, 60_000);
+
+  it.each([
+    // Alice's message, read before Bob approves, doesn't change the sender the call was asked under.
+    { aliceAgrees: true, approver: BOB, sender: "bob" },
+    // The caller approving the call makes them its sender.
+    { aliceAgrees: false, approver: ALICE, sender: "alice" },
+  ])(
+    "after someone else speaks, starts a waiting workflow tool's run with the sender it was asked under, or the caller when they approve it: $sender",
+    async ({ aliceAgrees, approver, sender }) => {
+      const { stages } = await withChainRun(
+        `approval-caller-workflow-sender-${sender}`,
+        async (run) => {
+          // Bob's message joins Alice's turn while deploy_change waits as a task: he spoke last
+          // from then on.
+          await run.send(BOB, "Bob adds a note.");
+          if (aliceAgrees) await run.send(ALICE, "Alice agrees.");
+          await run.approve(approver, "report_sender");
+          await run.approve(ALICE, "deploy_change");
+        },
+        {
+          message: "Use deploy_change, then report_sender.",
+          modules: [workflowTool("report_sender", reportSenderWorkflow)],
+        },
+      );
+
+      expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender }]);
+    },
+    60_000,
+  );
+
+  it("keeps a step's other approval open when a message arrives with one answer", async () => {
     const { seen, stages } = await withChainRun(
       "approval-caller-steer-with-answer",
       async (run) => {
@@ -394,10 +562,10 @@ describe("approval caller", () => {
         );
         expect(approvalsIn(run.stages)).toHaveLength(2);
         // publish_change waits for its response policy; deploy_change has none. The message
-        // queues behind the policy's answer and must still steer past deploy_change.
+        // queues behind the policy's answer, and deploy_change then waits as a task.
         await run.deliver(ALICE, {
           answers: [{ interactionId: publish!.interactionId, optionId: "approve" }],
-          message: "Never mind, skip the deploy.",
+          message: "Go ahead with publishing; the deploy can wait.",
         });
       },
       { firstApproval: always(), message: "Call in parallel: deploy_change, publish_change." },
@@ -412,9 +580,14 @@ describe("approval caller", () => {
     const byTool = Object.fromEntries(
       approvalsIn(stages).map((entry) => [entry.toolName, outcomes[entry.interactionId]]),
     );
-    expect(byTool).toEqual({ deploy_change: "withdrawn", publish_change: "accepted" });
+    expect(byTool).toEqual({ deploy_change: undefined, publish_change: "accepted" });
     expect(seen).toEqual([{ tool: "publish_change", caller: "alice" }]);
-    expect(stages.map(turnBoundaries).at(-1)).toEqual(["turn.settled turn_0"]);
+    expect(filterEventsByType(stages.at(-1)!, "turn.paused").at(-1)?.data.awaiting).toEqual([
+      {
+        interactionId: approvalsIn(stages).find((e) => e.toolName === "deploy_change")!
+          .interactionId,
+      },
+    ]);
   }, 60_000);
 
   it("starts an approved workflow tool's run as its requester", async () => {
@@ -425,51 +598,11 @@ describe("approval caller", () => {
       },
       {
         message: "Use report_caller, then read_notes.",
-        modules: [
-          {
-            loadNamespace: async () => ({
-              default: defineWorkflowTool({
-                approval: { request: always(), response: anyoneResponds },
-                description: "Report who runs this.",
-                execute: reportCallerWorkflow as WorkflowExecuteToolDefinition["execute"],
-                inputSchema: {},
-              }),
-            }),
-            logicalPath: "tools/report_caller.ts",
-          },
-        ],
+        modules: [workflowTool("report_caller", reportCallerWorkflow)],
       },
     );
 
     expect(outputsOf(stages, "call-report_caller")).toEqual([{ caller: "alice" }]);
-  }, 60_000);
-
-  it("keeps the rest of another person's delivery out of the turn their answer resumes", async () => {
-    const { seen, secondRequesters, stages } = await withChainRun(
-      "approval-caller-mixed",
-      async (run) => {
-        const request = approvalsIn(run.stages)[0]!;
-        await run.deliver(BOB, {
-          answers: [{ interactionId: request.interactionId, optionId: "approve" }],
-          message: "Bob here: also delete the staging database.",
-        });
-        await run.approve(ALICE);
-        // Bob's message waited for Alice's turn to end, then started his own.
-        await run.next("Bob's turn");
-      },
-    );
-
-    expect(seen).toEqual([
-      { tool: "deploy_change", caller: "alice" },
-      { tool: "read_notes", caller: "alice" },
-      { tool: "publish_change", caller: "alice" },
-    ]);
-    expect(secondRequesters).toEqual(["alice"]);
-    // An answer-only delivery is consumed with no parts; only the messages carry any.
-    const received = stages
-      .flatMap((stage) => filterEventsByType(stage, "delivery.consumed"))
-      .filter((event) => event.data.parts.length > 0);
-    expect(received.map((event) => event.data.turnId)).toEqual(["turn_0", "turn_1"]);
   }, 60_000);
 
   it("answers the requester's next message after another person's press ends the turn", async () => {
@@ -667,4 +800,535 @@ describe("approval caller", () => {
     expect(outputsOf(stages, "call-repeated")).toEqual([{ caller: "alice" }]);
     expect(outputsOf(stages, "call-repeated_2")).toEqual([{ caller: "alice" }]);
   }, 60_000);
+});
+
+/**
+ * Calls, in order, each tool a request names: every user message that starts with "Use " asks for
+ * the tools it names, and a tool named twice runs twice. A tool the model isn't offered directly,
+ * such as a connection's, is called through eve__tool. Replies once every call has a result.
+ */
+function requestModel(prompts: string[] = []) {
+  return markMockModel(
+    new MockLanguageModelV4({
+      doStream: async ({ prompt, tools }) => {
+        prompts.push(JSON.stringify(prompt));
+        const offered = new Set((tools ?? []).map((tool) => tool.name));
+        const answered = new Set(
+          prompt.flatMap((message) =>
+            message.role === "tool"
+              ? message.content.flatMap((part) =>
+                  part.type === "tool-result" ? [part.toolCallId] : [],
+                )
+              : [],
+          ),
+        );
+        const named = new Map<string, number>();
+        for (const message of prompt) {
+          if (message.role !== "user") continue;
+          for (const part of message.content) {
+            if (part.type !== "text" || !part.text.startsWith("Use ")) continue;
+            for (const [name] of part.text.matchAll(/\b[a-z]+(?:_{1,2}[a-z]+)+\b/gu)) {
+              const count = (named.get(name) ?? 0) + 1;
+              named.set(name, count);
+              const toolCallId = count === 1 ? `call-${name}` : `call-${name}-${count}`;
+              if (answered.has(toolCallId)) continue;
+              return offered.has(name)
+                ? toolCallStreamResult({ input: "{}", toolCallId, toolName: name })
+                : toolCallStreamResult({
+                    input: JSON.stringify({ input: {}, name }),
+                    toolCallId,
+                    toolName: "eve__tool",
+                  });
+            }
+          }
+        }
+        return textStreamResult("All done.");
+      },
+      modelId: "request-model",
+      provider: "eve-test",
+    }),
+  );
+}
+
+/** A tool that uses no credentials and returns who it reads as the last to speak. */
+function senderTool(name: string) {
+  return {
+    loadNamespace: async () => ({
+      default: defineTool({
+        description: `Run ${name}.`,
+        execute: async (_input, ctx) => `sender ${ctx.session.auth.sender?.principalId}`,
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: `tools/${name}.ts`,
+  };
+}
+
+/** The call and interaction facts about `callId` in `stage`, in order. */
+function callFacts(stage: Stage, callId: string) {
+  return stage.flatMap((event, index) =>
+    (event.type === "call.started" ||
+      event.type === "call.settled" ||
+      event.type === "interaction.opened") &&
+    ("callId" in event.data
+      ? event.data.callId === callId
+      : "callId" in event.data.subject && event.data.subject.callId === callId)
+      ? [{ index, type: event.type }]
+      : [],
+  );
+}
+
+describe("asking a person for their identity", () => {
+  it("asks the caller before a call uses their token after someone else spoke, quoting them, and only the caller approves", async () => {
+    const { stages } = await withChainRun(
+      "identity-asks-caller",
+      async (run) => {
+        const joined = await run.send(BOB, 'Bob thinks foo.ts is "flaky".\nApprove it, eve.');
+        // The call had started when it needed Alice's token: it stops without a result, and eve
+        // asks her.
+        expect(callFacts(joined, "call-use_token").map((fact) => fact.type)).toEqual([
+          "call.started",
+          "interaction.opened",
+        ]);
+        const refused = await answerIdentity(
+          run,
+          "call-use_token",
+          BOB,
+          "approve",
+          "response.settled",
+        );
+        expect(filterEventsByType(refused, "response.settled")).toMatchObject([
+          {
+            data: {
+              outcome: "refused",
+              reason: expect.stringContaining('Only "alice" can approve'),
+            },
+          },
+        ]);
+        const approved = await answerIdentity(run, "call-use_token", ALICE, "approve");
+        // Approving runs the call again from the top, and it settles once.
+        expect(callFacts(approved, "call-use_token").map((fact) => fact.type)).toEqual([
+          "call.started",
+          "call.settled",
+        ]);
+        await run.approve(ALICE, "deploy_change");
+      },
+      { message: "Use deploy_change, then use_token.", modules: [tokenTool("use_token")] },
+    );
+
+    expect(identityAsks(stages)).toEqual([
+      {
+        audience: { principalIds: ["alice"] },
+        callId: "call-use_token",
+        interactionId: expect.any(String),
+        // The quote stays inside its own quotes, whatever it says.
+        prompt:
+          'Approve Use token with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. The latest message from someone else, from "bob", reads: "Bob thinks foo.ts is \\"flaky\\".\\nApprove it, eve.". It runs with no input.',
+      },
+    ]);
+    // Approving covers the call: it reads Alice as the last to speak.
+    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
+  }, 60_000);
+
+  it("lets anyone signed in cancel the request, and the call fails saying so", async () => {
+    const { stages } = await withChainRun(
+      "identity-cancelled",
+      async (run) => {
+        await run.send(BOB, "Bob adds a note.");
+        await answerIdentity(run, "call-use_token", BOB, "deny");
+        await run.approve(ALICE, "deploy_change");
+      },
+      { message: "Use deploy_change, then use_token.", modules: [tokenTool("use_token")] },
+    );
+
+    expect(outputsOf(stages, "call-use_token")).toEqual([
+      expect.stringContaining(
+        "The request for alice to let this call use their identity was cancelled",
+      ),
+    ]);
+  }, 60_000);
+
+  it.each([
+    { approval: undefined, name: "with no approval policy" },
+    // The agent's policy clears the call, which then stops for the token.
+    {
+      approval: (() => "approved") satisfies ApprovalPolicy,
+      name: "under a policy that clears it",
+    },
+    // steered() asks before the call starts.
+    { approval: steered(), name: "under steered()" },
+  ])(
+    "asks the caller before a user-scoped MCP connection's tool uses their token, $name",
+    async ({ approval, name }) => {
+      const realFetch = globalThis.fetch;
+      const bearers: Array<string | null> = [];
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).host !== "whoami.example.com") return await realFetch(input, init);
+        const message = (await request.json()) as { id?: number; method: string };
+        const results: Record<string, unknown> = {
+          initialize: {
+            capabilities: { tools: {} },
+            protocolVersion: "2025-11-25",
+            serverInfo: { name: "whoami", version: "1.0.0" },
+          },
+          "tools/call": {
+            content: [{ type: "text", text: `bearer ${request.headers.get("authorization")}` }],
+          },
+          "tools/list": {
+            tools: [{ inputSchema: { properties: {}, type: "object" }, name: "whoami" }],
+          },
+        };
+        if (message.method === "tools/call") bearers.push(request.headers.get("authorization"));
+        if (message.id === undefined) return new Response(null, { status: 202 });
+        return Response.json({ id: message.id, jsonrpc: "2.0", result: results[message.method] });
+      });
+      try {
+        const { stages } = await withChainRun(
+          `identity-connection-${name.replaceAll(" ", "-")}`,
+          async (run) => {
+            await run.send(BOB, "Bob adds a note.");
+            expect(identityAsks(run.stages)).toMatchObject([
+              { audience: { principalIds: ["alice"] }, callId: "call-whoami__whoami" },
+            ]);
+            // Nothing reached the server with Alice's token before she approved.
+            expect(bearers).toEqual([]);
+            await answerIdentity(run, "call-whoami__whoami", ALICE, "approve");
+            await run.approve(ALICE, "deploy_change");
+          },
+          {
+            ...(approval !== undefined && { approval }),
+            message: "Use deploy_change, then whoami__whoami.",
+            model: requestModel(),
+            modules: [
+              {
+                loadNamespace: async () => ({
+                  default: defineMcpClientConnection({
+                    auth: CALLER_TOKEN,
+                    description: "Says who the request is from.",
+                    protocolVersionDiscovery: false,
+                    url: "https://whoami.example.com/mcp",
+                  }),
+                }),
+                logicalPath: "connections/whoami.ts",
+              },
+            ],
+          },
+        );
+
+        expect(bearers).toEqual(["Bearer token:alice"]);
+        expect(JSON.stringify(outputsOf(stages, "call-whoami__whoami"))).toContain(
+          "bearer Bearer token:alice",
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+    60_000,
+  );
+
+  it("asks no more once the caller speaks, and runs a waiting request's call as a task", async () => {
+    const prompts: string[] = [];
+    const { stages } = await withChainRun(
+      "identity-caller-speaks",
+      async (run) => {
+        await run.send(BOB, "Bob adds a note.");
+        // Alice's message joins while use_token's request is open. That call waits as a task, and
+        // she spoke last, so the call her message asks for runs without asking.
+        await run.send(ALICE, "Use use_token_later.");
+        expect(outputsOf(run.stages, "call-use_token_later")).toEqual([
+          "token:alice, sender alice",
+        ]);
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        message: "Use deploy_change, then use_token.",
+        model: requestModel(prompts),
+        modules: [tokenTool("use_token"), tokenTool("use_token_later")],
+      },
+    );
+
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
+    // The approved waiting call's result reached the model as its task's result.
+    expect(prompts.at(-1)).toMatch(
+      /<task_result id=\\"[\w-]+\\" tool=\\"use_token\\" status=\\"completed\\">token:alice/u,
+    );
+  }, 60_000);
+
+  it("covers the caller's later calls with their approval until someone else speaks again", async () => {
+    const { stages } = await withChainRun(
+      "identity-until-someone-speaks",
+      async (run) => {
+        await run.send(BOB, "Bob adds a note.");
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
+        // use_token_again ran without asking: Alice approved since Bob last spoke. hold_change
+        // then waits on its approval, and Bob speaks again.
+        await run.send(BOB, "Bob adds another note.");
+      },
+      {
+        message:
+          "Use deploy_change, then use_token, then use_token_again, then read_sender, then hold_change, then use_token_later.",
+        model: requestModel(),
+        modules: [
+          tokenTool("use_token"),
+          tokenTool("use_token_again"),
+          senderTool("read_sender"),
+          recordingTool("hold_change", [], [], { request: always(), response: anyoneResponds }),
+          tokenTool("use_token_later"),
+        ],
+      },
+    );
+
+    // The approval hands out Alice's token, and every call still reads Bob as the last to speak:
+    // role checks keep seeing who asked.
+    expect(outputsOf(stages, "call-use_token_again")).toEqual(["token:alice, sender bob"]);
+    expect(outputsOf(stages, "call-read_sender")).toEqual(["sender bob"]);
+    // Bob's new message ends the approval: the next call asks again.
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual([
+      "call-use_token",
+      "call-use_token_later",
+    ]);
+  }, 60_000);
+
+  it("covers only its own call with an approval asked before someone else spoke again", async () => {
+    const { stages } = await withChainRun(
+      "identity-stale-approval",
+      async (run) => {
+        await run.send(BOB, "Bob adds a note.");
+        // Bob speaks again while use_token's request is open: the call waits as a task, and
+        // hold_change waits on its approval.
+        await run.send(BOB, "Bob adds another note.");
+        // Alice approves the request Bob's first note led to, which Bob's second note followed.
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
+        await run.approve(ALICE, "hold_change");
+      },
+      {
+        message: "Use deploy_change, then use_token, then hold_change, then use_token_later.",
+        model: requestModel(),
+        modules: [
+          tokenTool("use_token"),
+          recordingTool("hold_change", [], [], { request: always(), response: anyoneResponds }),
+          tokenTool("use_token_later"),
+        ],
+      },
+    );
+
+    expect(outputsOf(stages, "call-use_token")).toEqual(["token:alice, sender alice"]);
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual([
+      "call-use_token",
+      "call-use_token_later",
+    ]);
+  }, 60_000);
+
+  it("carries the caller's approval into a local subagent", async () => {
+    const { stages } = await withChainRun(
+      "identity-approval-in-subagent",
+      async (run) => {
+        await run.send(BOB, "Use use_token.\nAsk a helper to use use_token_again.");
+        await answerIdentity(run, "call-use_token", ALICE, "approve");
+        for (let read = 0; read < 3 && outputsOf(run.stages, "call-agent").length === 0; read++)
+          await run.next("the helper's result");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        message: "Use deploy_change.",
+        model: delegatingModel(),
+        modules: [tokenTool("use_token"), tokenTool("use_token_again")],
+      },
+    );
+
+    // Alice approved after Bob spoke, and no one spoke since, so the child's call used her token
+    // without asking.
+    expect(identityAsks(stages).map((ask) => ask.callId)).toEqual(["call-use_token"]);
+    expect(outputsOf(stages, "call-agent")).toEqual(["child read token:alice, sender bob"]);
+  }, 60_000);
+});
+
+/**
+ * In the parent, calls each tool a "Use " line names, then hands an "Ask a helper to use <tool>"
+ * message to the built-in agent tool. The child, which reads only "Use <tool>.", calls the tool
+ * and replies with its result.
+ */
+function delegatingModel() {
+  return markMockModel(
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        const texts = prompt.flatMap((message) =>
+          message.role === "user"
+            ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+            : [],
+        );
+        const called = new Set(
+          prompt.flatMap((message) =>
+            message.role === "assistant"
+              ? message.content.flatMap((part) =>
+                  part.type === "tool-call" ? [part.toolName] : [],
+                )
+              : [],
+          ),
+        );
+        const results = prompt.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.flatMap((part) => (part.type === "tool-result" ? [part] : []))
+            : [],
+        );
+        for (const text of texts) {
+          const tool = /^Use (\w+)\.$/mu.exec(text)?.[1];
+          if (tool === undefined || called.has(tool)) continue;
+          return toolCallStreamResult({ input: "{}", toolCallId: `call-${tool}`, toolName: tool });
+        }
+        const helped = texts.find((text) => text.includes("Ask a helper to use "));
+        if (helped !== undefined && !called.has("agent")) {
+          const tool = /Ask a helper to use (\w+)/u.exec(helped)![1]!;
+          return toolCallStreamResult({
+            input: JSON.stringify({ message: `Use ${tool}.` }),
+            toolCallId: "call-agent",
+            toolName: "agent",
+          });
+        }
+        const last = results.at(-1);
+        if (helped === undefined && last !== undefined && last.toolName !== "deploy_change") {
+          const { output } = last;
+          const text = output.type === "text" ? output.value : JSON.stringify(output);
+          return textStreamResult(`child read ${text}`);
+        }
+        return textStreamResult("All done.");
+      },
+      modelId: "delegating-model",
+      provider: "eve-test",
+    }),
+  );
+}
+
+describe("steered()", () => {
+  it("asks only the caller before a call made after someone else spoke, and their approval covers later calls until someone else speaks", async () => {
+    const { stages } = await withChainRun(
+      "steered-asks-caller",
+      async (run) => {
+        const joined = await run.send(BOB, "Bob adds a note.");
+        // eve asks before read_sender starts, with its request for Alice's identity.
+        expect(callFacts(joined, "call-read_sender").map((fact) => fact.type)).toEqual([
+          "interaction.opened",
+        ]);
+        const refused = await answerIdentity(
+          run,
+          "call-read_sender",
+          BOB,
+          "approve",
+          "response.settled",
+        );
+        expect(filterEventsByType(refused, "response.settled")).toMatchObject([
+          { data: { outcome: "refused", reason: expect.stringContaining('Only "alice" can') } },
+        ]);
+        // read_again then runs unasked, and hold_change waits on its own approval when Bob speaks
+        // again.
+        await answerIdentity(run, "call-read_sender", ALICE, "approve");
+        await run.send(BOB, "Bob adds another note.");
+      },
+      {
+        approval: steered(),
+        message:
+          "Use deploy_change, then read_sender, then read_again, then hold_change, then read_later.",
+        model: requestModel(),
+        modules: [
+          senderTool("read_sender"),
+          senderTool("read_again"),
+          recordingTool("hold_change", [], [], { request: always(), response: anyoneResponds }),
+          senderTool("read_later"),
+        ],
+      },
+    );
+
+    expect(identityAsks(stages)).toMatchObject([
+      {
+        audience: { principalIds: ["alice"] },
+        callId: "call-read_sender",
+        prompt:
+          'Approve Read sender with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. The latest message from someone else, from "bob", reads: "Bob adds a note.". It runs with no input.',
+      },
+      // Bob's new message ends Alice's approval.
+      { callId: "call-read_later" },
+    ]);
+    // The call Alice approved reads her as the last to speak; one her standing approval covers
+    // still reads Bob.
+    expect(outputsOf(stages, "call-read_sender")).toEqual(["sender alice"]);
+    expect(outputsOf(stages, "call-read_again")).toEqual(["sender bob"]);
+  }, 60_000);
+
+  it("denies the call when anyone cancels eve's request, and the call never starts", async () => {
+    const { stages } = await withChainRun(
+      "steered-cancelled",
+      async (run) => {
+        await run.send(BOB, "Bob adds a note.");
+        await answerIdentity(run, "call-read_sender", BOB, "deny");
+        await run.approve(ALICE, "deploy_change");
+      },
+      {
+        approval: steered(),
+        message: "Use deploy_change, then read_sender.",
+        model: requestModel(),
+        modules: [senderTool("read_sender")],
+      },
+    );
+
+    expect(callFacts(stages.flat(), "call-read_sender").map((fact) => fact.type)).toEqual([
+      "interaction.opened",
+      "call.settled",
+    ]);
+    expect(outputsOf(stages, "call-read_sender")).toMatchObject([
+      { code: "TOOL_EXECUTION_DENIED", tool: { result: "not_run" } },
+    ]);
+  }, 60_000);
+
+  it.each([
+    {
+      approval: steered(),
+      bobApproves: false,
+      name: "asks the caller before it starts, and runs as them once they approve",
+    },
+    {
+      approval: { request: always(), response: anyoneResponds },
+      bobApproves: true,
+      name: "asks the caller before a call someone else approved starts",
+    },
+  ])(
+    "for a workflow tool, $name",
+    async ({ approval, bobApproves }) => {
+      const { stages } = await withChainRun(
+        `steered-workflow-${String(bobApproves)}`,
+        async (run) => {
+          await run.send(BOB, "Bob adds a note.");
+          // Bob's approval answers the tool's own request; eve still asks Alice before the run.
+          if (bobApproves) await run.approve(BOB, "report_sender");
+          await answerIdentity(run, "call-report_sender", ALICE, "approve");
+          await run.approve(ALICE, "deploy_change");
+        },
+        {
+          approval: steered(),
+          message: "Use deploy_change, then report_sender.",
+          model: requestModel(),
+          modules: [
+            {
+              loadNamespace: async () => ({
+                default: defineWorkflowTool({
+                  approval: approval as Approval,
+                  description: "Report who runs this.",
+                  execute: reportSenderWorkflow as WorkflowExecuteToolDefinition["execute"],
+                  inputSchema: {},
+                }),
+              }),
+              logicalPath: "tools/report_sender.ts",
+            },
+          ],
+        },
+      );
+
+      expect(identityAsks(stages)).toMatchObject([
+        { audience: { principalIds: ["alice"] }, callId: "call-report_sender" },
+      ]);
+      expect(outputsOf(stages, "call-report_sender")).toEqual([{ sender: "alice" }]);
+    },
+    60_000,
+  );
 });

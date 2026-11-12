@@ -139,10 +139,74 @@ describe("workflowEntry sign-ins", () => {
     });
   });
 
-  it("answers a message that steers a held sign-in, in the same turn, without asking to sign in again", async () => {
-    const continuationToken = "http:workflow-entry-auth-steer-answers";
+  it.each([
+    ["the caller's own", "user-1"],
+    ["another person's", "user-2"],
+  ])(
+    "keeps a held sign-in open through %s message, and runs its call as the caller once it completes",
+    async (_label, sender) => {
+      const continuationToken = `http:workflow-entry-auth-open-${sender}`;
+      const { completeCalls, executions, runtime } = await createWeatherAuthRuntime(
+        `workflow-entry-auth-open-${sender}`,
+      );
+
+      await runtime.run(async () => {
+        const run = await startWeatherRun(continuationToken);
+        const stream = captureEvents(run);
+
+        try {
+          const asked = await stream.nextUntil("sign-in", isSignInOpened);
+          await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+
+          await waitForHook(
+            { runId: run.runId },
+            { token: sessionInboxHookToken(continuationToken) },
+          );
+          await resumeHook(sessionInboxHookToken(continuationToken), {
+            auth: userAuth(sender),
+            kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload: { message: "Also say hello." },
+          });
+          // The message joins the turn, and the sign-in stays open: the turn pauses on it again.
+          const joined = await stream.nextUntil("the message joins", (event) => {
+            return event.type === "turn.paused";
+          });
+          expect(filterEventsByType(joined, "interaction.settled")).toEqual([]);
+          expect(joined.filter(isSignInOpened)).toEqual([]);
+          expect(filterEventsByType(joined, "model.requested")).toHaveLength(1);
+
+          await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+            kind: "authorization-callback",
+            payloads: [weatherCallback(signInId(asked))],
+          });
+          const resumed = await stream.nextUntil("turn after sign-in", isTurnSettled);
+          expect(
+            filterEventsByType(resumed, "interaction.settled").map((event) => event.data),
+          ).toMatchObject([{ interactionId: signInId(asked), outcome: "accepted" }]);
+          // The call ran with the caller's credentials, though someone else may have spoken since.
+          expect(filterEventsByType(resumed, "call.settled")).toMatchObject([
+            {
+              data: {
+                outcome: "completed",
+                output: { summary: "authorized with weather-token:user-1" },
+              },
+            },
+          ]);
+          expect(executions()).toEqual([{ city: "Lisbon" }]);
+          expect(completeCalls()).toBe(1);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+  );
+
+  it("lets a later call wait on the sign-in a waiting call holds, and runs both on one callback", async () => {
+    const continuationToken = "http:workflow-entry-auth-shared";
     const { completeCalls, executions, runtime } = await createWeatherAuthRuntime(
-      "workflow-entry-auth-steer-answers",
+      "workflow-entry-auth-shared",
     );
 
     await runtime.run(async () => {
@@ -161,20 +225,30 @@ describe("workflowEntry sign-ins", () => {
           auth: userAuth("user-1"),
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-          payload: { message: "Never mind that, just say hello." },
+          payload: { message: "What's the weather in Porto?" },
         });
-        // A sign-in nobody completed does not stand between the user and an answer.
-        const answered = await stream.nextUntil("answer to the steering message", isTurnSettled);
-        expect(filterEventsByType(answered, "interaction.settled")).toMatchObject([
-          { data: { interactionId: signInId(asked), outcome: "withdrawn" } },
-        ]);
-        expect(answered.filter(isSignInOpened)).toHaveLength(0);
-        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
-        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
-          { data: { outcome: "completed" } },
-        ]);
-        expect(executions()).toEqual([]);
-        expect(completeCalls()).toBe(0);
+        // The Porto call needs the same sign-in, and waits on the open card instead of
+        // replacing it.
+        const joined = await stream.nextUntil("the second call waits", (event) => {
+          return event.type === "turn.paused";
+        });
+        expect(joined.filter(isSignInOpened)).toEqual([]);
+        expect(filterEventsByType(joined, "interaction.settled")).toEqual([]);
+
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [weatherCallback(signInId(asked))],
+        });
+        const resumed = await stream.nextUntil("turn after sign-in", isTurnSettled);
+        expect(
+          filterEventsByType(resumed, "call.settled").map((event) => event.data.outcome),
+        ).toEqual(["completed", "completed"]);
+        expect(
+          executions()
+            .map((entry) => entry.city)
+            .sort(),
+        ).toEqual(["Lisbon", "Porto"]);
+        expect(completeCalls()).toBe(1);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -224,7 +298,7 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
         resume: { nonce: "weather-nonce" },
       };
     },
-    async completeAuthorization({ callback, resume }): Promise<TokenResult> {
+    async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
       completeCalls += 1;
       if (callback.params.error === "access_denied") {
         throw new ConnectionAuthorizationFailedError("weather", {
@@ -234,7 +308,8 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
       }
       expect(callback.params.code).toBe("oauth-code");
       expect(resume).toEqual({ nonce: "weather-nonce" });
-      return { token: "weather-token" };
+      // The token names whose it is, so a call's result shows whose credentials it ran with.
+      return { token: `weather-token:${principal.type === "user" ? principal.id : "app"}` };
     },
   };
   // Both tools sign in to the same connection, so one callback serves a step that calls both.

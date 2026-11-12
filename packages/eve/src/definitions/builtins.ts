@@ -1,5 +1,6 @@
 import { sessionOffersTasks } from "#execution/catalog/step-catalog.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
+import { hadPersonWaits } from "#execution/tasks/table.js";
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
 import {
   type Definition,
@@ -12,7 +13,7 @@ import {
 
 /**
  * What eve adds for its own features, seeing everything the agent declares: the task tools and
- * their note when the session offers tasks.
+ * their note when the session offers tasks, or once a call in it has waited on a person as one.
  */
 export const builtins: Definition = {
   contribute: ({ container, step }) => ({
@@ -20,7 +21,8 @@ export const builtins: Definition = {
       const offersTasks = once(
         async () =>
           step !== undefined &&
-          (hasRunningTask(step) ||
+          (hadPersonWaits(step.session.state) ||
+            hasRunningTask(step) ||
             sessionOffersTasks({
               ctx: container,
               session: step.session,

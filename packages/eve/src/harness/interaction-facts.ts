@@ -36,9 +36,11 @@ export function interactionOpened(input: {
   return fact("interaction.opened", { audience, interactionId, origin, request, subject });
 }
 
-/** An approval opens about its call. */
+/** An approval opens about its call; a request for a person's identity is for that person. */
 export function approvalOpened(ask: ApprovalAsk): FactOf<"interaction.opened"> {
   return interactionOpened({
+    audience:
+      ask.identity === undefined ? undefined : { principalIds: [ask.identity.person.principalId] },
     interactionId: ask.interactionId,
     request: ask.request,
     subject: { callId: ask.call.callId },

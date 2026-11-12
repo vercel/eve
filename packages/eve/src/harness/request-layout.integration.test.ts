@@ -88,7 +88,7 @@ function normalize(value: unknown): unknown {
     ["ulid", /(?<![0-9A-Za-z])[0-9A-HJKMNP-TV-Z]{26}(?![0-9A-Za-z])/g],
     ["request", /(?<=requestId\\?"\s*:\s*\\?")[A-Za-z0-9_-]{12,32}/g],
     ["id", /\b(?:sess|turn|req|call|del|int|task|agent|run|wrun|step|msg|evt)_[A-Za-z0-9]{8,}\b/g],
-    ["id", /\b(?:agent|task)-[a-z0-9]{6,}\b/g],
+    ["id", /\b(?:agent|task|deploy)-[a-z0-9]{6,}\b/g],
   ];
   const rewrite = (text: string) =>
     patterns.reduce(
@@ -137,7 +137,7 @@ async function onWorkflow<T>(fn: (runtime: Runtime) => Promise<T>): Promise<T> {
 }
 
 describe("what eve sends the model", () => {
-  it("assembles instructions, tools, an approval another person interrupts, and a compaction", async () => {
+  it("assembles instructions, tools, an approval that waits through a message, and a compaction", async () => {
     const script: Respond[] = [
       () => toolCallStreamResult({ input: "{}", toolCallId: "call-lookup", toolName: "lookup" }),
       () => textStreamResult("Three changes."),

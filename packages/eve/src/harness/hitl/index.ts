@@ -9,7 +9,7 @@ import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-a
 import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState } from "#harness/session-machine/state.js";
-import type { Step } from "#harness/step/context.js";
+import { canAskPerson, type Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
@@ -20,11 +20,19 @@ import type {
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
 import {
+  createTask,
+  markPersonWaits,
+  readTaskTable,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
+import {
   askApprovals,
   approvalMemory,
   openLimit,
   requestLimit,
   requireSignIn,
+  waitAsTasks,
+  waitingCalls,
 } from "./approvals.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
@@ -44,8 +52,13 @@ export {
   type HumanDecisions,
   type HumanInputIntake,
 } from "./intake.js";
-export { openDeferredApprovals, queueInput } from "./approvals.js";
-export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
+export {
+  endCallerApprovals,
+  openDeferredApprovals,
+  queueInput,
+  withdrawWaitingCalls,
+} from "./approvals.js";
+export { compactInput, isEmptyInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 
 /**
@@ -59,6 +72,8 @@ export async function askStepApprovals(
     readonly messages: readonly ModelMessage[];
     readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+    /** Who had spoken last as the model made the calls. */
+    readonly sender: SessionAuthContext | null;
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
   },
@@ -69,8 +84,35 @@ export async function askStepApprovals(
     requests: input.requests,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
+    sender: input.sender,
     tasks: input.tasks,
   });
+  await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
+}
+
+/**
+ * A message joined the turn: every call still waiting on a person becomes a task. The model reads
+ * the message with everything the calls' responses did, each waiting call's receipt among it, and
+ * the requests stay open; each call runs once its person acts.
+ */
+export async function waitOnPeopleAsTasks(step: Step): Promise<void> {
+  const calls = waitingCalls(step.view());
+  if (calls.length === 0) return;
+  let table = readTaskTable(step.session.state);
+  const tasks = calls.map((call) => {
+    const created = createTask(table, {
+      awaitsPerson: true,
+      callId: call.callId,
+      kind: "tool",
+      name: call.toolName,
+      resumable: false,
+      turnId: call.turnId,
+    });
+    table = created.table;
+    return { ...call, taskId: created.taskId };
+  });
+  step.session = markPersonWaits(writeTaskTable(step.session, table));
+  const transition = waitAsTasks(step.view(), { calls: tasks });
   await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 
@@ -104,7 +146,7 @@ export async function enforceBudget(
   messages: readonly ModelMessage[],
 ): Promise<StepResult | undefined> {
   const limit = checkSessionUsageLimit({
-    canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
+    canAsk: canAskPerson(step),
     limit: step.config.sessionUsageLimit ?? DEFAULT_SESSION_USAGE_LIMIT,
     session: step.session,
     turnSequence: step.position().sequence,
@@ -146,6 +188,8 @@ function responsePolicyRequestIds(
 ): readonly string[] {
   return requests
     .filter((ask) => {
+      // Only the person whose identity a call needs approves eve's request for it.
+      if (ask.identity !== undefined) return false;
       const approval = tools.get(ask.call.toolName)?.approval;
       return (
         approval !== undefined && typeof approval !== "function" && approval.response !== undefined
@@ -189,6 +233,7 @@ export {
   ResumeSignInKey,
   settleSignIns,
   signInsEnded,
+  signInsEndedBy,
   type AnsweredSignIn,
   type OwnCallbacks,
   type ResumeSignIn,

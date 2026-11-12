@@ -22,11 +22,15 @@ export function requireTenantCaller(ctx: SessionContext): {
   tenantId: string;
   userId: string;
 } {
-  const caller = ctx.session.auth.current;
+  const { current: caller, sender } = ctx.session.auth;
   const tenantId = caller?.attributes.tenantId;
 
   if (caller?.principalType !== "user" || typeof tenantId !== "string") {
     throw new Error("An authenticated tenant user is required.");
+  }
+  // In a shared session, someone else's message can steer the caller's turn.
+  if (sender?.attributes.tenantId !== tenantId) {
+    throw new Error("The latest message came from outside this tenant.");
   }
 
   return { tenantId, userId: caller.principalId };
@@ -34,6 +38,8 @@ export function requireTenantCaller(ctx: SessionContext): {
 ```
 
 The tenant comes from verified route auth, never a prompt, tool argument, or remote API response. See [Auth & route protection](../guides/auth-and-route-protection) for custom session and OIDC examples.
+
+`auth.current` is the turn's caller, the person whose message started the turn. In a session several people share, another person's message can join the turn, and `auth.sender` names who sent the latest one. eve checks the sender before it hands out a token from connection `auth` with `principalType: "user"`, but not for credentials your code picks itself. That's why the helper also requires the sender to belong to the caller's tenant. A per-user credential, such as the API key the [API-key-only example](#authenticate-an-api-key-only-connection) looks up with `userId`, belongs to the caller alone, so that connection sets `approval: steered()` to ask the caller before someone else's message uses it. See [Shared sessions](../concepts/security-model#shared-sessions).
 
 ## Authenticate with your own API key or JWT
 
@@ -223,6 +229,7 @@ tenant API key from `headers` instead:
 
 ```ts title="agent/connections/support.ts"
 import { defineMcpClientConnection } from "eve/connections";
+import { steered } from "eve/tools/approval";
 import { tenantCredentials } from "../lib/tenant-credentials";
 import { requireTenantCaller } from "../lib/tenant";
 
@@ -230,6 +237,8 @@ export default defineMcpClientConnection({
   url: "https://support.example.com/mcp",
   description: "Support tickets and customers for the current tenant.",
   tools: { allow: ["search_tickets", "get_ticket", "add_internal_note"] },
+  // The key below is the caller's own, so ask them after someone else speaks.
+  approval: steered(),
 
   headers: async (ctx) => {
     const { tenantId, userId } = requireTenantCaller(ctx);
@@ -289,7 +298,7 @@ The provider must fail closed for unknown tenants, keep secrets out of logs and 
 ## What the model can and cannot see
 
 1. Route auth adds the verified tenant to the session.
-2. Tool code reads `ctx.session.auth.current`, and connection auth receives the user as `principal`.
+2. Tool code reads `ctx.session.auth.current` and checks `ctx.session.auth.sender`, and connection auth receives the user as `principal`.
 3. Your provider gets the matching credential.
 4. eve sends the resulting token and headers directly to the remote service.
 5. Neither becomes a model message or tool result.

@@ -24,18 +24,13 @@ import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { ChannelContext } from "#shared/channel-context.js";
-import {
-  AuthKey,
-  ContinuationHookTokensKey,
-  ContinuationTokenKey,
-  InitiatorAuthKey,
-  SessionIdKey,
-} from "#context/keys.js";
+import { ContinuationHookTokensKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { readSessionAuth } from "#context/session-auth.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session extends SessionReader {
@@ -291,10 +286,7 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
         return accessor.get(SessionIdKey) ?? "";
       },
       get auth(): SessionAuth {
-        return {
-          current: accessor.get(AuthKey) ?? null,
-          initiator: accessor.get(InitiatorAuthKey) ?? null,
-        };
+        return readSessionAuth(accessor);
       },
     },
     get continuation() {

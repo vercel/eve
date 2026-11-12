@@ -1,11 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey, SenderAuthKey } from "#context/keys.js";
 import { openCodeChannel } from "#public/channels/slack/open-code-channel.js";
+import {
+  callerConfirmationMessage,
+  identityRequestOf,
+  withCallIdentity,
+} from "#runtime/connections/caller-confirmation.js";
 import type { SlackChannel } from "#public/channels/slack/slackChannel.js";
 
 const slack = {} as SlackChannel;
 
-function toolContext(metadata: Record<string, unknown> | undefined) {
+const slackUser = (principalId: string) => ({
+  attributes: {},
+  authenticator: "slack",
+  principalId,
+  principalType: "user",
+});
+const alice = slackUser("U_ALICE");
+const bob = slackUser("U_BOB");
+const slackThread = { channelId: "C_ORIGIN", threadTs: "1700000000.000001" };
+
+/** Alice's turn, which Bob spoke in last. */
+function bobSpokeLast(): ContextContainer {
+  const session = new ContextContainer();
+  session.set(AuthKey, alice);
+  session.set(SenderAuthKey, bob);
+  return session;
+}
+
+function toolContext(
+  metadata: Record<string, unknown> | undefined,
+  auth: { readonly current: unknown; readonly sender: unknown } = { current: null, sender: null },
+) {
   const send = vi.fn(async () => ({ sessionId: "session_code" }));
   const to = vi.fn(() => ({ send }));
   return {
@@ -22,7 +50,7 @@ function toolContext(metadata: Record<string, unknown> | undefined) {
           ],
         },
       ],
-      session: { auth: { current: null, initiator: null }, id: "session_thread" },
+      session: { auth: { ...auth, initiator: auth.current }, id: "session_thread" },
       to,
     } as never,
     send,
@@ -49,6 +77,51 @@ describe("openCodeChannel", () => {
       reason: "This conversation is already a code channel.",
       status: "unavailable",
     });
+  });
+
+  it("is unavailable after someone other than the caller spoke, telling the model to ask the caller", async () => {
+    const { ctx, to } = toolContext(slackThread, { current: alice, sender: bob });
+
+    await expect(
+      contextStorage.run(bobSpokeLast(), () =>
+        openCodeChannel(ctx, slack, "Start by reproducing it."),
+      ),
+    ).resolves.toEqual({
+      reason: callerConfirmationMessage("identity to open a Slack code channel"),
+      status: "unavailable",
+    });
+    expect(to).not.toHaveBeenCalled();
+  });
+
+  it("asks the caller after someone else spoke, in a call eve can ask a person about", async () => {
+    const { ctx, to } = toolContext(slackThread, { current: alice, sender: bob });
+
+    const refusal = await contextStorage
+      .run(bobSpokeLast(), () =>
+        withCallIdentity({ canAsk: true, confirmed: [] }, () =>
+          openCodeChannel(ctx, slack, "Start by reproducing it."),
+        ),
+      )
+      .catch((error: unknown) => error);
+
+    expect(identityRequestOf(refusal)?.person).toMatchObject({ principalId: "U_ALICE" });
+    expect(to).not.toHaveBeenCalled();
+  });
+
+  it("opens the channel as the caller when their own message was the last", async () => {
+    const { ctx, send } = toolContext(slackThread, {
+      current: alice,
+      sender: { ...alice, attributes: { team: "T01" } },
+    });
+
+    await expect(openCodeChannel(ctx, slack, "Start by reproducing it.")).resolves.toEqual({
+      sessionId: "session_code",
+      status: "opened",
+    });
+    expect(send).toHaveBeenCalledWith(
+      "Start by reproducing it.",
+      expect.objectContaining({ auth: alice }),
+    );
   });
 
   it("opens the channel from the triggering message with the conversation's text as history", async () => {

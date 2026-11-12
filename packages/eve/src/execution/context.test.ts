@@ -89,7 +89,7 @@ describe("runStep with sessionProvider", () => {
 
     await runStep(ctx, createStubSession(), async () => {
       const session = loadContext().require(SessionKey);
-      expect(session.auth).toEqual({ current: auth, initiator: auth });
+      expect(session.auth).toEqual({ current: auth, initiator: auth, sender: auth });
       expect(session.sessionId).toBe("sess-xyz");
       expect(session.turn.id).toBe("turn_0");
       expect(session.turn.sequence).toBe(0);
@@ -132,6 +132,7 @@ describe("runStep with sessionProvider", () => {
       expect(session.auth).toEqual({
         current: currentAuth,
         initiator: initiatorAuth,
+        sender: currentAuth,
       });
       expect(session.parent).toEqual({
         callId: "call-parent",

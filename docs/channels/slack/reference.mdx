@@ -344,9 +344,9 @@ export default slackChannel({
 - `ctx.defaultAuth` identifies the person who clicked but doesn't authorize them.
 - Without `onAnswers`, Slack accepts every answer with the clicking user's auth.
 
-While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a pending request. A message typed in the thread or DM reaches the agent as a new message under the [turn policy](#control-overlapping-turns). With the default `"steer"` policy, it withdraws an open question.
+While `onAnswers` or `approvalChannel` is set, only the Slack controls answer a pending request. A message typed in the thread or DM reaches the agent as a new message under the [turn policy](#control-overlapping-turns). With the default `"steer"` policy, it withdraws an open question. An open approval or sign-in stays open, and its controls keep working.
 
-Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` in a sensitive tool before it changes anything.
+Post sensitive requests in conversations limited to the intended approvers. Re-check `ctx.session.auth.current` and `ctx.session.auth.sender` in a sensitive tool before it changes anything, because another person's message can steer the caller's turn.
 
 #### Use Slack's action token
 
@@ -360,7 +360,8 @@ export default defineTool({
   description: "Search public Slack channels for the person asking.",
   inputSchema: z.object({ query: z.string() }),
   async execute({ query }, ctx) {
-    const actionToken = ctx.session.auth.current?.attributes.action_token;
+    // The person who sent the latest message, who may not be the turn's caller in a thread.
+    const actionToken = ctx.session.auth.sender?.attributes.action_token;
     // Pass `actionToken` and `query` to `assistant.search.context` with the bot token.
   },
 });
@@ -523,7 +524,7 @@ When the triggering message starts the thread's session, eve adds the earlier re
 
 #### Control overlapping turns
 
-A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to let every running turn finish first. [Message edits](#message-edits) follow the same policy:
+A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to hold a new message until the running turn finishes. A queued message still joins a turn that waits on an approval or sign-in. [Message edits](#message-edits) follow the same policy:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
@@ -775,7 +776,7 @@ export default defineTool({
 
 - Slack links the new channel in the original thread and invites the person who asked. A private conversation opens a private code channel.
 - Omit `name` to let Slack name the channel from the message.
-- Outside Slack or inside a code channel, `openCodeChannel()` returns `{ status: "unavailable", reason }` and the model continues in the thread.
+- Outside Slack or inside a code channel, `openCodeChannel()` returns `{ status: "unavailable", reason }` and the model continues in the thread. The code channel opens as the caller, so after someone other than the caller spoke last, eve asks the caller to approve the call, as it does for a call that reads their token. Where eve can't ask, such as in a workflow tool, it returns `unavailable`. If the caller approved a call since anyone else last spoke, it opens without asking.
 - When Slack refuses, such as for a Slack Connect conversation, disabled code channels, or a missing scope, it throws Slack's error for the model to relay.
 - Like every [`ctx.to()`](/docs/tools#start-channel-sessions-ctxto), it works only in a tool on the root agent.
 
@@ -790,7 +791,7 @@ await ctx
   // Opens the channel from the thread's root message.
   .to(slack, { channelId, codeChannel: { originThreadTs: threadTs, originTs: threadTs } })
   .send(task, {
-    auth: ctx.session.auth.current,
+    auth: ctx.session.auth.sender, // the person who asked
     idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
   });
 ```

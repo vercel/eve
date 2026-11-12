@@ -16,6 +16,7 @@ import type {
 } from "#protocol/session-events/families/interaction.js";
 import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { SessionPerson } from "#context/session-auth.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -161,6 +162,30 @@ export interface TurnCaller {
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }
     | { readonly kind: "callback"; readonly token: string; readonly url: string };
+  /**
+   * The delegating turn's latest sender. A local child inherits it, so a subagent called after
+   * someone other than the caller spoke can't hand out the caller's token unasked.
+   */
+  readonly senderAuth?: SessionAuthContext | null;
+  /** What the delegating turn's child inherits beside its sender. */
+  readonly identity?: DelegatedIdentity;
+}
+
+/**
+ * What a local child session inherits from the session that delegated to it, beside its latest
+ * sender: who has spoken there, and the callers' standing approvals, each of which lasts until
+ * someone else speaks.
+ */
+export interface DelegatedIdentity {
+  /** The people who have spoken in the delegating session, without their attributes. */
+  readonly participants: readonly SessionPerson[];
+  /** The standing caller approvals there, by the key eve remembers each under. */
+  readonly confirmed: readonly string[];
+  /** The latest message from each sender the delegating turn read, which a request can quote. */
+  readonly messages?: readonly {
+    readonly from: { readonly id: string; readonly type: string; readonly issuer?: string };
+    readonly text: string;
+  }[];
 }
 
 /** Internal transport payload, including framework-owned compatibility and context fields. */
@@ -548,6 +573,10 @@ export interface RunInput {
    * (root session behavior).
    */
   readonly initiatorAuth?: SessionAuthContext | null;
+  /** A delegating turn's latest sender, which a local child's first turn inherits. */
+  readonly senderAuth?: SessionAuthContext | null;
+  /** What a local child inherits from the delegating session beside its sender. */
+  readonly delegatedIdentity?: DelegatedIdentity;
   readonly input: {
     /** Omitted only when creating a conversation session before its first turn. */
     readonly message?: MessageContent;

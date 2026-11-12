@@ -82,6 +82,29 @@ export function renderTaskReceipt(task: {
   return `${started} To send it another message, call ${task.tool} again with taskId ${task.id}.`;
 }
 
+/** What a call that waits on a person waits for: an approval, or a sign-in. */
+export type PersonWait = "approval" | "sign-in";
+
+/**
+ * The receipt for a call that still waited on a person when a message joined its turn: it became
+ * a task, and runs once they act.
+ */
+export function renderWaitingTaskReceipt(task: {
+  readonly id: string;
+  readonly awaiting: PersonWait;
+}): string {
+  const waits =
+    task.awaiting === "approval"
+      ? "It waits for a person to approve it, and runs once they do."
+      : "It waits for a person to sign in, and runs once they do.";
+  return `Started task ${task.id}. ${waits} Its result will arrive in a <task_result> message. If a later message makes it unnecessary, drop it with ${TASK_CANCEL_TOOL_NAME}.`;
+}
+
+/** The result of a waiting call a person denied, or a policy refused when it was approved. */
+export function renderDeniedCall(reason: string | undefined): string {
+  return `${reason ?? "Tool execution was denied."} The call didn't run.`;
+}
+
 /** The receipt for a call that reaches a resumable task by its `taskId`. */
 export function renderTaskSentReceipt(taskId: string): string {
   return `Sent to task ${taskId}. Its reply will arrive in a <task_result> message.`;
@@ -268,16 +291,22 @@ function isModelOutput(
 export interface ListedTask {
   readonly id: string;
   readonly tool: string;
+  /** The person a working task waits for, before its call can run. */
+  readonly awaiting?: PersonWait;
 }
 
-/** The `[Tasks]` note: working tasks, then idle resumable tasks when there are any. */
+/**
+ * The `[Tasks]` note: working tasks, each with what it waits for when a person must act, then idle
+ * resumable tasks when there are any.
+ */
 export function renderTasksNote(input: {
   readonly idle: readonly ListedTask[];
   readonly working: readonly ListedTask[];
 }): string {
   const lines = [TASKS_NOTE_LABEL, "<tasks>"];
   for (const task of input.working) {
-    lines.push(`<task ${listedTaskAttributes(task)} status="working"/>`);
+    const status = task.awaiting === undefined ? "working" : `awaiting-${task.awaiting}`;
+    lines.push(`<task ${listedTaskAttributes(task)} status="${status}"/>`);
   }
   lines.push("</tasks>");
   if (input.idle.length > 0) {

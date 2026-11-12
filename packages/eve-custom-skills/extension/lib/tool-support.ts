@@ -243,7 +243,11 @@ async function targetsSharedScope(ctx: Parameters<ApprovalResponsePolicy>[0]): P
     const scopes = await skillScopes({
       session: {
         id: ctx.session.id,
-        auth: { current: ctx.request.principal, initiator: ctx.session.initiator },
+        auth: {
+          current: ctx.request.principal,
+          initiator: ctx.session.initiator,
+          sender: ctx.request.principal,
+        },
       },
     });
     const requested = (ctx.request.toolInput as { readonly scope?: unknown } | undefined)?.scope;

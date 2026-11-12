@@ -152,6 +152,22 @@ export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
     clearedBy: clearedBySchema.optional(),
+    /**
+     * Whom the run of a call that waited on a person reads as `auth.sender`, whoever spoke since:
+     * the caller when they approved it, else who had spoken last when the model made it. `null`
+     * for someone who isn't signed in.
+     */
+    sender: z
+      .object({
+        attributes: z.record(z.string(), z.union([z.string(), z.array(z.string()).readonly()])),
+        authenticator: z.string(),
+        issuer: z.string().optional(),
+        principalId: z.string(),
+        principalType: z.string(),
+        subject: z.string().optional(),
+      })
+      .nullable()
+      .optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,

@@ -57,6 +57,66 @@ export function withResult(
   return next;
 }
 
+/** A call that waited as a task, settled: its task, and the result the model reads. */
+export interface WaitingCallResult {
+  readonly taskId: string;
+  readonly part: ToolResultPart;
+}
+
+/**
+ * Each call that waited as a task and has a result leaves its step as its task's result, and a
+ * step left with no call leaves the turn.
+ */
+export function takeWaitingResults(turn: TurnState): {
+  readonly results: readonly WaitingCallResult[];
+  readonly turn: TurnState;
+} {
+  const results: WaitingCallResult[] = [];
+  const suspended = turn.suspended.flatMap((step): SuspendedStep[] => {
+    const taskIds = step.taskIds;
+    if (taskIds === undefined) return [step];
+    const settled = new Set<string>();
+    for (const message of step.messages) {
+      if (message.role !== "tool") continue;
+      for (const part of message.content) {
+        const taskId = part.type === "tool-result" ? taskIds[part.toolCallId] : undefined;
+        if (part.type !== "tool-result" || taskId === undefined) continue;
+        settled.add(part.toolCallId);
+        results.push({ part, taskId });
+      }
+    }
+    if (settled.size === 0) return [step];
+    const rest = withoutCalls(step, settled);
+    return Object.keys(rest.taskIds ?? {}).length === 0 ? [] : [rest];
+  });
+  return results.length === 0 ? { results, turn } : { results, turn: { ...turn, suspended } };
+}
+
+/** The step without the calls in `callIds`: their calls, results, and what they waited on. */
+export function withoutCalls(step: SuspendedStep, callIds: ReadonlySet<string>): SuspendedStep {
+  const messages = withoutResults(step.messages, callIds).flatMap((message): ModelMessage[] => {
+    if (message.role !== "assistant" || typeof message.content === "string") return [message];
+    const content = message.content.filter(
+      (part) => part.type !== "tool-call" || !callIds.has(part.toolCallId),
+    );
+    return content.length === 0 ? [] : [{ ...message, content }];
+  });
+  const approved = step.approved?.filter((call) => !callIds.has(call.call.callId));
+  const { approved: _approved, taskIds, ...rest } = step;
+  return {
+    ...rest,
+    ...(approved !== undefined && approved.length > 0 && { approved }),
+    messages,
+    requests: step.requests.filter((request) => !callIds.has(request.call.callId)),
+    tasks: step.tasks.filter((task) => !callIds.has(task.callId)),
+    ...(taskIds !== undefined && {
+      taskIds: Object.fromEntries(
+        Object.entries(taskIds).filter(([callId]) => !callIds.has(callId)),
+      ),
+    }),
+  };
+}
+
 /** The messages without the results of the calls in `callIds`, which stay as unanswered calls. */
 export function withoutResults(
   messages: readonly ModelMessage[],

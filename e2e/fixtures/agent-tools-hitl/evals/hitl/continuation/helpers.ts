@@ -47,6 +47,8 @@ export async function expectReply(
       `Exactly one reply matching ${String(expected)} in ${turnId}`,
     ),
   );
+  // A turn whose earlier request still waits on a person pauses on it again instead of ending.
+  const end = endOf(turn, turnId);
   const completions = turn.events.filter(
     (event) =>
       event.type === "turn.settled" &&
@@ -54,10 +56,10 @@ export async function expectReply(
       event.data.outcome === "completed",
   );
   await t.require(
-    completions.length,
+    end === "paused" ? 1 : completions.length,
     satisfies<number>((count) => count === 1, `Exactly one completion for ${turnId}`),
   );
-  turn.eventOrder([replyMatch(turnId, expected), completionMatch(turnId)]);
+  turn.eventOrder([replyMatch(turnId, expected), endMatch(turnId, end)]);
   turn.notEvent("interaction.opened", { scope: { turnId } });
   t.log(`Checking answer and completion for ${turnId}.`);
   return turn;
@@ -88,7 +90,7 @@ export async function expectResponseReply(
       count: 1,
     },
     replyMatch(turnId, expected),
-    completionMatch(turnId),
+    endMatch(turnId, endOf(turn, turnId)),
   ]);
   return turn;
 }
@@ -102,23 +104,34 @@ function replyMatch(turnId: string, expected: string | RegExp): EveEvalEventMatc
   };
 }
 
-function completionMatch(turnId: string): EveEvalEventMatch {
-  return { count: 1, data: { outcome: "completed", turnId }, type: "turn.settled" };
+/**
+ * How `turnId` ended in `turn`: settled, or paused again on a request that still waits, with no
+ * `turn.settled` after it.
+ */
+function endOf(turn: EveEvalTurn, turnId: string): "paused" | "settled" {
+  const last = [...turn.events]
+    .reverse()
+    .find(
+      (event) =>
+        (event.type === "turn.paused" || event.type === "turn.settled") &&
+        event.data.turnId === turnId,
+    );
+  return last?.type === "turn.paused" && last.data.awaiting.length > 0 ? "paused" : "settled";
+}
+
+function endMatch(turnId: string, end: "paused" | "settled"): EveEvalEventMatch {
+  return end === "paused"
+    ? { data: { turnId }, type: "turn.paused" }
+    : { count: 1, data: { outcome: "completed", turnId }, type: "turn.settled" };
 }
 
 /**
- * A message steered the turn held on this approval, which cancels it: the
- * request is withdrawn and its call never runs.
+ * A message joined the turn held on this approval, which stays open: its call waits as a task
+ * and hasn't run.
  */
-export function expectApprovalCancelled(session: EveEvalSession, request: Interaction) {
-  session.event("interaction.settled", {
-    data: { interactionId: request.interactionId, outcome: "withdrawn" },
-    count: 1,
-  });
-  session.event("call.settled", {
-    data: { callId: request.call!.callId, outcome: "rejected" },
-    count: 1,
-  });
+export function expectApprovalStillOpen(session: EveEvalSession, request: Interaction) {
+  session.notEvent("interaction.settled", { data: { interactionId: request.interactionId } });
+  session.notEvent("call.settled", { data: { callId: request.call!.callId } });
   expectChangeStillUnexecuted(session, request.call!.name);
 }
 

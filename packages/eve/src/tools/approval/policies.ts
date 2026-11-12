@@ -3,6 +3,7 @@ import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import { decide } from "#ai/decide.js";
 import { approvalEvaluation } from "#approval/evaluation.js";
+import { callerSpokeLast } from "#context/session-auth.js";
 import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
@@ -84,6 +85,30 @@ export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
 /** Returns an `approval` callback that never requires user approval. */
 export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
   return () => "not-applicable";
+}
+
+/**
+ * Asks the turn's caller before a call the model makes after someone else's message, as eve asks
+ * before a call uses the caller's identity, with the same request. The caller's approval covers
+ * their later calls until anyone else sends a message. Where eve can't ask, the call is denied and
+ * the model reads why. In a session with one person it never asks.
+ */
+export function steered<TInput = unknown>(): ApprovalPolicy<TInput> {
+  if (arguments.length !== 0) {
+    throw new TypeError(
+      "steered() does not accept options. Use a custom approval policy for input-dependent decisions.",
+    );
+  }
+  return (context) => {
+    const requireCaller = approvalEvaluation(context as ApprovalContext)?.requireCaller;
+    // Outside eve's evaluation, such as a policy calling it directly, or under an older copy of
+    // eve's harness bundled beside this one, it can only ask.
+    if (requireCaller === undefined) {
+      return callerSpokeLast(context.session.auth) ? "not-applicable" : "user-approval";
+    }
+    requireCaller();
+    return "not-applicable";
+  };
 }
 
 /** Remembers a person's approval for this tool for the rest of the session. */

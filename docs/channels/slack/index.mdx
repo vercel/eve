@@ -398,6 +398,8 @@ export default slackChannel({
 
 Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) adds per-conversation allowlists.
 
+Anyone these hooks admit can reply in a thread while someone else's turn runs, and their reply joins that turn. The turn keeps its caller, so a tool that checks only `ctx.session.auth.current` acts with the caller's access. Set `approval: steered()` in `agent.ts` so eve asks the caller before any call made after someone else spoke. See [Shared sessions](/docs/concepts/security-model#shared-sessions).
+
 ## Reference
 
 The [Slack reference](/docs/channels/slack/reference) covers:

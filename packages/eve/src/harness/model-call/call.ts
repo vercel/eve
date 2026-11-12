@@ -54,7 +54,7 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
-import { stepReference } from "#harness/step/context.js";
+import { canAskPerson, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
@@ -535,6 +535,7 @@ export class ModelCaller {
       abortSignal: this.input.generation.signal,
       approvalMemory: this.input.approvalMemory,
       beforeExecute: () => this.input.generation.protectToolExecution(),
+      canAsk: canAskPerson(step),
       excludedCallIds: options.excludedCallIds ?? new Set(),
       messages,
       modelCallId: stepResult.callId,

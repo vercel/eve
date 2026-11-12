@@ -63,6 +63,7 @@ Point the App's webhook URL at `https://your-agent.example/eve/v1/github`, subsc
 By default, a new comment that includes `@my-agent` starts a turn. The token is plain text, not a GitHub mention, so GitHub may not autocomplete or link it. The agent reacts with 👀 when it starts, then replies on the issue or PR timeline, or in the review thread. Each later comment in that thread that includes `@my-agent` continues the same session.
 
 - To customize which comments start a turn, override `onComment`. See [Dispatch](/docs/channels/github/reference#dispatch).
+- To limit who can steer a running turn, see [Restrict who can steer](#restrict-who-can-steer).
 - To also wake on new issues, pull requests, or CI, see [Trigger on issues, pull requests, and CI](#trigger-on-issues-pull-requests-and-ci).
 - To turn off the reaction or change how replies are posted, see [Delivery](/docs/channels/github/reference#delivery).
 
@@ -90,6 +91,28 @@ export default githubChannel({
 ```
 
 Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
+
+## Restrict who can steer
+
+By default, any comment that includes `@my-agent` starts a turn or joins the running one, including a turn someone else started. On a public repository, that is anyone with a GitHub account. The turn keeps its caller, so a tool that checks only `ctx.session.auth.current` acts with the caller's access.
+
+Check the commenter in `onComment`, and set `approval: steered()` in `agent.ts` so eve asks the caller before any call made after someone else spoke. A custom `onComment` replaces the default mention check, so keep one:
+
+```ts title="agent/channels/github.ts"
+import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
+
+const maintainers = new Set(["octocat"]);
+
+export default githubChannel({
+  botName: "my-agent",
+  onComment: (ctx, comment) =>
+    comment.body.includes("@my-agent") && maintainers.has(ctx.sender.login)
+      ? { auth: defaultGitHubAuth(ctx) }
+      : null,
+});
+```
+
+See [Shared sessions](/docs/concepts/security-model#shared-sessions).
 
 ## Access the repository
 

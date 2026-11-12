@@ -27,7 +27,7 @@ const input = {
   hookToken: "control",
   input: {},
   session: {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     id: "session",
     turn: { id: "turn", sequence: 1 },
   },

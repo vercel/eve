@@ -39,6 +39,11 @@ export interface ApprovalDecision {
   readonly denied: boolean;
   readonly awaitsPerson?: true;
   readonly reason?: string;
+  /**
+   * `steered()` marked the call: it runs only while the turn's caller's identity is released, as
+   * a call that uses their identity does.
+   */
+  readonly steered?: true;
 }
 
 export function approvalDecision(value: unknown): ApprovalDecision {

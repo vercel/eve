@@ -135,7 +135,7 @@ describe("durable tool stub playback", () => {
           context.set(SessionKey, {
             sessionId: run.runId,
             turn: { id: "turn_1", sequence: 1 },
-            auth: { current: null, initiator: null },
+            auth: { current: null, initiator: null, sender: null },
           });
           await contextStorage.run(context, async () => {
             context.set(

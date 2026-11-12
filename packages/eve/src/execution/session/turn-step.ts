@@ -20,6 +20,8 @@ import {
   ScheduleInstanceKey,
   OccurrenceIdKey,
   InitiatorAuthKey,
+  DelegatedIdentityKey,
+  SenderAuthKey,
   SessionTitleKey,
   ParentSessionKey,
   SandboxKey,
@@ -64,8 +66,10 @@ import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
+import { attachInputText } from "#internal/input-text.js";
+import { principalOf } from "#context/session-auth.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import { continueTurnAuth } from "#execution/session/principal.js";
+import { continueTurnAuth, recordSender } from "#execution/session/principal.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -417,16 +421,55 @@ async function runSessionStepBody(
       resolved = answers;
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
+    // Someone other than the running turn's caller sent this delivery. Their answers are
+    // theirs, whatever the turn's identity is. Only the caller's text answers a request by
+    // text, so theirs is a message; and without a message they only answer: the context and
+    // history they sent never reach the model unattributed.
+    if (
+      resolved !== undefined &&
+      delivery?.auth !== undefined &&
+      !startedBetweenTurns &&
+      principalOf(delivery.auth) !== principalOf(previousAuth)
+    ) {
+      const responder = delivery.auth;
+      const answers = resolved.answers?.map((answer) => ({ ...answer, responder }));
+      resolved =
+        resolved.message === undefined
+          ? answersOnly({ ...resolved, answers })
+          : attachInputText({ ...resolved, answers }, "");
+    }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
     // The adapter saw the incoming caller. A responder's answers, an ignored
     // correction and other input without a message keep a running turn's
     // identity; a message joining it may update only its principal's claims.
     let turnAuth = ctx.get(AuthKey);
-    if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
-    else if (delivery !== undefined && !startedBetweenTurns) {
+    // Who spoke last changes as this step reads a message, so every call the model makes in the
+    // step sees one sender: a new turn starts with its caller, and a message joining the turn
+    // makes its sender the last to speak, including text the caller types to answer a request.
+    // A pressed answer speaks no words: it settles its own request, whoever gave it. A session's
+    // first turn keeps the sender its run started with, such as a delegating parent's, and a
+    // turn that a delivery without auth starts, such as a hook's continuation, keeps the last one.
+    if (
+      startedBetweenTurns &&
+      initialEmissionState.sessionStarted &&
+      delivery?.auth !== undefined
+    ) {
+      ctx.delete(SenderAuthKey);
+    }
+    if (answers !== undefined || ignoredActiveDelivery) {
+      turnAuth = previousAuth;
+    } else if (delivery !== undefined && !startedBetweenTurns) {
       turnAuth =
         resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+      if (resolved?.message !== undefined) recordSender(ctx, previousAuth, delivery.auth);
+    }
+    // A delegating parent passes its own latest sender down with the message it sends.
+    if (resolved?.message !== undefined && delivery?.caller?.senderAuth !== undefined) {
+      recordSender(ctx, turnAuth, delivery.caller.senderAuth);
+    }
+    if (resolved?.message !== undefined && delivery?.caller?.identity !== undefined) {
+      ctx.set(DelegatedIdentityKey, delivery.caller.identity);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
@@ -653,6 +696,7 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        inputOnly: input.input?.inputOnly === true,
         controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,
@@ -771,11 +815,12 @@ async function runSessionStepBody(
 }
 
 /**
- * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's an interaction (`announceWaiting`).
+ * The step stopped for an interaction: it says so, or it stopped on its tasks or with nothing of its
+ * own to wait on, and the tables say whether that's an interaction (`announceWaiting`), as when a
+ * task's call waits on a person.
  */
 function stoppedForPerson(result: StepResult): boolean {
-  if (result.held !== undefined) return result.held.kind === "request";
+  if (result.held !== undefined) return true;
   return result.next === null && result.settledTurn === undefined;
 }
 
@@ -798,4 +843,14 @@ function ownSignInAnswer(
   const error = callback.params["error"];
   if (signIn === undefined || (error !== undefined && error !== SIGN_IN_DECLINED)) return undefined;
   return { interactionId, outcome: error === undefined ? "accepted" : "declined", signIn };
+}
+
+/** A delivery's answers alone, without the message, context, or history sent with them. */
+function answersOnly(input: HarnessStepInput): HarnessStepInput {
+  return {
+    ...(input.answers !== undefined && { answers: input.answers }),
+    ...(input.deliveries !== undefined && {
+      deliveries: input.deliveries.map(({ history: _history, ...delivery }) => delivery),
+    }),
+  };
 }

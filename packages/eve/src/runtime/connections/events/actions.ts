@@ -1,7 +1,7 @@
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
 import { createHash } from "node:crypto";
 import {
@@ -19,6 +19,7 @@ import type {
 } from "#shared/connection-types.js";
 import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
+import { requireCallerConfirmation } from "#runtime/connections/caller-confirmation.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { connectionEventDestination } from "#runtime/connections/events/path.js";
 import {
@@ -214,6 +215,13 @@ export class ConnectionEventActions {
       );
       return subscriptionResult(bindingId, subscription);
     }
+    // The watch's callbacks run as the caller whatever credential the connection uses: after
+    // someone else spoke, only a call the caller approved starts one.
+    requireCallerConfirmation(
+      this.connection.connectionName,
+      ctx,
+      "identity for a watch that runs as them",
+    );
     return this.withClient(async (events) => {
       const definition = (await this.catalog(events)).find(
         (event) => actionName(event.name) === name,

@@ -160,6 +160,23 @@ describe("extension-scope plugin (bundled)", () => {
     expect(code).toContain("eve/internal/mount-state");
   });
 
+  it("keeps the rest of eve/context for an extension-owned module", async () => {
+    const { modulePath } = scratchModule(
+      [
+        'import { defineState, samePrincipal } from "eve/context";',
+        'export const budget = defineState("budget", () => ({ count: 0 }));',
+        "export const same = samePrincipal;",
+        "",
+      ].join("\n"),
+    );
+    const code = await bundle(modulePath, [
+      createFixedMountScopePlugin("extensions/crm"),
+      externalizeEvePlugin,
+    ]);
+    expect(code).toContain('defineMountedState("extensions/crm", name, initial)');
+    expect(code).toMatch(/import \{[^}]*samePrincipal[^}]*\} from "eve\/context"/);
+  });
+
   it("leaves a module outside every extension source root unscoped", async () => {
     const { modulePath } = scratchModule(STATE_MODULE);
     const code = await bundle(modulePath, [

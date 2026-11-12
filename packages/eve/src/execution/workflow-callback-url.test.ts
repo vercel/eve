@@ -4,6 +4,7 @@ import {
   createWorkflowCallbackUrl,
   resolveVercelProductionCallbackBaseUrl,
   resolveWorkflowCallbackBaseUrl,
+  workflowCallbackBaseUrl,
 } from "#execution/workflow-callback-url.js";
 
 describe("resolveVercelProductionCallbackBaseUrl", () => {
@@ -126,5 +127,11 @@ describe("createWorkflowCallbackUrl", () => {
         "/eve/v1/connections/linear/callback/tok123?code=abc",
       ),
     ).toBe("https://agent.example.com/eve/support/v1/connections/linear/callback/tok123?code=abc");
+  });
+});
+
+describe("workflowCallbackBaseUrl", () => {
+  it("is undefined outside a workflow step", async () => {
+    await expect(workflowCallbackBaseUrl()).resolves.toBeUndefined();
   });
 });

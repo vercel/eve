@@ -3,6 +3,7 @@ import type { RememberedApproval, RememberRequest } from "#approval/evaluation.j
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionPerson } from "#context/session-auth.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
@@ -33,6 +34,25 @@ export interface ApprovalAsk {
     readonly version?: string;
   };
   readonly request: InteractionRequest;
+  /** Set when the request asks a person to let the call use their identity. */
+  readonly identity?: IdentityAsk;
+}
+
+/**
+ * A call that stopped because it needs a person's identity: only that person can approve it, and
+ * approving runs the call again, from the top, with their identity.
+ */
+export interface IdentityAsk {
+  readonly person: SessionPerson;
+  /** Who approved the call's own approval; the call still reads them as `ctx.approval`. */
+  readonly responder?: SessionAuthContext;
+  /** The people who had already approved the call, whose identities it keeps. */
+  readonly confirmed?: readonly SessionPerson[];
+  /**
+   * eve asked before the call started, as for a call `steered()` marks: cancelling denies it,
+   * and nothing of it ran.
+   */
+  readonly beforeStart?: true;
 }
 
 /**
@@ -50,6 +70,11 @@ export interface ApprovedCall {
    * runs, after the answer, and the responder's record with it, has settled.
    */
   readonly responder?: SessionAuthContext;
+  /**
+   * The people who let the call use their identity, by approving it: eve's requests for their
+   * identity, and the caller's approval of the call itself before one of those.
+   */
+  readonly confirmedBy?: readonly SessionPerson[];
 }
 
 /**
@@ -77,6 +102,18 @@ export interface SuspendedStep {
   readonly responseAuthRequiredRequestIds?: readonly string[];
   /** The caller whose turn parked the step; `null` when unauthenticated. */
   readonly requester?: SessionAuthContext | null;
+  /**
+   * Who had spoken last when the model made the step's calls, which each call keeps when it runs
+   * later, whatever the turn read meanwhile; `null` for someone who isn't signed in.
+   */
+  readonly sender?: SessionAuthContext | null;
+  /**
+   * The calls that still waited on a person when a message joined the turn, each with the task
+   * it became. The step's response already joined history with a receipt for each, so the step
+   * holds only these calls and never commits again: each call's result reaches the model as its
+   * task's result.
+   */
+  readonly taskIds?: Readonly<Record<string, string>>;
 }
 
 export interface TurnState {

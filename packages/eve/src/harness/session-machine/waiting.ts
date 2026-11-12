@@ -1,16 +1,18 @@
 import type { Commit } from "#harness/types.js";
 import { commitOf } from "./commit.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { activeTurn, openWork, waiting } from "#protocol/session-projection/selectors.js";
+import { activeTurn, openWork, runTurn, waiting } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
  * What a step announces as it ends, from the tables before and after it: that the open turn
  * waits on interactions — `turn.paused` with the interactions, and `awaiting-input` for the
  * deliveries the turn answers for now. It announces when the step leaves the turn waiting on
- * someone it didn't wait on before, or a delivery arrived or moved during the step and can go
- * no further: one answer of a batch still waiting for the rest, or a message queued behind a
- * budget question. A step that only finds the turn as it was announces nothing.
+ * someone it didn't wait on before, or no longer on someone it did, when it called the model for
+ * the turn, as a turn whose calls wait on people as tasks does between pauses, or when a delivery
+ * arrived or moved during the step and can go no further: one answer of a batch still waiting for
+ * the rest, or a message queued behind a budget question. A step that only finds the turn as it
+ * was announces nothing.
  *
  * A step is the session's unit of progress: inside one, a line can look as if nothing is left
  * to do while the step goes on, so only its end can say. Every step's publisher asks here, so
@@ -36,7 +38,19 @@ function waitingAnnouncements(before: SessionView, after: SessionView): SessionE
   const arrived = Object.values(after.deliveries).some(
     (row) => row.status !== "settled" && before.deliveries[row.deliveryId]?.status !== row.status,
   );
-  if (!arrived && now.interactions.every((row) => asked.has(row.interactionId))) return [];
+  const worked = Object.keys(after.runs).some(
+    (runId) => before.runs[runId] === undefined && runTurn(after, runId) === turnId,
+  );
+  const narrowed = [...asked].some(
+    (interactionId) => after.interactions[interactionId]?.status !== "open",
+  );
+  if (
+    !arrived &&
+    !worked &&
+    !narrowed &&
+    now.interactions.every((row) => asked.has(row.interactionId))
+  )
+    return [];
   return [
     {
       data: {

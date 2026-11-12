@@ -97,7 +97,7 @@ async function inSession<T>(
   ctx.set(SessionIdKey, "alice-session");
   ctx.set(SessionKey, {
     sessionId: "alice-session",
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     turn: { id: "turn-1", sequence: 0 },
   });
   ctx.set(ConversationContextKey, {

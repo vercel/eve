@@ -455,8 +455,8 @@ describe("a session's spans, from its committed lines", () => {
   it.each([
     ["a failure's reason code", "failed", "access_denied", "access_denied"],
     ["a failure's error message", "failed", "Calendar said: token abc123 is invalid", undefined],
-    // Alice sent a new message, so the sign-in ended without anyone refusing it.
-    ["a withdrawal's reason", "withdrawn", "superseded-by-message", undefined],
+    // The call that asked ended, so the sign-in ended without anyone refusing it.
+    ["a withdrawal's reason", "withdrawn", "asker-ended", undefined],
   ])("records an authorization reason for %s", async (_, outcome, reason, recorded) => {
     const { commit, spans } = session();
     await commit(...opening.slice(0, 2));

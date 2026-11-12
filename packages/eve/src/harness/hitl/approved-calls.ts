@@ -2,6 +2,8 @@ import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage, TelemetryOptions } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { personOf, principalOf } from "#context/session-auth.js";
+import { sessionCaller } from "#runtime/connections/caller-confirmation.js";
 
 import {
   type CallOutcome,
@@ -21,7 +23,7 @@ import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { settleCall } from "#harness/session-machine/calls.js";
 import { commitOf } from "#harness/session-machine/commit.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import type { ApprovedCall } from "#harness/session-machine/state.js";
+import type { ApprovalAsk, ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -114,13 +116,19 @@ export async function runApprovedCalls(input: {
   readonly telemetry?: TelemetryOptions;
   /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
   readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
+  /** Whether the caller approved each call, which then runs with their identity. */
+  readonly callerApprovedOf?: (approval: ApprovedCall) => boolean;
   /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
   readonly view: () => Pick<SessionView, "projection">;
   /** The batch's sign-in reports, shared by every group of calls resumed together. */
   readonly signIns?: SignInReports;
+  /** The session can ask a person, so a call refused for someone's identity asks them. */
+  readonly canAsk?: boolean;
 }): Promise<{
   readonly settled: readonly CallResult[];
   readonly signIns: readonly ToolSignIn[];
+  /** What eve asks the people whose identity calls stopped for. */
+  readonly identities: readonly ApprovalAsk[];
 }> {
   const reportSignIns = (input.signIns ?? signInReports(input)).report;
   const executed = await Promise.allSettled(
@@ -137,12 +145,25 @@ export async function runApprovedCalls(input: {
       }
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
+        const caller = sessionCaller();
+        const callerApproval =
+          input.callerApprovedOf?.(approval) === true && caller !== null
+            ? personOf(caller)
+            : undefined;
+        const earlier = approval.confirmedBy ?? [];
+        // The caller's approval can be one eve asked them for, already among the earlier ones.
+        const confirmedBy =
+          callerApproval === undefined ||
+          earlier.some((person) => principalOf(person) === principalOf(callerApproval))
+            ? earlier
+            : [callerApproval, ...earlier];
         return await executeToolCall(
           call,
           {
             ...input,
             definition,
             ...(responder !== undefined && { responder }),
+            confirmedBy,
             beforeResult: (failure) => reportSignIns(approval, failure),
           },
           "recheck",
@@ -166,5 +187,6 @@ export async function runApprovedCalls(input: {
   return {
     settled: completed.flatMap((call) => call.settled),
     signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
+    identities: completed.flatMap((call) => (call.identity === undefined ? [] : [call.identity])),
   };
 }

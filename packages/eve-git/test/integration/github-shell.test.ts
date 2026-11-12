@@ -171,6 +171,74 @@ test("asks authorize with the argv, caller, owner, repository, and token before 
   assert.equal(runs.length, 1);
 });
 
+const ALICE = slackUser("slack:alice");
+const BOB = slackUser("slack:bob");
+
+function slackUser(principalId: string) {
+  return { attributes: {}, authenticator: "slack", principalId, principalType: "user" };
+}
+
+/** Runs READ with an app token in Alice's turn, after `sender` spoke last. */
+async function readInAliceTurn(sender: typeof ALICE, authorized: readonly string[]) {
+  const asked: Array<string | undefined> = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const outcome = await executeGitHubShell(
+    READ,
+    {
+      ...CONFIG,
+      authorize: ({ auth }: GitHubAppAuthorizeRequest) => {
+        asked.push(auth?.principalId);
+        return authorized.includes(auth?.principalId ?? "");
+      },
+    },
+    {
+      auth: ALICE,
+      sender,
+      sessionId: "session-shared",
+      async getConnectToken() {
+        return "secret-token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
+  ).then(
+    () => undefined,
+    (error: Error) => error,
+  );
+  return { asked, outcome, runs };
+}
+
+test("refuses an app-token command the caller may run when the person who spoke last may not", async () => {
+  const { asked, outcome, runs } = await readInAliceTurn(BOB, [ALICE.principalId]);
+
+  assert.match(
+    outcome?.message ?? "",
+    /^The person who spoke last in this turn is not authorized to run this command on vercel\/internal-agents\. Ask the person whose message started this turn to confirm it/u,
+  );
+  assert.deepEqual(asked, [ALICE.principalId, BOB.principalId]);
+  assert.equal(runs.length, 0);
+});
+
+test("runs an app-token command when the caller and the person who spoke last are both authorized", async () => {
+  const { asked, outcome, runs } = await readInAliceTurn(BOB, [ALICE.principalId, BOB.principalId]);
+
+  assert.equal(outcome, undefined);
+  assert.deepEqual(asked, [ALICE.principalId, BOB.principalId]);
+  assert.equal(runs.length, 1);
+});
+
+test("asks authorize once when the caller spoke last, whatever claims their latest message carried", async () => {
+  const { asked, outcome, runs } = await readInAliceTurn(
+    { ...ALICE, attributes: { team: "platform" } },
+    [ALICE.principalId],
+  );
+
+  assert.equal(outcome, undefined);
+  assert.deepEqual(asked, [ALICE.principalId]);
+  assert.equal(runs.length, 1);
+});
+
 test("resolves one user grant for every repository through ctx.getToken and re-authorizes on 401", async () => {
   const getTokenCalls: Parameters<ToolContext["getToken"]>[] = [];
   const requireAuthCalls: Parameters<ToolContext["requireAuth"]>[] = [];

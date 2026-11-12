@@ -1,6 +1,7 @@
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type {
   ChannelInstrumentationProjection,
+  DelegatedIdentity,
   SessionCapabilities,
   SessionParent,
   SessionTraceRoot,
@@ -48,6 +49,11 @@ export interface AgentSessionContext {
   readonly dynamicSelections: DynamicSubagentSelections;
   /** Whether a parent, local or remote, delegated the calling session. */
   readonly delegated?: boolean;
+  /**
+   * Who had spoken in the calling session and the callers' standing approvals, as of
+   * the call. A local child inherits them, and the remote-agent guard reads the approvals.
+   */
+  readonly identity?: DelegatedIdentity;
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** The calling session, turn, and tool call, recorded as each session's lineage. */
   readonly parent: SessionParent;
@@ -75,6 +81,7 @@ type CallerDispatch = Pick<
   | "bundle"
   | "capabilities"
   | "channelMetadata"
+  | "delegatedIdentity"
   | "dynamicSubagentSelections"
   | "inheritedConversation"
   | "localDevRequest"
@@ -106,6 +113,7 @@ export function captureAgentSessionContext(
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
     delegated: hasDelegatedSessionContext(caller.serializedContext),
+    identity: caller.delegatedIdentity,
     localDevRequest: caller.localDevRequest,
     parent: {
       callId,

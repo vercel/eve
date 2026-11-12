@@ -5,7 +5,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { runEffects, type RunEffectsInput } from "#definitions/kernel.js";
-import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
+import { ParentSessionKey, SessionKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -66,6 +66,7 @@ import { endSession } from "#harness/session-machine/deliveries.js";
 import { SessionStreamWriteError } from "#harness/session-stream-write-error.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { readSessionAuth } from "#context/session-auth.js";
 
 const log = createLogger("execution.publish-session-events");
 
@@ -767,9 +768,8 @@ export async function publishTerminalSessionEvent(input: {
   // installs the session callback context that channel `session.ended`
   // handlers read, so install it here. A prewarmed session that expires,
   // resets, or closes before its first message has no turn yet: `turn_0`.
-  const auth = ctx.get(AuthKey) ?? null;
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },
+    auth: readSessionAuth(ctx),
     parent: ctx.get(ParentSessionKey),
     sessionId,
     turn: input.turn ?? { id: "turn_0", sequence: 0 },

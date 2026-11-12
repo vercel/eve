@@ -3,6 +3,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
+import { principalOf } from "#context/session-auth.js";
 import {
   buildApprovalResponseAuth,
   handleApprovalResponsePolicyError,
@@ -36,6 +37,10 @@ const UNAUTHENTICATED_FEEDBACK = "Authentication is required to respond to this 
 const INVALID_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const REQUESTER_ONLY_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
+/** Why someone other than the person whose identity a call needs can't approve it. */
+function identityOnlyFeedback(person: string): string {
+  return `Only ${JSON.stringify(person)} can approve this, because the action uses their identity. Anyone signed in can cancel it.`;
+}
 const UNAVAILABLE_REASON =
   "The tool this approval was for is no longer available, so the call won't run.";
 const TEMPORARILY_UNAVAILABLE_REASON =
@@ -96,6 +101,22 @@ export function checkResponders(
     const decision = decisionOf(response);
     if (decision === undefined) {
       refused.push({ reason: INVALID_FEEDBACK, responseId });
+      continue;
+    }
+    // eve's request for a person's identity is theirs to approve, whatever the tool's response
+    // policy; anyone signed in may cancel it.
+    if (request.identity !== undefined) {
+      const responder = auth !== undefined ? auth : currentResponder();
+      if (responder === null || responder.principalType === "anonymous") {
+        refused.push({ reason: UNAUTHENTICATED_FEEDBACK, responseId });
+        continue;
+      }
+      const { person } = request.identity;
+      if (decision === "approve" && principalOf(person) !== principalOf(responder)) {
+        refused.push({ reason: identityOnlyFeedback(person.principalId), responseId });
+        continue;
+      }
+      if (responseId !== undefined) admit.push(responseId);
       continue;
     }
     const gated = step.responseAuthRequiredRequestIds?.includes(request.interactionId) === true;

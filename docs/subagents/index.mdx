@@ -104,14 +104,16 @@ To offer a subagent only to some sessions or turns, export `defineDynamic` from 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
-export default defineDynamic((ctx) =>
-  ctx.session.auth.current?.attributes.role === "researcher"
+export default defineDynamic((ctx) => {
+  const { current, sender } = ctx.session.auth;
+  // `sender` is `current` until someone else's message joins the turn.
+  return current?.attributes.role === "researcher" && sender?.attributes.role === "researcher"
     ? defineAgent({
         description: "Investigate ambiguous questions before the parent responds.",
         model: "anthropic/claude-opus-5.5",
       })
-    : null,
-);
+    : null;
+});
 ```
 
 eve runs the function before each parent model call. The subagent's files are always built. Build settings such as `build.externalDependencies` can't be dynamic, so set them on the root agent, where they also apply to subagents:

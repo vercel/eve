@@ -406,15 +406,6 @@ async function pressSignInCancel(conversation: ChannelConversation) {
   await conversation.press(cancel!);
 }
 
-/** Starts a calendar sign-in, then moves on with a new message before finishing it. */
-async function abandonSignIn(conversation: ChannelConversation) {
-  await conversation.say(READ_CALENDAR);
-  await conversation.waitForSignIn();
-  // A person moves on once they've seen the sign-in, which in a group they reply to.
-  await conversation.waitForRest();
-  await conversation.say(CHANGE_OF_PLANS);
-}
-
 const questionRules = [
   {
     rule: "a rendered question shows every option a person can choose",
@@ -672,9 +663,8 @@ const approvalRules = [
     },
   },
   {
-    rule: "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply",
-    // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    rule: "a message while an approval is pending leaves it open, so typing approve afterwards runs the tool and the next message gets a reply",
+    source: "docs/tools/human-in-the-loop.md#follow-up-messages",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -683,17 +673,14 @@ const approvalRules = [
       await conversation.waitForReplyTo(ASIDE);
       await conversation.say("approve");
       await conversation.waitForRest();
-      expect(
-        conversation.runsOf(GATED_TOOL),
-        `${GATED_TOOL} ran on an approval the aside cancelled`,
-      ).toBe(0);
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} runs`).toBe(1);
       await conversation.say(FOLLOW_UP);
       await conversation.waitForReplyTo(FOLLOW_UP);
     },
   },
   {
-    rule: "pressing Approve on an approval a message cancelled runs nothing",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    rule: "pressing Approve on an approval a message left open runs the tool",
+    source: "docs/tools/human-in-the-loop.md#follow-up-messages",
     requires: ["buttons", "text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -703,10 +690,7 @@ const approvalRules = [
       // The card's original button, as a client that hasn't refreshed still shows it.
       await conversation.press(option(options, APPROVE_LABELS));
       await conversation.waitForRest();
-      expect(
-        conversation.runsOf(GATED_TOOL),
-        `${GATED_TOOL} ran on an approval the aside cancelled`,
-      ).toBe(0);
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} runs`).toBe(1);
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -1084,30 +1068,20 @@ const signInRules = [
     },
   },
   {
-    rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
+    rule: "a message while a sign-in is pending gets a reply and leaves it open, so signing in afterwards runs the tool",
     source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
-      await abandonSignIn(conversation);
-      await conversation.waitForReplyTo(CHANGE_OF_PLANS);
-      // Finishing the abandoned sign-in afterwards must not run the tool.
-      await conversation.completeSignIn();
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      // A person moves on once they've seen the sign-in, which in a group they reply to.
       await conversation.waitForRest();
-      expect(
-        conversation.runsOf("read_calendar"),
-        "read_calendar ran after its sign-in was cancelled",
-      ).toBe(0);
-    },
-  },
-  {
-    rule: "message after ignored sign-in tells user it was cancelled",
-    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
-    requires: ["text-replies"],
-    variesByConversation: true,
-    async run(conversation) {
-      await abandonSignIn(conversation);
-      await conversation.waitForShown(/\b(?:cancel|declin)/iu);
+      await conversation.say(CHANGE_OF_PLANS);
+      await conversation.waitForReplyTo(CHANGE_OF_PLANS);
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran before sign-in").toBe(0);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -1140,18 +1114,19 @@ const approvalPermissionRules = [
   },
   {
     rule: "another person typing deny or approve doesn't settle a requester-only approval",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    source: "docs/tools/human-in-the-loop.md#follow-up-messages",
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
-      // Today another person's message waits for the turn to end, so it never reaches the
-      // response policy; the approval stays pending either way.
+      // Another person's text joins the turn as a message, never as an answer, so the approval
+      // stays pending.
       await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
       // A denial taken as Alice's would settle the call as denied before this approval.
       await conversation.say("approve");
-      await expectReleased(conversation);
+      await conversation.waitForRest();
+      expect(conversation.runsOf(REQUESTER_GATED_TOOL), `${REQUESTER_GATED_TOOL} runs`).toBe(1);
     },
   },
   {

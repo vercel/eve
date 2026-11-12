@@ -21,6 +21,7 @@ Important naming note:
 | Require approval, or ask the user something mid-turn     | [Human in the Loop](./tools/human-in-the-loop.md)                                |
 | Call an external HTTP API or MCP server                  | [Connections](./connections/index.mdx)                                           |
 | Add a messaging surface (Slack, Discord, iMessage, …)    | [Channels](./channels/index.mdx)                                                 |
+| Let several people share a session, such as a thread     | [Shared sessions](./concepts/security-model.md#shared-sessions)                  |
 | Expose your own HTTP route as a conversation surface     | [Custom Channels](./channels/custom.mdx)                                         |
 | Package a procedure the agent loads only when it applies | [Skills](./skills.mdx)                                                           |
 | Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)   |
@@ -47,6 +48,8 @@ You are responsible for configuring approval policies, tool restrictions, connec
 Before using eve with non-public, sensitive, regulated, or production data, review which default tools, custom tools, MCP tools, shell/file/web tools, connected services, subagents, schedules, and external actions are available to the agent.
 
 Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
+
+When more than one person can reach a session, such as a Slack thread or a GitHub issue, anyone the channel admits can steer another person's turn. Set `approval: steered()` in `agent.ts`, or check `ctx.session.auth.sender` in code that authorizes from the caller. See [Shared sessions](./concepts/security-model.md#shared-sessions).
 
 Unless you configure stricter controls, eve agents may operate with permissive settings, including tool execution without human approval where approval is omitted and sandbox network egress that is not deny-all. Do not rely on model behavior alone to prevent sensitive or irreversible actions.
 

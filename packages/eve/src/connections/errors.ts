@@ -85,6 +85,12 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    *   Terminal for the turn.
    * - `"sign_in_unavailable"`: a turn a schedule started needed a sign-in.
    *   Scheduled turns never ask for one. Terminal.
+   * - `"confirmation_required"`: a call needed the caller's identity while
+   *   someone else spoke last, the caller hadn't approved the call, and eve
+   *   couldn't ask them, such as in a session that can't request input or a
+   *   workflow tool. Where eve can ask, it opens an approval for the caller
+   *   instead. The message asks the model to get the caller's clear
+   *   confirmation. Terminal for the call.
    */
   readonly reason?: string;
 

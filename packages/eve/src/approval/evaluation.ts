@@ -37,6 +37,11 @@ export interface ApprovalEvaluation {
   };
   /** Asks a person; their decision is remembered under `remember.key` when it settles. */
   readonly ask: (remember: RememberRequest) => ApprovalStatus;
+  /**
+   * Marks the call as acting for the turn's caller, whatever status wins: it runs only while their
+   * identity is released, and eve asks them for it otherwise.
+   */
+  readonly requireCaller: () => void;
 }
 
 // Bundles may load eve's policies and the harness from separate copies of this module. The global
@@ -59,6 +64,8 @@ export async function evaluateApproval(
   // Only the exact result `ask` issued remembers its settlement, not a discarded or copied one.
   const asked = new WeakMap<object, RememberRequest>();
   const scoped = (key: string) => JSON.stringify([context.toolName, key]);
+  // A side effect rather than a status: the agent's policy and the tool's merge to one status.
+  let steered = false;
   const evaluation: ApprovalEvaluation = Object.freeze({
     ask: (remember: RememberRequest) => {
       const status = Object.freeze({ type: "user-approval" as const });
@@ -70,12 +77,17 @@ export async function evaluateApproval(
       pending: memory.pending.includes(scoped(key)),
     }),
     recheck,
+    requireCaller: () => {
+      steered = true;
+    },
   });
   const evaluated: EvaluatedContext = { ...context, [evaluationKey]: evaluation };
   const status = await policy(evaluated);
-  const decision = approvalDecision(status);
+  const decided = approvalDecision(status);
+  const decision = steered && !decided.denied ? { ...decided, steered: true as const } : decided;
   if (decision.awaitsPerson !== true) return decision;
-  if (recheck) return { denied: false };
+  if (recheck)
+    return decision.steered === true ? { denied: false, steered: true } : { denied: false };
   const remember = typeof status === "object" && status !== null ? asked.get(status) : undefined;
   return remember === undefined ? decision : { ...decision, remember };
 }

@@ -234,7 +234,8 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 
 5. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
 6. Open the PR with a short description that explains the problem, user need,
-   or decision behind the change before describing the solution.
+   or decision behind the change before describing the solution. List any
+   public API additions or changes in its Public API section.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 

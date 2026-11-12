@@ -1,7 +1,8 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf } from "#context/session-auth.js";
 
 function signInCallback(attemptId: string) {
   return {
@@ -74,7 +75,7 @@ describe("SessionInputQueue", () => {
     expect(queue.takeAuthorizations(held)).toBeUndefined();
   });
 
-  it("lets only the turn's own person steer it and keeps another person's message for its own turn", () => {
+  it("lets anyone steer a turn, and lets a queued message join one that waits on a person", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -92,19 +93,48 @@ describe("SessionInputQueue", () => {
         payloads: [{ message }],
       })!.sequence;
 
+    const queuedEarly = send("Invite the design team too.", alice, "queue");
     const fromBob = send("Add a meeting to my calendar.", bob);
-    const fromAlice = send("Also cover the launch date.", alice);
-    const unauthenticated = send("Include the press notes.");
-    const queuedByBob = send("Invite the design team too.", bob, "queue");
-    const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
+    const heldSince = queue.nextAdmission;
+    const queuedByBob = send("Book the large room.", bob, "queue");
+    const admitted = new Set([queuedEarly, fromBob, queuedByBob]);
 
-    // A delivery without auth acts as the session's current identity, which is the turn's.
-    expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromAlice, unauthenticated]);
-    // A turn held on Alice lets her queued messages steer it, but never Bob's.
-    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })).toBeUndefined();
-    expect(queue.takeNext()).toMatchObject({
+    // Bob's message steers Alice's turn; queued messages wait while nothing holds it.
+    expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromBob]);
+    expect(queue.hasSteering(admitted, turn)).toBe(false);
+    // A turn that waits on a person can't end until they act, so a queued message sent since
+    // joins it, whoever sent it. One sent before the request existed waits for the next turn.
+    expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([queuedByBob]);
+    expect(queue.takeNext()).toMatchObject({ delivery: { auth: alice }, sequences: [queuedEarly] });
+  });
+
+  it("takes one person's messages per step, so each is recorded as its sender's", () => {
+    const user = (principalId: string) => ({
+      attributes: {},
+      authenticator: "slack",
+      principalId,
+      principalType: "user" as const,
+    });
+    const [alice, bob] = [user("ALICE"), user("BOB")];
+    const queue = new SessionInputQueue([]);
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const send = (message: string, auth?: SessionAuthContext) =>
+      queue.enqueueDelivery({
+        ...(auth !== undefined && { auth }),
+        kind: "deliver",
+        payloads: [{ message }],
+      })!.sequence;
+    const first = [send("It's the retry logic.", bob), send("In foo.ts.")];
+    const second = send("Thanks, that helps.", alice);
+    const admitted = new Set([...first, second]);
+
+    expect(queue.takeSteering(admitted, turn)).toMatchObject({
       delivery: { auth: bob },
-      sequences: [fromBob, queuedByBob],
+      sequences: first,
+    });
+    expect(queue.takeSteering(admitted, turn)).toMatchObject({
+      delivery: { auth: alice },
+      sequences: [second],
     });
   });
 

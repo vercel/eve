@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey, SenderAuthKey } from "#context/keys.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { withCallIdentity } from "#runtime/connections/caller-confirmation.js";
 import {
   createScheduleCollectionClient,
   type ScheduleBoundCallContext,
@@ -22,6 +25,12 @@ const callContext: ScheduleBoundCallContext = {
         principalType: "user",
       },
       initiator: null,
+      sender: {
+        attributes: { secret: "not-persisted" },
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user",
+      },
     },
   },
 };
@@ -70,6 +79,28 @@ describe("dynamic schedules client", () => {
     });
   });
 
+  it("records the caller as creator after someone else spoke only for a call the caller approved", async () => {
+    const { client, create, provider } = setup();
+    const created = await client.create(input);
+    const update = vi.spyOn(provider, "update");
+    const alice = callContext.session.auth.current!;
+    const turn = new ContextContainer();
+    turn.set(AuthKey, alice);
+    turn.set(SenderAuthKey, { ...alice, principalId: "bob" });
+
+    await contextStorage.run(turn, async () => {
+      const refused = { reason: "confirmation_required" };
+      await expect(client.create(input)).rejects.toMatchObject(refused);
+      await expect(client.update(created.name, { payload })).rejects.toMatchObject(refused);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(update).not.toHaveBeenCalled();
+      // A timing-only update keeps the stored creator.
+      await client.update(created.name, { expression: { type: "delay", minutes: 10 } });
+      await withCallIdentity({ confirmed: [alice] }, () => client.create(input));
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects invalid input before preparation, and rejected or oversized preparation before writes", async () => {
     const { definition, create } = setup();
     const prepare = vi.fn((value: { task: string; destination: "my-dm" | "team-channel" }) => {
@@ -116,6 +147,7 @@ describe("dynamic schedules client", () => {
         auth: {
           current: { ...callContext.session.auth.current!, principalId: "bob" },
           initiator: null,
+          sender: { ...callContext.session.auth.current!, principalId: "bob" },
         },
       },
     });

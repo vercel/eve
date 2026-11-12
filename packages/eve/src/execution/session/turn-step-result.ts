@@ -38,11 +38,12 @@ export function resolveSessionStepResult(
     };
   }
 
+  const projection = storedProjection(stepResult.session.state);
   if (stepResult.held?.kind === "tasks") {
-    return { action: "paused", ...pausedOnTasks(stepResult.held.taskIds), ...values };
+    const paused = pausedOnTasks(stepResult.session, projection, stepResult.held.taskIds);
+    return { action: "paused", ...paused, ...values };
   }
   if (stepResult.held?.kind === "request") {
-    const projection = storedProjection(stepResult.session.state);
     return { action: "paused", ...pausedOnInteraction(stepResult.session, projection), ...values };
   }
   if (stepResult.next !== null) return { action: "continue", ...values };

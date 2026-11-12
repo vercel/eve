@@ -26,12 +26,21 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { assertUniqueCoordinationCallIds } from "#harness/coordination.js";
 import {
   activeTurnId,
+  rememberedApprovals,
   runtimeWait,
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
+import type {
+  DelegatedIdentity,
+  SessionAuthContext,
+  SessionParent,
+  SessionTraceRoot,
+} from "#channel/types.js";
+import { messagesToDelegate, participantsOf } from "#harness/sender-line.js";
+import { callerApprovals } from "#runtime/connections/caller-confirmation.js";
+import { readSender } from "#context/session-auth.js";
 import type { ContextReader } from "#context/key.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
@@ -45,6 +54,8 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
+  /** Only these calls' runs start, when the turn already runs its other calls. */
+  readonly callIds?: readonly string[];
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -76,6 +87,9 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly senderAuth: SessionAuthContext | null;
+  /** What a local child this dispatch starts inherits beside the sender. */
+  readonly delegatedIdentity: DelegatedIdentity;
   /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
@@ -98,13 +112,18 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
  * run starts. Returns undefined when no actions are pending.
  */
 export async function prepareCoordinationDispatch(input: {
+  readonly callIds?: readonly string[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<PreparedCoordinationDispatch | undefined> {
   const durableSession = readDurableSession(input.sessionState);
   const waiting = runtimeWait(durableSession.state);
   if (waiting === undefined) return undefined;
-  const requests = waiting.tasks;
+  const { callIds } = input;
+  const requests =
+    callIds === undefined
+      ? waiting.tasks
+      : waiting.tasks.filter((task) => callIds.includes(task.callId));
   if (requests.length === 0) return undefined;
   const turnId =
     waiting.event.turnId || activeTurnId(turnPosition(storedProjection(durableSession.state)));
@@ -170,6 +189,12 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     dynamicSubagentSelections: readDynamicSubagentSelections(ctx),
     inheritedConversation: ctx.get(ConversationContextKey),
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    senderAuth: readSender(ctx, ctx.get(AuthKey) ?? null),
+    delegatedIdentity: {
+      confirmed: callerApprovals(rememberedApprovals(session.state), ctx),
+      messages: messagesToDelegate(storedProjection(session.state), ctx),
+      participants: participantsOf(session.state, ctx),
+    },
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
     plan,

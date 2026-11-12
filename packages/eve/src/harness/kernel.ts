@@ -4,6 +4,7 @@ import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory } from "#harness/compaction/step.js";
 import { readTaskTable, takeTaskResults, writeTaskTable } from "#execution/tasks/table.js";
 import { runModelStep } from "#harness/model-call/run.js";
+import { forgetSender } from "#harness/sender-line.js";
 import { withUsageSink } from "#harness/usage-sink.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import {
@@ -15,20 +16,22 @@ import {
   admitHumanInput,
   applyHumanDecisions,
   compactInput,
+  endCallerApprovals,
   openDeferredApprovals,
   queueInput,
   settleHumanInput,
   turnInputOnly,
+  waitOnPeopleAsTasks,
   withoutTurnInput,
 } from "#harness/hitl/index.js";
-import { blocked, hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { blocked, hasQueuedTurnInput, nothingToRead, park } from "#harness/step/park.js";
 import {
   clear,
   controlDeliveryFor,
   controlled,
   join,
 } from "#harness/session-machine/transitions.js";
-import { turnPosition } from "#harness/session-machine/view.js";
+import { turnPosition, waitsAsTasks } from "#harness/session-machine/view.js";
 import { createStep, failTurnForEffect, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
@@ -152,6 +155,7 @@ export function createKernel(config: KernelConfig): StepFn {
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
     }
+    if (nothingToRead(step, { hasInput: turn.messages.length > 0 })) return park(step);
     return runModelStep(step, {
       generation,
       turn,
@@ -192,6 +196,8 @@ async function answers(
   const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
   if (intake.kind === "stop") return { ended: intake.result } as Ended;
   const decided = await settleHumanInput(step, intake);
+  // A message joined the turn: what still waits on a person waits as tasks, and the model reads on.
+  if (intake.steer) await waitOnPeopleAsTasks(step);
   let { input, message } = intake;
   if (
     decided.approved.length > 0 ||
@@ -203,9 +209,19 @@ async function answers(
     input = withoutTurnInput(input);
     message = undefined;
   }
-  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+  // Answers that only let calls waiting as tasks run, while a request still holds the turn, give
+  // the model nothing to read yet: those calls run, and the delivery waits unreceived, as one
+  // answer of a batch does, until the turn goes on.
+  if (
+    decided.approved.every(({ step: parked }) => waitsAsTasks(parked)) &&
+    blocked(step.view(), step.session.state)
+  ) {
     await step.apply(queueInput(step.view(), compactInput(input)));
-    return { ended: await park(step) } as Ended;
+    const hookFailure = await failTurnForEffect(step);
+    if (hookFailure !== undefined) return { ended: hookFailure } as Ended;
+    const stopped =
+      decided.approved.length === 0 ? undefined : await applyHumanDecisions(step, decided);
+    return { ended: stopped ?? (await park(step)) } as Ended;
   }
   return { decided, input, intake, message };
 }
@@ -235,6 +251,8 @@ async function turnInput(
   if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
     return { ended: { next: null, session: step.session } } as Ended;
   }
+  if (turn.spokeLast !== undefined)
+    await step.apply(endCallerApprovals(step.view(), turn.spokeLast));
   return turn;
 }
 
@@ -248,7 +266,7 @@ async function clearContext(step: Step): Promise<StepResult> {
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
   // The clear's transition emptied history; task results it never read go with it.
   const unread = takeTaskResults(readTaskTable(step.session.state)).table;
-  return { next: null, session: writeTaskTable(step.session, unread) };
+  return { next: null, session: forgetSender(writeTaskTable(step.session, unread)) };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

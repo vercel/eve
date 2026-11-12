@@ -1,5 +1,14 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
+import {
+  identityRequestOf,
+  callerApprovals,
+  steeredConfirmation,
+  withCallIdentity,
+  type IdentityRequest,
+} from "#runtime/connections/caller-confirmation.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionPerson } from "#context/session-auth.js";
+import { identityApprovalRequest } from "#harness/identity-prompt.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import {
@@ -81,6 +90,8 @@ export interface CallOutcome {
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly awaitsApproval?: true;
   readonly signIn?: ToolSignIn;
+  /** The call stopped for a person's identity: what eve asks them. */
+  readonly identity?: ApprovalAsk;
 }
 
 /**
@@ -104,6 +115,17 @@ export async function executeToolCall(
     readonly view?: () => Pick<SessionView, "projection">;
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
+    /**
+     * The people who approved the call, whose identities it may use whoever spoke last: the caller
+     * for their approval of the call itself, and whoever approved eve's requests for their
+     * identity. A later request keeps them all.
+     */
+    readonly confirmedBy?: readonly SessionPerson[];
+    /**
+     * The session can ask a person: a call refused for someone's identity stops and asks them
+     * instead of failing.
+     */
+    readonly canAsk?: boolean;
     /**
      * Runs once the call settles, just before its result is reported: with why it didn't succeed,
      * if it didn't. Not when it stops for a sign-in or the turn's cancellation cuts it short.
@@ -160,11 +182,25 @@ export async function executeToolCall(
     });
     if (decision.awaitsPerson === true)
       return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
-    if (decision.denied) {
-      await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
+    const steering =
+      decision.steered === true
+        ? steeredGate(
+            { callId, input: args, toolName, version: definition.version },
+            {
+              approvalMemory: input.approvalMemory,
+              canAsk: input.canAsk,
+              confirmed: input.confirmedBy ?? [],
+              responder: input.responder,
+            },
+          )
+        : undefined;
+    if (steering?.ask !== undefined) return { identity: steering.ask, settled, toolResults };
+    const deniedFor = decision.denied ? decision.reason : steering?.reason;
+    if (decision.denied || deniedFor !== undefined) {
+      await input.beforeResult?.(deniedFor ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
         { callId, input: args, toolName },
-        { publish: input.publish, reason: decision.reason },
+        { publish: input.publish, reason: deniedFor },
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
@@ -178,6 +214,8 @@ export async function executeToolCall(
     let failed = false;
     let failure = "";
     let thrown: Error | undefined;
+    let identity: IdentityRequest | undefined;
+    const confirmed = input.confirmedBy ?? [];
     const telemetry = toolTelemetry(input.telemetry, {
       // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,
@@ -195,38 +233,49 @@ export async function executeToolCall(
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
-          // Usage the tool records belongs to its call, including while a streaming tool iterates.
-          await withUsageCall(callId, async () => {
-            const executed = invokeTool(
-              definition,
-              args,
-              {
-                ...(input.responder !== undefined && { approval: { responder: input.responder } }),
-                abortSignal: input.abortSignal,
-                messages: [...input.messages],
-                toolCallId: callId,
-              },
-              clearance,
-            );
-            // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
-            // waiting, and whatever the tool returns later is dropped.
-            const abandon = approval === "evaluate" ? input.abortSignal : undefined;
-            if (isAsyncIterable(executed)) {
-              for await (const partial of untilAborted(executed, abandon)) {
-                output = partial;
-                const visible = withoutSignInSecrets(partial);
-                await input.publish(
-                  callProgress(
-                    callId,
-                    visible,
-                    projectToolLabel(definition, "delta", args, visible),
-                  ),
-                );
+          // Usage the tool records belongs to its call, including while a streaming tool iterates,
+          // and so do the identities of the people who approved the call, and the callers'
+          // standing approvals.
+          const identityScope = {
+            canAsk: input.canAsk === true,
+            confirmed,
+            remembered: callerApprovals(input.approvalMemory?.remembered),
+          };
+          await withCallIdentity(identityScope, () =>
+            withUsageCall(callId, async () => {
+              const executed = invokeTool(
+                definition,
+                args,
+                {
+                  ...(input.responder !== undefined && {
+                    approval: { responder: input.responder },
+                  }),
+                  abortSignal: input.abortSignal,
+                  messages: [...input.messages],
+                  toolCallId: callId,
+                },
+                clearance,
+              );
+              // A model's call is abandoned when its step is cut, as the AI SDK did: the step stops
+              // waiting, and whatever the tool returns later is dropped.
+              const abandon = approval === "evaluate" ? input.abortSignal : undefined;
+              if (isAsyncIterable(executed)) {
+                for await (const partial of untilAborted(executed, abandon)) {
+                  output = partial;
+                  const visible = withoutSignInSecrets(partial);
+                  await input.publish(
+                    callProgress(
+                      callId,
+                      visible,
+                      projectToolLabel(definition, "delta", args, visible),
+                    ),
+                  );
+                }
+              } else {
+                output = await raceAbort(Promise.resolve(executed), abandon);
               }
-            } else {
-              output = await raceAbort(Promise.resolve(executed), abandon);
-            }
-          });
+            }),
+          );
         } finally {
           executionMs = performance.now() - startedAt;
         }
@@ -239,11 +288,26 @@ export async function executeToolCall(
       // `call.started` or a progress write failed: the call can't settle on that stream.
       throwIfSessionStreamDead(error);
       throwIfTurnAborted(input.abortSignal);
-      logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
+      identity = input.canAsk === true ? identityRequestOf(error) : undefined;
+      if (identity === undefined)
+        logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;
       thrown = toError(error);
       output = thrown.message;
       failure = modelFacingError(error);
+    }
+    // A refusal for someone's identity asks them where the session can, as a sign-in does: the
+    // call stops without a result, and runs again from the top once they approve.
+    if (identity !== undefined) {
+      return {
+        identity: identityApprovalRequest(
+          { callId, input: args, toolName, version: definition.version },
+          identity,
+          { confirmed, responder: input.responder },
+        ),
+        settled,
+        toolResults,
+      };
     }
     if (!failed) {
       await telemetry.ended(
@@ -506,6 +570,8 @@ export async function executeInlineCalls(input: {
   readonly modelCallId?: string;
   /** Runs just before each tool does, so steering no longer interrupts the step. */
   readonly beforeExecute: () => void;
+  /** The session can ask a person, so a call refused for someone's identity asks them. */
+  readonly canAsk?: boolean;
 }): Promise<InlineCallResults> {
   const calls = input.toolCalls.filter(
     (call) =>
@@ -532,7 +598,7 @@ export async function executeInlineCalls(input: {
           const approval =
             executed.awaitsApproval === true
               ? { ...approvalRequest(call, definition), remember: executed.remember }
-              : undefined;
+              : executed.identity;
           return { call, executed, approval };
         } catch (error) {
           throwIfSessionStreamDead(error);
@@ -569,6 +635,7 @@ async function decideDeferredCall(
   input: {
     readonly abortSignal: AbortSignal | undefined;
     readonly approvalMemory: ApprovalMemory;
+    readonly canAsk?: boolean;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
@@ -581,7 +648,15 @@ async function decideDeferredCall(
   });
   if (decision.awaitsPerson === true)
     return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
-  if (!decision.denied)
+  const steering =
+    decision.steered === true && !decision.denied
+      ? steeredGate(
+          { ...call, version: definition.version },
+          { approvalMemory: input.approvalMemory, canAsk: input.canAsk, confirmed: [] },
+        )
+      : undefined;
+  if (steering?.ask !== undefined) return { identity: steering.ask, settled: [], toolResults: [] };
+  if (!decision.denied && steering === undefined)
     return {
       settled: [],
       toolResults: [],
@@ -589,8 +664,47 @@ async function decideDeferredCall(
     };
   return await publishDenial(call, {
     publish: input.publish,
-    reason: decision.reason,
+    reason: decision.denied ? decision.reason : steering?.reason,
   });
+}
+
+/**
+ * A call `steered()` marks acts for the turn's caller, so it runs only while their identity is
+ * released, by the rule eve's guards of it use. Otherwise eve asks the caller with its request for
+ * their identity, before the call starts, or where it can't ask, the call is denied with why.
+ * `undefined` when the call may run.
+ */
+export function steeredGate(
+  call: {
+    readonly callId: string;
+    readonly input: unknown;
+    readonly toolName: string;
+    readonly version?: string;
+  },
+  input: {
+    readonly approvalMemory?: ApprovalMemory;
+    readonly canAsk?: boolean;
+    /** The people who approved the call, the caller among them when they approved it. */
+    readonly confirmed: readonly SessionPerson[];
+    readonly responder?: SessionAuthContext;
+  },
+):
+  | { readonly ask: ApprovalAsk; readonly reason?: never }
+  | { readonly reason: string; readonly ask?: never }
+  | undefined {
+  const needed = withCallIdentity(
+    { confirmed: input.confirmed, remembered: callerApprovals(input.approvalMemory?.remembered) },
+    steeredConfirmation,
+  );
+  if (needed === undefined) return undefined;
+  if (input.canAsk !== true || needed.request === undefined) return { reason: needed.reason };
+  return {
+    ask: identityApprovalRequest(call, needed.request, {
+      beforeStart: true,
+      confirmed: input.confirmed,
+      responder: input.responder,
+    }),
+  };
 }
 
 /** Reports a call its approval policy refused: it settles rejected, without running. */

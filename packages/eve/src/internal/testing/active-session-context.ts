@@ -57,14 +57,14 @@ export function buildActiveSessionContext(init: ActiveSessionInit): ContextConta
 function buildSession(init: ActiveSessionInit): Session {
   if (init.parent === undefined) {
     return {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: init.sessionId,
       turn: init.turn,
     };
   }
 
   return {
-    auth: { current: null, initiator: null },
+    auth: { current: null, initiator: null, sender: null },
     parent: init.parent,
     sessionId: init.sessionId,
     turn: init.turn,

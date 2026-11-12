@@ -162,7 +162,7 @@ describe("buildToolSet", () => {
     ]);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
@@ -197,7 +197,7 @@ describe("buildToolSet", () => {
     ]);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
@@ -242,7 +242,7 @@ describe("buildToolSet", () => {
     ]);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
@@ -274,7 +274,7 @@ describe("buildToolSet", () => {
     ]);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
@@ -307,7 +307,7 @@ describe("buildToolSet", () => {
     ]);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
-      auth: { current: null, initiator: null },
+      auth: { current: null, initiator: null, sender: null },
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
@@ -1253,6 +1253,12 @@ describe("buildToolSet", () => {
             principalId: "user_initiator",
             principalType: "user",
           },
+          sender: {
+            attributes: { tenant: "tenant_abc" },
+            authenticator: "jwt",
+            principalId: "user_current",
+            principalType: "user",
+          },
         },
         parent: {
           callId: "call_parent",
@@ -1306,12 +1312,16 @@ describe("buildToolSet", () => {
         ],
       ]);
       const scheduleSession: Session = {
-        auth: { current: SCHEDULE_APP_AUTH, initiator: SCHEDULE_APP_AUTH },
+        auth: {
+          current: SCHEDULE_APP_AUTH,
+          initiator: SCHEDULE_APP_AUTH,
+          sender: SCHEDULE_APP_AUTH,
+        },
         sessionId: "schedule-session",
         turn: { id: "schedule-turn", sequence: 0 },
       };
       const humanResumedSession: Session = {
-        auth: { current: human, initiator: SCHEDULE_APP_AUTH },
+        auth: { current: human, initiator: SCHEDULE_APP_AUTH, sender: human },
         sessionId: "schedule-session",
         turn: { id: "human-turn", sequence: 1 },
       };

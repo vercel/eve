@@ -51,7 +51,7 @@ export function supersededChallenges(
 /**
  * The sign-in that rules out asking again for the same grant and principal as `challenge`. In
  * this turn, that is one that ended without being completed, other than a retryable failure or an
- * invalid callback (see `rulesOutReasking`), such as one a new message withdrew.
+ * invalid callback (see `rulesOutReasking`), such as one its person cancelled.
  */
 export function terminalSignInFailure(
   projection: SessionProjection,
