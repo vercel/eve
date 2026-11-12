@@ -220,6 +220,8 @@ A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAI
 
 OpenAI's `cyber_policy` and `bio_policy` refusals also fail only their turn, with `MODEL_CALL_FAILED`, and the session can receive another message.
 
+A provider's rejection of a request longer than the model's context window also fails only its turn, with `MODEL_CALL_FAILED` and a `hint`. [Compaction](./default-harness#compaction) explains how eve keeps requests under the window.
+
 ## Query session state
 
 Whenever you have a `SessionView`, use selectors from `eve/events` to inspect session state instead of reconstructing it from events. The same selectors work in evals, hooks, channel handlers, dynamic capabilities, and clients.

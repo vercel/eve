@@ -224,11 +224,10 @@ export class ModelCaller {
   }
 
   /**
-   * A failed compaction fails the step, whatever recovery the call attempted.
-   * One that left the history over the limit ends the session with its message;
-   * any other failure is reported like a failed model call, since its summary
-   * call already retried. Rethrowing would make the workflow replay the step and
-   * then end the session.
+   * A failed compaction fails the step, whatever recovery the call attempted. One that can't fit
+   * the request in the model's window reports its message; any other failure is reported like a
+   * failed model call, since its summary call already retried. Rethrowing would make the workflow
+   * replay the step and then end the session.
    */
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;

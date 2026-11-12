@@ -1,4 +1,32 @@
-import { anyOf, codeIs, messageMatches, nameIs, type SemanticErrorRule } from "../rule.js";
+import {
+  allOf,
+  anyOf,
+  codeIs,
+  messageMatches,
+  nameIs,
+  type SemanticErrorRule,
+  statusCodeIs,
+} from "../rule.js";
+
+/**
+ * A provider's rejection of a request longer than the model's context window. Anthropic says
+ * "prompt is too long" or "exceed context limit"; Bedrock says "Input is too long"; OpenAI says
+ * "maximum context length" (Chat Completions) or "exceeds the context window" (Responses); Gemini
+ * says "input token count ... exceeds the maximum". AI Gateway relays the upstream message. The
+ * prose only counts on a 400 or 413, so another error that quotes it isn't misread. OpenAI stream
+ * errors carry `code: "context_length_exceeded"` instead.
+ *
+ * Message prose is a stopgap until the AI SDK classifies this itself (vercel/ai#22461).
+ */
+const isContextOverflowLink = anyOf(
+  codeIs("context_length_exceeded"),
+  allOf(
+    statusCodeIs(400, 413),
+    messageMatches(
+      /prompt is too long|exceed context limit|input is too long|maximum context length|exceeds the context window|input token count.*exceeds the maximum/i,
+    ),
+  ),
+);
 
 /**
  * Discriminators verified against the vendored `@ai-sdk/provider` /
@@ -10,6 +38,16 @@ import { anyOf, codeIs, messageMatches, nameIs, type SemanticErrorRule } from ".
  * rethrow under the unprefixed class name.
  */
 export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
+  {
+    // A 400 that would otherwise end the session. Only the turn fails: the session can still
+    // fit a later message, once compaction or a smaller agent makes room.
+    id: "model-context-overflow",
+    name: "Model context window exceeded",
+    tags: ["model-provider", "recoverable"],
+    when: isContextOverflowLink,
+    message: "The request exceeds the model's context window.",
+    hint: "Send a shorter message or start a new session. If this repeats, lower `compaction.threshold` in `agent.ts` so compaction runs sooner, or shorten the agent's instructions, tools, or memory.",
+  },
   {
     id: "model-provider-api-key-missing",
     name: "Model provider API key missing",
