@@ -9,6 +9,11 @@ import { prepareWebAuthScaffold } from "./auth-scaffold.js";
 import { WEB_AUTHENTICATION_QUESTION } from "./auth-options.js";
 import { detectWebChatFramework, type WebChatFramework } from "./framework.js";
 import {
+  FRAMEWORK_HOSTED_CONFIGS,
+  NEXT_HOSTED_CONFIG,
+  TANSTACK_HOSTED_VITE_CONFIG,
+} from "./hosted-config.js";
+import {
   defaultWebChatHostingDeps,
   peerServiceVercelConfig,
   prepareWebChatHosting,
@@ -23,15 +28,6 @@ import {
   type SetupPrepareContext,
 } from "../types.js";
 
-const NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
-import { withEve } from "eve/next";
-import { fileURLToPath } from "node:url";
-
-const nextConfig: NextConfig = {};
-const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
-
-export default withEve(nextConfig, { eveRoot });
-`;
 const PEER_SERVICE_NEXT_CONFIG = `import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {};
@@ -55,27 +51,6 @@ const LEGACY_NEXT_PEER_SERVICE_VERCEL_CONFIG = NEXT_PEER_SERVICE_VERCEL_CONFIG.r
 );
 
 const TANSTACK_REGISTRY_VITE_CONFIG = WEB_APP_TANSTACK_TEMPLATE_FILES["vite.config.ts"];
-const TANSTACK_HOSTED_VITE_CONFIG = `import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import tailwindcss from "@tailwindcss/vite";
-import viteReact from "@vitejs/plugin-react";
-import { eveTanStack } from "eve/tanstack";
-import { nitro } from "nitro/vite";
-import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
-
-const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
-
-export default defineConfig({
-  resolve: { tsconfigPaths: true },
-  plugins: [
-    eveTanStack({ eveRoot }),
-    tailwindcss(),
-    tanstackStart({ srcDirectory: "app" }),
-    viteReact(),
-    nitro(),
-  ],
-});
-`;
 const TANSTACK_PEER_SERVICE_VERCEL_CONFIG = peerServiceVercelConfig(
   "tanstack-start",
   "node ../../node_modules/vite/bin/vite.js build",
@@ -108,12 +83,6 @@ interface WebSetupPlan {
   authProject?: VercelProjectReference;
   rootWebChat?: boolean;
 }
-
-/** The config the installer writes when the web app hosts the agent itself. */
-const FRAMEWORK_HOSTED_CONFIGS: Record<WebChatFramework, { file: string; source: string }> = {
-  next: { file: "next.config.ts", source: NEXT_HOSTED_CONFIG },
-  tanstack: { file: "vite.config.ts", source: TANSTACK_HOSTED_VITE_CONFIG },
-};
 
 /** Whether an earlier install set up `webRoot` to host the agent in the app. */
 async function hostsAgentInApp(
