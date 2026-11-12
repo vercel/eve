@@ -28,6 +28,33 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibilit
 // a 4-vCPU CI runner.
 const MAX_CONCURRENT_TEMPLATES = 3;
 
+// Templates ordered by their measured wall time in CI, longest first, so the
+// expensive `next build`/`nuxt build` templates start on the first three worker
+// slots instead of queueing behind cheap ones. The bound stays at 3: the job is
+// CPU-bound on a 4-vCPU runner (three concurrent templates took 326-337s against
+// 349s serial), so a fourth build would mostly contend with the three that
+// dominate the schedule. Templates missing from this list run alphabetically
+// afterwards.
+const TEMPLATES_BY_EXPECTED_DURATION = [
+  "personal-agent-template", // ~199s
+  "eve-chat-template", // ~129s
+  "eve-voice-template", // ~97s
+  "eve-llm-council-template", // ~53s
+  "eve-discord-agent-template", // ~31s
+  "eve-slack-agent-template", // ~25s
+  "eve-company-brain-template", // eve build only, no web service
+  "eve-coding-agent-template", // ~17s
+];
+
+const compareByExpectedDuration = (left, right) => {
+  const leftIndex = TEMPLATES_BY_EXPECTED_DURATION.indexOf(left);
+  const rightIndex = TEMPLATES_BY_EXPECTED_DURATION.indexOf(right);
+  if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
+  if (leftIndex === -1) return 1;
+  if (rightIndex === -1) return -1;
+  return leftIndex - rightIndex;
+};
+
 // Vercel Framework Preset slugs a template web service may deploy under. Vercel rejects unknown
 // slugs at deploy time, and eve's own host names differ from them (Nuxt is "nuxtjs", not "nuxt").
 const VERCEL_WEB_FRAMEWORKS = new Set(["nextjs", "nuxtjs", "sveltekit", "tanstack-start"]);
@@ -186,7 +213,7 @@ try {
         entry.isDirectory() && existsSync(join(templatesDirectory, entry.name, "package.json")),
     )
     .map((entry) => entry.name)
-    .sort();
+    .sort(compareByExpectedDuration);
   if (templates.length === 0) throw new Error(`No templates found in ${templatesDirectory}`);
 
   const failures = [];
