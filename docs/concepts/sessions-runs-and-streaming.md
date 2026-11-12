@@ -210,7 +210,7 @@ When a turn's step fails every Workflow retry with an error outside the model an
 
 A turn that ends closes what it left open in the same line. Running calls and open requests for input end `interrupted`, and their pending answers end `withdrawn`. A task can outlive its turn and stays open.
 
-A failure that ends the session fails its turn first: the turn settles `failed` with the error, then `session.ended` follows in the same line with `outcome: "failed"`, the same error, and `cause.turnId` naming that turn. A session that ends any other way, such as a reset, ends its open turn `cancelled`; when that session failed, `failure(view, turnId)` reads the session's error for that turn. Built-in channels post one notice for a failed session, not one for its turn as well.
+A session that fails ends its turn `cancelled`, because the session failed, not the turn. The error is on `session.ended`, and `failure(view, turnId)` reads it for that turn. Built-in channels post one notice for it.
 
 When cancellation or clear ends a turn, input queued inside it but not yet read ends `ignored` and doesn't carry into the next turn. Messages the session holds for a later turn aren't part of that unread input.
 

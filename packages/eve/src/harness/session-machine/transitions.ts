@@ -224,14 +224,12 @@ export function fail(
   const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
   const error = errorInfoOf(failure);
   const turnId = activeTurnIdOf(view.projection);
+  // A terminal failure ends the session, which ends the turn with it, in one commit.
   const runId = turnId === undefined ? undefined : openRunOf(view.projection, turnId);
-  // The turn fails either way. A terminal failure then ends the session in the same commit, so
-  // the turn's outcome says what happened to it and the session's what happened to the session.
   const events = [
     ...(runId === undefined ? [] : runSettledFacts({ runId, outcome: "failed", error })),
-    ...turnSettled(view.projection, { error, outcome: "failed" }),
     ...(failure.terminal === undefined
-      ? []
+      ? turnSettled(view.projection, { error, outcome: "failed" })
       : sessionEndedFacts(view.projection, {
           cause: turnId === undefined ? undefined : { turnId },
           error,

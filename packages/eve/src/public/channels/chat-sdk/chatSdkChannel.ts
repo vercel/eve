@@ -1,5 +1,5 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
-import { failureNotice, sessionFailed } from "#public/channels/reply.js";
+import { failureNotice } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { type PromptQueueState, promptQueue } from "#channel/prompt-queue.js";
@@ -609,9 +609,9 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         );
       }
     },
-    async "turn.settled"({ data }, { channel, view }) {
+    async "turn.settled"({ data }, { channel }) {
       const notice = failureNotice(data, "turn");
-      if (notice !== undefined && !sessionFailed(view)) await channel.thread?.post(notice);
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
     async "session.ended"({ data }, { channel }) {
       const notice = failureNotice(data, { restart: "message" });

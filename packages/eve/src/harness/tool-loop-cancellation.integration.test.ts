@@ -153,21 +153,15 @@ describe("tool loop cancellation (real AI SDK)", () => {
 
     await runStep(createSession(), { message: "Hi" });
 
-    // The turn fails with the error first, then the session ends with the same error.
-    const endings = events.filter(
-      (event) => event.type === "turn.settled" || event.type === "session.ended",
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: expect.objectContaining({ code: "MODEL_SELECTION_FAILED" }),
+          outcome: "failed",
+        }),
+        type: "session.ended",
+      }),
     );
-    expect(endings.map((event) => event.type)).toEqual(["turn.settled", "session.ended"]);
-    const settled = endings[0]!.data as { readonly error: object; readonly turnId: string };
-    expect(settled).toMatchObject({
-      error: { code: "MODEL_SELECTION_FAILED" },
-      outcome: "failed",
-    });
-    expect(endings[1]!.data).toMatchObject({
-      cause: { turnId: settled.turnId },
-      error: settled.error,
-      outcome: "failed",
-    });
   });
 
   it("forwards a live signal to executing tools and discards the straggler result", async () => {

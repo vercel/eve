@@ -1,7 +1,7 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { signInEndedText, signInOf } from "#channel/sign-in.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
-import { failureNotice, sessionFailed } from "#public/channels/reply.js";
+import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueue } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -211,9 +211,9 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "turn.settled"({ data }, { channel, view }) {
+    async "turn.settled"({ data }, { channel }) {
       const notice = failureNotice(data, "turn");
-      if (notice === undefined || sessionFailed(view)) return;
+      if (notice === undefined) return;
       await postActivity(channel, options, {
         body: notice,
         type: "error",

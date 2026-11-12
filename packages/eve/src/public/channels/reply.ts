@@ -1,7 +1,6 @@
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { ContentCompletedData } from "#protocol/session-events/families/content.js";
-import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import { formatErrorHint } from "#internal/logging.js";
 
 // What built-in channels post: a turn's reply text as each part completes, and failures with
@@ -19,14 +18,6 @@ export function errorHintOf(error: ErrorInfo | undefined): {
   readonly details?: { readonly name: string };
 } {
   return error === undefined ? {} : { details: { name: error.code }, message: error.message };
-}
-
-/**
- * True when the commit `view` observes failed the session. A failure that ends the session also
- * settles its turn `failed`, in that commit; the session's notice covers both.
- */
-export function sessionFailed(view: SessionView): boolean {
-  return sessionTables(view).session.outcome === "failed";
 }
 
 /**

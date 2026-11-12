@@ -56,9 +56,8 @@ export function errorInfoOf(failure: {
 
 /**
  * The facts that end a session, in one commit, `session.ended` last. The writer closes what the
- * session leaves open before it (`cascade`): an open turn ends cancelled. A failure that ends the
- * session settles its turn `failed` first (`fail`), so only a turn the session cut is cancelled.
- * Every reader stops there.
+ * session leaves open before it (`cascade`): an open turn ends cancelled, since its session ended,
+ * not it; `failure(view, turnId)` reads the session's error. Every reader stops there.
  */
 export function sessionEndedFacts(
   projection: Pick<SessionProjection, "view"> | undefined,
