@@ -224,7 +224,7 @@ Callbacks run at least once. Provider retries, including after an `events` handl
 
 ## Revalidate creator identity
 
-`auth({ principal, payload, occurrence })` turns the stored creator reference into current access. `principal` identifies the creator; it holds no credentials or permissions. Look up current account status and permissions instead of replaying credentials or roles captured at creation.
+`auth({ principal, payload, occurrence, schedule })` turns the stored creator reference into current access. `principal` identifies the creator; it holds no credentials or permissions. Look up current account status and permissions instead of replaying credentials or roles captured at creation.
 
 | `auth` result               | What happens                                                                                                                          |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -234,6 +234,19 @@ Callbacks run at least once. Provider retries, including after an `events` handl
 | A thrown error              | The provider retries the occurrence. Throw when a lookup fails, so an outage doesn't read as a denial.                                |
 
 A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/experimental/schedules`.
+
+A denial fails only the current occurrence; a recurring schedule keeps firing and failing. When a denial is permanent, such as a removed account, stop the schedule through `schedule` before you return `null`:
+
+```ts
+async auth({ principal, schedule }) {
+  const account = await findActiveAccount(principal.principalId);
+  if (account === null) {
+    await schedule.disable();
+    return null;
+  }
+  return { attributes: { team: account.team } };
+},
+```
 
 eve never falls back to app identity. Manual `invoke` runs as the creator, not the caller. Tool and connection authorization still applies during the run.
 

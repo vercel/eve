@@ -307,12 +307,14 @@ export interface DynamicSchedulesDefinition<
    * Resolves the captured creator to current execution auth. Return `{ attributes }` to run as
    * the stored creator with those attributes, or a full `SessionAuthContext`, whose identity
    * fields must equal the stored creator's. Return `null` to deny: the occurrence fails without
-   * a retry. Throw to let the provider retry.
+   * a retry. Throw to let the provider retry. A denial fails only this occurrence; to stop later
+   * ones too, call `schedule.disable()` or `schedule.delete()` before returning `null`.
    */
   readonly auth: (context: {
     readonly principal: SchedulePrincipalReference;
     readonly payload: NoInfer<TPrepared>;
     readonly occurrence: ScheduleOccurrenceIdentity;
+    readonly schedule: ScheduleHandle;
   }) => ScheduleAuthResult | Promise<ScheduleAuthResult>;
   /** May repeat on provider retries. Key external effects on the occurrence identity. */
   readonly run: (args: DynamicSchedulesRunArgs<NoInfer<TPrepared>>) => void | Promise<void>;

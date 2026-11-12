@@ -21,6 +21,7 @@ import {
   defineDynamicSchedules,
   type DynamicSchedulesRunArgs,
   type DynamicSchedulesToFn,
+  type ScheduleHandle,
   type SchedulePrincipalReference,
 } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
@@ -87,7 +88,9 @@ describe("ScheduleDispatcher", () => {
     };
     type AuthResult = SessionAuthContext | Pick<SessionAuthContext, "attributes"> | null;
     function setup(
-      auth: AuthResult | (() => AuthResult) = creator,
+      auth:
+        | AuthResult
+        | ((context: { schedule: ScheduleHandle }) => AuthResult | Promise<AuthResult>) = creator,
       idempotencyKey?: string,
       principal: SchedulePrincipalReference = {
         type: "user",
@@ -254,6 +257,19 @@ describe("ScheduleDispatcher", () => {
         expect(runtime.createSession).not.toHaveBeenCalled();
       },
     );
+
+    it("lets auth stop the schedule it denies", async () => {
+      const { dispatcher, input, run } = setup(async ({ schedule }) => {
+        await schedule.disable();
+        return null;
+      });
+      const disable = vi.fn(async () => {});
+      input.schedule = { ...input.schedule, disable };
+      const error = await dispatcher.triggerCollection(input).catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(PermanentScheduleMessageError);
+      expect(disable).toHaveBeenCalledOnce();
+      expect(run).not.toHaveBeenCalled();
+    });
 
     it("validates provider-delivered payloads before auth or callback side effects", async () => {
       const { dispatcher, input, run } = setup();

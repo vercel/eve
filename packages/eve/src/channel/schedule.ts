@@ -127,7 +127,12 @@ export class ScheduleDispatcher {
         : envelope.payload;
     await input.verifyDelivery?.();
     const auth = resolveCreatorAuth(
-      await definition.auth({ principal: envelope.principal, payload, occurrence }),
+      await definition.auth({
+        principal: envelope.principal,
+        payload,
+        occurrence,
+        schedule: input.schedule,
+      }),
       envelope.principal,
     );
     const scope = new ContextContainer();
