@@ -104,8 +104,18 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 | `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
 | `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
 | `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
+| `github.access`        | No            | `"private-write"` or `"public-write"`: limits commands by repository visibility            |
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
+
+Set `github.access` to limit what the agent can do by repository visibility. GitHub enforces the limit, so the extension does not sort commands into reads and writes. Every command then needs `repository` set to `owner/name`, and costs one extra GitHub lookup. Nothing is cached, so a repository that changes visibility is judged anew on the next command.
+
+| `github.access`   | Public repositories | Private and internal repositories |
+| ----------------- | ------------------- | --------------------------------- |
+| `"private-write"` | Read-only           | Read and write                    |
+| `"public-write"`  | Read and write      | Refused, reads included           |
+
+With `"app"`, eve reads the repository's visibility with a `metadata:read` token, then mints the token the command runs with. With `"private-write"` on a public repository, every `write` in `github.permissions` is lowered to `read`, or the token carries `contents:read` and `metadata:read` when none is set. With `"user"`, a token can't be narrowed when it is minted, so the GitHub App installation is the boundary. eve refuses the command, and names the repositories, when the installation reaches a public repository the caller can push to (`"private-write"`) or any private or internal repository (`"public-write"`). Narrow the installation to fix it.
 
 Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
 

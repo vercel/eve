@@ -13,11 +13,20 @@ import {
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
+import {
+  appTokenPermissions,
+  assertUserInstallation,
+  GitHubPolicyLookupError,
+  repositoryRequiredMessage,
+  type GitHubAccess,
+} from "./github-policy.ts";
 import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
+
+export type { GitHubAccess } from "./github-policy.ts";
 
 export interface GitHubShellInput {
   readonly command: string;
@@ -48,6 +57,13 @@ interface GitHubConfigBase {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
+  /**
+   * Limits the agent by repository visibility. GitHub enforces it: app tokens
+   * are minted read-only for public repositories, and a user's App
+   * installation must not reach repositories the setting rules out. Omit it
+   * for no visibility rule.
+   */
+  readonly access?: GitHubAccess;
   readonly broker: (
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
@@ -114,6 +130,8 @@ export interface GitHubLeaseRule {
 }
 
 interface GitHubShellDependencies {
+  /** Looks up repository visibility and the user's App installation when `access` is set. */
+  readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** The calling tool's context, passed to `attribution`. */
   readonly context?: ToolContext;
   readonly auth?: SessionAuthContext | null;
@@ -193,6 +211,8 @@ export async function executeGitHubShell(
     argv,
     target: { owner, repository, name },
   } = validateGitHubShellInput(input);
+  const { access } = config;
+  if (access && !repository) throw new GitHubCommandInputError(repositoryRequiredMessage(access));
   if (config.principalType === "user" ? owner && !repository : !owner) {
     throw new GitHubCommandInputError(
       config.principalType === "user"
@@ -210,6 +230,7 @@ export async function executeGitHubShell(
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const auth = dependencies.auth ?? null;
+  const fetchGitHub = dependencies.fetch ?? fetch;
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
   if (config.principalType === "user") {
@@ -220,21 +241,43 @@ export async function executeGitHubShell(
     // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
     ({ token } = await dependencies.getToken(userAuth));
+    if (access) {
+      try {
+        await assertUserInstallation({ access, fetch: fetchGitHub, token });
+      } catch (error) {
+        if (error instanceof GitHubPolicyLookupError && error.status === 401) {
+          dependencies.requireAuth(userAuth);
+        }
+        throw error;
+      }
+    }
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
-    const installation: {
-      type: "github_app_installation";
-      org: string;
-      repositories?: string[];
-      permissions?: string[];
-    } = { type: "github_app_installation", org: owner! };
-    if (name) installation.repositories = [name];
-    if (config.permissions) installation.permissions = [...config.permissions];
-    token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
-      authorizationDetails: [installation],
-      subject: { type: "app" },
-    });
+    const mint = (permissions: readonly string[] | undefined) => {
+      const installation: {
+        type: "github_app_installation";
+        org: string;
+        repositories?: string[];
+        permissions?: string[];
+      } = { type: "github_app_installation", org: owner! };
+      if (name) installation.repositories = [name];
+      if (permissions) installation.permissions = [...permissions];
+      return (dependencies.getConnectToken ?? getToken)(config.connector, {
+        authorizationDetails: [installation],
+        subject: { type: "app" },
+      });
+    };
+    const permissions = access
+      ? await appTokenPermissions({
+          access,
+          configured: config.permissions,
+          fetch: fetchGitHub,
+          mint,
+          repository: repository!,
+        })
+      : config.permissions;
+    token = await mint(permissions);
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
