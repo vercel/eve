@@ -56,6 +56,8 @@ export interface TurnOperation extends Operation {
   approval: WrappedOperation<ApprovalInput, ApprovalOperation>;
   /** Returns an open turn-level approval without starting one. Durable turns only. */
   findApproval(requestId: string): ApprovalOperation | undefined;
+  /** A model call no step makes, such as a context compaction's summary request. */
+  modelCall(input: ModelOptions, key?: string): Promise<ModelOperation>;
 }
 /** What a person is asked. `kind` defaults to `tool-approval`. */
 export interface ApprovalInput {
@@ -227,6 +229,8 @@ export function operationHandle(
       memory,
       ...approvals(),
       links: (links: readonly TraceLink[]) => runtime.update({ links }),
+      modelCall: (input: ModelOptions, key?: string) =>
+        child({ type: "model", options: input }, key),
       findAttempt: (input: { stepIndex: number; attempt: number }) =>
         found<AttemptOperation>(
           runtime.find({

@@ -116,6 +116,10 @@ before the runtime records its dispatch. In a durable turn, calling
 `usage`, and optional response/content metadata. It returns only `result`.
 Without a callback, `modelCall(data)` returns a model handle.
 
+A turn records a model call that no step makes, such as a context compaction's
+summary request, with `turn.modelCall(data)`. It takes no callback and returns
+a model handle.
+
 ```ts
 const stream = await attempt.modelStream({ provider: "test", modelId: "model" }, () => ({
   result: response.stream,
