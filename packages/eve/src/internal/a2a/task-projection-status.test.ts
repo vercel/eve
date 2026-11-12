@@ -69,6 +69,40 @@ describe("projectTask status", () => {
   });
 });
 
+describe("a channel's failureText", () => {
+  const failed = viewWithTurn({
+    endedAt: STARTED_AT,
+    error: { code: "MODEL_FAILED", id: "err_9", message: "Upstream said no.\nsecret detail" },
+    outcome: "failed",
+    status: "settled",
+  });
+
+  it("describes the failure it receives: code, whole message, and support id", () => {
+    const seen: unknown[] = [];
+    const task = projectTask(failed, ref, {
+      failureText: (failure) => {
+        seen.push(failure);
+        return `${failure.code}: ask support about ${failure.id}`;
+      },
+    });
+    expect(seen).toEqual([
+      { code: "MODEL_FAILED", id: "err_9", message: "Upstream said no.\nsecret detail" },
+    ]);
+    expect(statusText(task)).toBe("MODEL_FAILED: ask support about err_9");
+  });
+
+  it("falls back to the default when it throws or returns no text", () => {
+    const fallback = "Upstream said no. (error id: err_9)";
+    const throwing = projectTask(failed, ref, {
+      failureText: () => {
+        throw new Error("boom");
+      },
+    });
+    expect(statusText(throwing)).toBe(fallback);
+    expect(statusText(projectTask(failed, ref, { failureText: () => "" }))).toBe(fallback);
+  });
+});
+
 describe("failureText", () => {
   it("bounds a long first line and falls back when nothing is left", () => {
     expect(failureText("x".repeat(400))).toHaveLength(300);

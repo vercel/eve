@@ -128,6 +128,18 @@ export interface ProjectTaskOptions {
   readonly includeArtifacts?: boolean;
   /** A working status names the tool the task is running. Defaults to true. */
   readonly toolActivity?: boolean;
+  /** The text a failed status carries. Defaults to {@link failureText}. */
+  readonly failureText?: (failure: A2aFailure) => string;
+}
+
+/** A failure as a channel's `failureText` receives it. */
+export interface A2aFailure {
+  /** eve's error code, such as `MODEL_FAILED`, or `DELIVERY_FAILED` for a message that failed before its turn ran. */
+  readonly code: string;
+  /** The whole error message, which can carry internals such as an upstream page. */
+  readonly message: string;
+  /** The support id the server's logs carry the error under. */
+  readonly id?: string;
 }
 
 /** The A2A task a delivery started. */
@@ -195,7 +207,13 @@ function taskStatus(
         : delivery.outcome === "failed"
           ? "TASK_STATE_FAILED"
           : "TASK_STATE_COMPLETED";
-    const reason = state === "TASK_STATE_FAILED" ? failureText(delivery.reason) : delivery.reason;
+    const reason =
+      state === "TASK_STATE_FAILED"
+        ? describeFailure(options, {
+            code: "DELIVERY_FAILED",
+            message: delivery.reason ?? "The task failed.",
+          })
+        : delivery.reason;
     return status(state, address, delivery.endedAt, reason);
   }
 
@@ -233,7 +251,16 @@ function taskStatus(
       "TASK_STATE_FAILED",
       address,
       turn.endedAt,
-      failureText(error?.message, error?.id),
+      describeFailure(
+        options,
+        error === undefined
+          ? { code: "TURN_FAILED", message: "The task failed." }
+          : {
+              code: error.code,
+              message: error.message,
+              ...(error.id !== undefined && { id: error.id }),
+            },
+      ),
     );
   }
   if (turn.outcome === "cancelled") return status("TASK_STATE_CANCELED", address, turn.endedAt);
@@ -344,6 +371,22 @@ export function failureText(message: string | undefined, id?: string): string {
         ? `${firstLine.slice(0, MAX_FAILURE_TEXT_LENGTH - 1)}…`
         : firstLine;
   return id === undefined ? brief : `${brief} (error id: ${id})`;
+}
+
+/**
+ * A failure as the channel's `failureText` describes it. One that throws or returns no text gets
+ * the default instead: a read of the task must not fail because describing its failure did.
+ */
+function describeFailure(options: ProjectTaskOptions, failure: A2aFailure): string {
+  if (options.failureText !== undefined) {
+    try {
+      const text = options.failureText(failure);
+      if (typeof text === "string" && text.length > 0) return text;
+    } catch {
+      // Fall through to the default.
+    }
+  }
+  return failureText(failure.message, failure.id);
 }
 
 function workingLabel(view: SessionView, turnId: string): string | undefined {

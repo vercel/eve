@@ -14,6 +14,7 @@ import {
 } from "#internal/a2a/agent-card.js";
 import { A2aTaskExecution } from "#internal/a2a/execution.js";
 import { handleA2aJsonRpc } from "#internal/a2a/json-rpc.js";
+import type { A2aFailure } from "#internal/a2a/task-projection.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   clientUrl,
@@ -30,6 +31,7 @@ import {
 import { defineChannel, GET, OPTIONS, POST, type Channel } from "#public/definitions/channel.js";
 
 export type { A2aAgentCardOptions, A2aAgentSkill } from "#internal/a2a/agent-card.js";
+export type { A2aFailure } from "#internal/a2a/task-projection.js";
 
 export interface A2aChannelConfig {
   /**
@@ -66,6 +68,14 @@ export interface A2aChannelConfig {
    * @default true
    */
   readonly toolActivity?: boolean;
+  /**
+   * The text a failed task's status shows the caller. It receives eve's error `code`, its whole
+   * `message`, and the support `id` the server's logs carry it under; return what the caller may
+   * see, such as a message with secrets scrubbed, or the whole message in development. One that
+   * throws or returns an empty string gets the default.
+   * @default The message's first line, at most 300 characters and without HTML, plus the id
+   */
+  readonly failureText?: (failure: A2aFailure) => string;
   /**
    * When a request that reached eve over plain HTTP is accepted. `"loopback"` accepts it only
    * from a loopback host, such as a local `eve dev`. `"forwarded-https"` also accepts it when
@@ -150,6 +160,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
       maxBlockingMs,
       resolveSession: args.resolveSession,
       toolActivity: input.toolActivity ?? true,
+      ...(input.failureText !== undefined && { failureText: input.failureText }),
       uploadPolicy,
     });
     return await handleA2aJsonRpc(request, sessionAuthFromResult(auth), execution);

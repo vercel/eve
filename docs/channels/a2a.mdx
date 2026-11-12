@@ -42,6 +42,7 @@ The Agent Card path is fixed by the A2A specification, so an application can hav
 | `maxBlockingMs` | `25_000`        | The longest a blocking `SendMessage` waits before returning a working task. Keep it under the host's request timeout.                                                       |
 | `uploadPolicy`  | 25 MB, any type | Limits on inbound file parts, as for the [eve HTTP channel](./eve).                                                                                                         |
 | `toolActivity`  | `true`          | Whether a working task's status names the tool it is running. Set `false` to keep the agent's tool names from callers.                                                      |
+| `failureText`   | First line      | What a failed task's status says; see [Failures](#failures).                                                                                                                |
 | `plainHttp`     | `"loopback"`    | When a plain HTTP request is accepted; see [HTTP security](#http-security).                                                                                                 |
 
 By default, the Agent Card takes its name and description from the agent, lists the agent's [skills](../skills) as A2A skills, and reports the installed eve version as the agent version.
@@ -74,7 +75,7 @@ A context another caller owns, or one that doesn't exist, is refused with `Inval
 | `TASK_STATE_INPUT_REQUIRED` | The turn waits on a question or approval.                                                                           |
 | `TASK_STATE_AUTH_REQUIRED`  | The turn waits only on a [connection sign-in](../connections). The status message carries the sign-in link or code. |
 | `TASK_STATE_COMPLETED`      | The turn finished. The reply is the task's artifact: structured output as a data part, otherwise text.              |
-| `TASK_STATE_FAILED`         | The turn failed. The status message carries the error's first line and its support id; the server logs the rest.    |
+| `TASK_STATE_FAILED`         | The turn failed. The status message describes the error; see [Failures](#failures).                                 |
 | `TASK_STATE_CANCELED`       | The turn was cancelled.                                                                                             |
 | `TASK_STATE_REJECTED`       | The session refused the message without starting a turn.                                                            |
 
@@ -138,6 +139,25 @@ When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: ea
 
 Each message answers one prompt and carries only text parts, which eve joins into one answer; the task's history records the answer as that one text part. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
 
+## Failures
+
+A failed task's status message shows the caller the error's first line, at most 300 characters and without any HTML page, plus its support id. The server's logs keep the whole error under that id. An error's message can carry internals, such as an upstream service's error page or a token in a URL. eve can't tell which parts are secret, so set `failureText` to decide what the caller sees:
+
+```ts title="agent/channels/a2a.ts"
+import { vercelOidc } from "eve/channels/auth";
+import { a2aChannel } from "eve/channels/a2a";
+
+export default a2aChannel({
+  auth: vercelOidc(),
+  failureText: (failure) =>
+    failure.code === "MODEL_CALL_FAILED"
+      ? `The model provider failed. Quote ${failure.id ?? "this task"} to support.`
+      : "",
+});
+```
+
+It receives eve's error `code`, the whole `message`, and the support `id`. An empty string, or a function that throws, gets the default text.
+
 ## Authentication
 
 The JSON-RPC endpoint runs the ordinary eve auth walk: Basic auth, HMAC or ECDSA JWTs, OIDC, Vercel OIDC, custom `AuthFn` policies, or an ordered array of them. A request no strategy accepts gets `401` with the strategies' challenges. Tasks and contexts belong to the principal that created them; unknown, expired, and other callers' tasks all read as `TaskNotFoundError`.
@@ -169,7 +189,7 @@ The JSON-RPC endpoint validates each request before authentication, as the MCP c
 - `Host` must match the request URL.
 - Browser requests must have an exact same-origin `Origin`.
 
-Behind a proxy that terminates TLS, set `plainHttp: "forwarded-https"`. eve then accepts plain HTTP when `X-Forwarded-Proto` is `https`, and the Agent Card advertises the `https` URL the client used. Any client can send that header, so use this only when every request passes through such a proxy. For callers on a network that is private by other means, such as services in one cluster, `plainHttp: "allow"` accepts plain HTTP from any host. The `Host` and `Origin` checks apply under every setting, and the [MCP channel](./mcp#http-security) takes the same option.
+Behind a proxy that terminates TLS, set `plainHttp: "forwarded-https"`. eve then accepts plain HTTP when `X-Forwarded-Proto` is `https`, and the Agent Card advertises the `https` URL the client used, on the port `X-Forwarded-Port` names when the proxy sends it. Any client can send that header, so use this only when every request passes through such a proxy. For callers on a network that is private by other means, such as services in one cluster, `plainHttp: "allow"` accepts plain HTTP from any host. The `Host` and `Origin` checks apply under every setting, and the [MCP channel](./mcp#http-security) takes the same option.
 
 Request bodies are limited to 32 MB. File parts accept only `https` and `http` URLs or inline `raw` bytes, held to `uploadPolicy`; a disallowed media type is refused with `ContentTypeNotSupportedError`. A file URL's size and actual type are known only once it downloads, so those are checked when the file is staged for the agent. A file that fails then reaches the agent as a note that it wasn't accepted, rather than as an error to the caller.
 

@@ -72,6 +72,7 @@ import {
   reachedTask,
   readSessionView,
   submittedTask,
+  type A2aFailure,
   type ProjectTaskOptions,
 } from "./task-projection.js";
 
@@ -84,6 +85,8 @@ export interface A2aExecutionOptions {
   readonly uploadPolicy: UploadPolicy;
   /** A working status names the tool the task is running. */
   readonly toolActivity: boolean;
+  /** The text a failed status carries, when the channel sets one. */
+  readonly failureText?: (failure: A2aFailure) => string;
 }
 
 /** Who is calling, and what the request carries beside its params. */
@@ -395,7 +398,11 @@ export class A2aTaskExecution {
 
   /** How this channel projects tasks: `options`, plus the channel's own choices. */
   #projection(options: ProjectTaskOptions = {}): ProjectTaskOptions {
-    return { ...options, toolActivity: this.#options.toolActivity };
+    return {
+      ...options,
+      toolActivity: this.#options.toolActivity,
+      ...(this.#options.failureText !== undefined && { failureText: this.#options.failureText }),
+    };
   }
 
   /** The answer a typed message gives the first question `turnId` waits on. */

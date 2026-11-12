@@ -32,6 +32,9 @@ const model = mockModel(async (request) => {
       : { toolCalls: [{ id: "guard-1", input: {}, name: "guarded" }] };
   }
   const prompt = JSON.stringify(request.messages);
+  if (prompt.includes("A2A-CUSTOM-FAILURE")) {
+    throw new Error("A2A-CUSTOM-FAILURE: token sk-live-123 rejected.");
+  }
   if (prompt.includes("A2A-FAILURE-PROBE")) {
     throw new Error(
       "A2A-FAILURE-PROBE: provider rejected the request.\\n<!DOCTYPE html><html><body>edge-internal-7f</body></html>",
@@ -75,6 +78,9 @@ export default a2aChannel({
     }
     return { attributes: {}, authenticator: "scenario", principalId, principalType: "user" };
   }, [{ scheme: "Bearer" }]),
+  // Rewrites one failure; an empty string leaves the rest to the default.
+  failureText: (failure) =>
+    failure.message.startsWith("A2A-CUSTOM-FAILURE") ? \`Delegation failed (\${failure.id ?? "no id"}).\` : "",
   maxBlockingMs: 10_000,
   uploadPolicy: { allowedMediaTypes: ["image/*"] },
 });
@@ -380,6 +386,14 @@ describe("A2A channel", () => {
       expect(failure).not.toContain("edge-internal");
       expect(failure).not.toContain("\n");
       expect(JSON.stringify(failed)).not.toMatch(/\n\s+at /);
+
+      // The channel's failureText decides what a failure says.
+      const custom = await sendTask("alice", {
+        message: userMessage("f-2", "Trigger A2A-CUSTOM-FAILURE."),
+      });
+      expect(custom.status).toMatchObject({ state: "TASK_STATE_FAILED" });
+      expect(statusText(custom)).toMatch(/^Delegation failed \(.+\)\.$/u);
+      expect(JSON.stringify(custom)).not.toContain("sk-live-123");
     },
     TEST_TIMEOUT_MS,
   );

@@ -4,5 +4,6 @@
   "A2aAgentSkill",
   "A2aChannel",
   "A2aChannelConfig",
+  "A2aFailure",
   "a2aChannel"
 ]
