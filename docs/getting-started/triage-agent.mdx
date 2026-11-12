@@ -1,0 +1,166 @@
+---
+title: "Quickstart: Triage Agent"
+description: "Build an eve agent that classifies new GitHub issues and reproduces reported bugs in a sandbox, then deploy it to your repository."
+contentType: "Tutorial"
+---
+
+You'll build an agent that reads each new GitHub issue, classifies it as a bug, feature request, or question, and can even reproduce bug reports by running the code in an isolated sandbox, away from your machine and your app. It replies on the issue with its classification and what it found. It doesn't apply GitHub labels.
+
+To have your coding agent build it, ask it to follow this page:
+
+```text
+Build the eve triage agent from https://eve.dev/docs/getting-started/triage-agent.md. Check with me before you connect GitHub or deploy.
+```
+
+Or follow the steps below.
+
+## Prerequisites
+
+- Node.js 24 or newer, which includes npm
+- Access to an AI model, as in [Getting Started](/docs/getting-started#prerequisites)
+- [Docker](https://docs.docker.com/get-started/get-docker/), running, so the agent gets a Linux sandbox with Node.js and Git on your machine
+- A GitHub account
+
+## Create the agent
+
+```bash
+npx eve@latest init triage-agent
+```
+
+The command opens the terminal UI. Leave it running; eve reloads each file you add in the next steps. Run the remaining commands and create the files from `triage-agent/` in a second terminal:
+
+```bash
+cd triage-agent
+```
+
+## Add the instructions
+
+Replace `agent/instructions.md`:
+
+```md title="agent/instructions.md"
+You triage new GitHub issues.
+
+For each issue:
+
+1. Call `get_issue` with the repository and issue number. If the message
+   already includes the issue text, use that instead.
+2. Label it `bug`, `feature`, or `question`.
+3. For a bug, reproduce it before you answer. Follow the `reproduce-bug` skill.
+4. Reply in this format:
+
+   Label: <label>
+
+   <One or two sentences on what the issue asks for.>
+
+   <For a bug: the command you ran and its output, or what you tried.>
+
+Keep replies short. Don't propose a fix unless the reporter asks for one.
+```
+
+## Add the issue tool
+
+Create `agent/tools/get_issue.ts`. It reads the issue from GitHub's public API:
+
+```ts title="agent/tools/get_issue.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Fetch a GitHub issue's title, body, and author.",
+  inputSchema: z.object({
+    repository: z.string().describe("The repository as owner/repo"),
+    issueNumber: z.number().int().positive(),
+  }),
+  async execute({ repository, issueNumber }, ctx) {
+    const url = `https://api.github.com/repos/${repository}/issues/${issueNumber}`;
+    const response = await fetch(url, { signal: ctx.abortSignal });
+    if (!response.ok) throw new Error(`GitHub returned ${response.status} for ${url}`);
+    const issue = (await response.json()) as {
+      title: string;
+      body: string | null;
+      user: { login: string };
+    };
+    return { title: issue.title, body: issue.body ?? "", author: issue.user.login };
+  },
+});
+```
+
+The tool runs in your app, not in the sandbox. It reads public repositories without a token, up to GitHub's limit of 60 requests an hour.
+
+## Add the reproduction skill
+
+A [skill](/docs/skills) is a procedure the agent loads only when it needs it. Create `agent/skills/reproduce-bug/SKILL.md`:
+
+```md title="agent/skills/reproduce-bug/SKILL.md"
+---
+description: Reproduce a reported bug in the sandbox before triaging it.
+---
+
+1. If the working directory is a Git checkout of the issue's repository, work
+   there. Otherwise run
+   `git clone --depth 1 https://github.com/<owner>/<repo> /workspace/repos/<repo>`
+   and work in that directory.
+2. Install dependencies the way the project's README says.
+3. Write the smallest script or command that shows the reported behavior, and
+   run it with `bash`.
+4. Report the exact command and its output, and say whether you reproduced it.
+```
+
+The agent runs these commands with its built-in `bash` tool in the [sandbox](/docs/sandbox). With Docker running, eve starts a container from its default image, which includes Node.js, Python, and Git.
+
+## Triage an issue locally
+
+[vercel-labs/eve-triage-demo](https://github.com/vercel-labs/eve-triage-demo) is a small project with two reported bugs and a feature request. In the terminal UI, send:
+
+```text
+Triage vercel-labs/eve-triage-demo#1
+```
+
+The agent calls `get_issue`, loads `reproduce-bug`, clones the repository, and runs the cart subtotal with the quantities from the issue. Its reply starts with `Label: bug` and shows the command it ran and the wrong `$14.50` it printed.
+
+Try `#2`, another bug, and `#3`, a feature request the agent classifies without running any code.
+
+## Connect GitHub
+
+Add the GitHub channel so new issues reach the agent:
+
+```bash
+eve add channel/github
+```
+
+When setup asks what the GitHub App should respond to, select **New issues** along with the defaults. Setup signs you in to Vercel, links a project, creates a GitHub App through Vercel Connect, and writes the channel file:
+
+```ts title="agent/channels/github.ts"
+import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "triage-agent",
+  credentials: connectGitHubCredentials("github/triage-agent"),
+  onIssue(ctx, issue) {
+    if (issue.action !== "opened") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },
+});
+```
+
+Your `botName` and connection name come from the GitHub App that setup creates. `onIssue` starts a turn when someone opens an issue. The agent also answers comments that include `@<botName>`.
+
+## Deploy
+
+```bash
+npm run deploy
+```
+
+Create your own copy of the demo with **Use this template** on [eve-triage-demo](https://github.com/vercel-labs/eve-triage-demo). Open the GitHub App in the Vercel Connect dashboard and install it on your copy. Then open an issue there, such as one with the text of the demo's issue #2.
+
+On Vercel, the GitHub channel checks out the repository into the sandbox before each turn, so the agent works on the real files. The App's token is used only for the checkout, so commands the agent runs afterward have no GitHub credentials. The agent replies on the issue with its classification and what it found.
+
+Anyone who can open an issue on your repository can start a turn, and each turn uses model tokens. On a busy repository, filter in `onIssue`, for example by label or by `issue.raw.author_association`.
+
+## Where to go next
+
+- To apply real GitHub labels, run `/add` and choose **GitHub Tools**. It adds GitHub tools, including one that adds labels, authenticated through Vercel Connect.
+- Turn the issues you tried into regression tests with [Evals](/docs/evals).
+- Let the agent open fix pull requests with the [code and git extensions](/docs/code-extension), which add investigation skills and an authenticated `gh` tool.
+- See every GitHub channel option in [GitHub](/docs/channels/github).
