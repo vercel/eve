@@ -66,7 +66,9 @@ export async function isFullMember(teamId: string, userId: string): Promise<bool
   );
 }
 
-const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/gu;
+// The label excludes `<` so a failed match can't rescan later mentions;
+// otherwise unterminated `<@U1|` runs make matching quadratic.
+const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^<>]*)?>/gu;
 // Bounds the users.info calls one tool result makes.
 const MAX_NAME_LOOKUPS = 30;
 
