@@ -117,6 +117,9 @@ for (const item of items) {
     if (!item.dependencies?.includes("claude-mem")) {
       throw new Error('Registry item "memory/claude-mem" must depend on claude-mem.');
     }
+    if (item.meta?.eve?.requires !== ">=0.84.0") {
+      throw new Error('Registry item "memory/claude-mem" must require eve >=0.84.0.');
+    }
     if (!("CLAUDE_MEM_API_KEY" in (item.envVars ?? {}))) {
       throw new Error(
         'Registry item "memory/claude-mem" must declare CLAUDE_MEM_API_KEY as an environment variable.',
