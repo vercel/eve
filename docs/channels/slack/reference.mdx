@@ -1014,7 +1014,7 @@ Other public `https:` file URLs download without the token. Both bases must be a
 Pass `renderers` to change what the agent posts. Each renderer wraps the ones after it, ending with eve's default renderer. A renderer has four optional parts:
 
 - `received(message, channel, next)` acknowledges a mention or DM when it arrives, and another message once `onMessage` accepts it. eve's default sets `Thinking...`.
-- `events` handles session events such as `content.completed` or `interaction.opened`. Each handler receives `(event, ctx, next)`. The event has `type`, `data`, and `scope` (the turn or call it belongs to). The context has `ctx.channel.thread`, `ctx.channel.slack`, `ctx.position`, and `ctx.view`.
+- `events` handles session events such as `content.completed` or `interaction.opened`. Each handler receives `(event, ctx, next)`. The event has `type`, `data`, and `scope` (the turn or call it belongs to). The context has `ctx.channel.thread`, `ctx.channel.slack`, `ctx.position`, and `ctx.view`. `call.input` streams a tool call's arguments as the model writes them, so a renderer can show a draft before the call runs; eve's default ignores it.
 - `taskCard(view, next)` returns the task card's blocks and notification text, or `null` for no card.
 - `interactionCard(card, next)` returns the messages for one approval, question, or budget prompt.
 

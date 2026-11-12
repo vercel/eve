@@ -1854,6 +1854,34 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  examples/json-render-slack:
+    dependencies:
+      '@json-render/chat':
+        specifier: 0.22.0
+        version: 0.22.0(chat@4.44.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(zod@4.6.7)
+      '@json-render/core':
+        specifier: 0.22.0
+        version: 0.22.0(zod@4.6.7)
+      ai:
+        specifier: ^7.0.137
+        version: 7.0.137(zod@4.6.7)
+      eve:
+        specifier: workspace:*
+        version: link:../../packages/eve
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
+      chat:
+        specifier: 4.44.0
+        version: 4.44.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   packages/eve:
     dependencies:
       '@linqapp/sdk':
@@ -2915,6 +2943,10 @@ packages:
     resolution: {integrity: sha512-JrsQaiUg3rJIgIcqXteuhgccmbzlwyv9LSBlUokDeX6nFD0I3nrn+msLiI381NYKpu6V/l8GrNWF9Y73JeyMcw==}
     engines: {node: '>=20'}
 
+  '@chat-adapter/catalog@4.44.0':
+    resolution: {integrity: sha512-UtpW5mMgIjYBRDIgxJKh+tfnlFe0GjLsFG5MPPUDA5b/PggSOAt00TFr0xF6UIXXh1SaK3V1u3FiXyM2sdnaJQ==}
+    engines: {node: '>=20'}
+
   '@chat-adapter/gchat@4.42.0':
     resolution: {integrity: sha512-9GernT8cbAK8CrnbIVoKvL7eDmCzfOsRvCEsq6o7p1tIYP6fD3HDvPjhjvx2KwX9ZMUrC4XWjXLMc3C8roWg0Q==}
     engines: {node: '>=20'}
@@ -3945,6 +3977,17 @@ packages:
 
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
+
+  '@json-render/chat@0.22.0':
+    resolution: {integrity: sha512-5X88BgOWLyC1B2ko7kHFM3BO2LygsN+79wy6Gin6EIxYvT4v+6wp9gRcUMQZP3hLGhEbuIE4sawk5OsZzPkGTQ==}
+    peerDependencies:
+      chat: ^4.43.0
+      zod: 4.6.7
+
+  '@json-render/core@0.22.0':
+    resolution: {integrity: sha512-BIfJ2V3bLYETetBu2KWoxxRPU5cSAf77dDTBgqaV54kEAfyHta1psPJgNk0fDcB3FCrnCZ5KO/X41VDkrNSYgw==}
+    peerDependencies:
+      zod: 4.6.7
 
   '@kapso/chat-adapter@0.1.1':
     resolution: {integrity: sha512-4QAqB4ADI7k1bbvHdjIB0r3qrBHahtET1IeJHYXc8ND+3uF0OmCK/5hRoNrKYhCzMMPHESK35t6wVkc+zWcJyw==}
@@ -9132,6 +9175,21 @@ packages:
 
   chat@4.42.0:
     resolution: {integrity: sha512-CXZyMG+qU9bX0nk8uO/cmZoI/yLu3kImdjS5BlCNYyE+Xi3umKwT8X8hrNaDA+ZyMzmkQJLYxdnN/HlPNIwl3A==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      ai: ^6.0.182 || ^7.0.0
+      workflow: ^5.0.0-beta.35
+      zod: 4.6.7
+    peerDependenciesMeta:
+      ai:
+        optional: true
+      workflow:
+        optional: true
+      zod:
+        optional: true
+
+  chat@4.44.0:
+    resolution: {integrity: sha512-DGVc9yV1ifOJFpe8Pz6BAoOBVT7/iI/7kkMuB+ZUrpyQ1iw1ElibxyvYBx7tEo1qPl6w510+Acvt1XSVPSgKjA==}
     engines: {node: '>=20'}
     peerDependencies:
       ai: ^6.0.182 || ^7.0.0
@@ -16579,6 +16637,8 @@ snapshots:
 
   '@chat-adapter/catalog@4.42.0': {}
 
+  '@chat-adapter/catalog@4.44.0': {}
+
   '@chat-adapter/gchat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)':
     dependencies:
       '@chat-adapter/shared': 4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
@@ -17460,6 +17520,16 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@js-sdsl/ordered-map@4.4.2': {}
+
+  '@json-render/chat@0.22.0(chat@4.44.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@json-render/core': 0.22.0(zod@4.6.7)
+      chat: 4.44.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
+      zod: 4.6.7
+
+  '@json-render/core@0.22.0(zod@4.6.7)':
+    dependencies:
+      zod: 4.6.7
 
   '@kapso/chat-adapter@0.1.1(ai@7.0.137(zod@4.6.7))(chat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)':
     dependencies:
@@ -23389,6 +23459,22 @@ snapshots:
   chat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7):
     dependencies:
       '@chat-adapter/catalog': 4.42.0
+      '@workflow/serde': 4.1.0-beta.2
+      mdast-util-to-string: 4.0.0
+      remark-gfm: 4.0.1(supports-color@10.2.2)
+      remark-parse: 11.0.0(supports-color@10.2.2)
+      remark-stringify: 11.0.0
+      remend: 1.3.1
+      unified: 11.0.5
+    optionalDependencies:
+      ai: 7.0.137(zod@4.6.7)
+      zod: 4.6.7
+    transitivePeerDependencies:
+      - supports-color
+
+  chat@4.44.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7):
+    dependencies:
+      '@chat-adapter/catalog': 4.44.0
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1(supports-color@10.2.2)
