@@ -85,10 +85,11 @@ it("fails the turn with a fixed failure, never what a step's last attempt threw"
   });
   expect(JSON.stringify(published)).not.toContain("4242");
   expect(result).toMatchObject({ result: { settled: { isError: true, output: message } } });
-  // The id on the stream finds the cause in the server log.
+  // The id on the stream finds the failure's log line, which names the error's class only.
   const errorId = (settled!.data as { readonly error: { readonly id: string } }).error.id;
   expect(JSON.stringify(logged.mock.calls)).toContain(errorId);
-  expect(JSON.stringify(logged.mock.calls)).toContain("4242");
+  expect(JSON.stringify(logged.mock.calls)).toContain("TypeError");
+  expect(JSON.stringify(logged.mock.calls)).not.toContain("4242");
 });
 
 it("leaves a turn stopped while its step kept failing open for its cancel", async () => {

@@ -34,7 +34,7 @@ import type {
   SessionStateMap,
   StepResult,
 } from "#harness/types.js";
-import { createErrorId, createLogger, formatError } from "#internal/logging.js";
+import { createErrorId, createLogger } from "#internal/logging.js";
 import { eventsOfLine } from "#protocol/session-lines.js";
 import type { SessionOutcome } from "#protocol/session-events/families/session.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -149,7 +149,7 @@ export async function recoverInterruptedStep(input: {
    * The error the step's last attempt threw, when every attempt failed; `stopped` when the turn
    * was cancelled meanwhile.
    */
-  readonly failed?: { readonly error: unknown; readonly stopped?: true };
+  readonly failed?: { readonly error: { readonly name?: string }; readonly stopped?: true };
 }): Promise<
   | { readonly result: DurableStepResult }
   | { readonly session: HarnessSession; readonly stepInput: HarnessStepInput | undefined }
@@ -290,8 +290,8 @@ export async function recoverInterruptedStep(input: {
   const failing = activeTurnIdOf(currentProjection(ctx));
   if (failing === undefined) return finish({ next: null, session });
   session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
-  // What the step threw can carry request content, so the turn reports a fixed failure; the
-  // error itself goes only to the server log, under the id the turn reports.
+  // What the step threw can carry request content, so neither the turn nor the log carries it:
+  // the turn reports a fixed failure, and the log only the error's class under the same id.
   const failure =
     input.failed === undefined
       ? {
@@ -305,8 +305,8 @@ export async function recoverInterruptedStep(input: {
           message: "This turn failed before it finished. Send another message to continue.",
         };
   log.error("turn failed", {
-    ...(input.failed !== undefined && formatError(input.failed.error, failure.details.errorId)),
     code: failure.code,
+    errorName: input.failed?.error.name,
     errorId: failure.details.errorId,
     sessionId: session.sessionId,
     turnId: failing,
