@@ -4,7 +4,7 @@ import {
   mayContainWorkflowDirective,
   type WorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
-import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
+import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-source-ast.js";
 
 import type { WorkflowManifest } from "./workflow-builders.js";
 
@@ -46,33 +46,33 @@ type DirectiveFunction = {
 };
 
 type AstProgram = {
-  body?: AstNode[];
+  readonly body?: readonly AstNode[];
 };
 
 type AstNode = {
-  argument?: AstNode | null;
-  async?: boolean;
-  body?: AstNode[] | { body?: AstNode[] };
-  callee?: AstNode | null;
-  declaration?: AstNode | null;
-  declarations?: AstNode[];
-  directive?: string;
-  end?: number;
-  exported?: { name?: string } | null;
-  expression?: AstNode | null;
-  expressions?: AstNode[];
-  id?: { name?: string } | null;
-  importKind?: string;
-  init?: AstNode | null;
-  kind?: string;
-  local?: { name?: string } | null;
-  name?: string;
-  object?: AstNode | null;
-  source?: AstNode | null;
-  start?: number;
-  specifiers?: AstNode[];
-  type?: string;
-  value?: unknown;
+  readonly argument?: AstNode | null;
+  readonly async?: boolean;
+  readonly body?: readonly AstNode[] | { readonly body?: readonly AstNode[] };
+  readonly callee?: AstNode | null;
+  readonly declaration?: AstNode | null;
+  readonly declarations?: readonly AstNode[];
+  readonly directive?: string;
+  readonly end?: number;
+  readonly exported?: { readonly name?: string } | null;
+  readonly expression?: AstNode | null;
+  readonly expressions?: readonly AstNode[];
+  readonly id?: { readonly name?: string } | null;
+  readonly importKind?: string;
+  readonly init?: AstNode | null;
+  readonly kind?: string;
+  readonly local?: { readonly name?: string } | null;
+  readonly name?: string;
+  readonly object?: AstNode | null;
+  readonly source?: AstNode | null;
+  readonly start?: number;
+  readonly specifiers?: readonly AstNode[];
+  readonly type?: string;
+  readonly value?: unknown;
 };
 
 /** Reads the syntax tree, so a directive quoted in a string or comment never counts. */
@@ -244,7 +244,7 @@ export async function transformWorkflowDirectives(input: {
 }
 
 async function parseWorkflowSource(filename: string, source: string): Promise<AstProgram> {
-  return (await parseWithRolldownAst(filename, source)) as AstProgram;
+  return (await parseWorkflowSourceAst(filename, source)) as AstProgram;
 }
 
 function createWorkflowStepProxySource(
@@ -405,12 +405,17 @@ function readFunctionDeclarationRange(
   };
 }
 
-function readBlockStatements(block: AstNode["body"]): AstNode[] | undefined {
-  if (block === undefined || Array.isArray(block)) {
+function readBlockStatements(block: AstNode["body"]): readonly AstNode[] | undefined {
+  if (block === undefined || isAstNodeList(block)) {
     return block;
   }
 
   return block.body;
+}
+
+// `Array.isArray` does not narrow a readonly array out of a union.
+function isAstNodeList(block: AstNode["body"]): block is readonly AstNode[] {
+  return Array.isArray(block);
 }
 
 function readFunctionDirective(

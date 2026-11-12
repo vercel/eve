@@ -1,8 +1,8 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
-import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
+import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   ScheduleClient,
@@ -98,24 +98,15 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
         : await definition.scope({ ...context, operation });
     if (scope === null) throw new Error(`Schedule ${operation} is not available in this context.`);
     validateScope(scope);
-    const provider: ScheduleProviderContext = {
+    const provider = createScheduleProviderContext({
       abortSignal: callContext.abortSignal,
+      application: callContext.application,
+      bundle: () => loadContext().require(BundleKey),
       collection: callContext.collection,
-      namespace: deriveScheduleNamespace(callContext.application, callContext.collection, scope),
+      definition,
       operationId: nextOperationId(),
-      target: {
-        key: callContext.application,
-        deliver: async ({ payload, occurrence }) => {
-          await dispatchScheduledOccurrence({
-            bundle: loadContext().require(BundleKey),
-            collection: callContext.collection,
-            definition,
-            occurrence: { ...occurrence, collection: callContext.collection },
-            payload: payload as ScheduleCollectionPayload<unknown>,
-          });
-        },
-      },
-    };
+      scope,
+    });
     return { scope, provider };
   };
 
@@ -313,16 +304,4 @@ function validateScope(scope: ScheduleScopeValue): void {
     values.some((value) => typeof value !== "string" || value.trim().length === 0)
   )
     throw new Error("Schedule scope must be a non-empty string or tuple of non-empty strings.");
-}
-
-function deriveScheduleNamespace(
-  application: string,
-  collection: string,
-  scope: ScheduleScopeValue,
-): string {
-  if (application.trim().length === 0) throw new Error("Schedule application must not be empty.");
-  const digest = createHash("sha256")
-    .update(JSON.stringify(["eve-schedule-namespace-v2", application, collection, scope]))
-    .digest("base64url");
-  return `eve-${digest}`;
 }

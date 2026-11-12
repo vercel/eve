@@ -75,10 +75,13 @@ export interface ServeCallInput {
   readonly taskId?: string;
 }
 
+// Some models fill an optional string with "" or a placeholder instead of
+// omitting it. No task id can take these values: ids are `<tool>-<suffix>`.
+const ABSENT_TASK_IDS: ReadonlySet<string> = new Set(["", "undefined", "null"]);
+
 export function splitTaskIdInput(modelInput: JsonObject): ServeCallInput {
   const { [TASK_ID_INPUT]: taskId, ...input } = modelInput;
-  // Some models fill an optional string with "" instead of omitting it.
-  if (typeof taskId !== "string" || taskId === "") return { input };
+  if (typeof taskId !== "string" || ABSENT_TASK_IDS.has(taskId)) return { input };
   return { input, taskId };
 }
 

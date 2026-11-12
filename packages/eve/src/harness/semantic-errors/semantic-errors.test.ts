@@ -156,6 +156,22 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-stream-timeout",
     },
     {
+      title: "gateway stream terminated before its finish",
+      error: new Error("Upstream stream ended before terminal chunk", {
+        cause: {
+          code: "gateway_stream_terminated",
+          message: "Upstream stream ended before terminal chunk",
+          origin: "gateway",
+        },
+      }),
+      id: "gateway-stream-terminated",
+    },
+    {
+      title: "gateway stream terminated without its code",
+      error: new Error("Upstream stream ended before terminal chunk"),
+      id: "gateway-stream-terminated",
+    },
+    {
       title: "provider api key missing",
       error: named("LoadAPIKeyError", "OpenAI API key is missing."),
       id: "model-provider-api-key-missing",

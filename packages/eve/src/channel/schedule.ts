@@ -10,12 +10,14 @@ import type {
   DispatchContinuationInput,
   RunInput,
   Runtime,
+  SessionAuthContext,
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
+import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
 import type {
   ScheduleDefinition,
   ScheduleHandlerArgs,
@@ -23,7 +25,9 @@ import type {
 } from "#public/definitions/schedule.js";
 import type {
   DynamicSchedulesDefinition,
+  DynamicSchedulesRunArgs,
   ScheduleOccurrenceIdentity,
+  SchedulePrincipalReference,
 } from "#public/schedules/subscription.js";
 import {
   parseSchedulePayload,
@@ -66,6 +70,7 @@ export interface ScheduleCollectionDispatchInput {
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly payload: ScheduleCollectionPayload<unknown>;
   readonly occurrence: ScheduleOccurrenceIdentity;
+  readonly schedule: DynamicSchedulesRunArgs<unknown>["schedule"];
   readonly verifyDelivery?: () => Promise<void>;
 }
 
@@ -121,21 +126,15 @@ export class ScheduleDispatcher {
         ? await validateSchedulePayload(definition.inputSchema, envelope.payload)
         : envelope.payload;
     await input.verifyDelivery?.();
-    const resolvedAuth = await definition.auth({
-      principal: envelope.principal,
-      payload,
-      occurrence,
-    });
-    if (resolvedAuth === null) throw new Error("Scheduled execution is no longer authorized.");
-    if (
-      resolvedAuth.principalId !== envelope.principal.principalId ||
-      resolvedAuth.principalType !== envelope.principal.type ||
-      resolvedAuth.authenticator !== envelope.principal.authenticator ||
-      resolvedAuth.issuer !== envelope.principal.issuer ||
-      resolvedAuth.subject !== envelope.principal.subject
-    )
-      throw new Error("Scheduled execution auth must resolve the schedule creator.");
-    const auth = resolvedAuth;
+    const auth = resolveCreatorAuth(
+      await definition.auth({
+        principal: envelope.principal,
+        payload,
+        occurrence,
+        schedule: input.schedule,
+      }),
+      envelope.principal,
+    );
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.collectionId);
     scope.set(AuthKey, auth);
@@ -180,6 +179,7 @@ export class ScheduleDispatcher {
         payload,
         occurrence,
         auth,
+        schedule: input.schedule,
         to: (channel, target) => ({
           send: (message, options) => args.to(channel, target).send(message, { ...options, auth }),
         }),
@@ -252,6 +252,48 @@ export class ScheduleDispatcher {
       delivery.deliveryId,
     );
   }
+}
+
+/**
+ * Turns what `auth` returned into the session auth of the stored creator. What `auth` returns
+ * is its decision, so a denial or a wrong shape fails the occurrence without a retry; only an
+ * error it throws is retried.
+ */
+function resolveCreatorAuth(
+  resolved: Awaited<ReturnType<DynamicSchedulesDefinition["auth"]>>,
+  principal: SchedulePrincipalReference,
+): SessionAuthContext {
+  if (resolved === null)
+    throw new PermanentScheduleMessageError(
+      'Scheduled execution is no longer authorized: "auth" returned null for the schedule creator.',
+    );
+  if (typeof resolved === "object" && "principalId" in resolved) {
+    if (
+      resolved.principalId !== principal.principalId ||
+      resolved.principalType !== principal.type ||
+      resolved.authenticator !== principal.authenticator ||
+      resolved.issuer !== principal.issuer ||
+      resolved.subject !== principal.subject
+    )
+      throw new PermanentScheduleMessageError(
+        "Scheduled execution auth must resolve the schedule creator.",
+      );
+    return resolved;
+  }
+  const attributes = (resolved as { readonly attributes?: unknown } | undefined)?.attributes;
+  if (typeof attributes !== "object" || attributes === null)
+    throw new PermanentScheduleMessageError(
+      'Scheduled execution "auth" must return { attributes }, a SessionAuthContext for the schedule creator, or null.',
+    );
+  const auth: { -readonly [K in keyof SessionAuthContext]: SessionAuthContext[K] } = {
+    attributes: attributes as SessionAuthContext["attributes"],
+    authenticator: principal.authenticator,
+    principalId: principal.principalId,
+    principalType: principal.type,
+  };
+  if (principal.issuer !== undefined) auth.issuer = principal.issuer;
+  if (principal.subject !== undefined) auth.subject = principal.subject;
+  return auth;
 }
 
 /**

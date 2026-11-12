@@ -264,8 +264,8 @@ export interface WorkflowServeToolDefinition<
 }
 
 /**
- * A static tool whose entry point runs as a durable workflow and must start
- * with "use workflow". It defines exactly one entry point.
+ * A tool whose entry point runs as a durable workflow and must start with
+ * "use workflow". It defines exactly one entry point.
  */
 export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowExecuteToolDefinition<TInput, TOutput>

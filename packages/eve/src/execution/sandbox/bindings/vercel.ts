@@ -159,7 +159,17 @@ export function createVercelSandbox(
           `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
         );
       }
-      await ensureVercelSandboxBaseRuntime(sandbox);
+      try {
+        await ensureVercelSandboxBaseRuntime(sandbox);
+      } catch (error) {
+        // A stopped sandbox whose snapshot expired lost its filesystem; `start()` replaces it.
+        if (isVercelSnapshotNotFoundError(error)) {
+          throw new SandboxSessionGoneError(
+            `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
+          );
+        }
+        throw error;
+      }
       return createVercelConnection(sandbox);
     },
     async start(context, options, artifact) {
@@ -206,7 +216,6 @@ export function createVercelSandbox(
     };
     try {
       const session = await ensureUsableSession({
-        // Only an expired snapshot gives a tool session a fresh sandbox.
         expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         inheritsBaseRuntime:
           artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,

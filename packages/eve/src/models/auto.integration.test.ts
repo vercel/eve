@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
+import type { HistoryMessage } from "#shared/history-message.js";
 import { anthropic } from "#public/models/anthropic/index.js";
 
 import { openMemos } from "#definitions/memos.js";
@@ -67,7 +68,11 @@ function view(text: string) {
 }
 
 /** Evaluates the model as the runner does: its memo decides, and the option is the model. */
-async function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof context>) {
+async function run(
+  definition: ReturnType<typeof auto>,
+  input: ReturnType<typeof context>,
+  messages: readonly HistoryMessage[] = [],
+) {
   const tables = view(input.text) as { readonly turn: unknown };
   const memos = openMemos({
     abortSignal: input.abortSignal,
@@ -79,7 +84,7 @@ async function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof
   return await dynamicEvaluate(definition)({
     channel: {},
     memo: memos.memo,
-    messages: async () => [],
+    messages: async () => messages,
     now: new Date(0),
     session: { auth: { current: null, initiator: null }, id: "test" },
     turn: tables.turn,
@@ -131,6 +136,33 @@ describe("auto", () => {
     await expect(run(handler, context())).resolves.toBe("openai/small");
     expect(runtime.localDecisionModel).toHaveBeenCalledWith("typesafe-ai/jev");
     expect(decider.doDecide).toHaveBeenCalledOnce();
+  });
+
+  it("routes long input with up to seven earlier messages without truncating their text", async () => {
+    const decider = decisionModel();
+    const handler = auto({ model: decider.model, options });
+    const text = "Alice requests a summary of this report.\n" + "Report details. ".repeat(2_000);
+    const history = Array.from({ length: 9 }, (_, index) => ({
+      role: "user" as const,
+      content: `Report ${index}: ${"Earlier details. ".repeat(2_000)}`,
+    }));
+
+    await expect(run(handler, context(text), history)).resolves.toBe("openai/small");
+    expect(decider.doDecide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: [
+          {
+            type: "json",
+            value: {
+              messages: [
+                ...history.slice(-7).map((message) => ({ role: "user", text: message.content })),
+                { role: "user", text },
+              ],
+            },
+          },
+        ],
+      }),
+    );
   });
 
   it("forwards provider options to the decision model", async () => {
@@ -188,8 +220,8 @@ describe("auto", () => {
     );
   });
 
-  it("uses and retains the fallback model when decision fails", async () => {
-    const providerError = new Error("decision unavailable");
+  it("uses the fallback model when the decision provider rejects long input", async () => {
+    const providerError = new Error("decision input exceeds provider context limit");
     const doDecide = vi.fn(async () => {
       throw providerError;
     });
@@ -200,12 +232,13 @@ describe("auto", () => {
       options,
     });
 
-    await expect(run(handler, context())).resolves.toBe("anthropic/claude-sonnet-5");
+    const text = "Alice requests a summary.\n" + "Report details. ".repeat(2_000);
+    await expect(run(handler, context(text))).resolves.toBe("anthropic/claude-sonnet-5");
     expect(doDecide).toHaveBeenCalledOnce();
     expect(runtime.logWarn).toHaveBeenCalledOnce();
     expect(runtime.logWarn).toHaveBeenCalledWith("model decision failed; using fallback", {
       error: expect.objectContaining({
-        message: expect.stringContaining("decision unavailable"),
+        message: expect.stringContaining("decision input exceeds provider context limit"),
       }),
       fallback: "anthropic/claude-sonnet-5",
     });

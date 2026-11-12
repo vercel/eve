@@ -41,7 +41,7 @@ function loadRolldownParseAst(): Promise<typeof import("rolldown/parseAst")> {
   return rolldownParseAstPromise;
 }
 
-function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
+export function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
   if (filename.endsWith(".tsx")) return "tsx";
   if (filename.endsWith(".jsx")) return "jsx";
   if (/\.[cm]?ts$/.test(filename)) return "ts";

@@ -213,8 +213,8 @@ function routeTool(
 }
 
 /**
- * Whether the session offers tasks: one of the agent's own tools it sees starts them, or the agent
- * resolves subagents at runtime. Both are fixed by the deployment.
+ * Whether the session offers tasks: one of the tools it sees starts them, or the agent resolves
+ * subagents at runtime.
  */
 export function sessionOffersTasks(input: {
   readonly ctx: ContextReader;

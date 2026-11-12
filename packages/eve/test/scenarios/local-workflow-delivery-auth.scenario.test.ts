@@ -39,7 +39,12 @@ export default eveChannel({ auth: httpBasic({ username: "alice", password: "fixt
         signal: AbortSignal.timeout(10_000),
       });
       expect(response.status, server.stderr()).toBe(401);
-      expect(await response.json()).toEqual({ error: "Untrusted workflow delivery." });
+      // Workflow refuses a delivery without its queue key before eve checks its
+      // own proof, which still guards anything that gets past it.
+      expect(await response.json()).toEqual({
+        error: "Unauthorized queue delivery",
+        code: "QUEUE_AUTH_REFUSED",
+      });
     }
 
     const client = new Client({
