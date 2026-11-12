@@ -63,6 +63,14 @@ matches the turn byte for byte:
 - **Messages:** the turn's framed request messages (what `ModelCaller` sends,
   including memory recall, `context.state`, and client context), followed by
   one summarize message.
+- **Cache breakpoints.** The turn's breakpoints come from `prepareStep`
+  (`step-hooks.ts`), not from the messages: `applyConversationCacheControl` for
+  models with eve's own breakpoints, and Gateway `caching: "auto"` otherwise.
+  The summary call never runs `prepareStep`; on `main` and in #5661 it only gets
+  `resolveCallProviderOptions`. Anthropic reads the cache only at a breakpoint,
+  so the summary request must carry the same breakpoints and Gateway caching
+  options the turn's `prepareStep` would set, with the last breakpoint on or
+  after the turn's last message.
 
 The summary model must be the turn's model. With `compaction.model` set to a
 different model, there is no shared cache and eve keeps today's transcript
@@ -70,10 +78,13 @@ request.
 
 ### 2. Use it for eve's default compaction
 
-eve's fixed-tail compaction summarizes the head and keeps a recent tail
-verbatim. With a prefix-reusing request the model reads the whole conversation,
-so the summarize message names what to summarize: everything before the kept
-tail, with the tail's own content left out of the summary. eve keeps the
+eve's fixed-tail compaction keeps a recent tail verbatim when it can, but its
+summary covers the whole conversation, tail included: the later stages can drop
+the tail's tool results (`text-tail`) or the whole tail (`summary-only`), and
+they never summarize again (`compaction/engine.ts`). The prefix-reusing request
+keeps that contract. The summarize message asks for the same summary
+`COMPACTION_SYSTEM_PROMPT` asks for today, over everything the model has read,
+so each tail stage still finds what it drops in the summary. eve keeps the
 transcript request as the fallback when:
 
 - the turn's request plus the summarize message would not fit the model's
@@ -83,8 +94,8 @@ transcript request as the fallback when:
 
 ### 3. Native OpenAI Responses compaction, as a strategy
 
-Native compaction fits #5661's strategy model, with two capabilities the
-strategy API does not have yet:
+Native compaction fits #5661's strategy model, with capabilities the strategy
+API does not have yet:
 
 - **A provider part that history keeps.** The returned window holds an
   `openai.compaction` item that must be stored and replayed verbatim. eve's
@@ -95,8 +106,16 @@ strategy API does not have yet:
   unreadable on Azure, and Azure drops it silently. While history holds an item,
   `prepareStep` pins routing to its issuer (`providerOptions.gateway.only`),
   keeping the authored `order` and `models` and never widening an authored
-  `only`. When routing no longer allows the issuer, eve skips native compaction
-  and the next compaction drops the item.
+  `only`.
+- **A text checkpoint for requests that can't read the item.** After a native
+  compaction the encrypted item is the only record of the compacted head, and a
+  later text summary can't recover it. A step whose model changes (#6186), or
+  whose routing no longer allows the issuer, would otherwise run with no memory
+  of that head. eve stores a text checkpoint made at the same boundary (the
+  prefix-reusing summary from section 1, which reads the same cache) beside the
+  item. A request pinned to the issuer replays the item; any other request
+  replays the checkpoint in its place, and the next compaction drops the item
+  and keeps the checkpoint.
 
 Behavior:
 
@@ -115,9 +134,14 @@ Behavior:
 
 ## Tests to add with the implementation
 
-- The summary request's tools, tool choice, provider options, and leading
-  messages equal the turn request's, and only one message is appended.
+- The summary request's tools, tool choice, provider options, cache
+  breakpoints, Gateway caching options, and leading messages equal the turn
+  request's, and only one message is appended.
 - A summary response with a tool call falls back to the transcript request.
+- A summary that falls through to `text-tail` or `summary-only` still covers
+  the dropped tail.
 - A native window replaces the history, keeps only the history's own user
   messages, and the next request is pinned to the issuer.
+- A request that can't be pinned to the issuer replays the text checkpoint, not
+  the item.
 - A failed or unsupported native attempt falls back to the summary.
