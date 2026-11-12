@@ -262,28 +262,6 @@ function callerNeeded(
 }
 
 /**
- * Throws unless the running call may use `person`'s identity for `connectionName`: they sent the
- * message the model read last as it made the call, or approved the call. A caller's standing
- * approval doesn't apply: the identity of someone who isn't the caller always needs them.
- */
-export function requirePersonConfirmation(
-  person: SessionPerson,
-  connectionName: string,
-  ctx: AlsContext | undefined,
-): void {
-  const sender = spokeLast(readSender(ctx, ctx?.get(AuthKey) ?? null));
-  if (approvedBy(person) || principalOf(sender) === principalOf(person)) return;
-  const name = JSON.stringify(person.principalId);
-  throw confirmationRequired(
-    connectionName,
-    `${name} didn't send the latest message and hasn't approved this action, so it can't use ` +
-      `their ${connectionName} access. Ask ${name} to clearly confirm this action. Retry only ` +
-      `after a reply from them that plainly confirms it.`,
-    { person },
-  );
-}
-
-/**
  * What the model reads when the caller's `what` was refused: who to ask, and that only a reply
  * that plainly confirms the action counts.
  */

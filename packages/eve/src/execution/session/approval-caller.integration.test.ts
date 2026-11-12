@@ -10,7 +10,6 @@ import {
 } from "#internal/testing/approval-resume.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
-import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineDynamic } from "#public/definitions/model.js";
 import type { Approval, ApprovalPolicy, ApprovalResponsePolicy } from "#approval/definition.js";
@@ -129,18 +128,15 @@ const CALLER_TOKEN: ToolAuthProvider = {
   }),
 };
 
-/**
- * A tool that returns the token of the caller, or of the person `as` names, and who it reads as the
- * last to speak.
- */
-function tokenTool(name: string, { approval, as }: { approval?: Approval; as?: string } = {}) {
+/** A tool that returns the caller's token, and who it reads as the last to speak. */
+function tokenTool(name: string, { approval }: { approval?: Approval } = {}) {
   return {
     loadNamespace: async () => ({
       default: defineTool({
         approval,
-        description: `Run ${name} with ${as ?? "the caller"}'s token.`,
+        description: `Run ${name} with the caller's token.`,
         execute: async (_input, ctx) => {
-          const { token } = await ctx.getToken(CALLER_TOKEN, { as });
+          const { token } = await ctx.getToken(CALLER_TOKEN);
           return `${token}, sender ${ctx.session.auth.sender?.principalId}`;
         },
         inputSchema: {},
@@ -806,8 +802,6 @@ describe("approval caller", () => {
   }, 60_000);
 });
 
-const CAROL = testUser("carol");
-
 /**
  * Calls, in order, each tool a request names: every user message that starts with "Use " asks for
  * the tools it names, and a tool named twice runs twice. A tool the model isn't offered directly,
@@ -1125,208 +1119,6 @@ describe("asking a person for their identity", () => {
       "call-use_token",
       "call-use_token_later",
     ]);
-  }, 60_000);
-
-  it("acts as the person ctx.getToken names with as, asking them unless they spoke last", async () => {
-    const { stages } = await withChainRun(
-      "identity-as",
-      async (run) => {
-        await run.send(BOB, "Bob adds a note.");
-        // Naming the caller is the same as naming no one: Bob spoke last, so Alice is asked.
-        await answerIdentity(run, "call-token_for_alice", ALICE, "approve");
-        // token_for_bob ran unasked, Bob having spoken last, and token_for_carol named someone
-        // who hasn't spoken. Carol's message asks for Bob's token again.
-        await run.send(CAROL, "Use token_for_bob again.");
-        const refused = await answerIdentity(
-          run,
-          "call-token_for_bob-2",
-          ALICE,
-          "approve",
-          "response.settled",
-        );
-        expect(filterEventsByType(refused, "response.settled")).toMatchObject([
-          { data: { outcome: "refused" } },
-        ]);
-        await answerIdentity(run, "call-token_for_bob-2", BOB, "approve");
-      },
-      {
-        message:
-          "Use deploy_change, then token_for_alice, then token_for_bob, then token_for_carol.",
-        model: requestModel(),
-        modules: [
-          tokenTool("token_for_alice", { as: "alice" }),
-          tokenTool("token_for_bob", { as: "bob" }),
-          tokenTool("token_for_carol", { as: "carol" }),
-        ],
-      },
-    );
-
-    expect(outputsOf(stages, "call-token_for_alice")).toEqual(["token:alice, sender alice"]);
-    expect(outputsOf(stages, "call-token_for_bob")).toEqual(["token:bob, sender bob"]);
-    expect(outputsOf(stages, "call-token_for_carol")).toEqual([
-      expect.stringContaining(
-        'No one with the principalId "carol" has spoken in this conversation',
-      ),
-    ]);
-    expect(identityAsks(stages)).toMatchObject([
-      { audience: { principalIds: ["alice"] }, callId: "call-token_for_alice" },
-      {
-        audience: { principalIds: ["bob"] },
-        callId: "call-token_for_bob-2",
-        prompt: expect.stringContaining('from "carol", reads: "Use token_for_bob again."'),
-      },
-    ]);
-    expect(outputsOf(stages, "call-token_for_bob-2")).toEqual([
-      expect.stringMatching(/^token:bob, sender /u),
-    ]);
-  }, 60_000);
-  it.each([
-    {
-      approval: undefined,
-      asked: ["alice", "carol"],
-      name: "asks each person a call needs once, keeps both approvals, and runs the call once",
-      approve: async (run: ChainRun) => {
-        await answerIdentity(run, "call-both_tokens", ALICE, "approve");
-        await answerIdentity(run, "call-both_tokens", CAROL, "approve");
-      },
-    },
-    {
-      approval: { request: always() },
-      asked: ["carol"],
-      name: "keeps the caller's approval of the tool when the call then asks another person",
-      approve: async (run: ChainRun) => {
-        await run.approve(ALICE, "both_tokens");
-        await answerIdentity(run, "call-both_tokens", CAROL, "approve");
-      },
-    },
-  ])(
-    "$name",
-    async ({ approval, approve, asked }) => {
-      const { stages } = await withChainRun(
-        "identity-two-people",
-        async (run) => {
-          await run.send(CAROL, "Carol adds a note.");
-          // Bob asks for a call that needs Alice's token and Carol's: neither spoke last.
-          await run.send(BOB, "Use both_tokens.");
-          await approve(run);
-        },
-        {
-          message: "Use deploy_change.",
-          model: requestModel(),
-          modules: [
-            {
-              loadNamespace: async () => ({
-                default: defineTool({
-                  approval,
-                  description: "Use Alice's token and Carol's.",
-                  execute: async (_input, ctx) => {
-                    const { token: caller } = await ctx.getToken(CALLER_TOKEN);
-                    const { token: carol } = await ctx.getToken(CALLER_TOKEN, { as: "carol" });
-                    return `${caller} ${carol}`;
-                  },
-                  inputSchema: {},
-                }),
-              }),
-              logicalPath: "tools/both_tokens.ts",
-            },
-          ],
-        },
-      );
-
-      expect(identityAsks(stages).map((ask) => ask.audience?.principalIds)).toEqual(
-        asked.map((person) => [person]),
-      );
-      expect(outputsOf(stages, "call-both_tokens")).toEqual(["token:alice token:carol"]);
-    },
-    60_000,
-  );
-
-  it("signs in the person as names, resuming the turn as its caller, without releasing the caller's identity", async () => {
-    const connected = new Set<string>();
-    const signInAs: ToolAuthProvider = {
-      principalType: "user",
-      async getToken({ principal }) {
-        const id = principal.type === "user" ? principal.id : "app";
-        if (!connected.has(id)) throw new ConnectionAuthorizationRequiredError("svc");
-        return { token: `signed-in:${id}` };
-      },
-      async startAuthorization({ callbackUrl }) {
-        return { challenge: { url: `https://idp.example/authorize?callback=${callbackUrl}` } };
-      },
-      async completeAuthorization({ principal }) {
-        const id = principal.type === "user" ? principal.id : "app";
-        connected.add(id);
-        return { token: `signed-in:${id}` };
-      },
-    };
-    const callers: Array<string | undefined> = [];
-    const { stages } = await withChainRun(
-      "identity-named-sign-in",
-      async (run) => {
-        // Bob spoke last, so his own token needs no approval, only his sign-in.
-        const asked = await run.send(BOB, "Use bob_then_caller.");
-        const signIn = filterEventsByType(asked, "interaction.opened").find(
-          (event) => event.data.request.kind === "sign-in",
-        );
-        expect(signIn?.data.audience).toEqual({ principalIds: ["bob"] });
-        await run.signIn(signIn!.data.interactionId, "svc");
-      },
-      {
-        message: "Use deploy_change.",
-        model: requestModel(),
-        modules: [
-          {
-            loadNamespace: async () => ({
-              default: defineTool({
-                description: "Use Bob's token, then the caller's.",
-                execute: async (_input, ctx) => {
-                  callers.push(ctx.session.auth.current?.principalId);
-                  const { token: bob } = await ctx.getToken(signInAs, {
-                    as: "bob",
-                    authKey: "svc",
-                  });
-                  const { token: caller } = await ctx.getToken(CALLER_TOKEN);
-                  return `${bob} ${caller}`;
-                },
-                inputSchema: {},
-              }),
-            }),
-            logicalPath: "tools/bob_then_caller.ts",
-          },
-        ],
-      },
-    );
-
-    // The callback resumed the turn as Alice, its caller, and the call ran again as hers.
-    expect(callers).toEqual(["alice", "alice"]);
-    expect(connected).toEqual(new Set(["bob"]));
-    // Bob's sign-in released nothing of Alice's: the call stopped to ask her.
-    expect(identityAsks(stages)).toMatchObject([
-      { audience: { principalIds: ["alice"] }, callId: "call-bob_then_caller" },
-    ]);
-    expect(outputsOf(stages, "call-bob_then_caller")).toEqual([]);
-  }, 60_000);
-
-  it("lets a local subagent's tool act for a person who spoke only in the delegating session", async () => {
-    const { stages } = await withChainRun(
-      "identity-as-in-subagent",
-      async (run) => {
-        // Bob's message joins Alice's turn, and the model hands his request to a subagent, which
-        // reports as a task.
-        await run.send(BOB, "Ask a helper to use token_for_bob.");
-        for (let read = 0; read < 3 && outputsOf(run.stages, "call-agent").length === 0; read++)
-          await run.next("the helper's result");
-        await run.approve(ALICE, "deploy_change");
-      },
-      {
-        message: "Use deploy_change.",
-        model: delegatingModel(),
-        modules: [tokenTool("token_for_bob", { as: "bob" })],
-      },
-    );
-
-    // The child's tool found Bob, and he spoke last in the turn that delegated to it.
-    expect(outputsOf(stages, "call-agent")).toEqual(["child read token:bob, sender bob"]);
   }, 60_000);
 
   it("carries the caller's approval into a local subagent", async () => {

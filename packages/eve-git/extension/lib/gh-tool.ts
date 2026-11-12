@@ -1,14 +1,13 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { GH_ACTOR_GUIDANCE } from "./github-guidance.ts";
 import {
   executeGitHubShell,
   githubShellApproval,
   type GitHubConfig,
   type GitHubShellInput,
 } from "./github-shell.ts";
-import { githubAppShellInputSchema, githubShellInputSchema } from "./github-shell-schema.ts";
+import { githubShellInputSchema } from "./github-shell-schema.ts";
 
 const GH_TOOL_SCOPE = {
   repository:
@@ -26,8 +25,7 @@ const GH_TOOL_REPOSITORY = {
 
 /** Describes the `gh` tool for app-installation (`repository`) or user-scoped (`caller`) tokens. */
 export function ghToolDescription(scope: keyof typeof GH_TOOL_SCOPE): string {
-  const actor = scope === "caller" ? ` ${GH_ACTOR_GUIDANCE}` : "";
-  return `Run one authenticated gh, git, or gh-signed-commit command in the sandbox. The full gh and git CLI surface is available. ${GH_TOOL_REPOSITORY[scope]}${actor} The agent's access policy decides whether each command runs. ${GH_TOOL_SCOPE[scope]} The sandbox process receives only a placeholder GH_TOKEN that the firewall exchanges on matching GitHub requests. Commands run without an approval prompt; description records the GitHub-side result the command intends to produce. Use simple argv quoting only, never environment assignments, pipes, redirects, substitutions, or other shell syntax. gh alias and extension commands may execute local code, but remain sandboxed. Use gh-signed-commit only with --repo. Use ordinary bash for local git status, diff, add, commit, and rebase.`;
+  return `Run one authenticated gh, git, or gh-signed-commit command in the sandbox. The full gh and git CLI surface is available. ${GH_TOOL_REPOSITORY[scope]} The agent's access policy decides whether each command runs. ${GH_TOOL_SCOPE[scope]} The sandbox process receives only a placeholder GH_TOKEN that the firewall exchanges on matching GitHub requests. Commands run without an approval prompt; description records the GitHub-side result the command intends to produce. Use simple argv quoting only, never environment assignments, pipes, redirects, substitutions, or other shell syntax. gh alias and extension commands may execute local code, but remain sandboxed. Use gh-signed-commit only with --repo. Use ordinary bash for local git status, diff, add, commit, and rebase.`;
 }
 
 export const GH_TOOL_DESCRIPTION = ghToolDescription("repository");
@@ -39,20 +37,15 @@ const ghOutputSchema = z.object({
   truncated: z.boolean(),
 });
 
-/**
- * The Connect-brokered `gh` tool, rebuilt by the dynamic resolver with its current config. Only
- * user tokens act for a person, so only they offer `actor`; the config is fixed per deployment,
- * so the schema stays the same from turn to turn.
- */
+/** The Connect-brokered `gh` tool, rebuilt by the dynamic resolver with its current config. */
 export function defineGhTool(
   github: () => GitHubConfig | undefined,
   description = ghToolDescription(github()?.principalType === "user" ? "caller" : "repository"),
 ) {
-  const userTokens = github()?.principalType === "user";
   return defineTool({
     description,
     approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
-    inputSchema: userTokens ? githubShellInputSchema : githubAppShellInputSchema,
+    inputSchema: githubShellInputSchema,
     outputSchema: ghOutputSchema,
     label: {
       start: (input) => input.description,

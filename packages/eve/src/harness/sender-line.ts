@@ -9,8 +9,8 @@ import type { SessionProjection } from "#protocol/session-projection.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 
 // The model is told who is speaking when the speaker changes. A session with one person never
-// reads a sender line. eve also records who has spoken, so a tool can name one of them with
-// `ctx.getToken(provider, { as })`.
+// reads a sender line. eve also records who has spoken, so memory can check that a scope belongs
+// to all of them and a request can tell whose message it quotes.
 
 const LAST_SENDER_KEY = "eve.harness.lastSender";
 const PARTICIPANTS_KEY = "eve.harness.participants";

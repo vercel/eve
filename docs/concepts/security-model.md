@@ -131,8 +131,6 @@ The caller's approval covers that call and later calls that use their identity, 
 
 An approval never changes `auth.sender`; only a message does. A call the caller approves reads the caller as `auth.sender`, but later calls their approval covers still read the other person. Another person's approval, which a `response` policy allows, doesn't release the caller's identity.
 
-A tool can act for someone other than the caller with `ctx.getToken(provider, { as })`, which names a person who has spoken in the session by `principalId`. eve hands out that person's token when they sent the latest message, or when they approve the call. Their approval covers only that call, and the caller's approval doesn't cover them. See [Act for another person](../guides/auth-and-route-protection#act-for-another-person).
-
 A call that waits on an approval or sign-in while the turn reads new messages runs as the model made it. Its `auth.sender` is whoever had spoken last when the model made the call, whatever messages arrive before it runs. A call the caller approves runs with the caller's identity. Completing a sign-in isn't an approval: a call that waited only for a sign-in keeps the sender it was asked under.
 
 eve's own role checks cover both people. When someone other than the caller spoke last, the git extension's `gh` tool with app tokens and deployed self-modification call `authorize` for the caller and for that person, and need both to pass. A `gh` command that the caller approves itself reads the caller as its sender, so `authorize` runs only for the caller.

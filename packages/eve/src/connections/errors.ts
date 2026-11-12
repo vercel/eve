@@ -85,20 +85,12 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    *   Terminal for the turn.
    * - `"sign_in_unavailable"`: a turn a schedule started needed a sign-in.
    *   Scheduled turns never ask for one. Terminal.
-   * - `"confirmation_required"`: a call needed a person's identity, the
-   *   caller's or the one `ctx.getToken(provider, { as })` names, while someone
-   *   else spoke last, the person hadn't approved the call, and eve couldn't
-   *   ask them, such as in a session that can't request input or a workflow
-   *   tool. Where eve can ask, it opens an approval for that person instead.
-   *   The message asks the model to get the person's clear confirmation.
-   *   Terminal for the call.
-   * - `"principal_not_found"`: `ctx.getToken(provider, { as })` named a
-   *   `principalId` no one who has spoken in the session has, or the tool ran
-   *   outside the session's turn. A local subagent's session counts the people
-   *   who had spoken in the session that delegated to it. Terminal.
-   * - `"principal_ambiguous"`: `ctx.getToken(provider, { as })` named a
-   *   `principalId` that more than one person who has spoken has, signed in
-   *   different ways. Terminal.
+   * - `"confirmation_required"`: a call needed the caller's identity while
+   *   someone else spoke last, the caller hadn't approved the call, and eve
+   *   couldn't ask them, such as in a session that can't request input or a
+   *   workflow tool. Where eve can ask, it opens an approval for the caller
+   *   instead. The message asks the model to get the caller's clear
+   *   confirmation. Terminal for the call.
    */
   readonly reason?: string;
 

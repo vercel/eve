@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SkillDefinition } from "eve/skills";
-import { z } from "zod";
 
 import extension from "../../extension/extension.ts";
 import instructions from "../../extension/instructions/github.ts";
@@ -21,12 +20,6 @@ async function run<T>(definition: unknown): Promise<T> {
     Symbol.for("eve.dynamic")
   ]!;
   return (await evaluate(context as never)) as T;
-}
-
-/** The input fields the model is offered for the resolved `gh` tool. */
-function inputFields(tool: ReturnType<typeof defineGhTool>): string[] {
-  const schema = z.toJSONSchema(tool.inputSchema as z.ZodType, { io: "input" });
-  return Object.keys((schema as { properties?: object }).properties ?? {});
 }
 
 async function resolve() {
@@ -63,8 +56,6 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   });
   const { content, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
-  // App tokens act for no one, so the model isn't offered an actor.
-  assert.equal(inputFields(tool).includes("actor"), false);
   assert.ok(tool.label);
   assert.equal(
     tool.label.start({
@@ -115,7 +106,6 @@ test("with a user principal, guidance describes the caller's token instead of re
   });
   const { content, tool } = await resolve();
   assert.ok(tool && "description" in tool && typeof tool.description === "string");
-  assert.equal(inputFields(tool).includes("actor"), true);
   for (const text of [content, tool.description]) {
     assert.match(text, /caller's own GitHub token/u);
     assert.match(text, /caller's GitHub permissions/u);

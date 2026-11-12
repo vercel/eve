@@ -25,11 +25,6 @@ export interface GitHubShellInput {
   /** The `owner/name` repository the command acts on, an `owner` for discovery, or omitted. */
   readonly repository?: string;
   readonly workingDirectory?: string;
-  /**
-   * The `principalId` of the person whose request the command carries out. With user tokens the
-   * command runs with their token, and `authorize` checks them instead of the caller.
-   */
-  readonly actor?: string;
 }
 
 export interface GitHubShellOutput {
@@ -65,8 +60,7 @@ export interface GitHubAppConfig extends GitHubConfigBase {
   /**
    * The only access control: commands run only when it returns `true`. In a shared session it
    * is asked about the turn's caller and, when someone else spoke last, about that person too.
-   * The command runs only when it returns `true` for both. App tokens act for no one, so the
-   * command's `actor` doesn't change it.
+   * The command runs only when it returns `true` for both.
    */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
   /**
@@ -77,15 +71,9 @@ export interface GitHubAppConfig extends GitHubConfigBase {
   readonly principalType: "app";
 }
 
-/**
- * Resolves the caller's own token through `ctx.getToken`, signing them in when needed, or the
- * token of the command's `actor` when it names someone else.
- */
+/** Resolves the caller's own token through `ctx.getToken`, signing them in when needed. */
 export interface GitHubUserConfig extends GitHubConfigBase {
-  /**
-   * The only access control: commands run only when it returns `true`. It is asked about the
-   * person whose token the command uses: the caller, or the command's `actor`.
-   */
+  /** The only access control: commands run only when it returns `true`. */
   readonly authorize: GitHubAuthorize<GitHubUserAuthorizeRequest>;
   readonly principalType: "user";
 }
@@ -98,8 +86,7 @@ export interface GitHubUserAuthorizeRequest {
   readonly argv: readonly string[];
   /**
    * The person the command is checked for, or `null` when the session has none: the turn's
-   * caller, or with user tokens the command's `actor` as eve resolved them, without attributes;
-   * with app tokens also whoever spoke last, when that is someone else.
+   * caller, and with app tokens also whoever spoke last, when that is someone else.
    */
   readonly auth: SessionAuthContext | null;
   /** Always `null`: user tokens cannot be restricted to the declared repository. Use app tokens for repository allowlists. */
@@ -233,11 +220,6 @@ export async function executeGitHubShell(
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const auth = dependencies.auth ?? null;
   const sender = dependencies.sender === undefined ? auth : dependencies.sender;
-  // With user tokens, the command runs with the actor's own token, which eve hands out only once
-  // they spoke last or approved the call. App tokens act for no one.
-  const actingAs =
-    config.principalType === "user" && input.actor !== undefined ? { as: input.actor } : undefined;
-  let actor = auth;
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
   if (config.principalType === "user") {
@@ -247,9 +229,7 @@ export async function executeGitHubShell(
     // was consented with, and repository details do not narrow user tokens.
     // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
-    const resolved = await dependencies.getToken(userAuth, actingAs);
-    token = resolved.token;
-    actor = actorOf(input.actor, auth, resolved.principal);
+    ({ token } = await dependencies.getToken(userAuth));
   } else {
     // Scope the installation token to the repository, or to the owner's
     // installation for owner-level commands such as `gh repo list <owner>`.
@@ -273,15 +253,15 @@ export async function executeGitHubShell(
   // Never let it satisfy a repository allowlist for an unrestricted lease.
   const allowed =
     config.principalType === "user"
-      ? await config.authorize({ argv, auth: actor, repository: null, token })
+      ? await config.authorize({ argv, auth, repository: null, token })
       : await config.authorize({ argv, auth, owner: owner!, repository, token });
   if (!allowed) {
     throw new Error(`The current caller is not authorized to run this command${scope}.`);
   }
   // An app token is nobody's own, so `authorize` is the only check on who asks for the command.
   // Another person's message can ask for it in the caller's turn, so they must pass it too. A
-  // user token is its owner's own: `ctx.getToken` hands it out only once they spoke last, or
-  // approved this call or, for the caller, an earlier one since anyone else spoke.
+  // user token is the caller's own: `ctx.getToken` hands it out only once the caller spoke last,
+  // or approved this call or an earlier one since anyone else spoke.
   if (
     config.principalType !== "user" &&
     !samePrincipal(auth, sender) &&
@@ -354,7 +334,7 @@ export async function executeGitHubShell(
   }
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
     // GitHub rejected the caller's token: evict it and sign the caller in again.
-    dependencies.requireAuth!(userAuth, actingAs);
+    dependencies.requireAuth!(userAuth);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
   const stderr = sanitizeOutput(result.stderr, token, authorization);
@@ -446,26 +426,6 @@ async function leaseCredential<T>(
     ],
   });
   return await run();
-}
-
-/**
- * The person a user-token command acts for, as `authorize` sees them: the caller, or the person
- * eve resolved for `actor`, without attributes. Without one, the command fails rather than
- * authorize a guess.
- */
-function actorOf(
-  actor: string | undefined,
-  auth: SessionAuthContext | null,
-  resolved: Omit<SessionAuthContext, "attributes"> | undefined,
-): SessionAuthContext | null {
-  if (actor === undefined) return auth;
-  if (resolved === undefined) {
-    throw new Error(
-      `eve didn't resolve who ${actor} is, so the command can't be checked for them.`,
-    );
-  }
-  // Naming the caller acts for the caller, whose claims `authorize` reads as usual.
-  return samePrincipal(resolved, auth) ? auth : { ...resolved, attributes: {} };
 }
 
 export function parseCommand(command: string): string[] {

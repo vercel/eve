@@ -37,25 +37,4 @@ export interface ToolAuthOptions {
    * `connect({ connector, tokenParams })`.
    */
   readonly authKey?: string;
-  /**
-   * The `principalId` of the person whose token to read, instead of the caller's. It names
-   * someone who has spoken in the session, as the sender lines the model reads name them. Naming
-   * the caller is the same as omitting it.
-   *
-   * eve hands out the named person's token when they sent the latest message the model read as it
-   * made the call, or when they approved the call. Otherwise eve asks them to approve the call,
-   * and signs them in if they haven't connected, where the session can ask; elsewhere the call
-   * fails with `reason: "confirmation_required"`. Their approval covers only that call; the
-   * caller's approval, which covers the caller's later calls until someone else speaks, doesn't
-   * apply to anyone else.
-   *
-   * eve keeps a person's identity but not their attributes, so a provider that reads
-   * `principal.attributes` receives none for the named person. Fails with
-   * `reason: "principal_not_found"` when no one who has spoken has this `principalId`, and with
-   * `reason: "principal_ambiguous"` when more than one has. A local subagent can name the people
-   * who had spoken in the session that delegated to it. Only a tool's own `ctx.getToken` and
-   * `ctx.requireAuth` take it, in a tool that runs in the session's turn; elsewhere, such as in a
-   * workflow tool's own code, it throws a `TypeError`.
-   */
-  readonly as?: string;
 }

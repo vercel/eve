@@ -517,42 +517,6 @@ Vercel Connect providers usually supply their own display name for the authoriza
 
 Inline providers derive a stable auth key from Vercel Connect metadata when available. Give each custom provider without that metadata an explicit key, for example `ctx.getToken(auth, { authKey: "github" })`. `authKey` sets eve's cache and callback keys; it is not an OAuth scope.
 
-## Act for another person
-
-By default, `ctx.getToken(provider)` reads the turn caller's token. In a shared session, set `as` to the `principalId` of another person who has spoken, as the model reads it in sender lines, to read their token instead:
-
-```ts title="agent/tools/open_pull_request.ts"
-import { connect } from "@vercel/connect/eve";
-import { defineTool } from "eve/tools";
-import { z } from "zod";
-
-const github = connect("github/myagent");
-
-export default defineTool({
-  description: "Open a pull request for the person who asked for it.",
-  inputSchema: z.object({ branch: z.string(), actor: z.string().optional() }),
-  async execute({ branch, actor }, ctx) {
-    // Omit `as` for the caller's token.
-    const { token } = await ctx.getToken(github, { as: actor });
-    return await openPullRequest(branch, token);
-  },
-});
-```
-
-With `as`, the result's `principal` is the person whose token it is, as eve resolved them, without attributes. Authorize that identity, not the `principalId` the model passed.
-
-eve hands out the named person's token when they sent the latest message the model read as it made the call, or when they approved the call. Otherwise eve asks them to approve it, as it asks the caller; see [Approvals for a person's identity](/docs/human-in-the-loop#approvals-for-a-persons-identity). A person who hasn't connected the provider is asked to sign in once they approve. A named person's approval covers only that call, and the caller's approval doesn't cover them. Naming the caller is the same as omitting `as`.
-
-- eve keeps each person's identity but not their attributes, so a provider that reads `principal.attributes` receives none for a named person.
-- `as` works in tools that run in the session's turn. In a workflow tool's own code, it throws a `TypeError`. In a local subagent, `as` can also name anyone who had spoken in the session that delegated to it.
-- `as` names a person only for an authored tool's `ctx.getToken` and `ctx.requireAuth`. Connection tools always use the caller's identity.
-
-| What you see                      | What to do                                                                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "principal_not_found"`   | No one who has spoken in the conversation has that `principalId`. Name someone from a sender line.                                    |
-| `reason: "principal_ambiguous"`   | Two people who have spoken share that `principalId`, signed in through different channels. Ask the person to continue in one channel. |
-| `reason: "confirmation_required"` | The named person didn't speak last, and the session can't ask for input. Ask them to confirm in the conversation, then retry.         |
-
 ## What to read next
 
 - [Security model](../concepts/security-model): trust boundaries and the pre-production checklist

@@ -39,7 +39,6 @@ import {
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
 import { liveProjection } from "#harness/session-machine/current.js";
-import { requirePersonConfirmation } from "#runtime/connections/caller-confirmation.js";
 import { SIGN_IN_DECLINED, terminalSignInFailure } from "#harness/hitl/sign-ins.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
@@ -61,11 +60,6 @@ const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0
  */
 export interface ScopedAuthorization {
   readonly boundResponder?: SessionAuthContext;
-  /**
-   * The bound responder is the person a tool named with `ctx.getToken(provider, { as })`: their
-   * identity needs them, as the caller's does, and their sign-in resumes the turn as its caller.
-   */
-  readonly named?: true;
   /** Opaque resolved instance identity for connection-hosted authorization. */
   readonly instanceId?: string;
   readonly scope: string;
@@ -415,9 +409,7 @@ async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
-  const caller = contextStorage.getStore()?.get(AuthKey) ?? undefined;
-  // A named person signs in for the call, but the callback resumes the turn as its caller.
-  const requester = input.named === true ? caller : (input.boundResponder ?? caller);
+  const requester = input.boundResponder ?? contextStorage.getStore()?.get(AuthKey) ?? undefined;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,
@@ -436,7 +428,7 @@ async function startScopedAuthorization(
       instanceId: input.instanceId,
       name: scope,
       principal,
-      principalId: (input.boundResponder ?? requester)?.principalId,
+      principalId: requester?.principalId,
       requester,
       resume,
     },
@@ -444,18 +436,14 @@ async function startScopedAuthorization(
 }
 
 function resolveScopedPrincipal(input: ScopedAuthorization, ctx?: AlsContext) {
-  if (input.boundResponder === undefined)
-    return resolveConnectionPrincipal(input.scope, input.authorization, ctx);
-  // A named person's identity is theirs to hand out, as the caller's is; an approver's is not
-  // guarded here: their own answer is what bound them.
-  if (input.named === true && input.authorization.principalType === "user")
-    requirePersonConfirmation(input.boundResponder, input.scope, ctx ?? contextStorage.getStore());
-  return resolveConnectionPrincipalFromAuth(
-    input.scope,
-    input.authorization,
-    input.boundResponder,
-    ctx,
-  );
+  return input.boundResponder === undefined
+    ? resolveConnectionPrincipal(input.scope, input.authorization, ctx)
+    : resolveConnectionPrincipalFromAuth(
+        input.scope,
+        input.authorization,
+        input.boundResponder,
+        ctx,
+      );
 }
 
 /** Normalizes callback URLs for providers with localhost requirements. */

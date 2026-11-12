@@ -325,10 +325,9 @@ The ids are recorded only when the trace policy records both inputs and outputs,
 
 ### Approvals for a person's identity
 
-In a [shared session](/docs/concepts/security-model#shared-sessions), a call that needs the caller's identity after someone else spoke asks the caller first. Such a call reads a user-scoped token, calls a `forwardPrincipal` connection, or names a person with [`ctx.getToken(provider, { as })`](/docs/guides/auth-and-route-protection#act-for-another-person). eve opens an ordinary approval, with `request.kind: "approval"`, for the person whose identity the call needs:
+In a [shared session](/docs/concepts/security-model#shared-sessions), a call that needs the caller's identity after someone else spoke asks the caller first. Such a call reads a user-scoped token or calls a `forwardPrincipal` connection. eve opens an ordinary approval, with `request.kind: "approval"`, for the caller:
 
 - The prompt names the call by its tool's title, never by text the model wrote. It quotes the latest message from someone else in the turn, then lists the input the call runs with: `Approve Deploy with your identity? Approving also lets later actions use your identity, on any account, until someone else sends a message after this request. The latest message from someone else, from "bob", reads: "ship it". It runs with "env": "prod".` The sender's ID, the quote, input keys, and values are JSON-escaped, and the quote and input are shortened, so none of them can pass for eve's text.
-- Only a request to the caller says, before the quote, that approving also covers later actions. A request to a person named with `as` covers only its call.
 - The prompt shows every top-level input field. A long value is cut on its own, and inside an array or object each item is cut on its own, with a note of how many characters are hidden, so it can't hide what comes after it. Only an input with more than 100 fields is cut short, with a note that counts the fields left out and names the first five.
 - In a local subagent, the quote can come from the turn that delegated to it, since the subagent's own messages come from the delegating agent.
 - Slack shows the whole prompt beside the approval card, whose body holds only its start.

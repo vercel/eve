@@ -173,8 +173,8 @@ export interface TurnCaller {
 
 /**
  * What a local child session inherits from the session that delegated to it, beside its latest
- * sender: who has spoken there, so `ctx.getToken(provider, { as })` can name them, and the
- * callers' standing approvals, each of which lasts until someone else speaks.
+ * sender: who has spoken there, and the callers' standing approvals, each of which lasts until
+ * someone else speaks.
  */
 export interface DelegatedIdentity {
   /** The people who have spoken in the delegating session, without their attributes. */

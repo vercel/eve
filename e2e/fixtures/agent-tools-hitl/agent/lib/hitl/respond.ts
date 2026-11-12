@@ -22,7 +22,6 @@ export const SAY = {
   bobSpeakers: "Bob adds a note and asks who is speaking.",
   bobCallerToken: "Bob adds that the release should go out with Alice's release token.",
   bobReleaseNote: "Bob adds that the release note should be posted now.",
-  aliceBobToken: "Alice asks for a release with Bob's release token.",
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
   deadline: "Alice adds that the note should mention the deadline.",
@@ -147,11 +146,6 @@ export function respond(request: MockModelRequest): MockModelResponse {
       run(
         [call("release-note", "release-note")],
         () => `Release note: ${outcome("release-note")}.`,
-      ),
-    [SAY.aliceBobToken]: () =>
-      run(
-        [call("named-token", "named-token", { as: "bob" })],
-        () => `Bob's token: ${outcome("named-token")}.`,
       ),
     [SAY.spendBudget]: () => ({
       text: REPLY.summary,

@@ -3,8 +3,7 @@ import { z } from "zod";
 /** An `owner` or `owner/name` GitHub target. */
 export const GITHUB_TARGET = /^([A-Za-z0-9][A-Za-z0-9-]*)(?:\/([A-Za-z0-9._-]+))?$/u;
 
-/** The `gh` tool's input with app tokens, which act for no one. */
-export const githubAppShellInputSchema = z.object({
+export const githubShellInputSchema = z.object({
   command: z.string().trim().min(1).max(20_000),
   repository: z
     .string()
@@ -27,17 +26,4 @@ export const githubAppShellInputSchema = z.object({
     .max(1_000)
     .optional()
     .describe("sandbox workspace directory; defaults to the workspace root"),
-});
-
-/** The `gh` tool's input with user tokens, which adds the person a command acts for. */
-export const githubShellInputSchema = githubAppShellInputSchema.extend({
-  actor: z
-    .string()
-    .trim()
-    .min(1)
-    .max(500)
-    .optional()
-    .describe(
-      "the principalId of the person whose request this command carries out, as the sender lines name them; omit for the person whose message started this turn",
-    ),
 });
