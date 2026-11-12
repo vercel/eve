@@ -13,7 +13,10 @@ import { KITCHEN_SINK } from "#execution/v26-history.fixtures.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
-import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
+import {
+  parkedAnchorWorkflow,
+  sessionCommandInboxWorkflow,
+} from "#internal/testing/session-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -80,6 +83,42 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
     } finally {
       await successor.cancel().catch(() => {});
       await owner.cancel().catch(() => {});
+    }
+  });
+});
+
+it("moves a session past an idle subagent and ends the subagent's run on the earlier build", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-idle-task" } });
+  await runtime.run(async () => {
+    // The helper answered Alice earlier; on 0.83 its run stays parked on its control hook.
+    const hookToken = `helper-control:${crypto.randomUUID()}`;
+    const helper = await start(parkedAnchorWorkflow, [{ token: hookToken }]);
+    await waitForHook(helper, { token: hookToken });
+    const task = {
+      calls: [],
+      id: "helper-1",
+      kind: "agent",
+      name: "helper",
+      resumable: true,
+      results: [],
+      run: { hookToken, runId: helper.runId, started: true },
+    };
+    const { owner, sessionId, successor } = await startForcedHandoff(
+      KITCHEN_SINK,
+      turnsIn(KITCHEN_SINK),
+      { "eve.taskTable": { tasks: [task], version: 1 } },
+    );
+    try {
+      await owner.returnValue;
+      await readTurn(sessionId, KITCHEN_SINK.length);
+      const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+      expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
+      // The successor told the old run to end.
+      await expect(helper.returnValue).resolves.toBeUndefined();
+    } finally {
+      await successor.cancel().catch(() => {});
+      await owner.cancel().catch(() => {});
+      await helper.cancel().catch(() => {});
     }
   });
 });
