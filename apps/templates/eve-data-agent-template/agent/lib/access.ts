@@ -6,14 +6,14 @@ type Principal = {
   attributes: Record<string, unknown>;
 } | null;
 
-const HTTP_OPERATOR = "company-brain";
+const HTTP_OPERATOR = "data-agent";
 
 function isDevelopment(env: NodeJS.ProcessEnv): boolean {
   return env.EVE_DEV === "1" || (env.VERCEL === "1" && env.VERCEL_ENV === "development");
 }
 
 export function authenticateDevelopmentHttp(request: Request, env: NodeJS.ProcessEnv) {
-  const password = env.COMPANY_BRAIN_HTTP_PASSWORD;
+  const password = env.DATA_AGENT_HTTP_PASSWORD;
   if (!isDevelopment(env) || !password) return null;
   const result = verifyHttpBasic(request.headers.get("authorization"), {
     username: HTTP_OPERATOR,
@@ -32,7 +32,7 @@ function parseIds(value: string | undefined): string[] {
 export function canReadModels(auth: Principal, env: NodeJS.ProcessEnv): boolean {
   if (!auth) return false;
   if (auth.authenticator === "http-basic" && auth.principalId === HTTP_OPERATOR) {
-    return isDevelopment(env) && Boolean(env.COMPANY_BRAIN_HTTP_PASSWORD);
+    return isDevelopment(env) && Boolean(env.DATA_AGENT_HTTP_PASSWORD);
   }
   if (auth.authenticator !== "slack-webhook") return false;
 

@@ -1,4 +1,4 @@
-# Company Brain Template
+# Data Agent Template
 
 Ask an eve agent about dbt models and their data from Slack. The example uses
 Jaffle Shop customers, orders, and payments. dbt builds the tables and supplies
@@ -36,7 +36,7 @@ generate an HTTP operator password in `.env.local`:
 node --input-type=module - <<'JS'
 import { randomBytes } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
-appendFileSync('.env.local', `\nCOMPANY_BRAIN_HTTP_PASSWORD=${randomBytes(32).toString('hex')}\n`);
+appendFileSync('.env.local', `\nDATA_AGENT_HTTP_PASSWORD=${randomBytes(32).toString('hex')}\n`);
 JS
 pnpm dev
 ```
@@ -45,12 +45,12 @@ pnpm dev
 same directory, connect with the operator credentials:
 
 ```bash
-AUTH=$(node --env-file=.env.local -e 'process.stdout.write(Buffer.from("company-brain:" + process.env.COMPANY_BRAIN_HTTP_PASSWORD).toString("base64"))')
+AUTH=$(node --env-file=.env.local -e 'process.stdout.write(Buffer.from("data-agent:" + process.env.DATA_AGENT_HTTP_PASSWORD).toString("base64"))')
 pnpm exec eve remote connect --url http://127.0.0.1:2000 --header "Authorization: Basic $AUTH"
 unset AUTH
 ```
 
-The username is `company-brain`. Anyone with this password can query all exposed
+The username is `data-agent`. Anyone with this password can query all exposed
 models in development. Keep it private and do not deploy it. For Slack-only
 development, skip generating the password; HTTP session routes remain disabled.
 
@@ -89,7 +89,7 @@ Vercel project environment:
 
 | Variable                    | Value                                                       |
 | --------------------------- | ----------------------------------------------------------- |
-| `SLACK_CONNECTOR`           | The connector UID from setup, such as `slack/company-brain` |
+| `SLACK_CONNECTOR`           | The connector UID from setup, such as `slack/data-agent`    |
 | `SLACK_TEAM_ID`             | The workspace ID                                            |
 | `SLACK_ALLOWED_USER_IDS`    | Comma-separated user IDs allowed to ask questions           |
 | `SLACK_ALLOWED_CHANNEL_IDS` | Comma-separated conversation IDs where the agent may answer |
@@ -112,7 +112,7 @@ Slack Connect membership, move sensitive results to DMs, or implement per-user
 warehouse permissions. Everyone admitted uses the same warehouse identity.
 
 The HTTP channel requires HTTP Basic operator credentials in development. An
-unset or empty `COMPANY_BRAIN_HTTP_PASSWORD` disables HTTP access. Synthetic
+unset or empty `DATA_AGENT_HTTP_PASSWORD` disables HTTP access. Synthetic
 `local-dev` identities cannot read models. Production HTTP access stays disabled,
 even if the password is accidentally configured; Slack uses its own admission
 policy.
@@ -166,7 +166,7 @@ Slack → eve agent → read model definitions ─────┘
 ```
 
 `pnpm data:build` runs dbt and all its tests, then generates a compact catalog
-from `manifest.json` and `catalog.json`. Only models tagged `company_brain` are
+from `manifest.json` and `catalog.json`. Only models tagged `data_agent` are
 exposed. They must be materialized tables in `main`, with snake_case relation
 names. The catalog includes descriptions, column types, compiled SQL, immediate
 model dependencies, and authored `meta` values for grain, joins, metrics, and

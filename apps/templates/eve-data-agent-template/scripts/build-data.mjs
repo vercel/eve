@@ -33,7 +33,7 @@ const warehouseCatalog = JSON.parse(
   await readFile(resolve(root, "dbt/target/catalog.json"), "utf8"),
 );
 const models = Object.values(manifest.nodes)
-  .filter((node) => node.resource_type === "model" && node.tags.includes("company_brain"))
+  .filter((node) => node.resource_type === "model" && node.tags.includes("data_agent"))
   .map((node) => {
     if (node.config.materialized !== "table" || node.schema !== "main") {
       throw new Error("Exposed models must be materialized tables in the main schema.");
@@ -59,7 +59,7 @@ const models = Object.values(manifest.nodes)
     };
   })
   .sort((a, b) => a.name.localeCompare(b.name));
-if (models.length === 0) throw new Error("Tag at least one analytics model with company_brain.");
+if (models.length === 0) throw new Error("Tag at least one analytics model with data_agent.");
 const catalogPath = resolve(root, "agent/lib/catalog.ts");
 await mkdir(dirname(catalogPath), { recursive: true });
 await writeFile(

@@ -1,4 +1,4 @@
-company_brain:
+data_agent:
   target: dev
   outputs:
     dev:
