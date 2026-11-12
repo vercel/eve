@@ -2500,6 +2500,44 @@ Connect owns the OAuth flow, and each end-user authorizes in their own browser b
     keywords: ["mcp", "docs", "tables", "pages", "oauth", "connect"],
     authModes: ["user"],
   },
+  context7: {
+    logo: "context7",
+    docsHref: "https://context7.com/docs/integrations/eve",
+    keywords: [
+      "mcp",
+      "documentation",
+      "library docs",
+      "code examples",
+      "api reference",
+      "coding agent",
+      "Upstash",
+      "api key",
+    ],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "CONTEXT7_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/context7.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/context7.ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const apiKey = process.env.CONTEXT7_API_KEY;
+
+export default defineMcpClientConnection({
+  url: "https://mcp.context7.com/mcp",
+  description: "Context7: up-to-date, version-specific library documentation and code examples.",
+  ...(apiKey ? { auth: { getToken: async () => ({ token: apiKey }) } } : {}),
+  tools: { allow: ["resolve-library-id", "query-docs"] },
+});
+\`\`\`
+
+The allowlist limits the connection to Context7's two read-only documentation tools, \`context7__resolve-library-id\` and \`context7__query-docs\`, even if the server adds more tools later. For a named library, the agent resolves its Context7 library ID first, then queries the docs with that ID. A prompt that already includes an ID such as \`/vercel/next.js\` can skip straight to \`query-docs\`.`,
+    configureNote:
+      "Create a free API key in the [Context7 dashboard](https://context7.com/dashboard?tab=settings). eve sends it as an Authorization Bearer token, and Context7 uses it to apply your plan's limits. The connection still works without a key, at Context7's anonymous limits. Vercel Connect is not required.",
+  },
   context: {
     logo: "context",
     docsHref: "https://docs.context.dev/install-mcp",

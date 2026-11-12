@@ -59,6 +59,19 @@ describe("Firecrawl connection setup", () => {
   });
 });
 
+describe("Context7 connection setup", () => {
+  it("shows the installed connection file with its tool allowlist in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/context7.ts", import.meta.url),
+      "utf8",
+    );
+    const quickStart = getIntegration("context7")!.quickStart!;
+
+    expect(quickStart).toContain(source.trim());
+    expect(quickStart).toContain('tools: { allow: ["resolve-library-id", "query-docs"] }');
+  });
+});
+
 describe("Stacktree connection setup", () => {
   it("keeps the installed approval and Bearer authorization policy in the gallery", () => {
     const integration = getIntegration("stacktree")!;

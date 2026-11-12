@@ -1143,6 +1143,22 @@
       ]
     },
     {
+      "name": "connection/context7",
+      "type": "registry:item",
+      "title": "Context7",
+      "description": "Look up up-to-date, version-specific library docs and code examples.",
+      "envVars": {
+        "CONTEXT7_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/context7.ts",
+          "type": "registry:file",
+          "target": "agent/connections/context7.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/flora",
       "type": "registry:item",
       "title": "FLORA",

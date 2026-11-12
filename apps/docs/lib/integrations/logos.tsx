@@ -427,6 +427,28 @@ const contextLogo = (props: LogoProps) => (
   </svg>
 );
 
+const context7Logo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect width="28" height="28" rx="4" fill="#000" />
+    <path
+      d="M10.5724 15.2565c0 2.246-.9111 4.1213-2.3943 5.8482h3.4538v1.6739H6.3346v-1.5891c1.621-1.8329 2.246-3.3267 2.246-5.933h1.9918Z"
+      fill="#fff"
+    />
+    <path
+      d="M17.4276 15.2565c0 2.246.9111 4.1213 2.3944 5.8482h-3.4539v1.6739h5.2973v-1.5891c-1.621-1.8329-2.246-3.3267-2.246-5.933h-1.9918Z"
+      fill="#fff"
+    />
+    <path
+      d="M10.5724 12.7435c0-2.246-.9111-4.1213-2.3943-5.8482h3.4538V5.2214H6.3346v1.5892c1.621 1.8328 2.246 3.3267 2.246 5.9329h1.9918Z"
+      fill="#fff"
+    />
+    <path
+      d="M17.4276 12.7435c0-2.246.9111-4.1213 2.3944-5.8482h-3.4539V5.2214h5.2973v1.5892c-1.621 1.8328-2.246 3.3267-2.246 5.9329h-1.9918Z"
+      fill="#fff"
+    />
+  </svg>
+);
+
 export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
@@ -1167,6 +1189,7 @@ export const logos = {
   linear: linearLogo,
   sent: sentLogo,
   context: contextLogo,
+  context7: context7Logo,
   notion: notionLogo,
   datadog: datadogLogo,
   honeycomb: honeycombLogo,

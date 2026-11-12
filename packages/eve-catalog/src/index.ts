@@ -606,6 +606,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "context7",
+    name: "Context7",
+    kind: "connection",
+    tagline: "Look up up-to-date, version-specific library docs and code examples.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Context7: up-to-date, version-specific library documentation and code examples.",
+      mcp: { url: "https://mcp.context7.com/mcp" },
+    },
+  },
+  {
     slug: "flora",
     name: "FLORA",
     kind: "connection",
