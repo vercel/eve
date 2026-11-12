@@ -2073,6 +2073,62 @@ Keep credentials server-side and use one credential set: API client credentials 
 
 See the [provider README](https://github.com/memcoai/eve-memco#readme) for save-and-search verification, options, and service calls. The adapter does not provide exactly-once guarantees for remote operations or immediate key revocation after interrupted turns.`,
   },
+  "claude-mem": {
+    logo: "claude-mem",
+    docsHref: "https://docs.claude-mem.ai/eve-integration",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "coding agents",
+      "Claude Code",
+      "Codex",
+      "automatic recall",
+      "session context",
+      "cmem.ai",
+      "claude-mem",
+    ],
+    install: `Give your eve agent the memory you build in Claude Code, Codex, and your other claude-mem clients, and record the agent's own work the same way they do.
+
+Install the claude-mem provider:
+
+\`\`\`bash
+eve add memory/claude-mem
+\`\`\`
+
+This installs \`claude-mem\` and writes a memory slot. The provider requires Node.js 24 or later, zod 4, and eve 0.84.0 or later.`,
+    quickStart: `Create a key at [cmem.ai/pro/key](https://cmem.ai/pro/key) and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+CLAUDE_MEM_API_KEY=...
+\`\`\`
+
+The registry writes the slot:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+import { claudeMem } from "claude-mem/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and save durable context for the current user.",
+  provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`claude-mem\` slot. Before every turn, the provider adds your newest memory as session context and recalls records that match the user's message. The model also gets \`claude-mem__search\`, \`claude-mem__timeline\`, and \`claude-mem__get_observations\` to look further back, and \`claude-mem__remember\` to save a note. Saving needs a Pro key with write access.`,
+    configure: `By default, each eve scope reads and writes its own claude-mem project, derived from eve's scope key, and recording is on. After each completed turn, the provider sends the prompt, each tool call, and a turn summary to cmem.ai. Each recorded tool call and summary spends the key owner's cmem.ai observer allowance, for every caller the scope admits. Pass \`capture: false\` to keep recall, search, and \`remember\` without recording:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+provider: claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY, capture: false }),
+\`\`\`
+
+Before anything is sent, the provider removes \`<private>\` regions and redacts secret-shaped text. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
+
+\`searchAllProjects: true\` lets session context, recall, \`search\`, and \`timeline\` read every project the key can see, so the agent recalls work from your other claude-mem clients. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. \`get_observations\` fetches by ID across the key's whole memory regardless of project; give callers separate keys when they must never see each other's memory. Other options are \`project\` and \`baseUrl\`.
+
+Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source control. See the [claude-mem eve guide](https://docs.claude-mem.ai/eve-integration) for the one-click personal agent template, owner-only scoping, and the full option and tool reference.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {

@@ -396,6 +396,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "claude-mem",
+    name: "claude-mem",
+    kind: "memory",
+    tagline:
+      "Recall what you did in Claude Code, Codex, and other claude-mem clients, and record the agent's own work.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",

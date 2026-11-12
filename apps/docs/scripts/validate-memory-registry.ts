@@ -113,6 +113,15 @@ for (const item of items) {
         'Registry item "memory/memco" must declare MEMCO_API_TOKEN as an environment variable.',
       );
     }
+  } else if (slug === "claude-mem") {
+    if (!item.dependencies?.includes("claude-mem")) {
+      throw new Error('Registry item "memory/claude-mem" must depend on claude-mem.');
+    }
+    if (!("CLAUDE_MEM_API_KEY" in (item.envVars ?? {}))) {
+      throw new Error(
+        'Registry item "memory/claude-mem" must declare CLAUDE_MEM_API_KEY as an environment variable.',
+      );
+    }
   } else if (slug === "memanto") {
     if (!item.dependencies?.some((dependency) => dependency.startsWith("@moorcheh-ai/memanto@"))) {
       throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto.');
