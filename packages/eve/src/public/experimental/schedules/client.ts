@@ -17,7 +17,7 @@ import {
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
 
-/** Binds a registered subscription to a scope authorized on every operation. */
+/** Binds a dynamic schedules definition to a client whose scope is authorized on every operation. */
 export async function schedules<TPayload, TPrepared = TPayload>(
   collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
 ): Promise<ScheduleClient<TPayload>> {
@@ -30,10 +30,12 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
 ): Promise<ScheduleCollectionClient<TPayload, TPrepared>> {
   const identity = readScheduleCollectionSource(collection);
   if (identity === undefined)
-    throw new Error("schedules(): subscription must be a stamped agent/schedules module export.");
+    throw new Error(
+      "schedules(): argument must be a defineDynamicSchedules() definition exported from a module in agent/schedules/.",
+    );
   const definition = normalizeScheduleCollectionDefinition(
     collection,
-    `Invalid schedule subscription ${identity.logicalPath}.`,
+    `Invalid dynamic schedules definition ${identity.logicalPath}.`,
   ) as DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
   const context = loadContext();
   return createScheduleCollectionClient(definition, {

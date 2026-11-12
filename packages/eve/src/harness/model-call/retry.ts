@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createLogger } from "#internal/logging.js";
 import { classifyModelCallError } from "#harness/model-call/errors.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import { decide, type Policy, type Restriction } from "#shared/restriction.js";
 
 const log = createLogger("harness.tool-loop");
@@ -88,6 +89,7 @@ export async function runModelCallWithRetries<T>(
     try {
       return await fn();
     } catch (error) {
+      throwIfSessionStreamDead(error);
       signal?.throwIfAborted();
       const decision = decide(retryLaw, policies, { attempt, error });
       if (!decision.retry) throw error;

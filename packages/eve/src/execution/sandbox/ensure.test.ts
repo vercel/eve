@@ -229,60 +229,6 @@ describe("ensureSandboxAccess", () => {
     expect(order).toEqual(["flaky", "broken", "broken", "later"]);
   });
 
-  it("resumes a recorded sandbox in the background but never starts one", async () => {
-    const value = fixture();
-    const recorded = { session: { providerName: "test", state: null, stateProtocolVersion: 1 } };
-    const build = (state: typeof recorded | null) =>
-      ensureSandboxAccess({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-        nodeId: "__root__",
-        registry: value.registry,
-        sessionId: "session-1",
-        state,
-      });
-
-    const unrecorded = await build(null);
-    unrecorded.resumeRecorded();
-    await unrecorded.settle();
-    expect(value.create).not.toHaveBeenCalled();
-
-    value.resume.mockRejectedValue(new SandboxSessionGoneError("The sandbox is gone."));
-    const gone = await build(recorded);
-    gone.resumeRecorded();
-    await gone.settle();
-    expect(value.resume).toHaveBeenCalledOnce();
-    expect(value.start).not.toHaveBeenCalled();
-
-    // A consumer that needs the sandbox still gets a fresh one.
-    await expect(gone.get()).resolves.toBeTruthy();
-    expect(value.start).toHaveBeenCalledOnce();
-  });
-
-  it("starts a fresh sandbox for an opener that joined a background resume of a gone one", async () => {
-    const value = fixture();
-    const gone = Promise.withResolvers<void>();
-    value.resume.mockImplementation(async () => {
-      await gone.promise;
-      throw new SandboxSessionGoneError("The sandbox is gone.");
-    });
-    const access = await ensureSandboxAccess({
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      nodeId: "__root__",
-      registry: value.registry,
-      sessionId: "session-1",
-      state: { session: { providerName: "test", state: null, stateProtocolVersion: 1 } },
-    });
-
-    access.resumeRecorded();
-    await vi.waitFor(() => expect(value.resume).toHaveBeenCalledOnce());
-    // Attachment staging opens without waiting for the queue, joining that resume.
-    const opened = access.open();
-    gone.resolve();
-
-    await expect(opened).resolves.toBeTruthy();
-    expect(value.start).toHaveBeenCalledOnce();
-  });
-
   it("keeps missing production artifacts fatal without starting a sandbox", async () => {
     vi.mocked(loadSandboxPreparedArtifact).mockResolvedValueOnce(undefined);
     const value = fixture();

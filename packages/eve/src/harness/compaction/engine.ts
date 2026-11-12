@@ -296,9 +296,7 @@ export async function compactMessages(
       return { messages: outcome.messages, stage: outcome.stage };
     }
   }
-  throw new CompactionOverLimitError(
-    `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
-  );
+  throw overLimitError(config);
 }
 
 /**
@@ -362,9 +360,7 @@ async function fixedTailHeuristic({
       : noFiles;
   const floor = withResumptionGuard(checkpointHead(""), floorRequest, Number.POSITIVE_INFINITY);
   if (evaluateThreshold(floor, config).type === "over-limit") {
-    throw new CompactionOverLimitError(
-      `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
-    );
+    throw overLimitError(config);
   }
 
   const { recent } = splitMessagesForCompaction(cappedConversation, keep);
@@ -468,13 +464,16 @@ async function fixedTailHeuristic({
     noFiles === undefined
       ? undefined
       : (fitCurrentMessage(noFiles, requestBudget)?.replay ?? noFiles);
-  const cutRequest = withClippedSummary(request);
-  if (cutRequest === undefined) {
-    throw new CompactionOverLimitError(
-      `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it.`,
-    );
-  }
+  // Estimate rounding can leave the cut request a token over; the floor's request fits, as checked
+  // before the summary call, so a billed summary always yields a history.
+  const cutRequest = withClippedSummary(request) ?? withClippedSummary(floorRequest) ?? floor;
   return { messages: cutRequest, stage: "summary-only", type: "compacted" };
+}
+
+function overLimitError(config: CompactionConfig): CompactionOverLimitError {
+  return new CompactionOverLimitError(
+    `The agent's system prompt, tools and memory leave only ~${config.threshold} tokens for the conversation, too few to compact it. Shorten the instructions, remove tools or trim memory, or raise \`compaction.threshold\`.`,
+  );
 }
 
 const CAPPED_RESULT_ANNOTATION =

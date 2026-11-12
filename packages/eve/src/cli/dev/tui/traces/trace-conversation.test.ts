@@ -329,6 +329,20 @@ describe("buildConversationItems", () => {
     expect(items[0]?.inputTokens).toBe(100);
   });
 
+  it("leaves a compaction's summary call out of the conversation", () => {
+    const [turn, step, model, action] = weatherTurn();
+    const summary = span("e".repeat(16), "chat claude-test", 5, 9, turn!.spanId, {
+      "ai.settings.context.eve.compaction.request": "summary",
+      "gen_ai.operation.name": "chat",
+      "gen_ai.system_instructions": '[{"content":"Summarize the conversation.","type":"text"}]',
+      "ai.response.text": "Alice asked about the weather.",
+      "gen_ai.usage.input_tokens": 1200,
+    });
+    const items = buildConversationItems(trace([turn!, summary, step!, model!, action!]));
+    expect(items.map((item) => item.kind)).toEqual(["user", "assistant", "tool"]);
+    expect(items[1]?.span).toBe(model);
+  });
+
   it("flags error tool calls", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 100, turn.spanId, {});

@@ -18,6 +18,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { createAttachSessionFn, type Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ConversationSpace } from "#shared/conversation-context.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
 import type { ApprovalPrompt, ApprovalResponsePolicy } from "#approval/definition.js";
@@ -186,6 +187,12 @@ export interface ChannelDriver {
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
   /**
+   * Where the driver's conversation happens on the platform, as its channel
+   * must report it in `ctx.conversation.space`. Omit for a channel that
+   * reports no space, so a channel that starts reporting one updates its driver.
+   */
+  readonly space?: ConversationSpace;
+  /**
    * The address a person's next message continues, when it continues one the
    * bot claimed, such as the Telegram message it replies to. The harness waits
    * for the session to claim it before sending.
@@ -291,6 +298,13 @@ export interface ChannelConversation {
    * that begins with the principal id.
    */
   callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
+  /**
+   * The space each run of `tool` saw in `ctx.conversation.space`, in order,
+   * or `null` for none.
+   */
+  spacesOf(tool: typeof PLAIN_TOOL): readonly (ConversationSpace | null)[];
+  /** Where the conversation happens, as the driver says the channel must report it; `undefined` for none. */
+  readonly space: ConversationSpace | undefined;
 }
 
 /**
@@ -328,6 +342,8 @@ export interface ClientView {
   readonly personShownAs?: readonly string[];
   /** Alice's id on the platform; a client authenticates her as {@link CLIENT_PERSON}. */
   readonly personId?: string;
+  /** See {@link ChannelDriver.space}. */
+  readonly space?: ConversationSpace;
   /** See {@link ChannelDriver.nextAddress}. */
   nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
@@ -608,6 +624,7 @@ function webhookView(
     },
     personShownAs: driver.personShownAs ?? [],
     personId: driver.personId,
+    ...(driver.space !== undefined && { space: driver.space }),
     nextAddress: driver.nextAddress?.bind(driver),
     shown: () => [
       ...calls.flatMap((call) => {
@@ -696,6 +713,7 @@ async function converse(
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
   const callers: (string | null)[] = [];
+  const spaces: (ConversationSpace | null)[] = [];
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
@@ -752,6 +770,7 @@ async function converse(
             execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
               callers.push(callerKey(ctx.session.auth.current));
+              spaces.push(ctx.conversation?.space ?? null);
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -1031,6 +1050,7 @@ async function converse(
       },
       runsOf: (tool) => runs[tool],
       callersOf: () => callers,
+      spacesOf: () => spaces,
       waitForRest: () => waitForRest([...sessions.values()], wait),
       async cancelRunsInWorld() {
         await waitForStepsToFinish([...sessions.values()], wait);
@@ -1045,6 +1065,7 @@ async function converse(
       },
       personShownAs: view.personShownAs ?? [],
       personId: view.personId ?? CLIENT_PERSON.principalId,
+      space: view.space,
     };
 
     /**

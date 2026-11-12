@@ -1,5 +1,5 @@
 import { commitOf } from "#harness/session-machine/commit.js";
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import {
@@ -59,15 +59,17 @@ function openTurnSession(sessionId: string) {
   return { ctx, session: withOpenTurn(session, { sequence: 1, turnId: "turn-1" }) };
 }
 
-it("fails the turn with what a step's last attempt threw", async () => {
+it("fails the turn with a fixed failure, never what a step's last attempt threw", async () => {
   const { ctx, session } = openTurnSession("exhausted-session");
   enterSessionProjection(ctx, session.state);
   const published: SessionEvent[] = [];
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => logged.mockRestore());
   const result = await recoverInterruptedStep({
     admission: commitOf([]),
     attempt: readInterruptedAttempt(0, []),
     ctx,
-    failed: { error: Object.assign(new Error("write failed"), { code: "ENOSPC" }) },
+    failed: { error: new TypeError("bad row: Alice's account number is 4242") },
     publish: async (events, current) => {
       published.push(...[events].flat());
       return current;
@@ -75,19 +77,39 @@ it("fails the turn with what a step's last attempt threw", async () => {
     session,
     stepInput: undefined,
   });
+  const message = "This turn failed before it finished. Send another message to continue.";
   const settled = published.find((event) => event.type === "turn.settled");
   expect(settled?.data).toMatchObject({
-    error: {
-      code: "Disk full",
-      hint: "Free up space and retry.",
-      id: expect.any(String),
-      message: "The disk is full, so writes are failing.",
-    },
+    error: { code: "TURN_FAILED", id: expect.any(String), message },
     outcome: "failed",
   });
-  expect(result).toMatchObject({
-    result: { settled: { isError: true, output: "The disk is full, so writes are failing." } },
+  expect(JSON.stringify(published)).not.toContain("4242");
+  expect(result).toMatchObject({ result: { settled: { isError: true, output: message } } });
+  // The id on the stream finds the cause in the server log.
+  const errorId = (settled!.data as { readonly error: { readonly id: string } }).error.id;
+  expect(JSON.stringify(logged.mock.calls)).toContain(errorId);
+  expect(JSON.stringify(logged.mock.calls)).toContain("4242");
+});
+
+it("leaves a turn stopped while its step kept failing open for its cancel", async () => {
+  const { ctx, session } = openTurnSession("stopped-session");
+  enterSessionProjection(ctx, session.state);
+  const published: SessionEvent[] = [];
+  const stepInput = { message: "Please look up Alice's plan." };
+  const result = await recoverInterruptedStep({
+    admission: commitOf([]),
+    attempt: readInterruptedAttempt(0, []),
+    ctx,
+    failed: { error: new TypeError("bad row: 4242"), stopped: true },
+    publish: async (events, current) => {
+      published.push(...[events].flat());
+      return current;
+    },
+    session,
+    stepInput,
   });
+  expect(result).toMatchObject({ stepInput });
+  expect(published.filter((event) => event.type === "turn.settled")).toEqual([]);
 });
 
 it("keeps the outcome of a turn an attempt settled when every attempt failed", async () => {

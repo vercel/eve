@@ -1,4 +1,4 @@
-import { APICallError } from "ai";
+import { APICallError, StreamProviderError, TypeValidationError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +12,7 @@ import {
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import { modelCallErrorInfo } from "#harness/model-call/failure.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
@@ -227,6 +228,43 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(payload)).toBe("retry");
   });
 
+  it("returns retry for a stream chunk that failed the provider schema", () => {
+    const error = new TypeValidationError({
+      cause: new Error("Invalid input: expected string, received undefined"),
+      value: { type: "response.output_text.delta" },
+    });
+
+    expect(classifyModelCallError(normalizeModelStreamError(error))).toBe("retry");
+  });
+
+  it("does not retry invalid provider options that wrap a validation error", () => {
+    // The shape `parseProviderOptions` throws from a provider adapter's `doStream`.
+    const error = Object.assign(
+      new Error("invalid openai provider options", {
+        cause: new TypeValidationError({ cause: new Error("Invalid input"), value: {} }),
+      }),
+      { name: "AI_InvalidArgumentError" },
+    );
+
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(modelCallErrorInfo(error).message).toBe("invalid openai provider options");
+  });
+
+  it("returns retry for an AI Gateway stream the provider ended before its finish", () => {
+    const message = "Upstream stream ended before terminal chunk";
+
+    expect(
+      classifyModelCallError(
+        normalizeModelStreamError(
+          new StreamProviderError({ code: "gateway_stream_terminated", message }),
+        ),
+      ),
+    ).toBe("retry");
+    expect(
+      classifyModelCallError(normalizeModelStreamError(new StreamProviderError({ message }))),
+    ).toBe("retry");
+  });
+
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {
     for (const statusCode of [408, 409, 429]) {
       const err = Object.assign(new Error("retryable"), { statusCode });
@@ -317,6 +355,39 @@ describe("classifyModelCallError", () => {
     });
 
     expect(classifyModelCallError(err)).toBe("recoverable");
+  });
+
+  // The session stays open: a later message can fit once compaction or a smaller agent makes room.
+  it.each([
+    {
+      title: "Anthropic's 400",
+      error: directApiCallError({
+        message: "prompt is too long: 215000 tokens > 200000 maximum",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "Bedrock's 400 relayed by AI Gateway",
+      error: gatewayModelCallError({
+        gatewayName: "GatewayInvalidRequestError",
+        gatewayType: "invalid_request_error",
+        statusCode: 400,
+        upstreamMessage: "Input is too long for requested model.",
+        upstreamType: "invalid_request_error",
+      }),
+    },
+    {
+      title: "OpenAI's stream error",
+      error: normalizeModelStreamError({
+        code: "context_length_exceeded",
+        message: "Your input exceeds the context window of this model.",
+        sequence_number: 1,
+        type: "error",
+      }),
+    },
+  ])("returns recoverable when the provider rejects a request as too long: $title", ({ error }) => {
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(summarizeKnownError(error)?.id).toBe("model-context-overflow");
   });
 
   it("returns terminal for structural 4xx errors", () => {

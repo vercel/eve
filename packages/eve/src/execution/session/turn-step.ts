@@ -39,7 +39,11 @@ import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlem
 import { readPendingHistory, withoutPendingHistory } from "#execution/session/pending-history.js";
 import * as agentTraceState from "#tracing/eve/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  isTurnCancellation,
+  throwIfTurnAborted,
+  TurnCancelledError,
+} from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { isBetweenTurns, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import {
@@ -675,7 +679,9 @@ async function runSessionStepBody(
     try {
       // A signal already aborted at entry (cancellation during an in-line
       // runtime-action wait) must settle before the park-resume stages run,
-      // or the pending batch would re-park and later re-dispatch.
+      // or the pending batch would re-park and later re-dispatch. A turn stopped while its
+      // step kept failing settles too, whether or not its signal has reached this step yet.
+      if (input.recover?.stopped === true) throw new TurnCancelledError();
       throwIfTurnAborted(abortSignal);
       stepResult = await runModelCallBatch({
         steeringSignal: input.steeringSignal,

@@ -13,6 +13,7 @@
       ],
       "meta": {
         "eve": {
+          "hidden": true,
           "requires": ">=0.62.0",
           "install": {
             "pnpm": {
@@ -95,6 +96,27 @@
           "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
           "target": "agent/extensions/self-modification/extension.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/code",
+      "type": "registry:item",
+      "title": "Code",
+      "description": "Add coding instructions, project AGENTS.md or CLAUDE.md, and investigation and review skills to an eve agent.",
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=0.76.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/code.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/code.ts"
         }
       ]
     },
@@ -430,6 +452,22 @@
           "path": "registry/memory/memco.ts",
           "type": "registry:file",
           "target": "agent/memory/memco.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/claude-mem",
+      "type": "registry:item",
+      "title": "claude-mem",
+      "description": "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
+      "dependencies": ["claude-mem"],
+      "envVars": { "CLAUDE_MEM_API_KEY": "" },
+      "meta": { "eve": { "requires": ">=0.84.0" } },
+      "files": [
+        {
+          "path": "registry/memory/claude-mem.ts",
+          "type": "registry:file",
+          "target": "agent/memory/claude-mem.ts"
         }
       ]
     },
@@ -1139,6 +1177,22 @@
           "path": "registry/connections/context.ts",
           "type": "registry:file",
           "target": "agent/connections/context.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/context7",
+      "type": "registry:item",
+      "title": "Context7",
+      "description": "Look up up-to-date, version-specific library docs and code examples.",
+      "envVars": {
+        "CONTEXT7_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/context7.ts",
+          "type": "registry:file",
+          "target": "agent/connections/context7.ts"
         }
       ]
     },

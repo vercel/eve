@@ -105,6 +105,7 @@ minimumReleaseAgeExclude:
   - "@stripe/link-integrations-eve@0.2.0"
   - "@stripe/link-sdk@0.9.0"
   - "chat@4.42.0"
+  - "claude-mem@15.18.1"
 patchedDependencies:
   "@nuxt/devtools@3.4.2": patches/@nuxt__devtools@3.4.2.patch
   "@vercel/geistdocs@2.14.2": patches/@vercel__geistdocs@2.14.2.patch

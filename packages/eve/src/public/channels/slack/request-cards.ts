@@ -25,7 +25,11 @@ import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
-import { deliverPrivateInteraction } from "#public/channels/slack/private-approval-delivery.js";
+import {
+  deliverEphemeralInteraction,
+  deliverPrivateInteraction,
+  type PrivateInteractionDelivery,
+} from "#public/channels/slack/private-approval-delivery.js";
 import type {
   SlackCardMessage,
   SlackInteractionCard,
@@ -57,6 +61,8 @@ const log = createLogger("slack.request-cards");
 type RequestCardContext = ChannelEventContext<SlackEventContext>;
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
+type PrivateDestination = Exclude<SlackApprovalChannel, "thread">;
+
 /**
  * Slack echoes the whole controls message on every click (#1909). A request's controls beyond a
  * compact card's size, such as an approval's input preview, count toward a per-message budget, so
@@ -68,7 +74,7 @@ const CONTROLS_MESSAGE_EXTRA_BYTES = 2000;
 /**
  * Posts a commit's requests: each `approvalChannel` sends to the thread joins one batch, details
  * first, then controls, grouped under Slack's 50-block cap and, for controls, a size budget; each
- * sent to a DM posts there alone.
+ * sent privately, to a DM or as an ephemeral message, posts alone.
  */
 export async function postRequestCards(
   batch: RequestBatch,
@@ -77,15 +83,21 @@ export async function postRequestCards(
   approvalChannel: SlackApprovalChannelResolver | undefined,
 ): Promise<void> {
   forgetSettledCards(ctx);
-  const directMessageRequests: Interaction[] = [];
+  const privateRequests: { request: Interaction; destination: PrivateDestination }[] = [];
   const threadRequests: Interaction[] = [];
   for (const request of batch.requests) {
     const destination =
       approvalChannel === undefined ? "thread" : await approvalChannel(request, ctx);
-    (destination === "direct-message" ? directMessageRequests : threadRequests).push(request);
+    if (destination === "direct-message" || destination === "ephemeral") {
+      privateRequests.push({ destination, request });
+    } else {
+      threadRequests.push(request);
+    }
   }
   await postThreadCards(threadRequests, ctx, chain);
-  for (const request of directMessageRequests) await postDirectMessageCard(request, ctx, chain);
+  for (const { destination, request } of privateRequests) {
+    await postPrivateCard(request, destination, ctx, chain);
+  }
 }
 
 interface CardEntry extends RenderedRequestCard {
@@ -209,49 +221,123 @@ function joinParts(parts: readonly CardPart[]): SlackCardMessage {
   };
 }
 
-async function postDirectMessageCard(
+/**
+ * Posts one request only the person behind the turn sees, in their DM or as an ephemeral message
+ * in the thread, and a note in the thread naming who it waits on, which shows the outcome later.
+ * The card always carries the session's route: a click on a DM, or on an ephemeral Slack showed
+ * outside a thread without replies, can't name the thread it answers.
+ */
+async function postPrivateCard(
   request: Interaction,
+  destination: PrivateDestination,
   ctx: RequestCardContext,
   chain: SlackInteractionCardChain,
 ): Promise<void> {
   const { channel } = ctx;
-  const reviewer =
-    slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId;
+  const reviewer = reviewerOf(ctx);
   if (!reviewer) {
-    log.warn("direct-message input request not delivered because no reviewer was resolved", {
+    log.warn(`${destination} input request not delivered because no reviewer was resolved`, {
       requestId: request.interactionId,
       sessionId: ctx.session.id,
     });
     return;
   }
   const route = slackSessionTargetOf(channel.slack);
-  const delivery = await deliverPrivateInteraction({
-    card: renderRequestCard(chain, cardOf(request, "direct-message", ctx), route),
-    previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
-    reviewer,
-    slack: channel.slack,
-  });
-  const record: SlackInteractionCardRecord = {
+  const card = renderRequestCard(chain, cardOf(request, destination, ctx), route);
+  let announcementTs: string | undefined;
+  let delivery: PrivateInteractionDelivery;
+  if (destination === "ephemeral") {
+    // Slack hides an ephemeral in a thread without replies, so the note goes first.
+    announcementTs = await announcePrivateRequest(request, reviewer, ctx);
+    try {
+      delivery = await deliverEphemeralInteraction({
+        card,
+        channelId: channel.slack.channelId,
+        reviewer,
+        thread: channel.thread,
+      });
+    } catch (error) {
+      // Nothing would ever update a note whose card never posted.
+      if (announcementTs !== undefined && channel.state.channelId !== null) {
+        await callSlack(channel, "chat.delete", request.interactionId, {
+          channel: channel.state.channelId,
+          ts: announcementTs,
+        });
+      }
+      throw error;
+    }
+  } else {
+    delivery = await deliverPrivateInteraction({
+      card,
+      previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
+      reviewer,
+      slack: channel.slack,
+    });
+    // A DM that failed, such as without `im:write`, must leave no note claiming it waits.
+    announcementTs = await announcePrivateRequest(request, reviewer, ctx);
+  }
+  const record: Mutable<SlackInteractionCardRecord> = {
     channelId: delivery.channelId,
-    destination: "direct-message",
+    destination,
     requests: [cardRequest(request.interactionId, delivery.blocks, delivery.detailsTs)],
     route,
     ts: delivery.ts,
   };
+  if (announcementTs !== undefined) record.announcementTs = announcementTs;
   remember(channel.state, record);
+}
+
+/** The Slack user a private request goes to: the one behind the turn. */
+function reviewerOf(ctx: RequestCardContext): string | null | undefined {
+  return slackUserIdFromAuthContext(ctx.session.auth.current) ?? ctx.channel.state.triggeringUserId;
+}
+
+async function announcePrivateRequest(
+  request: Interaction,
+  reviewer: string,
+  ctx: RequestCardContext,
+): Promise<string | undefined> {
   try {
-    const announcement = await channel.thread.post(
+    const announcement = await ctx.channel.thread.post(
       `Waiting on ${request.request.kind === "approval" ? "approval" : "a response"} from <@${reviewer}>…`,
     );
-    if (announcement.id) {
-      replace(channel.state, record, { ...record, announcementTs: announcement.id });
-    }
+    return announcement.id || undefined;
   } catch (error) {
     logError(log, "failed to announce private input request", error, {
       requestId: request.interactionId,
       sessionId: ctx.session.id,
     });
+    return undefined;
   }
+}
+
+/**
+ * Posts an ephemeral request's card again once a refused answer leaves it open: its click already
+ * replaced the card, and Slack can't edit an ephemeral back, so only a new one brings the controls.
+ */
+async function repostEphemeralCard(
+  record: SlackInteractionCardRecord,
+  interactionId: string,
+  ctx: RequestCardContext,
+  chain: SlackInteractionCardChain,
+): Promise<SlackInteractionCardRecord> {
+  const interaction = interactionOf(sessionTables(ctx.view), interactionId);
+  const reviewer = reviewerOf(ctx);
+  if (interaction === undefined || !reviewer) return record;
+  const card = cardOf(interaction, "ephemeral", ctx);
+  // An admitted answer stands, and the card its click left already shows it.
+  if (card.interaction.answer !== undefined) return record;
+  const delivery = await deliverEphemeralInteraction({
+    card: renderRequestCard(chain, card, record.route),
+    channelId: record.channelId,
+    reviewer,
+    thread: ctx.channel.thread,
+  });
+  return {
+    ...record,
+    requests: [cardRequest(interactionId, delivery.blocks, undefined)],
+    ts: delivery.ts,
+  };
 }
 
 /**
@@ -267,15 +353,19 @@ export async function showAnswerChange(
   const record = recordOf(ctx.channel.state, interactionId);
   if (record === undefined) return;
   if (sessionTables(ctx.view).interactions[interactionId]?.status !== "open") return;
-  replace(ctx.channel.state, record, await writeRequests(ctx, chain, record, [interactionId]));
+  const next =
+    record.destination === "ephemeral"
+      ? await repostEphemeralCard(record, interactionId, ctx, chain)
+      : await writeRequests(ctx, chain, record, [interactionId]);
+  replace(ctx.channel.state, record, next);
 }
 
 /**
  * Writes a settled request's card. Every request of its message that settled in the same commit
  * without its settled rendering written joins the one update, since the commit's view already
  * shows them settled. Then deletes each details message whose requests have all written their
- * settled rendering, reports the outcome in a DM request's thread note, and forgets the message
- * once every request in it has.
+ * settled rendering, reports the outcome in a private request's thread note, and forgets the
+ * message once every request in it has.
  */
 export async function settleRequestCard(
   interactionId: string,
@@ -335,7 +425,8 @@ interface RequestChange {
  * stay within Slack's 50 blocks, so eve uses the renderers' output if it fits, else eve's
  * defaults, else the defaults at their smallest, which always fit, since every request held at
  * least one block when posted. When Slack refuses the content, eve sends the next of those once
- * more. Returns the record as Slack now shows it.
+ * more. Returns the record as Slack now shows it. An ephemeral message can't be updated: its
+ * click replaces it, and its thread note shows the outcome.
  */
 async function writeRequests(
   ctx: RequestCardContext,
@@ -343,6 +434,7 @@ async function writeRequests(
   record: SlackInteractionCardRecord,
   ids: readonly string[],
 ): Promise<SlackInteractionCardRecord> {
+  if (record.destination === "ephemeral") return record;
   const tables = sessionTables(ctx.view);
   const changes = ids.flatMap((id): RequestChange[] => {
     const interaction = interactionOf(tables, id);
@@ -461,9 +553,7 @@ function cardOf(
   const standing = standingOf(tables, interaction);
   const card: Mutable<SlackInteractionCard> = {
     audience:
-      destination === "direct-message"
-        ? "private"
-        : normalizeChannelAudience(ctx.channel.state.audience),
+      destination === "thread" ? normalizeChannelAudience(ctx.channel.state.audience) : "private",
     destination,
     interaction: standing.interaction,
     view: ctx.view,

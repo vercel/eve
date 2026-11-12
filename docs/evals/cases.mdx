@@ -105,20 +105,21 @@ export default defineEval({
 
 Every `t.session()` or `t.send()` call starts a new, separate conversation (a session). Send more messages through its session handle. The run-level assertions on `t` see the events from every session.
 
-| Method                                     | Does                                                                                                    |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `t.session(options?)`                      | Creates an empty session and resolves on `202 Accepted`, with `.id` and `.state` set                    |
-| `t.send(message, options?)`                | Creates a session with its first message and waits for the turn to finish                               |
-| `session.send(message, options?)`          | Sends a follow-up and waits for the turn to finish                                                      |
-| `session.start(message, options?)`         | Starts a turn and returns once the server accepts it; see [In-flight turns](#in-flight-turns)           |
-| `session.cancel()`                         | Asks the agent to stop and returns a `Delivery`; a no-op when idle                                      |
-| `session.compact()`                        | Compacts the conversation history between turns and resolves to a turn with the compaction's events     |
-| `session.sendFile(text, path, mediaType?)` | Sends a message with a local file attached as a data URL                                                |
-| `session.agent(opened).stream(options?)`   | Follows a subagent's event stream, given a `child.opened` event from that session                       |
-| `session.requireInteraction(filter?)`      | Records a gate that exactly one approval or question is pending, and returns it                         |
-| `session.respond(responses, options?)`     | Answers specific pending requests as the next turn; `session.startRespond(...)` returns without waiting |
-| `session.respondAll(optionId)`             | Answers every pending request with the same option as the next turn                                     |
-| `session.events`, `session.transcript`     | The session's recorded events, and its user and assistant messages as text                              |
+| Method                                     | Does                                                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `t.session(options?)`                      | Creates an empty session and resolves on `202 Accepted`, with `.id` and `.state` set                       |
+| `t.send(message, options?)`                | Creates a session with its first message and waits for the turn to finish                                  |
+| `session.send(message, options?)`          | Sends a follow-up and waits for the turn to finish                                                         |
+| `session.start(message, options?)`         | Starts a turn and returns once the server accepts it; see [In-flight turns](#in-flight-turns)              |
+| `session.cancel()`                         | Asks the agent to stop and returns a `Delivery`; a no-op when idle                                         |
+| `session.compact()`                        | Compacts the conversation history between turns and resolves to a turn with the compaction's events        |
+| `session.sendFile(text, path, mediaType?)` | Sends a message with a local file attached as a data URL                                                   |
+| `session.agent(opened).stream(options?)`   | Follows a subagent's event stream, given a `child.opened` event from that session                          |
+| `session.requireInteraction(filter?)`      | Records a gate that exactly one approval or question is pending, and returns it                            |
+| `session.respond(responses, options?)`     | Answers specific pending requests as the next turn; `session.startRespond(...)` returns without waiting    |
+| `session.respondAll(optionId)`             | Answers every pending request with the same option as the next turn                                        |
+| `session.view`                             | Read-only session snapshot; query it with [selectors](./assertions#assert-on-session-state-with-selectors) |
+| `session.events`, `session.transcript`     | The session's recorded events, and its user and assistant messages as text                                 |
 
 `t.session()` and `t.send()` options accept per-request `headers` and `signal`. Omit `signal` to use the eval's timeout signal.
 
@@ -128,7 +129,9 @@ Every `t.session()` or `t.send()` call starts a new, separate conversation (a se
 
 The transcript uses `User:` and `Assistant:` labels separated by blank lines. It leaves out reasoning, tool calls, tool results, and other sessions' messages. It updates when a turn finishes, so read it after `await session.send(...)`, `await session.respond(...)`, or `await live.result()`.
 
-Each `send`, `respond`, and `respondAll` resolves to a turn, which doesn't change after it returns. The turn has `.reply`, `.data`, `.events`, `.interactions`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. `.session` is the conversation handle for sending more messages. `expectOk()` throws only when the turn failed.
+Each `send`, `respond`, and `respondAll` resolves to a turn, which doesn't change after it returns. The turn has `.reply`, `.data`, `.view`, `.events`, `.interactions`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. `.session` is the conversation handle for sending more messages. `expectOk()` throws only when the turn failed.
+
+`turn.view` is a fixed session snapshot at that boundary, not a view filtered to that turn. `session.view` reflects the history recorded by the session handle so far. Use [selectors from `eve/events`](./assertions#assert-on-session-state-with-selectors) to inspect either view, with explicit turn filters when needed.
 
 ## Prewarming a session
 
@@ -154,7 +157,7 @@ The agent sets up the session when the first message arrives. If eve can't creat
 
 ## In-flight turns
 
-Use `start()` when the eval must watch or change a turn before it finishes. The returned live turn has `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`. `waitForEvent()` resolves with the first matching event, including one that arrived before the call. `result()` waits for the turn to end and returns it. Event data matchers use the same partial matching as `t.event(...)`.
+Use `start()` when the eval must watch or change a turn before it finishes. The returned live turn has `.view`, `.events`, `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`. Read `live.view` for a new session snapshot after its reader observes more events; a saved snapshot does not advance. `waitForEvent()` resolves with the first matching event, including one that arrived before the call. `result()` waits for the turn to end and returns it. Event data matchers use the same partial matching as `t.event(...)`.
 
 ```ts title="evals/cancel-running-tool.eval.ts"
 import { defineEval } from "eve/evals";

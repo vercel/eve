@@ -58,6 +58,8 @@ export interface CompactionState {
 
 /** How one model call's history compacts: the session's observations, and the model's limit. */
 export interface CompactionConfig extends CompactionState {
+  /** The model's context window, when eve knows it. */
+  readonly contextWindowTokens?: number;
   readonly recentWindowSize: number;
   /** The input tokens, on the provider's ruler, a compaction's tail stages must reach. */
   readonly target: number;

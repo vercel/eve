@@ -23,5 +23,14 @@ Start with `node_modules/eve/docs/README.md`. It contains the full
 index and recommended reading order. Before writing any eve code, read the
 relevant guide there first.
 
+## One rule to know before reading
+
+A `defineDynamic` function runs before every model call, not once per turn.
+Wrap every network request, database query, API call, and sandbox read inside
+it in `ctx.memo(key, fn)`, or that work repeats on every model call. See
+`node_modules/eve/docs/dynamic-configuration/index.md`.
+
+## Install
+
 If `eve` is not installed yet, install it (`npm install eve`) or scaffold a new
 agent with `npx eve init <agent-name>`, then read the bundled docs.
