@@ -12,10 +12,9 @@ export function readSlackSpaceType(
     case "im":
       return "direct";
     case "mpim":
-      return "group";
     case "channel":
     case "group":
-      return "channel";
+      return "shared";
     default:
       return undefined;
   }
@@ -38,7 +37,7 @@ export function slackConversationSpace(state: {
   if (!state.channelId) return undefined;
   const team = state.installationTeamId || state.teamId;
   // Slack DM conversation IDs start with `D`; proactive sends carry no event to read.
-  const type = state.spaceType ?? (state.channelId.startsWith("D") ? "direct" : "channel");
+  const type = state.spaceType ?? (state.channelId.startsWith("D") ? "direct" : "shared");
   if (!team) return undefined;
   // A DM is private whatever Slack reported; otherwise only what Slack said.
   const visibility = type === "direct" ? "private" : state.spaceVisibility;

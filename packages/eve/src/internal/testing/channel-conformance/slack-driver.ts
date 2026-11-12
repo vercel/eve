@@ -179,7 +179,7 @@ export function slackDriver(
     personId: PERSON,
     space: {
       id: `slack:${TEAM}:${CHANNEL}`,
-      type: dm ? "direct" : "channel",
+      type: dm ? "direct" : "shared",
       // The driver's events name a public channel or a DM in `channel_type`.
       visibility: dm ? "private" : "public",
       workspaceId: `slack:${TEAM}`,

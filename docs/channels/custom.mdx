@@ -563,7 +563,7 @@ export default defineChannel({
     if (state.workspaceId === null || state.roomId === null) return undefined;
     return {
       id: `acme:${state.workspaceId}:${state.roomId}`,
-      type: state.dm ? "direct" : "channel",
+      type: state.dm ? "direct" : "shared",
       visibility: state.dm ? "private" : undefined,
       workspaceId: `acme:${state.workspaceId}`,
     };

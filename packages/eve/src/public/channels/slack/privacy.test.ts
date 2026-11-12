@@ -74,9 +74,9 @@ describe("Slack conversation privacy", () => {
 
   it.each([
     { channel: { is_im: true }, spaceType: "direct" },
-    { channel: { is_mpim: true, is_private: true }, spaceType: "group" },
-    { channel: { is_channel: true, is_private: false }, spaceType: "channel" },
-    { channel: { is_private: true }, spaceType: "channel" },
+    { channel: { is_mpim: true, is_private: true }, spaceType: "shared" },
+    { channel: { is_channel: true, is_private: false }, spaceType: "shared" },
+    { channel: { is_private: true }, spaceType: "shared" },
     { channel: {}, spaceType: undefined },
   ])(
     "reads an app mention's space type from conversations.info: $spaceType",
