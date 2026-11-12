@@ -135,7 +135,7 @@ npx eve link
 npx eve add channel/web
 ```
 
-Choose a hosting layout, then **Sign in with Vercel**. The terminal UI's `/add`
+Choose **Next.js**, then **Sign in with Vercel**. The terminal UI's `/add`
 channel picker offers the same setup. A team owner or a custom role with App and
 environment permissions can provision access for members of the project's team.
 Setup configures production and preview credentials; run `npx eve deploy` to publish.

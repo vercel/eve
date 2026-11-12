@@ -32,37 +32,13 @@ An existing Web Chat app in `apps/web/` keeps its framework, and the installer s
 
 ### Run the generated app outside Vercel
 
-The generated app runs its agent as a Vercel service through `vercel.ts`, which only Vercel reads. To run it anywhere else, embed the agent in the TanStack Start app with `eveTanStack()`, the same way as in an [existing app](#register-the-vite-plugin):
+The generated app reaches its agent through the Vercel services in `vercel.ts`, which only Vercel reads. Unlike `eve/next`, `eveTanStack()` doesn't embed the agent in a self-hosted production build: it proxies to an eve dev server during `vite dev` and adds Vercel services only on Vercel builds (see [Dev vs deploy topology](#dev-vs-deploy-topology)). To run the app anywhere else, run the agent as its own service:
 
-1. Replace `apps/web/vite.config.ts` with:
+1. Build and start the agent from the project root with `npx eve build` and `npx eve start`. See [Self-host eve](../deployment/self-hosting) for authentication, the Workflow world, and sandboxes.
+2. Point Web Chat at the agent. Either pass the agent's origin as `baseUrl` to `useEveAgent` in `apps/web/app/_components/agent-chat.tsx` and configure [CORS](../../channels/eve#cors), or mount the agent's routes on the app's origin through your reverse proxy. See [Add a peer frontend](../deployment/self-hosted-operations#add-a-peer-frontend).
+3. Build the app with `pnpm build:web` and serve its Nitro output.
 
-   ```ts title="apps/web/vite.config.ts"
-   import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-   import tailwindcss from "@tailwindcss/vite";
-   import viteReact from "@vitejs/plugin-react";
-   import { eveTanStack } from "eve/tanstack";
-   import { nitro } from "nitro/vite";
-   import { fileURLToPath } from "node:url";
-   import { defineConfig } from "vite";
-
-   const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
-
-   export default defineConfig({
-     resolve: { tsconfigPaths: true },
-     plugins: [
-       eveTanStack({ eveRoot }),
-       tailwindcss(),
-       tanstackStart({ srcDirectory: "app" }),
-       viteReact(),
-       nitro(),
-     ],
-   });
-   ```
-
-2. Delete the root `vercel.ts`, and the `dev:eve` and `dev:all` scripts from `package.json`.
-3. Run it with `pnpm dev:web`, and build it with `pnpm build:web`.
-
-When `vite.config.ts` matches the file above, rerunning `eve add channel/web` keeps this setup. A Vercel deploy from the project root doesn't build an app set up this way, because the app's dependencies are in the root `package.json`, so keep `vercel.ts` to deploy Web Chat on Vercel. The installer doesn't embed a workspace agent in the app; to run one outside Vercel, see [Run workspace members](../deployment/self-hosted-operations#run-workspace-members).
+Projects that an earlier installer set up with `eveTanStack({ eveRoot })` in `apps/web/vite.config.ts` keep that setup when you rerun `eve add channel/web`. That setup runs the agent only under `pnpm dev:web`. For a workspace agent, see [Run workspace members](../deployment/self-hosted-operations#run-workspace-members).
 
 Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
 
