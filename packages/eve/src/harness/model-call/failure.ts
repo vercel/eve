@@ -4,6 +4,7 @@ import {
   extractModelCallErrorDetails,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import type { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
@@ -138,4 +139,24 @@ function withoutTurnInput(
     return history[index - 1]?.content === REFUSED_TURN_NOTE.content ? [] : [REFUSED_TURN_NOTE];
   });
   return noted ? rewrite : undefined;
+}
+
+/**
+ * Compaction can't fit the request in the model's context window, so the provider isn't called.
+ * Only the turn fails: the session waits for its next message, which can fit once the agent's
+ * instructions, tools or memory shrink.
+ */
+export async function reportCompactionFailure(
+  step: Step,
+  error: CompactionOverLimitError,
+): Promise<StepResult> {
+  const { sessionId } = step.session;
+  log.error(error.message, { sessionId, turnId: step.position().turnId });
+  await step.apply(fail(step.view(), { code: "COMPACTION_FAILED", message: error.message }));
+  step.session = { ...step.session, outputSchema: undefined };
+  return {
+    next: null,
+    session: step.session,
+    settledTurn: { isError: true, output: error.message },
+  };
 }

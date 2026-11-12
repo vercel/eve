@@ -4,13 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import * as compaction from "#harness/compaction/engine.js";
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession, HarnessToolMap, StepFn } from "#harness/types.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -51,11 +50,11 @@ const summaryStream = (): StreamResult =>
     },
   ]);
 
-const finish = (unified: "stop" | "tool-calls"): StreamPart => ({
+const finish = (unified: "stop" | "tool-calls", inputTokens = 50): StreamPart => ({
   finishReason: { raw: undefined, unified },
   type: "finish",
   usage: {
-    inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 50, total: 50 },
+    inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: inputTokens, total: inputTokens },
     outputTokens: { reasoning: 0, text: 8, total: 8 },
   },
 });
@@ -67,14 +66,14 @@ const answer = (): StreamResult =>
     { id: "reply", type: "text-end" },
     finish("stop"),
   ]);
-const lookup = (preamble: string): StreamResult =>
+const lookup = (preamble: string, inputTokens?: number): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
     { id: "preamble", type: "text-start" },
     { delta: preamble, id: "preamble", type: "text-delta" },
     { id: "preamble", type: "text-end" },
     { input: "{}", toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" },
-    finish("tool-calls"),
+    finish("tool-calls", inputTokens),
   ]);
 const lookupTool: HarnessToolDefinition = {
   description: "Looks up the sources.",
@@ -82,6 +81,22 @@ const lookupTool: HarnessToolDefinition = {
   inputSchema: jsonSchema({ type: "object" }),
   name: "lookup",
 };
+/** A tool description no compaction can shrink: over a quarter of a 20k window, far under all of it. */
+const policyTool: HarnessToolDefinition = {
+  ...lookupTool,
+  description: "Protected policy. ".repeat(1_500),
+};
+const overThresholdAgent = {
+  model: { contextWindowTokens: 20_000, id: "step-model" },
+  thresholdPercent: 0.25,
+};
+
+/** Runs a turn through its steps. */
+async function untilTurnEnds(kernel: StepFn, session: HarnessSession, message: string) {
+  let stepped = await kernel(session, { message });
+  while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+  return stepped;
+}
 
 /** The user-role text of one model request, in order. */
 function userTexts(prompt: Prompt): string[] {
@@ -212,65 +227,116 @@ describe("compaction summary call", () => {
   });
 
   // https://github.com/vercel/eve/issues/5921
-  it("sends the request uncompacted when a summary can't bring it under the limit", async () => {
-    vi.spyOn(Math, "random").mockReturnValue(0);
+  it("compacts against the model's window when the agent alone is over the threshold", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const compact = vi
-      .spyOn(compaction, "compactMessages")
-      .mockImplementation(async (_messages, _config, summarize) => {
-        await summarize({
-          messages: [{ role: "user", content: "Summarize Alice's research notes." }],
-          system: "CONTEXT CHECKPOINT COMPACTION",
-        });
-        throw new CompactionOverLimitError("Still over the limit.");
-      });
+    const summaries = vi.fn(async () => summaryStream());
     const turnPrompts: Prompt[] = [];
-    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async ({ prompt }) => {
-      const system = prompt[0]?.role === "system" ? prompt[0].content : "";
-      if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
-      turnPrompts.push(prompt);
-      // The first try fails transiently; its retry doesn't summarize again.
-      if (turnPrompts.length === 1) {
-        return streamOf([
-          { type: "stream-start", warnings: [] },
-          { error: { message: "Overloaded", type: "overloaded_error" }, type: "error" },
-        ]);
-      }
-      return answer();
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
+        turnPrompts.push(prompt);
+        // Measured over the threshold, so the next step would compact again if it measured
+        // against the threshold.
+        return turnPrompts.length === 1 ? lookup("Let me check.", 12_000) : answer();
+      },
     });
     const events: SessionEvent[] = [];
-    const result = await createTestKernel({
-      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
-      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
-      resolveModel: async () => new MockLanguageModelV3({ doStream }),
-      tools: new Map(),
-    })(
+    const notes = "Earlier notes. ".repeat(4_000);
+
+    const result = await untilTurnEnds(
+      createTestKernel({
+        agent: overThresholdAgent,
+        handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+        resolveModel: async () => model,
+        tools: new Map([["lookup", policyTool]]),
+      }),
       {
         compaction: {},
-        continuationToken: "http:over-limit-compaction",
-        history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
-        sessionId: "over-limit-compaction",
+        continuationToken: "http:agent-over-threshold",
+        history: [
+          { content: notes, kind: "user", role: "user" },
+          { content: "Noted.", role: "assistant" },
+        ],
+        sessionId: "agent-over-threshold",
       },
-      { message: "Please continue." },
+      "Which sources back the second claim?",
     );
 
-    expect(compact).toHaveBeenCalledOnce();
+    // Both steps send the summary, not the notes, and only the first one summarizes.
+    expect(summaries).toHaveBeenCalledOnce();
     expect(turnPrompts).toHaveLength(2);
-    expect(userTexts(turnPrompts[1]!).join("\n")).toContain("Earlier notes. Earlier notes.");
+    for (const prompt of turnPrompts) {
+      expect(JSON.stringify(prompt)).toContain("Alice asked for the quarterly report.");
+      expect(JSON.stringify(prompt)).not.toContain("Earlier notes. Earlier notes.");
+    }
     expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
-      {
-        data: {
-          outcome: "failed",
-          error: { code: "COMPACTION_FAILED", message: "Still over the limit." },
-        },
-      },
+      { data: { outcome: "completed" } },
     ]);
     expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
       data: { outcome: "completed" },
     });
     expect(events.some((event) => event.type === "session.ended")).toBe(false);
-    expect(result.session.history[0]).toMatchObject({ content: "Earlier notes. ".repeat(2_000) });
-    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 170, outputTokens: 16 });
+    expect(result.next).toBeNull();
+  });
+
+  it("fails only the turn when the provider rejects the request as too long", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const summaries = vi.fn(async () => summaryStream());
+    let turnCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
+        if ((turnCalls += 1) > 1) return answer();
+        throw new APICallError({
+          isRetryable: false,
+          message: "prompt is too long: 21000 tokens > 20000 maximum",
+          requestBodyValues: {},
+          statusCode: 400,
+          url: "https://provider.example/v1/messages",
+        });
+      },
+    });
+    const events: SessionEvent[] = [];
+    const kernel = createTestKernel({
+      agent: overThresholdAgent,
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", policyTool]]),
+    });
+
+    // Over the threshold but under the window by eve's estimate, so the provider decides.
+    const rejected = await untilTurnEnds(
+      kernel,
+      {
+        compaction: {},
+        continuationToken: "http:provider-too-long",
+        history: [],
+        sessionId: "provider-too-long",
+      },
+      "Please review Alice's contract.",
+    );
+    const followUp = await untilTurnEnds(kernel, rejected.session, "Please list its parties.");
+
+    expect(summaries).not.toHaveBeenCalled();
+    expect(turnCalls).toBe(2);
+    expect(rejected.next).toBeNull();
+    expect(followUp.next).toBeNull();
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      {
+        data: {
+          outcome: "failed",
+          error: {
+            code: "MODEL_CALL_FAILED",
+            message: "The request exceeds the model's context window.",
+          },
+        },
+      },
+      { data: { outcome: "completed" } },
+    ]);
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
   });
 
   // https://github.com/vercel/eve/issues/5350
@@ -328,15 +394,16 @@ describe("compaction summary call", () => {
     expect(result.session.history.slice(0, 2)).toEqual(history);
   });
 
-  it("sends the request when protected request context alone exceeds the limit", async () => {
+  it("fails only the turn when protected request context alone exceeds the model's window", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const doStream = vi.fn(async () => answer());
     const events: SessionEvent[] = [];
     const result = await createTestKernel({
-      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
+      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 0.5 },
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
-      // A tool description no compaction can shrink, over the limit by itself.
+      // A tool description no compaction can shrink, over the window by itself.
       tools: new Map([
         [
           "policy_lookup",
@@ -351,19 +418,26 @@ describe("compaction summary call", () => {
     })(
       {
         compaction: {},
-        continuationToken: "http:fixed-part-over-limit",
+        continuationToken: "http:fixed-part-over-window",
         history: [],
-        sessionId: "fixed-part-over-limit",
+        sessionId: "fixed-part-over-window",
       },
       { message: "Please continue." },
     );
 
-    // Nothing could be compacted, so no change opened; the provider served the request.
-    expect(doStream).toHaveBeenCalledOnce();
+    // Nothing could be compacted, so no change opened, and the provider wasn't asked.
+    expect(doStream).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.startsWith("context."))).toBe(false);
     expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
-      data: { outcome: "completed" },
+      data: {
+        outcome: "failed",
+        error: {
+          code: "COMPACTION_FAILED",
+          message: expect.stringContaining("~2000-token context window"),
+        },
+      },
     });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
     expect(result.next).toBeNull();
   });
 
