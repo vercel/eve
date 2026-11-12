@@ -80,7 +80,8 @@ export function mentionedUserIds(text: string): string[] {
 /**
  * Looks up display names for Slack users and bots, so the agent can refer to
  * them by name instead of an ID or a mention that would notify them. IDs Slack
- * can't resolve are left out.
+ * can't resolve, including failed or rate-limited lookups, are left out so a
+ * missing name never fails the read that asked for it.
  */
 export async function slackUserNames(
   teamId: string,
@@ -94,8 +95,8 @@ export async function slackUserNames(
     unique.map(async (id) => {
       const response = await callSlack<{
         user: { name?: string; real_name?: string; profile?: { display_name?: string } };
-      }>(teamId, "users.info", { user: id });
-      const user = response.ok ? response.user : undefined;
+      }>(teamId, "users.info", { user: id }).catch(() => undefined);
+      const user = response?.ok ? response.user : undefined;
       return [id, user?.profile?.display_name || user?.real_name || user?.name] as const;
     }),
   );
