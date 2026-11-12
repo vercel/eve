@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import { cause, conforming, envelopeOf, errorInfo, id, known } from "../common.js";
 import type { Cause, Envelope, ErrorInfo } from "../envelope.js";
-import type { TraceContext } from "./session.js";
+import { type TraceContext, traceContext } from "./session.js";
 
 export interface TurnStartedData {
   readonly turnId: string;
@@ -65,9 +65,7 @@ export const turnSchemas = {
       z.object({
         cause,
         follows: id.nullable(),
-        trace: z
-          .object({ spanId: z.string(), traceFlags: z.number().int(), traceId: z.string() })
-          .optional(),
+        trace: traceContext.optional(),
         turnId: id,
       }),
     ),

@@ -63,6 +63,8 @@ function deployment(origin: string, token: string) {
   const bindings = new Map<string, RemoteChildBinding>();
   const tokens = new Map<string, string>();
   const attached: string[] = [];
+  /** Every stored-line read, by session and start position. */
+  const lineReads: { sessionId: string; startIndex: number }[] = [];
   const authorization = vi.fn((binding: RemoteAgentBinding) =>
     Promise.resolve({ authorization: `Bearer ${tokens.get(binding.url)}` }),
   );
@@ -95,13 +97,15 @@ function deployment(origin: string, token: string) {
         id: sessionId,
         getChildBinding: async (childId) => bindings.get(JSON.stringify([sessionId, childId])),
         getStreamTailIndex: async () => stored().length - 1,
-        getLineStream: async (options) =>
-          new ReadableStream({
+        getLineStream: async (options) => {
+          lineReads.push({ sessionId, startIndex: options?.startIndex ?? 0 });
+          return new ReadableStream({
             start(controller) {
               for (const line of stored().slice(options?.startIndex ?? 0)) controller.enqueue(line);
               controller.close();
             },
-          }),
+          });
+        },
         async *stream(options): AsyncIterable<SessionStreamEvent> {
           const records = legacy.get(sessionId);
           const events =
@@ -151,7 +155,18 @@ function deployment(origin: string, token: string) {
       });
     return event;
   };
-  return { origin, histories, legacy, bindings, tokens, attached, authorization, serve, link };
+  return {
+    origin,
+    histories,
+    legacy,
+    bindings,
+    tokens,
+    attached,
+    lineReads,
+    authorization,
+    serve,
+    link,
+  };
 }
 function network(...deployments: ReturnType<typeof deployment>[]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -324,8 +339,26 @@ describe("authorized descendant readers", () => {
     const history = await collect(session.stream({ follow: false }));
     const child = history.find((event) => event.type === "child.opened")!;
     home.histories.set(child.data.sessionId, [{ type: "session.started", data: {} }]);
+    home.lineReads.length = 0;
     const events = await collect(session.agent(child).stream({ follow: false, reconnect: false }));
     expect(events.map((event) => event.type)).toEqual(["session.started"]);
+    // Only the parent's line at the opening's position, not the v26 lines before it.
+    expect(home.lineReads.filter((read) => read.sessionId === "root")).toEqual([
+      { sessionId: "root", startIndex: child.meta.position.line },
+    ]);
+
+    const position = child.meta.position.line;
+    for (const forged of [
+      {
+        ...child,
+        meta: { ...child.meta, position: { ...child.meta.position, line: position + 1 } },
+      },
+      { ...child, data: { ...child.data, sessionId: "unrelated" } },
+    ]) {
+      await expect(
+        collect(session.agent(forged).stream({ follow: false, reconnect: false })),
+      ).rejects.toMatchObject({ status: 404 });
+    }
   });
 
   it("rejects forged cached links and unrelated children before contacting any foreign destination", async () => {
