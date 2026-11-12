@@ -17,7 +17,6 @@ type NetworkPolicySandboxSession = SandboxSession & {
 interface Repo {
   readonly full_name: string;
   readonly visibility: "public" | "private" | "internal";
-  readonly permissions?: { readonly push: boolean };
 }
 
 interface Mint {
@@ -29,11 +28,13 @@ interface Mint {
 /**
  * A fake api.github.com at the fetch edge. `repos` answers `GET /repos/{repo}`;
  * `installs` maps each caller token to the repositories its installations
- * reach. Every request records the token it carried.
+ * reach, and `installPermissions` is what each installation grants (`null`
+ * leaves it out of the answer). Every request records the token it carried.
  */
 function fakeGitHub(options: {
   repos?: Record<string, Repo>;
   installs?: Record<string, Repo[][]>;
+  installPermissions?: Record<string, string> | null;
   status?: number;
 }) {
   const requests: { url: string; token: string }[] = [];
@@ -53,7 +54,17 @@ function fakeGitHub(options: {
     const installs = options.installs?.[token];
     if (!installs) return new Response("{}", { status: 401 });
     if (url.pathname === "/user/installations") {
-      return Response.json({ installations: slice(installs.map((_, id) => ({ id }))) });
+      const permissions =
+        options.installPermissions === undefined ? SAFE_INSTALLATION : options.installPermissions;
+      return Response.json({
+        installations: slice(
+          installs.map((_, id) => ({
+            account: { login: `org-${id}` },
+            id,
+            permissions: permissions ?? undefined,
+          })),
+        ),
+      });
     }
     const listed = /^\/user\/installations\/(\d+)\/repositories$/u.exec(url.pathname);
     if (listed) return Response.json({ repositories: slice(installs[Number(listed[1])] ?? []) });
@@ -92,6 +103,13 @@ async function broker(
   );
 }
 
+const SAFE_INSTALLATION = {
+  actions: "write",
+  contents: "write",
+  metadata: "read",
+  pull_requests: "write",
+};
+
 const PUBLIC: Repo = { full_name: "acme/site", visibility: "public" };
 const PRIVATE: Repo = { full_name: "acme/vault", visibility: "private" };
 const INTERNAL: Repo = { full_name: "acme/wiki", visibility: "internal" };
@@ -101,11 +119,7 @@ const READ_COMMAND = "gh pr view 7 --repo acme/site";
 const WRITE_COMMAND = "git push origin HEAD:refs/heads/topic";
 
 function input(repository?: string, command = WRITE_COMMAND): GitHubShellInput {
-  return {
-    command,
-    description: "Run a command",
-    ...(repository ? { repository } : {}),
-  };
+  return { command, description: "Run a command", repository };
 }
 
 async function runApp(
@@ -122,8 +136,8 @@ async function runApp(
     {
       connector: "github/robot",
       principalType: "app",
-      ...(access ? { access } : {}),
-      ...(options.permissions ? { permissions: options.permissions } : {}),
+      access,
+      permissions: options.permissions,
       broker,
       authorize: ({ token }) => {
         authorized.push(token);
@@ -143,6 +157,7 @@ async function runApp(
   return { result, mints, authorized, runs, requests: github.requests };
 }
 
+const WRITES = ["contents:write"];
 const LOOKUP = { type: "github_app_installation", org: "acme", permissions: ["metadata:read"] };
 
 test("public-write mints the configured token for a public repository, read and write commands alike", async () => {
@@ -205,9 +220,6 @@ test("private-write keeps the configured permissions on private and internal rep
       assert.equal(app.runs.length, 1);
     }
   }
-  const unconfigured = await runApp("private-write", "acme/vault");
-  await unconfigured.result;
-  assert.equal(unconfigured.mints.at(-1)?.permissions, undefined);
 });
 
 test("private-write lowers every write to read on a public repository", async () => {
@@ -223,17 +235,56 @@ test("private-write lowers every write to read on a public repository", async ()
       "issues:read",
     ]);
     assert.equal(configured.runs.length, 1);
-
-    const unconfigured = await runApp("private-write", "acme/site", { command });
-    await unconfigured.result;
-    assert.deepEqual(unconfigured.mints.at(-1)?.permissions, ["contents:read", "metadata:read"]);
   }
 });
 
-test("a command with no repository or only an owner is refused under each access value", async () => {
+test("private-write refuses App permissions that can make a repository public, before any GitHub call", async () => {
+  for (const permissions of [
+    undefined,
+    ["contents:write", "administration:write"],
+    ["repository_creation:write"],
+    ["administration:admin"],
+    ["contents:write", "gists:write"],
+  ]) {
+    for (const repository of ["acme/vault", "acme/site"]) {
+      const app = await runApp("private-write", repository, permissions ? { permissions } : {});
+      await assert.rejects(
+        app.result,
+        permissions
+          ? /access "private-write" refused: github\.permissions grants/u
+          : /github\.permissions is not set/u,
+        `${permissions} ${repository}`,
+      );
+      assert.deepEqual(app.mints, []);
+      assert.deepEqual(app.requests, []);
+      assert.deepEqual(app.runs, []);
+    }
+  }
+});
+
+test("private-write allows read permissions outside the write allowlist", async () => {
+  const app = await runApp("private-write", "acme/vault", {
+    permissions: ["contents:write", "administration:read", "metadata:read"],
+  });
+  await app.result;
+  assert.equal(app.runs.length, 1);
+});
+
+test("public-write leaves App permissions as configured, including none", async () => {
+  const app = await runApp("public-write", "acme/site", {
+    permissions: ["administration:write"],
+  });
+  await app.result;
+  assert.deepEqual(app.mints.at(-1)?.permissions, ["administration:write"]);
+  const unconfigured = await runApp("public-write", "acme/site");
+  await unconfigured.result;
+  assert.equal(unconfigured.mints.at(-1)?.permissions, undefined);
+});
+
+test("an App command with no repository or only an owner is refused under each access value", async () => {
   for (const access of ["private-write", "public-write"] as const) {
     for (const repository of [undefined, "acme"]) {
-      for (const principalType of ["app", "user"] as const) {
+      for (const principalType of ["app"] as const) {
         const mints: Mint[] = [];
         const github = fakeGitHub({});
         let tokens = 0;
@@ -301,7 +352,7 @@ test("without access, App tokens mint as before with no GitHub lookup", async ()
 });
 
 test("the App visibility lookup fails closed when GitHub does not answer", async () => {
-  const app = await runApp("private-write", "acme/missing");
+  const app = await runApp("private-write", "acme/missing", { permissions: WRITES });
   await assert.rejects(app.result, /GitHub answered 404 to \/repos\/acme\/missing/u);
   assert.deepEqual(app.runs, []);
   assert.deepEqual(app.authorized, []);
@@ -309,14 +360,14 @@ test("the App visibility lookup fails closed when GitHub does not answer", async
 
 test("a repository that changes visibility between two commands is judged anew", async () => {
   const repos: Record<string, Repo> = { "acme/site": PUBLIC };
-  const first = await runApp("private-write", "acme/site", { repos });
+  const first = await runApp("private-write", "acme/site", { repos, permissions: WRITES });
   await first.result;
-  assert.deepEqual(first.mints.at(-1)?.permissions, ["contents:read", "metadata:read"]);
+  assert.deepEqual(first.mints.at(-1)?.permissions, ["contents:read"]);
 
   repos["acme/site"] = { ...PUBLIC, visibility: "private" };
-  const second = await runApp("private-write", "acme/site", { repos });
+  const second = await runApp("private-write", "acme/site", { repos, permissions: WRITES });
   await second.result;
-  assert.equal(second.mints.at(-1)?.permissions, undefined);
+  assert.deepEqual(second.mints.at(-1)?.permissions, WRITES);
 
   repos["acme/site"] = PUBLIC;
   const third = await runApp("public-write", "acme/site", { repos });
@@ -348,13 +399,14 @@ function runUser(
   leases: number[] = [],
   authorized: string[] = [],
   requireAuth: () => never = () => assert.fail("must not request re-authorization"),
+  repository: string | null = "acme/vault",
 ) {
   return executeGitHubShell(
-    input("acme/vault"),
+    input(repository ?? undefined, repository ? WRITE_COMMAND : "gh search repos --owner acme"),
     {
       connector: "github/v",
       principalType: "user",
-      ...(access ? { access } : {}),
+      access,
       broker,
       authorize: ({ token: minted }) => {
         authorized.push(minted);
@@ -371,16 +423,10 @@ function runUser(
   );
 }
 
-test("private-write user commands run while the installation reaches no public repository the caller can push to", async () => {
+test("private-write user commands run while the installation reaches no public repository", async () => {
   const github = fakeGitHub({
     installs: {
-      "user-a": [
-        [
-          { ...PRIVATE, permissions: { push: true } },
-          { ...INTERNAL, permissions: { push: true } },
-        ],
-        [{ ...PUBLIC, permissions: { push: false } }],
-      ],
+      "user-a": [[{ ...PRIVATE }, { ...INTERNAL }], [{ ...PRIVATE, full_name: "acme/other" }]],
     },
   });
   const runs: string[] = [];
@@ -397,15 +443,10 @@ test("private-write user commands run while the installation reaches no public r
   assert.ok(github.requests.every((request) => request.token === "user-a"));
 });
 
-test("private-write user commands are refused, naming the repository, when the installation can push to a public one", async () => {
+test("private-write user commands are refused, naming the repository, when the installation reaches a public one", async () => {
   const github = fakeGitHub({
     installs: {
-      "user-b": [
-        [
-          { ...PRIVATE, permissions: { push: true } },
-          { ...PUBLIC, permissions: { push: true } },
-        ],
-      ],
+      "user-b": [[{ ...PRIVATE }, { ...PUBLIC }]],
     },
   });
   const runs: string[] = [];
@@ -413,7 +454,7 @@ test("private-write user commands are refused, naming the repository, when the i
   const authorized: string[] = [];
   await assert.rejects(
     runUser("private-write", "user-b", github, runs, leases, authorized),
-    /access "private-write" refused: the GitHub App installation includes public repositories the caller can write to \(acme\/site\)\. Narrow the App installation/u,
+    /access "private-write" refused: the GitHub App installation includes public repositories \(acme\/site\)\. Any user with read access can comment on a public repository/u,
   );
   assert.deepEqual([runs, leases, authorized], [[], [], []]);
 });
@@ -423,7 +464,7 @@ test("public-write user commands run on public-only installations and are refuse
   await runUser(
     "public-write",
     "user-a",
-    fakeGitHub({ installs: { "user-a": [[{ ...PUBLIC, permissions: { push: true } }]] } }),
+    fakeGitHub({ installs: { "user-a": [[{ ...PUBLIC }]] } }),
     runs,
   );
   assert.equal(runs.length, 1);
@@ -441,16 +482,96 @@ test("public-write user commands run on public-only installations and are refuse
   assert.deepEqual(refused, []);
 });
 
+test("private-write refuses an installation that grants a write outside the allowlist, or does not list its permissions", async () => {
+  for (const [installPermissions, message] of [
+    [{ ...SAFE_INSTALLATION, administration: "write" }, /grants administration:write/u],
+    [{ ...SAFE_INSTALLATION, repository_creation: "write" }, /grants repository_creation:write/u],
+    [{ ...SAFE_INSTALLATION, administration: "admin" }, /grants administration:admin/u],
+    [null, /did not list the permissions of the App installation on org-0/u],
+  ] as const) {
+    const github = fakeGitHub({ installs: { "user-a": [[PRIVATE]] }, installPermissions });
+    const runs: string[] = [];
+    await assert.rejects(runUser("private-write", "user-a", github, runs), message);
+    assert.deepEqual(runs, []);
+    assert.deepEqual(
+      github.requests.map((request) => request.url),
+      ["/user/installations?per_page=100&page=1"],
+    );
+  }
+});
+
+test("private-write allows an installation with read-only administration", async () => {
+  const runs: string[] = [];
+  await runUser(
+    "private-write",
+    "user-a",
+    fakeGitHub({
+      installs: { "user-a": [[PRIVATE]] },
+      installPermissions: { ...SAFE_INSTALLATION, administration: "read" },
+    }),
+    runs,
+  );
+  assert.equal(runs.length, 1);
+});
+
+test("public-write does not judge installation permissions", async () => {
+  const runs: string[] = [];
+  await runUser(
+    "public-write",
+    "user-a",
+    fakeGitHub({
+      installs: { "user-a": [[PUBLIC]] },
+      installPermissions: { ...SAFE_INSTALLATION, administration: "write" },
+    }),
+    runs,
+  );
+  assert.equal(runs.length, 1);
+});
+
+test("user commands that name no repository are judged by the installation, under each access value", async () => {
+  for (const access of ["private-write", "public-write"] as const) {
+    const refused = access === "private-write" ? PUBLIC : PRIVATE;
+    const allowed = access === "private-write" ? PRIVATE : PUBLIC;
+    const runs: string[] = [];
+    await runUser(
+      access,
+      "user-a",
+      fakeGitHub({ installs: { "user-a": [[allowed]] } }),
+      runs,
+      [],
+      [],
+      undefined,
+      null,
+    );
+    assert.equal(runs.length, 1, access);
+    await assert.rejects(
+      runUser(
+        access,
+        "user-b",
+        fakeGitHub({ installs: { "user-b": [[refused]] } }),
+        [],
+        [],
+        [],
+        undefined,
+        null,
+      ),
+      new RegExp(`access "${access}" refused`, "u"),
+    );
+  }
+});
+
 test("the installation check reads every page", async () => {
   const filler = Array.from({ length: 100 }, (_, index) => ({
     full_name: `acme/private-${index}`,
     visibility: "private" as const,
-    permissions: { push: true },
   }));
   const github = fakeGitHub({
-    installs: { "user-b": [[...filler, { ...PUBLIC, permissions: { push: true } }]] },
+    installs: { "user-b": [[...filler, { ...PUBLIC }]] },
   });
-  await assert.rejects(runUser("private-write", "user-b", github), /can write to \(acme\/site\)/u);
+  await assert.rejects(
+    runUser("private-write", "user-b", github),
+    /includes public repositories \(acme\/site\)/u,
+  );
   assert.ok(
     github.requests.some((request) => request.url.endsWith("repositories?per_page=100&page=2")),
   );
@@ -488,8 +609,8 @@ test("user commands without access make no installation reads", async () => {
 test("each caller's own installation decides only that caller's command, in either order", async () => {
   const github = fakeGitHub({
     installs: {
-      "user-a": [[{ ...PRIVATE, permissions: { push: true } }]],
-      "user-b": [[{ ...PUBLIC, permissions: { push: true } }]],
+      "user-a": [[{ ...PRIVATE }]],
+      "user-b": [[{ ...PUBLIC }]],
     },
   });
   for (const order of [

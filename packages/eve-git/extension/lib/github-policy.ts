@@ -4,6 +4,7 @@ import { z } from "zod";
  * What an agent may do by repository visibility.
  *
  * - `"private-write"`: public repositories are read-only; private and internal ones are read-write.
+ *   Tokens may write only the permissions in `WRITABLE_PERMISSIONS`.
  * - `"public-write"`: public repositories are read-write; private and internal ones are refused.
  */
 export type GitHubAccess = "private-write" | "public-write";
@@ -18,16 +19,40 @@ const REQUEST_TIMEOUT_MS = 10_000;
 
 const visibilitySchema = z.enum(["public", "private", "internal"]);
 const repositorySchema = z.object({ visibility: visibilitySchema });
-const installationsSchema = z.object({ installations: z.array(z.object({ id: z.number() })) });
-const installationRepositoriesSchema = z.object({
-  repositories: z.array(
+const installationsSchema = z.object({
+  installations: z.array(
     z.object({
-      full_name: z.string(),
-      permissions: z.object({ push: z.boolean() }).optional(),
-      visibility: visibilitySchema,
+      account: z.object({ login: z.string() }).nullish(),
+      id: z.number(),
+      permissions: z.record(z.string(), z.string()).optional(),
     }),
   ),
 });
+const installationRepositoriesSchema = z.object({
+  repositories: z.array(z.object({ full_name: z.string(), visibility: visibilitySchema })),
+});
+
+/**
+ * Permissions `"private-write"` lets a token write. Any other `write` or
+ * `admin` permission can reach a public repository without naming one:
+ * `administration` makes a private repository public or creates a public one,
+ * and `repository_creation` creates repositories.
+ */
+const WRITABLE_PERMISSIONS: ReadonlySet<string> = new Set([
+  "actions",
+  "checks",
+  "contents",
+  "issues",
+  "pull_requests",
+  "statuses",
+  "workflows",
+]);
+
+function writesOutsideAllowlist(permissions: Iterable<readonly [string, string]>): string[] {
+  return [...permissions]
+    .filter(([name, level]) => level !== "read" && !WRITABLE_PERMISSIONS.has(name))
+    .map(([name, level]) => `${name}:${level}`);
+}
 
 /** A GitHub API lookup the policy made, which GitHub answered with `status`. */
 export class GitHubPolicyLookupError extends Error {
@@ -39,9 +64,9 @@ export class GitHubPolicyLookupError extends Error {
   }
 }
 
-/** Why a command that names no single repository is refused: visibility is judged per repository. */
+/** Why an App command that names no single repository is refused: visibility is judged per repository. */
 export function repositoryRequiredMessage(access: GitHubAccess): string {
-  return `access ${JSON.stringify(access)} judges each command by repository visibility, so set repository to owner/name. An owner or no repository can't be checked.`;
+  return `access ${JSON.stringify(access)} judges each App command by repository visibility, so set repository to owner/name. An owner or no repository can't be checked.`;
 }
 
 /**
@@ -56,20 +81,42 @@ export async function appTokenPermissions(options: {
   readonly mint: (permissions: readonly string[]) => Promise<string>;
   readonly repository: string;
 }): Promise<readonly string[] | undefined> {
-  const { access, configured, repository } = options;
+  const { access, repository } = options;
+  const writable =
+    access === "private-write" ? privateWritePermissions(options.configured) : undefined;
   const lookupToken = await options.mint(["metadata:read"]);
   const { visibility } = repositorySchema.parse(
     await githubGet(options.fetch, lookupToken, `/repos/${repository}`),
   );
-  if (access === "public-write") {
+  if (!writable) {
     if (visibility !== "public") {
       throw new Error(
         `access "public-write" refused ${repository}: it is ${visibility}, and this agent may only use public repositories. Use a public repository.`,
       );
     }
-    return configured;
+    return options.configured;
   }
-  return visibility === "public" ? readOnly(configured) : configured;
+  return visibility === "public" ? readOnly(writable) : writable;
+}
+
+function privateWritePermissions(configured: readonly string[] | undefined): readonly string[] {
+  if (!configured) {
+    throw new Error(
+      `access "private-write" refused: github.permissions is not set, so the App token would carry every permission the App holds, including administration. List the permissions the agent needs.`,
+    );
+  }
+  const outside = writesOutsideAllowlist(
+    configured.map((permission) => {
+      const [name = "", level = "write"] = permission.split(":");
+      return [name, level] as const;
+    }),
+  );
+  if (outside.length > 0) {
+    throw new Error(
+      `access "private-write" refused: github.permissions grants ${outside.join(", ")}, which can make a repository public or create one. Allowed writes are ${[...WRITABLE_PERMISSIONS].join(", ")}.`,
+    );
+  }
+  return configured;
 }
 
 /**
@@ -89,6 +136,21 @@ export async function assertUserInstallation(options: {
     "/user/installations",
     (body) => installationsSchema.parse(body).installations,
   );
+  if (access === "private-write") {
+    for (const installation of installations) {
+      const outside = installation.permissions
+        ? writesOutsideAllowlist(Object.entries(installation.permissions))
+        : undefined;
+      if (outside === undefined || outside.length > 0) {
+        const label = installation.account?.login ?? String(installation.id);
+        throw new Error(
+          outside === undefined
+            ? `access "private-write" refused: GitHub did not list the permissions of the App installation on ${label}.`
+            : `access "private-write" refused: the App installation on ${label} grants ${outside.join(", ")}, which can make a repository public or create one. Remove those permissions from the App.`,
+        );
+      }
+    }
+  }
   const offending: string[] = [];
   for (const { id } of installations) {
     const repositories = await githubPages(
@@ -98,24 +160,23 @@ export async function assertUserInstallation(options: {
       (body) => installationRepositoriesSchema.parse(body).repositories,
     );
     for (const repository of repositories) {
-      const writablePublic =
-        repository.visibility === "public" && repository.permissions?.push === true;
-      if (access === "private-write" ? writablePublic : repository.visibility !== "public") {
-        offending.push(repository.full_name);
-      }
+      const refused =
+        access === "private-write"
+          ? repository.visibility === "public"
+          : repository.visibility !== "public";
+      if (refused) offending.push(repository.full_name);
     }
   }
   if (offending.length === 0) return;
   const names = `${offending.slice(0, 10).join(", ")}${offending.length > 10 ? `, and ${offending.length - 10} more` : ""}`;
   throw new Error(
     access === "private-write"
-      ? `access "private-write" refused: the GitHub App installation includes public repositories the caller can write to (${names}). Narrow the App installation to private repositories.`
+      ? `access "private-write" refused: the GitHub App installation includes public repositories (${names}). Any user with read access can comment on a public repository, so narrow the App installation to private repositories.`
       : `access "public-write" refused: the GitHub App installation includes private or internal repositories (${names}). Narrow the App installation to public repositories.`,
   );
 }
 
-function readOnly(configured: readonly string[] | undefined): readonly string[] {
-  if (!configured) return ["contents:read", "metadata:read"];
+function readOnly(configured: readonly string[]): readonly string[] {
   return [
     ...new Set(configured.map((permission) => permission.replace(/:(?:write|admin)$/u, ":read"))),
   ];

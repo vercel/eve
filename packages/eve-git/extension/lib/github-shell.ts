@@ -212,7 +212,8 @@ export async function executeGitHubShell(
     target: { owner, repository, name },
   } = validateGitHubShellInput(input);
   const { access } = config;
-  if (access && !repository) throw new GitHubCommandInputError(repositoryRequiredMessage(access));
+  if (access && config.principalType === "app" && !repository)
+    throw new GitHubCommandInputError(repositoryRequiredMessage(access));
   if (config.principalType === "user" ? owner && !repository : !owner) {
     throw new GitHubCommandInputError(
       config.principalType === "user"
