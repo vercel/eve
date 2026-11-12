@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 const mocks = vi.hoisted(() => ({ secrets: new Map<string, string>(), defaults: vi.fn() }));
 vi.mock("#internal/model-auth/store.js", async (original) => ({
@@ -50,6 +50,11 @@ vi.mock("#setup/validate-gateway-key.js", () => ({
 import { runModelLogin } from "./model-login.js";
 import { readProviderSelection, readProviderTeamSync } from "#setup/provider-settings.js";
 const roots: string[] = [];
+beforeEach(async () => {
+  const home = await mkdtemp(join(tmpdir(), "eve-provider-cycle-home-"));
+  roots.push(home);
+  vi.stubEnv("HOME", home);
+});
 afterEach(async () => {
   vi.unstubAllEnvs();
   mocks.secrets.clear();

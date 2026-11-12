@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   write: vi.fn(),
   cli: vi.fn(),
   open: vi.fn(),
+  lock: vi.fn(),
 }));
 vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => {}) }));
 vi.mock("#internal/model-auth/vercel.js", async (original) => ({
@@ -18,6 +19,7 @@ vi.mock("#internal/model-auth/vercel.js", async (original) => ({
   }),
   vercelApiJson: mocks.json,
   validateVercelAccess: mocks.validate,
+  withVercelLoginLock: mocks.lock,
 }));
 vi.mock("#internal/model-auth/store.js", () => ({ writeVercelSession: mocks.write }));
 vi.mock("#internal/model-auth/vercel-cli.js", () => ({ readVercelCliTeam: mocks.cli }));
@@ -25,6 +27,7 @@ vi.mock("#setup/primitives/open-url.js", () => ({ openUrl: mocks.open }));
 import { loginVercelModel } from "./vercel-model-login.js";
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.lock.mockImplementation((run: () => Promise<unknown>) => run());
   mocks.json
     .mockResolvedValueOnce({
       device_code: "device",
@@ -63,6 +66,7 @@ it.each([undefined, "team_b"])(
       refreshToken: "refresh",
     });
     expect(mocks.write.mock.calls[0]![1]).toBe("cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp");
+    expect(mocks.lock).toHaveBeenCalledOnce();
   },
 );
 it("asks for a team when the CLI selection is unavailable", async () => {

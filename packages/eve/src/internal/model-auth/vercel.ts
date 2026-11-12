@@ -114,6 +114,28 @@ export async function resolveVercelSession(rejectedToken?: string): Promise<Verc
   if (!session) throw new Error("Sign in to Vercel with /login.");
   if (session.expiresAt > Date.now() + 60_000 && session.accessToken !== rejectedToken)
     return session;
+  return withVercelLoginLock(async () => {
+    session = await readVercelSession(VERCEL_MODEL_CLIENT_ID);
+    if (!session) throw new Error("Sign in to Vercel with /login.");
+    if (session.expiresAt > Date.now() + 60_000 && session.accessToken !== rejectedToken)
+      return session;
+    const endpoints = await vercelOAuthEndpoints();
+    const token = await authJson(endpoints.token, {
+      method: "POST",
+      body: new URLSearchParams({
+        client_id: VERCEL_MODEL_CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: session.refreshToken,
+      }),
+    });
+    session = sessionFromToken(token, session);
+    await writeVercelSession(session, VERCEL_MODEL_CLIENT_ID);
+    return session;
+  });
+}
+
+/** Serializes Vercel login writes across every eve process for this user. */
+export async function withVercelLoginLock<T>(run: () => Promise<T>): Promise<T> {
   const dir = join(homedir(), ".eve", "auth");
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const lock = join(dir, "vercel-refresh.lock");
@@ -135,22 +157,7 @@ export async function resolveVercelSession(rejectedToken?: string): Promise<Verc
     }
   }
   try {
-    session = await readVercelSession(VERCEL_MODEL_CLIENT_ID);
-    if (!session) throw new Error("Sign in to Vercel with /login.");
-    if (session.expiresAt > Date.now() + 60_000 && session.accessToken !== rejectedToken)
-      return session;
-    const endpoints = await vercelOAuthEndpoints();
-    const token = await authJson(endpoints.token, {
-      method: "POST",
-      body: new URLSearchParams({
-        client_id: VERCEL_MODEL_CLIENT_ID,
-        grant_type: "refresh_token",
-        refresh_token: session.refreshToken,
-      }),
-    });
-    session = sessionFromToken(token, session);
-    await writeVercelSession(session, VERCEL_MODEL_CLIENT_ID);
-    return session;
+    return await run();
   } finally {
     await rm(lock, { recursive: true, force: true });
   }
