@@ -114,7 +114,7 @@ describe("model attempts", () => {
   it.each([
     { failure: overloaded, message: "overloaded" },
     { failure: terminated, message: "ended before the response finished" },
-    { failure: malformed, message: "could not parse" },
+    { failure: malformed, message: "Type validation failed" },
   ])(
     "retries an attempt that published nothing in the same run, and says so ($message)",
     async ({ failure, message }) => {

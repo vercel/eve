@@ -237,6 +237,19 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(normalizeModelStreamError(error))).toBe("retry");
   });
 
+  it("does not retry invalid provider options that wrap a validation error", () => {
+    // The shape `parseProviderOptions` throws from a provider adapter's `doStream`.
+    const error = Object.assign(
+      new Error("invalid openai provider options", {
+        cause: new TypeValidationError({ cause: new Error("Invalid input"), value: {} }),
+      }),
+      { name: "AI_InvalidArgumentError" },
+    );
+
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(modelCallErrorInfo(error).message).toBe("invalid openai provider options");
+  });
+
   it("returns retry for an AI Gateway stream the provider ended before its finish", () => {
     const message = "Upstream stream ended before terminal chunk";
 

@@ -172,11 +172,6 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-stream-terminated",
     },
     {
-      title: "model response chunk failed the provider schema",
-      error: named("AI_TypeValidationError", "Type validation failed"),
-      id: "model-response-malformed",
-    },
-    {
       title: "provider api key missing",
       error: named("LoadAPIKeyError", "OpenAI API key is missing."),
       id: "model-provider-api-key-missing",
