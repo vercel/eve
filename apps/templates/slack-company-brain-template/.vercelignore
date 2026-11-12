@@ -4,3 +4,5 @@ node_modules
 .output
 .nitro
 dist
+# OAuth app credentials for `vercel connect create pagerduty`.
+pagerduty.json

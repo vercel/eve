@@ -11,3 +11,5 @@ dist
 .DS_Store
 *.tsbuildinfo
 .env*.local
+# OAuth app credentials for `vercel connect create pagerduty`.
+pagerduty.json
