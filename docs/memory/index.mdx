@@ -319,7 +319,8 @@ The slot omits the provider's `get_observations` tool, which has no project filt
 and would let one caller read another caller's observations by ID.
 
 Recording spends the key owner's cmem.ai allowance for every caller and needs a
-key with write access. Pass `capture: false` to turn it off. To recall your Claude
+key with write access. Pass `capture: false` to `claudeMem(...)` to turn it off, and
+keep the `tools` wrapper. To recall your Claude
 Code and Codex work, a single-owner agent can set `searchAllProjects: true`. See the
 [claude-mem integration page](/integrations/claude-mem) for options and the
 security boundaries of `searchAllProjects`.
