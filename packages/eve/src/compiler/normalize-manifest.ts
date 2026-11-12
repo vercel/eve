@@ -54,6 +54,7 @@ import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import {
   assertScheduleCollectionNameAvailable,
+  assertScheduleCollectionNamesDistinctFromSchedules,
   compileScheduleCollectionDefinition,
 } from "#compiler/normalize-schedule-collection.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
@@ -635,6 +636,7 @@ class AgentGraphCompiler {
     if (sandbox === undefined) {
       throw new Error(`Agent node "${input.nodeId}" has no selected sandbox source.`);
     }
+    assertScheduleCollectionNamesDistinctFromSchedules(scheduleCollections, schedules);
     assertStaticConnectionOwnership({
       connectionNames: connections.map((connection) => connection.connectionName),
       subagentNames: state.projected.subagents

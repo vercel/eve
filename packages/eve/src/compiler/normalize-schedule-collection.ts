@@ -1,4 +1,7 @@
-import type { CompiledScheduleCollectionDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledScheduleCollectionDefinition,
+  CompiledScheduleDefinition,
+} from "#compiler/manifest.js";
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ScheduleSourceRef } from "#discover/manifest.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
@@ -48,5 +51,19 @@ export function assertScheduleCollectionNameAvailable(
         `Schedule collections "${existing.logicalPath}" ("${existing.name}") and "${collection.logicalPath}" ("${collection.name}") both name their tools "${toolPrefix}". Set a different "id" on one of them, or rename its file.`,
       );
     }
+  }
+}
+
+/** Throws when a collection and a static schedule share a name, which `session.schedule.definition` reports for both. */
+export function assertScheduleCollectionNamesDistinctFromSchedules(
+  collections: readonly CompiledScheduleCollectionDefinition[],
+  schedules: readonly CompiledScheduleDefinition[],
+): void {
+  for (const collection of collections) {
+    const schedule = schedules.find((candidate) => candidate.name === collection.name);
+    if (schedule === undefined) continue;
+    throw new Error(
+      `Schedule collection "${collection.logicalPath}" and schedule "${schedule.logicalPath}" both resolve to the name "${collection.name}". Set a different "id" on the collection, or rename one of the files.`,
+    );
   }
 }

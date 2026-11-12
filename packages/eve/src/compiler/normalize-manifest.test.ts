@@ -601,6 +601,27 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
+  it("rejects a collection id that matches a static schedule's name", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({
+          default: defineSchedule({ cron: "0 9 * * *", content: "Run the report." }),
+        }),
+      },
+      {
+        logicalPath: "schedules/workflows.ts",
+        loadNamespace: async () => ({ default: scheduleCollection({ id: "daily" }) }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Schedule collection "schedules/workflows.ts" and schedule "schedules/daily.ts" both resolve to the name "daily".',
+    );
+  });
+
   it("rejects collections whose different names produce the same tool names", async () => {
     const sourceRegistry = registry([
       {

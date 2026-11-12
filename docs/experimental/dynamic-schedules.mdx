@@ -76,7 +76,7 @@ export default defineDynamicSchedules({
 });
 ```
 
-An `id` has up to 64 ASCII letters, digits, `_`, and `-`, with `/` allowed between segments. The build fails when two definitions in one agent have the same name, whether it comes from `id` or the path.
+An `id` has up to 64 ASCII letters, digits, `_`, and `-`, with `/` allowed between segments. The build fails when two collections, or a collection and a [static schedule](../schedules), in one agent have the same name, whether it comes from `id` or the path.
 
 In an [extension](../extensions), a path-derived name takes the mount's prefix, such as `crm__requests`, so it changes with the mount filename. eve uses an `id` as written, without the prefix, so the extension's schedules keep one name in every agent that mounts it. Mounting that extension twice in one agent fails the build.
 

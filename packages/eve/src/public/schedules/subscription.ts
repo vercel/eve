@@ -248,7 +248,11 @@ export interface DynamicSchedulesDefinition<
   TSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,
   TPrepared = TPayload,
 > {
-  /** Stable collection name that overrides the one derived from the module path. */
+  /**
+   * Stable collection name that overrides the one derived from the module path. Stored schedules
+   * belong to this name, so it is persisted identity rather than a label; this is why a
+   * collection can override its path-derived name when other definitions can't.
+   */
   readonly id?: string;
   readonly description?: string;
   /** Model-facing payload schema. Destination intent may be resolved by `run`. */
