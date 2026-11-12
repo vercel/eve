@@ -27,6 +27,8 @@ Every dynamic function receives:
 | `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
 | `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
 
+For session state inside a dynamic function, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
+
 Before a model call, `ctx.messages()` includes the task results and `[Tasks]` note that call will receive. A dynamic model can react to a background task's result in the same step, without waiting for another call.
 
 For each call, eve prepares task results once with the tool definitions available before dynamic functions run. Those functions configure the upcoming model and tools without changing the prepared task results. If a dynamic function fails, pending results remain available for a later call.

@@ -291,21 +291,11 @@ Show "Approved" or "Denied" only for `accepted` and `declined`. For any other ou
 
 ## Use eve's answers
 
-Read session state from `view` with functions from `eve/events`, instead of scanning `events` or keeping your own copy:
+Read session state from `view` with selectors from `eve/events`, instead of scanning `events` or keeping your own copy. [Session views & selectors](/docs/concepts/session-views-and-selectors) maps common questions to the right selector.
 
-| Question                                        | Ask eve                                                                                                   |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| How did my request end, and what did it reply?  | `delivery.result()`: `status`, `outcome`, `reply`, `interactions`, and `error` for that delivery          |
-| Is a turn open?                                 | `activeTurn(view)`                                                                                        |
-| What is the turn waiting on?                    | `waiting(view, turnId)` or `activity(view)`                                                               |
-| How did a turn end, and why did it fail?        | `turn(view, turnId)` and `failure(view, turnId)`, which also covers a session failure that ended the turn |
-| What is a call doing, and how long did it take? | `call(view, callId)`: `state`, `outcome`, `startedAt`, and `endedAt`                                      |
-| What did a turn's model runs cost?              | `runs(view, { turnId })` and `usage(view)`                                                                |
-| What did a turn reply?                          | `reply(view, turnId)`                                                                                     |
-| Where should a saved chat resume?               | The hook's `session`, `position(view)`, or `session.snapshot()`. Never an event count                     |
-| Did a person approve?                           | `interaction(view, id).outcome`. See [Interactions](#interactions)                                        |
+For one request's `status`, `outcome`, `reply`, `interactions`, and `error`, use `delivery.result()`. It is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
 
-`delivery.result()` is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
+To resume a saved chat, use the hook's `session`, `position(view)`, or `session.snapshot()`, never an event count. See [Resume a saved session](#resume-a-saved-session) for the client cursor contract.
 
 Outside the store:
 
