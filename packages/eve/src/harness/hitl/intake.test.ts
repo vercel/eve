@@ -2,6 +2,7 @@ import { jsonSchema } from "ai";
 import { expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   type AuthorizationChallenge,
   type AuthorizationResult,
@@ -81,6 +82,13 @@ function parked(stepIndex: number): SuspendedStep {
   };
 }
 
+/** The context of a step whose agent sets nothing, which the calls' settings read. */
+function agentContext(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(BundleKey, { resolvedAgent: { config: {} }, turnAgent: {} } as never);
+  return ctx;
+}
+
 /**
  * A step whose sign-ins stay open as far as its view says, so only the batch's reporter settles
  * each once. `publish` fails for what `fails` names.
@@ -109,7 +117,7 @@ function intakeStep(attemptIds: readonly string[], fails?: (event: SessionEvent)
   const step = {
     apply: async () => {},
     config: { abortSignal: undefined } as KernelConfig,
-    ctx: new ContextContainer(),
+    ctx: agentContext(),
     frameworkToolNames: new Set<string>(),
     instrumentation: undefined,
     publish,
