@@ -119,7 +119,7 @@ You don't need to pass `"steer"`; omit `turnPolicy` unless you want to queue.
 
 Steering timing depends on what the turn is doing:
 
-- Before answer output or local tool execution starts, eve interrupts model generation and continues the same turn with the correction.
+- Until answer output or a local tool call's input starts streaming, eve interrupts model generation and continues the same turn with the correction.
 - Running tools finish and save their results first.
 - After the reply starts streaming, a steering message waits until the current step is saved.
 - Reasoning and search progress don't count as answer output.
