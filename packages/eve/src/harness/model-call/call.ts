@@ -58,7 +58,7 @@ import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
-import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
+import { reportModelCallFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
   isEmptyModelResponse,
@@ -136,6 +136,8 @@ export class ModelCaller {
   /** Usage of a call steering interrupted, which the steered step still counts. */
   private interruptedUsage: TokenUsageDelta | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
+  /** Compaction couldn't bring this step's history under the limit; a retry would fail alike. */
+  private overLimit = false;
   /** Tries at this model step, across the runs a retry after output replaced. */
   private attemptIndex = 0;
   /** The attempt the stream last heard start, until it hears how it ended. */
@@ -217,19 +219,13 @@ export class ModelCaller {
   }
 
   /**
-   * A failed compaction fails the step, whatever recovery the call attempted.
-   * One that left the history over the limit ends the session with its message;
-   * any other failure is reported like a failed model call, since its summary
-   * call already retried. Rethrowing would make the workflow replay the step and
-   * then end the session.
+   * A failed compaction fails the step, whatever recovery the call attempted. It is reported like
+   * a failed model call, since its summary call already retried. Rethrowing would make the
+   * workflow replay the step and then end the session.
    */
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;
-    const { error } = this.compactionFailure;
-    if (error instanceof CompactionOverLimitError) {
-      return reportCompactionFailure(this.step, error);
-    }
-    return reportModelCallFailure(this.step, error);
+    return reportModelCallFailure(this.step, this.compactionFailure.error);
   }
 
   /** Steering interrupted the call: the step ends with what it committed, and runs again. */
@@ -323,6 +319,7 @@ export class ModelCaller {
   /** Asks for the history this call reads, then rebuilds what depends on it. */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
+    if (this.overLimit) return tools;
     let compacted: HarnessModelMessage[] | undefined;
     try {
       compacted = await historyBeforeCall(step, {
@@ -332,6 +329,16 @@ export class ModelCaller {
         requestEnvelopeTokens: this.requestEnvelopeTokens,
       });
     } catch (error) {
+      // Over eve's estimate of the limit isn't over the model's window, so the request goes out
+      // uncompacted and the provider decides. A change it opened already settled failed.
+      if (error instanceof CompactionOverLimitError) {
+        log.warn(error.message, {
+          sessionId: step.session.sessionId,
+          turnId: step.position().turnId,
+        });
+        this.overLimit = true;
+        return tools;
+      }
       this.compactionFailure = { error };
       throw error;
     }

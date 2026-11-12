@@ -1,6 +1,6 @@
 /**
- * Compaction finished and the history is still over the limit. Retrying would
- * summarize the same history again, so the step reports it as a terminal failure.
+ * Compaction can't bring the request under the limit by eve's estimate. The
+ * step sends the request uncompacted, so the provider decides whether it fits.
  */
 export class CompactionOverLimitError extends Error {
   override readonly name = "CompactionOverLimitError";

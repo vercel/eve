@@ -167,63 +167,111 @@ describe("compaction summary call", () => {
     expect(result.next).toBeNull();
   });
 
-  it.each([
-    { error: new CompactionOverLimitError("Still over the limit."), terminal: true },
-    { error: new Error("Summary validation failed."), terminal: false },
-  ])(
-    "keeps summary usage after a late compaction failure ($terminal terminal)",
-    async ({ error, terminal }) => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      vi.spyOn(compaction, "compactMessages").mockImplementation(
-        async (_messages, _config, summarize) => {
-          await summarize({
-            messages: [{ role: "user", content: "Summarize Alice's research notes." }],
-            system: "",
-          });
-          throw error;
-        },
-      );
-      const doStream = vi.fn(async () => summaryStream());
-      const events: SessionEvent[] = [];
-      const run = createTestKernel({
-        agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
-        handleEvent: async (publication) => void events.push(...eventsOf(publication)),
-        resolveModel: async () => new MockLanguageModelV3({ doStream }),
-        tools: new Map(),
-      })(
-        {
-          compaction: {},
-          continuationToken: "http:late-compaction-failure",
-          history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
-          sessionId: "late-compaction-failure",
-        },
-        { message: "Please continue." },
-      );
+  it("keeps summary usage after a late compaction failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = new Error("Summary validation failed.");
+    vi.spyOn(compaction, "compactMessages").mockImplementation(
+      async (_messages, _config, summarize) => {
+        await summarize({
+          messages: [{ role: "user", content: "Summarize Alice's research notes." }],
+          system: "",
+        });
+        throw error;
+      },
+    );
+    const doStream = vi.fn(async () => summaryStream());
+    const events: SessionEvent[] = [];
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(
+      {
+        compaction: {},
+        continuationToken: "http:late-compaction-failure",
+        history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
+        sessionId: "late-compaction-failure",
+      },
+      { message: "Please continue." },
+    );
 
-      const result = await run;
-      expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
-      if (terminal) {
-        expect(result.next).toEqual({ done: true, output: "" });
-        expect(events.at(-1)).toMatchObject({
-          type: "session.ended",
-          data: { outcome: "failed", error: { code: "COMPACTION_FAILED", message: error.message } },
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(result.next).toBeNull();
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "failed", error: { code: "MODEL_CALL_FAILED", message: error.message } },
+    });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    expect(doStream).toHaveBeenCalledOnce();
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { outcome: "failed" } },
+    ]);
+    expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
+      { data: { usage: { inputTokens: 120, outputTokens: 8 } } },
+    ]);
+  });
+
+  // https://github.com/vercel/eve/issues/5921
+  it("sends the request uncompacted when a summary can't bring it under the limit", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const compact = vi
+      .spyOn(compaction, "compactMessages")
+      .mockImplementation(async (_messages, _config, summarize) => {
+        await summarize({
+          messages: [{ role: "user", content: "Summarize Alice's research notes." }],
+          system: "CONTEXT CHECKPOINT COMPACTION",
         });
-      } else {
-        expect(result.next).toBeNull();
-        expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
-          data: { outcome: "failed", error: { code: "MODEL_CALL_FAILED", message: error.message } },
-        });
-        expect(events.some((event) => event.type === "session.ended")).toBe(false);
+        throw new CompactionOverLimitError("Still over the limit.");
+      });
+    const turnPrompts: Prompt[] = [];
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async ({ prompt }) => {
+      const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+      if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
+      turnPrompts.push(prompt);
+      // The first try fails transiently; its retry doesn't summarize again.
+      if (turnPrompts.length === 1) {
+        return streamOf([
+          { type: "stream-start", warnings: [] },
+          { error: { message: "Overloaded", type: "overloaded_error" }, type: "error" },
+        ]);
       }
-      expect(doStream).toHaveBeenCalledOnce();
-      expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
-        { data: { outcome: "failed" } },
-      ]);
-      expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
-        { data: { usage: { inputTokens: 120, outputTokens: 8 } } },
-      ]);
-    },
-  );
+      return answer();
+    });
+    const events: SessionEvent[] = [];
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(
+      {
+        compaction: {},
+        continuationToken: "http:over-limit-compaction",
+        history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
+        sessionId: "over-limit-compaction",
+      },
+      { message: "Please continue." },
+    );
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(turnPrompts).toHaveLength(2);
+    expect(userTexts(turnPrompts[1]!).join("\n")).toContain("Earlier notes. Earlier notes.");
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          outcome: "failed",
+          error: { code: "COMPACTION_FAILED", message: "Still over the limit." },
+        },
+      },
+    ]);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    expect(result.session.history[0]).toMatchObject({ content: "Earlier notes. ".repeat(2_000) });
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 170, outputTokens: 16 });
+  });
 
   // https://github.com/vercel/eve/issues/5350
   it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
@@ -280,9 +328,9 @@ describe("compaction summary call", () => {
     expect(result.session.history.slice(0, 2)).toEqual(history);
   });
 
-  it("ends before summarizing when protected request context alone exceeds the limit", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const doStream = vi.fn(async () => summaryStream());
+  it("sends the request when protected request context alone exceeds the limit", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const doStream = vi.fn(async () => answer());
     const events: SessionEvent[] = [];
     const result = await createTestKernel({
       agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
@@ -310,18 +358,13 @@ describe("compaction summary call", () => {
       { message: "Please continue." },
     );
 
-    expect(result.next).toEqual({ done: true, output: "" });
-    expect(doStream).not.toHaveBeenCalled();
-    expect(events.at(-1)).toMatchObject({
-      type: "session.ended",
-      data: {
-        outcome: "failed",
-        error: {
-          code: "COMPACTION_FAILED",
-          message: expect.stringContaining("system prompt, tools, memory and context"),
-        },
-      },
+    // Nothing could be compacted, so no change opened; the provider served the request.
+    expect(doStream).toHaveBeenCalledOnce();
+    expect(events.some((event) => event.type.startsWith("context."))).toBe(false);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
     });
+    expect(result.next).toBeNull();
   });
 
   it("settles a failed manual compaction and its summary run exactly once", async () => {
