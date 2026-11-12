@@ -42,7 +42,7 @@ tools, approval policies, dynamic values, and memory scopes read it as
 interface ConversationSpace {
   /** Stable, namespaced by platform and workspace: `slack:T0123:C0456`. */
   readonly id: string;
-  readonly type: "direct" | "group" | "channel";
+  readonly type: "direct" | "shared";
   /** Absent when the platform doesn't say. */
   readonly visibility?: "public" | "private";
   /** `slack:T0123`; absent when the platform has no workspace. */
@@ -50,8 +50,9 @@ interface ConversationSpace {
 }
 ```
 
-- `direct`: one person and the agent. `group`: a private conversation among a
-  fixed set of people. `channel`: a named place that members join.
+- `direct`: one person and the agent. `shared`: any place with more people,
+  such as a channel or a group chat. Code that needs to tell a private group
+  chat from a public channel reads `visibility`.
 - `visibility` is who can find and join the space. It differs from `audience`
   on purpose: the audience fails closed to `private` for trace capture, while
   `visibility` is absent unless the platform said, so code can tell a public
@@ -75,8 +76,7 @@ Built-in channels report:
 | Chat SDK | `<adapter>:<channel>`                              | None              |
 
 Linq and Photon are built on the Chat SDK channel, so they report the same
-shape. Messaging-app adapters (iMessage, Linq, WhatsApp) report shared chats as
-`group`, since their members are fixed rather than joining.
+shape.
 
 The channel conformance suite checks the space every first-party channel and
 client reports, in shared conversations and in DMs, and that another person
@@ -103,5 +103,6 @@ not the thread its conversation ID names.
 
 - Discord threads report themselves, because the channel state has no parent
   channel ID. Recording the parent would let a thread share its channel's space.
-- Whether `group` should split into a "private channel" type for platforms
-  where private channels are joinable but not public.
+- Whether `shared` should split into finer types, such as group chats with
+  fixed members and channels people join. Platforms draw that line
+  differently, so for now `visibility` carries the distinction code needs.

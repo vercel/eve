@@ -6,7 +6,7 @@ describe("slackConversationSpace", () => {
   it("names the channel under the installation team", () => {
     expect(
       slackConversationSpace({ channelId: "C1", teamId: "T2", installationTeamId: "T1" }),
-    ).toEqual({ id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" });
+    ).toEqual({ id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" });
   });
 
   it("falls back to the event team, and reports none without a team", () => {
@@ -20,12 +20,9 @@ describe("slackConversationSpace", () => {
       type: "direct",
       visibility: "private",
     });
-    expect(
-      slackConversationSpace({ channelId: "G1", teamId: "T1", spaceType: "group" })?.type,
-    ).toBe("group");
     expect(readSlackSpaceType({ channel_type: "im" })).toBe("direct");
-    expect(readSlackSpaceType({ channel_type: "mpim" })).toBe("group");
-    expect(readSlackSpaceType({ channel_type: "group" })).toBe("channel");
+    expect(readSlackSpaceType({ channel_type: "mpim" })).toBe("shared");
+    expect(readSlackSpaceType({ channel_type: "group" })).toBe("shared");
     expect(readSlackSpaceType({})).toBeUndefined();
   });
 

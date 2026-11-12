@@ -195,18 +195,18 @@ describe("buildConversationContext", () => {
           kind: "http",
           state: { channel: "C1" },
           instrumentation: {
-            space: ({ state }) => ({ id: `acme:${String(state?.channel)}`, type: "channel" }),
+            space: ({ state }) => ({ id: `acme:${String(state?.channel)}`, type: "shared" }),
           },
         },
       }),
       "production",
     );
 
-    expect(context.space).toEqual({ id: "acme:C1", type: "channel" });
+    expect(context.space).toEqual({ id: "acme:C1", type: "shared" });
   });
 
   it.each([
-    ["a malformed space", () => ({ id: "", type: "channel" })],
+    ["a malformed space", () => ({ id: "", type: "shared" })],
     ["an unknown type", () => ({ id: "acme:C1", type: "room" })],
     [
       "a throwing projection",
@@ -214,7 +214,7 @@ describe("buildConversationContext", () => {
         throw new Error("boom");
       },
     ],
-    ["a Promise", () => Promise.resolve({ id: "acme:C1", type: "channel" })],
+    ["a Promise", () => Promise.resolve({ id: "acme:C1", type: "shared" })],
   ])("reports no space for %s", (_label, space) => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const context = buildConversationContext(
@@ -230,20 +230,20 @@ describe("buildConversationContext", () => {
       run({
         adapter: {
           kind: "subagent",
-          instrumentation: { space: () => ({ id: "other:C2", type: "channel" }) },
+          instrumentation: { space: () => ({ id: "other:C2", type: "shared" }) },
         },
         inheritedConversation: {
           audience: "private",
           channel: { kind: "channel:slack", name: "slack" },
           environment: "production",
           principalType: "user",
-          space: { id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" },
+          space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
         },
       }),
       "production",
     );
 
-    expect(context.space).toEqual({ id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" });
+    expect(context.space).toEqual({ id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" });
   });
 
   it("lets a trusted forwarded origin win over local classification", () => {
@@ -283,7 +283,7 @@ describe("ConversationContextKey", () => {
   it("keeps a space's visibility and drops one it doesn't know", () => {
     const context = {
       ...buildConversationContext(run({ auth }), "production"),
-      space: { id: "slack:T1:C1", type: "channel", visibility: "private" },
+      space: { id: "slack:T1:C1", type: "shared", visibility: "private" },
     } as const;
 
     expect(ConversationContextKey.codec?.deserialize(context, new Map() as never)).toEqual(context);
@@ -292,13 +292,13 @@ describe("ConversationContextKey", () => {
         { ...context, space: { ...context.space, visibility: "secret" } },
         new Map() as never,
       ),
-    ).toMatchObject({ space: { id: "slack:T1:C1", type: "channel" } });
+    ).toMatchObject({ space: { id: "slack:T1:C1", type: "shared" } });
   });
 
   it("round-trips a space and drops a malformed one", () => {
     const context = {
       ...buildConversationContext(run({ auth }), "production"),
-      space: { id: "slack:T1:C1", type: "channel", workspaceId: "slack:T1" },
+      space: { id: "slack:T1:C1", type: "shared", workspaceId: "slack:T1" },
     } as const;
 
     expect(ConversationContextKey.codec?.deserialize(context, new Map() as never)).toEqual(context);
