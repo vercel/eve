@@ -2,6 +2,6 @@
 "eve": patch
 ---
 
-Include the GitHub CLI (`gh`) in the sandbox base image, so a project's first `eve build` no longer installs it with `apt-get`.
+Publish `ghcr.io/vercel/eve-git`, eve's default sandbox image plus the GitHub CLI (`gh`), and the same image to Vercel Container Registry as `vcr.vercel.com/vercel/eve/git`.
 
-Agents that call `installCodeTooling` from `eve/extensions/code/sandbox` skip the install when `gh` is already present, which removes about 7 seconds from the sandbox step of a first build and its dependency on Ubuntu's package mirror.
+Start a sandbox `Dockerfile` from it with `FROM ghcr.io/vercel/eve-git:latest` so `installCodeTooling` from `eve/extensions/code/sandbox` finds `gh` and skips its `apt-get` install, which takes about 7 seconds of a first build. The default image is unchanged.

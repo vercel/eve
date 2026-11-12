@@ -69,6 +69,18 @@ Each eve release pins one tag of the default image, and the tag is not the eve v
 
 To run a different published tag, set `EVE_SANDBOX_IMAGE_TAG` in both the build and runtime environments. eve applies the tag to both registries.
 
+## The eve-git image
+
+`ghcr.io/vercel/eve-git` is eve's default image plus the GitHub CLI (`gh`), for agents that clone repositories, push branches, or open pull requests. [Vercel Sandbox](/docs/sandbox/vercel) pulls the same image from `vcr.vercel.com/vercel/eve/git`. Both registries move `latest` to the newest eve-git image whenever one is published.
+
+To build on it, start your `agent/sandbox/Dockerfile` from it:
+
+```dockerfile title="agent/sandbox/Dockerfile"
+FROM ghcr.io/vercel/eve-git:latest
+```
+
+The default image doesn't include `gh`, so `installCodeTooling` from `eve/extensions/code/sandbox` installs it with `apt-get` during the first build unless you start from this image.
+
 ## Environment options
 
 Pass `image`, `pullPolicy`, `env`, and `prepare` to the environment. During preparation, eve copies workspace and skill files into a temporary container and runs your `prepare`. It saves the result as the template image.
