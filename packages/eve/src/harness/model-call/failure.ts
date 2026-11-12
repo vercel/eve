@@ -3,7 +3,6 @@ import {
   classifyModelCallError,
   extractModelCallErrorDetails,
   extractUpstreamRejectionMessage,
-  findMaskedByokFailure,
 } from "#harness/model-call/errors.js";
 import type { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { createErrorId, createLogger, formatError } from "#internal/logging.js";
@@ -13,7 +12,7 @@ import type { StepResult } from "#harness/types.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { fail } from "#harness/session-machine/transitions.js";
-import { type SemanticErrorSummary, summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
   createFrameworkUserMessage,
@@ -26,15 +25,10 @@ const log = createLogger("harness.tool-loop");
 /** A failed model call as the stream reports it: what a reader can act on, not the SDK's dump. */
 export function modelCallErrorInfo(error: unknown): ErrorInfo {
   const message =
-    summarizeModelCallError(error)?.message ??
+    summarizeKnownError(error)?.message ??
     extractUpstreamRejectionMessage(error)?.message ??
     toErrorMessage(error);
   return { code: "MODEL_CALL_FAILED", message };
-}
-
-/** The catalog would read AI Gateway's retry of a masked BYOK failure, so it names none. */
-function summarizeModelCallError(error: unknown): SemanticErrorSummary | null {
-  return findMaskedByokFailure(error) === undefined ? summarizeKnownError(error) : null;
 }
 
 /** Exhausted model calls fail the turn; terminal errors end its session as well. */
@@ -63,7 +57,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
     return { next: null, session: step.session };
   }
 
-  const summary = summarizeModelCallError(error);
+  const summary = summarizeKnownError(error);
   const rejection = summary === null ? extractUpstreamRejectionMessage(error) : null;
   const message = summary?.message ?? rejection?.message ?? toErrorMessage(error);
   // A delegated caller reads the remedy as prose; events keep it structured.
