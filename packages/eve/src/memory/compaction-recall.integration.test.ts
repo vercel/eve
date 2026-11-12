@@ -26,7 +26,7 @@ const ALICE = {
   principalType: "user" as const,
 };
 const SUMMARY = "Alice asked for the quarterly report.";
-const REPORT = `Quarterly report. ${"Revenue grew in every region. ".repeat(2_000)}`;
+const REPORT = `Quarterly report. ${"Revenue grew in every region. ".repeat(10_000)}`;
 
 function isSummaryRequest(prompt: LanguageModelV4Prompt): boolean {
   return JSON.stringify(prompt).includes("CONTEXT CHECKPOINT COMPACTION");
@@ -82,7 +82,7 @@ async function runSession(
       definition: defineAgent({
         compaction: { threshold: 1 },
         model: scriptedModel(log, prompts),
-        modelContextWindowTokens: 2_000,
+        modelContextWindowTokens: 50_000,
       } as never),
       name,
     },

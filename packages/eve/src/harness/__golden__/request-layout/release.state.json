@@ -114,6 +114,7 @@
         "content.delta": 48,
         "context.settled": 42,
         "context.settled:compaction": 42,
+        "context.settled:compaction:completed": 42,
         "context.started": 40,
         "context.started:compaction": 40,
         "delivery.admitted": 44,

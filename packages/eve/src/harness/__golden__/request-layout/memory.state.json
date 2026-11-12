@@ -92,6 +92,7 @@
         "content.delta": 17,
         "context.settled": 11,
         "context.settled:compaction": 11,
+        "context.settled:compaction:completed": 11,
         "context.started": 9,
         "context.started:compaction": 9,
         "delivery.admitted": 13,
