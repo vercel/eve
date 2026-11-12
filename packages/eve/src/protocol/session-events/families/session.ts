@@ -56,6 +56,13 @@ export type SessionStarted = Envelope<"session.started", SessionStartedData>;
 export type SessionEnded = Envelope<"session.ended", SessionEndedData>;
 export type SessionFact = SessionStarted | SessionEnded;
 
+/** The schema of a {@link TraceContext}. */
+export const traceContext = z.object({
+  spanId: z.string(),
+  traceFlags: z.number().int(),
+  traceId: z.string(),
+});
+
 const sessionStartedData = conforming<SessionStartedData>()(
   z.object({
     parent: z.object({ callId: id, sessionId: id }).optional(),
@@ -74,9 +81,7 @@ const sessionStartedData = conforming<SessionStartedData>()(
         eveVersion: z.string(),
       })
       .optional(),
-    trace: z
-      .object({ spanId: z.string(), traceFlags: z.number().int(), traceId: z.string() })
-      .optional(),
+    trace: traceContext.optional(),
   }),
 );
 
