@@ -490,7 +490,7 @@ export class ModelCaller {
       catalog.resolve,
     );
     assertUsableResponse(stepResult, responseMessages, {
-      allowEmptyStop: !step.hasDelegatedCaller,
+      allowEmptyStop: !step.hasDelegatedCaller && agentSettings(step).emptyReply !== "retry",
       hasInlineResults: trailingInlineToolResultParts.length > 0,
     });
     const calls = await this.runInlineCalls(stepResult, messages, {
@@ -543,7 +543,7 @@ export class ModelCaller {
 
 /**
  * A filtered response fails the step. A successful empty `stop` is usable only
- * when no delegated caller needs a reply.
+ * when no delegated caller needs a reply and the agent accepts empty replies.
  */
 
 function assertUsableResponse(

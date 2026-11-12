@@ -339,6 +339,12 @@ export interface AgentWorkflowDefinition {
   readonly world?: AgentWorkflowWorldDefinition;
 }
 
+/** Accepted values for `emptyReply`, shared by the authored type and its validators. */
+export const AGENT_EMPTY_REPLY_VALUES = ["accept", "retry"] as const;
+
+/** What a root session does with an empty model reply. See `emptyReply` on `defineAgent`. */
+export type AgentEmptyReplyBehavior = (typeof AGENT_EMPTY_REPLY_VALUES)[number];
+
 /**
  * How eve exposes an agent to its parent model: `true` as a tool in the
  * model's tool list, `"deferred"` as a catalog entry the model finds with
@@ -358,6 +364,7 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
+  emptyReply?: AgentEmptyReplyBehavior;
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
@@ -417,6 +424,17 @@ type PublicAgentDefinitionBase = {
    * available when this is `false`.
    */
   readonly defaultTools?: boolean;
+  /**
+   * What a root session does when the model ends its turn with `finishReason: "stop"` and
+   * nothing in the reply. `"accept"` completes the turn without a final message. `"retry"`
+   * reissues the model call once with a nudge to answer, and fails the turn if the second
+   * reply is also empty; an agent that means to stay quiet then calls `no_reply`.
+   *
+   * Delegated sessions, such as a subagent's, always retry, because their caller needs a reply.
+   *
+   * @default "accept"
+   */
+  readonly emptyReply?: AgentEmptyReplyBehavior;
   /**
    * Experimental, opt-in capabilities. Unstable, see
    * {@link AgentExperimentalDefinition}.

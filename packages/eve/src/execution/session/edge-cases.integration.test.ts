@@ -35,7 +35,7 @@ import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js"
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { SessionUsageLimit } from "#shared/agent-definition.js";
+import type { AgentEmptyReplyBehavior, SessionUsageLimit } from "#shared/agent-definition.js";
 import { readSessionEventHistory } from "#execution/session-event-stream.js";
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
 import { failure } from "#protocol/session-projection/selectors.js";
@@ -309,6 +309,7 @@ async function withSession(
     readonly hooks?: Readonly<Record<string, HookDefinition>>;
     readonly parent?: SessionParent;
     readonly sessionUsage?: SessionUsageLimit;
+    readonly emptyReply?: AgentEmptyReplyBehavior;
   },
   body: (session: Session) => Promise<void>,
 ) {
@@ -324,6 +325,7 @@ async function withSession(
         ...(options.sessionUsage !== undefined && {
           limits: { sessionUsage: options.sessionUsage },
         }),
+        ...(options.emptyReply !== undefined && { emptyReply: options.emptyReply }),
       }),
       name,
     },
@@ -1379,15 +1381,24 @@ describe("approvals off the happy path", () => {
 
 describe("models that fail", () => {
   it.each([
-    { delegated: false, attempts: 1, outcome: "completed" },
-    { delegated: true, attempts: 2, outcome: "failed" },
+    { delegated: false, emptyReply: undefined, replies: [""], attempts: 1, outcome: "completed" },
+    { delegated: true, emptyReply: undefined, replies: [""], attempts: 2, outcome: "failed" },
+    {
+      delegated: false,
+      emptyReply: "retry",
+      replies: ["", "Here is the summary."],
+      attempts: 2,
+      outcome: "completed",
+    },
+    { delegated: false, emptyReply: "retry", replies: [""], attempts: 2, outcome: "failed" },
   ] as const)(
-    "handles an empty stop response with delegated=$delegated",
-    async ({ delegated, attempts, outcome }) => {
+    "handles an empty stop response with delegated=$delegated, emptyReply=$emptyReply, replies=$replies",
+    async ({ delegated, emptyReply, replies, attempts, outcome }) => {
       let calls = 0;
       await withSession(
-        `empty-stop-${delegated ? "child" : "root"}`,
+        `empty-stop-${delegated ? "child" : "root"}-${emptyReply ?? "default"}-${replies.length}`,
         {
+          emptyReply,
           message: "Alice asks for the weekly summary.",
           tools: [],
           parent: delegated
@@ -1398,10 +1409,7 @@ describe("models that fail", () => {
                 turn: { id: "parent-turn", sequence: 1 },
               }
             : undefined,
-          model: scriptedModel(() => {
-            calls += 1;
-            return "";
-          }),
+          model: scriptedModel(() => replies[calls++] ?? ""),
         },
         async (session) => {
           const events = await session.next("empty stop response");

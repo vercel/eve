@@ -206,6 +206,7 @@ function createResolvedAgentConfig(
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
+    emptyReply?: NonNullable<ResolvedAgent["config"]>["emptyReply"];
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
@@ -224,6 +225,9 @@ function createResolvedAgentConfig(
   }
   if (manifest.config.description !== undefined) {
     config.description = manifest.config.description;
+  }
+  if (manifest.config.emptyReply !== undefined) {
+    config.emptyReply = manifest.config.emptyReply;
   }
 
   if (manifest.config.compaction !== undefined) {

@@ -374,6 +374,19 @@ A cancelled agent task ends and sends no further reply. Usage the cancelled run
 reported up to that point still counts against the parent when its usage report
 or final outcome arrives.
 
+## Empty replies
+
+A provider sometimes ends a turn with `finishReason: "stop"` and an empty reply. By default, a root session accepts that and completes the turn without a final message, so an agent can stay quiet. Set `emptyReply: "retry"` when your agent always answers:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  emptyReply: "retry",
+});
+```
+
+eve then sends the model call again once, with a note that the previous reply was empty, and fails the turn with `MODEL_CALL_FAILED` if the second reply is also empty. To stay quiet on purpose with this option on, the agent calls [`no_reply`](./concepts/built-in-tools#no_reply). Delegated sessions, such as a subagent's, always retry an empty reply because their caller needs one, so this option only changes root sessions, including scheduled runs.
+
 ## Workflow world
 
 The Workflow world is the backend that stores and runs sessions, so they survive restarts and redeploys. Omit
@@ -510,6 +523,7 @@ All other `defineAgent` fields are optional. For the exported types, see the [Ty
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                       |
 | `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                               |
 | `limits`       | `AgentLimitsDefinition`               | field-specific   | eve's [runtime limits](#runtime-limits).                                                                                                                                                                                                                                                                            |
+| `emptyReply`   | `"accept" \| "retry"`                 | `"accept"`       | Whether a root session [retries an empty model reply](#empty-replies) once instead of completing the turn without one.                                                                                                                                                                                              |
 | `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins: [`workflow.world`](#workflow-world), [`workflow.modelCallsPerStep`](#workflow-checkpoint-batching), and [`workflow.retention`](#run-data-retention).                                                                                                                                              |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages unbundled and includes them in the hosted output.                                                                                                                                                                                     |
 | `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` hides it from the tool list until the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. With `false`, authored workflow tools can still call a subagent through `ctx.agent()`. |

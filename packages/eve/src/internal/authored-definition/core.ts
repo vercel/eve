@@ -19,6 +19,7 @@ import {
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
 import {
+  AGENT_EMPTY_REPLY_VALUES,
   AGENT_WORKFLOW_RETENTION_VALUES,
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
@@ -60,6 +61,7 @@ export function normalizeAgentDefinition(
       "compaction",
       "defaultTools",
       "description",
+      "emptyReply",
       "experimental",
       "limits",
       "model",
@@ -92,6 +94,14 @@ export function normalizeAgentDefinition(
 
   if (record.defaultTools !== undefined) {
     definition.defaultTools = expectBoolean(record.defaultTools, message);
+  }
+
+  if (record.emptyReply !== undefined) {
+    const emptyReply = AGENT_EMPTY_REPLY_VALUES.find((accepted) => accepted === record.emptyReply);
+    if (emptyReply === undefined) {
+      throw new Error(`${message} "emptyReply" must be "accept" or "retry".`);
+    }
+    definition.emptyReply = emptyReply;
   }
 
   if (record.compaction !== undefined) {

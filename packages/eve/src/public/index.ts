@@ -41,6 +41,7 @@ export {
 
 export type {
   AgentBuildDefinition,
+  AgentEmptyReplyBehavior,
   AgentPromptCacheDefinition,
   AgentToolExposure,
   EveLanguageModel,

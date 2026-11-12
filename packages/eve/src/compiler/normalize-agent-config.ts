@@ -96,6 +96,7 @@ export async function compileAgentConfig(
     };
     defaultTools?: boolean;
     description?: string;
+    emptyReply?: CompiledAgentDefinition["emptyReply"];
     experimental?: CompiledAgentDefinition["experimental"];
     name: string;
     reasoning?: CompiledAgentDefinition["reasoning"];
@@ -114,6 +115,10 @@ export async function compileAgentConfig(
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  if (definition.emptyReply !== undefined) {
+    compiledConfig.emptyReply = definition.emptyReply;
   }
 
   // A function can't enter the manifest; the runtime loads it from the agent config module.

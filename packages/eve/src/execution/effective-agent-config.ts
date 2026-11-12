@@ -6,6 +6,7 @@ import type { ApprovalPolicy } from "#approval/definition.js";
 import { strictestApproval } from "#approval/agent.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
+  AgentEmptyReplyBehavior,
   AgentLimitsDefinition,
   AgentReasoningDefinition,
   SessionUsageLimit,
@@ -14,6 +15,8 @@ import type {
 /** What the agent sets for every model call, whichever model it runs. */
 export interface AgentSettings {
   readonly compactionModel?: RuntimeModelReference;
+  /** Only `agent.ts` sets it: a dynamic subagent's sessions always have a delegated caller. */
+  readonly emptyReply?: AgentEmptyReplyBehavior;
   readonly reasoning?: AgentReasoningDefinition;
   readonly thresholdPercent?: number;
 }
@@ -33,6 +36,7 @@ export function agentSettings(step: {
   const bundle = step.ctx.require(BundleKey);
   return {
     compactionModel: bundle.turnAgent.compactionModel,
+    emptyReply: bundle.resolvedAgent.config?.emptyReply,
     reasoning: bundle.turnAgent.reasoning,
     thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
   };

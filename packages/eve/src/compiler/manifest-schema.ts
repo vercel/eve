@@ -12,6 +12,7 @@ import { jsonObjectSchema } from "#shared/json-schemas.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { WEB_SEARCH_FALLBACK_PROVIDERS, WEB_SEARCH_PROVIDERS } from "#shared/web-search.js";
 import {
+  AGENT_EMPTY_REPLY_VALUES,
   AGENT_WORKFLOW_RETENTION_VALUES,
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type ModelRouting,
@@ -318,6 +319,7 @@ export const compiledAgentConfigBaseFields = {
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
   description: z.string().optional(),
+  emptyReply: z.enum(AGENT_EMPTY_REPLY_VALUES).optional(),
   experimental: z
     .object({
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),

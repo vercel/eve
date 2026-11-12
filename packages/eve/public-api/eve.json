@@ -2,6 +2,7 @@
   "AgentBuildDefinition",
   "AgentCompactionDefinition",
   "AgentDefinition",
+  "AgentEmptyReplyBehavior",
   "AgentExperimentalDefinition",
   "AgentLimitsDefinition",
   "AgentModelDefinition",

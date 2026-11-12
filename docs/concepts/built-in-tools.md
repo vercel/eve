@@ -558,6 +558,8 @@ export default noReply;
 
 Without `no_reply`, a root session also accepts an empty model reply with `finishReason: "stop"` and completes the turn without a final message. Use `no_reply` to record an explicit choice to stay quiet, with a reason. Delegated sessions retry an empty reply once and report a failure if it stays empty, so the caller can act on it.
 
+Providers sometimes end a turn empty by mistake, and that looks the same as a quiet turn. If your agent should always answer, set [`emptyReply: "retry"`](../agent-config#empty-replies) in `agent.ts`. Root sessions then retry an empty reply once, the way delegated sessions do, and the turn fails if the reply stays empty. With this option on, the agent stays quiet only by calling `no_reply`.
+
 ### `sleep`
 
 `sleep` pauses the current turn and resumes it later, without keeping the application runtime running. The wait survives restarts. The model calls it with `{ seconds }`. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message, the default for a new message, ends the wait early: the model reads `{ interrupted: true }` as `Stopped early because a new message arrived.`, then the message. Add it:

@@ -356,6 +356,18 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.experimental?.workflow?.retention).toBe(value);
   });
 
+  it.each(["accept", "retry"] as const)("accepts emptyReply %j", (emptyReply) => {
+    expect(
+      normalizeAgentDefinition({ emptyReply, model: "openai/gpt-5.5" }, FAILURE_MESSAGE).emptyReply,
+    ).toBe(emptyReply);
+  });
+
+  it.each(["reissue", true, null])("rejects invalid emptyReply %j", (emptyReply) => {
+    expect(() =>
+      normalizeAgentDefinition({ emptyReply, model: "openai/gpt-5.5" }, FAILURE_MESSAGE),
+    ).toThrow('"emptyReply" must be "accept" or "retry".');
+  });
+
   it.each(["none", "0", 1, true, null])("rejects invalid workflow retention %j", (value) => {
     expect(() =>
       normalizeAgentDefinition(
