@@ -9,13 +9,12 @@ export type ConversationEnvironment = "development" | "preview" | "production";
 
 /**
  * What kind of place a {@link ConversationSpace} is. `direct` is a one-to-one
- * conversation between one person and the agent, `group` is a private
- * conversation among a fixed set of people, and `channel` is a named place
- * that members join and leave, such as a Slack channel.
+ * conversation between one person and the agent. `shared` is any place with
+ * more people, such as a Slack channel or a group chat.
  */
-export type ConversationSpaceType = "direct" | "group" | "channel";
+export type ConversationSpaceType = "direct" | "shared";
 
-export const CONVERSATION_SPACE_TYPES = ["direct", "group", "channel"] as const;
+export const CONVERSATION_SPACE_TYPES = ["direct", "shared"] as const;
 
 /**
  * Who can find and join a {@link ConversationSpace}. `public` is open to anyone

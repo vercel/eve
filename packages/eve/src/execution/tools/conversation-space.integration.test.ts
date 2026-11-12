@@ -28,7 +28,7 @@ describe("ctx.conversation in tools", () => {
       conversation: { id: "C_TEAM", is_channel: true, is_private: false },
       expected: {
         id: "slack:T01:C_TEAM",
-        type: "channel",
+        type: "shared",
         visibility: "public",
         workspaceId: "slack:T01",
       },
@@ -39,7 +39,7 @@ describe("ctx.conversation in tools", () => {
       conversation: { id: "G_GROUP", is_mpim: true, is_private: true },
       expected: {
         id: "slack:T01:G_GROUP",
-        type: "group",
+        type: "shared",
         visibility: "private",
         workspaceId: "slack:T01",
       },

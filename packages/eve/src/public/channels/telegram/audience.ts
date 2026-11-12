@@ -29,10 +29,10 @@ function telegramSpace(state: TelegramChannelState): ConversationSpace | undefin
       return { id: `telegram:${state.chatId}`, type: "direct", visibility: "private" };
     case "group":
       // A basic group has no public link; a supergroup or channel may.
-      return { id: `telegram:${state.chatId}`, type: "group", visibility: "private" };
+      return { id: `telegram:${state.chatId}`, type: "shared", visibility: "private" };
     case "supergroup":
     case "channel":
-      return { id: `telegram:${state.chatId}`, type: "channel" };
+      return { id: `telegram:${state.chatId}`, type: "shared" };
     default:
       return undefined;
   }

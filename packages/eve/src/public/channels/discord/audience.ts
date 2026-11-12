@@ -18,8 +18,9 @@ export function discordInstrumentationMetadata(
 }
 
 /**
- * The Discord channel a session is in. DMs (type 1) are direct and group DMs
- * (type 3) are groups; a thread reports itself, since its parent isn't known.
+ * The Discord channel a session is in. DMs (type 1) are direct; server
+ * channels and group DMs (type 3) are shared. A thread reports itself, since
+ * its parent isn't known.
  * A proactive session knows neither its guild nor its channel type, so it
  * reports no space rather than one that differs from its channel's.
  */
@@ -32,7 +33,7 @@ export function discordConversationSpace(
     // visibility lives in permission overwrites the channel never reads.
     return {
       id: `discord:${state.guildId}:${state.channelId}`,
-      type: "channel",
+      type: "shared",
       ...(state.channelType === 12 && { visibility: "private" as const }),
       workspaceId: `discord:${state.guildId}`,
     };
@@ -41,7 +42,7 @@ export function discordConversationSpace(
     return { id: `discord:${state.channelId}`, type: "direct", visibility: "private" };
   }
   if (state.channelType === 3) {
-    return { id: `discord:${state.channelId}`, type: "group", visibility: "private" };
+    return { id: `discord:${state.channelId}`, type: "shared", visibility: "private" };
   }
   return undefined;
 }

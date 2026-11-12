@@ -11,18 +11,18 @@ describe("discordConversationSpace", () => {
   it("names a guild channel under its guild", () => {
     expect(discordConversationSpace(state({ guildId: "g1", channelType: 0 }))).toEqual({
       id: "discord:g1:c1",
-      type: "channel",
+      type: "shared",
       workspaceId: "discord:g1",
     });
   });
 
-  it("reports DMs as direct and group DMs as groups", () => {
+  it("reports DMs as direct and group DMs as shared", () => {
     expect(discordConversationSpace(state({ channelType: 1 }))).toEqual({
       id: "discord:c1",
       type: "direct",
       visibility: "private",
     });
-    expect(discordConversationSpace(state({ channelType: 3 }))?.type).toBe("group");
+    expect(discordConversationSpace(state({ channelType: 3 }))?.type).toBe("shared");
   });
 
   it("reports a private thread as private and leaves other server channels unknown", () => {
