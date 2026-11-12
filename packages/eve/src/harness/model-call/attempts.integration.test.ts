@@ -82,9 +82,13 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
 const spent = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 };
 
 /** An answer with no text and no calls, which the provider billed with an AI Gateway cost. */
-const billedEmpty = (finish: "other" | "content-filter"): StreamResult =>
+const billedEmpty = (
+  finish: "other" | "content-filter",
+  before: readonly StreamPart[] = [],
+): StreamResult =>
   streamOf([
     { type: "stream-start", warnings: [] },
+    ...before,
     {
       finishReason: { raw: undefined, unified: finish },
       providerMetadata: { gateway: { cost: "0.05" } },
@@ -166,6 +170,33 @@ describe("model attempts", () => {
       { attempt: 1, modelId: "m", runId: "run_0", type: "model.started" },
       expect.objectContaining({ outcome: "completed", runId: "run_0", type: "model.settled" }),
       { kind: "model", owner: { runId: "run_0" }, type: "usage.recorded", usage: spent },
+    ]);
+  });
+
+  it("records what an empty answer that published reasoning spent on the run it gave up", async () => {
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockResolvedValueOnce(
+        // Its reasoning reached the stream, so the reissue needs a new run.
+        billedEmpty("other", [
+          { id: "r", type: "reasoning-start" },
+          { delta: "Checking the report.", id: "r", type: "reasoning-delta" },
+          { id: "r", type: "reasoning-end" },
+        ]),
+      )
+      .mockImplementation(async () => streamOf(reply("Here it is.")));
+
+    const facts = await runTurn(doStream);
+
+    expect(facts.map(({ data, type }) => ({ type, ...data }))).toMatchObject([
+      { runId: "run_0", type: "model.requested" },
+      { attempt: 0, runId: "run_0", type: "model.started" },
+      { outcome: "abandoned", runId: "run_0", type: "model.settled" },
+      { owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
+      { runId: "run_1", type: "model.requested" },
+      { attempt: 1, runId: "run_1", type: "model.started" },
+      { outcome: "completed", runId: "run_1", type: "model.settled" },
+      { owner: { runId: "run_1" }, type: "usage.recorded", usage: spent },
     ]);
   });
 
