@@ -378,6 +378,7 @@ async function summaryExecutor(
     telemetry: step.instrumentation?.prepareAttempt({
       attempt: 0,
       runId: input.change.runId,
+      runtimeContext: { "eve.compaction.request": "summary" },
       ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
     }).telemetry,
   };

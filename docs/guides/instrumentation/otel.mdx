@@ -174,8 +174,11 @@ invoke_agent <agent>
   │     ├── chat <model>
   │     └── execute_tool <tool>
   │           └── agent.approval
+  ├── chat <model>
   └── agent.approval
 ```
+
+A `chat` span directly under `invoke_agent` is a [compaction](../concepts/execution-model-and-durability#compaction-handoff) summary request made during the turn. It carries `ai.settings.context.eve.compaction.request=summary`, so you can sum or exclude compaction usage. A compaction between turns, such as one `session.compact()` starts, has no turn and exports no span.
 
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.
 

@@ -184,10 +184,23 @@ export function createAgentOtelInstrumentation(
     await input.stateStore.delete("session", event.sessionId);
   };
 
+  /** A run that isn't a step, such as a compaction's summary run, calls the model for its turn. */
+  async function openTurnOf(scope: InstrumentationScope) {
+    if (scope.turnId === undefined || traceStepIndex(scope) !== undefined) return undefined;
+    const turn = await turnState({ sessionId: scope.sessionId, turnId: scope.turnId });
+    if (turn === undefined || !isSampledTrace(turn.context)) return undefined;
+    const operation = await sessionTracing.turnFor(
+      scope.sessionId,
+      scope.turnId,
+      withChannelAudience(ROOT_CONTEXT, scope.channelAudience),
+    );
+    return operation?.finished === false ? operation : undefined;
+  }
+
   const onModelCallStarted = async (event: InstrumentationModelCallStartedEvent): Promise<void> => {
-    const attempt = steps.get(attemptIdempotencyKey(event.scope));
-    if (attempt === undefined) return;
-    const operation = await attempt.modelCall(
+    const parent = steps.get(attemptIdempotencyKey(event.scope)) ?? (await openTurnOf(event.scope));
+    if (parent === undefined) return;
+    const operation = await parent.modelCall(
       {
         provider: event.model.provider,
         modelId: event.model.modelId,
@@ -225,6 +238,8 @@ export function createAgentOtelInstrumentation(
     const models = modelSpans.get(attemptIdempotencyKey(event.scope));
     const operation = models?.get(event.idempotencyKey);
     models?.delete(event.idempotencyKey);
+    // A run that isn't a step has no attempt end to drain its calls.
+    if (models?.size === 0) modelSpans.delete(attemptIdempotencyKey(event.scope));
     if (operation === undefined) return;
     if (event.outcome === "failed") await operation.fail(event.error);
     else
