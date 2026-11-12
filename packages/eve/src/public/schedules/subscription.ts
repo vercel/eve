@@ -77,7 +77,7 @@ export interface ScheduleOccurrence {
 export interface ScheduleOccurrenceIdentity extends ScheduleOccurrence {
   /** Readable schedule label; name remains the unique management identifier. */
   readonly displayName?: string;
-  /** Path-derived name of the dynamic schedules definition. */
+  /** Name of the dynamic schedules collection the schedule belongs to. */
   readonly collection: string;
 }
 
