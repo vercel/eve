@@ -101,7 +101,7 @@ export default defineTool({
 });
 ```
 
-Channels show this prompt in their approval UI. Slack also shows the complete tool input in a collapsed **Tool input** block.
+Channels show this prompt in their approval UI. Slack shows it as the title of one approval card that also lists the tool input, one field per line and shortened to a fixed size, above the **Approve** and **Deny** buttons.
 
 ### Write your own policy
 
