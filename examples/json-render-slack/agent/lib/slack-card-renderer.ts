@@ -71,13 +71,17 @@ export function slackCardRenderer(options: SlackCardRendererOptions = {}): Slack
           streaming.set(callId, call);
         }
         call.text += delta;
-        const now = Date.now();
-        if (now - call.lastUpdateMs < interval) return;
-        call.lastUpdateMs = now;
-        const { value } = await parsePartialJson(call.text);
-        if (value === undefined || value === null || typeof value !== "object") return;
-        const partial = safely(() => toPartialCard(value as Partial<Spec>));
-        if (partial && hasContent(partial)) await show(ctx.channel, callId, partial, call.runId);
+        try {
+          const now = Date.now();
+          if (now - call.lastUpdateMs < interval) return;
+          call.lastUpdateMs = now;
+          const { value } = await parsePartialJson(call.text);
+          if (value === undefined || value === null || typeof value !== "object") return;
+          const partial = safely(() => toPartialCard(value as Partial<Spec>));
+          if (partial && hasContent(partial)) await show(ctx.channel, callId, partial, call.runId);
+        } finally {
+          await next();
+        }
       },
 
       async "call.requested"(event, ctx, next) {

@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@types/node": "26.6.5",
-    "chat": "4.42.0",
+    "chat": "4.44.0",
     "typescript": "7.0.2"
   }
 }
