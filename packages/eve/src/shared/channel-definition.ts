@@ -8,7 +8,11 @@ import type { Delivery } from "#shared/delivery.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { ChannelDelivery, ChannelDeliveryReplacement } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
-import type { AudienceContext } from "#shared/conversation-context.js";
+import type {
+  AudienceContext,
+  ConversationSpace,
+  ConversationSpaceContext,
+} from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
@@ -138,4 +142,13 @@ export interface GenericChannelDefinition<
    * confident; consumers treat it as non-public.
    */
   readonly audience?: (input: AudienceContext<TState>) => ChannelAudience;
+
+  /**
+   * Reports where the conversation happens on the platform, such as the Slack
+   * channel a thread is in, so tools and dynamic values can share data per
+   * place through `ctx.conversation.space`. Return `undefined` when the
+   * channel can't tell. A throwing, asynchronous, or malformed return reports
+   * no space. Like `audience`, it is fixed when the session is created.
+   */
+  readonly space?: (input: ConversationSpaceContext<TState>) => ConversationSpace | undefined;
 }

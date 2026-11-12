@@ -550,6 +550,30 @@ Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the chan
 
 The audience is fixed when the session is created, so turns from a different caller don't change it. A local subagent inherits its parent's audience, and eve forwards the parent's custom channel metadata separately.
 
+### Conversation space
+
+`space(input)` reports where the conversation happens on the platform, such as the channel a thread is in. Tools, dynamic values, and memory scopes read it as `ctx.conversation.space` to share data per place. See [Spaces](/docs/channels#spaces).
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: { workspaceId: null as string | null, roomId: null as string | null, dm: false },
+  space({ state }) {
+    if (state.workspaceId === null || state.roomId === null) return undefined;
+    return {
+      id: `acme:${state.workspaceId}:${state.roomId}`,
+      type: state.dm ? "direct" : "channel",
+      visibility: state.dm ? "private" : undefined,
+      workspaceId: `acme:${state.workspaceId}`,
+    };
+  },
+  routes: [POST("/webhook", async () => new Response("ok"))],
+});
+```
+
+Return an `id` that is the same for every session in the place and unique across platforms and workspaces, usually by prefixing the platform and workspace. Return `undefined` when the channel can't tell. A throwing, asynchronous, or malformed `space` function reports no space. Like the audience, the space is fixed when the session is created.
+
 ## Continuation tokens
 
 A continuation token is the address that each channel operation accepts: your channel's ID for one conversation. Each token belongs to its channel, so tokens from different channels never collide.
