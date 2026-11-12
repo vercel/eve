@@ -12,17 +12,16 @@ import { createLogger, logError } from "#internal/logging.js";
 const log = createLogger("context.sandbox");
 
 /**
- * Starts a prewarmed session's sandbox, and resumes a sandbox the session
- * already recorded when a turn begins. A turn never starts a sandbox: every
- * agent has one, and most turns may not need it.
+ * Starts a prewarmed session's sandbox. A turn neither starts nor resumes
+ * one: every agent has a sandbox, most turns may not need it, and resuming a
+ * stopped sandbox can start billed compute, so the first use opens it.
  */
 export const sandboxPrewarmer: SessionPrewarmer = {
   name: "sandbox",
   start(ctx, phase) {
+    if (phase !== "session") return;
     // `sandboxProvider.create` built this step's access.
-    const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
-    if (phase === "session") access?.prepare();
-    else access?.resumeRecorded();
+    (ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined)?.prepare();
   },
 };
 

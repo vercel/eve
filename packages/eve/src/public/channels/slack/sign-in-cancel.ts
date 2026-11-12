@@ -1,4 +1,5 @@
 import type { ChannelFrom } from "#channel/channel-operations.js";
+import { sendSlackResponseUrl } from "#compiled/@chat-adapter/slack/api.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createLogger } from "#internal/logging.js";
 import type { SlackChannelState, SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
@@ -87,17 +88,7 @@ async function cancelHeldSignIn(
   }
   if (cancel.responseUrl === undefined) return;
   try {
-    const response = await fetch(cancel.responseUrl, {
-      body: JSON.stringify({ delete_original: true }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-    if (!response.ok) {
-      log.warn("Slack refused to remove the cancelled sign-in prompt", {
-        body: await response.text(),
-        status: response.status,
-      });
-    }
+    await sendSlackResponseUrl(cancel.responseUrl, { deleteOriginal: true });
   } catch (error) {
     log.warn("failed to remove the cancelled sign-in prompt", { error });
   }

@@ -39,7 +39,11 @@ eve needs a Vercel token, team ID, and project ID. `eve build` uses them to capt
 | Team ID    | `teamId` environment option, `VERCEL_TEAM_ID`, `VERCEL_ORG_ID`  |
 | Project ID | `projectId` environment option, `VERCEL_PROJECT_ID`             |
 
-When any of the three is unset, eve uses a Vercel OIDC token and reads the team and project from it. Outside a Vercel deployment, eve reads `VERCEL_OIDC_TOKEN`. It refreshes a missing or expired token with your Vercel CLI login and the project linked in `.vercel/project.json`. If that fails, the Vercel Sandbox SDK's own credential lookup runs, and it reports an authentication error when it finds none.
+eve checks OIDC token expiry before use, with a five-minute refresh buffer. Refresh uses your Vercel CLI login and targets the configured team and project IDs. The linked project's `.vercel/project.json` supplies only missing IDs. If OIDC resolution fails, eve uses `VERCEL_TOKEN` when both IDs are configured. Configured IDs keep their precedence after OIDC resolution; when either ID is unset, eve reads both IDs from the token.
+
+A `VERCEL_OIDC_TOKEN` from `vercel env pull` expires. In CI or other environments without a Vercel CLI login, set `VERCEL_TOKEN` alongside `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`. Locally, rerun `vercel env pull` to get a fresh token.
+
+If eve cannot resolve credentials, the Vercel Sandbox SDK's own credential lookup runs. The SDK reports an authentication error when it finds none.
 
 For local development, link the app to a Vercel project and pull its environment into `.env.local`:
 
@@ -57,13 +61,15 @@ Outside Vercel and without a linked project, such as in CI or on a self-hosted s
 
 Set `image`, `source`, `tags`, project credentials, and `fetch` on the environment, because `open()` doesn't accept them. eve sets the sandbox's name and persistence itself.
 
-If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, eve runs the selector again to start a fresh sandbox.
+If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, or it stopped and its snapshot expired, eve runs the selector again to start a fresh sandbox. Files from the old sandbox are not kept.
 
 ## Snapshot preparation
 
 During build, eve prepares its base runtime in a temporary Vercel Sandbox, writes managed workspace and skill files, and runs the authored `prepare` callback. A `prepare` callback that breaks the base runtime fails the build. eve creates each new session sandbox from the captured snapshot.
 
 eve skips the snapshot when the environment has no `prepare` callback, managed workspace or skill files, or `source`. Each new session sandbox then starts from the image and prepares the base runtime itself. A `source` always produces a snapshot, so sessions start from what the build captured instead of fetching the source again.
+
+When `VERCEL` is set, builds need `VERCEL_OIDC_TOKEN` for templates with a `prepare` callback, managed workspace or skill files, or a `source`. Empty templates without these inputs build without the token. For a local `vercel build`, run `vercel link` and `vercel pull` before building templates that need preparation.
 
 A new session sandbox from a snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without Drive mounts, runs no setup command. eve runs base-runtime setup when it attaches any other sandbox. These include existing or resumed sandboxes, custom images or snapshot sources, sandboxes with Drive mounts, and sandboxes created without a snapshot.
 

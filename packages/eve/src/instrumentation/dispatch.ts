@@ -61,6 +61,14 @@ export function createInstrumentationDispatcher(
       (decision) => decision.action === "record" && decision.recordOutputs,
     );
     const capturesContent = capturesInputs || capturesOutputs;
+    // eve's own providers run serially and apply their own decisions; only authored files count.
+    const authored = groups.parallel.map((provider) => decisions.get(provider));
+    const authoredCapturesInputs = authored.some(
+      (decision) => decision?.action === "record" && decision.recordInputs,
+    );
+    const authoredCapturesOutputs = authored.some(
+      (decision) => decision?.action === "record" && decision.recordOutputs,
+    );
 
     const publish = async (event: InstrumentationEvent): Promise<void> => {
       const snapshot = snapshotInstrumentationEvent(
@@ -132,6 +140,8 @@ export function createInstrumentationDispatcher(
     };
 
     return {
+      authoredCapturesInputs,
+      authoredCapturesOutputs,
       capturesContent,
       capturesInputs,
       capturesOutputs,

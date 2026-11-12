@@ -140,6 +140,86 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
     });
   });
 
+  it.each([
+    [
+      "inline",
+      'defineWorkflowTool({ description: "Probe", inputSchema: {}, async execute() { return 1; } })',
+      "",
+    ],
+    [
+      "local reference",
+      'defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run })',
+      "async function run() { return 1; }",
+    ],
+  ])(
+    "rejects a dynamic workflow tool with an %s executor without the directive during compilation",
+    async (_kind, tool, helper) => {
+      const app = await createApp({
+        files: {
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+          "agent/tools/probe.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+${helper}
+export default defineDynamic(() => ${tool});`,
+        },
+        name: "dynamic-missing-workflow-directive",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        'without "use workflow"',
+      );
+    },
+  );
+
+  it("compiles a dynamic workflow tool whose executor is a top-level workflow function", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/probe.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+async function run() { "use workflow"; return 1; }
+const probe = defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });
+export default defineDynamic(() => ({ probe }));`,
+      },
+      name: "dynamic-workflow-tool",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
+  it("compiles inline workflow methods of top-level const tools a defineDynamic() returns", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/support.ts": `import { defineDynamic, defineWorkflowTool } from "eve/tools";
+export const escalate = defineWorkflowTool({ description: "Escalate", inputSchema: {}, async execute() { "use workflow"; return 1; } });
+export const review = defineWorkflowTool({ description: "Review", inputSchema: {}, async task() { "use workflow"; return 2; } });
+export default defineDynamic(() => ({ escalate, review }));`,
+      },
+      name: "dynamic-inline-workflow-tools",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+
+    const namespace = (await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "support.ts"),
+    )) as Record<string, Record<string, { workflowId?: unknown }>>;
+    expect(namespace.escalate?.execute?.workflowId).toBe(
+      "workflow//./agent/tools/support//escalate$execute",
+    );
+    expect(namespace.review?.task?.workflowId).toBe("workflow//./agent/tools/support//review$task");
+  });
+
   it("compiles a workflow tool that calls agent through an imported helper", async () => {
     const app = await createApp({
       files: {

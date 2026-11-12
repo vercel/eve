@@ -240,11 +240,12 @@ export interface SlackInteractionCardRequest {
 export interface SlackInteractionCardRecord {
   /** The message's conversation: the session's channel, or the reviewer's DM. */
   readonly channelId: string;
+  /** The message's `ts`. An ephemeral's identifies it but can't be edited. */
   readonly ts: string;
   readonly destination: SlackApprovalChannel;
-  /** The session a card's controls answer back to: a direct message's thread, or a code channel. */
+  /** The session a card's controls answer back to: a private request's thread, or a code channel. */
   readonly route?: SlackHitlRoute;
-  /** Thread post announcing a direct-message request; updated with the outcome. */
+  /** Thread post announcing a private request; updated with the outcome. */
   readonly announcementTs?: string;
   readonly requests: readonly SlackInteractionCardRequest[];
 }
@@ -652,6 +653,13 @@ export interface SlackInteractionAction {
    */
   readonly label?: string;
   /**
+   * Slack `response_url` of the click. POST to it to replace or delete the
+   * message hosting the component, for example `{ delete_original: true }`.
+   * It is the only way to change an ephemeral message, which `chat.update`
+   * and `chat.delete` can't reach.
+   */
+  readonly responseUrl?: string;
+  /**
    * Slack actor who triggered the interaction, letting `onInteraction`
    * handlers attribute resolutions back to the clicker without re-parsing
    * the raw payload. Always present, since Slack requires `user` on every
@@ -795,7 +803,11 @@ export type SlackChannelInternalEvents = {
   ) => void | Promise<void>;
 };
 
-export type SlackApprovalChannel = "direct-message" | "thread";
+/**
+ * Where an input request appears: the shared `"thread"`, or only for the Slack user who
+ * triggered the turn, in their `"direct-message"` or as an `"ephemeral"` message in the thread.
+ */
+export type SlackApprovalChannel = "direct-message" | "ephemeral" | "thread";
 
 /** Input request passed to a {@link SlackApprovalChannelResolver}. */
 export type SlackApprovalRequest = Interaction;
@@ -813,9 +825,9 @@ export interface SlackChannelConfig {
   readonly botName?: string;
 
   /**
-   * Chooses where each input request is delivered. Direct-message requests go to the
-   * Slack user who triggered the active turn; the session thread names that reviewer
-   * without exposing the request. Defaults to `"thread"` when omitted.
+   * Chooses where each input request is delivered. Direct-message and ephemeral requests
+   * go only to the Slack user who triggered the active turn; the session thread names that
+   * reviewer without exposing the request. Defaults to `"thread"` when omitted.
    */
   readonly approvalChannel?: SlackApprovalChannelResolver;
 

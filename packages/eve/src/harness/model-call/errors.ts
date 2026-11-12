@@ -328,6 +328,12 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     return "retry";
   }
 
+  // A stream chunk that failed the provider adapter's schema; a fresh request gets past it. Only
+  // when it is the failure itself: invalid `providerOptions` wrap one too, and won't change.
+  if (readErrorName(error) === "AI_TypeValidationError") {
+    return "retry";
+  }
+
   const signals = readModelCallErrorSignals(error);
   // Payment-required responses can be fixed outside the running process;
   // keep the conversation available so the user can retry afterward.
