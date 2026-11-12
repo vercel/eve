@@ -6,7 +6,6 @@ import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlActionId,
-  formatInteractionFallbackText,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
@@ -281,6 +280,23 @@ describe("renderInteractionBlocks", () => {
     ]);
   });
 
+  it("titles an approval with a blank prompt by its tool name, since Slack refuses an empty title", () => {
+    const [container] = renderInteractionBlocks(
+      makeRequest({
+        call: { callId: "call_deploy", name: "deploy", input: { env: "prod" } },
+        display: "confirmation",
+        kind: "approval",
+        prompt: " \n ",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
+      }),
+    );
+
+    expect(container).toMatchObject({ title: { type: "plain_text", text: "deploy" } });
+  });
+
   it("keeps an approval without tool input as a compact card", () => {
     const [card, ...rest] = renderInteractionBlocks(
       makeRequest({
@@ -325,11 +341,16 @@ describe("renderInteractionBlocks", () => {
 
     const small = JSON.stringify(preview({ value: "y".repeat(5000) }));
     const large = preview(fields);
+    const many = JSON.stringify(
+      preview(Object.fromEntries(Array.from({ length: 2000 }, (_, index) => [`${index}`, "y"]))),
+    );
 
     expect(large.title.text).toHaveLength(150);
     expect(small).toContain("y...");
     expect(JSON.stringify(large)).toMatch(/\+\d+ more fields/u);
     expect(JSON.stringify(large).length).toBeLessThan(3000);
+    expect(many).toContain("+1990 more fields");
+    expect(many.length).toBeLessThan(3000);
   });
 
   it("renders model-supplied prompts and tool input literally", () => {
@@ -548,39 +569,6 @@ describe("renderInteractionBlocks", () => {
         optionId: "weekly_report",
       },
     });
-  });
-});
-
-describe("formatInteractionFallbackText", () => {
-  it("includes approval tool input in Slack fallback text", () => {
-    const text = formatInteractionFallbackText(
-      makeRequest({
-        call: {
-          callId: "call_mongo",
-          name: "mongodb-mutate",
-          input: {
-            operation: "deleteOne",
-            collection: "orgs",
-            filter: { _id: "48gtnni64rxqtaoh" },
-          },
-        },
-        display: "confirmation",
-        kind: "approval",
-        prompt: "Approve tool call: mongodb-mutate",
-        options: [
-          { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
-        ],
-      }),
-    );
-
-    expect(text).toContain("Approve tool call: mongodb-mutate");
-    expect(text).toContain('"collection": "orgs"');
-    expect(text).toContain('"_id": "48gtnni64rxqtaoh"');
-  });
-
-  it("leaves non-approval fallback text unchanged", () => {
-    expect(formatInteractionFallbackText(makeRequest({ prompt: "Pick one" }))).toBe("Pick one");
   });
 });
 

@@ -82,6 +82,7 @@ const TOOL_INPUT_SUFFIX = "\n```";
  */
 const TOOL_INPUT_PREVIEW_MAX_LENGTH = 1500;
 const TOOL_INPUT_VALUE_MAX_LENGTH = 500;
+const TOOL_INPUT_PREVIEW_MAX_FIELDS = 10;
 const APPROVAL_PAUSED_TEXT = "I've paused until someone approves or denies.";
 const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
 const ANSWERED_TEXT_SUFFIX = "*";
@@ -300,8 +301,8 @@ export function renderInteractionBlocks(
 }
 
 /**
- * eve's default messages for one request: a single controls message. An approval's notification
- * text is only its prompt, since the card already carries the bounded input preview and Slack
+ * eve's default messages for one request: a single controls message. Its notification text is
+ * only the prompt, since an approval card already carries the bounded input preview and Slack
  * echoes both on every click.
  */
 export function renderInteractionPostParts(
@@ -309,21 +310,7 @@ export function renderInteractionPostParts(
   route?: SlackHitlRoute,
 ): SlackInteractionCardParts {
   const blocks = renderInteractionBlocks(request, route);
-  const text = isApprovalRequest(request)
-    ? escapeSlackText(request.request.prompt)
-    : formatInteractionFallbackText(request);
-  return { controls: { blocks, text } };
-}
-
-/**
- * Creates the fallback text for one HITL request. Slack clients use this
- * outside the rich Block Kit surface, so include the same approval details
- * that appear in the blocks.
- */
-export function formatInteractionFallbackText(request: Interaction): string {
-  const prompt = escapeSlackText(request.request.prompt);
-  const details = formatToolInputDetails(request);
-  return details === undefined ? prompt : `${prompt}\n${details}`;
+  return { controls: { blocks, text: escapeSlackText(request.request.prompt) } };
 }
 
 /**
@@ -463,12 +450,14 @@ function renderApprovalContainerBlock(
     ...buttons.filter((button) => button.style === "primary"),
     ...buttons.filter((button) => button.style !== "primary"),
   ];
+  const prompt = request.request.prompt.replace(/\s+/gu, " ").trim();
   return {
     type: "container",
-    // `plain_text` renders literally, so the prompt needs no Slack escaping here.
+    // `plain_text` renders literally, so the prompt needs no Slack escaping here. Slack refuses an
+    // empty title, so a blank prompt shows the tool's name.
     title: {
       type: "plain_text",
-      text: truncateContainerTitle(request.request.prompt.replace(/\s+/gu, " ").trim()),
+      text: truncateContainerTitle(prompt || (request.call?.name ?? "Approve?")),
     },
     subtitle: { type: "mrkdwn", text: APPROVAL_PAUSED_TEXT },
     has_header_divider: true,
@@ -572,15 +561,16 @@ function renderToolInputPreviewBlock(request: Interaction): BlockKitBlock | unde
   let budget = TOOL_INPUT_PREVIEW_MAX_LENGTH;
   let shown = 0;
   for (const [name, value] of entries) {
-    if (budget <= name.length + "...".length) break;
+    // Each field also adds a few rich text elements, so the field count is capped too.
+    if (shown === TOOL_INPUT_PREVIEW_MAX_FIELDS || budget <= name.length + "...".length) break;
     budget -= name.length;
-    // Slack refuses an empty rich text element, so an empty string shows as `""`.
+    // Slack refuses an empty rich text element, so an empty name or string shows as `""`.
     const isText = typeof value === "string" && value.length > 0;
     const raw = isText ? value : JSON.stringify(value);
     const text = truncateWithEllipsis(raw, Math.min(TOOL_INPUT_VALUE_MAX_LENGTH, budget));
     budget -= text.length;
     if (shown > 0) lines.push(plainText("\n"));
-    lines.push({ ...plainText(name), style: { bold: true } }, plainText("  "));
+    lines.push({ ...plainText(name || '""'), style: { bold: true } }, plainText("  "));
     lines.push(isText ? plainText(text) : { ...plainText(text), style: { code: true } });
     shown += 1;
   }

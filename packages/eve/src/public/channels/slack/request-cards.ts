@@ -58,8 +58,17 @@ type RequestCardContext = ChannelEventContext<SlackEventContext>;
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 /**
+ * Slack echoes the whole controls message on every click (#1909). A request's controls beyond a
+ * compact card's size, such as an approval's input preview, count toward a per-message budget, so
+ * a batch of large approvals splits across messages instead of growing one echo.
+ */
+const COMPACT_CARD_BYTES = 1000;
+const CONTROLS_MESSAGE_EXTRA_BYTES = 2000;
+
+/**
  * Posts a commit's requests: each `approvalChannel` sends to the thread joins one batch, details
- * first, then controls, grouped under Slack's 50-block cap; each sent to a DM posts there alone.
+ * first, then controls, grouped under Slack's 50-block cap and, for controls, a size budget; each
+ * sent to a DM posts there alone.
  */
 export async function postRequestCards(
   batch: RequestBatch,
@@ -145,7 +154,8 @@ async function postGroups(
     const ts = await post(joinParts(parts));
     if (ts) posted(parts, ts);
   };
-  for (const group of groupParts(entries, (entry) => entry.parts[kind])) {
+  const extraBytes = kind === "controls" ? CONTROLS_MESSAGE_EXTRA_BYTES : Infinity;
+  for (const group of groupParts(entries, (entry) => entry.parts[kind], extraBytes)) {
     try {
       await send(group);
     } catch (error) {
@@ -155,7 +165,9 @@ async function postGroups(
       const unchanged = members.every((entry) => sameJson(entry.parts[kind], entry.fallback[kind]));
       if (refusedPayloadError(error) === undefined || unchanged) throw error;
       logError(log, "Slack refused rendered input requests; posting eve's defaults", error);
-      for (const retry of groupParts(members, (entry) => entry.fallback[kind])) await send(retry);
+      for (const retry of groupParts(members, (entry) => entry.fallback[kind], extraBytes)) {
+        await send(retry);
+      }
     }
   }
 }
@@ -163,19 +175,28 @@ async function postGroups(
 function groupParts(
   entries: readonly CardEntry[],
   messageOf: (entry: CardEntry) => SlackCardMessage | undefined,
+  extraBytes: number,
 ): CardPart[][] {
   const groups: CardPart[][] = [];
   let blocks = 0;
+  let extra = 0;
   for (const entry of entries) {
     const message = messageOf(entry);
     if (message === undefined) continue;
+    const excess = Math.max(0, JSON.stringify(message.blocks).length - COMPACT_CARD_BYTES);
     const current = groups.at(-1);
-    if (current && blocks + message.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
+    if (
+      current &&
+      blocks + message.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE &&
+      extra + excess <= extraBytes
+    ) {
       current.push({ interactionId: entry.interactionId, message });
       blocks += message.blocks.length;
+      extra += excess;
     } else {
       groups.push([{ interactionId: entry.interactionId, message }]);
       blocks = message.blocks.length;
+      extra = excess;
     }
   }
   return groups;

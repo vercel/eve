@@ -360,6 +360,22 @@ describe("Slack input request cards", () => {
     expect(eveActionIds(controls?.body)).toHaveLength(4);
   });
 
+  it("splits a batch of large-input approvals so no echoed controls message grows with the batch", async () => {
+    const { ask, blocksOf, calls } = harness();
+    const large = { plan: "y".repeat(5000), script: "y".repeat(5000), notes: "y".repeat(5000) };
+
+    await ask(
+      approval("a_one", "deploy", large),
+      approval("a_two", "deploy", large),
+      approval("a_three", "deploy", large),
+    );
+
+    const posts = calls("thread.post");
+    expect(posts).toHaveLength(3);
+    for (const post of posts) expect(JSON.stringify(blocksOf(post)).length).toBeLessThan(4000);
+    expect(eveActionIds(posts.map((post) => post.body))).toHaveLength(6);
+  });
+
   it("posts relabeled controls nested in a renderer's blocks, and they decode to the request", async () => {
     const nested = defineSlackRenderer({
       interactionCard(card, next) {
