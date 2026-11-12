@@ -8,6 +8,7 @@ import {
   type SlackEventContext,
   type SlackRenderer,
 } from "eve/channels/slack";
+import { call as callOf } from "eve/events";
 
 import { CARD_TOOL, cardSpecSchema, SLACK_CARD_LIMITS } from "./card-spec";
 
@@ -26,6 +27,8 @@ const asSlackCard = (card: CardElement) => card as SlackCard;
 /** The Slack message a card call posted, kept in channel state so a later step can edit it. */
 interface PostedCard {
   readonly ts: string;
+  /** The model run that wrote the call, to find a card whose call it never finished. */
+  readonly runId?: string;
   /** Serialized blocks last sent, to skip edits that change nothing. */
   readonly sent: string;
 }
@@ -38,13 +41,18 @@ interface CardState {
 interface StreamingCall {
   text: string;
   lastUpdateMs: number;
+  readonly runId?: string;
 }
 
 /**
  * A Slack renderer that shows each `card` tool call as a native Block Kit message: posted as soon
  * as the model has written the card's root, edited as elements stream in, and replaced with the
  * validated card once the call's input is complete. A call that fails validation removes its
- * partial message, so only the model's corrected retry stays in the thread.
+ * partial message, so only the model's corrected retry stays in the thread, and so does a call the
+ * model stopped writing, such as at its output limit.
+ *
+ * Each handler runs `next()` even when its own Slack call fails, so eve's defaults still see the
+ * event.
  */
 export function slackCardRenderer(options: SlackCardRendererOptions = {}): SlackRenderer {
   const interval = options.updateIntervalMs ?? 500;
@@ -59,7 +67,7 @@ export function slackCardRenderer(options: SlackCardRendererOptions = {}): Slack
         if (call === undefined) {
           // Only the announcing record carries the name.
           if (name !== CARD_TOOL) return next();
-          call = { text: "", lastUpdateMs: 0 };
+          call = { text: "", lastUpdateMs: 0, runId: event.scope?.runId };
           streaming.set(callId, call);
         }
         call.text += delta;
@@ -69,35 +77,67 @@ export function slackCardRenderer(options: SlackCardRendererOptions = {}): Slack
         const { value } = await parsePartialJson(call.text);
         if (value === undefined || value === null || typeof value !== "object") return;
         const partial = safely(() => toPartialCard(value as Partial<Spec>));
-        if (partial && hasContent(partial)) await show(ctx.channel, callId, partial);
+        if (partial && hasContent(partial)) await show(ctx.channel, callId, partial, call.runId);
       },
 
       async "call.requested"(event, ctx, next) {
         const { callId, capability, input } = event.data;
         if (capability.name !== CARD_TOOL) return next();
         streaming.delete(callId);
-        // An invalid spec keeps its partial message until the call fails and removes it.
-        const spec = cardSpecSchema.safeParse(input);
-        const card = spec.success ? safely(() => toCard(spec.data, { limits })) : null;
-        if (card) await show(ctx.channel, callId, card);
-        return next();
+        try {
+          // An invalid spec keeps its partial message until the call fails and removes it.
+          const spec = cardSpecSchema.safeParse(input);
+          const card = spec.success ? safely(() => toCard(spec.data, { limits })) : null;
+          if (card) await show(ctx.channel, callId, card, event.scope?.runId);
+        } finally {
+          await next();
+        }
       },
 
       async "call.settled"(event, ctx, next) {
         const { callId, outcome } = event.data;
         const cards = stateOf(ctx.channel).jsonRenderCards;
         const posted = cards?.[callId];
-        if (posted !== undefined) {
-          delete cards![callId];
-          if (outcome !== "completed") await remove(ctx.channel, posted.ts);
+        try {
+          if (posted !== undefined) {
+            delete cards![callId];
+            if (outcome !== "completed") await remove(ctx.channel, posted.ts);
+          }
+        } finally {
+          await next();
         }
-        return next();
+      },
+
+      // A call the model stopped writing never reaches `call.requested`, so it never settles.
+      // Once its run settles, drop the partial card like eve drops the call's preview.
+      async "model.settled"(event, ctx, next) {
+        const { runId } = event.data;
+        const unrequested = (callId: string, callRunId: string | undefined) =>
+          callRunId === runId && callOf(ctx.view, callId) === undefined;
+        try {
+          for (const [callId, call] of streaming) {
+            if (unrequested(callId, call.runId)) streaming.delete(callId);
+          }
+          const cards = stateOf(ctx.channel).jsonRenderCards ?? {};
+          for (const [callId, posted] of Object.entries(cards)) {
+            if (!unrequested(callId, posted.runId)) continue;
+            delete cards[callId];
+            await remove(ctx.channel, posted.ts);
+          }
+        } finally {
+          await next();
+        }
       },
     },
   });
 }
 
-async function show(channel: SlackEventContext, callId: string, card: CardElement): Promise<void> {
+async function show(
+  channel: SlackEventContext,
+  callId: string,
+  card: CardElement,
+  runId: string | undefined,
+): Promise<void> {
   const state = stateOf(channel);
   const blocks = cardToBlocks(asSlackCard(card));
   const sent = JSON.stringify(blocks);
@@ -106,7 +146,7 @@ async function show(channel: SlackEventContext, callId: string, card: CardElemen
   if (posted === undefined) {
     const message = await channel.thread.post(asSlackCard(card));
     if (!message.id) return;
-    state.jsonRenderCards = { ...state.jsonRenderCards, [callId]: { ts: message.id, sent } };
+    state.jsonRenderCards = { ...state.jsonRenderCards, [callId]: { ts: message.id, runId, sent } };
     return;
   }
   const response = await channel.slack.request("chat.update", {
@@ -116,7 +156,7 @@ async function show(channel: SlackEventContext, callId: string, card: CardElemen
     text: cardToFallbackText(asSlackCard(card)),
   });
   if (response.ok === true) {
-    state.jsonRenderCards = { ...state.jsonRenderCards, [callId]: { ts: posted.ts, sent } };
+    state.jsonRenderCards = { ...state.jsonRenderCards, [callId]: { ...posted, sent } };
   }
 }
 

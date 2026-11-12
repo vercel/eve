@@ -1841,23 +1841,23 @@ importers:
         specifier: 0.22.0
         version: 0.22.0(zod@4.6.7)
       ai:
-        specifier: 'catalog:'
+        specifier: ^7.0.137
         version: 7.0.137(zod@4.6.7)
       eve:
         specifier: workspace:*
         version: link:../../packages/eve
       zod:
-        specifier: 'catalog:'
+        specifier: 4.6.7
         version: 4.6.7
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: 26.6.5
         version: 26.6.5
       chat:
         specifier: 4.42.0
         version: 4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
       typescript:
-        specifier: 'catalog:'
+        specifier: 7.0.2
         version: 7.0.2
 
   packages/eve:
