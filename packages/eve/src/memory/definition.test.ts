@@ -17,8 +17,12 @@ import {
   resolveMemoryScope,
 } from "./definition.js";
 
-const recalled = (turnId: string, overrides: { cleared?: number; scope?: string } = {}) => ({
+const recalled = (
+  turnId: string,
+  overrides: { cleared?: number; compaction?: number; scope?: string } = {},
+) => ({
   cleared: overrides.cleared ?? null,
+  ...(overrides.compaction !== undefined && { compaction: overrides.compaction }),
   result: null,
   scope: overrides.scope ?? "alice",
   turnId,
@@ -63,6 +67,39 @@ describe("accumulate", () => {
     const again = accumulate(first as never, recalled("turn_0"), [{ content: "Once." }]);
 
     expect(again.batches).toEqual([{ messages: [{ content: "Once." }], turnId: "turn_0" }]);
+  });
+
+  it("joins a recall after a compaction to its turn's, replacing by id, once per compaction", () => {
+    const started = accumulate(null, recalled("turn_0"), [
+      { content: "Prefers Spanish.", itemKey: "language" },
+      { content: "Index: a large block.", itemKey: "index" },
+    ]);
+    const compacted = [
+      { content: "The window is archived." },
+      { content: "Index: one line.", itemKey: "index" },
+    ];
+    const joined = accumulate(started as never, recalled("turn_0", { compaction: 9 }), compacted);
+    const again = accumulate(joined as never, recalled("turn_0", { compaction: 9 }), compacted);
+
+    const expected = [
+      {
+        messages: [
+          { content: "Prefers Spanish.", id: "language" },
+          { content: "The window is archived." },
+          { content: "Index: one line.", id: "index" },
+        ],
+        turnId: "turn_0",
+      },
+    ];
+    expect(joined.batches).toEqual(expected);
+    expect(again.batches).toEqual(expected);
+    // The next compaction's recall joins too.
+    const next = accumulate(again as never, recalled("turn_0", { compaction: 15 }), [
+      { content: "The second window is archived." },
+    ]);
+    expect(next.batches[0]!.messages.at(-1)).toEqual({
+      content: "The second window is archived.",
+    });
   });
 
   it("starts over after a clear or under another scope", () => {

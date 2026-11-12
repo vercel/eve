@@ -6,6 +6,7 @@ import type { FactOf } from "#protocol/session-events/facts.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
+import type { ContextReader } from "#context/key.js";
 import type { SessionFrame } from "#dynamic/definition.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf, latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
@@ -61,7 +62,9 @@ export function bindMemoryInstrumentation(
  * brings back joins what earlier turns' recalls brought, which the slot keeps: each model call
  * reads every turn's recall just ahead of that turn's input, where earlier calls read it, so the
  * prompt ahead of it stays cached. A message with an `id` replaces the one with that `id` an
- * earlier turn recalled. A clear or a new scope starts over. Capture runs after the commit that
+ * earlier turn recalled. A clear or a new scope starts over. A provider with a
+ * `"compaction.completed"` recall recalls again after each compaction inside a turn, and what that
+ * brings joins the turn's recall. Capture runs after the commit that
  * completes a turn, and before a compaction rewrites the history it captures: a failure there
  * fails the compaction. The provider's tools are {@link memoryToolsDefinition}'s.
  */
@@ -75,9 +78,14 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
           const turn = latest["turn.started"] ?? null;
           if (turn === null) return null;
           const cleared = latest["context.settled:clear"] ?? null;
+          const compaction = compactionInTurn(memory, latest, turn, cleared);
+          const principal = principalOf(evaluation);
+          // Without a compaction to recall after, the memo key is the one a turn always had.
           const recalled = await evaluation.memo(
-            { cleared, principal: principalOf(evaluation), turn },
-            () => recallOnce(memory, evaluation, cleared),
+            compaction === undefined
+              ? { cleared, principal, turn }
+              : { cleared, compaction, principal, turn },
+            () => recallOnce(memory, evaluation, cleared, compaction),
           );
           if (recalled === null) return null;
           const messages = validateMemoryRecallResult(recalled.result as never, memory.slot);
@@ -156,36 +164,69 @@ async function captureTurn(
   }
 }
 
-/** One turn's recall: what the provider brought back, under the scope it recalled in. */
+/**
+ * The line of the latest compaction that completed inside the turn, when the provider recalls
+ * after one: a compaction between turns, or one a later clear undid, recalls nothing.
+ */
+function compactionInTurn(
+  memory: ResolvedMemoryDefinition,
+  latest: Readonly<Record<string, number>>,
+  turn: number,
+  cleared: number | null,
+): number | undefined {
+  if (memory.provider.recall["compaction.completed"] === undefined) return undefined;
+  const compaction = latest["context.settled:compaction:completed"];
+  if (compaction === undefined || compaction < turn || compaction < (cleared ?? 0)) {
+    return undefined;
+  }
+  return compaction;
+}
+
+/**
+ * One turn's recall, or the recall after the compaction on line `compaction`: what the provider
+ * brought back, under the scope it recalled in.
+ */
 async function recallOnce(
   memory: ResolvedMemoryDefinition,
   ctx: InternalContext,
   cleared: number | null,
+  compaction?: number,
 ): Promise<RecallRecord | null> {
   const messages = requireHistory(ctx.history, memory.logicalPath);
   const turnContext = activeTurn(messages);
   const scope = await resolveMemoryScope(memory, ctx);
   if (scope === null) return null;
-  const operation = operationId(ctx.session.id, memory.slot, "turn.started", turnContext);
+  const phase = compaction === undefined ? "turn.started" : "compaction.completed";
+  const operation = [
+    operationId(ctx.session.id, memory.slot, phase, turnContext),
+    ...(compaction === undefined ? [] : [String(compaction)]),
+  ].join(":");
   const result = await instrumentMemoryOperation(
     instrumentations.get(ctx.ctx),
     {
       idempotencyKey: operation,
       operationName: "search_memory",
-      phase: "turn.started",
+      phase,
       slot: memory.slot,
       storeId: scope.key,
       turnId: turnContext.id,
     },
     async () => {
-      const result = await memory.provider.recall["turn.started"]({
+      const context = {
         ...buildCallbackContext(),
         abortSignal: ctx.abortSignal,
         memory: { scope, slot: memory.slot },
         messages,
         operationId: operation,
         turn: turnContext,
-      });
+      };
+      const result =
+        compaction === undefined
+          ? await memory.provider.recall["turn.started"](context)
+          : await memory.provider.recall["compaction.completed"]!({
+              ...context,
+              compaction: { modelId: compactionModelId(ctx.ctx) },
+            });
       const records: InstrumentationMemoryRecord[] = (result?.messages ?? []).map((message) =>
         message.id === undefined
           ? { content: message.content }
@@ -196,10 +237,20 @@ async function recallOnce(
   );
   return {
     cleared,
+    ...(compaction !== undefined && { compaction }),
     result: (result ?? null) as RecallRecord["result"],
     scope: scope.key,
     turnId: turnContext.id,
   };
+}
+
+/** The model that writes the agent's compaction summaries. */
+function compactionModelId(container: Pick<ContextReader, "get">): string {
+  return (
+    container.get(BundleKey)?.turnAgent.compactionModel?.id ??
+    effectiveModelId(container) ??
+    "unknown"
+  );
 }
 
 /** What resolving a memory scope reads, after a commit. */
@@ -252,10 +303,7 @@ async function captureBeforeCompaction(
           ...buildCallbackContext(),
           abortSignal: ctx.signal,
           compaction: {
-            modelId:
-              container.get(BundleKey)?.turnAgent.compactionModel?.id ??
-              effectiveModelId(container) ??
-              "unknown",
+            modelId: compactionModelId(container),
             usageInputTokens: started.data.trigger?.inputTokens ?? null,
           },
           memory: { scope, slot: memory.slot },
@@ -279,6 +327,8 @@ async function captureBeforeCompaction(
 interface RecallRecord {
   /** The latest clear when it recalled: a clear starts over. */
   readonly cleared: number | null;
+  /** The compaction it recalled after, which joins the turn's recall instead of replacing it. */
+  readonly compaction?: number;
   readonly result: unknown;
   /** The scope it recalled under: another scope starts over. */
   readonly scope: string;
@@ -300,12 +350,15 @@ interface Recalls {
   readonly cleared: number | null;
   readonly scope: string;
   readonly batches: readonly RecallBatch[];
+  /** The latest compaction whose recall has joined its turn's. */
+  readonly compaction?: number;
 }
 
 /**
  * Joins a turn's recall to what earlier turns' recalls brought. A message with an `id` an earlier
  * turn recalled replaces it, unless its content is the same; a recall for a turn that already has
- * one, as on a new deployment, replaces that turn's.
+ * one, as on a new deployment, replaces that turn's. A recall after a compaction joins its turn's
+ * instead, once.
  */
 export function accumulate(
   previous: JsonValue,
@@ -313,12 +366,17 @@ export function accumulate(
   messages: readonly NormalizedMemoryRecallMessage[],
 ): Recalls {
   const earlier = previous as Recalls | null;
-  const kept =
+  const continues =
     earlier?.batches !== undefined &&
     earlier.cleared === recalled.cleared &&
-    earlier.scope === recalled.scope
-      ? earlier.batches.filter(({ turnId }) => turnId !== recalled.turnId)
-      : [];
+    earlier.scope === recalled.scope;
+  const joins = recalled.compaction !== undefined;
+  if (continues && joins && earlier.compaction === recalled.compaction) return earlier;
+  const kept = !continues
+    ? []
+    : joins
+      ? earlier.batches
+      : earlier.batches.filter(({ turnId }) => turnId !== recalled.turnId);
   const live = new Map<string, string>();
   for (const batch of kept) {
     for (const message of batch.messages) {
@@ -337,8 +395,18 @@ export function accumulate(
       messages: batch.messages.filter(({ id }) => id === undefined || !replaced.has(id)),
     }))
     .filter(({ messages }) => messages.length > 0);
-  if (added.length > 0) batches.push({ messages: added, turnId: recalled.turnId });
-  return { batches, cleared: recalled.cleared, scope: recalled.scope };
+  const own = joins ? batches.findIndex(({ turnId }) => turnId === recalled.turnId) : -1;
+  if (own !== -1) {
+    batches[own] = { ...batches[own]!, messages: [...batches[own]!.messages, ...added] };
+  } else if (added.length > 0) {
+    batches.push({ messages: added, turnId: recalled.turnId });
+  }
+  return {
+    batches,
+    cleared: recalled.cleared,
+    ...(joins && { compaction: recalled.compaction }),
+    scope: recalled.scope,
+  };
 }
 
 /** What resolving a memory slot's scope reads. */

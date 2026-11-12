@@ -95,6 +95,14 @@ export interface MemoryCompactionRequestedContext extends MemoryOperationContext
   };
 }
 
+export interface MemoryCompactionCompletedContext extends MemoryOperationContext {
+  /** The turn the compaction ran in. */
+  readonly turn: MemoryTurnContext;
+  readonly compaction: {
+    readonly modelId: string;
+  };
+}
+
 export type MemoryRecallHandler<TContext extends MemoryOperationContext> = (
   context: TContext,
 ) => MemoryRecallResult | Promise<MemoryRecallResult>;
@@ -122,6 +130,14 @@ export type MemoryToolSet = Readonly<Record<string, ToolDefinition<any, any>>>;
 export interface MemoryProvider {
   readonly recall: {
     readonly "turn.started": MemoryRecallHandler<MemoryTurnStartedContext>;
+    /**
+     * Runs after a compaction inside a turn completes, before the turn's next model call, with
+     * the compacted conversation. What it returns joins the turn's recall: a message with an
+     * `id` replaces the one recalled earlier with that `id`, and one without is added. When it
+     * throws, the turn fails before that model call. A compaction between turns doesn't run it;
+     * the next turn's `"turn.started"` recall stands in.
+     */
+    readonly "compaction.completed"?: MemoryRecallHandler<MemoryCompactionCompletedContext>;
   };
   readonly capture?: {
     /**

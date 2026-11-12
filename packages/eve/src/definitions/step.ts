@@ -77,6 +77,22 @@ export async function evaluateStepValues(step: StepSource, run: ValueRun): Promi
   await draft.announcements();
 }
 
+/**
+ * After a compaction inside a step: evaluates the context definitions keep, such as a memory's
+ * recall, with the compacted conversation the step's next call reads.
+ */
+export async function evaluateStepContext(step: StepSource, run: ValueRun): Promise<void> {
+  const container = step.ctx as ContextContainer;
+  const definitions = await sessionDefinitions(container);
+  const contributions = contributionsOf(
+    definitions,
+    container,
+    { history: run.conversation, signal: run.abortSignal, step: stepInfo(step) },
+    "evaluate",
+  );
+  await draftOf(contributions).context();
+}
+
 /** The model the step's call runs, as its definitions last chose it. */
 export async function stepModel(step: StepSource): Promise<ModelChoice | undefined> {
   const container = step.ctx as ContextContainer;

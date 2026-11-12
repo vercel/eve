@@ -23,7 +23,7 @@ import { historyCallNames, toEntryStep, toEntryStream } from "#harness/execute-c
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
-import type { HarnessModelMessage } from "#harness/messages.js";
+import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
@@ -53,7 +53,7 @@ import {
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
-import { stepReference } from "#harness/step/context.js";
+import { failTurnForValue, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
@@ -65,7 +65,8 @@ import {
   recoverModelCall,
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
-import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
+import { evaluateStepContext, stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
+import { DefinitionFailedError } from "#definitions/kernel.js";
 import { modelInstructions, type RequestMessages, withTrailingUserNote } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
@@ -218,10 +219,11 @@ export class ModelCaller {
 
   /**
    * A failed compaction fails the step, whatever recovery the call attempted.
-   * One that left the history over the limit ends the session with its message;
-   * any other failure is reported like a failed model call, since its summary
-   * call already retried. Rethrowing would make the workflow replay the step and
-   * then end the session.
+   * One that left the history over the limit ends the session with its message,
+   * and a recall after it that failed fails the turn, as a recall before the
+   * call would; any other failure is reported like a failed model call, since
+   * its summary call already retried. Rethrowing would make the workflow replay
+   * the step and then end the session.
    */
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;
@@ -229,6 +231,7 @@ export class ModelCaller {
     if (error instanceof CompactionOverLimitError) {
       return reportCompactionFailure(this.step, error);
     }
+    if (error instanceof DefinitionFailedError) return failTurnForValue(this.step, error);
     return reportModelCallFailure(this.step, error);
   }
 
@@ -337,6 +340,16 @@ export class ModelCaller {
     }
     if (compacted === undefined) return tools;
     compactPrompt(step, prompt, compacted);
+    try {
+      // A memory that recalls after a compaction reads the compacted conversation.
+      await evaluateStepContext(step, {
+        abortSignal: step.config.abortSignal,
+        conversation: validateHarnessModelMessages(withClientContext(prompt)),
+      });
+    } catch (error) {
+      this.compactionFailure = { error };
+      throw error;
+    }
     // This request announces again what the compaction dropped. A step that continues from tool
     // results has no input of its own, so the announcement goes before the turn's input, not after
     // those results where the model reads it as the newest message.

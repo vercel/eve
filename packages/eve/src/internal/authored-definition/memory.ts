@@ -39,9 +39,21 @@ export function normalizeMemoryDefinition(value: unknown, message: string): Memo
     provider.recall,
     `${message} "provider.recall" must be an object.`,
   );
-  expectOnlyKnownKeys(recall, ["turn.started"], `${message} "provider.recall"`);
+  expectOnlyKnownKeys(
+    recall,
+    ["compaction.completed", "turn.started"],
+    `${message} "provider.recall"`,
+  );
   if (typeof recall["turn.started"] !== "function") {
     throw new Error(`${message} provider.recall["turn.started"] must be a function.`);
+  }
+  if (
+    recall["compaction.completed"] !== undefined &&
+    typeof recall["compaction.completed"] !== "function"
+  ) {
+    throw new Error(
+      `${message} provider.recall["compaction.completed"] must be a function when provided.`,
+    );
   }
   if (provider.capture !== undefined) {
     const capture = expectObjectRecord(

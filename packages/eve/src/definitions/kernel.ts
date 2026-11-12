@@ -502,8 +502,11 @@ function withLatest(state: DefinitionsState, written: readonly WrittenEvent[]): 
     latest["*"] = position.line;
     at = event.meta?.at ?? at;
     if (event.type === "context.started" || event.type === "context.settled") {
-      latest[`${event.type}:${(event.data as { readonly kind?: string }).kind ?? ""}`] =
-        position.line;
+      const data = event.data as { readonly kind?: string; readonly outcome?: string };
+      latest[`${event.type}:${data.kind ?? ""}`] = position.line;
+      if (data.outcome === "completed") {
+        latest[`${event.type}:${data.kind ?? ""}:completed`] = position.line;
+      }
     }
   }
   return { ...state, latest, ...(at !== undefined && { at }) };

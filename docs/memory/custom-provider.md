@@ -76,11 +76,11 @@ prepended to its description.
 `defineMemoryProvider()` accepts three surfaces. Omit any optional handler the
 provider doesn't need; `fileMemory()`, for example, has no capture.
 
-| Surface   | Handlers                                     | Responsibility                                        |
-| --------- | -------------------------------------------- | ----------------------------------------------------- |
-| `recall`  | `"turn.started"` (required)                  | Return messages to place in model context             |
-| `capture` | `"turn.completed"`, `"compaction.requested"` | Read the finished conversation and write to the store |
-| `tools`   | one function                                 | Return tools for the model, bound to the slot's scope |
+| Surface   | Handlers                                              | Responsibility                                        |
+| --------- | ----------------------------------------------------- | ----------------------------------------------------- |
+| `recall`  | `"turn.started"` (required), `"compaction.completed"` | Return messages to place in model context             |
+| `capture` | `"turn.completed"`, `"compaction.requested"`          | Read the finished conversation and write to the store |
+| `tools`   | one function                                          | Return tools for the model, bound to the slot's scope |
 
 ### Operation context
 
@@ -105,6 +105,8 @@ Phase-specific fields:
   `compaction.usageInputTokens`, the input tokens that crossed the threshold or
   `null` for a requested compaction. Its `turn` is the turn the compaction runs
   in, or `null` for a compaction between turns.
+- `compaction.completed` adds `compaction.modelId` and the `turn` the
+  compaction ran in. Its `messages` are the compacted conversation.
 
 `tools()` receives a `MemoryToolsContext` with the same `memory` field, the
 session and channel, and an `abortSignal`.
@@ -163,6 +165,7 @@ same scope.
 | `turn.started`         | `recall["turn.started"]`          | The conversation the turn's first model call reads, with the turn's new input |
 | `turn.completed`       | `capture["turn.completed"]`       | The finished history after a successful turn                                  |
 | `compaction.requested` | `capture["compaction.requested"]` | The history compaction is about to rewrite                                    |
+| `compaction.completed` | `recall["compaction.completed"]`  | The conversation as compacted, before the turn's next model call              |
 
 eve recalls before the first model call of each turn, and again when the
 session's caller changes. Recalled messages stay outside history, so
@@ -171,6 +174,35 @@ turn's recalled messages move to just after the summary.
 
 Before compaction rewrites history, eve calls `capture["compaction.requested"]`
 and waits for it, so a provider can keep detail the summary will lose.
+
+A long turn can compact several times. To tell the model something after a
+compaction in the same turn, such as where the window it lost was archived,
+define `recall["compaction.completed"]`. eve calls it once after each
+compaction that completes inside a turn, before the turn's next model call. What
+it returns joins the turn's recall, with the same `id` rules as a later turn's
+recall: a message with an `id` replaces the one recalled earlier with that `id`,
+and one without is added.
+
+```ts
+recall: {
+  "turn.started": async ({ memory }) => ({
+    messages: [{ id: "index", content: await loadIndex(memory.scope.key) }],
+  }),
+  "compaction.completed": async ({ memory, operationId }) => {
+    await archive.flush(memory.scope.key, operationId);
+    return {
+      messages: [
+        { content: "The earlier part of this task is archived. Search it with notes__search." },
+        { id: "index", content: await loadIndexSummary(memory.scope.key) },
+      ],
+    };
+  },
+},
+```
+
+A compaction between turns, such as one `compact()` requests, doesn't call it;
+the next turn's `recall["turn.started"]` stands in. A failed compaction doesn't
+call it either. A provider without the handler recalls once per turn.
 
 Calling `clear()` on a session removes its history and recalled messages but
 not the provider's store, so the next turn recalls again. A new scope, such as
@@ -183,6 +215,8 @@ another caller's, also starts over.
   `abortSignal` is already aborted, eve treats the error as cancellation and
   continues with any queued follow-up. An `AbortError` with an active
   signal still fails the turn.
+- A throwing or invalid `recall["compaction.completed"]` fails the turn after
+  the compaction, before the turn's next model call.
 - A throwing or invalid `tools()` result fails the turn before the model call,
   like any other [dynamic tool](../guides/dynamic-capabilities#errors-and-recovery).
 - A throwing `capture["turn.completed"]` is logged after the response and does

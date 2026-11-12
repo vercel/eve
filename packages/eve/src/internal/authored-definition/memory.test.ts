@@ -12,6 +12,7 @@ function validDefinition() {
         "turn.completed": async () => {},
       },
       recall: {
+        "compaction.completed": async () => null,
         "turn.started": async () => null,
       },
       tools: async () => null,
@@ -63,6 +64,21 @@ describe("normalizeMemoryDefinition", () => {
 
     expect(() => normalizeMemoryDefinition(invalid, message)).toThrow(
       /provider\.capture\["turn\.completed"\].*must be a function/,
+    );
+  });
+
+  it("rejects a non-function recall after compaction", () => {
+    const definition = validDefinition();
+    const invalid = {
+      ...definition,
+      provider: {
+        ...definition.provider,
+        recall: { ...definition.provider.recall, "compaction.completed": "later" },
+      },
+    };
+
+    expect(() => normalizeMemoryDefinition(invalid, message)).toThrow(
+      /provider\.recall\["compaction\.completed"\].*must be a function/,
     );
   });
 });

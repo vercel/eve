@@ -189,6 +189,14 @@ export async function failTurnForEffect(step: Step): Promise<StepResult | undefi
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }
 
+/** A dynamic value failed after the turn's prompt was prepared: the turn fails. */
+export async function failTurnForValue(
+  step: Step,
+  error: DefinitionFailedError,
+): Promise<StepResult> {
+  return await failTurn(step, error, "REACTION_FAILED");
+}
+
 /** The turn fails with `error`; the session waits for its next message. */
 async function failTurn(step: Step, error: unknown, code: string): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);

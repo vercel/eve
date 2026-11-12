@@ -1,6 +1,7 @@
 [
   "DefinedMemory",
   "MemoryCaptureHandler",
+  "MemoryCompactionCompletedContext",
   "MemoryCompactionRequestedContext",
   "MemoryDefinition",
   "MemoryNamespaceContext",
