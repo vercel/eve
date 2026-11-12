@@ -101,6 +101,7 @@
     "braintrust": "3.29.0",
     "chat": "4.42.0",
     "chat-adapter-sendblue": "0.2.0",
+    "claude-mem": "15.18.1",
     "eve": "workspace:*",
     "eve-channel-blooio": "0.2.0",
     "mdast-util-mdx-jsx": "3.2.0",

@@ -60,6 +60,27 @@ export const HITL_FREEFORM_MODAL_BLOCK_ID = "eve_freeform_block";
  */
 export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
 
+/** `block_id` of a select's actions block whose **Use** button submits the preselected option. */
+const USE_BLOCK_PREFIX = "eve_use:";
+const USE_LABEL_PREFIX = "Use ";
+
+/**
+ * The answer a click gave, as the person saw it: the picked option, or for the **Use** button,
+ * the preselected option it submits rather than the button's own text.
+ */
+export function answerLabelOf(action: {
+  readonly blockId?: string;
+  readonly label?: string;
+  readonly selectedOptionValue?: string;
+}): string | undefined {
+  const { blockId, label, selectedOptionValue } = action;
+  const isUseButton =
+    selectedOptionValue === undefined && blockId?.startsWith(USE_BLOCK_PREFIX) === true;
+  return isUseButton && label?.startsWith(USE_LABEL_PREFIX)
+    ? label.slice(USE_LABEL_PREFIX.length)
+    : label;
+}
+
 const HITL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}route:`;
 const HITL_CODE_CHANNEL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}code:`;
 
@@ -252,11 +273,19 @@ export function renderInteractionBlocks(
     widget.initial_option = buildOption(initial);
     // Slack sends no action when the person keeps the preselected option, so a button submits it.
     const use = buildCardButton(
-      { id: initial.id, label: `Use ${initial.label}`, style: "primary" },
+      { id: initial.id, label: `${USE_LABEL_PREFIX}${initial.label}`, style: "primary" },
       actionId,
       0,
     );
-    return [prompt, ...details, { type: "actions", elements: [widget, use] }];
+    return [
+      prompt,
+      ...details,
+      {
+        type: "actions",
+        block_id: `${USE_BLOCK_PREFIX}${request.interactionId}`,
+        elements: [widget, use],
+      },
+    ];
   }
 
   if (options && options.length > 0) {
@@ -344,6 +373,8 @@ export type HitlFreeformModalMetadata = SlackSessionTarget & {
   readonly messageChannelId?: string;
   readonly messageTs: string;
   readonly requestId: string;
+  /** The click's `response_url`, when the card is ephemeral and only it can replace the card. */
+  readonly responseUrl?: string;
 };
 
 /**

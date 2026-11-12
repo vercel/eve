@@ -239,13 +239,13 @@ This adds the `users:read` scope, plus `users:read.email` with `email: true`, so
 
 By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
 
-To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
+To show a request only to the person who started the turn, return `"ephemeral"` from `approvalChannel` to keep it in the thread, or `"direct-message"` to send it to their DM:
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
-  approvalChannel: (request) => (request.request.kind === "question" ? "direct-message" : "thread"),
+  approvalChannel: (request) => (request.request.kind === "question" ? "ephemeral" : "thread"),
 });
 ```
 

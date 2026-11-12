@@ -80,9 +80,9 @@ export function endingOf(interaction: Interaction): {
 }
 
 /**
- * How a direct-message request's note in the shared thread reads once the request settles. The
- * answer stays in the DM: the note names an approval's decision, but for any other request only
- * that it was answered.
+ * How a private request's note in the shared thread reads once the request settles. The answer
+ * stays private: the note names an approval's decision, but for any other request only that it
+ * was answered.
  */
 export function threadNoteEndingOf(interaction: Interaction): string {
   const { answer, request } = interaction;
