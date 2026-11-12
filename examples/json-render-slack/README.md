@@ -16,17 +16,6 @@ This is the eve version of [Chat SDK agents streaming generative UI with json-re
 
 The card is a tool call, so the spec stays in the session. Only the Slack channel renders it. Other channels, such as the eve TUI, show an ordinary tool call.
 
-## Try it without Slack
-
-`scripts/simulate-slack.mjs` runs the built agent against a local stand-in for Slack's Web API, sends one signed `app_mention`, and prints every post, edit, and delete, then the final blocks:
-
-```bash
-pnpm build
-pnpm simulate "How did our deploys go last week?"
-```
-
-The model call needs AI Gateway credentials, such as `AI_GATEWAY_API_KEY` or a pulled `VERCEL_OIDC_TOKEN`.
-
 ## Run it in Slack
 
 Copy this directory out of the repository and replace `"eve": "workspace:*"` with a published version that includes Slack renderer support for `call.input`. Then set up the channel and deploy:
