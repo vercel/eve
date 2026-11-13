@@ -62,6 +62,7 @@ import {
   bindSlackSessionOperations,
   withSlackResponder,
 } from "#public/channels/slack/session-operations.js";
+import { handleModalClose, handleModalSubmit } from "#public/channels/slack/modals.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseAnswer } from "#shared/input.js";
 
@@ -260,7 +261,9 @@ export interface InteractionHandlerDeps {
 
 /**
  * Entry point for Slack's form-encoded interactivity endpoint. Routes
- * `view_submission` payloads to the freeform-answer flow, intercepts
+ * eve-owned `view_submission` payloads to the freeform-answer flow and other
+ * modal submissions and closes to `config.onModalSubmit` and
+ * `config.onModalClose`, intercepts
  * "Type your answer" button clicks to open a modal, resolves
  * framework HITL clicks through `onAnswers` to the parked session,
  * forwards other block actions to `config.onInteraction`, shortcuts to
@@ -288,7 +291,24 @@ export async function handleInteractionPost(
   }
 
   if (payload.kind === "view_submission") {
-    return handleViewSubmission(payload, ctx, deps);
+    return payload.callbackId === HITL_FREEFORM_MODAL_CALLBACK_ID
+      ? handleViewSubmission(payload, ctx, deps)
+      : handleModalSubmit(payload, {
+          deps,
+          installationTeamId: readInstallationTeamId(payload.raw),
+          waitUntil: ctx.waitUntil,
+        });
+  }
+
+  if (payload.kind === "view_closed") {
+    if (payload.view.callback_id !== HITL_FREEFORM_MODAL_CALLBACK_ID) {
+      handleModalClose(payload, {
+        deps,
+        installationTeamId: readInstallationTeamId(payload.raw),
+        waitUntil: ctx.waitUntil,
+      });
+    }
+    return new Response(null, { status: 200 });
   }
 
   if (payload.kind === "slash_command") {

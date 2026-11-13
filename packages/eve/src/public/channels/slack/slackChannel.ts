@@ -624,6 +624,61 @@ export interface SlackShortcutContext {
   readonly slack: SlackWorkspaceHandle;
 }
 
+/** Workspace-scoped context handed to `onModalSubmit` and `onModalClose`. */
+export interface SlackModalContext {
+  /** Slack workspace identity and raw Web API escape hatch. */
+  readonly slack: SlackWorkspaceHandle;
+  /** Keeps work alive after eve answers Slack. */
+  readonly waitUntil: (task: Promise<unknown>) => void;
+}
+
+/** An app-owned Slack modal, as `onModalSubmit` and `onModalClose` receive it. */
+export interface SlackModalEvent {
+  /** The view's `callback_id`. */
+  readonly callbackId: string;
+  readonly viewId: string;
+  /** The view's `private_metadata`, exactly as the app set it. */
+  readonly privateMetadata?: string;
+  readonly user: SlackInteractionUser;
+  /** Workspace of the person who acted. */
+  readonly teamId?: string;
+  /** Workspace whose app installation supplies `ctx.slack` credentials. */
+  readonly installationTeamId?: string;
+  readonly enterpriseId?: string;
+  /** The complete decoded Slack payload, including `view.state.values`. */
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
+/** A modal submission handed to `onModalSubmit`. */
+export interface SlackModalSubmitEvent extends SlackModalEvent {
+  /**
+   * One string per input, keyed by action ID, as in Chat SDK's
+   * `ModalSubmitEvent.values`: the text value, selected date, or selected
+   * option. Multi-value and other controls need `raw.view.state.values`.
+   */
+  readonly values: Readonly<Record<string, string>>;
+}
+
+/** A closed modal handed to `onModalClose`. */
+export interface SlackModalCloseEvent extends SlackModalEvent {
+  /** Whether Slack closed the whole view stack rather than only this view. */
+  readonly isCleared: boolean;
+}
+
+/** A native Slack view, the same object `views.open` takes. */
+export type SlackModalView = Readonly<Record<string, unknown>>;
+
+/**
+ * How `onModalSubmit` answers Slack. Returning nothing is the same as
+ * `{ action: "close" }`. `errors` keys are block IDs.
+ */
+export type SlackModalResponse =
+  | { readonly action: "close" }
+  | { readonly action: "clear" }
+  | { readonly action: "errors"; readonly errors: Readonly<Record<string, string>> }
+  | { readonly action: "update"; readonly view: SlackModalView }
+  | { readonly action: "push"; readonly view: SlackModalView };
+
 /** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
 export interface SlackSlashCommandContext {
   /** Slack workspace identity and raw Web API escape hatch. */
@@ -1027,6 +1082,31 @@ export interface SlackChannelConfig {
     action: SlackInteractionAction,
     ctx: SlackInteractionContext,
   ): void | Promise<void>;
+
+  /**
+   * Handles submissions from the app's own Slack modals. eve's **Type your
+   * answer** modal goes to `onAnswers` instead.
+   *
+   * Runs before eve answers Slack, so it can return field errors or a
+   * replacement view. Finish within Slack's three-second deadline and use
+   * `ctx.waitUntil(...)` for later work. A thrown error returns a 500, which
+   * keeps the modal open. Without this hook, eve closes custom modals without
+   * delivering them.
+   *
+   * The context has no thread or session: carry a review ID in
+   * `private_metadata` and authorize `event.user` against it.
+   */
+  onModalSubmit?(
+    event: SlackModalSubmitEvent,
+    ctx: SlackModalContext,
+  ): SlackModalResponse | void | Promise<SlackModalResponse | void>;
+
+  /**
+   * Handles the app's own Slack modals closing without a submission, for views
+   * opened with `notify_on_close: true`. eve answers Slack first and runs the
+   * hook through `waitUntil()`. Errors are caught and logged.
+   */
+  onModalClose?(event: SlackModalCloseEvent, ctx: SlackModalContext): void | Promise<void>;
 
   /**
    * Handles Slack message shortcuts (`message_action`) and global shortcuts
