@@ -41,7 +41,7 @@ Prefer native integrations. When installation is part of the task, use `pnpm exe
 
 ## Implementation conventions
 
-Keep files in `agent/tools/` small, with reusable behavior in `agent/lib/`. The template's tool files only disable eve built-ins. Disabling `write_file` steers the model toward the memory tools. The web and delegation tools are removed because a memory agent doesn't need them and they would give planted instructions a way to send data out. `bash` and `read_file` stay enabled for the Drives extension, and `agent/sandbox.ts` denies outbound network access when deployed. The filename exemption for `agent/tools/*.ts` in `oxlint.config.ts` exists because eve matches built-in tools by filename.
+Keep files in `agent/tools/` small, with reusable behavior in `agent/lib/`. The template's tool files only disable eve built-ins. Disabling `write_file` steers the model toward the memory tools. The web and delegation tools are removed because a memory agent doesn't need them and they would give planted instructions a way to send data out. `bash` and `read_file` stay enabled for the Drives extension, and `agent/sandbox.ts` denies outbound network access when deployed. The filename exemption for `agent/tools/*.ts` in `lint.config.ts` exists because eve matches built-in tools by filename.
 
 Preserve the strict TypeScript and Ultracite configuration. Do not disable rules to make a port or refactor pass.
 
@@ -66,7 +66,7 @@ pnpm enforces a minimum release age for dependencies. Do not bypass the policy o
 
 The hosted agent uses Vercel Sandbox and stores memory in a private Vercel Blob store that file memory reads through `BLOB_STORE_ID` and Vercel OIDC. Prefer Vercel OIDC for supported services rather than introducing additional API tokens.
 
-The Slack channel requires `SLACK_CONNECTOR`, so `pnpm exec eve info` and `pnpm build` fail when it is unset. Pull the project's variables with `vercel env pull .env.local`, or set a placeholder value such as `slack/placeholder` when only checking compilation.
+The Slack channel uses `SLACK_CONNECTOR`, falling back to `slack/placeholder` so compilation works before Slack is configured. Slack delivery still needs a real connector. Pull the project's variables with `vercel env pull .env.local`.
 
 Use the Vercel CLI for project configuration and deployment instructions, including `vercel deploy --prod`, `vercel env add`, `vercel blob`, and `vercel sandbox`. Confirm unfamiliar flags with `--help`. Provisioning services or deploying the agent is separate from checking code and documentation.
 
@@ -86,6 +86,8 @@ Write for a person using the template:
 Verify behavior against code and current CLI help. When reviewing a passage, read its surrounding section for contradictions and repeated explanations. After applying an edit, check that the revision didn't introduce new problems from the list above. Formatting and link checks do not replace an editorial review.
 
 ## Validation
+
+`pnpm check` and `pnpm fix` use `lint.config.ts` explicitly to keep its Ultracite rules separate from monorepo linting. `.oxfmtrc.json` contains the resolved Ultracite formatting preset so root tooling needs no template dependencies. Keep it in sync when upgrading Ultracite. Git hooks are opt-in: run `pnpm exec lefthook install` only from a standalone checkout, never from the eve monorepo.
 
 Choose checks that establish the changed behavior. Tests live beside their implementations under `agent/`.
 

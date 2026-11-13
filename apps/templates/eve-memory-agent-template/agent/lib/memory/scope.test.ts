@@ -17,7 +17,7 @@ const slackCaller = (overrides: Partial<NonNullable<Caller>> = {}): Caller => ({
 const scopeFor = (current: Caller) =>
   bySlackChannel({
     abortSignal: new AbortController().signal,
-    channel: {},
+    channel: { kind: "channel:slack", metadata: {} },
     session: { auth: { current, initiator: current }, id: "session-1" },
   });
 

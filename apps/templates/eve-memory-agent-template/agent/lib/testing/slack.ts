@@ -91,6 +91,7 @@ export const slackThread = (
 /* The `ctx.slack` handle; `request` defaults to an `{ ok: true }` spy. */
 const slackHandle = (overrides: Partial<SlackHandle> = {}): SlackHandle => ({
   channelId: "C123",
+  codeChannel: false,
   request: vi.fn<SlackHandle["request"]>(async () => await { ok: true }),
   teamId: "T123",
   threadTs: "100.1",
@@ -116,10 +117,11 @@ export const inboundContext = ({
   cancel: unsupported("session cancellation"),
   clear: unsupported("session clearing"),
   compact: unsupported("session compaction"),
+  end: unsupported("session end"),
   isBotMentioned: vi.fn(() => false),
   isDMOrPrivateChannel: vi.fn(() => Promise.resolve(false)),
   isSubscribed: vi.fn(() => Promise.resolve(false)),
-  reset: unsupported("session reset"),
+  openCodeChannel: unsupported("code channels"),
   resolveSession: unsupported("session resolution"),
   respond: unsupported("input responses"),
   send: unsupported("session sends"),

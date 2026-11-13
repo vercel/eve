@@ -18,6 +18,8 @@ Choose the task you want to complete:
 
 ## Change environment variables
 
+`SLACK_CONNECTOR` selects the Vercel Connect Slack connector. It defaults to `slack/placeholder` for compilation without credentials; configure a real connector before sending or receiving Slack messages.
+
 For local development, edit `.env.local`. To save a variable in your linked Vercel project, use `vercel env add` followed by its name. For example, to set the Slack connector the agent uses:
 
 ```sh
@@ -52,7 +54,7 @@ Keep the existing Memory section alongside your own guidance. It tells the agent
 
 Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
-The same file limits each session to `300_000` input tokens through `maxInputTokensPerSession`. Each model call counts the input it sends, including earlier messages in the thread, so a long Slack thread reaches the limit sooner than its length suggests. When a session crosses the limit, eve pauses it and asks whether to continue, and **Approve** grants another window of the same size. Increase the limit if threads pause too often. See [eve's agent configuration](https://eve.dev/docs/agent-config) for output and cost limits.
+The same file limits each session to `300_000` input tokens through the `limits.sessionUsage` callback. Each model call counts the input it sends, including earlier messages in the thread, so a long Slack thread reaches the limit sooner than its length suggests. When a session crosses the limit, eve pauses it and asks whether to continue, and **Approve** grants another window of the same size. Increase the limit if threads pause too often. See [eve's agent configuration](https://eve.dev/docs/agent-config) for other usage limits.
 
 The [current-time instructions](agent/instructions/current-time.ts) add a UTC timestamp at the start of each turn, which covers one message the agent responds to and the work it does for it. If people save preferences that depend on dates or times, such as "I work 9 to 5 Pacific", explain the intended timezone in your instructions.
 
