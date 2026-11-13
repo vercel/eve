@@ -1,7 +1,7 @@
 import type { DecisionModel } from "#ai/decision-types.js";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
-import { decide } from "#ai/decide.js";
+import { decideFor } from "#ai/decide.js";
 import { approvalEvaluation } from "#approval/evaluation.js";
 import { parseJsonValue } from "#shared/json.js";
 
@@ -37,7 +37,7 @@ async function autoApproval(
       return "user-approval";
     }
     const abortSignal = AbortSignal.any([context.abortSignal, AbortSignal.timeout(30_000)]);
-    const result = await decide({
+    const result = await decideFor("tool-approval", {
       model: decisionModel,
       state: {
         action: {

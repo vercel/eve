@@ -20,6 +20,7 @@ const CONTENT_FIELDS = {
   approvalRequest: "agent.approval.request",
   approvalResponse: "agent.approval.response",
   memoryRecords: "gen_ai.memory.records",
+  decisionResults: "gen_ai.decision.results",
 } as const;
 export function applyAttributes(
   span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
@@ -282,19 +283,32 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   decision: {
     parents: ["activation", "step", "tool"],
     prepare({ options }, context) {
+      // A decision made outside any run has no run identity to record.
+      const inRun = context.identity.runId !== "";
       return {
         name: decisionName(options.modelId),
         kind: "CLIENT",
         attributes: {
-          // A decision made outside any run has no run identity to record.
-          ...(context.identity.runId === "" ? undefined : context.attributes),
+          ...(inRun ? context.attributes : undefined),
           ...namingAttributes(decisionName(options.modelId), "decision"),
+          // The turn's own span is written when the turn ends; the turn ID lets a running turn
+          // claim a decision made before its first step.
+          "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
+          "agent.decision.purpose": options.purpose,
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "decision",
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
         },
       };
+    },
+    complete(span, _data, result, context) {
+      // Per-question results, refusals included, are opt-in output content.
+      if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
+        return;
+      applyAttributes(span, {
+        [CONTENT_FIELDS.decisionResults]: context.serializer.json(result.output),
+      });
     },
   },
   memory: {

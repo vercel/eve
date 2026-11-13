@@ -3,7 +3,9 @@ import {
   decideWithMetadata,
   resolveDecisionModel,
 } from "#ai/decision-adapter.js";
+import type { DecisionPurpose } from "#ai/decide.js";
 import type { DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
+import { decisionResults } from "#instrumentation/decision-results.js";
 import { Experimental_DecisionRefusalError as DecisionRefusalError } from "#compiled/@ai-sdk/provider/index.js";
 import { context } from "#compiled/@opentelemetry/api/index.js";
 import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
@@ -29,7 +31,7 @@ import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 /** Decision calls can run before a model attempt or outside an eve session. */
 export async function decideWithTracing<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
->(options: DecisionOptions<Questions>) {
+>(options: DecisionOptions<Questions>, purpose: DecisionPurpose) {
   const runtime = getInstrumentationRuntime();
   if (runtime === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
@@ -84,6 +86,7 @@ export async function decideWithTracing<
   const operation = await traceDecision({
     modelId: typeof model === "string" ? model : model.modelId,
     provider: typeof model === "string" ? undefined : model.provider,
+    purpose,
     identity:
       sessionId === undefined || turnId === undefined
         ? undefined
@@ -108,6 +111,7 @@ export async function decideWithTracing<
       ...gatewayCostAttributes(readGatewayCostData(result.providerMetadata) ?? {}),
     });
     await operation.complete({
+      output: decisionResults(options.questions, { answers: result.answers }),
       usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
     });
     return result;
@@ -116,7 +120,7 @@ export async function decideWithTracing<
     // enumerable properties, so a failure records only its type.
     await operation.complete(
       DecisionRefusalError.isInstance(error)
-        ? { outcome: "refused" }
+        ? { output: decisionResults(options.questions, { refused: error.questionIds }) }
         : { failed: true, errorCode: "decision_error" },
     );
     throw error;

@@ -28,6 +28,7 @@ import {
   type ExecutionInstrumentation,
 } from "#instrumentation/runtime.js";
 import { decide } from "#public/ai/index.js";
+import { decideFor } from "#ai/decide.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
@@ -202,6 +203,8 @@ describe("decide tracing", () => {
       "gen_ai.usage.output_tokens": 3,
       "gen_ai.generation.id": "gen_alice",
       "gen_ai.usage.cost": 0.0004,
+      "agent.turn.id": "turn-1",
+      "agent.decision.purpose": "custom",
     });
     const request = exporter.getFinishedSpans().find((span) => span.name === "decision request")!;
     expect(request.parentSpanContext?.spanId).toBe(decision.spanContext().spanId);
@@ -352,6 +355,56 @@ describe("decide tracing", () => {
       ).not.toContain(marker);
     },
   );
+
+  it.each([true, false])(
+    "records decision results only when outputs are recorded (%s)",
+    async (recordOutputs) => {
+      runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs }));
+      const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
+      await inSession(async () => {
+        await decideFor("model-selection", { model, questions, state });
+      });
+      const span = decisions()[0]!;
+      expect(span.attributes).toMatchObject({
+        "agent.decision.purpose": "model-selection",
+        "agent.turn.id": "turn-1",
+      });
+      expect(span.attributes["gen_ai.decision.results"]).toBe(
+        recordOutputs
+          ? JSON.stringify([
+              { question_index: 0, question_name: "team", type: "choice", value: "billing" },
+            ])
+          : undefined,
+      );
+    },
+  );
+
+  it("records a refusal as a result, not a failure, when outputs are recorded", async () => {
+    runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs: true }));
+    const model = new Experimental_DecisionMockModelV4({
+      doDecide: async () => ({
+        ...answer,
+        answers: { ...answer.answers, urgent: { type: "refusal" } },
+      }),
+    });
+    await inSession(async () => {
+      await expect(
+        decide({
+          model,
+          state,
+          questions: {
+            ...questions,
+            urgent: { type: "boolean", instructions: "Does Alice need an urgent response?" },
+          },
+        }),
+      ).rejects.toMatchObject({ questionIds: ["urgent"] });
+    });
+    const span = decisions()[0]!;
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
+    expect(JSON.parse(String(span.attributes["gen_ai.decision.results"]))).toEqual([
+      { question_index: 1, question_name: "urgent", type: "refusal" },
+    ]);
+  });
 
   it("keeps a partial model refusal distinct from a request failure", async () => {
     const model = new Experimental_DecisionMockModelV4({
