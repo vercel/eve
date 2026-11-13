@@ -26,8 +26,23 @@ import {
 
 const log = createLogger("channel.a2a");
 
-/** Cap on a request body; A2A parts can carry inline files, so this is larger than MCP's. */
+/** Least cap on a request body; A2A parts can carry inline files, so this is larger than MCP's. */
 export const A2A_REQUEST_BODY_MAX_BYTES = 32 * 1_024 * 1_024;
+
+/** Room in a request beside an inline file: the JSON-RPC envelope, the message, other parts. */
+const REQUEST_ENVELOPE_BYTES = 1_024 * 1_024;
+
+/**
+ * The request body cap for an upload limit: room for one inline file at `maxUploadBytes`, which
+ * ProtoJSON carries as base64 (4 bytes per 3), and never below {@link A2A_REQUEST_BODY_MAX_BYTES}.
+ * A file the upload policy allows is then refused by the policy, not by the body cap.
+ */
+export function a2aRequestBodyMaxBytes(maxUploadBytes: number): number {
+  return Math.max(
+    A2A_REQUEST_BODY_MAX_BYTES,
+    Math.ceil((maxUploadBytes * 4) / 3) + REQUEST_ENVELOPE_BYTES,
+  );
+}
 
 /** An SSE comment this often keeps idle proxies from closing a quiet stream. */
 const STREAM_HEARTBEAT_MS = 15_000;
@@ -49,6 +64,7 @@ export async function handleA2aJsonRpc(
   request: Request,
   auth: SessionAuthContext | null,
   execution: A2aOperations,
+  maxBodyBytes: number = A2A_REQUEST_BODY_MAX_BYTES,
 ): Promise<Response> {
   const contentType = request.headers.get("content-type");
   if (contentType !== null && !isJsonMediaType(contentType)) {
@@ -60,13 +76,13 @@ export async function handleA2aJsonRpc(
       ),
     );
   }
-  const read = await readJsonBody(request, A2A_REQUEST_BODY_MAX_BYTES);
+  const read = await readJsonBody(request, maxBodyBytes);
   if (read.kind === "too-large") {
     return rpcError(
       null,
       new A2aError(
         A2A_JSON_RPC_ERRORS.invalidRequest,
-        `Request body exceeds ${A2A_REQUEST_BODY_MAX_BYTES} bytes.`,
+        `Request body exceeds ${maxBodyBytes} bytes.`,
       ),
     );
   }

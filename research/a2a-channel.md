@@ -1,10 +1,10 @@
 ---
-issue: TBD
+issue: https://github.com/vercel/eve/pull/5693
 status: implemented
-last_updated: "2026-10-30"
+last_updated: "2026-11-13"
 ---
 
-# Experimental inbound A2A channel
+# Inbound A2A channel
 
 `a2aChannel` (`eve/channels/a2a`) publishes an eve agent as an
 [A2A](https://a2a-protocol.org/) v1.0 server, JSON-RPC binding only. Usage, options, task states,

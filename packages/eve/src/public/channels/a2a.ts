@@ -9,7 +9,7 @@ import {
   type CardSecurity,
 } from "#internal/a2a/agent-card.js";
 import { A2aTaskExecution } from "#internal/a2a/execution.js";
-import { handleA2aJsonRpc } from "#internal/a2a/json-rpc.js";
+import { a2aRequestBodyMaxBytes, handleA2aJsonRpc } from "#internal/a2a/json-rpc.js";
 import type { A2aFailure } from "#internal/a2a/task-projection.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
@@ -113,6 +113,10 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   const publicOrigin =
     input.publicOrigin === undefined ? undefined : parsePublicOrigin(input.publicOrigin);
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
+  // A disabled policy takes no files, so the body needs no room for one.
+  const maxBodyBytes = a2aRequestBodyMaxBytes(
+    uploadPolicy === "disabled" ? 0 : uploadPolicy.maxBytes,
+  );
   const security: CardSecurity = {
     challenges: declaredAuthChallenges(input.auth),
     oauth: readOAuthResourceOptions(input.auth),
@@ -158,7 +162,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
       ...(input.failureText !== undefined && { failureText: input.failureText }),
       uploadPolicy,
     });
-    return await handleA2aJsonRpc(request, sessionAuthFromResult(auth), execution);
+    return await handleA2aJsonRpc(request, sessionAuthFromResult(auth), execution, maxBodyBytes);
   };
 
   return defineChannel({

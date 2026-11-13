@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { A2A_REQUEST_BODY_MAX_BYTES, handleA2aJsonRpc, type A2aOperations } from "./json-rpc.js";
+import {
+  A2A_REQUEST_BODY_MAX_BYTES,
+  a2aRequestBodyMaxBytes,
+  handleA2aJsonRpc,
+  type A2aOperations,
+} from "./json-rpc.js";
 import { A2aError, type StreamResponse } from "./protocol.js";
 
 const task = {
@@ -36,6 +41,16 @@ async function call(body: unknown, headers?: Record<string, string>, exec = exec
   const response = await handleA2aJsonRpc(request(body, headers), null, exec);
   return { body: (await response.json()) as Record<string, any>, response };
 }
+
+describe("a2aRequestBodyMaxBytes", () => {
+  it("fits one inline file at the upload limit, as base64, and never drops below the floor", () => {
+    const limit = 25 * 1_024 * 1_024;
+    const cap = a2aRequestBodyMaxBytes(limit);
+    expect(cap).toBeGreaterThan(Math.ceil((limit * 4) / 3));
+    expect(a2aRequestBodyMaxBytes(0)).toBe(A2A_REQUEST_BODY_MAX_BYTES);
+    expect(a2aRequestBodyMaxBytes(1_024)).toBe(A2A_REQUEST_BODY_MAX_BYTES);
+  });
+});
 
 describe("handleA2aJsonRpc", () => {
   it("dispatches a method and answers with its result", async () => {
