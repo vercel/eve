@@ -27,6 +27,17 @@ on your behalf. OpenInstinct runs in your own Vercel account. Saved vault secret
 are encrypted before they reach your database, and browser autofill keeps saved
 passwords out of the model's context. You can read the code to see how it works.
 
+## Repository compatibility
+
+Use Node.js 24 and the pinned pnpm 12.17.0. `pnpm typecheck` generates Next.js
+route types before checking the app. `pnpm lint:app` selects
+`oxlint.template.jsonc` explicitly so the enclosing eve repository can apply
+its own lint rules without loading template-only plugins.
+
+The repository compatibility runner supplies nonsecret, unreachable service
+values for offline builds. These are not deployment defaults; running the app
+still requires the service configuration described below.
+
 ## Requirements and costs
 
 You can use free tiers for the supporting services. **Vercel requires the Pro

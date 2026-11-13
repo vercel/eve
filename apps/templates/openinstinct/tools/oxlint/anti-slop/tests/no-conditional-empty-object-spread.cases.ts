@@ -18,14 +18,11 @@ tester.run(
       "const result = condition ? { value } : {};",
     ],
     invalid: [
-      {
-        code: "const result = { ...(value !== undefined ? { value } : {}) };",
-        errors: [error],
-      },
-      {
-        code: "const result = { ...(condition ? {} : { value }) };",
-        errors: [error],
-      },
-    ],
+      "value !== undefined ? { value } : {}",
+      "condition ? {} : { value }",
+    ].map((conditional) => ({
+      code: `const result = { ...(${conditional}) };`,
+      errors: [error],
+    })),
   },
 );

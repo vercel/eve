@@ -1,9 +1,7 @@
 import type { LinqChannelConfig } from "eve/channels/linq";
 import type { CallSettled, InteractionOpened, JsonValue } from "eve/events";
-import {
-  createLinqAdapter,
-  type LinqSendOptions,
-} from "@linqapp/chat-sdk-adapter";
+import type { LinqSendOptions } from "@linqapp/chat-sdk-adapter";
+import type * as LinqAdapter from "@linqapp/chat-sdk-adapter";
 import type { LinqAPIV3 } from "@linqapp/sdk";
 import type { AdapterPostableMessage } from "chat";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +87,9 @@ vi.mock("@vercel/connect/eve", () => ({
   connectLinqCredentials: () => ({
     apiKey: linqChannelCapture.resolveApiKey,
   }),
+}));
+vi.mock("@linqapp/chat-sdk-adapter", () => ({
+  createLinqAdapter: () => ({ postMessage: linqChannelCapture.postMessage }),
 }));
 vi.mock("@linqapp/sdk", () => ({
   LinqAPIV3: class {
@@ -442,6 +443,9 @@ describe("Linq message delivery", () => {
         }),
         { headers: { "content-type": "application/json" }, status: 200 }
       )
+    );
+    const { createLinqAdapter } = await vi.importActual<typeof LinqAdapter>(
+      "@linqapp/chat-sdk-adapter"
     );
     const adapter = createLinqAdapter({
       apiKey: "linq-test-api-key",

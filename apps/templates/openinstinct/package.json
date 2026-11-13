@@ -3,12 +3,13 @@
   "license": "MIT",
   "dependencies": {
     "@base-ui/react": "^1.7.0",
-    "@better-auth/core": "1.7.5",
+    "@better-auth/core": "1.7.22",
     "@googleapis/calendar": "^16.0.0",
     "@googleapis/gmail": "^18.0.0",
     "@googleapis/people": "^8.0.0",
     "@linqapp/sdk": "0.47.1",
-    "@onkernel/browser-loop": "0.12.0",
+    "@linqapp/chat-sdk-adapter": "0.5.1",
+    "@onkernel/browser-loop": "0.12.1",
     "@onkernel/sdk": "^0.96.0",
     "@opentelemetry/api": "^1.9.1",
     "@streamdown/cjk": "1.0.3",
@@ -27,7 +28,7 @@
     "@vercel/connect": "^2.7.0",
     "@vercel/oidc": "3.8.5",
     "ai": "^7.0.159",
-    "better-auth": "1.7.5",
+    "better-auth": "1.7.22",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
@@ -38,7 +39,7 @@
     "lucide-react": "1.34.0",
     "motion": "13.1.1",
     "nanoid": "6.0.1",
-    "next": "16.3.3",
+    "next": "16.4.6",
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -46,12 +47,11 @@
     "tailwind-merge": "3.6.0",
     "tailwindcss": "4.3.3",
     "use-stick-to-bottom": "1.1.6",
-    "zod": "4.5.4"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "@linqapp/chat-sdk-adapter": "0.5.1",
-    "@next/env": "16.3.3",
+    "@next/env": "16.4.6",
     "@oxlint/plugins": "1.80.0",
     "@types/node": "24.13.3",
     "@types/pg": "^8.23.1",
@@ -72,8 +72,8 @@
     "tsx": "4.21.0",
     "turbo": "2.10.12",
     "typescript": "6.0.3",
-    "vercel": "^59.6.2",
-    "vitest": "4.1.11"
+    "vercel": "^59.26.0",
+    "vitest": "4.1.12"
   },
   "engines": {
     "node": "24.x"
@@ -82,7 +82,7 @@
     "./browser-benchmark-dashboard": "./evals/browser/dashboard/index.ts"
   },
   "name": "local-vault-assistant",
-  "packageManager": "pnpm@11.24.0",
+  "packageManager": "pnpm@12.17.0",
   "scripts": {
     "bench:ab": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/run-browser-ab.ts",
     "bench:browser": "eve eval browser",
@@ -109,12 +109,13 @@
     "format:check": "oxfmt --check .",
     "knip": "knip --config knip.config.ts",
     "lint": "turbo run lint:app",
-    "lint:app": "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix",
+    "lint:app": "oxlint --config oxlint.template.jsonc . --deny-warnings",
+    "lint:fix": "oxlint --config oxlint.template.jsonc . --fix",
     "start": "turbo run start:app",
     "start:app": "next start",
     "test": "turbo run test:app",
     "test:app": "vitest run",
+    "typecheck": "pnpm types:generate && pnpm types:check:app",
     "types:check": "turbo run types:check:app",
     "types:generate": "next typegen",
     "types:check:app": "tsc --noEmit -p tsconfig.json",

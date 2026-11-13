@@ -96,10 +96,9 @@ function collectTypeBindings(
 		if (declared.alias !== null) aliases.push(declared.alias);
 	}
 
-	// SAFETY: Oxlint's visitor keys identify only ESTree child-node properties.
-	const fields = node as unknown as Readonly<Record<string, unknown>>;
-	for (const key of visitorKeys[node.type] ?? []) {
-		const value = fields[key];
+	const keys = visitorKeys[node.type] ?? [];
+	for (const [key, value] of Object.entries(node)) {
+		if (!keys.includes(key)) continue;
 		if (isNode(value)) {
 			collectTypeBindings(value, visitorKeys, bindingsByName, aliases);
 			continue;

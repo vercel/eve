@@ -36,7 +36,7 @@ tester.run("anti-slop/no-chained-type-assertions", noChainedTypeAssertionsRule, 
     },
     {
       name: "reports a long chain once",
-      code: "const user = input as unknown as object as User;",
+      code: "const user = input as object as {} as User;",
       errors: 1,
     },
   ],

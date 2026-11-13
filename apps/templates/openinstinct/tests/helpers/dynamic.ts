@@ -18,19 +18,30 @@ export function dynamicContextFor({
   sessionId = "test-session",
   view = emptySessionView(),
 }: TestDynamicContextOptions = {}): DynamicContext {
-  return {
+  const context = {
+    async getSandbox() {
+      throw new Error("This test context has no sandbox.");
+    },
     channel,
-    memo: async (_key, fn) =>
-      fn({ abortSignal: new AbortController().signal, idempotencyKey: "memo" }),
+    memo: (async (_key, fn) =>
+      fn({
+        abortSignal: new AbortController().signal,
+        idempotencyKey: "memo",
+      })) satisfies DynamicContext["memo"],
     async messages() {
       return [];
     },
     model: { id: "test-model" },
     now: new Date("2026-01-01T00:00:00.000Z"),
     session: { auth, id: sessionId },
-    turn: { id: "turn-1", input: [], status: "running" },
+    turn: {
+      id: "turn-1",
+      input: [],
+      status: "running",
+    } satisfies DynamicContext["turn"],
     view,
   };
+  return context;
 }
 
 /**

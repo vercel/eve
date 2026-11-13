@@ -65,12 +65,9 @@ async function resourcesFor(sessionId: string, signal?: AbortSignal) {
 
   const browser = await kernel.browsers.retrieve(sessionId, {}, { signal });
 
-  type Options = ConstructorParameters<typeof LoopExecutionResources>[0];
   const resources = new LoopExecutionResources({
     browser,
-    // SAFETY: Browser Loop pins an older nominal Kernel SDK type, while the shared client is API-compatible with that exact runtime contract.
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions, typescript/no-unsafe-type-assertion -- the assertion bridges duplicate nominal SDK installations at the vendor boundary
-    client: kernel as unknown as Options["client"],
+    client: kernel,
   });
   const refState = refStates.get()[sessionId];
   if (refState) {

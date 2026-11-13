@@ -1,16 +1,16 @@
 # Dependency compatibility patches
 
-Eve is pinned to the published `1.0.0-rc.1` release.
+eve is pinned to the published `1.0.0-rc.1` release.
 
 `@linqapp__chat-sdk-adapter@0.5.1.patch` adds the native reply option to
 the separately installed adapter while preserving attachments and idempotency.
 The application delivery tests exercise that adapter.
 
-`eve@1.0.0-rc.1.patch` preserves native Linq replies. Eve bundles its own copy
-of the Linq Chat SDK adapter, which does not forward a reply target. The patch
-adds `replyToMessageId` to the bundled adapter's `LinqSendOptions` and forwards
-it to Linq as `reply_to`, matching the installed adapter patch above. Remove it
-when an Eve release's bundled adapter supports native replies.
+Native Linq replies use the separately installed, patched adapter directly.
+eve's bundled adapter does not forward a reply target. Keeping the patch on
+the application dependency preserves attachments and idempotency without an
+exact-version patch on eve, so packed framework compatibility checks can
+replace eve normally. The inbound channel still uses eve's adapter and auth.
 
 The earlier `task_cancel` hunk is no longer needed: Eve 1.0 provides
 `eve__task_cancel` itself for agents with task tools, including the resumable

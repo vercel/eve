@@ -17,9 +17,9 @@ function collectInferTypeParameterNames(
 	names: Set<string>,
 ): void {
 	if (node.type === "TSInferType") names.add(node.typeParameter.name.name);
-	const record = node as unknown as Readonly<Record<string, unknown>>;
-	for (const key of visitorKeys[node.type] ?? []) {
-		const value = record[key];
+	const keys = visitorKeys[node.type] ?? [];
+	for (const [key, value] of Object.entries(node)) {
+		if (!keys.includes(key)) continue;
 		if (isNode(value)) {
 			collectInferTypeParameterNames(value, visitorKeys, names);
 			continue;
