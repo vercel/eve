@@ -6,11 +6,14 @@ fixture eval files from the fixture directory.
 CI splits the coverage into two suites so live-model flake never gates
 world-infrastructure coverage (and vice versa):
 
-- **Model suite** (`e2e-local.yml`): every fixture runs against the local
-  workflow world with real matrix models. Fixtures whose behavior varies per
-  provider declare `"e2e": { "modelMatrix": "full" }` in `package.json` and
-  run on every matrix model; all other fixtures run once on the default
-  model.
+- **Model suite** (`e2e-local.yml`): each fixture's evals tagged
+  `real-model` run against the local workflow world with real matrix models.
+  Fixtures whose behavior varies per provider declare `"e2e": { "modelMatrix":
+  "full" }` in `package.json` and run on every matrix model; all other fixtures
+  run once on the default model. The default model's job also runs the
+  fixture's other evals with the mock model, which keeps them on the local
+  world and its dev routes, since the world suites test production builds. A
+  fixture without `real-model` evals gets one mock-only job.
 - **World suites** (`e2e-vercel.yml`, `e2e-postgres.yml`, and one workflow
   per additional workflow world): every fixture builds, deploys, and runs
   once with deterministic mock models (`EVE_E2E_MODEL=mock`), proving the
@@ -40,11 +43,15 @@ the `mock` option (see `agent-tools-sandbox/agent/agent.ts`).
 
 An eval tagged `real-model` asserts behavior only a live model produces
 (judge scoring, provider cache metrics, free-form tool planning). The world
-suites exclude it; it still runs in the model suite. Untagging an eval is the
+suites exclude it, and only it runs on real models. Untagging an eval is the
 migration unit for world-suite coverage: script the fixture's mock responder
 until the eval passes under `EVE_E2E_MODEL=mock`, then remove the tag. Prefer
 untagging over new `real-model` tags — deterministic evals make every world
-suite stronger.
+suite stronger, and an untagged eval runs with the mock everywhere.
+A fixture whose evals pick real models themselves, such as
+`agent-dynamic-model-session`, sets `"e2e": { "modelSuiteEvals": "all" }` to run
+every eval on real models in the model suite. Discovery reads the tag from the eval file, so
+write it as a literal: `tags: ["real-model"]`.
 
 ## Local
 
@@ -199,7 +206,12 @@ matrices from the registry:
   the fixture's workspace package name so Turbo can select its dependency
   graph. The first
   registry model is the default that every fixture runs on; the rest run only
-  on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
+  on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json. A leg
+  runs the fixture's `real-model` evals on its model (`model_evals`), and the
+  default model's leg also runs the other evals with the mock model
+  (`mock_evals`). A fixture without `real-model` evals gets one leg named
+  `mock`, and `e2e.modelSuiteEvals: "all"` runs every eval on real models
+  instead. A shard splits its evals between the two passes the same way.
   A fixture can set `e2e.localOnly: true` when it requires local-runner hardware
   or daemons and must not enter world deployment matrices. A fixture can add a
   narrowly scoped leg with `e2e.additionalModels` entries

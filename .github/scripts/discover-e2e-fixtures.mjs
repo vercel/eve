@@ -14,7 +14,13 @@
 //                         fixtures run once on the default (first) model. A
 //                         fixture may add narrowly scoped model legs through
 //                         `additionalModels` and make selected legs non-blocking
-//                         through `optionalModels`.
+//                         through `optionalModels`. A leg runs the fixture's
+//                         `real-model` evals on its model (`model_evals`), and
+//                         the default model's leg also runs the other evals
+//                         with the mock model (`mock_evals`); a fixture without
+//                         `real-model` evals gets one mock-only leg. `"e2e":
+//                         { "modelSuiteEvals": "all" }` runs every eval on real
+//                         models instead, for fixtures that pick models themselves.
 //   world_matrix_<world>  `{ name, package, dir[, world_package] }` entries for that
 //                         world's suite workflow, which runs fixtures that
 //                         select that world once with mock models
@@ -22,6 +28,9 @@
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+
+/** The tag that marks evals needing a live model; the world suites exclude it. */
+const REAL_MODEL_TAG = "real-model";
 
 export function discoverE2eFixtures({ registry, fixtures }) {
   const models = validateNamedEntries(registry.models, "models", ["id"]);
@@ -31,35 +40,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
     throw new Error("No e2e fixtures with an evals/ directory were found.");
   }
 
-  const modelMatrix = normalizedFixtures.flatMap(
-    ({ name, packageName, dir, modelMatrix, additionalModels, optionalModels, modelShards }) => {
-      const fixtureModels = uniqueModels([
-        ...(modelMatrix === "full" ? models : models.slice(0, 1)),
-        ...additionalModels,
-      ]);
-      const selectedNames = new Set(fixtureModels.map((model) => model.name));
-      for (const optionalModel of optionalModels) {
-        if (!selectedNames.has(optionalModel)) {
-          throw new Error(
-            `${dir}/package.json: optional model "${optionalModel}" is not selected by this fixture.`,
-          );
-        }
-      }
-      return fixtureModels.flatMap((model) => {
-        const entry = {
-          name,
-          package: packageName,
-          dir,
-          model_name: model.name,
-          model_id: model.id,
-          optional: optionalModels.includes(model.name),
-        };
-        return modelShards === undefined
-          ? [entry]
-          : modelShards.map((shard) => ({ ...entry, shard: shard.name, eval_ids: shard.evals }));
-      });
-    },
-  );
+  const modelMatrix = normalizedFixtures.flatMap((fixture) => modelSuiteLegs(fixture, models));
 
   const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
   for (const world of worlds) {
@@ -77,7 +58,82 @@ export function discoverE2eFixtures({ registry, fixtures }) {
   return { lines: `${outputs.join("\n")}\n`, modelMatrix, worlds, fixtures: normalizedFixtures };
 }
 
-function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
+/**
+ * The model-suite legs of one fixture. Its `real-model` evals run on every
+ * model it selects; its other evals run once, on the default model's leg, in a
+ * second pass with the mock model, so they keep running against the local
+ * world and its dev routes. A fixture without `real-model` evals gets one
+ * mock-only leg.
+ */
+function modelSuiteLegs(fixture, models) {
+  const { name, packageName, dir, modelMatrix, additionalModels, optionalModels } = fixture;
+  const { modelShards, modelSuiteEvals } = fixture;
+  const fixtureModels = uniqueModels([
+    ...(modelMatrix === "full" ? models : models.slice(0, 1)),
+    ...additionalModels,
+  ]);
+  const selectedNames = new Set(fixtureModels.map((model) => model.name));
+  for (const optionalModel of optionalModels) {
+    if (!selectedNames.has(optionalModel)) {
+      throw new Error(
+        `${dir}/package.json: optional model "${optionalModel}" is not selected by this fixture.`,
+      );
+    }
+  }
+  const base = { name, package: packageName, dir };
+  // Each partition is a shard, or the whole fixture when it isn't sharded.
+  const partitions = (modelShards ?? [{ evals: modelSuiteEvals.ids }]).map((shard) => ({
+    shard,
+    real: modelSuiteEvals.all
+      ? shard.evals
+      : shard.evals.filter((evalId) => modelSuiteEvals.tagged.includes(evalId)),
+    mock: modelSuiteEvals.all
+      ? []
+      : shard.evals.filter((evalId) => !modelSuiteEvals.tagged.includes(evalId)),
+  }));
+  const ids = (shard, key, evalIds) => (shard.name === undefined ? {} : { [key]: evalIds });
+  const legs = [];
+  for (const { shard, real, mock } of partitions) {
+    const shardFields = shard.name === undefined ? {} : { shard: shard.name };
+    if (real.length === 0) {
+      if (mock.length > 0) {
+        legs.push({
+          ...base,
+          model_name: "mock",
+          model_id: "mock",
+          optional: false,
+          model_evals: "none",
+          mock_evals: true,
+          ...shardFields,
+          ...ids(shard, "mock_eval_ids", mock),
+        });
+      }
+      continue;
+    }
+    for (const [index, model] of fixtureModels.entries()) {
+      const withMock = index === 0 && mock.length > 0;
+      legs.push({
+        ...base,
+        model_name: model.name,
+        model_id: model.id,
+        optional: optionalModels.includes(model.name),
+        model_evals: modelSuiteEvals.all ? "all" : REAL_MODEL_TAG,
+        mock_evals: withMock,
+        ...shardFields,
+        ...ids(shard, "eval_ids", real),
+        ...(withMock ? ids(shard, "mock_eval_ids", mock) : {}),
+      });
+    }
+  }
+  // Keep model-major order: every partition of the first model, then the next.
+  return legs.sort(
+    (a, b) =>
+      fixtureModels.findIndex((model) => model.name === a.model_name) -
+      fixtureModels.findIndex((model) => model.name === b.model_name),
+  );
+}
+
+function normalizeFixture({ name, dir, packageJson, evals = [], realModelEvals = evals }, worlds) {
   const pkg = packageJson ?? {};
   const packageJsonPath = join(dir, "package.json");
   const packageName = validateE2ePackageName(pkg.name, packageJsonPath);
@@ -98,12 +154,23 @@ function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
     pkg.e2e?.modelShards === undefined
       ? undefined
       : validateModelShards(pkg.e2e.modelShards, `${packageJsonPath}: e2e.modelShards`, evals);
+  const modelSuiteEvals = pkg.e2e?.modelSuiteEvals ?? REAL_MODEL_TAG;
+  if (modelSuiteEvals !== REAL_MODEL_TAG && modelSuiteEvals !== "all") {
+    throw new Error(
+      `${packageJsonPath}: e2e.modelSuiteEvals must be "${REAL_MODEL_TAG}" or "all".`,
+    );
+  }
   return {
     name,
     packageName,
     dir,
     modelMatrix,
     modelShards,
+    modelSuiteEvals: {
+      all: modelSuiteEvals === "all",
+      ids: evals,
+      tagged: evals.filter((evalId) => realModelEvals.includes(evalId)),
+    },
     additionalModels: validateNamedEntries(
       pkg.e2e?.additionalModels ?? [],
       `${packageJsonPath}: e2e.additionalModels`,
@@ -132,6 +199,7 @@ function discoverFromDisk() {
         name,
         dir,
         evals: discoverEvalIds(join(dir, "evals")),
+        realModelEvals: discoverEvalIds(join(dir, "evals"), isRealModelEval),
         packageJson: existsSync(packageJsonPath)
           ? JSON.parse(readFileSync(packageJsonPath, "utf8"))
           : undefined,
@@ -161,7 +229,12 @@ export function validateE2ePackageName(packageName, packageJsonPath) {
   return packageName;
 }
 
-export function discoverEvalIds(root) {
+/** Whether an eval file declares the `real-model` tag, which evals write as a literal. */
+export function isRealModelEval(source) {
+  return /\btags:\s*\[[^\]]*["']real-model["']/u.test(source);
+}
+
+export function discoverEvalIds(root, include = () => true) {
   const evalIds = [];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
@@ -169,7 +242,11 @@ export function discoverEvalIds(root) {
     )) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) visit(path);
-      else if (entry.isFile() && entry.name.endsWith(".eval.ts")) {
+      else if (
+        entry.isFile() &&
+        entry.name.endsWith(".eval.ts") &&
+        include(readFileSync(path, "utf8"))
+      ) {
         evalIds.push(path.slice(root.length + 1, -".eval.ts".length).replaceAll("\\", "/"));
       }
     }

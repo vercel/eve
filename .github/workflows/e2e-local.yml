@@ -50,11 +50,14 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # The model suite: every fixture runs here against the local world with
-  # real matrix models. Model-sensitive fixtures (`"e2e": { "modelMatrix":
-  # "full" }` in package.json) run on every matrix model; the rest run once
-  # on the default model. The world suites (e2e-vercel, e2e-postgres) cover
-  # the other workflow worlds with deterministic mock models.
+  # The model suite: each fixture's `real-model` evals run here against the
+  # local world with real matrix models. Model-sensitive fixtures (`"e2e": {
+  # "modelMatrix": "full" }` in package.json) run on every matrix model; the
+  # rest run once on the default model. The default model's job also runs the
+  # fixture's other evals with the mock model, which keeps them on the local
+  # world and its dev routes; a fixture without `real-model` evals gets one
+  # mock-only job. The world suites (e2e-vercel, e2e-postgres) cover the other
+  # workflow worlds with deterministic mock models.
   e2e:
     name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})${{ matrix.shard && format(' [{0}]', matrix.shard) || '' }}
     runs-on: ubuntu-latest
@@ -74,6 +77,9 @@ jobs:
     env:
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVE_EVAL_IDS_JSON: ${{ toJSON(matrix.eval_ids) }}
+      EVE_MODEL_EVALS: ${{ matrix.model_evals }}
+      EVE_MOCK_EVALS: ${{ matrix.mock_evals }}
+      EVE_MOCK_EVAL_IDS_JSON: ${{ toJSON(matrix.mock_eval_ids) }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
 
     steps:
@@ -138,11 +144,24 @@ jobs:
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
           cd "${{ matrix.dir }}"
           pnpm run --if-present e2e:prepare
-          mapfile -d '' -t eval_ids < <(node -e 'for (const id of JSON.parse(process.env.EVE_EVAL_IDS_JSON || "null") || []) process.stdout.write(`${id}\0`)')
+          ids_of() { node -e 'for (const id of JSON.parse(process.env[process.argv[1]] || "null") || []) process.stdout.write(`${id}\0`)' "$1"; }
+          mapfile -d '' -t eval_ids < <(ids_of EVE_EVAL_IDS_JSON)
+          mapfile -d '' -t mock_eval_ids < <(ids_of EVE_MOCK_EVAL_IDS_JSON)
           shard_suffix="${{ matrix.shard || '' }}"
           junit_suffix="${shard_suffix:+-$shard_suffix}"
-          pnpm exec eve eval "${eval_ids[@]}" --strict --verbose \
-            --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-${{ matrix.model_name }}${junit_suffix}.xml"
+          status=0
+          # Real-model evals on the leg's model, then every other eval with the mock model.
+          if [ "$EVE_MODEL_EVALS" != none ]; then
+            tag_args=()
+            if [ "$EVE_MODEL_EVALS" = real-model ]; then tag_args=(--tag real-model); fi
+            pnpm exec eve eval "${eval_ids[@]}" "${tag_args[@]}" --strict --verbose \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-${{ matrix.model_name }}${junit_suffix}.xml" || status=$?
+          fi
+          if [ "$EVE_MOCK_EVALS" = true ]; then
+            EVE_E2E_MODEL=mock pnpm exec eve eval "${mock_eval_ids[@]}" --exclude-tag real-model --strict --verbose \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-mock${junit_suffix}.xml" || status=$?
+          fi
+          exit "$status"
 
       - name: Capture failed workflow event ordering
         if: failure() && needs.changes.outputs.relevant == 'true'
