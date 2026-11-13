@@ -47,6 +47,28 @@ export async function openInBrowser(ctx: Ctx, url: string): Promise<void> {
   await runAgentBrowser(ctx, ["open", url], { session: BROWSER_SESSION });
 }
 
+/**
+ * What the browser shows: its title and the start of its text, so the model
+ * notices a sign-in or no-access screen instead of sharing it.
+ */
+export async function describePage(ctx: Ctx): Promise<{ title: string; text: string }> {
+  const read = async (args: string[]) => {
+    try {
+      const { stdout } = await runAgentBrowser(ctx, args, {
+        json: false,
+        session: BROWSER_SESSION,
+      });
+      return stdout.trim();
+    } catch {
+      return "";
+    }
+  };
+  // Apps such as Notion never go network-idle, so give the page a moment instead.
+  await read(["wait", "2000"]);
+  const [title, text] = [await read(["get", "title"]), await read(["get", "text", "body"])];
+  return { title, text: text.replace(/\s+/gu, " ").slice(0, 400) };
+}
+
 export function setShownPage(page: { pageId: string; url: string; follow: boolean } | null): void {
   shownPage.update(() => page);
 }
