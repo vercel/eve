@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -12,7 +12,7 @@ import {
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
   TRANSACTIONAL_REBUILD_DESCRIPTOR,
 } from "./dev-server-descriptors.js";
-import { startEveDev, waitForCondition } from "./dev-server-harness.js";
+import { startEveDev, waitForCondition } from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -94,9 +94,51 @@ export default defineDynamic(() => {
 });
 `;
 
-const DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR: ScenarioAppDescriptor = {
+function editableFactorySource(build: number): string {
+  return `import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { defineTool as tool } from "eve/tools";
+import { z } from "zod";
+
+const BUILD = ${build};
+
+export function createEditableMarkerTool(key: string, version: string) {
+  return tool({
+    description: "Editable marker tool " + key + ".",
+    inputSchema: z.object({}),
+    approval: {
+      request() {
+        return "user-approval";
+      },
+      response() {
+        return { status: "allowed" };
+      },
+    },
+    execute() {
+      const output = { build: BUILD, key, pid: process.pid, version };
+      writeFileSync(
+        join(process.cwd(), ".editable-execute-" + key + ".json"),
+        JSON.stringify(output),
+      );
+      return output;
+    },
+  });
+}
+`;
+}
+
+const EDITABLE_TOOLS_SOURCE = `import { defineDynamic } from "eve/tools";
+import { createEditableMarkerTool } from "../lib/editable-factory.ts";
+
+export default defineDynamic(() => ({
+  alpha_marker: createEditableMarkerTool("alpha", "v1"),
+  beta_marker: createEditableMarkerTool("beta", "v1"),
+}));
+`;
+
+const DYNAMIC_TOOL_RESUME_DESCRIPTOR: ScenarioAppDescriptor = {
   ...TRANSACTIONAL_REBUILD_DESCRIPTOR,
-  name: "dynamic-tool-cold-replay",
+  name: "dynamic-tool-resume",
   files: {
     ...Object.fromEntries(
       Object.entries(TRANSACTIONAL_REBUILD_DESCRIPTOR.files).filter(
@@ -105,6 +147,8 @@ const DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR: ScenarioAppDescriptor = {
     ),
     "agent/lib/durable-factory.ts": DURABLE_FACTORY_SOURCE,
     "agent/tools/durable-dynamic.ts": DYNAMIC_TOOLS_SOURCE,
+    "agent/lib/editable-factory.ts": editableFactorySource(1),
+    "agent/tools/editable-dynamic.ts": EDITABLE_TOOLS_SOURCE,
   },
 };
 
@@ -123,11 +167,28 @@ async function readMarker(appRoot: string, phase: string, key: string): Promise<
   ) as Marker;
 }
 
-describe("dynamic tool cold replay", () => {
+interface ExecuteMarker {
+  readonly build: number;
+  readonly key: string;
+  readonly pid: number;
+  readonly version: string;
+}
+
+async function readExecuteMarker(appRoot: string, key: string): Promise<ExecuteMarker> {
+  return JSON.parse(
+    await readFile(join(appRoot, `.editable-execute-${key}.json`), "utf8"),
+  ) as ExecuteMarker;
+}
+
+// One crash and `--resume` of `eve dev` with approvals parked on dynamic tools, in two sessions.
+// The fresh process renders the approved calls' tools again and runs every callback phase there
+// (cold replay), and a module edited while they were parked still runs the generation that
+// created each approval, under its own tool identity (source edit).
+describe("dynamic tools across an eve dev crash and resume", () => {
   it(
-    "renders an approved call's tool again in a fresh process and runs every callback phase there",
+    "renders parked approvals' tools again in the fresh process, on the generation that created them",
     async () => {
-      const app = await scenarioApp(DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR);
+      const app = await scenarioApp(DYNAMIC_TOOL_RESUME_DESCRIPTOR);
       const pinnedEnv = {
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
@@ -137,23 +198,26 @@ describe("dynamic tool cold replay", () => {
 
       try {
         const client = new Client({ baseUrl: server.url });
-        const created = await client.sessions.create({ message: "Hello." });
-        await expect(created.delivery.result()).resolves.toMatchObject({
-          interactions: [],
-          status: "completed",
-        });
-
-        const delivery = await created.session.send(
-          "Call tools in parallel: guarded_marker, companion_marker",
-        );
-        const events = [];
-        for await (const event of delivery.stream()) events.push(event);
-        const waiting = await delivery.result();
-        expect(waiting.status).toBe("awaiting-input");
-        expect(
-          waiting.interactions,
-          `Expected two approval requests.\n\nevents:\n${JSON.stringify(events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
-        ).toHaveLength(2);
+        /** Opens a session and parks it on two approvals. */
+        const park = async (message: string) => {
+          const created = await client.sessions.create({ message: "Hello." });
+          await expect(created.delivery.result()).resolves.toMatchObject({
+            interactions: [],
+            status: "completed",
+          });
+          const delivery = await created.session.send(message);
+          const events = [];
+          for await (const event of delivery.stream()) events.push(event);
+          const waiting = await delivery.result();
+          expect(waiting.status).toBe("awaiting-input");
+          expect(
+            waiting.interactions,
+            `Expected two approval requests.\n\nevents:\n${JSON.stringify(events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+          ).toHaveLength(2);
+          return { state: created.session.state, waiting };
+        };
+        const durable = await park("Call tools in parallel: guarded_marker, companion_marker");
+        const editable = await park("Call tools in parallel: alpha_marker, beta_marker");
 
         const firstRequest = await readMarker(app.appRoot, "approval-request", "guarded");
         const resolverRunsBeforeRestart = (
@@ -162,7 +226,15 @@ describe("dynamic tool cold replay", () => {
           .trim()
           .split("\n");
         expect(resolverRunsBeforeRestart.length).toBeGreaterThan(0);
-        const sessionState = created.session.state;
+
+        // Edit the callback module while approvals are parked: pad the top of
+        // the file (shifting every byte offset below — the old identity scheme
+        // resolved parked calls by those offsets) and bump the built-in
+        // constant so the edited body is observable.
+        await writeFile(
+          join(app.appRoot, "agent", "lib", "editable-factory.ts"),
+          "// padding line\n// another padding line\n\n" + editableFactorySource(2),
+        );
 
         await server.crash();
         await waitForCondition(async () => {
@@ -178,19 +250,23 @@ describe("dynamic tool cold replay", () => {
           env: { ...pinnedEnv, EVE_SCHEMA_TEST_SUFFIX: ":changed" },
         });
 
-        const resumedSession = new Client({ baseUrl: server.url }).sessions.attach(
-          sessionState.sessionId,
-          { streamIndex: sessionState.streamIndex },
-        );
-        const resumed = await (
-          await resumedSession.respond(
-            waiting.interactions.map((request) => ({
-              optionId: "approve",
-              interactionId: request.interactionId,
-            })),
-          )
-        ).result();
-        expect(resumed.status).toBe("completed");
+        const approve = async ({ state, waiting }: Awaited<ReturnType<typeof park>>) => {
+          const resumedSession = new Client({ baseUrl: server.url }).sessions.attach(
+            state.sessionId,
+            { streamIndex: state.streamIndex },
+          );
+          const resumed = await (
+            await resumedSession.respond(
+              waiting.interactions.map((request) => ({
+                optionId: "approve",
+                interactionId: request.interactionId,
+              })),
+            )
+          ).result();
+          expect(resumed.status).toBe("completed");
+        };
+        await approve(durable);
+        await approve(editable);
 
         for (const key of ["guarded", "companion"]) {
           const response = await readMarker(app.appRoot, "approval-response", key);
@@ -222,6 +298,15 @@ describe("dynamic tool cold replay", () => {
         );
         expect(rendersAfterRestart.length).toBeGreaterThan(0);
         expect(rendersAfterRestart.every((pid) => pid !== String(firstRequest.pid))).toBe(true);
+
+        // Pending approvals make the session ineligible for deployment
+        // handoff. Each parked call must run its own tool — never the other
+        // one — using the generation that created the approval.
+        const alpha = await readExecuteMarker(app.appRoot, "alpha");
+        const beta = await readExecuteMarker(app.appRoot, "beta");
+        expect(alpha).toMatchObject({ build: 1, key: "alpha", version: "v1" });
+        expect(beta).toMatchObject({ build: 1, key: "beta", version: "v1" });
+        expect(alpha.pid).toBe(beta.pid);
       } finally {
         await server.stop();
       }

@@ -1,3 +1,4 @@
+// @linux-only: tool authorization logic
 import { describe, expect, it } from "vitest";
 
 import {

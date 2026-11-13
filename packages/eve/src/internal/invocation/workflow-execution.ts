@@ -15,13 +15,12 @@ import type {
   AgentInvocationMutationResult,
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
+import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import {
-  INVOCATION_OWNER_ATTRIBUTE,
-  INVOCATION_TOKEN_ATTRIBUTE,
-  invocationOwnerKey,
-} from "#internal/invocation/metadata.js";
+  invocationContinuationToken,
+  readOwnedInvocationRun,
+} from "#internal/invocation/owned-run.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { getWorld } from "#internal/workflow/runtime.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
@@ -62,7 +61,7 @@ export class WorkflowAgentInvocationExecution {
       input: { message: input.message },
     });
 
-    const run = await this.#readInvocationRun(handle.sessionId, input.auth);
+    const run = await readOwnedInvocationRun(handle.sessionId, input.auth);
     if (run === undefined) {
       throw new Error("Invocation run was unavailable after durable creation.");
     }
@@ -154,7 +153,7 @@ export class WorkflowAgentInvocationExecution {
       }
     | undefined
   > {
-    const run = await this.#readInvocationRun(input.invocationId, input.auth);
+    const run = await readOwnedInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return undefined;
     const base = {
       createdAt: run.createdAt.toISOString(),
@@ -167,22 +166,8 @@ export class WorkflowAgentInvocationExecution {
     return {
       invocation: projectInvocation(base, run.status, stream),
       stream,
-      token: run.attributes[INVOCATION_TOKEN_ATTRIBUTE],
+      token: invocationContinuationToken(run),
     };
-  }
-
-  async #readInvocationRun(invocationId: string, auth: SessionAuthContext | null) {
-    const world = await getWorld();
-    try {
-      const run = await world.runs.get(invocationId);
-      if (run.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) return undefined;
-      return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth)
-        ? run
-        : undefined;
-    } catch (error) {
-      if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
-      throw error;
-    }
   }
 }
 

@@ -1,3 +1,4 @@
+// @linux-only: prewarm handoff semantics on Workflow; compiled from memory
 import { describe, expect, it, vi } from "vitest";
 import type { AnyEventRequest } from "@workflow/world";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
@@ -51,6 +52,14 @@ async function waitForPrewarmStep(runId: string): Promise<void> {
       const steps = await world.steps.list({ runId });
       const step = steps.data.find((entry) => entry.stepName.endsWith("//prewarmSessionStep"));
       expect(step?.status).toBe("completed");
+      // The World marks the step completed before its `step_completed` joins the event log, and
+      // a message delivered in between replays ahead of what the prewarm prepared.
+      const events = await world.events.listByCorrelationId({
+        correlationId: step!.stepId,
+        resolveData: "none",
+        runId,
+      });
+      expect(events.data.map((event) => event.eventType)).toContain("step_completed");
     },
     { timeout: 10_000 },
   );

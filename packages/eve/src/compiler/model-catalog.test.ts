@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -96,6 +99,12 @@ const MOCK_MODELS: CatalogModel[] = [
 
 const MOCK_PROVIDER_ALIASES: Record<string, string> = { blackForestLabs: "bfl" };
 
+/** An app root no other run wrote a model catalog cache into. A fixed path picks up
+ * whatever a real `eve` run left in it, and the loader then skips the mocked fetch. */
+function unusedAppRoot(): string {
+  return join(tmpdir(), `eve-model-catalog-${randomUUID()}`);
+}
+
 function mockCatalogFetch(): void {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     async () =>
@@ -186,14 +195,14 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
 
   it("resolves model limits by slug", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const limits = await loader.getModelLimits("anthropic/claude-opus-4.7");
     expect(limits?.contextWindowTokens).toBe(200_000);
   });
 
   it("identifies eve when fetching the AI Gateway model catalog", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
 
     await loader.getModelLimits("bfl/flux-pro");
 
@@ -204,35 +213,35 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
 
   it("returns null for unknown slug", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const limits = await loader.getModelLimits("unknown/model");
     expect(limits).toBeNull();
   });
 
   it("strips -thinking suffix from model ID before lookup", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const limits = await loader.getModelLimits("anthropic/claude-opus-4.7-thinking");
     expect(limits?.contextWindowTokens).toBe(200_000);
   });
 
   it("resolves a model whose canonical slug ends in -thinking", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const limits = await loader.getModelLimits("arcee-ai/trinity-large-thinking");
     expect(limits?.contextWindowTokens).toBe(262_100);
   });
 
   it("prefers the exact -thinking slug over its base model", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const limits = await loader.getModelLimits("moonshotai/kimi-k2-thinking");
     expect(limits?.contextWindowTokens).toBe(216_144);
   });
 
   it("resolves by provider and providerModelId", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const result = await loader.getByProviderModelId("anthropic", "claude-opus-4-7");
     expect(result?.slug).toBe("anthropic/claude-opus-4.7");
     expect(result?.contextWindowTokens).toBe(200_000);
@@ -240,42 +249,42 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
 
   it("strips dotted sub-path from provider before lookup", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const result = await loader.getByProviderModelId("anthropic.messages", "claude-opus-4-7");
     expect(result?.slug).toBe("anthropic/claude-opus-4.7");
   });
 
   it("resolves provider alias before lookup", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const result = await loader.getByProviderModelId("blackForestLabs", "flux-pro");
     expect(result?.slug).toBe("bfl/flux-pro");
   });
 
   it("resolves provider alias combined with dot stripping", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const result = await loader.getByProviderModelId("blackForestLabs.images", "flux-pro");
     expect(result?.slug).toBe("bfl/flux-pro");
   });
 
   it("returns null for unknown provider and providerModelId", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const result = await loader.getByProviderModelId("unknown", "model");
     expect(result).toBeNull();
   });
 
   it("skips providers with zero contextWindowTokens and uses the next valid one", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const limits = await loader.getModelLimits("example/zero-first-provider");
     expect(limits?.contextWindowTokens).toBe(50_000);
   });
 
   it("skips providers with zero contextWindowTokens in getByProviderModelId", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     const result = await loader.getByProviderModelId("providerA", "zero-model");
     expect(result).toBeNull();
     const result2 = await loader.getByProviderModelId("providerB", "zero-model");
@@ -285,7 +294,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
 
   it("projects the catalog onto the snapshot a build ships", async () => {
     mockCatalogFetch();
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
 
     const metadata = await loader.loadModelMetadata();
 
@@ -301,7 +310,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
 
   it("ships an empty snapshot when the catalog is unavailable", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
 
     await expect(loader.loadModelMetadata()).resolves.toMatchObject({
       fetchedAt: null,
@@ -311,7 +320,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
 
   it("preserves the fetch error for an unknown model", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const loader = createCompiledRuntimeModelCatalogLoader(unusedAppRoot());
     await expect(loader.getModelLimits("unknown/model")).rejects.toThrow("offline");
   });
 

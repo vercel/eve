@@ -1,8 +1,48 @@
+import { closeSync, globSync, openSync, readSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
 
 import { workspaceChannelPackages } from "./test/setup/workspace-channel-packages.js";
 
 import { workflow } from "./src/internal/testing/workflow-vitest-plugin.js";
+
+const INTEGRATION_TESTS = ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"];
+const LINUX_ONLY_MARKER = "// @linux-only:";
+
+/**
+ * The integration test files whose first line is `// @linux-only: <reason>`.
+ *
+ * Windows CI runs the integration tier to catch what differs on Windows: filesystem paths and
+ * links, file watching, processes and signals, module resolution and loading, bundling, the CLI,
+ * the dev host, and Workflow's local World on disk, which `eve dev` runs on. A file is marked
+ * when it tests only agent and session behavior that is the same on every OS: the kernel, the
+ * harness, and sessions compiled from memory, on the in-process host or on Workflow. On Windows,
+ * the host battery's Workflow side and the local World, session store, and step bundle tests keep
+ * Workflow's on-disk side covered.
+ *
+ * A file without the marker runs on Windows, so a new file is covered there until someone marks
+ * it. Mark a file only when none of its tests touches anything Windows can change.
+ */
+function linuxOnlyIntegrationTests(): string[] {
+  const root = fileURLToPath(new URL(".", import.meta.url));
+  const head = Buffer.alloc(512);
+  return globSync(INTEGRATION_TESTS, { cwd: root })
+    .map((file) => file.replaceAll("\\", "/"))
+    .filter((file) => {
+      const fd = openSync(root + file, "r");
+      const firstLine = head.toString("utf8", 0, readSync(fd, head, 0, head.length, 0));
+      closeSync(fd);
+      if (!firstLine.startsWith(LINUX_ONLY_MARKER)) return false;
+      const reason = firstLine.slice(LINUX_ONLY_MARKER.length).split("\n", 1)[0]!.trim();
+      if (reason === "") throw new Error(`${file} is marked Linux-only without a reason.`);
+      return true;
+    })
+    .sort();
+}
+
+// Scanned on every platform, so a marker without a reason fails on Linux CI too.
+const linuxOnlyTests = linuxOnlyIntegrationTests();
 
 /**
  * Tier 1 — Integration tests.
@@ -41,16 +81,20 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "test/scenarios/**",
-      // Channel conformance checks platform protocol, not the OS, and is slowest on Windows runners.
-      ...(process.platform === "win32" ? ["**/conformance*.integration.test.ts"] : []),
+      // Windows runs only the tests whose behavior can differ there; see linuxOnlyIntegrationTests.
+      // Channel conformance checks platform protocol, not the OS.
+      ...(process.platform === "win32"
+        ? ["**/conformance*.integration.test.ts", ...linuxOnlyTests]
+        : []),
     ],
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
-    include: ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"],
+    include: INTEGRATION_TESTS,
     server: {
       deps: {
         // Imports matrix-js-sdk paths without file extensions, which Node's ESM loader rejects
         // and bundlers resolve; registry template tests load it through Vite instead.
         inline: [/@beeper\/chat-adapter-matrix/u],
+        external: [/\.workflow-vitest[\\/]/],
       },
     },
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],

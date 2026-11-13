@@ -1,3 +1,4 @@
+// @linux-only: Connect event watches (subscription logic)
 import * as workflowRuntime from "#execution/workflow-runtime.js";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";

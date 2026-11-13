@@ -1,3 +1,4 @@
+// @linux-only: sandbox cleanup by key (registry)
 import { describe, expect, it } from "vitest";
 
 import { SandboxKey } from "#context/keys.js";

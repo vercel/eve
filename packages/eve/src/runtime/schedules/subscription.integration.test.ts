@@ -1,3 +1,4 @@
+// @linux-only: schedule operation schemas
 import { describe, expect, it, vi } from "vitest";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { scheduleCollectionTools } from "#context/schedule-collection-tools.js";

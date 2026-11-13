@@ -1,7 +1,17 @@
 import { defineConfig } from "vitest/config";
 
+import {
+  FRAMEWORK_SCENARIO_FILES,
+  PACKAGING_SCENARIO_FILES,
+  PRODUCTION_BUILD_SCENARIO_FILES,
+  PUBLIC_TYPES_SCENARIO_FILES,
+  SCENARIO_ALIASES,
+  SCENARIO_TEST_OPTIONS,
+} from "./vitest.scenario-shared.ts";
+
 /**
- * Tier 2 — Scenario tests.
+ * Tier 2 — Scenario tests that run eve: `eve dev` and `eve start` behavior,
+ * and files that need a real filesystem or shell.
  *
  * End-to-end behaviour checks that require real subprocesses, real HTTP
  * listeners, real compile/bundle pipelines, or real workflow on-disk state.
@@ -23,27 +33,23 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   resolve: {
-    alias: [
-      {
-        find: /^#compiled\/(.+)\.js$/,
-        replacement: new URL("./.generated/compiled/$1.js", import.meta.url).pathname,
-      },
-      {
-        find: /^#(.+)\.js$/,
-        replacement: new URL("./src/$1.ts", import.meta.url).pathname,
-      },
-    ],
+    alias: SCENARIO_ALIASES,
   },
   test: {
-    environment: "node",
-    exclude: ["**/node_modules/**"],
-    globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
+    ...SCENARIO_TEST_OPTIONS,
+    // This tier runs eve. Building and packaging apps runs in `test:build`,
+    // and type checks of the published declarations in `test:public-types`.
+    exclude: [
+      ...SCENARIO_TEST_OPTIONS.exclude,
+      ...FRAMEWORK_SCENARIO_FILES,
+      ...PACKAGING_SCENARIO_FILES,
+      ...PRODUCTION_BUILD_SCENARIO_FILES,
+      ...PUBLIC_TYPES_SCENARIO_FILES,
+    ],
     include: ["src/**/*.scenario.test.ts", "test/scenarios/**/*.scenario.test.ts"],
     // Subprocess-heavy files (dev servers, real builds, installs) fan out
     // beyond their own worker; a fixed cap keeps timing-sensitive
     // assertions stable on large hosts and matches CI's 4 vCPUs.
     maxWorkers: 4,
-    setupFiles: ["./test/setup/mock-ai-gateway.ts"],
-    testTimeout: 120_000,
   },
 });

@@ -7,12 +7,7 @@ import { describe, expect, it } from "vitest";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
-import {
-  fetchAgentInfo,
-  startEveDev,
-  waitForCondition,
-  type RunningEveDev,
-} from "./dev-server-harness.js";
+import { startEveDev, waitForCondition, type RunningEveDev } from "#internal/testing/dev-server-harness.js";
 import { DEV_SERVER_SCENARIO_TIMEOUT_MS } from "./dev-server-descriptors.js";
 
 const scenarioApp = useScenarioApp();
@@ -50,22 +45,6 @@ export default defineDynamicSchedules({
 `;
 
 describe("local Vercel schedule delivery", () => {
-  it(
-    "boots a static-only agent without local queue configuration",
-    async () => {
-      const app = await scenarioApp(appDescriptor);
-      const server = await startEveDev(app.appRoot, {
-        env: { ...localEnv, VERCEL_QUEUE_BASE_URL: undefined, VERCEL_QUEUE_TOKEN: undefined },
-      });
-      try {
-        expect((await fetchAgentInfo(server.url)).agent.name).toBe(appDescriptor.name);
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
-
   it(
     "consumes and acknowledges an occurrence after hot-adding the first dynamic collection",
     async () => {

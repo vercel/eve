@@ -1,3 +1,4 @@
+// @linux-only: stranded-session recovery on Workflow
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";

@@ -420,6 +420,14 @@ async function startNitroDevelopmentServer(
       async () => {
         const payload = await build.buildHost(preparedHost);
         build.close();
+        // Publish before the first worker goes live. The supervisor holds
+        // requests until then, and with no generation published they would
+        // read artifacts from the app root, which `eve dev` never writes.
+        await activateDevelopmentGeneration({
+          appRoot: preparedHost.appRoot,
+          generation: preparedHost.generation,
+        });
+        initialGenerationPublished = true;
         const workspace = preparedHost.workspace;
         initialWorkspaceTransferred = true;
         await devServer.swapTo({
@@ -427,11 +435,6 @@ async function startNitroDevelopmentServer(
           entry: payload.entry,
           workerData: payload.workerData,
         });
-        await activateDevelopmentGeneration({
-          appRoot: preparedHost.appRoot,
-          generation: preparedHost.generation,
-        });
-        initialGenerationPublished = true;
       },
       options.onBootProgress,
     );

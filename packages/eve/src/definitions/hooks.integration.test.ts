@@ -1,15 +1,16 @@
+// @linux-only: hook ctx.continue(); in-process
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookContext, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
@@ -92,18 +93,16 @@ async function runSession(input: {
   });
   const continuationToken = `http:${input.name}`;
   await runtime.run(async () => {
-    const run = await start(workflowEntry, [
-      {
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        input: { message: "Alice asks for the report." },
-        serializedContext: buildSerializedContext({
-          auth: ALICE,
-          channelKind: "http",
-          continuationToken,
-        }),
-      },
-    ]);
+    const run = await startTestSession("in-process", {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message: "Alice asks for the report." },
+      serializedContext: buildSerializedContext({
+        auth: ALICE,
+        channelKind: "http",
+        continuationToken,
+      }),
+    });
     try {
       await input.drive({ inbox: sessionInboxHookToken(continuationToken), log });
     } finally {
@@ -205,7 +204,7 @@ describe("hook ctx.continue()", () => {
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
         // Bob asks while the first turn still runs; his message waits behind it.
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -244,7 +243,7 @@ describe("hook ctx.continue()", () => {
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
         // Alice clears the conversation while the first turn still runs; the clear cancels it.
-        await resumeHook(inbox, { deliveryId: "clear-1", kind: "clear" });
+        await resumeRoutedHook(inbox, { deliveryId: "clear-1", kind: "clear" });
         await until(log, "turn:cancelled", 1);
         release();
         await until(log, 'admitted:{"control":"clear"}', 1);

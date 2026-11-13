@@ -1,7 +1,6 @@
 import { InvalidArgumentError, Option, type Command } from "#compiled/commander/index.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
 import { agentCommand } from "#cli/agent-command.js";
-import { inspectVerifiedRemoteAgent } from "#setup/verified-remote-agent.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
@@ -120,6 +119,7 @@ export function registerRemoteCommands(input: {
           { header: options.header, url: options.url },
           undefined,
         )!;
+        const { inspectVerifiedRemoteAgent } = await import("#setup/verified-remote-agent.js");
         const inspection = await inspectVerifiedRemoteAgent({
           headers: target.headers,
           prompter:

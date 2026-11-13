@@ -1,3 +1,4 @@
+// @linux-only: approval requester identity; in-process
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { MockLanguageModelV4 } from "ai/test";

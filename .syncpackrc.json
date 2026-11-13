@@ -34,7 +34,7 @@
     {
       "label": "Blooio is an externally published integration",
       "dependencies": ["eve-channel-blooio"],
-      "packages": ["eve-docs"],
+      "packages": ["docs-registry"],
       "dependencyTypes": ["dev"],
       "isIgnored": true
     },

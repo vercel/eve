@@ -1,5 +1,10 @@
 const SRVX_START_FAILURE_MARKER = "[srvx] Failed to start server:";
 
+/** A built eve server failed to start because another process listens on its port. */
+export class BuiltServerPortInUseError extends Error {
+  override readonly name = "BuiltServerPortInUseError";
+}
+
 /**
  * Detects a built eve server that reported a failed start in `output`.
  *
@@ -23,7 +28,7 @@ export function readBuiltServerStartFailure(
   const failure = output.slice(failureIndex);
 
   if (output.slice(failureIndex, failureLineEnd).includes("EADDRINUSE")) {
-    return new Error(
+    return new BuiltServerPortInUseError(
       `Port ${String(listen.port)} on ${listen.host} is already in use. Another process is listening there; stop it or ${listen.retryHint}.`,
     );
   }

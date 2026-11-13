@@ -1,16 +1,16 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import { watch } from "node:fs";
-import { lstat, mkdir, readFile, readdir, readlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import { materializeScenarioApp, useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 
 const scenarioApp = useScenarioApp();
 const PROCESS_DEADLINE_MS = 180_000;
@@ -486,65 +486,79 @@ describe("production build isolation", () => {
     SCENARIO_DEADLINE_MS,
   );
 
-  it(
-    "preserves the byte-for-byte last-good output when a later real bundle fails",
-    async () => {
-      const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
-      const successfulBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
-      const successfulResult = await successfulBuild.result;
+  describe("after a successful real build", () => {
+    // Both tests start from the same installed, built app. Each leaves the
+    // app buildable, so they hold in either order.
+    let appRoot: string;
+    let cleanupBuiltApp: (() => Promise<void>) | undefined;
+
+    beforeAll(async () => {
+      const app = await materializeScenarioApp(WEATHER_AGENT_DESCRIPTOR);
+      cleanupBuiltApp = app.cleanup;
+      appRoot = app.appRoot;
+      const successfulResult = await startEveProcess({ appRoot, args: ["build"] }).result;
       expect(successfulResult.code).toBe(0);
       expect(successfulResult.signal).toBeNull();
+    }, SCENARIO_DEADLINE_MS);
 
-      const outputDir = join(app.appRoot, ".output");
-      const summaryPath = join(app.appRoot, ".eve", "agent-summary.json");
-      const lastGoodOutputHash = await hashPath(outputDir);
-      const lastGoodSummaryHash = await hashPath(summaryPath);
-      await writeFile(
-        join(app.appRoot, "agent", "tools", "broken.ts"),
-        [
-          'import { missing } from "./does-not-exist";',
-          "export default {",
-          '  description: "Force the production bundle to fail.",',
-          '  inputSchema: { type: "object", properties: {}, required: [] },',
-          "  execute: async () => missing,",
-          "};",
-          "",
-        ].join("\n"),
-      );
+    afterAll(async () => {
+      await cleanupBuiltApp?.();
+    }, SCENARIO_DEADLINE_MS);
 
-      const failedBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
-      const failedResult = await failedBuild.result;
+    it(
+      "preserves the byte-for-byte last-good output when a later real bundle fails",
+      async () => {
+        const outputDir = join(appRoot, ".output");
+        const summaryPath = join(appRoot, ".eve", "agent-summary.json");
+        const brokenToolPath = join(appRoot, "agent", "tools", "broken.ts");
+        const lastGoodOutputHash = await hashPath(outputDir);
+        const lastGoodSummaryHash = await hashPath(summaryPath);
+        await writeFile(
+          brokenToolPath,
+          [
+            'import { missing } from "./does-not-exist";',
+            "export default {",
+            '  description: "Force the production bundle to fail.",',
+            '  inputSchema: { type: "object", properties: {}, required: [] },',
+            "  execute: async () => missing,",
+            "};",
+            "",
+          ].join("\n"),
+        );
 
-      expect(failedResult.code).toBe(1);
-      expect(failedResult.signal).toBeNull();
-      expect(failedResult.stdout).toBe("");
-      expect(failedResult.stderr).toContain("Could not resolve './does-not-exist'");
-      expect(failedResult.stderr).toContain("Build failed with 1 error:");
-      expect(failedResult.stderr).toContain("agent/tools/broken.ts");
-      expect(failedResult.stderr).not.toContain("Diagnostics artifact:");
-      expect(await hashPath(outputDir)).toBe(lastGoodOutputHash);
-      expect(await hashPath(summaryPath)).toBe(lastGoodSummaryHash);
-      expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
-    },
-    SCENARIO_DEADLINE_MS,
-  );
+        try {
+          const failedResult = await startEveProcess({ appRoot, args: ["build"] }).result;
 
-  it(
-    "publishes relocatable compiler artifacts without workspace-derived step ids",
-    async () => {
-      const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
+          expect(failedResult.code).toBe(1);
+          expect(failedResult.signal).toBeNull();
+          expect(failedResult.stdout).toBe("");
+          expect(failedResult.stderr).toContain("Could not resolve './does-not-exist'");
+          expect(failedResult.stderr).toContain("Build failed with 1 error:");
+          expect(failedResult.stderr).toContain("agent/tools/broken.ts");
+          expect(failedResult.stderr).not.toContain("Diagnostics artifact:");
+          expect(await hashPath(outputDir)).toBe(lastGoodOutputHash);
+          expect(await hashPath(summaryPath)).toBe(lastGoodSummaryHash);
+          expect(await listBuildWorkspaces(appRoot)).toEqual([]);
+        } finally {
+          await rm(brokenToolPath, { force: true });
+        }
+      },
+      SCENARIO_DEADLINE_MS,
+    );
 
-      const firstBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
-      await expect(firstBuild.result).resolves.toMatchObject({ code: 0, signal: null });
-      const firstCompilation = await readPublishedCompilationState(app.appRoot);
+    it(
+      "publishes relocatable compiler artifacts without workspace-derived step ids",
+      async () => {
+        const firstCompilation = await readPublishedCompilationState(appRoot);
 
-      const secondBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
-      await expect(secondBuild.result).resolves.toMatchObject({ code: 0, signal: null });
-      const secondCompilation = await readPublishedCompilationState(app.appRoot);
+        const secondBuild = startEveProcess({ appRoot, args: ["build"] });
+        await expect(secondBuild.result).resolves.toMatchObject({ code: 0, signal: null });
+        const secondCompilation = await readPublishedCompilationState(appRoot);
 
-      expect(secondCompilation).toEqual(firstCompilation);
-      expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
-    },
-    SCENARIO_DEADLINE_MS,
-  );
+        expect(secondCompilation).toEqual(firstCompilation);
+        expect(await listBuildWorkspaces(appRoot)).toEqual([]);
+      },
+      SCENARIO_DEADLINE_MS,
+    );
+  });
 });

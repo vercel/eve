@@ -1,3 +1,4 @@
+// @linux-only: tool result media; mock sandbox
 import { jsonSchema } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";

@@ -820,6 +820,18 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
   return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
 }
 
+/**
+ * @internal The `www-authenticate` challenges `auth` declares, deduped and in walk order; the
+ * schemes a 401 from {@link routeAuth} advertises. Empty when no entry declared one.
+ */
+export function declaredAuthChallenges(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): readonly UnauthorizedChallenge[] {
+  return collectDeclaredChallenges(
+    Array.isArray(auth) ? (auth as readonly AuthFn<Request>[]) : [auth as AuthFn<Request>],
+  );
+}
+
 /** Marks functions {@link localDev} returns so channels can tell the author configured it. */
 const LOCAL_DEV_AUTH_SYMBOL = Symbol.for("eve.channels.auth.localDev");
 

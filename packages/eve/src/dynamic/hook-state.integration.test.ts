@@ -1,10 +1,10 @@
+// @linux-only: hook state reaches model calls
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
   finalizeInstrumentationProviders,
@@ -14,9 +14,10 @@ import {
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
-import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
+import { captureTurnEvents } from "#internal/testing/events.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
@@ -112,29 +113,29 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
   const continuationToken = "http:hook-state";
 
   await runtime.run(async () => {
-    const run = await start(workflowEntry, [
-      {
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        input: { message: "Use the first model." },
-        serializedContext: buildSerializedContext({
-          auth: caller("pro"),
-          channelKind: "http",
-          continuationToken,
-        }),
-      },
-    ]);
+    const run = await startTestSession("in-process", {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message: "Use the first model." },
+      serializedContext: buildSerializedContext({
+        auth: caller("pro"),
+        channelKind: "http",
+        continuationToken,
+      }),
+    });
+    const stream = captureTurnEvents(run);
     try {
       // The second message must start its own turn, not steer the first one.
-      await waitForParkedTurnStep(run.runId);
-      await resumeHook(sessionInboxHookToken(continuationToken), {
+      await withTimeout(stream.nextTurn(), "first turn");
+      await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
         auth: caller("team"),
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",
         payload: { message: "Use the second model." },
       });
-      await waitForParkedTurnStep(run.runId, 2);
+      await withTimeout(stream.nextTurn(), "second turn");
     } finally {
+      stream.dispose();
       await run.cancel().catch(() => {});
     }
   });
