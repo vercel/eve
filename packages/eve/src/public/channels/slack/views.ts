@@ -1,6 +1,6 @@
 /**
- * Delivers submissions and closes of app-owned Slack modals to `onModalSubmit`
- * and `onModalClose`. eve's own freeform-answer modal never reaches these hooks.
+ * Delivers interactions with app-owned Slack views to `onView`. eve's own
+ * freeform-answer modal never reaches it.
  */
 
 import type {
@@ -12,65 +12,65 @@ import { createLogger, logError } from "#internal/logging.js";
 import { buildSlackWorkspaceHandle } from "#public/channels/slack/api.js";
 import type { InteractionHandlerDeps } from "#public/channels/slack/interactions.js";
 import type {
-  SlackModalContext,
-  SlackModalEvent,
-  SlackModalResponse,
+  SlackViewContext,
+  SlackViewEventFields,
+  SlackViewResponse,
 } from "#public/channels/slack/slackChannel.js";
 
-const log = createLogger("slack.modals");
+const log = createLogger("slack.views");
 
-interface ModalDispatch {
+interface ViewDispatch {
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }
 
-/** Runs `onModalSubmit` before Slack's acknowledgement so it can keep the modal open. */
-export async function handleModalSubmit(
+/** Runs `onView` before Slack's acknowledgement so a submission can keep the modal open. */
+export async function dispatchViewSubmit(
   payload: SlackViewSubmissionPayload,
-  dispatch: ModalDispatch,
+  dispatch: ViewDispatch,
 ): Promise<Response> {
-  const onModalSubmit = dispatch.deps.config.onModalSubmit;
-  if (onModalSubmit === undefined) return new Response(null, { status: 200 });
+  const onView = dispatch.deps.config.onView;
+  if (onView === undefined) return new Response(null, { status: 200 });
 
-  const event = modalEvent(payload, dispatch.installationTeamId);
+  const fields = viewEventFields(payload, dispatch.installationTeamId);
   try {
-    const result = await onModalSubmit(
-      { ...event, values: modalValues(payload.view) },
-      modalContext(event, dispatch),
+    const result = await onView(
+      { ...fields, type: "submit", values: modalValues(payload.view) },
+      viewContext(fields, dispatch),
     );
-    return modalResponse(result);
+    return submitResponse(result);
   } catch (error) {
     // A 2xx would close the modal and discard what the person typed.
-    logError(log, "onModalSubmit failed", error, { callbackId: event.callbackId });
+    logError(log, "onView failed", error, { callbackId: fields.callbackId, type: "submit" });
     return new Response("Unable to process modal submission", { status: 500 });
   }
 }
 
-/** Runs `onModalClose` after the acknowledgement, because Slack ignores its body. */
-export function handleModalClose(payload: SlackViewClosedPayload, dispatch: ModalDispatch): void {
-  const onModalClose = dispatch.deps.config.onModalClose;
-  if (onModalClose === undefined) return;
+/** Runs `onView` after the acknowledgement, because Slack ignores a close's response. */
+export function dispatchViewClose(payload: SlackViewClosedPayload, dispatch: ViewDispatch): void {
+  const onView = dispatch.deps.config.onView;
+  if (onView === undefined) return;
 
-  const event = modalEvent(payload, dispatch.installationTeamId);
+  const fields = viewEventFields(payload, dispatch.installationTeamId);
   dispatch.waitUntil(
     Promise.resolve()
       .then(() =>
-        onModalClose(
-          { ...event, isCleared: payload.raw.is_cleared === true },
-          modalContext(event, dispatch),
+        onView(
+          { ...fields, type: "close", isCleared: payload.raw.is_cleared === true },
+          viewContext(fields, dispatch),
         ),
       )
       .catch((error: unknown) => {
-        logError(log, "onModalClose failed", error, { callbackId: event.callbackId });
+        logError(log, "onView failed", error, { callbackId: fields.callbackId, type: "close" });
       }),
   );
 }
 
-function modalEvent(
+function viewEventFields(
   payload: SlackViewSubmissionPayload | SlackViewClosedPayload,
   installationTeamId: string | undefined,
-): SlackModalEvent {
+): SlackViewEventFields {
   const { view } = payload;
   return {
     callbackId: readString(view.callback_id) ?? "",
@@ -84,13 +84,13 @@ function modalEvent(
   };
 }
 
-function modalContext(event: SlackModalEvent, dispatch: ModalDispatch): SlackModalContext {
+function viewContext(fields: SlackViewEventFields, dispatch: ViewDispatch): SlackViewContext {
   return {
     slack: buildSlackWorkspaceHandle({
       api: dispatch.deps.api,
       botToken: dispatch.deps.config.credentials?.botToken,
-      installationTeamId: event.installationTeamId,
-      teamId: event.teamId,
+      installationTeamId: fields.installationTeamId,
+      teamId: fields.teamId,
     }),
     waitUntil: dispatch.waitUntil,
   };
@@ -125,7 +125,7 @@ function modalValues(view: Record<string, unknown>): Record<string, string> {
   return values;
 }
 
-function modalResponse(result: SlackModalResponse | void): Response {
+function submitResponse(result: SlackViewResponse | void): Response {
   if (result === undefined || result.action === "close") return new Response(null, { status: 200 });
   switch (result.action) {
     case "clear":
@@ -137,7 +137,7 @@ function modalResponse(result: SlackModalResponse | void): Response {
       return Response.json({ response_action: result.action, view: result.view });
     default:
       throw new Error(
-        `onModalSubmit returned an unsupported response. Return nothing, or an object whose action is "close", "clear", "errors", "update", or "push".`,
+        `onView returned an unsupported response to a submission. Return nothing, or an object whose action is "close", "clear", "errors", "update", or "push".`,
       );
   }
 }

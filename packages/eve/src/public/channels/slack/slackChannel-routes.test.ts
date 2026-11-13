@@ -25,7 +25,7 @@ import {
   type SlackChannelConfig,
   type SlackChannelState,
   type SlackInboundMessageContext,
-  type SlackModalResponse,
+  type SlackViewResponse,
 } from "#public/channels/slack/slackChannel.js";
 import type { SlackMessage, SlackMessageEdit } from "#public/channels/slack/inbound.js";
 
@@ -164,7 +164,7 @@ function slackCalls(operation: string): Record<string, unknown>[] {
     });
 }
 
-describe("slackChannel custom modals", () => {
+describe("slackChannel onView", () => {
   const values = {
     draft: { line: { type: "plain_text_input", value: "Thanks for meeting, Bob." } },
     facts: {
@@ -200,20 +200,21 @@ describe("slackChannel custom modals", () => {
 
   it("hands a submission its values, native state, and the installation's Slack credentials", async () => {
     const botToken = vi.fn(() => "xoxb-test");
-    const onModalSubmit = vi.fn<NonNullable<SlackChannelConfig["onModalSubmit"]>>((event, ctx) => {
+    const onView = vi.fn<NonNullable<SlackChannelConfig["onView"]>>((event, ctx) => {
       ctx.waitUntil(ctx.slack.request("views.publish", { user_id: event.user.id }));
     });
     const onInteraction = vi.fn();
 
     const response = await firePost(
-      slackChannel({ credentials: { botToken }, onInteraction, onModalSubmit }),
+      slackChannel({ credentials: { botToken }, onInteraction, onView }),
       interactionRequest(modalPayload("view_submission")),
     );
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
-    const [event] = onModalSubmit.mock.calls[0]!;
+    const [event] = onView.mock.calls[0]!;
     expect(event).toMatchObject({
+      type: "submit",
       callbackId: "sales_review",
       viewId: "V_REVIEW",
       privateMetadata: "draft-123",
@@ -254,27 +255,27 @@ describe("slackChannel custom modals", () => {
       { action: "push", view: { type: "modal", blocks: [] } },
       { response_action: "push", view: { type: "modal", blocks: [] } },
     ],
-  ] satisfies [SlackModalResponse, unknown][])(
+  ] satisfies [SlackViewResponse, unknown][])(
     "answers Slack with %o only after the hook finishes",
     async (result, body) => {
       let release!: () => void;
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const onModalSubmit = vi.fn(async () => {
+      const onView = vi.fn(async () => {
         await gate;
         return result;
       });
       let answered = false;
       const pending = firePost(
-        slackChannel({ onModalSubmit }),
+        slackChannel({ onView }),
         interactionRequest(modalPayload("view_submission")),
       ).then((response) => {
         answered = true;
         return response;
       });
 
-      await vi.waitFor(() => expect(onModalSubmit).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(onView).toHaveBeenCalledOnce());
       expect(answered).toBe(false);
       release();
       const response = await pending;
@@ -292,18 +293,18 @@ describe("slackChannel custom modals", () => {
       },
     ],
     ["returns an unsupported response", () => ({ response_action: "clear" }) as never],
-  ])("keeps the modal open without details when the hook %s", async (_, onModalSubmit) => {
+  ])("keeps the modal open without details when the hook %s", async (_, onView) => {
     const logs = captureLogRecords();
 
     const response = await firePost(
-      slackChannel({ onModalSubmit }),
+      slackChannel({ onView }),
       interactionRequest(modalPayload("view_submission")),
     );
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("Unable to process modal submission");
     expect(logs.records).toContainEqual(
-      expect.objectContaining({ level: "error", message: "onModalSubmit failed" }),
+      expect.objectContaining({ level: "error", message: "onView failed" }),
     );
   });
 
@@ -325,18 +326,20 @@ describe("slackChannel custom modals", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("runs onModalClose after answering Slack", async () => {
-    const onModalClose = vi.fn<NonNullable<SlackChannelConfig["onModalClose"]>>();
+  it("delivers a close after answering Slack, and sends no response body", async () => {
+    // A close's response never reaches Slack, even when the hook returns one.
+    const onView = vi.fn<NonNullable<SlackChannelConfig["onView"]>>(() => ({ action: "clear" }));
 
     const response = await firePost(
-      slackChannel({ onModalClose }),
+      slackChannel({ onView }),
       interactionRequest(modalPayload("view_closed", { is_cleared: true })),
     );
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
-    expect(onModalClose).toHaveBeenCalledWith(
+    expect(onView).toHaveBeenCalledWith(
       expect.objectContaining({
+        type: "close",
         callbackId: "sales_review",
         privateMetadata: "draft-123",
         isCleared: true,
@@ -473,8 +476,8 @@ describe("slackChannel ephemeral request press", () => {
   });
 
   it("replaces the card with a typed answer from its modal", async () => {
-    const onModalSubmit = vi.fn();
-    const channel = slackChannel({ credentials: { botToken: "xoxb-test" }, onModalSubmit });
+    const onView = vi.fn();
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" }, onView });
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     await firePost(
       channel,
@@ -517,7 +520,7 @@ describe("slackChannel ephemeral request press", () => {
     expect(slackCalls("chat.update")).toEqual([]);
     const [replaced] = responseUrlPosts();
     expect(replaced).toMatchObject({ replace_original: true, text: "The billing migration" });
-    expect(onModalSubmit).not.toHaveBeenCalled();
+    expect(onView).not.toHaveBeenCalled();
   });
 });
 

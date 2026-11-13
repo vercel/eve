@@ -3,8 +3,8 @@ import { slackChannel } from "eve/channels/slack";
 /** Validates and previews Alice's review form; the eval signs its own Slack requests. */
 export default slackChannel({
   credentials: { signingSecret: "e2e-slack-signing-secret" },
-  onModalSubmit(event) {
-    if (event.callbackId !== "sales_review") return;
+  onView(event) {
+    if (event.type !== "submit" || event.callbackId !== "sales_review") return;
     const line = event.values.line;
     if (!line?.trim()) {
       return { action: "errors", errors: { draft: "Enter a follow-up line." } };
