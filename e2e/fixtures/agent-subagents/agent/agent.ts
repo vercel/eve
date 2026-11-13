@@ -58,6 +58,28 @@ const dynamicSubagentProbe = mockModel({
   },
 });
 
+// Runs the eval's program unchanged: the eval checks eve's subagent budget, not
+// whether a model agrees to exceed it.
+const WORKFLOW_LIMIT_PROBE = "E2E_WORKFLOW_SUBAGENT_LIMIT";
+const workflowLimitParent = mockModel({
+  modelId: "workflow-subagent-limit-parent",
+  respond(request) {
+    const directive = request.messages.find(
+      (message) => message.role === "user" && message.text.includes(WORKFLOW_LIMIT_PROBE),
+    );
+    const js = directive?.text.match(/```js\n([\s\S]*?)\n```/u)?.[1];
+    if (js === undefined) throw new Error("The workflow limit directive has no js program.");
+    return playScript(
+      request,
+      [
+        { id: "workflow-limit-run", name: "workflow", input: () => ({ js }) },
+        { id: "workflow-limit-wait", name: "eve__task_wait" },
+      ],
+      (finished) => latestTaskResult(finished, "workflow") ?? "No workflow result.",
+    );
+  },
+});
+
 const TOOL_FALSE_PROBE = "E2E_TOOL_FALSE_SUBAGENT";
 const MODEL_AGENT_PROBE = "E2E_MODEL_SELECTING_AGENT_TOOL";
 const DISABLED_TOOL_PROBE = "E2E_DISABLED_SUBAGENT";
@@ -262,6 +284,9 @@ const agent: DefinedAgent = defineAgent({
     });
     if (messages.some((message) => message.includes(DYNAMIC_SUBAGENT_PROBE))) {
       return scripted(dynamicSubagentProbe);
+    }
+    if (messages.some((message) => message.includes(WORKFLOW_LIMIT_PROBE))) {
+      return scripted(workflowLimitParent);
     }
     if (messages.some((message) => message.includes(MODEL_AGENT_PROBE))) {
       return scripted(modelSelectingParent);

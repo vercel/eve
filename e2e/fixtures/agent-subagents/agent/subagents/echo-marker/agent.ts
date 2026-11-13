@@ -13,6 +13,7 @@ import { defineAgent } from "eve";
 export default defineAgent({
   description:
     "Smoke-test echo subagent. Call this whenever the user mentions the phrase 'echo marker subagent'. Pass any short text as the input; the subagent replies with a fixed marker token.",
-  ...e2eSubagentConfig(),
+  // The mock replies with the marker its instructions require of a live model.
+  ...e2eSubagentConfig({ mock: () => "SUBAGENT_TOKEN=echo-marker-9F2X" }),
   reasoning: "high",
 });

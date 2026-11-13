@@ -1,8 +1,8 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  tags: ["real-model"],
-  description: "The agent follows a requested one-retry policy after an injected lookup timeout.",
+  description:
+    "A thrown stub outcome fails the call, and the stub's next outcome answers the retry.",
   async test(t) {
     const session = await t.session({
       stubs: [
