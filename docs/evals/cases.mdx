@@ -212,7 +212,7 @@ export default rows.map((row) =>
 );
 ```
 
-Use the loaders in evals, not in runtime agent code.
+`loadYaml` reads YAML 1.2 values, so an unquoted date such as `2024-01-02` loads as a string. `<<` merge keys work, so rows can share defaults through an anchor. Use the loaders in evals, not in runtime agent code.
 
 ## What to read next
 
