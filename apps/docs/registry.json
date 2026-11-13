@@ -218,7 +218,7 @@
       "name": "extension/link",
       "type": "registry:item",
       "title": "Link",
-      "description": "Give an eve agent guarded access to a Link wallet for payment methods, purchase requests, and checkout credentials.",
+      "description": "Give an eve agent guarded access to a Link wallet for payments, purchase requests, and financial insights.",
       "dependencies": [
         "@stripe/link-integrations-eve"
       ],
@@ -227,7 +227,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=0.54.4"
+          "requires": ">=1.0.0-rc.5"
         }
       },
       "files": [
