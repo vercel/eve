@@ -143,6 +143,7 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 | A web app / browser chat UI                 | eve channel + [`useEveAgent`](/docs/guides/frontend)             |
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](/docs/channels/eve) (default)                 |
 | MCP clients handing off long-running work   | [MCP](/docs/channels/mcp)                                        |
+| A2A agents delegating durable tasks         | [A2A](/docs/channels/a2a)                                        |
 | Slack mentions, DMs, buttons                | [Slack](/docs/channels/slack)                                    |
 | iMessage and SMS                            | [Linq](/docs/channels/linq)                                      |
 | iMessage                                    | [Photon](/docs/channels/photon)                                  |
@@ -167,6 +168,7 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [eve HTTP channel](/docs/channels/eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](/docs/channels/slack): the most common platform channel, end to end
 - [MCP](/docs/channels/mcp): let MCP clients hand long-running work to the agent
+- [A2A](/docs/channels/a2a): publish the agent as an Agent2Agent server for other agents
 - [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [Recall.ai](/docs/channels/recall), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other first-class platform channels
 - [Chat SDK adapters](/docs/channels/chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](/docs/channels/custom): build a channel for any surface with `defineChannel`
