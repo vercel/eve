@@ -1,0 +1,13 @@
+packages:
+  - apps/web
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - ai
+  - eve
+  - "@eve/*"
+  - "@vercel/*"
+  - "@json-render/*"
+  - eslint-plugin-jsdoc@65.3.0
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - node-liblzma

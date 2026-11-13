@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["vercel"],
+  "workspaces": {
+    ".": {
+      "entry": ["agent/**/*.ts", "vercel.ts", "*.config.ts"],
+      "project": ["agent/**/*.ts", "*.ts"],
+      "ignoreDependencies": [
+        "@fontsource-variable/geist",
+        "@fontsource-variable/geist-mono",
+        "tw-animate-css"
+      ]
+    },
+    "apps/web": {
+      "entry": ["app/router.tsx", "app/start.ts", "app/routes/**/*.tsx"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": [
+        "app/routeTree.gen.ts",
+        "components/ai-elements/**",
+        "components/ui/**"
+      ]
+    }
+  }
+}
