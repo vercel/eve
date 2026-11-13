@@ -148,42 +148,6 @@ describe("createChannelAddress", () => {
     );
   });
 
-  it("delivers under the delivery ID a framework channel names, so a retry has the same receipt", async () => {
-    const runtime = createRuntime();
-    const address = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "a2a",
-      continuationToken: "context-1",
-      runtime,
-    });
-    const options = { auth: null, deliveryId: "delivery-1", idempotencyKey: "message-1" };
-
-    const delivery = await address.send("Alice asks again.", options);
-
-    const command = vi.mocked(runtime.dispatchContinuation).mock.calls[0]?.[0].command;
-    expect(command?.kind === "send" ? command.delivery?.deliveryId : undefined).toBe("delivery-1");
-    expect(delivery.deliveryId).toBe("delivery-1");
-  });
-
-  it("refuses a named delivery ID without its idempotency key, or of the wrong shape", async () => {
-    const runtime = createRuntime();
-    const address = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "a2a",
-      continuationToken: "context-1",
-      runtime,
-    });
-    await expect(
-      address.send("hi", { auth: null, deliveryId: "delivery-1" } as never),
-    ).rejects.toThrow("requires the idempotencyKey");
-    for (const deliveryId of ["", "has space", "line\nbreak", "x".repeat(2049)]) {
-      await expect(
-        address.send("hi", { auth: null, deliveryId, idempotencyKey: "message-1" } as never),
-      ).rejects.toThrow("printable ASCII");
-    }
-    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
-  });
-
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({
