@@ -92,6 +92,8 @@ export function webChatDriver(): ClientDriver {
       };
       // A card can re-render between reading a button and using it; fail fast and read again.
       page.setDefaultTimeout(2_000);
+      // Opening the page is the one slow step: it loads and parses the whole bundle.
+      page.setDefaultNavigationTimeout(30_000);
       const errors: string[] = [];
       page.on("pageerror", (error) => void errors.push(error.message));
       page.on("console", (message) => {
