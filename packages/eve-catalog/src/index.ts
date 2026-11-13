@@ -291,6 +291,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "agent-desktop",
+    name: "agent-desktop",
+    kind: "extension",
+    tagline:
+      "Add accessibility-based desktop automation tools backed by agent-desktop to an eve agent.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "blitzreels",
     name: "BlitzReels",
     kind: "extension",

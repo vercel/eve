@@ -137,6 +137,22 @@
       ]
     },
     {
+      "name": "extension/agent-desktop",
+      "type": "registry:item",
+      "title": "agent-desktop",
+      "description": "Add accessibility-based desktop automation tools backed by agent-desktop to an eve agent.",
+      "dependencies": [
+        "@eve/agent-desktop"
+      ],
+      "files": [
+        {
+          "path": "registry/extensions/agent-desktop.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/desktop.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/browserbase",
       "type": "registry:item",
       "title": "Browserbase",

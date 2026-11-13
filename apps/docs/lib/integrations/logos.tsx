@@ -1098,6 +1098,20 @@ const agentBrowserLogo = (props: LogoProps) => (
   </svg>
 );
 
+const agentDesktopLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect height="13" rx="2" stroke="currentColor" strokeWidth="1.5" width="20" x="2" y="3" />
+    <path d="M8 21h8M12 16v5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+    <path
+      d="m11 7 4.5 4-2 .4 1 2.1-1.2.6-1-2.1-1.3 1.4V7Z"
+      fill="currentColor"
+      stroke="currentColor"
+      strokeLinejoin="round"
+      strokeWidth=".75"
+    />
+  </svg>
+);
+
 const nimbleLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 170 144" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -1282,6 +1296,7 @@ export const logos = {
   browserbase: browserbaseLogo,
   jetty: jettyLogo,
   "agent-browser": agentBrowserLogo,
+  "agent-desktop": agentDesktopLogo,
   nimble: nimbleLogo,
 } as const;
 
