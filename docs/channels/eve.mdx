@@ -95,7 +95,7 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-A follow-up message joins the running turn by default; see [Overlapping messages](/docs/channels#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
+A follow-up message joins the running turn by default. Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. Set `principalPolicy` on `eveChannel(...)` to `"match-caller"` (the default), `"retain-caller"`, or `"adopt-sender"` for messages from someone other than the running turn's caller. `principalPolicy` is a channel option set in server code, and a request body cannot set it. See [Overlapping messages](/docs/channels#overlapping-messages) for both policies. `answers` only answer the requests they name.
 
 | Session state                | Response                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |

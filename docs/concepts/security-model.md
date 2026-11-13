@@ -109,9 +109,9 @@ Use `"adopt-sender"` when the last person to speak should own the turn and that 
 
 ### Who else steered the turn
 
-`ctx.session.auth.steeredBy` lists the people, other than the caller, whose messages joined the running turn. The list covers messages since the caller last sent a message or approved a call. eve sets it only while at least one such person exists. Otherwise it is absent, including when a turn starts and in every session with one person. `if (ctx.session.auth.steeredBy)` therefore means someone else is steering this turn.
+`ctx.session.auth.steeredBy` lists the people, other than the caller, whose messages joined the running turn. The list covers messages since the caller last sent a message or approved a call. eve sets it only while at least one such person exists. Otherwise it is absent, including in every session with one person. `if (ctx.session.auth.steeredBy)` therefore means someone else is steering this turn.
 
-It is cleared when the caller sends a message, the caller approves a call, or a turn starts. A message that adopts its sender clears it. A message sent without a signed-in sender never releases the hold. A denial does not clear it, and an approval from anyone else does not clear it.
+It is cleared when the caller sends a message or the caller approves a call. A session's own turn starts without it. A local subagent's turn starts with the list its parent turn had when it made the call or sent the message. A message that adopts its sender clears it. A message sent without a signed-in sender never releases the hold. A denial does not clear it, and an approval from anyone else does not clear it.
 
 Read it anywhere `ctx.session` is available: tools, approval policies, dynamic functions, and hooks. A workflow tool call or local subagent started while it is set sees the same list.
 

@@ -93,8 +93,8 @@ readonly steeredBy?: readonly SessionAuthContext[];
 ```
 
 The people other than the caller whose messages joined this turn since the caller last acted. eve
-sets it only while it has at least one person; it is absent whenever a turn starts and in every session
-with one person, so nothing changes for a session that never opts in.
+sets it only while it has at least one person; it is absent in every session with one person, so
+nothing changes for a session that never opts in.
 
 ```mermaid
 stateDiagram-v2
@@ -107,8 +107,8 @@ stateDiagram-v2
 
 - It is readable wherever `ctx.session` is: tools, approval policies, dynamic functions, and hooks.
 - It is stored with the turn, so a replayed step reads the same value.
-- A workflow tool call or local subagent reads the list its parent turn had when it made the call or sent the message.
-- It is absent whenever a turn starts.
+- A session's own turn starts without it.
+- A local subagent's turn starts with the list its parent turn had when it made the call or sent the message. A workflow tool call reads the same list.
 - An `"adopt-sender"` message clears it.
 - A denial doesn't clear it. Neither does an approval from anyone but the caller.
 
@@ -235,7 +235,7 @@ messages. A wrong choice makes a message wait or join; it never widens access.
 ## Compatibility
 
 Additive. `principalPolicy` defaults to `"match-caller"`, and stored deliveries without the field
-read as `"match-caller"`. `steeredBy` is absent whenever a turn starts. The changeset is `minor`.
+read as `"match-caller"`. `steeredBy` is absent when a session's own turn starts. The changeset is `minor`.
 
 ## Testing
 

@@ -309,7 +309,7 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 
 - `auth.current`: the caller on the active inbound turn. A follow-up from a different caller replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
-- `auth.steeredBy`: the people other than the caller whose messages joined the running turn; absent when a turn starts and present only while at least one exists.
+- `auth.steeredBy`: the people other than the caller whose messages joined the running turn; present only while at least one exists. A session's own turn starts without it. A local subagent's turn starts with the list its parent turn had when it made the call or sent the message.
 
 The caller stays the same for the whole turn unless a message joins with `principalPolicy: "adopt-sender"`. Otherwise, only its claims can change:
 

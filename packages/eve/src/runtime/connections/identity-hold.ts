@@ -7,9 +7,10 @@ import {
 import { SteeredByKey } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 
-// Branch-local rather than a context key: calls in one step run in parallel and share the
-// step's context, and eve's own work for the caller runs in that context outside any call.
-const MODEL_CALL = Symbol("eve.modelCall");
+// Registered so every copy of eve in one process sees the same mark. Branch-local rather than a
+// context key: calls in one step run in parallel and share the step's context, and eve's own work
+// for the caller runs in that context outside any call.
+const MODEL_CALL = Symbol.for("eve.modelCall");
 
 /** Runs one call the model made, so the caller identity hold applies to what it does. */
 export function withModelCall<T>(fn: () => T): T {
