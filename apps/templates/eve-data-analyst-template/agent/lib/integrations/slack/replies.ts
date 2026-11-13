@@ -8,7 +8,7 @@ import {
 } from "../../analyst/sql-attachment";
 import { conflictsWithThreadRoles } from "../../analyst/thread-roles";
 import { defineState } from "../../state";
-import { withRecentEntry } from "../../values";
+import { isString, withRecentEntry } from "../../values";
 import { visualizationReceipts } from "./visualizations/receipts";
 
 /** Notice posted when the thread role guard cancels a turn. */
@@ -45,34 +45,47 @@ export const replyDelivery = { post: postCompletedSlackReply };
  * step retries, so a delivery receipt keeps the notice to one post per turn.
  */
 export const replyEvents = {
-  async "message.completed"(event, channel, _ctx, renderNext) {
-    if (event.finishReason === "tool-calls") {
+  async "content.completed"(event, ctx, renderNext) {
+    const { channel } = ctx;
+    const turnId = event.scope?.turnId ?? ctx.session.turn.id;
+    if (
+      event.data.phase !== "reply" ||
+      event.data.kind !== "text" ||
+      !isString(event.data.value)
+    ) {
       await renderNext();
       return;
     }
-    channel.state.pendingToolCallMessage = null;
-
     const receipt = visualizationReceipts.get();
-    if (receipt?.turnId === event.turnId && receipt.posted && !receipt.failed) {
+    if (
+      receipt !== null &&
+      receipt.turnId === turnId &&
+      receipt.posted &&
+      !receipt.failed
+    ) {
       return;
     }
-    const queries = queriesForTurn(event.turnId);
+    const queries = queriesForTurn(turnId);
     const attachment = sqlAttachmentBlock(queries);
-    if (!(event.message && attachment)) {
+    if (!(event.data.value && attachment)) {
       await renderNext();
       return;
     }
     await replyDelivery.post(channel, {
-      blocks: [{ text: event.message, type: "markdown" }, attachment],
-      markdown: `${event.message}${sqlAttachmentMarkdown(queries)}`,
-      text: event.message,
+      blocks: [{ text: event.data.value, type: "markdown" }, attachment],
+      markdown: `${event.data.value}${sqlAttachmentMarkdown(queries)}`,
+      text: event.data.value,
     });
   },
-  async "turn.cancelled"(event, channel, ctx, renderNext) {
+  async "turn.settled"(event, ctx, renderNext) {
+    const { channel } = ctx;
+    if (event.data.outcome !== "cancelled") {
+      return renderNext();
+    }
     try {
       if (
         conflictsWithThreadRoles(ctx.session.auth.current) &&
-        !noticeDeliveries.get()[event.turnId]
+        !noticeDeliveries.get()[event.data.turnId]
       ) {
         const posted = await channel.thread.post(THREAD_ROLE_NOTICE);
         if (posted.raw.ok !== true || !posted.id) {
@@ -81,7 +94,12 @@ export const replyEvents = {
           );
         }
         noticeDeliveries.update((current) =>
-          withRecentEntry(current, event.turnId, posted.id, MAX_TRACKED_NOTICES)
+          withRecentEntry(
+            current,
+            event.data.turnId,
+            posted.id,
+            MAX_TRACKED_NOTICES
+          )
         );
       }
     } finally {

@@ -1,34 +1,31 @@
+import { interaction } from "eve/events";
 import { defineHook } from "eve/hooks";
 
-import { queriesForTurn, transferQueries } from "../../analyst/query-log";
 import { defineState } from "../../state";
 import { visualizationReceipts } from "./visualizations/receipts";
 
 const pendingResume = defineState<string | null>(
-  "analyst.slack-reply-resume",
+  "contentful.slack-reply-resume",
   () => null
 );
 
 export default defineHook({
   events: {
-    "input.resolved"(event, ctx) {
+    "interaction.settled"(event, ctx) {
       if (ctx.channel.kind !== "channel:slack") {
         return;
       }
-      const continued = event.data.resolutions.some(
-        (resolution) =>
-          resolution.kind === "session-limit" &&
-          resolution.outcome === "answered" &&
-          resolution.response?.optionId === "continue"
-      );
+      const request = interaction(ctx.view, event.data.interactionId);
+      const continued =
+        request?.request.kind === "budget" && event.data.outcome === "accepted";
       if (!continued) {
         return;
       }
-      const sourceTurnId = event.data.turnId;
-      if (
-        visualizationReceipts.get()?.turnId === sourceTurnId ||
-        queriesForTurn(sourceTurnId).length > 0
-      ) {
+      const sourceTurnId = request?.turnId;
+      if (!sourceTurnId) {
+        return;
+      }
+      if (visualizationReceipts.get()?.turnId === sourceTurnId) {
         pendingResume.update(() => sourceTurnId);
       }
     },
@@ -49,8 +46,6 @@ export default defineHook({
           ? { ...receipt, turnId: resumedTurnId }
           : receipt
       );
-      // The resumed turn posts the reply, so it carries the SQL attachment too.
-      transferQueries(sourceTurnId, resumedTurnId);
     },
   },
 });

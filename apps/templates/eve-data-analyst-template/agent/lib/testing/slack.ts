@@ -1,3 +1,4 @@
+import type { ChannelEventContext } from "eve/channels";
 /**
  * Typed Slack fixtures for unit tests, built against eve's public Slack types
  * so fixture drift after an eve upgrade fails typecheck instead of passing
@@ -16,8 +17,11 @@ import type {
   SlackRenderNext,
   SlackThread,
 } from "eve/channels/slack";
+import { emptySessionView } from "eve/events";
 import { vi } from "vitest";
 
+import type { SlackInputRequest } from "../integrations/slack/input-requests";
+import { eventView } from "./events";
 import { sessionContext } from "./session";
 
 const unsupported = (name: string) => (): never => {
@@ -104,6 +108,7 @@ export const slackThread = (
 /* The `ctx.slack` handle; `request` defaults to an `{ ok: true }` spy. */
 const slackHandle = (overrides: Partial<SlackHandle> = {}): SlackHandle => ({
   channelId: "C123",
+  codeChannel: false,
   request: vi.fn<SlackHandle["request"]>(async () => await { ok: true }),
   teamId: "T123",
   threadTs: "100.1",
@@ -133,10 +138,11 @@ export const inboundContext = ({
   cancel: unsupported("session cancellation"),
   clear: unsupported("session clearing"),
   compact: unsupported("session compaction"),
+  end: unsupported("session end"),
   isBotMentioned: vi.fn(() => mentioned),
   isDMOrPrivateChannel: vi.fn(() => Promise.resolve(false)),
   isSubscribed: vi.fn(async () => await subscribed),
-  reset: unsupported("session reset"),
+  openCodeChannel: unsupported("opening a code channel"),
   resolveSession: unsupported("session resolution"),
   respond: unsupported("input responses"),
   send: unsupported("session sends"),
@@ -166,7 +172,71 @@ export const slackEventContext = ({
   thread: slackThread(thread),
 });
 
-type MessageCompleted = NonNullable<SlackRendererEvents["message.completed"]>;
+/**
+ * Hydrates the public event context around a Slack transport fixture.
+ * @param channel - Slack transport and state to expose.
+ * @returns The public renderer context.
+ */
+export const channelEventContext = (
+  channel = slackEventContext()
+): ChannelEventContext<SlackEventContext> => ({
+  ...sessionContext(),
+  channel,
+  position: { index: 0, line: 0 },
+  view: emptySessionView(),
+});
+
+/**
+ * Drives a renderer against folded facts and an observable native renderer.
+ * @param request - Interaction and associated call to render.
+ * @param channel - Slack delivery capabilities.
+ * @returns A renderer driver and delivery observers.
+ */
+export const interactionOpenedHarness = (
+  request: SlackInputRequest,
+  channel = slackEventContext()
+) => {
+  const event = {
+    data: {
+      interactionId: request.interactionId,
+      request: request.request,
+      subject: { callId: request.call?.callId ?? "call-1" },
+    },
+    type: "interaction.opened" as const,
+  };
+  const view = eventView([
+    {
+      data: {
+        cause: { deliveryId: "delivery-1" },
+        follows: null,
+        turnId: request.turnId,
+      },
+      type: "turn.started",
+    },
+    {
+      data: {
+        callId: request.call?.callId ?? "call-1",
+        capability: { kind: "tool", name: request.call?.name ?? "test" },
+        input: request.call?.input,
+        owner: { turnId: request.turnId },
+      },
+      type: "call.requested",
+    },
+    event,
+  ]);
+  const next = vi.fn<SlackRenderNext<"interaction.opened">>(() =>
+    Promise.resolve()
+  );
+  const ctx = { ...channelEventContext(channel), view };
+  return {
+    channel,
+    next,
+    run: (handler: NonNullable<SlackRendererEvents["interaction.opened"]>) =>
+      handler(event, ctx, next),
+  };
+};
+
+type MessageCompleted = NonNullable<SlackRendererEvents["content.completed"]>;
 
 type MessageCompletedEvent = Parameters<MessageCompleted>[0];
 
@@ -186,21 +256,23 @@ export const messageCompletedHarness = (handler: MessageCompleted) => {
       }
   );
   const channel = slackEventContext({ thread: { post } });
-  const next = vi.fn<SlackRenderNext<"message.completed">>(() =>
+  const next = vi.fn<SlackRenderNext<"content.completed">>(() =>
     Promise.resolve()
   );
   const complete = (overrides: Partial<MessageCompletedEvent> = {}) =>
     handler(
       {
-        finishReason: "stop",
-        message: "Here is the result.",
-        sequence: 1,
-        stepIndex: 2,
-        turnId: "turn-1",
+        data: {
+          kind: "text",
+          partId: "part-1",
+          phase: "reply",
+          value: "Here is the result.",
+        },
+        scope: { turnId: "turn-1" },
+        type: "content.completed",
         ...overrides,
       },
-      channel,
-      sessionContext(),
+      channelEventContext(channel),
       next
     );
   return { channel, complete, next, post };

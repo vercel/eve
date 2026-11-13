@@ -192,7 +192,7 @@ On Postgres 14 and older, every database user can create functions in the `publi
 
 ## Tune approvals and limits
 
-Before running a query, the agent asks Postgres how much work the query will take, using `EXPLAIN`, which estimates the cost without running the query. When the estimate is above `ANALYST_APPROVAL_COST`, Slack shows an approval card with the query's purpose, the estimate, and the SQL. The person who asked can then run or cancel the query. Bots are asked to narrow the query instead.
+Before running a query, the agent asks Postgres how much work the query will take, using `EXPLAIN`, which estimates the cost without running the query. When the estimate is above `ANALYST_APPROVAL_COST`, Slack shows a preview with the query's purpose, the estimate, and the SQL, followed by eve's native approval controls. The person who asked can then run or cancel the query. Bots are asked to narrow the query instead.
 
 Cost estimates depend on your data and hardware, so the default only catches very expensive queries, such as large joins. `pnpm db:doctor` shows the estimated cost of reading your largest table and suggests a value that also covers queries over a whole table. Lower the value for more approvals, or raise it for fewer.
 
@@ -206,7 +206,7 @@ Cost estimates depend on your data and hardware, so the default only catches ver
 
 [agent/instructions.md](agent/instructions.md) sets the agent's persona, answer format, chart choices, and writing style.
 
-[agent/agent.ts](agent/agent.ts) sets the model and session limits. The template uses Claude Opus 5.5 with medium reasoning, which writes reliable SQL. Use `reasoning: "high"` for complex analysis such as cohorts and retention, or a faster model for quick lookups. To cap spending per conversation, add `maxTokenCostUsdPerSession` to `limits`. When a conversation reaches a limit, eve asks whether to continue.
+[agent/agent.ts](agent/agent.ts) sets the model and session limits. The template uses Claude Opus 5.5 with medium reasoning, which writes reliable SQL. Use `reasoning: "high"` for complex analysis such as cohorts and retention, or a faster model for quick lookups. `limits.sessionUsage` asks whether to continue after `5_000_000` new input tokens or `100_000` output tokens. Cached input does not count, and each approved continuation starts a new usage window. To also cap spending, include `(window.costUsd ?? 0) >= yourDollarLimit` in the existing predicate. When a conversation reaches a limit, eve asks whether to continue.
 
 ## Customize what the agent remembers
 

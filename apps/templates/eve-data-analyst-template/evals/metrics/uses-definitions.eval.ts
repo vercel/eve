@@ -6,7 +6,7 @@ export default defineEval({
   async test(t) {
     await t.send("What was net revenue last month?");
     t.succeeded();
-    t.loadedSkill("metric-definitions");
+    t.calledSkill("metric-definitions");
     t.calledTool("run_sql");
     t.judge(
       "The reply gives a dollar figure for net revenue, states the exact date range and time zone it covers, and says refunds were subtracted."

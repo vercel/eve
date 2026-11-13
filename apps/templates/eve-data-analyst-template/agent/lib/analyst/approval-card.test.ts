@@ -8,19 +8,16 @@ const approval = (
   input?: Record<string, string>,
   toolName = "run_sql"
 ): SlackInputRequest => ({
-  action: {
+  call: {
     callId: "call-1",
     input: input ?? { purpose: "MRR by plan", sql: "SELECT 1" },
-    kind: "tool-call",
-    toolName,
+    name: toolName,
   },
-  kind: "tool-approval",
-  options: [
-    { id: "approve", label: "Approve", style: "primary" },
-    { id: "cancel", label: "Cancel" },
-  ],
-  prompt: "Approve run_sql?",
-  requestId: "request-1",
+  interactionId: "request-1",
+  request: { kind: "approval", prompt: "Approve run_sql?" },
+  status: "open",
+  stepIndex: 0,
+  turnId: "turn-1",
 });
 
 const render = async (request: SlackInputRequest) => {
@@ -42,11 +39,14 @@ describe("runSqlApprovalCard", () => {
       await runSqlApprovalCard.render?.(approval({}, "post_slack_table"))
     ).toBeUndefined();
     expect(
-      await runSqlApprovalCard.render?.({ ...approval(), kind: "question" })
+      await runSqlApprovalCard.render?.({
+        ...approval(),
+        request: { kind: "question", prompt: "Which query?" },
+      })
     ).toBeUndefined();
   });
 
-  it("shows the estimate, SQL, eve-compatible buttons, and who may answer", async () => {
+  it("shows the estimate, SQL, and who may answer before eve's controls", async () => {
     recordQueryEstimate("call-1", {
       askerSlackUserId: "U123",
       planRows: 3_100_000,
@@ -61,11 +61,6 @@ describe("runSqlApprovalCard", () => {
     );
     expect(card.json).toContain("SELECT 1");
     expect(card.json).toContain("Only <@U123> can run or cancel this query.");
-    expect(card.json).toContain(
-      '"action_id":"eve_input:tool-approval:request-1:button:0"'
-    );
-    expect(card.json).toContain('"text":"Run query"');
-    expect(card.json).toContain('"text":"Cancel"');
     expect(card.blocks.length).toBeLessThanOrEqual(50);
   });
 
@@ -112,10 +107,10 @@ describe("runSqlApprovalCard", () => {
     }
     const forCall = (callId: string) => {
       const request = approval({ purpose: "MRR", sql });
-      if (request.kind !== "tool-approval") {
-        throw new Error("Expected a tool approval.");
+      if (!request.call) {
+        throw new Error("Expected an approval call.");
       }
-      return { ...request, action: { ...request.action, callId } };
+      return { ...request, call: { ...request.call, callId } };
     };
     const newest = await render(forCall("call-50"));
     const oldest = await render(forCall("call-0"));

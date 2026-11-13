@@ -17,7 +17,7 @@ export default defineEval<typeof config>({
     t.succeeded();
     t.calledTool("run_sql", { input: { sql: /is_bot/iu } });
     t.check(
-      turn.message,
+      turn.reply,
       includes(new RegExp(escapeRegExp(truth.topSourceLast10Days), "iu"))
     );
   },

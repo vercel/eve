@@ -3,7 +3,8 @@
  *
  * @packageDocumentation
  */
-import { inputRequestButtons } from "#lib/integrations/slack/input-requests";
+import { z } from "zod";
+
 import type { SlackInputRequestsConfig } from "#lib/integrations/slack/input-requests";
 import { escapeMrkdwn } from "#lib/slack-text";
 import { defineState } from "#lib/state";
@@ -66,12 +67,15 @@ const plain = (text: string) => ({
 export const runSqlApprovalCard: SlackInputRequestsConfig = {
   render(request) {
     if (
-      request.kind !== "tool-approval" ||
-      request.action.toolName !== "run_sql"
+      request.request.kind !== "approval" ||
+      request.call?.name !== "run_sql"
     ) {
       return;
     }
-    const { callId, input } = request.action;
+    const { callId } = request.call;
+    const input = z
+      .object({ purpose: z.string().optional(), sql: z.string() })
+      .parse(request.call.input);
     const sql = isString(input.sql) ? input.sql : "";
     const purpose =
       isString(input.purpose) && input.purpose ? input.purpose : "Run a query";
@@ -96,13 +100,6 @@ export const runSqlApprovalCard: SlackInputRequestsConfig = {
             },
           ],
           type: "rich_text",
-        },
-        {
-          elements: inputRequestButtons(request, {
-            approve: "Run query",
-            cancel: "Cancel",
-          }),
-          type: "actions",
         },
         { elements: [{ text: who, type: "mrkdwn" }], type: "context" },
       ],

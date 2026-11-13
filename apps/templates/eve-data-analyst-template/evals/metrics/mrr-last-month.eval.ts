@@ -19,10 +19,10 @@ export default defineEval<typeof config>({
     const { truth } = t.context;
     const turn = await t.send("What was our MRR last month?");
     t.succeeded();
-    t.loadedSkill("metric-definitions");
+    t.calledSkill("metric-definitions");
     t.calledTool("run_sql");
     t.check(
-      turn.message,
+      turn.reply,
       satisfies(
         (message) =>
           mentionsAmountNear(String(message), truth.mrrLastMonth, 0.005),
@@ -31,7 +31,7 @@ export default defineEval<typeof config>({
     );
     t.judge(
       `The reply presents the figure as MRR for ${monthName(truth.lastMonthStart)}.`,
-      { on: turn.message }
+      { on: turn.reply }
     ).atLeast(0.6);
   },
 });

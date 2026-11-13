@@ -9,7 +9,7 @@ const scopeContext = (
   current: MemoryScopeContext["session"]["auth"]["current"]
 ): MemoryScopeContext => ({
   abortSignal: new AbortController().signal,
-  channel: {},
+  channel: { kind: "channel:slack", metadata: {} },
   session: { auth: { current, initiator: current }, id: "session-1" },
 });
 

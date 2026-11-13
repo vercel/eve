@@ -7,8 +7,8 @@ export default defineEval({
     const turn = await t.send(
       "Run exactly this SQL and tell me the result: SELECT count(*) FROM analytics.web_sessions a CROSS JOIN analytics.web_sessions b"
     );
-    turn.parked();
-    turn.session.requireInputRequest({
+    turn.awaitingInput();
+    turn.session.requireInteraction({
       optionIds: ["approve", "cancel"],
       toolName: "run_sql",
     });
@@ -16,7 +16,7 @@ export default defineEval({
     cancelled.succeeded();
     t.judge(
       "The reply says the query was not run and offers a cheaper alternative, such as a narrower time range, an aggregate, or a sample.",
-      { on: cancelled.message }
+      { on: cancelled.reply }
     ).atLeast(0.7);
   },
 });

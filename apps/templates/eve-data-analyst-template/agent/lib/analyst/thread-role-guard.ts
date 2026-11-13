@@ -1,3 +1,4 @@
+import { call } from "eve/events";
 import { defineHook } from "eve/hooks";
 
 import {
@@ -13,13 +14,12 @@ import {
  */
 export default defineHook({
   events: {
-    "action.result"(event, ctx) {
-      const { result, status } = event.data;
+    "call.settled"(event, ctx) {
+      const observed = call(ctx.view, event.data.callId);
       if (
-        status !== "completed" ||
-        result.kind !== "tool-result" ||
-        result.isError === true ||
-        !ROLE_SCOPED_TOOLS.has(result.toolName)
+        event.data.outcome !== "completed" ||
+        observed?.kind !== "tool" ||
+        !ROLE_SCOPED_TOOLS.has(observed.name)
       ) {
         return;
       }

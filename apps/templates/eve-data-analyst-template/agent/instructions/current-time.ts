@@ -41,14 +41,13 @@ export const describeCurrentTime = (now: Date, timeZone: string): string => {
  * Relative periods such as "last month" are resolved in the reporting time zone.
  */
 export const currentTimeInstructions = () =>
-  defineDynamic({
-    events: {
-      "turn.started": () =>
-        defineInstructions({
-          content: describeCurrentTime(new Date(), reportingTimeZone()),
-          role: "user",
-        }),
-    },
-  });
+  defineDynamic((ctx) =>
+    ctx.memo(ctx.turn?.id ?? null, () =>
+      defineInstructions({
+        content: describeCurrentTime(ctx.now, reportingTimeZone()),
+        role: "user",
+      })
+    )
+  );
 
 export default currentTimeInstructions();
