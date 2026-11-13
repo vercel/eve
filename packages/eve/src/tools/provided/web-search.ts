@@ -1,4 +1,5 @@
 import type { WebSearchFallbackProvider, WebSearchProvider } from "#shared/web-search.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { frameworkTool } from "./framework-tool.js";
 
 export type { WebSearchFallbackProvider, WebSearchProvider };
@@ -58,6 +59,27 @@ export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
     provider: input.provider,
     ...(input.fallback !== undefined && { fallback: input.fallback }),
   });
+}
+
+/** What the model reads about `web_search`, whichever agent offers it. */
+export const WEB_SEARCH_TOOL_DESCRIPTION =
+  "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.";
+
+/** The activity label of a `web_search` call: its query, from whichever provider ran it. */
+export function resolveWebSearchActivityLabel(input: unknown): string {
+  if (input === null || typeof input !== "object") return "Search";
+  const record = input as Record<string, unknown>;
+  const action = record.action;
+  const providerAction =
+    action !== null && typeof action === "object" ? (action as Record<string, unknown>) : undefined;
+  const queries = providerAction?.queries;
+  const providerDetail = Array.isArray(queries)
+    ? queries.find((query) => typeof query === "string")
+    : (providerAction?.query ?? providerAction?.url ?? providerAction?.pattern);
+  return toolLabel(
+    "Search",
+    record.query ?? record.objective ?? record.search_query ?? record.searchQuery ?? providerDetail,
+  );
 }
 
 /** Default provider-managed web search configuration. */

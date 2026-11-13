@@ -12,7 +12,10 @@ import {
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
 import { CheckpointRefusal, refuse } from "#execution/session/checkpoint-refusal.js";
 import { normalizeHistory } from "#execution/session/imported-conversation.js";
-import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isObject } from "#shared/guards.js";

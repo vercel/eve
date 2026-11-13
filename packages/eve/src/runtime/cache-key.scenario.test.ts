@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
+import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifact-contract.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import {

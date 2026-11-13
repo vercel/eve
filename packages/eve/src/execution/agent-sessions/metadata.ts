@@ -1,16 +1,18 @@
 import { ParentSessionKey } from "#context/keys.js";
 import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { ContextReader } from "#context/key.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
-/** Snapshots callable agent metadata for one workflow tool run. */
-export function resolveWorkflowAgentMetadata(
+/**
+ * A compiled agent's delegates for one workflow tool run: its copy (a root session's `agent`
+ * tool), its subagents, and the dynamic agents the calling turn selected.
+ */
+export function compiledDelegates(
+  bundle: CompiledBundle,
   ctx: ContextReader,
 ): Readonly<Record<string, WorkflowAgentMetadata>> {
-  const bundle = ctx.get(BundleKey);
-  if (bundle === undefined) return {};
   const agents = new Map<string, WorkflowAgentMetadata>();
 
   if (bundle.nodeId === undefined && ctx.get(ParentSessionKey) === undefined) {

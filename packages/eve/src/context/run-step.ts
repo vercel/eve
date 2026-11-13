@@ -4,7 +4,6 @@ import type { FrameworkContextProvider } from "#context/provider.js";
 import { connectionProvider } from "#context/providers/connection.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
 import { sessionProvider } from "#context/providers/session.js";
-import { toolStubProvider } from "#context/providers/tool-stubs.js";
 
 /**
  * Framework providers in dependency order.
@@ -14,7 +13,6 @@ import { toolStubProvider } from "#context/providers/tool-stubs.js";
  */
 const frameworkProviders: readonly FrameworkContextProvider<any>[] = [
   sessionProvider,
-  toolStubProvider,
   connectionProvider,
   sandboxProvider,
 ];

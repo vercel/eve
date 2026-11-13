@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
-import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
+import type { AgentSessionAddress } from "#execution/agent-sessions/start.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { digestOf } from "#definitions/state.js";

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { scheduleCollectionTools } from "#context/schedule-collection-tools.js";
 import { z } from "#compiled/zod/index.js";
 import {
@@ -12,14 +13,17 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { schedules } from "#public/experimental/schedules/client.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
 import { evaluateApproval } from "#approval/evaluation.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
+
+// An occurrence runs on Workflow, the durable host a step bundle installs; this realm loads none.
+installWorkflowHost();
 
 const alice = {
   attributes: {},
@@ -30,8 +34,8 @@ const alice = {
 async function bindCaller() {
   loadContext().set(AuthKey, alice);
   loadContext().set(
-    BundleKey,
-    await getCompiledRuntimeAgentBundle({
+    SessionAgentKey,
+    await loadCompiledSessionAgent({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     }),
   );

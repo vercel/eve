@@ -6,7 +6,9 @@ import { foldPublication } from "#harness/session-machine/current.js";
 import type { KernelConfig, StepFn, StepResult } from "#harness/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 
 /** A kernel config for a direct harness test: the agent it runs is only a model and its settings. */
 export interface TestKernelConfig extends KernelConfig {
@@ -15,14 +17,14 @@ export interface TestKernelConfig extends KernelConfig {
 
 /**
  * A kernel whose steps run in a session of an agent that declares nothing but `agent`: the
- * test's context when it made one, else a new one, holding that agent's bundle.
+ * test's context when it made one, else a new one, holding that agent.
  */
 export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn {
   const step = createKernel(config);
   const run: StepFn = async (session, input) => {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
-      if (!ctx.has(BundleKey)) ctx.set(BundleKey, agentBundle(agent));
+      if (!ctx.has(SessionAgentKey)) ctx.set(SessionAgentKey, testAgent(agent));
       if (!ctx.has(ConnectionRegistryKey)) {
         ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
       }
@@ -30,7 +32,7 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
     }
     // A step of its own: the test's handler stands where the publish sink folds what it writes.
     const own = new ContextContainer();
-    own.set(BundleKey, agentBundle(agent));
+    own.set(SessionAgentKey, testAgent(agent));
     own.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
     const folding = createKernel({
       ...config,
@@ -47,8 +49,8 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
   return run;
 }
 
-function agentBundle(agent: TestKernelConfig["agent"]) {
-  return {
+function testAgent(agent: TestKernelConfig["agent"]): SessionAgent {
+  return fromCompiledBundle({
     graph: { nodesByNodeId: new Map() },
     modelMetadata: async () => ({}),
     nodeId: "root",
@@ -66,5 +68,5 @@ function agentBundle(agent: TestKernelConfig["agent"]) {
       model: agent.model,
       reasoning: agent.reasoning,
     },
-  } as never;
+  } as never);
 }

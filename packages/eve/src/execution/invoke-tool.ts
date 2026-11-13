@@ -29,7 +29,8 @@ import type { HarnessToolMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -190,7 +191,9 @@ async function runInvocation(input: {
     sessionId,
   });
   context.setVirtualContext(SandboxKey, sandbox.access);
-  if (runtime.bundle !== undefined) context.setVirtualContext(BundleKey, runtime.bundle);
+  if (runtime.bundle !== undefined) {
+    context.setVirtualContext(SessionAgentKey, await compiledSessionAgent(runtime.bundle));
+  }
 
   try {
     return await contextStorage.run(context, () =>

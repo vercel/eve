@@ -1,3 +1,4 @@
+import { workflowInboxTransport } from "#execution/session-inbox/workflow-transport.js";
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -11,7 +12,7 @@ export async function sessionCommandInboxWorkflow(input: {
   "use workflow";
 
   const sessionId = input.sessionId ?? getWorkflowMetadata().workflowRunId;
-  const inbox = createSessionInbox(sessionId);
+  const inbox = createSessionInbox(workflowInboxTransport(sessionId));
 
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
@@ -43,7 +44,7 @@ export async function sessionInboxTakeoverWorkflow(input: { readonly token: stri
 }> {
   "use workflow";
 
-  const inbox = createSessionInbox(getWorkflowMetadata().workflowRunId);
+  const inbox = createSessionInbox(workflowInboxTransport(getWorkflowMetadata().workflowRunId));
   try {
     await inbox.claimSessionHook(input.token);
     await inbox.whenTakenOver();
@@ -63,7 +64,7 @@ export async function sessionInboxForceClaimWorkflow(input: {
 }): Promise<void> {
   "use workflow";
 
-  const inbox = createSessionInbox(getWorkflowMetadata().workflowRunId);
+  const inbox = createSessionInbox(workflowInboxTransport(getWorkflowMetadata().workflowRunId));
   try {
     await inbox.claimSessionHook(input.token, { force: true });
     await inbox.whenTakenOver();

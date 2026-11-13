@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => ({
   openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({ sleep: mocks.sleep }));
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getWorkflowMetadata: () => ({ workflowRunId: "run-1" }),
+  sleep: mocks.sleep,
+}));
 
 vi.mock("#execution/tools/workflow/workflow-owner-blocking.js", () => ({
   createBlockingWorkflow: mocks.owner,

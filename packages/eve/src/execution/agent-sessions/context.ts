@@ -10,10 +10,7 @@ import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { PreparedCoordinationDispatch } from "#execution/coordination-dispatch-shared.js";
-import {
-  serializeDurableCompiledArtifactsSource,
-  type DurableCompiledArtifactsSource,
-} from "#runtime/durable-compiled-artifacts-source.js";
+import { agentSessionOwner, type AgentSessionOwner } from "#execution/agent-sessions/owner.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
@@ -32,11 +29,13 @@ import {
  * It is a session's lineage, bound when the session opens. Auth is not part
  * of it: each message carries the auth of the call that sends it.
  */
-export interface AgentSessionContext {
+export type AgentSessionContext = AgentSessionLineage & AgentSessionOwner;
+
+/** {@link AgentSessionContext}, beside the agent that owns the call. */
+export interface AgentSessionLineage {
   readonly toolStubs?: StubScope;
   /** The agents the call may open, by name, which `ctx.agents` lists. */
   readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
-  readonly bundle: AgentSessionBundle;
   /** Forwarded unchanged, so a session asks a person only when its caller can. */
   readonly capabilities?: SessionCapabilities;
   readonly schedule?: SessionSchedule;
@@ -57,12 +56,6 @@ export interface AgentSessionContext {
   readonly trace: AgentChildTraceDispatch;
 }
 
-/** The compiled agent that owns the tool, which resolves agent names. */
-export interface AgentSessionBundle {
-  readonly nodeId?: string;
-  readonly source: DurableCompiledArtifactsSource;
-}
-
 /** The caller's sandbox, which agents declared with a parent sandbox share. */
 export interface AgentSessionSandbox {
   readonly sessionId: string;
@@ -72,7 +65,7 @@ export interface AgentSessionSandbox {
 type CallerDispatch = Pick<
   PreparedCoordinationDispatch<unknown>,
   | "batch"
-  | "bundle"
+  | "owner"
   | "capabilities"
   | "channelMetadata"
   | "dynamicSubagentSelections"
@@ -95,10 +88,7 @@ export function captureAgentSessionContext(
   return {
     agents: caller.workflowAgents,
     toolStubs: caller.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined,
-    bundle: {
-      nodeId: caller.bundle.nodeId,
-      source: serializeDurableCompiledArtifactsSource(caller.bundle.compiledArtifactsSource),
-    },
+    ...agentSessionOwner(caller.owner.reference),
     capabilities: caller.capabilities,
     schedule: readSerializedSessionSchedule(caller.serializedContext),
     channelMetadata: caller.channelMetadata,

@@ -21,7 +21,7 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineState } from "#public/definitions/state.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
-import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import { withDevelopmentWorkflowGeneration } from "#runtime/development-generation.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
   createDiskRuntimeCompiledArtifactsSource,

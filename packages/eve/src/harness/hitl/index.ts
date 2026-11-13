@@ -188,10 +188,12 @@ export {
   ownCallbacks,
   ResumeSignInKey,
   settleSignIns,
+  signInsAnswered,
   signInsEnded,
   type AnsweredSignIn,
   type OwnCallbacks,
   type ResumeSignIn,
+  type SignInAnswer,
   type SignInCallback,
   type SignInEnding,
 } from "./sign-in-callbacks.js";

@@ -1,4 +1,5 @@
 import * as workflowRuntime from "#execution/workflow-runtime.js";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
 import { connectionEntry } from "#execution/catalog/connection-entry.js";
@@ -11,7 +12,8 @@ import { afterEach, beforeEach, expect, it, vi, onTestFinished } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { ConnectionEventActions } from "#runtime/connections/events/actions.js";
 import { startConnectionEventOwner } from "#runtime/connections/events/owner.js";
@@ -85,6 +87,9 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
 }));
+// The watches run on Workflow, the durable host a step bundle installs; this realm loads none.
+installWorkflowHost();
+
 let ctx: ContextContainer;
 let actions: ConnectionEventActions;
 let connection: ResolvedConnectionDefinition;
@@ -203,7 +208,7 @@ beforeEach(async () => {
     },
   }));
   ctx = new ContextContainer();
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
   ctx.set(SessionIdKey, "session-1");
   setUser("alice");
   actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
@@ -504,7 +509,7 @@ async function watch(callId = "watch-1", ttlMs: number | null = TTL_MS) {
 /** The context a handler run starts with: its creator, never the current caller. */
 function handlerContext(binding: EventBinding, bundle: unknown): Record<string, unknown> {
   const handler = new ContextContainer();
-  handler.set(BundleKey, bundle as CompiledRuntimeAgentBundle);
+  handler.set(SessionAgentKey, fromCompiledBundle(bundle as CompiledRuntimeAgentBundle));
   handler.set(AuthKey, binding.auth);
   handler.set(SessionIdKey, binding.sessionId);
   return serializeContext(handler);
@@ -555,7 +560,7 @@ it.each(["user", "app"] as const)(
       experimental_events: { ...connection.experimental_events!, authorization },
     };
     // The handler re-checks its binding against the deployed connection.
-    (ctx.require(BundleKey).resolvedAgent.connections as ResolvedConnectionDefinition[])[0] =
+    (requireCompiledBundle(ctx).resolvedAgent.connections as ResolvedConnectionDefinition[])[0] =
       connection;
     actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
       account: ctx.require(AuthKey)!.principalId,
@@ -601,7 +606,7 @@ it("keeps a 401 from subscribe classifiable as a sign-in request", async () => {
 it("throws when a subscribe response is lost, so the step retries with the same key", async () => {
   await watch();
   const binding: EventBinding = { ...initial.binding!, id: "lost" };
-  const context = handlerContext(binding, ctx.require(BundleKey));
+  const context = handlerContext(binding, requireCompiledBundle(ctx));
   const subscribe = subscriber.getMockImplementation()!;
   // Connect creates the subscription, but its response never arrives.
   subscriber.mockImplementationOnce(async (input) => {
@@ -686,7 +691,7 @@ it("keys Connect's subscribe by watch and run, so a step retry reuses it and a l
   const binding = initial.binding!;
   const open = () =>
     openConnectionEventStep({
-      serializedContext: handlerContext(binding, ctx.require(BundleKey)),
+      serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
       binding,
     });
   workflowRunId.current = "wrun_1";
@@ -837,7 +842,7 @@ it.each([
     const binding = initial.binding!;
     expect(
       await unsubscribeConnectionEventStep({
-        serializedContext: handlerContext(binding, ctx.require(BundleKey)),
+        serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
         binding,
         subscriptionId: subscription.id,
       }),
@@ -961,7 +966,7 @@ it("links callback sends to the callback span through durable channel delivery m
   await watch();
   initial = { ...initial, serializedContext: serializeContext(ctx) };
   const runtime = workflowRuntime.createWorkflowRuntime({
-    compiledArtifactsSource: ctx.require(BundleKey).compiledArtifactsSource,
+    compiledArtifactsSource: requireCompiledBundle(ctx).compiledArtifactsSource,
   });
   const send = vi.fn().mockResolvedValue({ status: "accepted" });
   vi.spyOn(workflowRuntime, "createWorkflowRuntime").mockReturnValue({
