@@ -226,7 +226,8 @@ matrices from the registry:
   workflow, including its workspace package name for Turbo filtering. A
   fixture can set `e2e.worlds` to a subset of registered world
   names, or to `[]` when its evals require local dev behavior; omitting it
-  selects every world. A registered world's `package` reaches the job as
+  selects every world. A fixture whose evals are all tagged `real-model` gets no
+  world legs, since the world suites would have nothing to run. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
   deploy target's default).
 
