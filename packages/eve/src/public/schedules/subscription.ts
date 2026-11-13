@@ -275,6 +275,8 @@ export type SchedulePreparePayloadContext = ScheduleScopeContext & {
   /**
    * The timing the schedule has after this write: what the caller passed, or the stored timing
    * when an update replaces only the payload. A relative delay is as written, not yet resolved.
+   * A timing-only update doesn't prepare again, so a value derived from this keeps the timing it
+   * was prepared with.
    */
   readonly expression: ScheduleTiming;
 };

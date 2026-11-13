@@ -283,6 +283,8 @@ Preparation can repeat when a write is retried, so avoid irreversible effects. R
 
 `context.expression` is the timing the schedule has after the write: the one the caller passed, or the stored one when an update replaces only the payload. Read `context.expression.type` to tell a recurring schedule (`"cron"`) from a one-time one, so the payload doesn't need a field for it. A relative delay arrives as written, not resolved to a time.
 
+A timing-only update doesn't call `preparePayload`, so a value you derive from `context.expression` keeps the timing it was prepared with. Vercel Schedules rejects an update that changes a schedule between recurring and one-time. With another provider, send the payload again when you change a schedule's kind.
+
 `auth`, `run`, and occurrence events infer the prepared return type. Declare `preparePayload` before them, or give it an explicit return type. Without preparation, the payload type comes from the schema.
 
 Before each run, eve checks only the saved payload's size and JSON validity, not `inputSchema`. Validate the prepared shape yourself if needed.
