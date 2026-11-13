@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-`eve eval` starts the sandbox template preparation when its server boots, so template builds overlap evals that do not use a sandbox instead of stalling the first eval that does.
+`eve eval` now builds an agent's sandbox templates as soon as it starts, rather than when the first eval needs a sandbox, so that eval no longer waits for the build.
