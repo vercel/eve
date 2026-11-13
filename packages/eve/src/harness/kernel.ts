@@ -160,9 +160,10 @@ export function createKernel(config: KernelConfig): StepFn {
       return { next: step.runStep, session: step.session };
     }
     // Results that end the turn settle it in their place, without a reply, unless input joined the
-    // turn with them: the model reads it. A working task holds the turn open until it settles.
+    // turn with them or waits behind a provider tool's deferred result: the model reads it. A
+    // working task holds the turn open until it settles.
     const endsTurn = runtime.endsTurn || committedEndingStep(step.view(), ending);
-    if (endsTurn && turn.messages.length === 0) {
+    if (endsTurn && turn.messages.length === 0 && !hasQueuedTurnInput(step.view())) {
       const workingTasks = workingTaskIds(step.session);
       if (workingTasks.length > 0) {
         return {

@@ -1,4 +1,4 @@
-import { jsonSchema } from "ai";
+import { jsonSchema, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ import {
   createApprovalContext,
   textStreamResult,
   toolCallsStreamResult,
+  usage,
 } from "#internal/testing/approval-resume.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
@@ -37,22 +38,63 @@ const workflow = (extra: Partial<HarnessToolDefinition> = {}): HarnessToolDefini
   ...extra,
 });
 
-/** A harness whose model calls every tool in `tools` in one step, then writes text. */
-function setup(tools: readonly HarnessToolDefinition[]) {
+type StreamPart =
+  Awaited<ReturnType<MockLanguageModelV4["doStream"]>>["stream"] extends ReadableStream<infer Part>
+    ? Part
+    : never;
+
+const searchCall = {
+  input: "{}",
+  providerExecuted: true,
+  toolCallId: "srvtoolu_search",
+  toolName: "web_search",
+};
+
+/** The search's result, which the provider defers to its next response, then text. */
+function searchResultThenText(text: string) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start", warnings: [] },
+        {
+          result: { results: [] },
+          toolCallId: searchCall.toolCallId,
+          toolName: searchCall.toolName,
+          type: "tool-result",
+        },
+        { id: "answer", type: "text-start" },
+        { delta: text, id: "answer", type: "text-delta" },
+        { id: "answer", type: "text-end" },
+        { finishReason: { raw: undefined, unified: "stop" }, type: "finish", usage },
+      ] satisfies StreamPart[],
+    }),
+  };
+}
+
+/**
+ * A harness whose model calls every tool in `tools` in one step, then writes text. With
+ * `search`, the step also calls a provider tool whose result opens the model's next response.
+ */
+function setup(tools: readonly HarnessToolDefinition[], options: { readonly search?: true } = {}) {
   const events: SessionEvent[] = [];
+  const calls = [
+    ...tools.map((tool) => ({
+      input: "{}",
+      toolCallId: `call-${tool.name}`,
+      toolName: tool.name,
+    })),
+    ...(options.search ? [searchCall] : []),
+  ];
+  let searched = options.search !== true;
   const model = new MockLanguageModelV4({
     doStream: vi
       .fn()
-      .mockImplementationOnce(async () =>
-        toolCallsStreamResult(
-          tools.map((tool) => ({
-            input: "{}",
-            toolCallId: `call-${tool.name}`,
-            toolName: tool.name,
-          })),
-        ),
-      )
-      .mockImplementation(async () => textStreamResult("Nothing was posted.")),
+      .mockImplementationOnce(async () => toolCallsStreamResult(calls))
+      .mockImplementation(async () => {
+        if (searched) return textStreamResult("Nothing was posted.");
+        searched = true;
+        return searchResultThenText("Searched.");
+      }),
     modelId: "ends-turn-model",
     provider: "eve-integration-mock",
   });
@@ -112,14 +154,27 @@ describe("an endsTurn call beside other calls", () => {
     expect(result.settledTurn?.output).toBe("");
   });
 
-  it("ends the turn once a parked workflow sibling settles", async () => {
-    const fixture = setup([noReply, workflow()]);
+  it.each([
+    ["true", true],
+    ["a function that accepts the output", (output: unknown) => output === "no_reply done"],
+  ])("ends the turn once a parked workflow sibling settles (endsTurn: %s)", async (_, endsTurn) => {
+    const fixture = setup([local("no_reply", { endsTurn }), workflow()]);
     const parked = await fixture.run(fixture.session, { message: "Check the count." });
 
     const result = await fixture.run(parked.session, deployed);
 
     expect(fixture.model.doStreamCalls).toHaveLength(1);
     expect(result.settledTurn?.output).toBe("");
+  });
+
+  it("lets the model answer when a parked step's endsTurn function rejects the output", async () => {
+    const fixture = setup([local("no_reply", { endsTurn: () => false }), workflow()]);
+    const parked = await fixture.run(fixture.session, { message: "Check the count." });
+
+    const result = await fixture.run(parked.session, deployed);
+
+    expect(fixture.model.doStreamCalls).toHaveLength(2);
+    expect(result.settledTurn?.output).toBe("Nothing was posted.");
   });
 
   it("ends the turn when a parked workflow call that ends it settles beside an inline sibling", async () => {
@@ -153,6 +208,21 @@ describe("an endsTurn call beside other calls", () => {
       expect(result.settledTurn?.output).toBe("");
     },
   );
+
+  it("lets the model read a message that arrives with the parked results while a provider result is still to come", async () => {
+    const fixture = setup([noReply, workflow()], { search: true });
+    const parked = await fixture.run(fixture.session, { message: "Check the count." });
+
+    const result = await fixture.run(parked.session, {
+      ...deployed,
+      message: "Alice asks for the total too.",
+    });
+
+    const lastPrompt = JSON.stringify(fixture.model.doStreamCalls.at(-1)?.prompt);
+    expect(fixture.model.doStreamCalls).toHaveLength(3);
+    expect(lastPrompt).toContain("Alice asks for the total too.");
+    expect(result.settledTurn?.output).toBe("Nothing was posted.");
+  });
 
   it("lets the model answer when the ending call fails", async () => {
     const failing = local("no_reply", {
