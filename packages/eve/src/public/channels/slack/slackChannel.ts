@@ -31,7 +31,6 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { attachInputText } from "#internal/input-text.js";
 import type { Answer, StrictAnswers, ValidatedAnswer } from "#shared/input.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import {
@@ -2272,16 +2271,14 @@ async function deliverSlackMessage(input: {
       input.resolvesTypedInput && edit === undefined
         ? slackTypedText(message.text, input.botUserId)
         : "";
-    const sendOptions: SlackSendOptions = attachInputText(
-      {
-        auth: input.result.auth,
-        ...(channelContext.length > 0 && { context: channelContext }),
-        // An edit follows the channel's `turnPolicy`: steered, it joins the running turn; queued,
-        // it stays behind the message it edits instead of overtaking it into an earlier turn.
-        ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
-      },
-      fileParts.length === 0 ? typedText : undefined,
-    );
+    const sendOptions: SlackSendOptions = {
+      auth: input.result.auth,
+      ...(channelContext.length > 0 && { context: channelContext }),
+      // An edit follows the channel's `turnPolicy`: steered, it joins the running turn; queued,
+      // it stays behind the message it edits instead of overtaking it into an earlier turn.
+      ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
+      ...(fileParts.length === 0 && { answerText: typedText }),
+    };
 
     await input.sessionOperations.send(turnMessage, sendOptions);
   } catch (error) {

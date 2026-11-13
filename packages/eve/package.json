@@ -548,6 +548,12 @@
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
     },
+    "./internal/channels": {
+      "eve-source": "./src/internal/channels.ts",
+      "types": "./dist/src/internal/channels.d.ts",
+      "import": "./dist/src/internal/channels.js",
+      "default": "./dist/src/internal/channels.js"
+    },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",
       "types": "./dist/src/internal/git.d.ts",

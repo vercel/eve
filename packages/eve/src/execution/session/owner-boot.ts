@@ -28,6 +28,7 @@ import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import type { SessionTimeoutControl, SessionTimeouts } from "#execution/session/timeout-control.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -245,13 +246,16 @@ function createInitialDelivery(
     kind: "deliver",
     payloads: [
       attachClientContext(
-        {
-          message: input.input.message,
-          context: input.input.context,
-          history: input.input.history,
-          outputSchema: input.input.outputSchema,
-          state: input.input.state,
-        },
+        attachInputText(
+          {
+            message: input.input.message,
+            context: input.input.context,
+            history: input.input.history,
+            outputSchema: input.input.outputSchema,
+            state: input.input.state,
+          },
+          readInputText(input.input),
+        ),
         readClientContext(input.input),
       ),
     ],
