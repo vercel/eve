@@ -111,9 +111,18 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         uses: ./.github/actions/sandbox-image
 
+      # Reuse the verdict ci.yml saves from main so pnpm skips its supply-chain
+      # check of the lockfile. This workflow only restores it.
+      - name: Restore the lockfile verification verdict
+        if: needs.changes.outputs.relevant == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
 
       - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'
