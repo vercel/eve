@@ -5,6 +5,7 @@ import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { questionWorkflowBodies } from "./question-workflows.js";
 
 // The hosts a conversation's sessions run on, and what the harness asks each about them: whether
 // an address is claimed, which steps still run, and how long a stream must stay unchanged before a
@@ -77,6 +78,9 @@ function inProcessHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource):
     // Workflow's own step serializer, so a payload a deployment couldn't carry fails here too.
     { callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL, stepBoundary: workflowStepBoundary },
   );
+  // The test agent's workflow tools, as the plain bodies their `"use workflow"` twins wrap.
+  for (const { body, workflowId } of questionWorkflowBodies())
+    runtime.registerWorkflow(workflowId, body);
   return {
     kind: "in-process",
     runtime,

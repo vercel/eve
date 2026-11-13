@@ -378,9 +378,6 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
 function inProcessGap(rule: string): string | undefined {
   if (rule.includes("run ended outside eve"))
     return "it cancels the session's Workflow run, which an in-process session doesn't have";
-  // Every question rule names a question, so a later rule that only mentions an option runs.
-  if (/\bquestions?\b/u.test(rule))
-    return "its questions are workflow tools, which an in-process session can't run yet";
   return undefined;
 }
 
