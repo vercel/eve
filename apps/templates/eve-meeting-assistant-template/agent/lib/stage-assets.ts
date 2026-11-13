@@ -128,6 +128,12 @@ createServer(async (request, response) => {
         socket?.send(JSON.stringify(input));
         return response.writeHead(204).end();
       }
+      // Special keys and shortcuts, such as Backspace or Control+a. Raw key
+      // events lack the key codes Chromium needs to edit text; press sends them.
+      if (name === "press" && /^[A-Za-z0-9+]{1,40}$/.test(String(input.keys))) {
+        await agentBrowser(["press", String(input.keys)]);
+        return response.writeHead(204).end();
+      }
       if (name === "open" && /^https?:\\/\\//.test(String(input.url))) {
         await agentBrowser(["open", String(input.url)]);
         return response.writeHead(204).end();
@@ -338,29 +344,37 @@ export const SIGN_IN_HTML = `<!doctype html>
   screen.onmousedown = (event) => {
     screen.focus();
     event.preventDefault();
-    post("input", { type: "input_mouse", eventType: "mousePressed", ...point(event), button: buttons[event.button] ?? "left", clickCount: event.detail || 1 });
+    send("input", { type: "input_mouse", eventType: "mousePressed", ...point(event), button: buttons[event.button] ?? "left", clickCount: event.detail || 1 });
   };
-  screen.onmouseup = (event) => post("input", { type: "input_mouse", eventType: "mouseReleased", ...point(event), button: buttons[event.button] ?? "left" });
+  screen.onmouseup = (event) => send("input", { type: "input_mouse", eventType: "mouseReleased", ...point(event), button: buttons[event.button] ?? "left" });
   screen.onwheel = (event) => {
     event.preventDefault();
-    post("input", { type: "input_mouse", eventType: "mouseWheel", ...point(event), deltaX: event.deltaX, deltaY: event.deltaY });
+    send("input", { type: "input_mouse", eventType: "mouseWheel", ...point(event), deltaX: event.deltaX, deltaY: event.deltaY });
   };
   screen.oncontextmenu = (event) => event.preventDefault();
 
-  function modifiers(event) {
-    return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+  // Input goes out in order: a character typed before Backspace must arrive first.
+  let queue = Promise.resolve();
+  function send(name, value) {
+    queue = queue.then(() => post(name, value)).catch(() => {});
   }
+  const modifierKeys = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
   screen.onkeydown = (event) => {
     event.preventDefault();
-    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      post("input", { type: "input_keyboard", eventType: "char", text: event.key });
+    if (modifierKeys.has(event.key)) return;
+    const shortcut = event.ctrlKey || event.metaKey || event.altKey;
+    if (event.key.length === 1 && !shortcut) {
+      send("input", { type: "input_keyboard", eventType: "char", text: event.key });
       return;
     }
-    post("input", { type: "input_keyboard", eventType: "keyDown", key: event.key, code: event.code, modifiers: modifiers(event) });
-  };
-  screen.onkeyup = (event) => {
-    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) return;
-    post("input", { type: "input_keyboard", eventType: "keyUp", key: event.key, code: event.code, modifiers: modifiers(event) });
+    // The browser runs on Linux, so Cmd shortcuts from a Mac become Control ones.
+    const keys = [
+      ...(event.ctrlKey || event.metaKey ? ["Control"] : []),
+      ...(event.altKey ? ["Alt"] : []),
+      ...(event.shiftKey && event.key.length > 1 ? ["Shift"] : []),
+      event.key === " " ? "Space" : event.key,
+    ];
+    if (/^[A-Za-z0-9+]+$/.test(keys.join("+"))) send("press", { keys: keys.join("+") });
   };
   // Pasting types the text, such as a one-time code.
   document.addEventListener("paste", (event) => {
