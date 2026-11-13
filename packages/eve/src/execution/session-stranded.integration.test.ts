@@ -151,20 +151,31 @@ async function readSessionStarted(sessionId: string) {
   }
 }
 
+/** Appends lines to a session's stream and waits until a reader can see them. */
+async function appendLines(sessionId: string, lines: readonly string[]): Promise<void> {
+  // A write resolves before the background pipe stores its chunk; `ops` settles once it is stored.
+  const ops: Promise<unknown>[] = [];
+  const writer = getRun(sessionId).getWritable<Uint8Array>({ ops }).getWriter();
+  try {
+    for (const line of lines) await writer.write(new TextEncoder().encode(line));
+  } finally {
+    writer.releaseLock();
+  }
+  await Promise.all(ops);
+}
+
 /** Appends v26 events to a parked session's stream, one per line, as its earlier build recorded them. */
 async function recordHistory(
   sessionId: string,
   events: readonly Record<string, unknown>[],
 ): Promise<void> {
-  const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
-  try {
-    for (const [index, event] of events.entries()) {
+  await appendLines(
+    sessionId,
+    events.map((event, index) => {
       const meta = { at: "2026-10-01T00:00:00.000Z", id: `evt_${String(index)}` };
-      await writer.write(new TextEncoder().encode(`${JSON.stringify({ ...event, meta })}\n`));
-    }
-  } finally {
-    writer.releaseLock();
-  }
+      return `${JSON.stringify({ ...event, meta })}\n`;
+    }),
+  );
 }
 
 const TURN = { sequence: 0, turnId: "turn_0" };
@@ -549,11 +560,9 @@ describe("stranded sessions", () => {
             type: "interaction.opened",
           },
         ];
-        const writer = getRun(stranded.runId).getWritable<Uint8Array>().getWriter();
-        await writer.write(
-          new TextEncoder().encode(encodeLine({ at: "2026-10-01T00:00:00.000Z", facts: waiting })),
-        );
-        writer.releaseLock();
+        await appendLines(stranded.runId, [
+          encodeLine({ at: "2026-10-01T00:00:00.000Z", facts: waiting }),
+        ]);
 
         await resetSession(runtime, stranded.runId);
 

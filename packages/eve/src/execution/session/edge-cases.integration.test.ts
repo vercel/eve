@@ -67,6 +67,13 @@ import {
 // The first session in a file compiles the agent; later ones reuse it.
 vi.setConfig({ testTimeout: 90_000 });
 
+/**
+ * How long one awaited stage may take before the test names where it stopped. A stage can cross
+ * several Workflow runs, such as a child session's start, which a loaded CI runner can stretch
+ * past 10 seconds.
+ */
+const STAGE_TIMEOUT_MS = 20_000;
+
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 afterEach(() => {
@@ -228,7 +235,7 @@ async function waitForOwnerGate<T>(
                   .join(", ")}`,
               ),
             ),
-          10_000,
+          STAGE_TIMEOUT_MS,
         );
       }),
     ]);
@@ -445,7 +452,7 @@ async function withSession(
                   `Timed out waiting for ${label} after: ${events.map((event) => event.type).join(", ")}`,
                 ),
               ),
-            20_000,
+            STAGE_TIMEOUT_MS,
           );
         }),
       ]).finally(() => clearTimeout(timer));
