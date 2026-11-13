@@ -9,6 +9,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@agent-browser/eve": "^0.43.0",
     "@eve/recall": "^0.1.0-rc.0",
     "@vercel/connect": "^2.5.0",
     "@vercel/sandbox": "^3.9.0",
