@@ -1,7 +1,7 @@
 // eve's browser is agent-browser's headless Chromium in the sandbox. Sign-ins
 // an admin saves at `/meeting/browser-sign-in` live in one agent-browser
-// state file on a Vercel Drive, which every meeting's sandbox mounts as a
-// read-only snapshot and loads when its browser starts.
+// state file on a Vercel Drive that the sign-in sandbox mounts; meetings copy
+// it from there when their browser starts. See `sign-ins.ts`.
 
 /** The agent-browser session the tools, the screen share, and the sign-in page use. */
 export const BROWSER_SESSION = "meeting";
@@ -39,15 +39,4 @@ export function browserEnv(): Record<string, string> {
   const key = process.env.MEETING_BROWSER_ENCRYPTION_KEY?.trim();
   if (key) env.AGENT_BROWSER_ENCRYPTION_KEY = key;
   return env;
-}
-
-/** The Drive of saved sign-ins as a read-only snapshot, or `undefined` before anyone signed in. */
-export async function signInsSnapshot(): Promise<{ drive: string; mode: "snapshot" } | undefined> {
-  const { Drive } = await import("@vercel/sandbox");
-  try {
-    return (await Drive.get({ name: SIGN_INS_DRIVE })).snapshot();
-  } catch (error) {
-    if (error instanceof Error && /not.?found|404/iu.test(error.message)) return undefined;
-    throw error;
-  }
 }

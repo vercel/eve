@@ -1,7 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { reloadSignIns } from "../lib/reload-sign-ins.js";
+import { reloadSignIns } from "../lib/sign-ins.js";
+import { environment } from "../sandbox.js";
 import { signInLink } from "../lib/sign-in-link.js";
 
 export default defineTool({
@@ -12,7 +13,7 @@ export default defineTool({
   inputSchema: z.object({ action: z.enum(["link", "reload"]) }),
   async execute({ action }, ctx) {
     if (action === "link") return signInLink();
-    await reloadSignIns(ctx);
+    await reloadSignIns(ctx, await ctx.getSandbox(environment));
     return { reloaded: true };
   },
 });
