@@ -47,12 +47,8 @@ export default function connectionDrainPlugin(): void {
       if (inFlight === 0) socket.destroy();
     }
   };
-  // Registered after srvx's own listeners, so srvx has closed the server when `stop` runs. A
-  // signal srvx doesn't handle (it skips graceful shutdown when CI or TEST is set) keeps
-  // Node's default.
-  setImmediate(() => {
-    for (const signal of SHUTDOWN_SIGNALS) {
-      if (process.listenerCount(signal) > 0) process.on(signal, stop);
-    }
-  });
+  // srvx skips graceful shutdown when CI or TEST is set. A signal then keeps Node's default,
+  // which a listener here would cancel.
+  if (process.env.CI || process.env.TEST) return;
+  for (const signal of SHUTDOWN_SIGNALS) process.on(signal, stop);
 }
