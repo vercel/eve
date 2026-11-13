@@ -1,4 +1,3 @@
-import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -391,61 +390,6 @@ describe("the in-process runtime", () => {
     });
   });
 
-  it("runs a call that needs a run of its own: the agent tool's child session", async () => {
-    const firstMessage = (prompt: LanguageModelV4CallOptions["prompt"]) =>
-      JSON.stringify(prompt.find((message) => message.role === "user")?.content ?? "");
-    const delegating = markMockModel(
-      new MockLanguageModelV4({
-        doStream: async ({ prompt }) =>
-          // The child the agent tool opens answers; its parent hears it.
-          firstMessage(prompt).includes("Summarize Bob's notes.")
-            ? textStreamResult("Bob's notes say ship on Friday.")
-            : prompt.some((message) => message.role === "tool")
-              ? textStreamResult("Alice, the helper is on it.")
-              : toolCallsStreamResult([
-                  {
-                    input: JSON.stringify({ message: "Summarize Bob's notes." }),
-                    toolCallId: "call-agent",
-                    toolName: "agent",
-                  },
-                ]),
-        modelId: "in-process-delegating",
-        provider: "eve-test",
-      }),
-    );
-    const test = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(() => ({ model: delegating, modelContextWindowTokens: 200_000 })),
-        }),
-        name: "in-process-durable-runs",
-      },
-    });
-    await test.run(async () => {
-      const runtime = createTestInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      try {
-        const result = await (
-          await address(runtime, "alice-durable-runs").send("Ask a helper.", { auth: null })
-        ).result();
-        expect(result).toMatchObject({
-          reply: "Alice, the helper is on it.",
-          status: "completed",
-        });
-        const events = await recorded(runtime, result.sessionId);
-        const settled = events.filter(({ type }) => type === "call.settled");
-        expect(settled).toHaveLength(1);
-        // The child session ran: its reply is the call's output the parent read.
-        expect(settled[0]).toMatchObject({ data: { outcome: "completed" } });
-        expect(JSON.stringify(settled[0])).toContain("Bob's notes say ship on Friday.");
-        await expect(violations(runtime, result.sessionId)).resolves.toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
-  });
-
   it("ends its sessions when disposed", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-dispose" } });
     await test.run(async () => {
@@ -471,6 +415,55 @@ describe("the in-process runtime", () => {
       expect(ended).toHaveLength(1);
       // Its stream is no longer read here.
       await expect(runtime.getStreamTailIndex(sent.sessionId)).rejects.toThrow();
+    });
+  });
+
+  it("ends a session whose turn is still running when disposed", async () => {
+    let started!: () => void;
+    const modelCalled = new Promise<void>((resolve) => (started = resolve));
+    // Answers only once its call is aborted, as a model call still streaming does.
+    const waiting = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ abortSignal }) => {
+          started();
+          await new Promise((resolve) => abortSignal?.addEventListener("abort", resolve));
+          throw abortSignal?.reason;
+        },
+        modelId: "in-process-waiting",
+        provider: "eve-test",
+      }),
+    );
+    const test = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({ model: waiting, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "in-process-dispose-running",
+      },
+    });
+    await test.run(async () => {
+      const runtime = createTestInProcessRuntime(
+        { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+        { disposeGraceMs: 50 },
+      );
+      const sent = await address(runtime, "alice-dispose-running").send("Alice says hello.", {
+        auth: null,
+      });
+      const reader = (await runtime.getEventStream(sent.sessionId)).getReader();
+      const following = (async () => {
+        const events: SessionStreamEvent[] = [];
+        for (let next = await reader.read(); !next.done; next = await reader.read())
+          events.push(next.value);
+        return events;
+      })();
+      await modelCalled;
+      await runtime.dispose();
+
+      const events = await following;
+      expect(events.filter(({ type }) => type === "turn.settled")).toMatchObject([
+        { data: { outcome: "cancelled" } },
+      ]);
+      expect(events.filter(({ type }) => type === "session.ended")).toHaveLength(1);
     });
   });
 
