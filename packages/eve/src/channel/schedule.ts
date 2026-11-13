@@ -294,9 +294,16 @@ function messageDigest(message: MessageContent): string {
     field(part.mediaType);
     field(part.filename ?? "");
     const { data } = part;
-    if (typeof data === "string") field(data);
-    else if (data instanceof URL) field(data.href);
-    else field(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+    if (typeof data === "string") {
+      field("encoded");
+      field(data);
+    } else if (data instanceof URL) {
+      field("url");
+      field(data.href);
+    } else {
+      field("bytes");
+      field(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+    }
   }
   return hash.digest("hex");
 }

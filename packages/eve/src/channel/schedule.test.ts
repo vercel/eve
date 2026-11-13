@@ -288,6 +288,26 @@ describe("ScheduleDispatcher", () => {
       expect(tokens[2]).toBe(tokens[0]);
     });
 
+    it("distinguishes encoded file data from raw bytes with the same text", async () => {
+      const encoded = "AQID";
+      const data = [encoded, new TextEncoder().encode(encoded)];
+      const { dispatcher, input, runtime } = setup(
+        creator,
+        undefined,
+        undefined,
+        1,
+        async (send) => {
+          await send("A", [{ type: "file", mediaType: "application/pdf", data: data.shift()! }]);
+        },
+      );
+      await dispatcher.triggerCollection(input);
+      await dispatcher.triggerCollection(input);
+      const tokens = vi
+        .mocked(runtime.createSession)
+        .mock.calls.map(([value]) => value.continuationToken);
+      expect(tokens[1]).not.toBe(tokens[0]);
+    });
+
     it.each([
       ["no issuer or subject", { type: "user", authenticator: "test", principalId: "alice" }],
       [
