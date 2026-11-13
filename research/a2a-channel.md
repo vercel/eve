@@ -64,8 +64,8 @@ named by its own delivery.
   specific to subscriptions, and the TCK, decide this one.
 - **Ownership.** Sessions are read through `readOwnedInvocationRun`, shared with the MCP channel;
   unknown, expired, and foreign tasks are all `TaskNotFoundError`. The public card derives
-  `securitySchemes` from the auth policy without calling it (`admitsAnonymousCallers`,
-  `declaredAuthChallenges`).
+  `securitySchemes` from the challenges the auth policy declares, without calling it
+  (`declaredAuthChallenges`); a policy that declares none, such as `none()`, advertises none.
 
 ## Validation
 

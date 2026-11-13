@@ -1,9 +1,5 @@
 /** Publish this agent as an A2A (Agent2Agent) v1.0 server over the JSON-RPC binding. */
-import {
-  admitsAnonymousCallers,
-  declaredAuthChallenges,
-  readOAuthResourceOptions,
-} from "#channel/auth/definitions.js";
+import { declaredAuthChallenges, readOAuthResourceOptions } from "#channel/auth/definitions.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
@@ -118,7 +114,6 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
     input.publicOrigin === undefined ? undefined : parsePublicOrigin(input.publicOrigin);
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
   const security: CardSecurity = {
-    anonymous: admitsAnonymousCallers(input.auth),
     challenges: declaredAuthChallenges(input.auth),
     oauth: readOAuthResourceOptions(input.auth),
   };

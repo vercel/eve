@@ -8,7 +8,7 @@ const base: BuildAgentCardInput = {
   eveVersion: "1.2.3",
   fileInputModes: ["*/*"],
   options: undefined,
-  security: { anonymous: false, challenges: [], oauth: undefined },
+  security: { challenges: [], oauth: undefined },
 };
 
 describe("buildAgentCard", () => {
@@ -40,18 +40,21 @@ describe("buildAgentCard", () => {
   });
 
   it("reads security from the auth policy", () => {
+    // A policy that declares no challenge, such as none(), advertises no scheme.
+    expect(buildAgentCard(base)).not.toHaveProperty("securitySchemes");
+    expect(buildAgentCard(base)).not.toHaveProperty("securityRequirements");
     expect(
-      buildAgentCard({ ...base, security: { ...base.security, anonymous: true } }),
-    ).not.toHaveProperty("securitySchemes");
-    // Undeclared strategies fall back to Bearer, as routeAuth's 401 does.
-    expect(buildAgentCard(base)).toMatchObject({
+      buildAgentCard({
+        ...base,
+        security: { ...base.security, challenges: [{ scheme: "Bearer" }] },
+      }),
+    ).toMatchObject({
       securityRequirements: [{ schemes: { bearer: { list: [] } } }],
       securitySchemes: { bearer: { httpAuthSecurityScheme: { scheme: "Bearer" } } },
     });
     const both = buildAgentCard({
       ...base,
       security: {
-        anonymous: false,
         challenges: [{ scheme: "Basic" }, { scheme: "Bearer" }],
         oauth: { issuer: "https://issuer.example.com", scopes: ["agent:invoke"] },
       },

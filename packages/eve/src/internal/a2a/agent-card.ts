@@ -28,8 +28,8 @@ export interface A2aAgentCardOptions {
   readonly iconUrl?: string;
   /**
    * `securitySchemes` and `securityRequirements` as A2A JSON, replacing the ones read from `auth`:
-   * none when it includes `none()`, else an HTTP scheme per challenge its strategies declare
-   * (`Basic`, `Bearer`), else `Bearer`.
+   * an HTTP scheme per challenge its strategies declare (`Basic`, `Bearer`), or none when they
+   * declare none, as `none()` does.
    */
   readonly securitySchemes?: Readonly<Record<string, JsonValue>>;
   readonly securityRequirements?: readonly JsonValue[];
@@ -47,7 +47,6 @@ export interface BuildAgentCardInput {
 
 /** What the route's auth policy tells a client before it has credentials. */
 export interface CardSecurity {
-  readonly anonymous: boolean;
   readonly challenges: readonly UnauthorizedChallenge[];
   readonly oauth: OAuthResourceOptions | undefined;
 }
@@ -97,9 +96,9 @@ export function buildAgentCard(input: BuildAgentCardInput): Record<string, JsonV
 }
 
 /**
- * `securitySchemes` and `securityRequirements` from the auth policy: none for a policy that admits
- * anonymous callers, else one HTTP scheme per challenge its 401 sends (Bearer when it declares
- * none, as `routeAuth` does), any one of which satisfies the route.
+ * `securitySchemes` and `securityRequirements` from the auth policy: one HTTP scheme per challenge
+ * its strategies declare, any one of which satisfies the route. A policy that declares none, such
+ * as `none()` or a custom `AuthFn`, advertises none: the card says only what the policy states.
  */
 function securityFields(input: BuildAgentCardInput): Record<string, JsonValue> {
   const { options, security } = input;
@@ -111,9 +110,8 @@ function securityFields(input: BuildAgentCardInput): Record<string, JsonValue> {
       }),
     };
   }
-  if (security.anonymous) return {};
   const schemes = new Set(security.challenges.map((challenge) => challenge.scheme));
-  if (schemes.size === 0) schemes.add("Bearer");
+  if (schemes.size === 0) return {};
   const issuer = security.oauth?.issuer ?? security.oauth?.authorizationServers?.[0];
   const securitySchemes: Record<string, JsonValue> = {};
   const securityRequirements: JsonValue[] = [];
