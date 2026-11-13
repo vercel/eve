@@ -197,6 +197,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: "pnpm"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -209,22 +210,14 @@ jobs:
         with:
           pull: "true"
 
-      # The scenario tier of every package with one, plus the extension fixture
-      # its scenarios build and the framework apps its public-types scenario
-      # typechecks against.
-      - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
+      - name: Restore the lockfile verification verdict
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          cache-key: scenario
-          filters: |
-            eve...
-            @eve/code...
-            @eve/git...
-            @eve/computer-use...
-            @eve/agent-desktop...
-            agent-self-modification...
-            extensions...
-            ./apps/frameworks/*
+          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
 
       - name: Run scenario tests
         run: pnpm test:scenario
