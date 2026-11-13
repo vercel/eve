@@ -22,7 +22,11 @@ export const REGION = (process.env.MEETING_BROWSER_REGION?.trim() || "iad1") as 
 export const SIGN_IN_SANDBOX = "meeting-browser-sign-in";
 
 export const SIGN_INS_DIR = "/sign-ins";
+/** Where the sign-in page saves. With an encryption key, agent-browser saves to this path plus `.enc`. */
 export const STATE_FILE = `${SIGN_INS_DIR}/state.json`;
+
+/** Shell that sets `$state` to the saved sign-ins file, encrypted or not, or leaves it empty. */
+export const FIND_STATE = `state=; for f in ${STATE_FILE}.enc ${STATE_FILE}; do [ -f "$f" ] && { state=$f; break; }; done`;
 
 /** Environment for every sandbox that runs the browser. */
 export function browserEnv(): Record<string, string> {
