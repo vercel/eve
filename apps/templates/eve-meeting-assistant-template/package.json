@@ -11,6 +11,7 @@
   "dependencies": {
     "@eve/recall": "^0.1.0-rc.0",
     "@vercel/connect": "^2.5.0",
+    "@vercel/sandbox": "^3.9.0",
     "ai": "7.0.139",
     "eve": "^1.0.0-rc.14",
     "zod": "4.4.3"

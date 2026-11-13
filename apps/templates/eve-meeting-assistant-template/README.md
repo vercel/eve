@@ -89,6 +89,38 @@ pnpm dev
 
 Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `https://<your-tunnel>/eve/v1/recall`.
 
+## Notes, docs, and screen sharing
+
+Beyond Linear, eve keeps the meeting's notes in Notion, starts and edits docs on request, looks things up in Notion, and shares its screen, much like [Claude Meetings](https://claude.com/resources/articles/claude-meetings).
+
+- **Notes.** About every 25 lines nobody addressed to eve, `shouldRespond` gives it a quiet turn to add what's new to the meeting's notes page: a summary, action items, decisions, and notes. eve only inserts after its own blocks, so people can edit the page while it grows. With a Recall status webhook, `call_ended` triggers one last pass.
+- **Docs.** "eve, start a doc for this plan" creates a subpage of the notes. Later requests read the doc first, then edit only the blocks they're about, so teammates' edits survive.
+- **Lookups.** `search_notion` searches page titles. The first search in a meeting waits for someone's approval in the chat or out loud.
+- **Screen.** "eve, put the plan on screen" opens the page in Firefox on eve's desktop, in the session's [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox), and screen-shares the desktop through Output Media. The camera page keeps showing when eve listens, thinks, and talks. While a doc is up, the view scrolls to each block eve edits. "eve, show us the venue's site" drives the same browser with `eve/extensions/computer-use`.
+- **Outside guests.** Set `MEETING_INTERNAL_DOMAINS=acme.com` to have eve leave when someone from another domain joins, matched against the emails Recall reports.
+
+The pieces are `agent/lib/notion.ts` and `agent/lib/notes.ts` for Notion, the `take_notes`, `create_doc`, `read_doc`, `edit_doc`, `search_notion`, and `present` tools, `agent/lib/stage.ts` and `agent/sandbox.ts` for the shared desktop, and `agent/instructions/notes-docs-screen.md`.
+
+To set it up, create a Notion page for meeting notes, such as "Meetings", connect it to a Notion integration (**…** > **Connections**), and set its general access to **Anyone on the web with link**, which its subpages inherit, so eve's signed-out browser can show them. Store the integration's token in Vercel Connect:
+
+```bash
+read -rs NOTION_TOKEN   # paste your ntn_... token
+printf '[{"value":"%s"}]' "$NOTION_TOKEN" |
+  vercel connect create notion --connection-method api-key --name meetings --data @-
+```
+
+Then set:
+
+```bash
+NOTION_CONNECTOR=<connector-uid>   # from `vercel connect list`; or set NOTION_TOKEN instead
+NOTION_PARENT_PAGE_ID=...          # the Meetings page's id or link
+MEETING_INTERNAL_DOMAINS=acme.com  # optional
+```
+
+For the end-of-meeting notes, add a workspace webhook in the Recall dashboard for bot status changes, pointed at `/eve/v1/recall`. `agent/channels/eve.ts` lets `eve remote connect` reach a production deployment with the project's Vercel OIDC token: pass `-H "authorization: Bearer $VERCEL_OIDC_TOKEN"` after `vercel env pull`.
+
+The first build prepares a sandbox template with a desktop and Firefox, which takes a few minutes.
+
 ## Limits
 
 - Each participant is their own principal, `recall:<botId>:<participantId>`, but display names prove nothing. Anyone in the meeting can use the Linear connector's access, so scope its Linear user accordingly.
@@ -97,3 +129,6 @@ Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `http
 - Talking over eve is detected by loudness, so background noise can cut it off. An interrupted reply stays whole in the session's history.
 - Approvals, questions, and sign-ins go to the meeting chat as text.
 - The bot runs Recall's `web_4_core` variant so the page animates and plays audio smoothly, which Recall bills at a higher rate.
+- Anyone in the meeting can read the Notion pages the integration can see, through search or the shared screen, and anyone with a notes page's link can read it.
+- The shared desktop is 1280x720 at a few frames a second, which suits documents and browsing, not video. Its public URL is protected only by an unguessable path.
+- The sandbox stops two hours after it starts, which ends a screen share in longer meetings.
