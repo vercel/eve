@@ -33,7 +33,10 @@ export default recallChannel({
       if (data.kind !== "text" || typeof data.value !== "string") return;
       const { mode, text } = replyModeOf(data.value);
       if (!text.trim()) return;
-      if (mode !== "voice" || /https?:\/\//u.test(text)) await channel.recall.sendChatMessage(text);
+      // An untagged message, usually the model thinking aloud, only posts for its link.
+      if (mode === "chat" || mode === "both" || /https?:\/\//u.test(text)) {
+        await channel.recall.sendChatMessage(text);
+      }
     },
   },
 });
