@@ -135,6 +135,10 @@ function renderSettledWait(
   }
   if (working.length > 0) {
     sentences.push(`${capitalize(countWorking(working))}: ${working.join(", ")}.`);
+    const pending = working.length === 1 ? "its result" : "their results";
+    sentences.push(
+      `If your reply needs ${pending}, call ${TASK_WAIT_TOOL_NAME} again before replying.`,
+    );
   }
   return sentences.join(" ");
 }

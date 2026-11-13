@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { readTaskResults, renderTaskResults } from "#execution/tasks/render.js";
+import {
+  readTaskResults,
+  renderTaskResults,
+  renderTaskWaitResult,
+} from "#execution/tasks/render.js";
 
 describe("renderTaskResults", () => {
   it("cuts a one-line body at the budget instead of dropping it", () => {
@@ -24,5 +28,42 @@ describe("renderTaskResults", () => {
     );
 
     expect(second!.body).toMatch(/^(?:😀)+\n\[truncated\]$/u);
+  });
+});
+
+describe("renderTaskWaitResult", () => {
+  it("tells the model to wait again when a result arrives while another task works", () => {
+    const text = renderTaskWaitResult(
+      {
+        status: "settled",
+        settled: [{ id: "compile_report-a1", status: "completed" }],
+        working: ["compile_report-b2"],
+      },
+      1000,
+    );
+    expect(text).toBe(
+      "compile_report-a1 completed; its result follows. 1 task is still working: compile_report-b2. " +
+        "If your reply needs its result, call eve__task_wait again before replying.",
+    );
+  });
+
+  it("names several working tasks' results in the plural", () => {
+    const text = renderTaskWaitResult(
+      {
+        status: "settled",
+        settled: [{ id: "a", status: "completed" }],
+        working: ["b", "c"],
+      },
+      1000,
+    );
+    expect(text).toContain("If your reply needs their results, call eve__task_wait again");
+  });
+
+  it("adds nothing once every task has settled", () => {
+    const text = renderTaskWaitResult(
+      { status: "settled", settled: [{ id: "a", status: "completed" }], working: [] },
+      1000,
+    );
+    expect(text).toBe("a completed; its result follows.");
   });
 });
