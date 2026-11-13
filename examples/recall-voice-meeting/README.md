@@ -1,6 +1,6 @@
 # Voice meeting agent
 
-An eve agent that joins Zoom, Google Meet, and Microsoft Teams calls through a [Recall.ai](https://recall.ai) bot and answers out loud. Say "eve, what did Bob say about the launch date?", and the bot replies by voice. If someone talks over it, it stops talking.
+An eve agent that joins Zoom, Google Meet, and Microsoft Teams calls through a [Recall.ai](https://recall.ai) bot and answers out loud. Say "eve, what did Bob say about the launch date?", and the bot replies by voice. If someone talks over it, it stops talking. Ask it to stay quiet, and it answers in the meeting chat instead.
 
 It's the [Recall.ai channel](https://eve.dev/docs/channels/recall) with one change: replies are spoken through Recall's [Output Media](https://docs.recall.ai/docs/stream-media) instead of posted to the meeting chat.
 
@@ -18,10 +18,13 @@ For the reply, the bot loads a page from the agent as its camera and microphone.
 
 The page also hears the meeting's mixed audio, without the bot's own voice. When someone talks for more than about a third of a second while eve is speaking, the page stops playback and drops the rest of that reply.
 
+The agent picks where each message goes by starting it with `[voice]`, `[chat]`, or `[both]`. The stream route holds the first few characters of each message until it can read the tag, then skips `[chat]` messages, and the channel posts `[chat]` and `[both]` messages to the meeting chat. The instructions tell the agent to switch to chat when someone asks it to stay quiet, when people are talking with each other, or when the answer is meant to be read. An untagged message is spoken.
+
 | File                          | Role                                                                                                      |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `agent/channels/recall.ts`    | `recallChannel()` with the voice routes, the `shouldRespond` check, and chat only for replies with a link |
 | `agent/lib/voice.ts`          | The bot config with Output Media, the page and stream routes, sentence splitting, and speech synthesis    |
+| `agent/lib/reply-mode.ts`     | Reads the `[voice]`, `[chat]`, or `[both]` tag at the start of a message                                  |
 | `agent/lib/voice-page.ts`     | The page the bot streams: plays speech in order, draws a waveform, and stops when someone talks over it   |
 | `agent/tools/join_meeting.ts` | Sends a voice bot to a meeting on request, for testing                                                    |
 | `agent/instructions.md`       | How to talk: short spoken sentences, no Markdown, and a heads-up line before tool calls                   |
