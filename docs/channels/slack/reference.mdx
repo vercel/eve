@@ -89,6 +89,8 @@ Hooks don't post anything. eve still acknowledges the message, shows progress, a
 
 `onInteraction(action, ctx)` handles clicks on your own buttons and selects (`block_actions`). Clicks on eve's approval and question controls go to `onAnswers(ctx, submission)` instead. To open a modal from a button, pass `action.triggerId` to `ctx.slack.request("views.open", { trigger_id, view })` within about 3 seconds. To replace or delete the message the click came from, POST to `action.responseUrl`, for example `{ "delete_original": true }`. That is the only way to change an ephemeral message. eve adds the clicking user's Slack ID to the model message.
 
+`onView(event, ctx)` handles submissions and closes of modals you open. See [Custom modals](#custom-modals).
+
 `onShortcut(shortcut, ctx)` handles message and global shortcuts configured under **Interactivity & Shortcuts**. It receives the callback ID, user, workspace, and trigger ID, plus the message and channel for a message shortcut.
 
 `onSlashCommand(command, ctx)` handles **Slash Commands**. It receives the command, argument text, user, channel, workspace, trigger ID, and response URL. Both handlers can call the Slack API for the workspace. eve acknowledges the request immediately while the handler runs in the background:
@@ -720,6 +722,7 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 | `onAnswers`       | Accept with `ctx.defaultAuth`                               | `(ctx, submission)` hook that authorizes HITL answers.                                                                                           |
 | `onEvent`         | None                                                        | `(ctx, event)` hook for other Events API callbacks. See [Other Events API callbacks](#other-events-api-callbacks).                               |
 | `onInteraction`   | None                                                        | `(action, ctx)` hook for your own `block_actions` callbacks.                                                                                     |
+| `onView`          | Close the modal                                             | `(event, ctx)` hook for submissions and closes of your own modals. See [Custom modals](#custom-modals).                                          |
 | `onShortcut`      | None                                                        | `(shortcut, ctx)` hook for message and global shortcuts.                                                                                         |
 | `onSlashCommand`  | None                                                        | `(command, ctx)` hook for slash commands.                                                                                                        |
 
@@ -921,7 +924,80 @@ export default slackChannel({
 
 - Handle your own button and select callbacks in `onInteraction`. For eve's approval and question controls, use the [HITL helpers](#render-and-decode-hitl-controls-yourself).
 - `thread.post({ card })` converts the card with `cardToBlocks(card)`, and with `cardToFallbackText(card)` unless you pass `fallbackText`.
-- Message cards don't support modals, text inputs, or external selects. For a custom modal, send native Slack view data with `ctx.slack.request("views.open", ...)`.
+- Message cards don't support modals, text inputs, or external selects. For a form, open a [custom modal](#custom-modals).
+
+### Custom modals
+
+Open a Block Kit modal from a button in `onInteraction`, then handle it in `onView`. `event.type` is `"submit"` when someone submits the modal and `"close"` when they close it. This review flow checks the edited line and shows a preview:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onInteraction(action, ctx) {
+    if (action.actionId !== "edit_draft" || !action.triggerId) return;
+    await ctx.slack.request("views.open", {
+      trigger_id: action.triggerId,
+      view: {
+        type: "modal",
+        callback_id: "sales_review",
+        private_metadata: action.value ?? "", // your review ID
+        title: { type: "plain_text", text: "Review draft" },
+        submit: { type: "plain_text", text: "Submit" },
+        blocks: [
+          {
+            type: "input",
+            block_id: "draft",
+            label: { type: "plain_text", text: "Follow-up line" },
+            element: { type: "plain_text_input", action_id: "line", multiline: true },
+          },
+        ],
+      },
+    });
+  },
+  onView(event) {
+    if (event.type !== "submit" || event.callbackId !== "sales_review") return;
+    const line = event.values.line;
+    if (!line?.trim()) {
+      return { action: "errors", errors: { draft: "Enter a follow-up line." } };
+    }
+    return {
+      action: "update",
+      view: {
+        type: "modal",
+        title: { type: "plain_text", text: "Review preview" },
+        close: { type: "plain_text", text: "Done" },
+        blocks: [{ type: "section", text: { type: "plain_text", text: line.slice(0, 3000) } }],
+      },
+    };
+  },
+});
+```
+
+For a submission, `onView` runs before eve answers Slack, and its return value decides what the person sees:
+
+| Return                                                 | What Slack does                                         |
+| ------------------------------------------------------ | ------------------------------------------------------- |
+| Nothing, or `{ action: "close" }`                      | Closes the modal.                                       |
+| `{ action: "errors", errors: { [blockId]: message } }` | Keeps the modal open and shows each error by its block. |
+| `{ action: "update", view }`                           | Replaces the modal with `view`.                         |
+| `{ action: "push", view }`                             | Opens `view` on top of the modal.                       |
+| `{ action: "clear" }`                                  | Closes every modal in the stack.                        |
+
+`view` is a native Slack view, the same object `views.open` takes. Finish within Slack's three-second deadline, and use `ctx.waitUntil(promise)` for work after that. If the hook throws, eve returns an error to Slack, which keeps the modal open and tells the person it couldn't connect. These are the same `action` values [Chat SDK](/docs/channels/chat-sdk)'s `onModalSubmit` returns, with a native `view` where Chat SDK takes a `modal`.
+
+Every event carries:
+
+- `callbackId`, `viewId`, and `privateMetadata` from the view.
+- `user`, `teamId` (the person's workspace), `installationTeamId` (whose credentials `ctx.slack` uses), and `enterpriseId`.
+- For a submission, `values`, one string per input keyed by `action_id`: the text, date, time, option, user, conversation, or channel. A date-time picker gives Unix seconds. An empty input is `""`.
+- `raw`, the complete Slack payload. Checkboxes, multi-selects, and rich text are `""` in `values`; read them from `raw.view.state.values`, keyed by block ID and then `action_id`.
+
+A view has no thread or session, so `ctx` has only `ctx.slack` and `ctx.waitUntil`. Put an ID in `private_metadata` that names your record, look it up on submit, and check that `event.user` may change it. Handle a second submission of the same record before sending anything, such as an email. `private_metadata` comes back as you set it, so it identifies the record but doesn't prove who may act on it.
+
+A `"close"` event arrives only for modals opened with `notify_on_close: true`. eve answers Slack first, then runs the hook, so its return value is ignored. `event.isCleared` is `true` when Slack closed the whole stack.
+
+Submissions from eve's **Type your answer** modal go to `onAnswers`, never to `onView`. Without `onView`, eve closes your modals without delivering their data. Buttons inside a modal or App Home and external select options don't reach any hook.
 
 ### Proactive sessions
 
