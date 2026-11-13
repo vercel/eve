@@ -30,7 +30,11 @@ export interface HostedRoute {
   deliver(token: string, payload: unknown): Promise<"delivered" | "gone" | undefined>;
   /** Whether `runId` ended. */
   runEnded(runId: string): boolean | undefined;
-  /** Stops `runId` outright: `true` when it was running here, `false` when it already ended. */
+  /**
+   * Stops `runId`: `true` when it was running here, `false` when it already ended. Workflow
+   * cancels the run outright; the in-process host asks its body to end, so a body that ignores
+   * its abort signal keeps running until it returns.
+   */
   cancelRun(runId: string, reason: string): boolean | undefined;
 }
 

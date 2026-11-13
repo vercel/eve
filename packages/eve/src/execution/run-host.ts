@@ -51,6 +51,11 @@ export interface RunHost {
     options?: { readonly ifPresent?: boolean },
   ): Promise<void>;
   readonly agentSessions: RunAgentSessions;
+  /**
+   * The body a workflow id names, when the host holds bodies itself. Workflow's are registered
+   * by its bundle; one this returns `undefined` for is looked up there.
+   */
+  resolveWorkflow?(workflowId: string): unknown;
   /** Answers a stubbed eval's calls from the run; see {@link ToolStubHost}. */
   readonly toolStubs?: ToolStubHost;
 }
