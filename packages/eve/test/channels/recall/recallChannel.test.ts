@@ -251,19 +251,6 @@ const approvalOptions = [
   { id: "cancel", label: "Cancel" },
 ];
 
-describe("recallChannel private replies", () => {
-  it("keeps a turn private once a private chat joins it", async () => {
-    // A bot eve didn't send learns its platform from Recall, not from participants.
-    const meeting = liveChannel({ botId: "bot_1" });
-
-    await meeting.hear(chat("can you deploy v2.4?", "only_bot"));
-    await meeting.hear(speech("Eve, use the release branch"));
-    await meeting.send("Deploying.");
-
-    expect(meeting.posts).toEqual([{ message: "Deploying.", to: "7" }]);
-  });
-});
-
 describe("recallChannel own messages", () => {
   it("drops chat from a bot eve didn't create, under the name Recall shows", async () => {
     const meeting = liveChannel({ botId: "bot_1" });

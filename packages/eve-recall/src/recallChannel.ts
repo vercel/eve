@@ -38,7 +38,7 @@ import {
   isAddressedTo,
   matchSpokenOption,
 } from "./defaults.js";
-import { parseRecallEvent, type RecallMeetingEvent } from "./inbound.js";
+import { parseRecallEvent, type RecallChatEvent, type RecallMeetingEvent } from "./inbound.js";
 import { resolveRecallVerificationSecret, verifyRecallWebhook } from "./verify.js";
 
 const log = createLogger("recall.channel");
@@ -73,12 +73,6 @@ export interface RecallChannelState extends PromptQueueState {
   sentChat?: string[];
   /** Lines the agent heard but didn't answer since its last turn, oldest first. */
   transcript?: string[];
-  /**
-   * Who the current turn answers privately: a participant id once a private
-   * chat joins the turn, or `null` when private chats from several people
-   * did. Cleared when the turn ends.
-   */
-  replyTo?: string | null;
   /** @internal The request eve's prompt queue last showed, which a typed reply answers. */
   shownPromptId?: string;
   /** The options of the prompt last shown, so a spoken or loosely typed reply can pick one. */
@@ -124,9 +118,7 @@ export interface RecallHandle {
    * Posts to the meeting chat, split to fit the platform's limit. Returns
    * `false` instead of throwing when Recall rejects it, such as after the bot
    * left the call. While a bot `receive` sent is still joining, the message
-   * waits and posts once the bot hears its first meeting event. Without `to`,
-   * a turn that answers a private chat replies privately; pass
-   * `{ to: "everyone" }` to post publicly anyway.
+   * waits and posts once the bot hears its first meeting event.
    */
   sendChatMessage(message: string, options?: { readonly to?: string }): Promise<boolean>;
   /** Plays an MP3 clip through the bot. The bot must be created with `automatic_audio_output`. */
@@ -304,12 +296,6 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         return IGNORED;
       }
       channel.state.transcript = [];
-      // A private chat keeps the rest of the turn private, even if public lines join it.
-      if (event.type === "chat" && event.to === "only_bot") {
-        const { replyTo } = channel.state;
-        channel.state.replyTo =
-          replyTo === undefined || replyTo === event.participant.id ? event.participant.id : null;
-      }
       const option =
         "text" in event ? shownOptionIn(channel.state, event.text, botName) : undefined;
       if (option === undefined && transcript.length === 0) return;
@@ -345,7 +331,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       });
     },
 
-    events: clearReplyToAfterTurn({ ...defaultEvents, ...config.events }),
+    events: { ...defaultEvents, ...config.events },
   });
 }
 
@@ -398,6 +384,10 @@ async function dispatch(input: {
   readonly onMeetingEvent: NonNullable<RecallChannelConfig["onMeetingEvent"]>;
 }): Promise<void> {
   const { event } = input;
+  if (event.type === "chat" && event.to === "only_bot") {
+    await declinePrivateChat(input.api, event);
+    return;
+  }
   // The route doesn't know the platform; the session looks it up once.
   const ctx: RecallContext = {
     botName: input.botName,
@@ -435,7 +425,7 @@ export function formatMeetingEvent(event: RecallMeetingEvent): string {
       return `${event.participant.name}: ${event.text}`;
     case "chat":
       // Chat can span lines, so the attribution gets its own.
-      return `${event.participant.name} (${event.to === "only_bot" ? "privately " : ""}in chat):\n${event.text}`;
+      return `${event.participant.name} (in chat):\n${event.text}`;
     case "join":
       return `${event.participant.name} joined the meeting.`;
     case "leave":
@@ -534,18 +524,6 @@ function shownOptionIn(state: RecallChannelState, text: string, botName: string)
   return matchSpokenOption(text, botName, shown.options);
 }
 
-/** Wraps the turn-ending handler so the turn's private reply target ends with it. */
-function clearReplyToAfterTurn(events: RecallChannelEvents): RecallChannelEvents {
-  const settled = events["turn.settled"];
-  return {
-    ...events,
-    async "turn.settled"(event, ctx) {
-      await settled?.(event, ctx);
-      delete ctx.channel.state.replyTo;
-    },
-  };
-}
-
 function isOwnMessage(event: RecallMeetingEvent, botName: string): boolean {
   return event.type === "chat" && event.participant.name === botName;
 }
@@ -563,10 +541,7 @@ function isOwnChat(event: RecallMeetingEvent, state: RecallChannelState): boolea
 
 function buildRecallHandle(
   api: RecallApiOptions,
-  state: Pick<
-    RecallChannelState,
-    "awaitingCall" | "botId" | "outbox" | "platform" | "replyTo" | "sentChat"
-  >,
+  state: Pick<RecallChannelState, "awaitingCall" | "botId" | "outbox" | "platform" | "sentChat">,
 ): RecallHandle {
   const botId = (): string => {
     if (!state.botId) throw new Error("recallChannel: this session has no Recall bot.");
@@ -583,14 +558,7 @@ function buildRecallHandle(
       return recallSupportsDirectMessages(state.platform ?? undefined);
     },
     async sendChatMessage(message, options) {
-      let to = options?.to;
-      if (to === undefined && state.replyTo !== undefined) {
-        if (state.replyTo !== null && recallSupportsDirectMessages(state.platform ?? undefined)) {
-          to = state.replyTo;
-        } else {
-          message = PRIVATE_REPLY_UNAVAILABLE;
-        }
-      }
+      const to = options?.to;
       if (state.awaitingCall) {
         (state.outbox ??= []).push(to === undefined ? { message } : { message, to });
         return true;
@@ -623,8 +591,25 @@ function buildRecallHandle(
   };
 }
 
-const PRIVATE_REPLY_UNAVAILABLE =
-  "I got a private message, but I can't answer it privately here. Ask me again in the meeting chat, or one person at a time.";
+/**
+ * Answers a private chat without letting it reach the meeting's session,
+ * whose history every participant can ask about later.
+ */
+async function declinePrivateChat(api: RecallApiOptions, event: RecallChatEvent): Promise<void> {
+  try {
+    await sendRecallChatMessage({
+      ...api,
+      botId: event.botId,
+      message: PRIVATE_CHAT_DECLINED,
+      to: event.participant.id,
+    });
+  } catch (error) {
+    log.error("Recall chat message failed", { error });
+  }
+}
+
+const PRIVATE_CHAT_DECLINED =
+  "I can't take private messages in a meeting, because everyone here shares what I remember. Ask me in the meeting chat instead.";
 
 async function readBoundedText(request: Request, maxBytes: number): Promise<string | undefined> {
   if (Number(request.headers.get("content-length") ?? 0) > maxBytes) return undefined;

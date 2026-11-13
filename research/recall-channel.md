@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: implemented
-last_updated: "2026-11-03"
+last_updated: "2026-11-12"
 ---
 
 # Recall.ai meeting channel
@@ -111,10 +111,9 @@ session, so another channel can hand a request into a meeting.
   Eve, approve it" approves, and "Eve, one" picks option 1. What's left must
   name exactly one option.
 - **Replies:** `content.completed` posts to the chat, including text before a
-  tool call. Once a private Zoom chat joins a turn, everything the turn posts
-  without an explicit `to` (replies, prompts, errors, notices) goes privately
-  to its sender until the turn ends. Private chats from several people in one
-  turn, or a platform without private chat, get a notice instead. Messages are split at the platform limit (Meet 500, Zoom and
+  tool call. Private Zoom chats to the bot never reach the session, because
+  its history is shared by everyone in the meeting; the route answers them
+  privately with a notice instead. Messages are split at the platform limit (Meet 500, Zoom and
   Teams 4096). Approvals and questions use the text prompt queue, like Twilio.
 - **Joining:** a bot `receive` creates can't chat until the meeting admits
   it. The channel holds its chat messages and posts them on the first meeting
