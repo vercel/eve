@@ -1,5 +1,36 @@
 # eve
 
+## 1.0.0-rc.17
+
+Released 2026-11-13 · [Compare with 1.0.0-rc.16](https://github.com/vercel/eve/compare/eve%401.0.0-rc.16...eve%401.0.0-rc.17)
+
+### Features
+
+- A dynamic schedule's `run` no longer starts its sessions again when the provider retries an occurrence.
+  A `to().send()` without an `idempotencyKey` now takes one from the occurrence and the message, so the retry reaches the session the first attempt started. Before, each retry started another session unless `run` passed its own key. A message that differs between attempts still starts another session; pass an `idempotencyKey` to keep it to one. ([#6358](https://github.com/vercel/eve/pull/6358))
+- A dynamic schedules definition can declare named `scopes`, for one kind of schedule with more than one owner.
+  `scopes` takes the place of `scope`. The definition still offers one set of management tools, and each tool takes a `scope` input that names the scope to act in. A scope can set its own `description`, `preparePayload`, `run`, and `approval`, and an `id` that keeps the schedules an earlier definition stored. `schedules(definition, { scope })` binds one scope from code. A definition with a single `scope` is unchanged. ([#6360](https://github.com/vercel/eve/pull/6360))
+- A dynamic schedule's `preparePayload` receives the schedule's timing as `context.expression`.
+  It is the timing the caller passed, or the stored timing when an update replaces only the payload, so `preparePayload` can tell a recurring schedule from a one-time one without a payload field for it. ([#6359](https://github.com/vercel/eve/pull/6359))
+- Dynamic schedules reject a cron expression that Vercel Schedules can't run before the write is prepared, so a model's call fails before a person is asked to approve it.
+  Vercel Schedules takes numeric fields only, and not both a day of the month and a day of the week. An expression that breaks these rules, such as one with `MON` or `JAN`, now fails with an error that says how to write it. `eve dev` applies the same rules. A custom `ScheduleProvider` can implement the optional `validateExpression` to check timing the same way. ([#6357](https://github.com/vercel/eve/pull/6357))
+- Decision spans now name their turn and purpose, and record per-question results as `gen_ai.decision.results` when the trace records outputs.
+  `decision <model>` spans carry `agent.turn.id` and `agent.decision.purpose` (`model-selection`, `tool-approval`, `agent-routing`, or `custom`), so Agent Runs can place a model-selection decision in a turn that is still running. Results follow the proposed OpenTelemetry GenAI decision conventions: choices, predicates, scores with their levels, and refusals, each keyed by the question's position. They are output content, recorded only when outputs are and dropped for any destination that declines outputs. `AgentRun.decision` accepts an optional `purpose`, and completing a decision with `output` records it as the results. ([#6389](https://github.com/vercel/eve/pull/6389))
+- Publish `ghcr.io/vercel/eve-git`, eve's default sandbox image plus the GitHub CLI (`gh`), and the same image to Vercel Container Registry as `vcr.vercel.com/vercel/eve/git`.
+  Each eve release pins one tag of it, exported as `DEFAULT_EVE_GIT_SANDBOX_IMAGE` from `eve/sandbox/docker` and `VERCEL_EVE_GIT_SANDBOX_IMAGE` from `eve/sandbox/vercel`, and both from `eve/extensions/git/sandbox`, and `latest` moves to the tag of the released eve package.
+  Pass the constant as `image` so `installCodeTooling` from `eve/extensions/code/sandbox` finds `gh` and skips its `apt-get` install, which takes about 7 seconds of a first build. A Vercel Sandbox session from a prepared snapshot of the eve-git image runs no base setup command, like the default image. The default image is unchanged. ([#6246](https://github.com/vercel/eve/pull/6246))
+
+### Bug Fixes
+
+- Update eve's bundled dependencies, including the AI SDK, Vercel SDKs, Chat SDK, and MCP, to their latest releases, and OpenTelemetry to its latest 2.x releases.
+  eve now requires `ai` 7.0.172 or later.
+  YAML frontmatter, eval data files, and OpenAPI specs now parse with js-yaml 5 and YAML 1.2 values. An unquoted date such as `2024-01-02` loads as a string instead of a `Date`, and a `0b` binary literal such as `0b101` loads as a string instead of a number. The YAML 1.1 tags `!!timestamp`, `!!binary`, `!!set`, `!!omap`, and `!!pairs` are no longer recognized, and a mapping with a non-scalar key, such as `? [a]`, throws. `<<` merge keys still work.
+  MCP connections over Streamable HTTP now fail when the `server/discover` request fails before the server answers, instead of retrying with `initialize`. Set `protocolVersionDiscovery: false` for a server that can't handle that request. Servers that answer `server/discover` with a JSON-RPC error or an HTTP error status other than `401` still use `initialize`, and servers that reject the protocol version with a supported legacy version still negotiate it. ([#6378](https://github.com/vercel/eve/pull/6378))
+- Fix `eve dev` requests that use a sandbox failing with `ENOENT … sandbox-preparation.lock` when another request finished preparing sandboxes at the same time.
+  These requests now wait for the other request and continue, as they already did while preparation was in progress. ([#6388](https://github.com/vercel/eve/pull/6388))
+- Keep an answered ephemeral Slack card in its thread instead of also showing it at the top of the channel. ([#6381](https://github.com/vercel/eve/pull/6381))
+- When `eve__task_wait` returns with one task's result while others are still working, the result now tells the model to wait again if its reply needs the rest, so it no longer sends a partial answer first. ([#6380](https://github.com/vercel/eve/pull/6380))
+
 ## 1.0.0-rc.16
 
 Released 2026-11-13 · [Compare with 1.0.0-rc.14](https://github.com/vercel/eve/compare/eve%401.0.0-rc.14...eve%401.0.0-rc.16)
