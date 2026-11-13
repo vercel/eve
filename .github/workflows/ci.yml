@@ -10,8 +10,10 @@ on:
 permissions:
   contents: read
 
-# Jobs install only the workspace packages their commands read, each under its
-# own pnpm store cache key. See .github/actions/pnpm-install.
+# Jobs that read the whole workspace -- lint, typecheck, and the unit tier, which
+# includes the docs site's tests -- install everything and share setup-node's
+# pnpm cache. Every other job installs only the workspace packages its commands
+# read, each under its own pnpm store cache key. See .github/actions/pnpm-install.
 
 jobs:
   lint:
@@ -33,11 +35,19 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: "pnpm"
+
+      # pnpm verifies the lockfile against the supply-chain policies on every
+      # install (13 s on Linux, 44 s on Windows). Its verdict log is keyed by the
+      # lockfile hash, so caching it keeps the check and skips the re-check.
+      - name: Restore the lockfile verification verdict
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
 
       - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
-        with:
-          cache-key: full
+        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
 
       - name: Run lint
         run: pnpm lint
@@ -76,12 +86,16 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: "pnpm"
 
-      # Typecheck covers every package, so it reads the whole workspace.
-      - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
+      - name: Restore the lockfile verification verdict
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          cache-key: full
+          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
 
       - name: Run typecheck
         run: pnpm typecheck
@@ -102,13 +116,16 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: "pnpm"
 
-      # `pnpm test:unit` runs the unit tier of every package that has one,
-      # including the docs site's, so this job reads the whole workspace.
-      - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
+      - name: Restore the lockfile verification verdict
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          cache-key: full
+          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
 
       - name: Run unit tests
         run: pnpm test:unit
