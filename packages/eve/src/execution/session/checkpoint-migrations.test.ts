@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+} from "#execution/session/checkpoint.js";
 import { digestOf } from "#definitions/state.js";
 
 function checkpoint(version: number) {

@@ -11,7 +11,8 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { evaluateValues } from "#definitions/step.js";
 import { installDefinitions, restoreDefinitions } from "./kernel.js";
 import { forgetSessionLive } from "#definitions/state.js";
@@ -111,29 +112,32 @@ function session(skills?: readonly object[]) {
     auth: { current: null, initiator: null },
     sessionId: ctx.get(SessionIdKey),
   } as never);
-  ctx.set(BundleKey, {
-    graph: { nodesByNodeId: new Map() },
-    resolvedAgent: {
-      definitions: (
-        skills ?? [
-          {
-            logicalPath: "skills/policy.ts",
-            evaluate: () =>
-              defineSkill({
-                description: "The tenant policy.",
-                files: { "references/policy.md": "Policy reference.\n" },
-                content: "# Policy",
-              }),
-            slug: "policy",
-            sourceId: "skills/policy.ts",
-          },
-        ]
-      ).map((skill) => ({ ...skill, kind: "skill" })),
-    },
-    subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
-    toolRegistry: { toolsByName: new Map() },
-    turnAgent: {},
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: { nodesByNodeId: new Map() },
+      resolvedAgent: {
+        definitions: (
+          skills ?? [
+            {
+              logicalPath: "skills/policy.ts",
+              evaluate: () =>
+                defineSkill({
+                  description: "The tenant policy.",
+                  files: { "references/policy.md": "Policy reference.\n" },
+                  content: "# Policy",
+                }),
+              slug: "policy",
+              sourceId: "skills/policy.ts",
+            },
+          ]
+        ).map((skill) => ({ ...skill, kind: "skill" })),
+      },
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
+      toolRegistry: { toolsByName: new Map() },
+      turnAgent: {},
+    } as never),
+  );
   enterSessionProjection(ctx, undefined);
   return ctx;
 }

@@ -1,4 +1,4 @@
-import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import { getDevelopmentWorkflowGeneration } from "#runtime/development-generation.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 interface DevelopmentCompiledArtifactsSelector {

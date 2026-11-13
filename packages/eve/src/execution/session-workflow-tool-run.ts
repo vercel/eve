@@ -1,5 +1,5 @@
 import { deliverWorkflowRelay } from "#execution/tools/workflow/owner.js";
-import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import {
   isAgentSessionMessage,
   runMessageBatchBudget,

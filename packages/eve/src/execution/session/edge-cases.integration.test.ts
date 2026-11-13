@@ -1,7 +1,11 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type { DeliverPayload, SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import {
+  startTestSession,
+  type TestSessionHostKind,
+} from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { simulateReadableStream, type LanguageModel } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -12,8 +16,7 @@ import { conversationOf } from "#client/conversation.js";
 import type { EveToolPart } from "#client/message-types.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { mockModel } from "#evals/mock-model.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -33,7 +36,7 @@ import {
 } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getWorld, start } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import { readSessionEventHistory } from "#execution/session-event-stream.js";
@@ -338,6 +341,11 @@ async function withSession(
     readonly hooks?: Readonly<Record<string, HookDefinition>>;
     readonly parent?: SessionParent;
     readonly sessionUsage?: SessionUsageLimit;
+    /**
+     * The host its sessions run on: in process, unless the test reads what Workflow keeps (its
+     * runs) or runs a `"use workflow"` tool, which only Workflow can.
+     */
+    readonly host?: TestSessionHostKind;
   },
   body: (session: Session) => Promise<void>,
 ) {
@@ -398,31 +406,29 @@ async function withSession(
   const events: SessionStreamEvent[] = [];
 
   const sessionId = await runtime.run(async () => {
-    const run = await startSessionOwner(workflowEntry, [
-      {
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        input: { message: options.message },
-        serializedContext: {
-          ...buildSerializedContext({
-            auth: ALICE,
-            channelKind: options.parent === undefined ? "http" : "subagent",
-            channelState:
-              options.parent === undefined
-                ? undefined
-                : {
-                    callId: options.parent.callId,
-                    parentContinuationToken: `${name}:initial:reply`,
-                    parentSessionId: options.parent.sessionId,
-                    subagentName: name,
-                  },
-            continuationToken,
-            parent: options.parent,
-          }),
-          "eve.capabilities": { requestInput: true },
-        },
+    const run = await startTestSession(options.host ?? "in-process", {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message: options.message },
+      serializedContext: {
+        ...buildSerializedContext({
+          auth: ALICE,
+          channelKind: options.parent === undefined ? "http" : "subagent",
+          channelState:
+            options.parent === undefined
+              ? undefined
+              : {
+                  callId: options.parent.callId,
+                  parentContinuationToken: `${name}:initial:reply`,
+                  parentSessionId: options.parent.sessionId,
+                  subagentName: name,
+                },
+          continuationToken,
+          parent: options.parent,
+        }),
+        "eve.capabilities": { requestInput: true },
       },
-    ]);
+    });
     const commandInbox = sessionInboxHookToken(sessionCommandHookToken(run.runId));
     const stream = captureTurnEvents(run);
     // Each read gives up well inside the test's timeout, naming what it waited for and what the
@@ -462,7 +468,7 @@ async function withSession(
             channelKind: "http",
             channelName: "test",
           });
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth,
             kind: "send",
             delivery,
@@ -478,7 +484,7 @@ async function withSession(
             channelKind: "http",
             channelName: "test",
           });
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth: BOB,
             kind: "send",
             delivery,
@@ -487,7 +493,7 @@ async function withSession(
           return delivery.deliveryId;
         },
         async control(kind, extra = {}) {
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth: ALICE,
             deliveryId: `control_${deliveries++}`,
             kind,
@@ -499,7 +505,7 @@ async function withSession(
           const { parent } = options;
           if (parent === undefined) throw new Error("A forwarded call needs a parent session.");
           // The command a parent's agent session sends to serve another of its calls.
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth: ALICE,
             caller: {
               callId: parent.callId,
@@ -516,7 +522,7 @@ async function withSession(
         },
         next: (label) => read(label, stream.nextTurn()),
         async send(message, auth = ALICE) {
-          await resumeHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -528,10 +534,14 @@ async function withSession(
       await vi.waitFor(() => expectInstrumentationPairs(events, heard, run.runId));
     } finally {
       stream.dispose();
+      // What the checks below compare is the session as the test left it. Workflow's cancel stops
+      // the run without a word; the in-process host ends its sessions, which instrumentation hears.
+      const heardBeforeCleanup = heard.length;
       const cleanup = run.cancel().catch(() => {});
       if (name === "edge-cancel-hung-task")
         await waitForOwnerGate(cleanup, "parent run cancel cleanup", () => events);
       else await cleanup;
+      if ((options.host ?? "in-process") === "in-process") heard.splice(heardBeforeCleanup);
     }
     return run.runId;
   });
@@ -889,6 +899,7 @@ describe("calls in flight", () => {
     const { events } = await withSession(
       "edge-cancel-late-workflow-question",
       {
+        host: "workflow",
         message: "Prepare the deploy.",
         model: scriptedModel(({ said }) =>
           said("Prepare") ? [{ toolName: "prepare", toolCallId: "call_prepare" }] : "Ready.",
@@ -902,7 +913,7 @@ describe("calls in flight", () => {
         const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
         expect(runIds).toHaveLength(1);
         await waitForOwnerGate(
-          resumeHook(sessionInboxHookToken(`http:edge-cancel-late-workflow-question`), {
+          resumeRoutedHook(sessionInboxHookToken(`http:edge-cancel-late-workflow-question`), {
             kind: "request",
             from: {
               callId: "call_prepare",
@@ -1013,6 +1024,8 @@ describe("calls in flight", () => {
     const { events } = await withSession(
       "edge-steer-before-output",
       {
+        // It reads which message reaches the model first, which Workflow's step timing decides.
+        host: "workflow",
         message: "Write a long story.",
         model: scriptedModel(({ said }) => {
           if (said("Make it short")) {
@@ -1722,6 +1735,7 @@ describe("work delegated to a child session", () => {
     const { events } = await withSession(
       "edge-cancel-hung-task",
       {
+        host: "workflow",
         message: "Start the slow work, then cancel it.",
         model: scriptedModel((_prompt, raw) => {
           const prompt = JSON.stringify(raw);
@@ -1754,7 +1768,7 @@ describe("work delegated to a child session", () => {
         const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
         expect(runIds).toHaveLength(1);
         await waitForOwnerGate(
-          resumeHook(sessionInboxHookToken(`http:edge-cancel-hung-task`), {
+          resumeRoutedHook(sessionInboxHookToken(`http:edge-cancel-hung-task`), {
             kind: "request",
             from: {
               callId: "call_agent",
@@ -2111,7 +2125,7 @@ describe("work delegated to a child session", () => {
         for (const child of childSessions(session.events())) {
           const inbox = sessionInboxHookToken(sessionCommandHookToken(child));
           for (const { data } of receipts.of(child, "response.submitted"))
-            await resumeHook(inbox, {
+            await resumeRoutedHook(inbox, {
               auth: ALICE,
               deliveryMetadata: [
                 {
@@ -2128,7 +2142,11 @@ describe("work delegated to a child session", () => {
                 },
               ],
             });
-          await resumeHook(inbox, { auth: ALICE, deliveryId: `probe_${child}`, kind: "cancel" });
+          await resumeRoutedHook(inbox, {
+            auth: ALICE,
+            deliveryId: `probe_${child}`,
+            kind: "cancel",
+          });
         }
         await vi.waitFor(
           () =>
@@ -2519,6 +2537,8 @@ describe("deliveries a child session reads", () => {
     const { events } = await withSession(
       name,
       {
+        // Its parent is a Workflow run of its own (`receiveDelegatedResultWorkflow`).
+        host: "workflow",
         message: "Review the release notes.",
         parent: {
           callId: "opening",

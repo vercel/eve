@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
 import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { Runtime } from "#channel/types.js";
+import { installedDurableHost } from "#execution/hosts.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
@@ -70,6 +72,23 @@ export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleCli
   ): Promise<import("#public/schedules/subscription.js").ScheduleRecord>;
 }
 
+function noScheduledRuns(): never {
+  throw new Error(
+    "This host keeps no scheduled runs: run a schedule's occurrence from a deployed agent.",
+  );
+}
+
+/** Without a durable host, an occurrence that starts a session is refused, saying why. */
+const NO_SCHEDULED_RUNS: Runtime = {
+  createSession: async () => noScheduledRuns(),
+  dispatchContinuation: async () => noScheduledRuns(),
+  dispatchSession: async () => noScheduledRuns(),
+  getEventStream: async () => noScheduledRuns(),
+  getLineStream: async () => noScheduledRuns(),
+  getStreamTailIndex: async () => noScheduledRuns(),
+  resolveContinuation: async () => noScheduledRuns(),
+};
+
 export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   definition: DynamicSchedulesDefinition<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
   callContext: ScheduleBoundCallContext,
@@ -101,8 +120,12 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     const provider = createScheduleProviderContext({
       abortSignal: callContext.abortSignal,
       application: callContext.application,
-      bundle: () => loadContext().require(BundleKey),
+      bundle: () => requireCompiledBundle(loadContext()),
       collection: callContext.collection,
+      runtime: () =>
+        installedDurableHost()?.createRuntime({
+          compiledArtifactsSource: requireCompiledBundle(loadContext()).compiledArtifactsSource,
+        }) ?? NO_SCHEDULED_RUNS,
       definition,
       operationId: nextOperationId(),
       scope,

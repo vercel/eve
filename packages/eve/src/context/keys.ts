@@ -1,6 +1,6 @@
 /**
  * Leaf context keys — no codec, no runtime imports. Safe to import from any
- * tier. Codec-carrying keys (`ChannelKey`, `BundleKey`) live in
+ * tier. Codec-carrying keys (`ChannelKey`, `SessionAgentKey`) live in
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -13,8 +12,8 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
@@ -90,7 +89,7 @@ async function issuesRuntime(name: string) {
 }
 
 function send(runId: string, message: string, scheduled: boolean) {
-  return resumeHook(sessionInboxHookToken(sessionCommandHookToken(runId)), {
+  return resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(runId)), {
     auth: alice,
     kind: "send",
     delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -107,22 +106,20 @@ describe("workflowEntry scheduled sign-in", () => {
   it("never asks across ten firings into a conversation, and asks once for the person", async () => {
     const { counts, runtime } = await issuesRuntime("scheduled-sign-in-conversation");
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Firing 1: create today's issue." },
-          serializedContext: {
-            ...buildSerializedContext({
-              auth: alice,
-              channelKind: "http",
-              continuationToken: "http:scheduled-sign-in-conversation",
-            }),
-            "eve.capabilities": { requestInput: true },
-            "eve.scheduleId": schedule.definition,
-          },
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Firing 1: create today's issue." },
+        serializedContext: {
+          ...buildSerializedContext({
+            auth: alice,
+            channelKind: "http",
+            continuationToken: "http:scheduled-sign-in-conversation",
+          }),
+          "eve.capabilities": { requestInput: true },
+          "eve.scheduleId": schedule.definition,
         },
-      ]);
+      });
       const stream = captureEvents(run);
       try {
         const seen = [...(await stream.nextUntil("firing 1", turnEnd))];
@@ -152,21 +149,19 @@ describe("workflowEntry scheduled sign-in", () => {
   it("never asks in a scheduled session nobody can answer", async () => {
     const { counts, runtime } = await issuesRuntime("scheduled-sign-in-unattended");
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Create today's issue." },
-          serializedContext: {
-            ...buildSerializedContext({
-              auth: alice,
-              channelKind: "schedule",
-              continuationToken: "eve-scheduled-send:unattended",
-            }),
-            "eve.scheduleId": schedule.definition,
-          },
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Create today's issue." },
+        serializedContext: {
+          ...buildSerializedContext({
+            auth: alice,
+            channelKind: "schedule",
+            continuationToken: "eve-scheduled-send:unattended",
+          }),
+          "eve.scheduleId": schedule.definition,
         },
-      ]);
+      });
       const stream = captureEvents(run);
       try {
         const events = await stream.nextUntil("unattended turn", turnEnd);

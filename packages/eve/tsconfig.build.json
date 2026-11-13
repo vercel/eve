@@ -12,6 +12,8 @@
     "src/**/*.test.ts",
     "src/**/*.integration.test.ts",
     "src/internal/testing/**/*.ts",
+    "src/execution/in-process/**/*.ts",
+    "src/execution/workflow-host/step-boundary.ts",
     "src/setup/build.ts"
   ]
 }

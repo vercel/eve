@@ -4,7 +4,7 @@ import type { AlsContext } from "#context/container.js";
 import type { Announcement } from "#harness/announcements.js";
 import { digestOf } from "#definitions/state.js";
 import { agentInstructionsOf, renderInstructionsBlock } from "#runtime/prompt/compose.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
@@ -26,7 +26,7 @@ export const instructions: Definition = {
         ]),
       ),
     system: () => {
-      const block = agentInstructionsOf(container.get(BundleKey)?.resolvedAgent.instructions);
+      const block = agentInstructionsOf(compiledBundleOf(container)?.resolvedAgent.instructions);
       return [
         section("eve.instructions", block === undefined ? "" : renderInstructionsBlock(block), {
           order: SECTION_ORDER.instructions,
@@ -42,7 +42,7 @@ export const instructions: Definition = {
 export const workspace: Definition = {
   contribute: ({ container }) => ({
     system: () => {
-      const spec = container.get(BundleKey)?.turnAgent?.workspaceSpec;
+      const spec = compiledBundleOf(container)?.turnAgent?.workspaceSpec;
       const text = spec === undefined ? undefined : createWorkspacePromptSection(spec);
       return text === undefined
         ? []
@@ -134,7 +134,7 @@ function userInstruction(content: string | undefined, digest: string): Announcem
 export function staticUserInstructions(
   container: Pick<AlsContext, "get">,
 ): readonly { readonly key: string; readonly content: string }[] {
-  return (container.get(BundleKey)?.resolvedAgent.instructions ?? []).flatMap((entry) => {
+  return (compiledBundleOf(container)?.resolvedAgent.instructions ?? []).flatMap((entry) => {
     const content = entry.content.trim();
     return entry.role === "user" && content.length > 0
       ? [{ content, key: `eve.instructions:${entry.name}` }]

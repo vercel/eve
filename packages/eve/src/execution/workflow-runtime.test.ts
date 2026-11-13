@@ -14,12 +14,14 @@ import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
-  sessionTimeoutWorkflowReference,
   startWorkflowOnDeployment,
   startWorkflowOnCurrentDeployment,
+} from "#execution/workflow-runtime.js";
+import {
+  sessionTimeoutWorkflowReference,
   workflowEntryReference,
   workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
+} from "#execution/workflow-references.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
