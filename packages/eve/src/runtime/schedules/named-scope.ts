@@ -44,7 +44,6 @@ export function namedScopeDefinition(definition: AnyDefinition, scopeName: strin
   const preparePayload = scope.preparePayload ?? shared.preparePayload;
   const scoped: AnyDefinition = {
     ...shared,
-    ...(scope.description !== undefined && { description: scope.description }),
     ...(scope.run !== undefined && { run: scope.run }),
     ...(scope.approval !== undefined && { approval: { ...shared.approval, ...scope.approval } }),
     // Callbacks learn which scope they act for, so shared ones needn't be told apart by payload.

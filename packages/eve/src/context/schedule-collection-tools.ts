@@ -83,6 +83,8 @@ export interface ScheduleToolsMember {
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly collection: string;
   readonly scope?: string;
+  /** Explains the named scope, not the shared definition. */
+  readonly description?: string;
 }
 
 type ReadOrStateOperation = "get" | "list" | "enable" | "disable" | "invoke" | "delete";
@@ -143,9 +145,10 @@ function scheduleTools(
           .enum(members.map((member) => member.scope!) as [string, ...string[]])
           .describe(
             `Which schedules the call acts on. ${members
-              .map(
-                (member) =>
-                  `"${member.scope}": ${member.definition.description ?? `the ${member.collection} schedules.`}`,
+              .map((member) =>
+                member.description === undefined
+                  ? `"${member.scope}"`
+                  : `"${member.scope}": ${member.description}`,
               )
               .join(" ")}`,
           ),
@@ -251,8 +254,7 @@ function scheduleTools(
     execute: ToolDefinition<any, unknown>["execute"],
     approval?: Approval,
   ) => {
-    // Named scopes show each description beside its scope instead.
-    const preface = named ? undefined : first.definition.description;
+    const preface = first.definition.description;
     const tool = defineTool({
       deferred: first.definition.tool === "deferred",
       description: `${preface ? `${preface}\n\n` : ""}${description}`,

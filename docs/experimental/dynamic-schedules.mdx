@@ -144,11 +144,13 @@ A scope is a resolver function, or an object that also says what the scope does 
 | Field            | Purpose                                                                                                           |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `resolve`        | Required. Authorizes each operation and returns the namespace, as `scope` does.                                   |
-| `description`    | Tells the model what the scope holds. Defaults to the definition's `description`.                                 |
+| `description`    | Tells the model what the scope holds, beside its name. Without it, only the name is shown.                        |
 | `id`             | The name the scope's schedules are stored under. Defaults to `<definition>/<scope>`, such as `workflows/channel`. |
 | `preparePayload` | Replaces the definition's `preparePayload` for this scope. It returns the same shape.                             |
 | `run`            | Replaces the definition's `run` for this scope.                                                                   |
 | `approval`       | Policies that replace the definition's for this scope, operation by operation.                                    |
+
+The definition's `description` is added to every management tool as common instructions. A scope's `description` explains only that scope, beside its name in the tool's `scope` input.
 
 `inputSchema`, `auth`, `events`, `tool`, and `provider` are the definition's, for every scope. A shared `preparePayload` or `scope` resolver reads which scope it acts for from `context.scopeName`.
 

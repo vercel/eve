@@ -92,6 +92,9 @@ export async function resolveScheduleCollection(
       logicalPath: collection.logicalPath,
       sourceId: collection.sourceId,
     });
+    const namedScope = collection.namedScope;
+    const scopeEntry = namedScope === undefined ? undefined : authored.scopes?.[namedScope.name];
+    const scopeDescription = typeof scopeEntry === "object" ? scopeEntry.description : undefined;
     const offersTools =
       definition.tool !== false && !scope.toolFiles.has(scheduleCollectionToolSlot(collection));
     return {
@@ -99,7 +102,12 @@ export async function resolveScheduleCollection(
       kind: "schedules",
       logicalPath: collection.logicalPath,
       name: collection.name,
-      ...(collection.namedScope !== undefined && { namedScope: collection.namedScope }),
+      ...(namedScope !== undefined && {
+        namedScope: {
+          ...namedScope,
+          ...(scopeDescription !== undefined && { description: scopeDescription }),
+        },
+      }),
       ...(offersTools && { offersTools: true as const }),
       sourceId: collection.sourceId,
       sourceKind: "module",

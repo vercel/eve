@@ -381,7 +381,12 @@ export interface ResolvedScheduleCollection extends Readonly<ModuleSourceRef> {
   readonly name: string;
   readonly definition: DynamicSchedulesDefinition<unknown>;
   /** Set when it is one named scope of a definition: the definition's name, and the scope's. */
-  readonly namedScope?: { readonly definition: string; readonly name: string };
+  readonly namedScope?: {
+    readonly definition: string;
+    readonly name: string;
+    /** Explains only this scope, beside its name in the tools' scope input. */
+    readonly description?: string;
+  };
   /**
    * It offers the model its tools: `tool` isn't `false`, and no tool file replaces them. A
    * named scope offers them through its definition's one set.

@@ -221,7 +221,7 @@ describe("schedule creation and invocation", () => {
     const created = vi.spyOn(provider, "create");
     const ran: string[] = [];
     const workflows = defineDynamicSchedules({
-      description: "Your own workflows.",
+      description: "Schedule a task that runs unattended.",
       inputSchema: z.object({ task: z.string() }).strict(),
       provider,
       // One preparation for every scope, told which scope it acts for.
@@ -286,6 +286,7 @@ describe("schedule creation and invocation", () => {
           collection: collection.name,
           definition: collection.definition,
           scope: collection.namedScope!.name,
+          description: collection.namedScope!.description,
         })),
         "schedule__workflows",
       ) as Record<
@@ -304,13 +305,15 @@ describe("schedule creation and invocation", () => {
         properties: {
           scope: {
             enum: ["personal", "channel"],
-            description: expect.stringMatching(
-              /"personal": Your own workflows\..*"channel": Channel workflows\./u,
-            ),
+            description:
+              'Which schedules the call acts on. "personal" "channel": Channel workflows.',
           },
         },
       });
-      expect(create.description).not.toContain("Your own workflows.");
+      for (const tool of Object.values(tools)) {
+        expect(tool.description).toMatch(/^Schedule a task that runs unattended\.\n\n/u);
+        expect(tool.description).not.toContain("Channel workflows.");
+      }
 
       const input = (scope: string) => ({
         scope,

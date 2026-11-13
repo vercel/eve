@@ -152,6 +152,7 @@ function scheduleToolsDefinitions(
             collection: scope.name,
             definition: scope.definition,
             scope: scope.namedScope!.name,
+            description: scope.namedScope!.description,
           })),
           slug,
         );
