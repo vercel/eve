@@ -493,8 +493,8 @@ importers:
         specifier: 3.1.1
         version: 3.1.1(supports-color@10.2.2)
       '@memco/eve':
-        specifier: 0.1.2
-        version: 0.1.2(eve@packages+eve)
+        specifier: 0.2.0
+        version: 0.2.0(eve@packages+eve)
       '@moorcheh-ai/memanto':
         specifier: 0.2.29
         version: 0.2.29(ai@7.0.137(zod@4.6.7))(eve@packages+eve)(openai@6.49.0(@smithy/signature-v4@5.7.5)(ws@8.22.2(bufferutil@4.1.0))(zod@4.6.7))(zod@4.6.7)
@@ -4096,14 +4096,14 @@ packages:
   '@mdx-js/mdx@3.1.1':
     resolution: {integrity: sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ==}
 
-  '@memco/eve@0.1.2':
-    resolution: {integrity: sha512-sTNq+u1kfm3J1XeYTz6NMKaLX3miAUO3k++b2maYpHrNftgpIi/biqKXchCXp2a2Euaj9i7hz+GD6dd8pEtH8A==}
+  '@memco/eve@0.2.0':
+    resolution: {integrity: sha512-MxDK4CG7yEwKgw23mTlKQxp1+eO7klKRrJaxvxZn6EJ3ZzCTFFhX04FnSVV+kWwnkHnYdGc4VCoibrUncy/YBw==}
     engines: {node: '>=24'}
     peerDependencies:
-      eve: '>=0.84.1 <1'
+      eve: '>=1.0.0-rc.10 <2'
 
-  '@memco/memcoai@0.3.1':
-    resolution: {integrity: sha512-fOvFUfVj1CnvBD/chMK9esFcXM5EuvmjRheyBZEg/85eNNUuBkxJFQe9efTtyEpNHJi7FkMzG2qHx6VYI/gcyQ==}
+  '@memco/memcoai@0.4.0':
+    resolution: {integrity: sha512-z84+uUz3eojY2GQJSZqZJUsQL2EMdXma/DQNb3RAb2tC0ZWwGwEh5Vcke4mEAzrOFJOpgRiuIiA+WkaBYisTlw==}
     engines: {node: '>=22'}
 
   '@mermaid-js/parser@1.2.1':
@@ -17726,12 +17726,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@memco/eve@0.1.2(eve@packages+eve)':
+  '@memco/eve@0.2.0(eve@packages+eve)':
     dependencies:
-      '@memco/memcoai': 0.3.1
+      '@memco/memcoai': 0.4.0
       eve: link:packages/eve
 
-  '@memco/memcoai@0.3.1':
+  '@memco/memcoai@0.4.0':
     dependencies:
       '@bufbuild/protobuf': 2.15.0
       '@grpc/grpc-js': 1.14.7

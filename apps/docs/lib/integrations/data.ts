@@ -1980,9 +1980,7 @@ Install the memco provider:
 eve add memory/memco
 \`\`\`
 
-This installs the independently maintained \`@memco/eve\` package and writes a memory slot. You need Node.js 24 or later and a [memco](https://memco.ai) account. memco hosts the memory service.
-
-\`@memco/eve@0.1.2\` declares support for \`eve >=0.84.1 <1\`. That peer range does not include eve 1.0 prereleases; check the [provider README](https://github.com/memcoai/eve-memco#readme) for supported versions before installing.`,
+This installs the independently maintained \`@memco/eve\` package and writes a memory slot. You need Node.js 24 or later and a [memco](https://memco.ai) account. memco hosts the memory service.`,
     quickStart: `### Shared identity
 
 Use one API token for a personal agent or one trusted team. Every caller shares the token's memco identity and accessible memory. For separate customers, use the multi-tenant setup below.
