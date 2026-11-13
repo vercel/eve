@@ -92,6 +92,8 @@ export interface InProcessHostOptions {
   readonly callbackBaseUrl?: string;
   /** For tests: turn steps that lose their completion, or fail, and run again, as on Workflow. */
   readonly stepFaults?: StepFaults;
+  /** How long disposing waits for running turns to park before it resets their sessions: 5s. */
+  readonly disposeGraceMs?: number;
 }
 
 export interface InProcessHost {
@@ -273,24 +275,48 @@ export function createInProcessHost(
       // Runs end first, while their sessions still listen, so each session hears its runs' ends
       // instead of waiting out a run that can no longer reach it.
       await runs.stopAll("The in-process host is stopping.");
-      // A session in a turn ends it, as a reset does: with its runs gone, a turn that keeps
-      // calling its model would never park, and closing its addresses wouldn't stop it.
-      await Promise.all(
-        [...running.keys()].map((sessionId) =>
-          inboxes
-            .deliver(
-              sessionCommandHookToken(sessionId),
-              identifyCommand({ deliveryId: `in-process-dispose:${sessionId}`, kind: "reset" }),
-            )
-            .catch(() => {}),
-        ),
-      );
+      // A turn still running gets a grace to park, as a server's shutdown gives its requests.
+      // One that never does, such as a turn whose runs ended and that keeps calling its model, is
+      // reset: closing its addresses wouldn't stop it.
+      if (!(await restsWithin(work, options.disposeGraceMs ?? DISPOSE_GRACE_MS))) {
+        await Promise.all(
+          [...running.keys()].map((sessionId) =>
+            registry
+              .deliver(
+                sessionCommandHookToken(sessionId),
+                identifyCommand({ deliveryId: `in-process-dispose:${sessionId}`, kind: "reset" }),
+              )
+              .catch(() => {}),
+          ),
+        );
+      }
       inboxes.closeAll();
       await Promise.all(running.values());
       timers.dispose();
       for (const release of releases.splice(0)) release();
     },
   };
+}
+
+/** How long disposing waits for running turns to park before it resets their sessions. */
+const DISPOSE_GRACE_MS = 5_000;
+
+/** Whether the host comes to rest within `ms`. */
+async function restsWithin(
+  work: ReturnType<typeof createWorkCounter>,
+  ms: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.idle().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Work in flight on a host, and a wait for none to be. */

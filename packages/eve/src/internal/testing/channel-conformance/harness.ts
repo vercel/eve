@@ -1215,39 +1215,47 @@ async function waitForStepsToFinish(
 
 /**
  * Waits until each session's stream ends waiting on its next message or on a
- * person, with no step running, and stays that way. A response just delivered
- * may not have reached the stream yet, so one quiet read is not enough.
+ * person, with nothing in its host still working: a response just delivered is
+ * in flight until its session has read it, so a resting host has written what
+ * it does with it.
  */
 async function waitForRest(
   host: ConformanceHost,
   sessions: readonly Session[],
   wait: Wait,
 ): Promise<void> {
-  let quietSince: number | undefined;
-  let lastTails = "";
   await wait(
     "every session to rest",
     async () => {
-      const states = await Promise.all(
+      if (!(await settledWithin(host, REST_POLL_MS))) return undefined;
+      const resting = await Promise.all(
         sessions.map(async (session) => {
           const tail = await internalSession(session).getStreamTailIndex();
           const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
-          const idle = (await host.runningSteps(session.id)).length === 0;
-          return { resting: waiting && idle, tail };
+          return waiting && (await host.runningSteps(session.id)).length === 0;
         }),
       );
-      const tails = states.map((state) => state.tail).join(",");
-      const quiet = states.every((state) => state.resting) && tails === lastTails;
-      lastTails = tails;
-      if (!quiet) {
-        quietSince = undefined;
-        return undefined;
-      }
-      quietSince ??= Date.now();
-      return Date.now() - quietSince >= host.quietMs ? true : undefined;
+      return resting.every(Boolean) ? true : undefined;
     },
     () => "",
   );
+}
+
+/** How long one look at a host waits for it to settle, so a host that never does times out. */
+const REST_POLL_MS = 1_000;
+
+async function settledWithin(host: ConformanceHost, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      host.settled().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Whether an event asks the person `prompt`. */

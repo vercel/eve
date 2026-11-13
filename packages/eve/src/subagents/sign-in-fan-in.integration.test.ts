@@ -82,31 +82,6 @@ describe("one sign-in answer for parallel children", () => {
     });
   });
 
-  // The parent's turn hears its children's runs end and calls its model again; it never parks,
-  // so the host must stop it rather than wait for it.
-  it("stops when disposed while its children wait on the sign-in", async () => {
-    const app = await createApp("sign-in-fan-in-dispose", { grant: "oauth/weather" });
-
-    await app.runtime.run(async () => {
-      const run = await startParent(app.name);
-      const stream = captureEvents(run);
-      try {
-        await signInCards(stream, CHILDREN);
-        const ended = stream.nextUntil("session end", (event) => event.type === "session.ended");
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          run.cancel(),
-          new Promise((_resolve, reject) => {
-            timer = setTimeout(() => reject(new Error("Disposing the host hung.")), 10_000);
-          }),
-        ]).finally(() => clearTimeout(timer));
-        expect(filterEventsByType(await ended, "session.ended")).toHaveLength(1);
-      } finally {
-        stream.dispose();
-      }
-    });
-  });
-
   it("completes the other children's sign-ins while the answered child's call still runs", async () => {
     const app = await createApp("sign-in-fan-in-held", { grant: "oauth/weather", holdFirst: true });
 

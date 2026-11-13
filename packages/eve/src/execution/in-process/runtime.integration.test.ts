@@ -446,9 +446,10 @@ describe("the in-process runtime", () => {
       },
     });
     await test.run(async () => {
-      const runtime = createInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
+      const runtime = createInProcessRuntime(
+        { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+        { disposeGraceMs: 50 },
+      );
       const sent = await address(runtime, "alice-dispose-running").send("Alice says hello.", {
         auth: null,
       });
