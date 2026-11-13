@@ -282,9 +282,11 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * Ends the turn after this tool succeeds, without another model call and
    * without a final reply. Use it for a tool whose action is the whole
    * answer, such as reacting to a message. Other tool calls in the same
-   * model step still run, and the turn ends once they all settle, whatever
-   * their outcome; a failed ending call lets the model recover. Ignored in delegated sessions, which must return
-   * a reply to their caller, and on turns that request structured output.
+   * model step still run, including ones that wait on approval or a
+   * workflow, and the turn ends once they all settle, whatever their
+   * outcome; a failed ending call lets the model recover. Ignored in
+   * delegated sessions, which must return a reply to their caller, and on
+   * turns that request structured output.
    * With `true`, eve appends a sentence to the description the model sees
    * telling it the call ends its turn, so write `description` for what the
    * tool does.

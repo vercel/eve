@@ -98,6 +98,7 @@ export function askApprovals(
     readonly messages: readonly ModelMessage[];
     readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+    readonly endsTurn?: SuspendedStep["endsTurn"];
     readonly responseAuthRequiredRequestIds?: readonly string[];
     readonly requester?: SuspendedStep["requester"];
   },
@@ -109,6 +110,7 @@ export function askApprovals(
   const pendingStart = input.messages.findIndex((message) => message.role !== "tool");
   const committed = pendingStart === -1 ? input.messages : input.messages.slice(0, pendingStart);
   const turn = suspend(view.turn, {
+    ...(input.endsTurn === true && { endsTurn: true }),
     event: input.event,
     messages: input.messages.slice(committed.length),
     requester,

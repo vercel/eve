@@ -1,11 +1,8 @@
-import type { ModelMessage } from "ai";
-
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
 import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
-import { isToolResultError } from "#harness/action-result-helpers.js";
-import { endsTurnTools, type EndsTurnTools } from "#harness/model-call/tools.js";
-import { callsEndTurn, type EndingCall } from "#harness/step/after-model.js";
+import { endsTurnTools } from "#harness/model-call/tools.js";
+import { callsEndTurn } from "#harness/step/after-model.js";
 import {
   anchorToTurn,
   createFrameworkUserMessage,
@@ -20,7 +17,7 @@ import {
 } from "#harness/messages.js";
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
 import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine/runs.js";
-import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
+import { activeTurnId, parkedCallsAnswered, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -81,68 +78,25 @@ export async function settleRuntimeWork(
       })),
     }),
   );
-  // The turn ends here only when these results settle every call of a parked response and one of
-  // its calls ends the turn: a settled one, or one that ran in the step before it parked. A call
-  // something else answered, a provider's included, keeps the model in the loop.
+  // The turn ends here only when these results leave every call of a parked response answered and
+  // one of them ends the turn. A provider-run call's outcome keeps the model in the loop. A call
+  // that ran before the step parked ends the turn through the step's `endsTurn` once it commits.
   const settledIds = new Set(results.map(({ part }) => part.toolCallId));
-  const ending = endsTurnTools(catalog, step.endsTurn);
   const endsTurn =
     suspended.length > 0 &&
-    suspended.every(({ messages }) =>
-      messages.every(
-        ({ content, role }) =>
-          role !== "assistant" ||
-          typeof content === "string" ||
-          content.every((part) => part.type !== "tool-call" || settledIds.has(part.toolCallId)),
-      ),
-    ) &&
+    parkedCallsAnswered(suspended, settledIds) &&
     (await callsEndTurn(
-      [
-        ...results.map(({ part, result }) => ({
-          failed: result.isError === true,
-          output: result.output,
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-        })),
-        ...answeredEndingCalls(suspended, settledIds, ending),
-      ],
-      ending,
+      results.map(({ part, result }) => ({
+        failed: result.isError === true,
+        output: result.output,
+        toolCallId: part.toolCallId,
+        toolName: part.toolName,
+      })),
+      endsTurnTools(catalog, step.endsTurn),
     ));
   if (input === undefined) return { endsTurn, input, waited: true };
   const { delegatedUsage: _usage, runtimeActionResults: _results, ...rest } = input;
   return { endsTurn, input: rest, waited: true };
-}
-
-/**
- * The calls a parked response answered before it parked whose tool ends the turn with `true`. Only
- * the model-facing result remains of those calls, so a tool whose `endsTurn` is a function, which
- * reads the `execute` output, isn't among them.
- */
-export function answeredEndingCalls(
-  suspended: readonly { readonly messages: readonly ModelMessage[] }[],
-  settledIds: ReadonlySet<string>,
-  ending: EndsTurnTools,
-): EndingCall[] {
-  return suspended.flatMap(({ messages }) =>
-    messages.flatMap((message) =>
-      message.role !== "tool"
-        ? []
-        : message.content.flatMap((part) =>
-            part.type !== "tool-result" ||
-            settledIds.has(part.toolCallId) ||
-            ending.get(part.toolName) !== true
-              ? []
-              : [
-                  {
-                    failed: isToolResultError(part.output),
-                    output: undefined,
-                    toolCallId: part.toolCallId,
-                    toolName: part.toolName,
-                  },
-                ],
-          ),
-    ),
-  );
 }
 
 /**

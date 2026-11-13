@@ -301,7 +301,7 @@ export default defineTool({
 
 If the function throws or rejects, eve logs a warning and treats the result as `false`. With an `outputSchema`, `output` takes that schema's type wherever `endsTurn` appears. eve doesn't add the sentence for a function, so say in `description` when the call ends the turn.
 
-The turn ends when any tool call in the step can end the turn, succeeds, and passes any `endsTurn` function. Other calls in the same step still run, and the turn ends once they all settle, whatever their outcome; the model doesn't see their results. When no call ends the turn, the model gets the results and continues. Channels don't post text the model wrote before the call as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+The turn ends when any tool call in the step can end the turn, succeeds, and passes any `endsTurn` function. Other calls in the same step still run, including ones that wait for an approval, a sign-in, or a workflow, and the turn ends once they all settle, whatever their outcome; the model doesn't see their results. eve runs every successful call's `endsTurn` function. A provider-executed tool whose result would only arrive in the model's next response is closed without that result. When no call ends the turn, the model gets the results and continues. Channels don't post text the model wrote before the call as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
 
 eve ignores `endsTurn` in delegated sessions, which must reply to their caller, and on turns that request structured output. There, the model doesn't see the sentence, and eve doesn't call the function.
 

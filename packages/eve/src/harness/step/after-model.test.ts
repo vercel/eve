@@ -38,7 +38,7 @@ describe("callsEndTurn", () => {
     expect(await callsEndTurn([], tools)).toBe(false);
   });
 
-  it("ends the turn once one endsTurn function accepts its call's output", async () => {
+  it("ends the turn when one endsTurn function accepts, running every function", async () => {
     const declines = vi.fn(() => false);
     const accepts = vi.fn((output: unknown) => (output as { posted: boolean }).posted);
     const functions: EndsTurnTools = new Map([
@@ -46,8 +46,8 @@ describe("callsEndTurn", () => {
       ["post_chart", accepts],
     ]);
     const calls = [
-      call("post_table", { output: { posted: false } }),
       call("post_chart", { output: { posted: true } }),
+      call("post_table", { output: { posted: false } }),
       call("browser__close"),
     ];
 

@@ -132,7 +132,14 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       turnId,
     });
     step.session = changeHistory(dispatched.session, { extend: promptMessages });
+    // A call that ran in this step can already end the turn: its `execute` output is only here.
+    // The turn then ends once the parked calls settle, however they do. A provider-run call's
+    // outcome still goes to the model.
+    const endsTurn =
+      !normalizedProviderHistory.outcomeEndsResponse &&
+      (await stepEndsTurn(result, responseMessages, input.endsTurnTools));
     const parked = {
+      ...(endsTurn && { endsTurn: true as const }),
       event: { sequence, stepIndex, turnId },
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
@@ -264,20 +271,22 @@ export interface EndingCall {
 
 /**
  * Whether some call ends the turn: it targets a tool that can end it, succeeded, and its
- * `endsTurn` function, if any, accepts its call's output. Other calls in the same step, which have
- * all settled, don't keep the turn going. Functions run in call order until one accepts.
+ * `endsTurn` function, if any, accepts its call's output. Other calls in the same step don't keep
+ * the turn going. Every successful call's function runs, in call order.
  */
 export async function callsEndTurn(
   calls: readonly EndingCall[],
   endsTurnTools: EndsTurnTools,
 ): Promise<boolean> {
+  let ends = false;
   for (const call of calls) {
     const endsTurn = endsTurnTools.get(call.toolName);
     if (endsTurn === undefined || call.failed) continue;
-    if (typeof endsTurn !== "function") return true;
-    if (await callEndsTurn(endsTurn, call.output, call)) return true;
+    if (typeof endsTurn !== "function" || (await callEndsTurn(endsTurn, call.output, call))) {
+      ends = true;
+    }
   }
-  return false;
+  return ends;
 }
 
 /** A throwing `endsTurn` function keeps the turn going rather than failing it. */
