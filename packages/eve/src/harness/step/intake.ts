@@ -3,7 +3,6 @@ import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import { endsTurnTools } from "#harness/model-call/tools.js";
 import { callsEndTurn } from "#harness/step/after-model.js";
-import { stepCallIds } from "#harness/session-machine/suspended-steps.js";
 import {
   anchorToTurn,
   createFrameworkUserMessage,
@@ -80,11 +79,19 @@ export async function settleRuntimeWork(
     }),
   );
   // The turn ends here only when these results settle every call of a parked response and each
-  // ends the turn; a call something else answered keeps the model in the loop.
+  // ends the turn; a call something else answered, a provider's included, keeps the model in the
+  // loop.
   const settledIds = new Set(results.map(({ part }) => part.toolCallId));
   const endsTurn =
     suspended.length > 0 &&
-    suspended.every((parked) => [...stepCallIds(parked)].every((id) => settledIds.has(id))) &&
+    suspended.every(({ messages }) =>
+      messages.every(
+        ({ content, role }) =>
+          role !== "assistant" ||
+          typeof content === "string" ||
+          content.every((part) => part.type !== "tool-call" || settledIds.has(part.toolCallId)),
+      ),
+    ) &&
     (await callsEndTurn(
       results.map(({ part, result }) => ({
         failed: result.isError === true,

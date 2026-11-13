@@ -154,9 +154,17 @@ export function createKernel(config: KernelConfig): StepFn {
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
     }
-    // Results that end the turn settle it in their place, without a reply; a working task holds
-    // the turn open, and its result brings the model back.
-    if (runtime.endsTurn && workingTaskIds(step.session).length === 0) {
+    // Results that end the turn settle it in their place, without a reply, unless input joined the
+    // turn with them: the model reads it. A working task holds the turn open until it settles.
+    if (runtime.endsTurn && turn.messages.length === 0) {
+      const workingTasks = workingTaskIds(step.session);
+      if (workingTasks.length > 0) {
+        return {
+          held: { kind: "tasks", taskIds: workingTasks },
+          next: null,
+          session: step.session,
+        };
+      }
       return settleTurn(step, { stepOutput: null });
     }
     return runModelStep(step, {

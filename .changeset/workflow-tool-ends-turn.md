@@ -6,4 +6,4 @@
 
 Pass `true`, or a function that receives the call's output. `task` and `serve` entry points still reject it.
 
-Thanks @matchai for requesting this.
+Thanks @matchai for requesting this, and @xcscxr for the implementation plan in #5337.
