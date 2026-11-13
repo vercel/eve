@@ -274,7 +274,7 @@ SLACK_IDENTITY_EXCLUDED_USER_IDS=U0123456789,U0987654321
 
 | Feature | Files to remove or change |
 | --- | --- |
-| Slack | Remove `agent/channels/slack.ts`, `agent/tools/post_slack_chart.ts`, `agent/tools/post_slack_table.ts`, and `agent/hooks/reply-continuation.ts` |
+| Slack | Remove `agent/channels/slack.ts`, `agent/tools/post_slack_chart.ts`, and `agent/tools/post_slack_table.ts` |
 | Channel memory | Remove `agent/memory/channel-preferences.ts` |
 | All memory | Remove `agent/memory/` and the Memory section of `agent/instructions.md` |
 | Demo data | Remove `scripts/seed.ts`, `scripts/seed/generate.ts`, `scripts/seed/schema.ts`, and the `db:seed` script. The evals use `scripts/seed/sql.ts`, so remove `evals/` too, or rewrite the evals for your data. |
