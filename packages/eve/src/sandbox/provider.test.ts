@@ -225,7 +225,7 @@ describe("public sandbox types", () => {
     void colliding;
   });
 
-  it("keeps SandboxSession assignable to the AI SDK sandbox session", () => {
+  it("keeps SandboxSession compatible with the AI SDK sandbox members it implements", () => {
     // AI SDK 7.0.172 added `stat`, `listDirectory`, and `deleteFile`, and
     // overloads `spawn` so `stdin: true` returns a required `stdin`. eve
     // sessions do not offer those yet; the remaining members stay compatible.
