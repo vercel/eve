@@ -182,7 +182,11 @@ export interface SessionInboxHandle extends SessionInbox {
   readonly awaitingHandover: boolean;
   /** Resolves once no handover is awaited: it arrived, was abandoned, or the inbox closed. */
   whenHandoverSettled(): Promise<void>;
-  /** Stops waiting for `attemptKey`'s handover, which can no longer arrive; queued payloads become readable. */
+  /**
+   * Stops waiting for `attemptKey`'s handover, which can no longer arrive;
+   * queued payloads become readable. A part the source had already sent still
+   * lands as input.
+   */
   abandonHandover(attemptKey: string): void;
   /** Resolves the first time a read waits on an awaited handover. */
   whenBlockedOnHandover(): Promise<void>;
@@ -243,6 +247,12 @@ export function createSessionInbox<Hook extends InboxHook>(
       }
     | undefined;
   let handoverObservation: SessionHandoverObservation | undefined;
+  /**
+   * Parts that landed after their attempt's handover was abandoned, keyed by
+   * attempt and the part indices applied: a source that ended may still have
+   * had a part in flight, and its payloads are input the session accepted.
+   */
+  const lateParts = new Map<string, Set<number>>();
   const blockedWaiters = new Set<() => void>();
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
@@ -285,7 +295,11 @@ export function createSessionInbox<Hook extends InboxHook>(
     // A retried send step repeats its own key and index, so any other key
     // belongs to an attempt this inbox is no longer waiting for.
     const current = handover;
-    if (current === undefined || part.attemptKey !== current.attemptKey) return;
+    if (current === undefined) {
+      acceptLatePart(part);
+      return;
+    }
+    if (part.attemptKey !== current.attemptKey) return;
     if (part.index < current.nextPart || current.parts.has(part.index)) return;
     current.parts.set(part.index, part);
     const restored: SessionInboxPayload[] = [];
@@ -309,6 +323,26 @@ export function createSessionInbox<Hook extends InboxHook>(
       restored.push(...next.payloads);
     }
     observe(interruptHandlers, restored, isInterrupt);
+    notify();
+  };
+
+  /**
+   * Takes a part for an abandoned attempt: the source ended, but a part it had
+   * already sent can still land. Its payloads join the queue in the order they
+   * arrive rather than being dropped; nothing waits on the rest of that attempt.
+   */
+  const acceptLatePart = (part: SessionHandoverPayload): void => {
+    const seen = lateParts.get(part.attemptKey);
+    if (seen === undefined) return;
+    if (part.final === true) {
+      lateParts.delete(part.attemptKey);
+      return;
+    }
+    // A retried send step repeats its own index.
+    if (seen.has(part.index)) return;
+    seen.add(part.index);
+    queue.push(...part.payloads);
+    observe(interruptHandlers, part.payloads, isInterrupt);
     notify();
   };
 
@@ -359,6 +393,7 @@ export function createSessionInbox<Hook extends InboxHook>(
   const stop = async (): Promise<void> => {
     const released = sources.splice(0);
     handover = undefined;
+    lateParts.clear();
     takenOver = false;
     stopped = true;
     for (const source of released) source.stopping = true;
@@ -430,7 +465,9 @@ export function createSessionInbox<Hook extends InboxHook>(
       while (handover !== undefined) await wait();
     },
     abandonHandover(attemptKey) {
-      if (handover?.attemptKey === attemptKey) openHandover();
+      if (handover?.attemptKey !== attemptKey) return;
+      lateParts.set(attemptKey, new Set());
+      openHandover();
     },
     whenBlockedOnHandover() {
       return new Promise((resolve) => blockedWaiters.add(resolve));

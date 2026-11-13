@@ -442,6 +442,35 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("keeps a handover part that lands after its attempt was abandoned", async () => {
+    const late = createDeferred<IteratorResult<SessionInboxPayload>>();
+    const repeat = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("direct"))), late.promise, repeat.promise],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
+    const arrived = inbox.whenArrival();
+    await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
+    await arrived;
+    inbox.abandonHandover("owner-a:1");
+    expect(inbox.awaitingHandover).toBe(false);
+
+    // The source ended, but a part it had already sent still lands: its payloads are
+    // input the session accepted, so they join the queue instead of being dropped.
+    late.resolve(resolved(part("owner-a:1", 0, send("sent before the end"))));
+    await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
+    // A retried send step repeats its index.
+    repeat.resolve(resolved(part("owner-a:1", 0, send("sent before the end"))));
+    await repeat.promise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(inbox.drain()).toEqual([send("direct"), send("sent before the end")]);
+    await inbox.dispose();
+  });
+
   it("takes back a held address on a fresh hook and places the handover after what it had queued", async () => {
     const replaced = createDeferred<IteratorResult<SessionInboxPayload>>();
     const handover = createDeferred<IteratorResult<SessionInboxPayload>>();
