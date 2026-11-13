@@ -3,8 +3,8 @@
  *
  * One A2A task is the turn its starting delivery opened or joined. Follow-ups a client sends with
  * the task's `taskId` (refinements, typed answers) join that same turn, because an eve turn stays
- * running while it waits on interactions. Nothing here writes to the session: reads fold its
- * lines into a view this process keeps, so a read folds only the lines since the last one.
+ * running while it waits on interactions. Nothing here writes: every read folds the session's
+ * lines, as the MCP channel's invocation reads do.
  */
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import { signInChallengeText, signInOf } from "#channel/sign-in.js";
@@ -48,44 +48,11 @@ function legacySession(): A2aError {
   );
 }
 
-/** How many sessions' views this process keeps, least recently read evicted first. */
-export const CACHED_SESSION_VIEWS = 32;
-
-/**
- * Views of recently read sessions, each folded as far as some read got. The stream is append-only
- * and a view is only ever folded from it, so a kept view can trail the session but never disagree
- * with it: a read folds the lines past the view's position and the result is the same as folding
- * from the start. `foldLine` skips lines a view already holds, so concurrent reads of one session
- * fold into the same view safely, and a read that fails partway leaves a shorter but valid view.
- * Every read still opens the stream, which checks that the session exists and hasn't expired.
- */
-const sessionViews = new Map<string, SessionView>();
-
-function keptView(sessionId: string): SessionView {
-  const view = sessionViews.get(sessionId) ?? emptySessionView();
-  sessionViews.delete(sessionId);
-  sessionViews.set(sessionId, view);
-  if (sessionViews.size > CACHED_SESSION_VIEWS) {
-    const oldest = sessionViews.keys().next().value;
-    if (oldest !== undefined) sessionViews.delete(oldest);
-  }
-  return view;
-}
-
-/** Forgets every kept view. Tests only. */
-export function forgetSessionViews(): void {
-  sessionViews.clear();
-}
-
-/**
- * The session folded to its current tail. The view is shared with this process's other reads of
- * the session, which only ever move it forward; read it, don't write it.
- */
+/** The session folded to its current tail. */
 export async function readSessionView(sessionId: string): Promise<SessionView> {
-  const view = keptView(sessionId);
+  const view = emptySessionView();
   for await (const { line, position, record } of streamSessionLines(sessionId, {
     follow: false,
-    startIndex: view.position,
   })) {
     if (line === undefined) {
       if (position === 0 && isV26Line(record)) throw legacySession();
@@ -105,13 +72,11 @@ export async function* followSessionView(
   signal: AbortSignal,
 ): AsyncGenerator<SessionView, void, undefined> {
   const tail = await readSessionStreamTailIndex(sessionId);
-  // A copy: a stream reports each change, and a shared view other reads fold ahead would skip some.
-  const view = structuredClone(keptView(sessionId));
-  if (view.position > tail) yield view;
+  const view = emptySessionView();
+  if (tail < 0) yield view;
   for await (const { line, position, record } of streamSessionLines(sessionId, {
     follow: true,
     signal,
-    startIndex: view.position,
   })) {
     if (line === undefined) {
       if (position === 0 && isV26Line(record)) throw legacySession();
