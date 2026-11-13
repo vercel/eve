@@ -233,4 +233,32 @@ describe("startProductionServer", () => {
 
     await server.close();
   });
+
+  it("retries a resolved port that another process claimed before the built server bound it", async () => {
+    const { startProductionServer } = await import("./start-production-server.js");
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const children = [createChildProcess(), createChildProcess()];
+    mocks.spawn
+      .mockImplementationOnce((_command, _args, options) => {
+        const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+        (children[0]!.stderr as PassThrough).write(
+          `[srvx] Failed to start server: Error: listen EADDRINUSE: address already in use 127.0.0.1:${port}\n`,
+        );
+        return children[0]!;
+      })
+      .mockImplementationOnce((_command, _args, options) => {
+        const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+        (children[1]!.stdout as PassThrough).write(`Listening on http://127.0.0.1:${port}/\n`);
+        return children[1]!;
+      });
+
+    const server = await startProductionServer("/tmp/app", { host: "127.0.0.1", port: 0 });
+    const retryPort = (mocks.spawn.mock.calls[1]?.[2] as { env: NodeJS.ProcessEnv }).env.PORT;
+
+    expect(mocks.spawn).toHaveBeenCalledTimes(2);
+    expect(server.url).toBe(`http://127.0.0.1:${retryPort}/`);
+    expect(children[0]!.kill).toHaveBeenCalledWith("SIGTERM");
+
+    await server.close();
+  });
 });

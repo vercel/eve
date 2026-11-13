@@ -13,6 +13,8 @@ const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
 const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
+// How many probed ports an ephemeral start tries before it reports the failure.
+const EPHEMERAL_PORT_ATTEMPTS = 3;
 // srvx prints this line only after its own listener is bound.
 const LISTENING_URL_PATTERN = /Listening on:?\s+(https?:\/\/\S+)/;
 // On SIGTERM, srvx closes the server for up to 5s before Nitro's close hooks
@@ -188,10 +190,41 @@ export async function startProductionServer(
   await loadDevelopmentEnvironmentFiles(appRoot);
 
   const host = options.host ?? DEFAULT_PRODUCTION_SERVER_HOST;
-  const port = await resolveListenPort({
-    host,
-    port: options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT,
-  });
+  const requestedPort = options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT;
+  // An ephemeral request picks a port by binding one and releasing it, so a
+  // parallel process can claim it before this child binds. Retry with a fresh
+  // port instead of failing the start.
+  for (let attempt = 1; ; attempt += 1) {
+    const port = await resolveListenPort({ host, port: requestedPort });
+    try {
+      return await spawnBuiltServer({
+        appRoot,
+        host,
+        port,
+        schedules: options.schedules,
+        serverEntry,
+      });
+    } catch (error) {
+      if (requestedPort !== 0 || attempt >= EPHEMERAL_PORT_ATTEMPTS || !isPortTaken(error)) {
+        throw error;
+      }
+    }
+  }
+}
+
+/** Detects the failure `readBuiltServerStartFailure` reports for a taken port. */
+function isPortTaken(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(" is already in use.");
+}
+
+async function spawnBuiltServer(input: {
+  readonly appRoot: string;
+  readonly host: string;
+  readonly port: number;
+  readonly schedules: boolean | undefined;
+  readonly serverEntry: string;
+}): Promise<ProductionServerHandle> {
+  const { appRoot, host, port, serverEntry } = input;
   // Startup output is kept only for URL detection and startup diagnostics.
   // After readiness it is dropped so a long-running server does not grow it.
   let output = "";
@@ -216,7 +249,7 @@ export async function startProductionServer(
   delete env.CI;
   delete env.SERVER_SHUTDOWN_TIMEOUT;
   delete env.NITRO_UNIX_SOCKET;
-  if (options.schedules === false) {
+  if (input.schedules === false) {
     env[EVE_SCHEDULES_DISABLED_ENV] = "1";
   }
 
