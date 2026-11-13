@@ -20,10 +20,10 @@ export default defineWorkflowTool({
     "findings.",
   async execute({ message }, ctx) {
     "use workflow";
-    return await ctx.agent("implementer", {
-      message,
+    const response = await ctx.agent("implementer").send(message, {
       outputSchema: IMPLEMENTER_OUTPUT_SCHEMA,
     });
+    return (await response.result()).data;
   },
   inputSchema: z.object({
     message: z

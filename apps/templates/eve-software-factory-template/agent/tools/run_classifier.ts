@@ -17,10 +17,10 @@ export default defineWorkflowTool({
     "the work item verbatim in the message.",
   async execute({ message }, ctx) {
     "use workflow";
-    return await ctx.agent("classifier", {
-      message,
+    const response = await ctx.agent("classifier").send(message, {
       outputSchema: CLASSIFIER_OUTPUT_SCHEMA,
     });
+    return (await response.result()).data;
   },
   inputSchema: z.object({
     message: z

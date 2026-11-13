@@ -8,8 +8,11 @@ export default defineEval({
     const turn = await t.send(
       "Record a durable note in the factory brain: this repo's test suite must be run with `pnpm test --runInBand`, or it flakes. Save it to the brain now."
     );
-    t.parked();
-    turn.session.requireInputRequest({ toolName: "update_factory_brain" });
+    t.awaitingInput();
+    turn.session.requireInteraction({
+      kind: "approval",
+      toolName: "update_factory_brain",
+    });
     t.calledTool("update_factory_brain", { status: "pending" });
   },
 });

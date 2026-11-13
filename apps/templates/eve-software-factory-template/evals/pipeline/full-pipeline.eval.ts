@@ -11,7 +11,7 @@ export default defineEval({
     );
     t.succeeded();
     for (const station of STATIONS) {
-      t.calledSubagent(station);
+      t.calledAgent(station);
     }
     t.eventsSatisfy("stations ran in pipeline order", (events) =>
       calledInOrder(events, [...STATIONS])

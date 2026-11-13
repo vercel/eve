@@ -10,8 +10,8 @@ export default defineEval({
       "Hi! What are you and what can you do for me on this repository?"
     );
     t.succeeded();
-    t.calledSubagent("implementer", { count: 0 });
-    t.calledSubagent("reviewer", { count: 0 });
+    t.calledAgent("implementer", { count: 0 });
+    t.calledAgent("reviewer", { count: 0 });
     for (const tool of GITHUB_WRITE_TOOLS) {
       t.notCalledTool(tool);
     }

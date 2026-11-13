@@ -19,10 +19,10 @@ export default defineWorkflowTool({
     "the analyst saved its full detail as one.",
   async execute({ message }, ctx) {
     "use workflow";
-    return await ctx.agent("reviewer", {
-      message,
+    const response = await ctx.agent("reviewer").send(message, {
       outputSchema: REVIEWER_OUTPUT_SCHEMA,
     });
+    return (await response.result()).data;
   },
   inputSchema: z.object({
     message: z

@@ -19,10 +19,10 @@ export default defineWorkflowTool({
     "save its own deep supporting detail as an analysis artifact and return the id.",
   async execute({ message }, ctx) {
     "use workflow";
-    return await ctx.agent("analyst", {
-      message,
+    const response = await ctx.agent("analyst").send(message, {
       outputSchema: ANALYST_OUTPUT_SCHEMA,
     });
+    return (await response.result()).data;
   },
   inputSchema: z.object({
     message: z

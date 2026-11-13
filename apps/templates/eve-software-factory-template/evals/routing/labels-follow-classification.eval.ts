@@ -1,6 +1,7 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
+import { openInteractions } from "eve/events";
 
 /**
  * Tool calls that read the repository's label vocabulary before a write.
@@ -18,16 +19,14 @@ const VOCABULARY_READS = new Set([
  */
 const LABEL_WRITES = new Set(["github__addLabels", "github__updateIssue"]);
 
-const toolCallOrder = (events: readonly MessageStreamEvent[]): string[] => {
+const toolCallOrder = (events: readonly SessionStreamEvent[]): string[] => {
   const order: string[] = [];
   for (const event of events) {
-    if (event.type !== "actions.requested") {
-      continue;
-    }
-    for (const action of event.data.actions) {
-      if (action.kind === "tool-call") {
-        order.push(action.toolName);
-      }
+    if (
+      event.type === "call.requested" &&
+      event.data.capability.kind === "tool"
+    ) {
+      order.push(event.data.capability.name);
     }
   }
   return order;
@@ -41,14 +40,14 @@ export default defineEval({
     const turn = await t.send(
       "Run issue #1 on the repository through the classifier and mirror the classification onto the issue, then stop; do not run the analyst or any later station."
     );
-    t.calledSubagent("classifier");
-    t.calledSubagent("analyst", { count: 0 });
-    t.calledSubagent("implementer", { count: 0 });
-    t.parked();
+    t.calledAgent("classifier");
+    t.calledAgent("analyst", { count: 0 });
+    t.calledAgent("implementer", { count: 0 });
+    t.awaitingInput();
     t.check(
-      turn.session.pendingInputRequests.map(
-        (request) => request.action.toolName
-      ),
+      openInteractions(turn.view)
+        .filter((row) => row.request.kind === "approval")
+        .map((row) => row.call?.name ?? ""),
       satisfies(
         (names: readonly string[]) =>
           names.some((name) => LABEL_WRITES.has(name)),

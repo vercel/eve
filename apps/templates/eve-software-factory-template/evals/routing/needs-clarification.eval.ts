@@ -8,14 +8,13 @@ export default defineEval({
     const turn = await t.send(
       "Something is wrong with the emails, you know the one I mean. Fix it properly this time."
     );
-    t.calledSubagent("classifier");
-    t.calledSubagent("implementer", { count: 0 });
-    t.calledSubagent("reviewer", { count: 0 });
+    t.calledAgent("classifier");
+    t.calledAgent("implementer", { count: 0 });
+    t.calledAgent("reviewer", { count: 0 });
     t.judge(
       "Does the submission ask the user specific clarifying questions about which email problem they mean, rather than proceeding to build something or claiming work was done?",
       {
-        on:
-          turn.message ?? "(the run parked on a question instead of replying)",
+        on: turn.reply || "(the run parked on a question instead of replying)",
       }
     ).atLeast(0.5);
   },

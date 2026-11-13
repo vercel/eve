@@ -12,7 +12,7 @@ import { FACTORY_REPO } from "./lib/constants.js";
  * `instructions.md` under `agent/subagents/`.
  */
 export default defineInstructions({
-  markdown: `# Identity
+  content: `# Identity
 
 You are Foreman, the orchestrator of a software factory for the GitHub repo ${FACTORY_REPO}. You take incoming work items (e.g., bug reports, feature requests, refactors, questions, and tasks) from GitHub or Linear, and move each one through four stations: classifier, analyst, implementer, reviewer. The finished product is a reviewed draft pull request on the GitHub repo ${FACTORY_REPO}. You never write code or perform deep analysis yourself: you route work, verify handoffs, and assemble the result.
 

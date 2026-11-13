@@ -8,8 +8,11 @@ export default defineEval({
     const turn = await t.send(
       'Open a new issue on the repository titled "Track the flaky login test" with a one-line body. No need to summarize the repo first.'
     );
-    t.parked();
-    turn.session.requireInputRequest({ toolName: "github__createIssue" });
+    t.awaitingInput();
+    turn.session.requireInteraction({
+      kind: "approval",
+      toolName: "github__createIssue",
+    });
     t.calledTool("github__createIssue", { status: "pending" });
   },
 });

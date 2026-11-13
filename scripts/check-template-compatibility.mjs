@@ -211,11 +211,20 @@ const checkTemplate = async (template, tarball, tarballName) => {
   const sandboxPath = join(destination, "agent", "sandbox.ts");
   const vercelSandbox =
     existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
+  // Non-secret build fixtures preserve fail-fast production configuration
+  // without giving this compatibility check credentials to external services.
+  const buildEnv = { ...process.env };
+  if (template === "eve-software-factory-template") {
+    Object.assign(buildEnv, {
+      FACTORY_REPO: "acme/widgets",
+      LINEAR_CONNECTOR: "linear/template-ci",
+    });
+  }
   await run(
     template,
     "pnpm",
     ["exec", "eve", "build", ...(vercelSandbox ? ["--skip-sandbox-prewarm"] : [])],
-    { cwd: destination },
+    { cwd: destination, env: buildEnv },
   );
   // A template's `pnpm build` is `eve build` plus, at most, its web app, which
   // the service builds just produced the way Vercel does. Run it only when

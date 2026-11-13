@@ -8,7 +8,10 @@ export default defineEval({
     const turn = await t.send(
       "Mark the repository's most recently opened pull request ready for review."
     );
-    turn.session.requireInputRequest({ toolName: "github__updatePullRequest" });
+    turn.session.requireInteraction({
+      kind: "approval",
+      toolName: "github__updatePullRequest",
+    });
     t.calledTool("github__updatePullRequest", { status: "pending" });
   },
 });

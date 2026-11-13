@@ -10,7 +10,7 @@ export default defineEval({
       "What is this repository about, and what does its README say about getting started?"
     );
     t.succeeded();
-    t.calledSubagent("implementer", { count: 0 });
+    t.calledAgent("implementer", { count: 0 });
     for (const tool of WRITE_TOOLS) {
       t.notCalledTool(tool);
     }
