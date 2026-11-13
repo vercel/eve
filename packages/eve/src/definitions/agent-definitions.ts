@@ -10,30 +10,56 @@ import { builtins } from "./builtins.js";
 import { catalog } from "./catalog.js";
 import { connections as eveConnections } from "./connections.js";
 import type { Definition } from "./definition.js";
-import { instructions as eveInstructions, workspace } from "./instructions.js";
+import {
+  instructions as eveInstructions,
+  type StaticInstruction,
+  staticInstructionsDefinition,
+  workspace,
+} from "./instructions.js";
 import { parentModel } from "./model.js";
 import { skills as eveSkills } from "./skills.js";
 import { staticTools } from "./tools.js";
 
 // One path from an agent's contents to the definitions its sessions run. An agent compiled from an
-// `agent/` directory maps its node's files to them (`#definitions/compiled-agent.js`). Each field
-// arrives as the definitions its builder made; this module owns where each goes, and what the
-// agent's settings are.
+// `agent/` directory maps its node's files to them (`#definitions/compiled-agent.js`); any other
+// kind of agent maps its own fields the same way. Each field arrives as the definitions its
+// builder made, the same builder whichever kind of agent it is; this module owns where each goes,
+// and what the agent's settings are.
 
-/** An agent's contents: each kind of file in `agent/`, as the definitions its builder made. */
+/**
+ * An agent's contents: each field of `defineAgent`, or each kind of file in `agent/`, as the
+ * definitions its builder made.
+ */
 export interface AgentContents {
-  /** The model, as `agent.ts` chooses it. The last choice wins. */
+  /** The model, as `model` (or `agent.ts`'s) chooses it. The last choice wins. */
   readonly model: readonly Definition[];
-  /** Instructions chosen per session: `agent/instructions/*`. */
+  /**
+   * Instructions the same in every session (`instructions: "..."`), as `instructions.md` states
+   * them: one block of eve's prompt. A compiled agent's are its node's, which eve reads itself.
+   */
+  readonly staticInstructions?: readonly StaticInstruction[];
+  /** Instructions chosen per session: `instructions` as a function, or `agent/instructions/*`. */
   readonly instructions: readonly Definition[];
-  /** `agent/connections/*`. */
+  /** `connections`, or `agent/connections/*`. */
   readonly connections: readonly Definition[];
-  /** `agent/tools/*`. */
+  /** Further definitions the agent adds, such as eve's defaults. */
+  readonly definitions: readonly Definition[];
+  /**
+   * `subagents`: after the agent's own tools, where a compiled node's subagents sit in its tool
+   * table. A compiled node's are in that table already.
+   */
+  readonly subagents: readonly Definition[];
+  /** `tools`, or `agent/tools/*`. */
   readonly tools: readonly Definition[];
-  /** `agent/skills/*`. */
+  /** `skills`, or `agent/skills/*`. */
   readonly skills: readonly Definition[];
-  /** What else an `agent/` directory declares, at the positions its files take. */
-  readonly files: {
+  /** Leave out eve's runtime definitions (instructions, connections, catalog, ...). */
+  readonly bare?: boolean;
+  /**
+   * What only an `agent/` directory declares, with no `defineAgent` field yet, at the positions
+   * its files take. Internal: nothing public builds these.
+   */
+  readonly files?: {
     /** `agent/hooks/*`: first, so each hook sees the session before anything else contributes. */
     readonly hooks: readonly Definition[];
     /** `agent/subagents/*` chosen at runtime (`defineDynamic`): after eve's static tools. */
@@ -50,34 +76,74 @@ export interface AgentContents {
  * contribute in it, and each arrangement wraps what the ones before it left:
  *
  * - The first to offer a tool name keeps it. So eve's static tools (a compiled node's static tool
- *   files, its declared subagents and eve's defaults among them) come before dynamic ones, and
- *   connections keep theirs before tools check names against them.
+ *   files and eve's defaults among them) come before dynamic ones, and connections keep theirs
+ *   before tools and subagents check names against them.
  * - eve's skills listing, approvals, builtins and catalog come after everything the agent
  *   declares, so they see all of it: the catalog indexes the final tool table.
  * - The last model choice wins, and a parent's choice comes last, so it's the one the session runs.
+ * - Among the contents' fields, one definition per id: a later one takes an earlier one's place,
+ *   as an agent's own `bash` replaces eve's default (`definitions: eve.defaults()`) where it stood.
+ *   A file's entries (`files`) and eve's runtime definitions are never replaced.
  */
 export function agentDefinitionsOf(contents: AgentContents): readonly Definition[] {
-  const { files } = contents;
+  const eve = (definition: Definition): readonly Definition[] =>
+    contents.bare === true ? [] : [definition];
+  const own = overriding([
+    contents.model,
+    contents.instructions,
+    contents.connections,
+    contents.definitions,
+    contents.subagents,
+    contents.tools,
+    contents.skills,
+  ]);
+  const files = contents.files;
+  const staticInstructions = contents.staticInstructions;
   return [
-    ...files.hooks,
-    ...contents.model,
-    eveInstructions,
-    ...contents.instructions,
-    workspace,
-    eveConnections,
-    ...contents.connections,
-    staticTools,
-    ...files.dynamicSubagents,
-    ...files.memory,
-    ...contents.tools,
-    ...files.scheduleTools,
-    ...contents.skills,
-    eveSkills,
-    approvals,
-    builtins,
-    catalog,
-    parentModel,
+    ...(files?.hooks ?? []),
+    ...own(contents.model),
+    // The agent's own static instructions in eve's slot, bare or not; else eve's, which reads a
+    // compiled node's.
+    ...(staticInstructions === undefined
+      ? eve(eveInstructions)
+      : [staticInstructionsDefinition(() => staticInstructions)]),
+    ...own(contents.instructions),
+    ...eve(workspace),
+    ...eve(eveConnections),
+    ...own(contents.connections),
+    ...eve(staticTools),
+    ...own(contents.definitions),
+    ...(files?.dynamicSubagents ?? []),
+    ...(files?.memory ?? []),
+    ...own(contents.tools),
+    ...own(contents.subagents),
+    ...(files?.scheduleTools ?? []),
+    ...own(contents.skills),
+    ...eve(eveSkills),
+    ...eve(approvals),
+    ...eve(builtins),
+    ...eve(catalog),
+    ...eve(parentModel),
   ];
+}
+
+/**
+ * Places `fields`' definitions one per id: each id at its first place, holding the last
+ * definition with it. Call the result on each field in the order they're placed.
+ */
+function overriding(
+  fields: readonly (readonly Definition[])[],
+): (field: readonly Definition[]) => readonly Definition[] {
+  const last = new Map<string, Definition>();
+  for (const definition of fields.flat()) last.set(definition.id, definition);
+  const placed = new Set<string>();
+  return (field) =>
+    field.flatMap((definition) => {
+      const winner = last.get(definition.id);
+      if (winner === undefined || placed.has(definition.id)) return [];
+      placed.add(definition.id);
+      return [winner];
+    });
 }
 
 /** What an agent's configuration sets for its sessions, resolved, as `settingsOf` takes it. */

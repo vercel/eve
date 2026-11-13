@@ -34,7 +34,8 @@ export interface CreateSessionStepResult {
  */
 export async function createSessionStep(input: {
   readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
-  readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
+  /** Absent for a held agent, which has no compiled graph to check. */
+  readonly compiledArtifactsSource?: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   /** History from `create()`, held until the first message's turn adds it. */
@@ -46,12 +47,17 @@ export async function createSessionStep(input: {
 }): Promise<CreateSessionStepResult> {
   "use step";
 
-  const bundle = await getCompiledRuntimeAgentBundle({
-    compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
-    nodeId: input.nodeId,
-  });
-  if (bundle.turnAgent.configResolver === true && input.dynamicSubagentAgentConfig === undefined) {
-    throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+  if (input.compiledArtifactsSource !== undefined) {
+    const bundle = await getCompiledRuntimeAgentBundle({
+      compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
+      nodeId: input.nodeId,
+    });
+    if (
+      bundle.turnAgent.configResolver === true &&
+      input.dynamicSubagentAgentConfig === undefined
+    ) {
+      throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+    }
   }
 
   const session = createSession({

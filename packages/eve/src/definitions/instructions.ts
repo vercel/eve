@@ -5,38 +5,53 @@ import type { Announcement } from "#harness/announcements.js";
 import { digestOf } from "#definitions/state.js";
 import { agentInstructionsOf, renderInstructionsBlock } from "#runtime/prompt/compose.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
-import type { ResolvedDynamicDefinition } from "#runtime/types.js";
+import type { ResolvedDynamicDefinition, ResolvedInstructionsDefinition } from "#runtime/types.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
 import { authoredEvaluate, type Definition, section, SECTION_ORDER } from "./definition.js";
 
 type Instruction = { readonly role: "system" | "user"; readonly content: string };
 
+/** An instruction as an instructions file states it: the same in every session. */
+export type StaticInstruction = Pick<
+  ResolvedInstructionsDefinition,
+  "content" | "name" | "owner" | "role"
+>;
+
 /**
- * The agent's static instructions: its system instructions as one block of eve's default prompt,
- * and its user instructions announced, as dynamic ones are.
+ * An agent's static instructions, as `read` finds them: its system instructions as one block of
+ * eve's default prompt, and its user instructions announced, as dynamic ones are.
  */
-export const instructions: Definition = {
-  contribute: ({ container }) => ({
-    announcements: () =>
-      Object.fromEntries(
-        staticUserInstructions(container).map(({ content, key }) => [
-          key,
-          userInstruction(content, digestOf(content)),
-        ]),
-      ),
-    system: () => {
-      const block = agentInstructionsOf(compiledBundleOf(container)?.resolvedAgent.instructions);
-      return [
-        section("eve.instructions", block === undefined ? "" : renderInstructionsBlock(block), {
-          order: SECTION_ORDER.instructions,
-        }),
-      ];
-    },
-  }),
-  id: "eve.instructions",
-  label: "the agent's instructions",
-};
+export function staticInstructionsDefinition(
+  read: (container: Pick<AlsContext, "get">) => readonly StaticInstruction[] | undefined,
+): Definition {
+  return {
+    contribute: ({ container }) => ({
+      announcements: () =>
+        Object.fromEntries(
+          userInstructionsOf(read(container)).map(({ content, key }) => [
+            key,
+            userInstruction(content, digestOf(content)),
+          ]),
+        ),
+      system: () => {
+        const block = agentInstructionsOf(read(container));
+        return [
+          section("eve.instructions", block === undefined ? "" : renderInstructionsBlock(block), {
+            order: SECTION_ORDER.instructions,
+          }),
+        ];
+      },
+    }),
+    id: "eve.instructions",
+    label: "the agent's instructions",
+  };
+}
+
+/** A compiled agent's static instructions: its node's instructions files. */
+export const instructions: Definition = staticInstructionsDefinition(
+  (container) => compiledBundleOf(container)?.resolvedAgent.instructions,
+);
 
 /** What the agent's workspace holds, where it has one. */
 export const workspace: Definition = {
@@ -134,7 +149,13 @@ function userInstruction(content: string | undefined, digest: string): Announcem
 export function staticUserInstructions(
   container: Pick<AlsContext, "get">,
 ): readonly { readonly key: string; readonly content: string }[] {
-  return (compiledBundleOf(container)?.resolvedAgent.instructions ?? []).flatMap((entry) => {
+  return userInstructionsOf(compiledBundleOf(container)?.resolvedAgent.instructions);
+}
+
+function userInstructionsOf(
+  entries: readonly StaticInstruction[] | undefined,
+): readonly { readonly key: string; readonly content: string }[] {
+  return (entries ?? []).flatMap((entry) => {
     const content = entry.content.trim();
     return entry.role === "user" && content.length > 0
       ? [{ content, key: `eve.instructions:${entry.name}` }]
