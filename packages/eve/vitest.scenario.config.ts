@@ -43,6 +43,14 @@ export default defineConfig({
     // beyond their own worker; a fixed cap keeps timing-sensitive
     // assertions stable on large hosts and matches CI's 4 vCPUs.
     maxWorkers: 4,
+    server: {
+      deps: {
+        // Built app output is self-contained, multi-megabyte JavaScript. Node
+        // loads it as a deployment would; transforming it through Vite costs
+        // seconds per import.
+        external: [/[\\/]\.output[\\/]/u, /[\\/]\.vercel[\\/]output[\\/]/u],
+      },
+    },
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 120_000,
   },
