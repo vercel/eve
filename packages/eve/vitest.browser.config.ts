@@ -31,6 +31,13 @@ export default defineConfig({
     environment: "node",
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
     include: ["test/browser/**/*.test.ts"],
+    server: {
+      deps: {
+        // The step registrations bundle is tens of megabytes; Vite transforming it costs seconds
+        // per worker. Node loads it natively instead, as the integration tier does.
+        external: [/\.workflow-vitest[\\/]/],
+      },
+    },
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 60_000,
   },
