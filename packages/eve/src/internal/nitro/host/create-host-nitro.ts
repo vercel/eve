@@ -1,4 +1,9 @@
 import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
+import {
+  stringifyEsmImportSpecifier,
+  stringifyNitroDataImportSpecifier,
+} from "#internal/application/import-specifier.js";
 
 import { createNitro } from "nitro/builder";
 import type { LoadConfigOptions, Nitro, NitroConfig } from "nitro/types";
@@ -42,6 +47,7 @@ const INSTRUMENTATION_ALIAS_PATHS = {
 // `nitro(`, which is the case when a TanStack Start host shares its root with
 // the agent. eve bundles its own runtime and never builds through the host's Vite.
 const EVE_NITRO_BUILDER = "rolldown";
+const TIMEZONE_SCHEDULES_PLUGIN_ID = "#eve/timezone-schedules.mjs";
 
 // Nitro gates preset behavior on this date. Pinning it keeps the build date
 // and COMPATIBILITY_DATE env out of eve's host; move it with the Nitro version.
@@ -92,12 +98,38 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     artifactsConfigPath: join(locations.buildDir, "eve-route-config.json"),
     workflowArtifacts,
     workflowWorldPluginPath: locations.compiledArtifacts.workflowWorldPluginPath,
+    timezoneRunner: spec.runtimePlugins.includes("timezone-schedules"),
   });
+  const timezoneSchedulesConfigPath = join(locations.buildDir, "eve-timezone-schedules.json");
+  const timezoneSchedulesPlugin = spec.runtimePlugins.includes("timezone-schedules")
+    ? createTimezoneSchedulesPlugin(timezoneSchedulesConfigPath)
+    : undefined;
 
-  return await createNitro(
-    toNitroConfig(spec, { routes, skillFilesPlugin, workflowArtifacts }),
+  const nitro = await createNitro(
+    toNitroConfig(spec, { routes, skillFilesPlugin, timezoneSchedulesPlugin, workflowArtifacts }),
     createNitroLoadOptions(locations.buildDir),
   );
+  if (timezoneSchedulesPlugin !== undefined) {
+    if (nitro.options.preset !== "node-server") {
+      await nitro.close().catch(() => undefined);
+      throw new Error(
+        `Schedule timezones require the node-server or Vercel host. The "${nitro.options.preset}" Nitro preset is not supported. Build for Node and run with eve start, or deploy to Vercel.`,
+      );
+    }
+    await writeFile(
+      timezoneSchedulesConfigPath,
+      JSON.stringify(spec.routes.scheduleTasks.filter((task) => task.timezone !== undefined)),
+    );
+  }
+  return nitro;
+}
+
+function createTimezoneSchedulesPlugin(configPath: string): string {
+  return [
+    `import data from ${stringifyNitroDataImportSpecifier("text", configPath)};`,
+    `import { installTimezoneSchedules } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/nitro/host/timezone-schedules-runtime.ts"))};`,
+    "export default function timezoneSchedulesPlugin(app) { installTimezoneSchedules(app, JSON.parse(data)); }",
+  ].join("\n");
 }
 
 function toNitroConfig(
@@ -105,6 +137,7 @@ function toNitroConfig(
   built: {
     readonly routes: HostNitroRoutes;
     readonly skillFilesPlugin: string | undefined;
+    readonly timezoneSchedulesPlugin: string | undefined;
     readonly workflowArtifacts: WorkflowArtifacts;
   },
 ): NitroConfig {
@@ -196,6 +229,9 @@ function toNitroConfig(
     virtual: {
       ...built.routes.virtual,
       [EVE_RUNTIME_PLUGIN_ID]: createRuntimePluginSource(spec.runtime, compiledArtifacts),
+      ...(built.timezoneSchedulesPlugin !== undefined && {
+        [TIMEZONE_SCHEDULES_PLUGIN_ID]: built.timezoneSchedulesPlugin,
+      }),
       ...(built.skillFilesPlugin !== undefined && {
         [SKILL_FILES_PLUGIN_ID]: built.skillFilesPlugin,
       }),
@@ -220,6 +256,8 @@ function resolveRuntimePluginPath(
       return compiledArtifacts.instrumentationPluginPath;
     case "skill-files":
       return SKILL_FILES_PLUGIN_ID;
+    case "timezone-schedules":
+      return TIMEZONE_SCHEDULES_PLUGIN_ID;
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

@@ -83,9 +83,25 @@ export function createEveVercelOptions(input: {
       : []),
   ]);
 
+  // Nitro's scheduledTasks has no timezone field. Its generated schedules
+  // merge beneath explicit Build Output API entries with the same names.
+  const schedules = Object.fromEntries(
+    input.routeTable.scheduleTasks
+      .filter((task) => task.timezone !== undefined)
+      .map((task) => [
+        task.nitroTaskName,
+        {
+          schedule: task.cron,
+          timezone: task.timezone,
+          function: VERCEL_SCHEDULES_FUNCTION_ROUTE.slice(1),
+        },
+      ]),
+  );
+
   return {
     config: {
       version: 3 as const,
+      ...(Object.keys(schedules).length > 0 && { schedules }),
       framework: {
         slug: EVE_PACKAGE_NAME,
         version: resolveInstalledPackageInfo().version,
