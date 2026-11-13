@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   type ContractRule,
@@ -412,6 +412,10 @@ const HOSTS: readonly ConformanceHostKind[] = ["in-process", "workflow"];
  */
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
   const entries: readonly ConformanceChannel[] = channelConformance[channel];
+  // A client that keeps a browser between cells releases it after the file's last cell.
+  afterAll(async () => {
+    for (const entry of entries) await entry.driver().dispose?.();
+  });
   const cases = entries.flatMap((entry) =>
     HOSTS.map((host) => ({ entry, host, name: entry.driver().name })),
   );

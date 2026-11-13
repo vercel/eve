@@ -319,6 +319,8 @@ export interface ClientDriver {
    * that origin from the eve channel's routes until the client closes.
    */
   open(host: string, wait: Wait): Promise<ClientView>;
+  /** Releases what the client keeps between cells, once the file's last cell is done. */
+  dispose?(): Promise<void>;
 }
 
 /** A running client, as a person sees and uses it. */

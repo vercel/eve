@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import type { Locator, Page } from "playwright-core";
+import type { Browser, Locator, Page } from "playwright-core";
 
 import type {
   ClientDriver,
@@ -43,12 +43,30 @@ const COMPOSER_PLACEHOLDER = "Send a message…";
 
 let bundled: Promise<string> | undefined;
 
+/** The browser every cell of a file drives; a cell gets its own page on it. */
+let shared: Promise<Browser> | undefined;
+
+async function launchBrowser(): Promise<Browser> {
+  const { chromium } = await import("playwright-core");
+  return await chromium.launch();
+}
+
+/** Releases the file's browser, once its last cell is done. */
+async function closeWebChatBrowser(): Promise<void> {
+  const browser = shared;
+  shared = undefined;
+  await (await browser)?.close();
+}
+
 /**
  * Drives the Web Chat template's real React page in headless Chromium. The
  * page is the registry's `AgentChat` bundled with Vite and served from a local
  * origin that forwards every other request to the agent, so the browser's
  * `useEveAgent` talks to `eveChannel` exactly as it does behind `withEve()`.
  * It reads only the DOM and acts only through clicks and keys.
+ *
+ * One Chromium serves every cell of a file, each cell on its own page and origin: a launch per
+ * cell costs more than the cell's own work, and a page of its own keeps cells isolated.
  */
 export function webChatDriver(): ClientDriver {
   return {
@@ -59,13 +77,12 @@ export function webChatDriver(): ClientDriver {
     async open(host, wait) {
       const assets = await (bundled ??= bundleTemplate());
       const server = await servePage(host, assets);
-      const { chromium } = await import("playwright-core");
-      const browser = await chromium.launch();
+      const browser = await (shared ??= launchBrowser());
+      const page = await browser.newPage();
       const close = async () => {
-        await browser.close();
+        await page.close();
         await server.close();
       };
-      const page = await browser.newPage();
       // A card can re-render between reading a button and using it; fail fast and read again.
       page.setDefaultTimeout(2_000);
       const errors: string[] = [];
@@ -177,6 +194,7 @@ export function webChatDriver(): ClientDriver {
         close,
       };
     },
+    dispose: closeWebChatBrowser,
   };
 }
 
@@ -293,7 +311,8 @@ async function bundleTemplate(): Promise<string> {
   await build({
     build: {
       copyPublicDir: false,
-      minify: false,
+      // Each cell loads the page again; a smaller bundle is parsed faster and reads the same.
+      minify: true,
       outDir,
       rollupOptions: {
         input: ENTRY_ID,
