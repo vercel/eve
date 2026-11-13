@@ -70,6 +70,37 @@ describe("dynamic schedules client", () => {
     });
   });
 
+  it("asks the provider to validate timing before it prepares a create or a timing update", async () => {
+    const { definition, provider, create } = setup();
+    const prepare = vi.fn(
+      (value: { task: string; destination: "my-dm" | "team-channel" }) => value,
+    );
+    const validateExpression = vi.fn((expression: { type: string; cron?: string }) => {
+      if (expression.cron === "0 9 * * MON") throw new Error("Provider can't run MON.");
+    });
+    const client = createScheduleCollectionClient(
+      { ...definition, provider: { ...provider, validateExpression }, preparePayload: prepare },
+      callContext,
+    );
+    const cron = (value: string) => ({ type: "cron" as const, cron: value });
+
+    await expect(
+      client.prepareCreate({ ...input, expression: cron("0 9 * * MON") }),
+    ).rejects.toThrow("Provider can't run MON.");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+
+    const created = await client.create({ ...input, expression: cron("0 9 * * 1") });
+    await expect(
+      client.prepareUpdate(created.name, { expression: cron("0 9 * * MON") }),
+    ).rejects.toThrow("Provider can't run MON.");
+    // A relative delay reaches the provider as the one-time expression it resolves to.
+    await client.prepareCreate(input);
+    expect(validateExpression).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "single", timezone: "UTC" }),
+    );
+  });
+
   it("rejects invalid input before preparation, and rejected or oversized preparation before writes", async () => {
     const { definition, create } = setup();
     const prepare = vi.fn((value: { task: string; destination: "my-dm" | "team-channel" }) => {

@@ -30,9 +30,11 @@ const PROVIDER_KEYS = [
   "disable",
   "invoke",
   "delete",
+  "validateExpression",
 ] as const satisfies readonly (keyof ScheduleProvider)[];
 const PROVIDER_METHODS = PROVIDER_KEYS.filter(
-  (key): key is Exclude<(typeof PROVIDER_KEYS)[number], "kind"> => key !== "kind",
+  (key): key is Exclude<(typeof PROVIDER_KEYS)[number], "kind" | "validateExpression"> =>
+    key !== "kind" && key !== "validateExpression",
 );
 const DEFINITION_KEYS = [
   "id",
@@ -108,6 +110,11 @@ export function normalizeScheduleCollectionDefinition(
   for (const method of PROVIDER_METHODS)
     if (typeof provider[method] !== "function")
       throw new Error(`${message} provider.${method} must be a function.`);
+  if (
+    provider.validateExpression !== undefined &&
+    typeof provider.validateExpression !== "function"
+  )
+    throw new Error(`${message} provider.validateExpression must be a function when provided.`);
   if (record.tool !== undefined) expectAgentToolExposure(record.tool, message);
   if (record.tool === false && record.approval !== undefined)
     throw new Error(`${message} "approval" cannot be configured when tool is false.`);

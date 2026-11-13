@@ -169,7 +169,8 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     if (patch.expression === undefined && patch.payload === undefined)
       throw new Error("Schedule update requires an expression or replacement payload.");
     const normalized = validateScheduleName(name);
-    if (patch.expression !== undefined) resolveScheduleTiming(patch.expression);
+    if (patch.expression !== undefined)
+      definition.provider.validateExpression?.(resolveScheduleTiming(patch.expression));
     const { scope, provider } = await resolveNamespace("update", normalized);
     if ((await definition.provider.get(provider, normalized)) === null)
       throw new Error("Schedule was not found in the authorized scope.");
@@ -188,7 +189,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
     // Validate timing before preparation; relative delays are resolved again at the write boundary.
-    resolveScheduleTiming(input.expression);
+    definition.provider.validateExpression?.(resolveScheduleTiming(input.expression));
     const { scope, provider } = await resolveNamespace("create", displayName);
     const prepared = snapshotPreparedWrite({
       displayName,
