@@ -15,20 +15,25 @@ jobs:
   # The e2e matrix jobs are required status checks, so they must report on
   # every PR. An `on.pull_request.paths` filter would leave them permanently
   # "expected" on PRs that don't touch e2e-relevant paths, blocking merge.
-  # Instead the workflow always triggers, this job decides relevance, and the
-  # matrix jobs skip when nothing relevant changed — skipped required checks
-  # count as satisfied.
+  # Instead the workflow always triggers, this job decides relevance and builds
+  # the matrix, and the matrix jobs skip when nothing relevant changed — skipped
+  # required checks count as satisfied.
   changes:
     name: changes
     runs-on: ubuntu-latest
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      model_matrix: ${{ steps.discover.outputs.model_matrix }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 2
+
+      - name: Discover eval fixtures
+        id: discover
+        run: node .github/scripts/discover-e2e-fixtures.mjs
 
       - name: Check changed paths
         id: filter
@@ -45,21 +50,6 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
           fi
 
-  discover-fixtures:
-    name: discover-fixtures
-    runs-on: ubuntu-latest
-    outputs:
-      model_matrix: ${{ steps.discover.outputs.model_matrix }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Discover eval fixtures
-        id: discover
-        run: node .github/scripts/discover-e2e-fixtures.mjs
-
   # The model suite: every fixture runs here against the local world with
   # real matrix models. Model-sensitive fixtures (`"e2e": { "modelMatrix":
   # "full" }` in package.json) run on every matrix model; the rest run once
@@ -68,7 +58,7 @@ jobs:
   e2e:
     name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})${{ matrix.shard && format(' [{0}]', matrix.shard) || '' }}
     runs-on: ubuntu-latest
-    needs: [changes, discover-fixtures]
+    needs: [changes]
     environment:
       name: eve-ci
       deployment: false
@@ -79,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.discover-fixtures.outputs.model_matrix) }}
+        include: ${{ fromJSON(needs.changes.outputs.model_matrix) }}
 
     env:
       EVE_E2E_MODEL: ${{ matrix.model_id }}
@@ -108,9 +98,20 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         uses: ./.github/actions/sandbox-image
 
+      # pnpm verifies the lockfile against the supply-chain policies on every
+      # install. Its verdict log is keyed by the lockfile hash, so the entry
+      # ci.yml saves from main is reused here and the check is skipped. This
+      # workflow never runs on main, so it only restores the verdict.
+      - name: Restore the lockfile verification verdict
+        if: needs.changes.outputs.relevant == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
 
       - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'
