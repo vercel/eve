@@ -113,41 +113,32 @@ function parseStartUrl(output: string): string | undefined {
   return match?.[1];
 }
 
-// srvx prints this once the server and Nitro's close hooks are done.
-const SERVER_CLOSED_LINE = "Server closed successfully.";
+/** Well under `eve start`'s 25s SIGKILL grace, which a server that hangs on exit would reach. */
+const STOP_TIMEOUT_MS = 10_000;
 
 /**
- * Sends SIGTERM and waits for the server to close. Once it has, the group is
- * killed: after a session ran, the built server does not exit on its own, and
- * `eve start` would only SIGKILL it after its 25s grace.
+ * Sends SIGTERM and waits for `eve start` to exit on its own, as it does once its server has
+ * closed. A process that outlives the timeout fails the test, after its group is killed.
  */
 async function stopChildProcess(child: ChildProcess, readStderr?: () => string): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
 
-  const stderrBefore = readStderr?.().length ?? 0;
-  const closed = () => readStderr?.().slice(stderrBefore).includes(SERVER_CLOSED_LINE) === true;
-  await new Promise<void>((resolve) => {
-    const killGroup = () => {
-      clearInterval(poll);
-      clearTimeout(timeout);
-      // The whole group, so a server child that outlives `eve start` dies too.
-      process.kill(-child.pid!, "SIGKILL");
-    };
-    const poll = setInterval(() => {
-      if (closed()) killGroup();
-    }, 50);
-    const timeout = setTimeout(() => {
-      killGroup();
-      resolve();
-    }, 10_000);
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  let timer: NodeJS.Timeout | undefined;
+  child.kill("SIGTERM");
+  const stopped = await Promise.race([
+    exited.then(() => true),
+    new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), STOP_TIMEOUT_MS))),
+  ]);
+  clearTimeout(timer);
+  if (stopped) return;
 
-    child.once("exit", () => {
-      clearInterval(poll);
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
+  // The whole group, so a server child that outlives `eve start` dies too.
+  process.kill(-child.pid!, "SIGKILL");
+  await exited;
+  throw new Error(
+    `eve start did not exit within ${STOP_TIMEOUT_MS / 1000}s of SIGTERM.\n\nstderr:\n${readStderr?.() ?? ""}`,
+  );
 }
