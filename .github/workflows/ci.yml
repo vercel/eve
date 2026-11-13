@@ -337,11 +337,6 @@ jobs:
 
   test-webchat:
     runs-on: ubuntu-latest
-    # The image bakes in Chromium and its system libraries. Keep its tag in
-    # lockstep with packages/eve's playwright-core version.
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
-      options: --ipc=host
 
     steps:
       - name: Checkout code
@@ -365,6 +360,21 @@ jobs:
           cache-key: webchat
           filters: |
             eve...
+
+      # The browser build the tests launch, at packages/eve's playwright-core
+      # version. The cache holds it; system libraries are installed only when the
+      # cache held no browser.
+      - name: Restore the browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-chromium-headless-shell-1.63.0
+
+      - name: Install the browser
+        run: |
+          if ! compgen -G "$HOME/.cache/ms-playwright/chromium_headless_shell-*" >/dev/null; then
+            pnpm --filter eve exec playwright-core install --with-deps chromium-headless-shell
+          fi
 
       - name: Run web chat tests
         run: pnpm test:webchat
