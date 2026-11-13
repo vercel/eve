@@ -1,0 +1,9 @@
+minimumReleaseAgeExclude:
+  - "@chat-adapter/*"
+  - "@ai-sdk/*"
+  - "@vercel/*"
+  - "@workflow/*"
+  - ai
+  - chat
+  - eve
+  - workflow

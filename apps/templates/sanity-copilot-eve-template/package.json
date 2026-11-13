@@ -1,0 +1,41 @@
+{
+  "name": "sanity-copilot-eve-template",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "prebuild": "node scripts/sync-shared.mjs",
+    "build": "eve build",
+    "check": "ultracite check",
+    "predev": "node scripts/sync-shared.mjs",
+    "dev": "eve dev",
+    "eval": "eve eval live",
+    "eval:offline": "EVE_MOCK_MODEL=1 eve eval offline",
+    "fix": "ultracite fix",
+    "start": "eve start",
+    "sync:shared": "node scripts/sync-shared.mjs",
+    "typecheck": "tsc",
+    "validate": "node scripts/sync-shared.mjs --check && pnpm run check && pnpm run typecheck && eve info && pnpm run eval:offline"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.8.2",
+    "@vercel/connect": "2.9.1",
+    "ai": "7.0.150",
+    "eve": "1.0.0-rc.10",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "ultracite": "8.0.2"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
