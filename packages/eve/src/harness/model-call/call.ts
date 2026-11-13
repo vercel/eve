@@ -238,6 +238,22 @@ export class ModelCaller {
     return reportModelCallFailure(this.step, error);
   }
 
+  /**
+   * The model call asked for a sign-in: its attempt is abandoned, and the step parks with the
+   * messages the call read, to run again once the sign-in completes.
+   */
+  async abandonForSignIn(): Promise<readonly ModelMessage[]> {
+    const { step } = this;
+    step.ctx.set(HistoryStateKey, this.request.historyState);
+    const runId = step.position().runId;
+    if (runId !== undefined) {
+      await step.apply(
+        discardAttempt(step.view(), { ending: "retried", runId, usage: this.takeUnkeptUsage() }),
+      );
+    }
+    return this.request.history;
+  }
+
   /** Steering interrupted the call: the step ends with what it committed, and runs again. */
   async steered(): Promise<StepResult> {
     const { step } = this;

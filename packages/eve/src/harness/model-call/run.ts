@@ -6,7 +6,8 @@ import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
+import { enforceBudget, humanInputContext, stopForModelSignIn } from "#harness/hitl/index.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import {
   requestRun as requestRunFact,
   startRun as startRunFact,
@@ -17,6 +18,7 @@ import {
   failBoundaryEvent,
   failModelSelection,
   prepareModelCall,
+  signInForModelCall,
   type Step,
 } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
@@ -69,9 +71,12 @@ export async function runModelStep(
 ): Promise<StepResult> {
   const { generation } = input;
   const prepared = await previewPrompt(step, input.turn);
-  const failed = await prepareModelCall(step, prepared);
-  if (failed !== undefined) return failed;
+  const preparation = await prepareModelCall(step, prepared);
+  if (preparation !== undefined && "failed" in preparation) return preparation.failed;
   const prompt = commitTurnInput(step, prepared);
+  // A value the call needs waits on a sign-in: the step's messages park with it.
+  if (preparation !== undefined)
+    return await stopForModelSignIn(step, preparation.signIn, prompt.messages);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
@@ -107,6 +112,11 @@ export async function runModelStep(
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
+    if (isScopedAuthorizationRequiredError(error)) {
+      const signIn = await signInForModelCall(step, error);
+      if ("failed" in signIn) return signIn.failed;
+      return await stopForModelSignIn(step, signIn.signIn, await caller.abandonForSignIn());
+    }
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 

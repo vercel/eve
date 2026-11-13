@@ -13,6 +13,8 @@ import { announcementDigest } from "#harness/announcements.js";
 import { withUsageInEffect } from "#harness/usage-sink.js";
 import { sessionFrameOf } from "#definitions/frame.js";
 import { reportEffectFailure } from "#definitions/intents.js";
+import { createAuthorizationContext } from "#runtime/authorization-context.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { openMemos } from "#definitions/memos.js";
 import {
   clearLive,
@@ -116,9 +118,11 @@ async function keepOne(
     result = await evaluate(ctx, definition, fn, run);
   } catch (error) {
     if (run.mode === "evaluate") {
-      log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
-        error: toErrorMessage(error),
-      });
+      // A sign-in the value needs pauses the turn; the turn doesn't fail.
+      if (!isScopedAuthorizationRequiredError(error))
+        log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
+          error: toErrorMessage(error),
+        });
       throw new DefinitionFailedError(definition.label, error);
     }
     // The next model call evaluates it again, and fails the turn if it still fails.
@@ -441,6 +445,9 @@ async function withMemos<T>(
   return { result, used };
 }
 
+/** The scope a dynamic value's inline auth providers sign in under, before their provider key. */
+const DYNAMIC_AUTH_SCOPE = "agent";
+
 function internalContext(
   ctx: ContextContainer,
   definition: Definition,
@@ -448,11 +455,14 @@ function internalContext(
 ): InternalContext {
   const frame = sessionFrameOf(ctx);
   const { history } = run;
+  const auth = createAuthorizationContext({ scope: DYNAMIC_AUTH_SCOPE });
   return Object.defineProperties(
     {
       ...frame,
       abortSignal: run.signal,
       ctx,
+      getToken: auth.getToken,
+      requireAuth: auth.requireAuth,
       getSandbox: run.choosesModel
         ? () => {
             throw new Error(

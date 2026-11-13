@@ -8,6 +8,8 @@ import type { SessionView } from "#protocol/session-projection/session-view.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import type { SessionContext } from "#context/session-context.js";
+import type { TokenResult } from "#shared/connection-types.js";
+import type { ToolAuthOptions, ToolAuthProvider } from "#tools/definition.js";
 
 /**
  * The session's latest turn, running or not. Its `id` keys a memo that runs once per turn: it
@@ -96,6 +98,37 @@ export interface DynamicModelContext extends SessionFrame {
   readonly memo: Memo;
   /** The conversation history as of the latest commit, assembled when something reads it. */
   messages(): Promise<readonly ModelMessage[]>;
+  /**
+   * Resolves a token for an inline auth provider, such as `connect("github/myagent")`, with the
+   * same cache and sign-in as a tool's `ctx.getToken(provider)`. When the caller must sign in
+   * first, the model call doesn't run: eve opens the sign-in, pauses the turn, and evaluates the
+   * value again once the caller signs in. A scheduled turn fails with
+   * `reason: "sign_in_unavailable"`.
+   *
+   * Call it outside `ctx.memo`: a memo keeps its result in the session, and eve already reuses
+   * the token within a step.
+   *
+   * ```ts
+   * import { createAnthropic } from "@ai-sdk/anthropic";
+   * import { connect } from "@vercel/connect/eve";
+   *
+   * const anthropic = connect("anthropic/myagent");
+   *
+   * export default defineAgent({
+   *   model: defineDynamic(async (ctx) => {
+   *     const { token } = await ctx.getToken(anthropic);
+   *     return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
+   *   }),
+   * });
+   * ```
+   */
+  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
+  /**
+   * Evicts the provider's cached token and starts a fresh sign-in. Call it when a service
+   * rejects a token from {@link getToken}, including from inside the model call: the model call
+   * stops, and the turn resumes with a new model call once the caller signs in.
+   */
+  requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
 }
 
 /** What a dynamic value reads: the session as of its latest commit, and the model chosen for it. */

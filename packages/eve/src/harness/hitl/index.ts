@@ -5,6 +5,7 @@ import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
+import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
 import { fail } from "#harness/session-machine/transitions.js";
@@ -90,6 +91,28 @@ export async function stopForToolSignIn(
     requireSignIn(step.view(), {
       calls: interrupt.calls,
       challenges: interrupt.challenges,
+      callsBack: stepCallsBack(step),
+    }),
+    step.session.history,
+  );
+  return park(step);
+}
+
+/**
+ * A dynamic value or the model call needs a sign-in: the turn waits on it, and the step runs
+ * again once it completes. `messages` are the step's: they park with the sign-in, as they do at
+ * the budget gate.
+ */
+export async function stopForModelSignIn(
+  step: Step,
+  signal: AuthorizationSignal,
+  messages: readonly ModelMessage[],
+): Promise<StepResult> {
+  step.session = changeHistory(step.session, { extend: messages });
+  await applyEndingSignIns(
+    step,
+    requireSignIn(step.view(), {
+      challenges: signal.challenges,
       callsBack: stepCallsBack(step),
     }),
     step.session.history,

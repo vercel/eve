@@ -14,6 +14,11 @@ import { takeTurnFailure } from "#definitions/intents.js";
 import { isDynamicModelSelectionError } from "#definitions/model.js";
 import { DefinitionFailedError } from "#definitions/kernel.js";
 import { evaluateStepValues } from "#definitions/step.js";
+import type { AuthorizationSignal } from "#harness/authorization.js";
+import {
+  handleAuthorizationError,
+  isScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -170,16 +175,35 @@ export async function openTurn(
 export async function prepareModelCall(
   step: Step,
   preview: Prompt,
-): Promise<StepResult | undefined> {
+): Promise<ModelCallSignIn | undefined> {
   throwIfTurnAborted(step.config.abortSignal);
   const conversation = validateHarnessModelMessages(withClientContext(preview));
   try {
     await evaluateStepValues(step, { abortSignal: step.config.abortSignal, conversation });
   } catch (error) {
     if (!(error instanceof DefinitionFailedError)) throw error;
-    return failTurn(step, error, "REACTION_FAILED");
+    if (isScopedAuthorizationRequiredError(error.cause))
+      return await signInForModelCall(step, error.cause);
+    return { failed: await failTurn(step, error, "REACTION_FAILED") };
   }
   return undefined;
+}
+
+/** A model call that needs a sign-in: the sign-in it waits on, or the turn it failed. */
+export type ModelCallSignIn =
+  | { readonly signIn: AuthorizationSignal }
+  | { readonly failed: StepResult };
+
+/**
+ * A dynamic value or the model call asked for a sign-in. The turn fails when eve can't ask for
+ * one, such as in a scheduled turn or after the provider rejected a token it just issued.
+ */
+export async function signInForModelCall(step: Step, error: unknown): Promise<ModelCallSignIn> {
+  try {
+    return { signIn: await handleAuthorizationError(error) };
+  } catch (refused) {
+    return { failed: await failTurn(step, refused, "SIGN_IN_FAILED") };
+  }
 }
 
 /** A hook failed during the turn: the turn fails. Returns the step's result then. */

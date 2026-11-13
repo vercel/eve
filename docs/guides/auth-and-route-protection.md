@@ -492,6 +492,31 @@ Vercel Connect providers usually supply their own display name for the authoriza
 
 Inline providers derive a stable auth key from Vercel Connect metadata when available. Give each custom provider without that metadata an explicit key, for example `ctx.getToken(auth, { authKey: "github" })`. `authKey` sets eve's cache and callback keys; it is not an OAuth scope.
 
+### Before a model call
+
+When the model call itself needs the caller's credential, such as a provider API key that each person brings, resolve it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` as a tool's:
+
+```ts title="agent/agent.ts"
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { connect } from "@vercel/connect/eve";
+import { defineAgent, defineDynamic } from "eve";
+
+const anthropic = connect("anthropic/myagent");
+
+export default defineAgent({
+  model: defineDynamic(async (ctx) => {
+    const { token } = await ctx.getToken(anthropic);
+    return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
+  }),
+});
+```
+
+- When the caller has no token, the model call doesn't run. eve opens the sign-in, pauses the turn, and evaluates the model again once the caller signs in. The same turn continues; the caller sends no new message.
+- When the provider rejects a token during the model call, call `ctx.requireAuth(provider)` from your model code, such as AI SDK middleware that recognizes the provider's error. eve abandons that model run, opens the sign-in, and runs the model call again once the caller signs in.
+- A scheduled turn fails with `reason: "sign_in_unavailable"` and opens no sign-in.
+
+Call `ctx.getToken` outside `ctx.memo`: a memo keeps its result in the session, and eve already reuses the token within a step.
+
 ## What to read next
 
 - [Security model](../concepts/security-model): trust boundaries and the pre-production checklist
