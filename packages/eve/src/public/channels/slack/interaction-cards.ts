@@ -184,6 +184,7 @@ export async function settleHitlCard(
     installationTeamId: interaction.installationTeamId,
     messageTs: hitlAction.messageTs,
     responseUrl: interaction.ephemeral ? hitlAction.responseUrl : undefined,
+    threadTs: interaction.threadTs,
   });
 }
 
@@ -196,6 +197,7 @@ export async function settleFreeformCard(input: {
   readonly messageTs: string;
   /** The `response_url` of the click that opened the modal, when the card was ephemeral. */
   readonly responseUrl?: string;
+  readonly threadTs?: string;
 }): Promise<void> {
   await updateSettledCard({
     ...input,
@@ -215,6 +217,7 @@ async function updateSettledCard(input: {
   readonly installationTeamId?: string;
   readonly messageTs: string;
   readonly responseUrl?: string | undefined;
+  readonly threadTs?: string | undefined;
 }): Promise<void> {
   if (input.responseUrl !== undefined) {
     // Slack's own host, so the transport's `fetch`, confined to the configured bases, stays out.
@@ -222,6 +225,9 @@ async function updateSettledCard(input: {
       blocks: input.blocks,
       replaceOriginal: true,
       text: input.card.text,
+      // Without it, Slack also shows a threaded ephemeral's replacement at the top of the channel.
+      // A card outside a thread reports its own `ts` as its thread, so it stays top-level.
+      ...(input.threadTs && input.threadTs !== input.messageTs && { threadTs: input.threadTs }),
     });
     return;
   }

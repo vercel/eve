@@ -653,6 +653,7 @@ async function openFreeformModal(input: {
     continuationToken: slackSessionToken(target),
     installationTeamId: input.interaction.installationTeamId,
     messageChannelId: input.interaction.channelId,
+    messageThreadTs: input.interaction.threadTs,
     messageTs,
     requestId,
     // The submission carries no `response_url`, and only the click's can change an ephemeral card.
@@ -782,6 +783,7 @@ async function dispatchViewAnswer(input: {
       installationTeamId: input.installationTeamId,
       messageTs: input.metadata.messageTs,
       responseUrl: input.metadata.responseUrl,
+      threadTs: input.metadata.messageThreadTs,
     });
   const response = await respondOrRetireInactivePrompt(
     () =>
