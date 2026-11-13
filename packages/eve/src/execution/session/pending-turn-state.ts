@@ -1,5 +1,5 @@
 import { sessionView } from "#harness/session-machine/commit.js";
-import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
+import { holdsMessages, ownOpenRequestIds, runtimeWait } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
@@ -14,6 +14,11 @@ export type TurnPause =
   | {
       readonly on: "interaction";
       readonly attemptIds: readonly string[];
+      /**
+       * An open request takes its answer before any message (`holdsMessages`), so only the
+       * request's own answer may steer the turn as it resumes.
+       */
+      readonly holdsMessages: boolean;
       readonly requestIds: readonly string[];
     }
   /** Working tasks. Any of them settling resumes the turn. */
@@ -34,13 +39,14 @@ export function pausedOnInteraction(
   session: HarnessSession,
   projection: SessionProjection,
 ): TurnPause {
-  const challenges = sessionView(projection, session.state).signIns;
+  const view = sessionView(projection, session.state);
   return {
-    attemptIds: challenges.flatMap((challenge) =>
+    attemptIds: view.signIns.flatMap((challenge) =>
       challenge.attemptId === undefined ? [] : [challenge.attemptId],
     ),
+    holdsMessages: holdsMessages(view),
     on: "interaction",
-    requestIds: [...ownOpenRequestIds(sessionView(projection, session.state))],
+    requestIds: [...ownOpenRequestIds(view)],
   };
 }
 

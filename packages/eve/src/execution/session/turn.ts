@@ -317,6 +317,8 @@ export class SessionExecution {
       paused.on === "interaction"
         ? { attemptIds: new Set(paused.attemptIds), requestIds: new Set(paused.requestIds) }
         : undefined;
+    // A request that holds messages may only receive its answer: its text alone names an option.
+    const holdsMessages = paused.on === "interaction" && paused.holdsMessages;
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
     let interrupted = false;
     while (true) {
@@ -325,7 +327,7 @@ export class SessionExecution {
         if (callbacks !== undefined) return { delivery: { kind: "deliver", payloads: callbacks } };
         const answer = await turn.takeAnswers(pendingInteraction.requestIds);
         if (answer !== undefined) return { delivery: answer };
-        const steering = await turn.takeSteering({ heldSince });
+        const steering = await turn.takeSteering({ heldSince, holdsMessages });
         if (steering !== undefined) return { delivery: steering };
       }
       if (

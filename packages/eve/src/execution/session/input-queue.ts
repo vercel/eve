@@ -192,12 +192,17 @@ export class SessionInputQueue {
         }),
     );
     if (steering.length === 0) return undefined;
-    this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
+    // While an open request holds messages, only the next delivery comes through: it is that
+    // request's answer, and the messages behind it wait for the turn to settle it. Joined to the
+    // answer, they would change the text it is read from, so it would name no option and settle
+    // nothing.
+    const taken = options?.holdsMessages === true ? steering.slice(0, 1) : steering;
+    this.retain((entry) => entry.kind !== "delivery" || !taken.includes(entry));
     return {
-      delivery: combine(steering),
+      delivery: combine(taken),
       handoffEligible: false,
       kind: "turn",
-      sequences: steering.map(({ sequence }) => sequence),
+      sequences: taken.map(({ sequence }) => sequence),
     };
   }
 
@@ -274,6 +279,12 @@ export interface SteeringTurn {
 }
 
 export interface SteeringOptions {
+  /**
+   * An open request holds messages (`holdsMessages`). Only the next admitted delivery may steer
+   * the turn then: it is that request's answer, read from its own text. The messages behind it
+   * wait for the turn's next step, as they would had they arrived a moment later.
+   */
+  readonly holdsMessages?: boolean;
   /**
    * The turn waits on its own person for a sign-in or approval, held since
    * this admission sequence. Their later messages steer even with

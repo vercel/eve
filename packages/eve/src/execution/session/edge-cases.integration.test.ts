@@ -2975,4 +2975,113 @@ describe("turns parked on their own prompt", () => {
       ["bob here", "turn_1", "bob"],
     ]);
   });
+
+  const LIMIT_QUERY = "Carol wants the review by Friday.";
+  const EXHAUST_BUDGET = "Use look_up_notes to find Bob's review notes.";
+
+  /**
+   * A session whose first model call spends the whole budget, so its next one raises the
+   * session-limit prompt. The step that raised the prompt stays open until every `send` is
+   * accepted, so the paused turn reads them at one boundary, as a channel delivering a typed
+   * answer and the message beside it together does.
+   */
+  async function withBudgetPrompt(
+    name: string,
+    send: readonly string[],
+    body: (session: Session) => Promise<void>,
+  ) {
+    const promptRaised = gate();
+    const release = gate();
+    return await withSession(
+      name,
+      {
+        hooks: {
+          observe: defineHook({
+            events: {
+              async "interaction.opened"(event) {
+                if (event.data.request.kind !== "budget") return;
+                promptRaised.open();
+                await release.wait;
+              },
+            },
+          }),
+        },
+        message: EXHAUST_BUDGET,
+        model: scriptedModel(({ said }) =>
+          said(LIMIT_QUERY) ? "Noted: the review is due Friday." : [{ toolName: "look_up_notes" }],
+        ),
+        sessionUsage: ({ window }) => window.inputTokens >= 1,
+        tools: [{ name: "look_up_notes" }],
+      },
+      async (session) => {
+        await promptRaised.wait;
+        try {
+          for (const message of send) await session.send(message);
+        } finally {
+          // The held step must finish either way, so a failing test can still cancel the session.
+          release.open();
+        }
+        await body(session);
+      },
+    );
+  }
+
+  // #6307: the query and the approval are admitted at the same boundary. Joined, they read
+  // "Carol wants…\n\napprove", which names no option, so the prompt never settled and the
+  // session waited on it until the channel gave up.
+  it("answers the query admitted with the approval of a session-limit prompt", async () => {
+    const { events, ran } = await withBudgetPrompt(
+      "edge-limit-query-with-approval",
+      [LIMIT_QUERY, "approve"],
+      async (session) => {
+        await session.until(
+          "the budget prompt settles",
+          (event) => event.type === "interaction.settled",
+        );
+        await session.until(
+          "the query is answered",
+          (event) =>
+            event.type === "content.completed" &&
+            typeof event.data.value === "string" &&
+            event.data.value.includes("due Friday"),
+        );
+        await session.until(
+          "the turn ends",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    // The approval settles the prompt it was typed for, and the query behind it is answered.
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "accepted",
+    ]);
+    expect(ran).toEqual(["look_up_notes"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  // #6307: "stop" joined to the message behind it answers nothing, so the turn never stopped.
+  it("asks again for the message admitted with a stop on a session-limit prompt", async () => {
+    const { events, ran } = await withBudgetPrompt(
+      "edge-limit-stop-with-message",
+      ["stop", LIMIT_QUERY],
+      async (session) => {
+        await session.until(
+          "the budget prompt settles",
+          (event) => event.type === "interaction.settled",
+        );
+        // Stopping keeps the session over budget, so the message's turn asks again.
+        await session.until(
+          "the message asks again",
+          (event) => event.type === "interaction.opened",
+        );
+      },
+    );
+
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "declined",
+    ]);
+    expect(ofType(events, "content.completed")).toEqual([]);
+    expect(ran).toEqual(["look_up_notes"]);
+  });
 });

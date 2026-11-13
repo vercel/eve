@@ -128,3 +128,38 @@ describe("SessionInputQueue", () => {
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
   });
 });
+
+it("takes only the answer to a session-limit prompt, leaving the message behind it queued", () => {
+  const alice = {
+    attributes: {},
+    authenticator: "slack",
+    principalId: "ALICE",
+    principalType: "user" as const,
+  };
+  const queue = new SessionInputQueue([]);
+  const turn = { callerCallId: undefined, principal: principalOf(alice) };
+  const send = (message: string) => {
+    const enqueued = queue.enqueueDelivery({
+      auth: alice,
+      kind: "deliver",
+      payloads: [{ message }],
+    });
+    expect(enqueued).toBeDefined();
+    return enqueued!.sequence;
+  };
+
+  const answer = send("approve");
+  const behind = send("Carol wants the review by Friday.");
+  const admitted = new Set([answer, behind]);
+
+  // Read together, the two deliveries say "approve\n\nCarol wants…", which names no option.
+  expect(queue.takeSteering(admitted, turn, { heldSince: 0, holdsMessages: true })).toMatchObject({
+    delivery: { payloads: [{ message: "approve" }] },
+    sequences: [answer],
+  });
+  expect(queue.takeSteering(admitted, turn, { heldSince: 0, holdsMessages: true })).toMatchObject({
+    delivery: { payloads: [{ message: "Carol wants the review by Friday." }] },
+    sequences: [behind],
+  });
+  expect(queue.takeSteering(admitted, turn, { holdsMessages: true })).toBeUndefined();
+});
