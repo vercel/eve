@@ -39,8 +39,6 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
  */
 const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.approval.response",
-  "agent.decision.answers",
-  "agent.decision.outcome",
   "ai.embedding",
   "ai.embeddings",
   "ai.ranking",
@@ -53,6 +51,7 @@ const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "ai.response.tool_results",
   "ai.toolCall.args",
   "ai.toolCall.result",
+  "gen_ai.decision.results",
   "gen_ai.output.messages",
   "gen_ai.tool.call.result",
 ]);

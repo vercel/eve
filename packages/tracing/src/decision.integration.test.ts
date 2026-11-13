@@ -92,12 +92,14 @@ describe("decision tracing", () => {
     );
   });
 
-  it.each([
-    { recordOutputs: false, outcome: undefined, answers: undefined },
-    { recordOutputs: true, outcome: "completed", answers: '{"team":{"type":"choice","choice":"billing"}}' },
-  ])(
-    "names the turn and purpose, and records the outcome only as output content (outputs: $recordOutputs)",
-    async ({ recordOutputs, outcome, answers }) => {
+  const results = [
+    { question_index: 0, question_name: "team", type: "choice", value: "billing" },
+    { question_index: 1, question_name: "urgent", type: "refusal" },
+  ];
+
+  it.each([false, true])(
+    "names the turn and purpose, and records results only as output content (outputs: %s)",
+    async (recordOutputs) => {
       const turn = await tracing.turn({ agentName: "support", identity, sequence: 0, capture });
       await tracing.decision(
         {
@@ -108,9 +110,7 @@ describe("decision tracing", () => {
           capture: { emit: true, recordInputs: false, recordOutputs },
         },
         async (operation) => {
-          await operation.complete({
-            output: { team: { type: "choice", choice: "billing" } },
-          });
+          await operation.complete({ output: results });
         },
       );
       await turn.complete();
@@ -120,21 +120,11 @@ describe("decision tracing", () => {
         "agent.turn.id": "turn-1",
         "agent.decision.purpose": "model-selection",
       });
-      expect(decision.attributes["agent.decision.outcome"]).toBe(outcome);
-      expect(decision.attributes["agent.decision.answers"]).toBe(answers);
+      expect(decision.attributes["gen_ai.decision.results"]).toBe(
+        recordOutputs ? JSON.stringify(results) : undefined,
+      );
     },
   );
-
-  it("records a refusal as the outcome when outputs are recorded", async () => {
-    await tracing.decision(
-      { modelId: "jev", identity, capture: { emit: true, recordInputs: false, recordOutputs: true } },
-      async (operation) => {
-        await operation.complete({ outcome: "refused" });
-      },
-    );
-    expect(span("decision jev").attributes["agent.decision.outcome"]).toBe("refused");
-    expect(span("decision jev").attributes["agent.decision.answers"]).toBeUndefined();
-  });
 
   it("records nothing beneath an unsampled parent", async () => {
     let inner: boolean | undefined;

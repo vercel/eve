@@ -20,8 +20,7 @@ const CONTENT_FIELDS = {
   approvalRequest: "agent.approval.request",
   approvalResponse: "agent.approval.response",
   memoryRecords: "gen_ai.memory.records",
-  decisionAnswers: "agent.decision.answers",
-  decisionOutcome: "agent.decision.outcome",
+  decisionResults: "gen_ai.decision.results",
 } as const;
 export function applyAttributes(
   span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
@@ -304,12 +303,11 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
       };
     },
     complete(span, _data, result, context) {
-      // What the model answered, including whether it refused, is output content.
-      if (!context.capture.recordOutputs) return;
+      // Per-question results, refusals included, are opt-in output content.
+      if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
+        return;
       applyAttributes(span, {
-        [CONTENT_FIELDS.decisionOutcome]: context.outcome,
-        [CONTENT_FIELDS.decisionAnswers]:
-          result.output === undefined ? undefined : context.serializer.json(result.output),
+        [CONTENT_FIELDS.decisionResults]: context.serializer.json(result.output),
       });
     },
   },

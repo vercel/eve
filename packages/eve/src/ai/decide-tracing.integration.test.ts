@@ -357,7 +357,7 @@ describe("decide tracing", () => {
   );
 
   it.each([true, false])(
-    "records a decision's outcome and answers only when outputs are recorded (%s)",
+    "records decision results only when outputs are recorded (%s)",
     async (recordOutputs) => {
       runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs }));
       const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
@@ -369,14 +369,42 @@ describe("decide tracing", () => {
         "agent.decision.purpose": "model-selection",
         "agent.turn.id": "turn-1",
       });
-      expect(span.attributes["agent.decision.outcome"]).toBe(
-        recordOutputs ? "completed" : undefined,
-      );
-      expect(span.attributes["agent.decision.answers"]).toBe(
-        recordOutputs ? JSON.stringify(answer.answers) : undefined,
+      expect(span.attributes["gen_ai.decision.results"]).toBe(
+        recordOutputs
+          ? JSON.stringify([
+              { question_index: 0, question_name: "team", type: "choice", value: "billing" },
+            ])
+          : undefined,
       );
     },
   );
+
+  it("records a refusal as a result, not a failure, when outputs are recorded", async () => {
+    runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs: true }));
+    const model = new Experimental_DecisionMockModelV4({
+      doDecide: async () => ({
+        ...answer,
+        answers: { ...answer.answers, urgent: { type: "refusal" } },
+      }),
+    });
+    await inSession(async () => {
+      await expect(
+        decide({
+          model,
+          state,
+          questions: {
+            ...questions,
+            urgent: { type: "boolean", instructions: "Does Alice need an urgent response?" },
+          },
+        }),
+      ).rejects.toMatchObject({ questionIds: ["urgent"] });
+    });
+    const span = decisions()[0]!;
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
+    expect(JSON.parse(String(span.attributes["gen_ai.decision.results"]))).toEqual([
+      { question_index: 1, question_name: "urgent", type: "refusal" },
+    ]);
+  });
 
   it("keeps a partial model refusal distinct from a request failure", async () => {
     const model = new Experimental_DecisionMockModelV4({

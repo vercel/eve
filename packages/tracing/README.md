@@ -152,9 +152,10 @@ Omit `identity` for a decision made outside any run. Decision usage isn't added
 to the turn's totals.
 
 `purpose` is recorded as `agent.decision.purpose`, and a decision in a run
-records `agent.turn.id`. When the capture records outputs, completion records
-the outcome as `agent.decision.outcome` and `output` as `agent.decision.answers`;
-both are output content.
+records `agent.turn.id`. Pass the per-question results as `output` in the
+OpenTelemetry GenAI `gen_ai.decision.results` shape; they are output content,
+recorded only when the capture records outputs. A refusal is a result, not a
+failure.
 
 ## AI SDK
 
