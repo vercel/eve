@@ -110,7 +110,7 @@ function deriveInlineScope(input: {
 
   return input.owner === undefined
     ? `${input.scope}__inline_auth`
-    : `${input.scope}__${sanitizeScopeSegment(input.owner)}__inline_auth`;
+    : `${input.scope}__${encodeScopeOwner(input.owner)}__inline_auth`;
 }
 
 function validateInlineAuthKey(authKey: string): string {
@@ -120,6 +120,14 @@ function validateInlineAuthKey(authKey: string): string {
     );
   }
   return authKey;
+}
+
+/**
+ * Encodes a definition id into the allowed scope characters, one id to one segment: every
+ * character outside `[A-Za-z0-9:-]` becomes `.<hex>.`, so `foo/bar` and `foo_bar` stay apart.
+ */
+function encodeScopeOwner(owner: string): string {
+  return owner.replace(/[^A-Za-z0-9:-]/gu, (char) => `.${char.codePointAt(0)!.toString(16)}.`);
 }
 
 function sanitizeScopeSegment(value: string): string {

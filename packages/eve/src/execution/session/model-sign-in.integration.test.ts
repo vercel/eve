@@ -19,6 +19,7 @@ import { filterEventsByType } from "#internal/testing/events.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 
 const alice = {
@@ -192,17 +193,9 @@ describe("dynamic values with plain providers", () => {
         name: "plain-providers",
       },
       modules: [
-        {
-          logicalPath: "instructions/docs.ts",
-          loadNamespace: async () => ({
-            default: defineDynamic(async (ctx: DynamicModelContext) => {
-              seen.docs = (
-                await ctx.getToken({ getToken: async () => ({ token: "docs-key" }) })
-              ).token;
-              return "Answer from the docs.";
-            }),
-          }),
-        },
+        plainInstructions("instructions/docs.ts", "docs", seen),
+        plainInstructions("instructions/foo/bar.ts", "foo/bar", seen),
+        plainInstructions("instructions/foo_bar.ts", "foo_bar", seen),
       ],
     });
 
@@ -211,7 +204,12 @@ describe("dynamic values with plain providers", () => {
       const stream = captureEvents(run);
       try {
         await stream.nextUntil("answer", isTurnSettled);
-        expect(seen).toEqual({ docs: "docs-key", model: "model-key" });
+        expect(seen).toEqual({
+          docs: "docs-key",
+          "foo/bar": "foo/bar-key",
+          foo_bar: "foo_bar-key",
+          model: "model-key",
+        });
       } finally {
         stream.dispose();
         await run.cancel();
@@ -219,6 +217,21 @@ describe("dynamic values with plain providers", () => {
     });
   });
 });
+
+/** Dynamic instructions at `logicalPath` that read a plain provider's token into `seen[name]`. */
+function plainInstructions(logicalPath: string, name: string, seen: Record<string, string>) {
+  return {
+    logicalPath,
+    loadNamespace: async () => ({
+      default: defineDynamic(async (ctx: DynamicModelContext) => {
+        seen[name] = (
+          await ctx.getToken({ getToken: async () => ({ token: `${name}-key` }) })
+        ).token;
+        return defineInstructions({ content: `Answer from ${name}.` });
+      }),
+    }),
+  };
+}
 
 interface BillingProvider {
   readonly auth: AuthorizationDefinition<{ nonce: string }>;
