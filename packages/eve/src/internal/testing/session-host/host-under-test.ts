@@ -3,6 +3,7 @@ import { vi } from "vitest";
 
 import type { Runtime } from "#channel/types.js";
 import { forgetSessionLive } from "#definitions/state.js";
+import { forgetRunnableOwnerRun } from "#execution/session-inbox/runnable-owner.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -176,8 +177,12 @@ async function makeWorkflowHost(setup: HostSetup = {}): Promise<HostUnderTest> {
     async restart(options) {
       faults?.restore();
       const recovered = await testWorld.restart(options);
-      // What this realm kept of each session is the dead process's.
-      for (const runId of recovered) forgetSessionLive(runId);
+      // What this realm kept of each session is the dead process's, including that its run
+      // records this eve version: a restart can boot it under another.
+      for (const runId of recovered) {
+        forgetSessionLive(runId);
+        forgetRunnableOwnerRun(runId);
+      }
     },
     async cancelRunOutsideEve(sessionId) {
       await cancelRun(testWorld.world, sessionId);

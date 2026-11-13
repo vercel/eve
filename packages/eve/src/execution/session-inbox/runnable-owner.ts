@@ -14,6 +14,11 @@ const RUNNABLE_OWNER_CACHE_LIMIT = 10_000;
  */
 const runnableOwnerRunIds = new Set<string>();
 
+/** Forgets that `runId` is runnable, as a new process would: for a test that restarts one. */
+export function forgetRunnableOwnerRun(runId: string): void {
+  runnableOwnerRunIds.delete(runId);
+}
+
 /**
  * Whether the World replays every run on the deployment that started it
  * (Vercel). There, an owner from another eve version is the normal handoff
