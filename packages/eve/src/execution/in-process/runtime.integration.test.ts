@@ -10,6 +10,8 @@ import { defineTool } from "#tools/definition.js";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
+import type { DeliveryTiming } from "#execution/in-process/inbox-transport.js";
+import type { InProcessRuntime } from "#execution/in-process/runtime.js";
 import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -469,5 +471,123 @@ describe("the in-process runtime", () => {
         await runtime.dispose();
       }
     });
+  });
+});
+
+const LATER_MESSAGE = "Carol wants the review by Friday.";
+
+// Spends the whole budget on its first call, a tool call, so the next asks to go on.
+const budgetModel = markMockModel(
+  new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      const said = (text: string) =>
+        prompt.some(
+          (message) =>
+            message.role === "user" &&
+            message.content.some((part) => part.type === "text" && part.text.includes(text)),
+        );
+      if (said(LATER_MESSAGE)) return textStreamResult("Noted: the review is due Friday.");
+      return prompt.some((message) => message.role === "tool")
+        ? textStreamResult("Bob's notes are in.")
+        : toolCallsStreamResult([
+            { input: "{}", toolCallId: "call-notes", toolName: "look_up_notes" },
+          ]);
+    },
+    modelId: "in-process-budget",
+    provider: "eve-test",
+  }),
+);
+
+/** The first event `matches` accepts, read as the session writes it. */
+async function firstEvent(
+  runtime: Runtime,
+  sessionId: string,
+  matches: (event: SessionStreamEvent) => boolean,
+  timeoutMs: number,
+): Promise<SessionStreamEvent | undefined> {
+  const reader = (await runtime.getEventStream(sessionId)).getReader();
+  const timer = setTimeout(() => void reader.cancel(), timeoutMs);
+  try {
+    for (let next = await reader.read(); !next.done; next = await reader.read())
+      if (matches(next.value)) return next.value;
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+    await reader.cancel().catch(() => {});
+  }
+}
+
+/**
+ * Alice runs out of budget, then types a message and "approve" the moment the step that asked
+ * ends, before the session reads its end: what Workflow's late replay allows. Returns how the
+ * budget prompt settled, or `undefined` if it never did.
+ */
+async function answerBudgetPromptBackToBack(deliveries: DeliveryTiming) {
+  const test = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+        model: defineDynamic(() => ({ model: budgetModel, modelContextWindowTokens: 200_000 })),
+      }),
+      name: `in-process-budget-${deliveries}`,
+    },
+    modules: [
+      {
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Look up notes.",
+            execute: async () => ({ notes: "Ship on Friday." }),
+            inputSchema: {},
+          }),
+        }),
+        logicalPath: "tools/look_up_notes.ts",
+      },
+    ],
+  });
+  return await test.run(async () => {
+    const runtime: InProcessRuntime = createTestInProcessRuntime(
+      { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+      { deliveries },
+    );
+    try {
+      const alice = address(runtime, `alice-budget-${deliveries}`);
+      const { sessionId } = await alice.send("Use look_up_notes to find Bob's notes.", {
+        auth: null,
+      });
+      const asked = await firstEvent(
+        runtime,
+        sessionId,
+        (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
+        10_000,
+      );
+      expect(asked, "the budget prompt").toBeDefined();
+      while (runtime.stepsRunning(sessionId) > 0)
+        await new Promise((resolve) => setImmediate(resolve));
+      await alice.send(LATER_MESSAGE, { auth: null });
+      await alice.send("approve", { auth: null });
+      const settled = await firstEvent(
+        runtime,
+        sessionId,
+        (event) => event.type === "interaction.settled",
+        // A settled prompt settles within milliseconds; one that never settles costs this long.
+        3_000,
+      );
+      return settled?.type === "interaction.settled" ? settled.data.outcome : undefined;
+    } finally {
+      await runtime.dispose();
+    }
+  });
+}
+
+describe("deliveries made back to back", () => {
+  it("are read one at a time when handed over at once", async () => {
+    await expect(answerBudgetPromptBackToBack("immediate")).resolves.toBe("accepted");
+  });
+
+  // Broken until vercel/eve#6307 lands: the message and "approve" are read as one input,
+  // "Carol wants…\n\napprove", which names no option, so the prompt never settles. With the fix,
+  // expect "accepted", as above.
+  it("are read together with the step's end when batched, as on Workflow", async () => {
+    await expect(answerBudgetPromptBackToBack("batched")).resolves.toBeUndefined();
   });
 });

@@ -29,7 +29,11 @@ import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
 import { applyRunMessagesOn } from "#execution/tools/workflow/apply-run-messages.js";
 import { isHookNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
-import { createMemoryInboxRegistry, type MemoryInboxRegistry } from "./inbox-transport.js";
+import {
+  createMemoryInboxRegistry,
+  type DeliveryTiming,
+  type MemoryInboxRegistry,
+} from "./inbox-transport.js";
 import { createMemoryLineStore, type MemoryLineStore } from "./line-store.js";
 import { createInProcessRuns, type InProcessRuns } from "./runs.js";
 import { createStepAttempts, type StepFaults } from "./step-attempts.js";
@@ -94,6 +98,11 @@ export interface InProcessHostOptions {
   readonly stepFaults?: StepFaults;
   /** How long disposing waits for running turns to park before it resets their sessions: 5s. */
   readonly disposeGraceMs?: number;
+  /**
+   * When sessions and runs read what's delivered, and a session the end of its turn step
+   * (`DeliveryTiming`); at once by default.
+   */
+  readonly deliveries?: DeliveryTiming;
 }
 
 export interface InProcessHost {
@@ -133,7 +142,9 @@ export function createInProcessHost(
   const lines = createMemoryLineStore();
   const stepBoundary = options.stepBoundary ?? structuredCloneBoundary;
   const work = createWorkCounter();
-  const registry = createMemoryInboxRegistry(stepBoundary);
+  const registry = createMemoryInboxRegistry(stepBoundary, {
+    ...(options.deliveries !== undefined && { deliveries: options.deliveries }),
+  });
   const inboxes: MemoryInboxRegistry = {
     ...registry,
     deliver: (token, payload) => work.count(() => registry.deliver(token, payload)),
@@ -236,6 +247,9 @@ export function createInProcessHost(
           const left = (steps.get(sessionId) ?? 1) - 1;
           if (left === 0) steps.delete(sessionId);
           else steps.set(sessionId, left);
+          // On Workflow, a session reads a step's end when its run next replays, with every hook
+          // payload that arrived by then. With batched deliveries, so does this one.
+          await inboxes.heard();
         }
       }),
     until: (at) => timers.until(at),

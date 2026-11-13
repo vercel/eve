@@ -75,7 +75,13 @@ function workflowHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): 
 function inProcessHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): ConformanceHost {
   const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource },
-    { callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL },
+    {
+      callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL,
+      // Batched, a budget prompt's answer typed back to back with another message is sometimes
+      // read joined to it (vercel/eve#6307), so those cells fail at random rather than every
+      // time, and can't be recorded as broken. Batch here once #6307 lands.
+      deliveries: "immediate",
+    },
   );
   // The test agent's workflow tools, as the plain bodies their `"use workflow"` twins wrap.
   for (const { body, workflowId } of questionWorkflowBodies())
