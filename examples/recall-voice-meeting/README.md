@@ -22,7 +22,7 @@ The page also hears the meeting's mixed audio, without the bot's own voice. When
 | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `agent/channels/recall.ts`    | `recallChannel()` with the voice routes, the `shouldRespond` check, and chat only for replies with a link |
 | `agent/lib/voice.ts`          | The bot config with Output Media, the page and stream routes, sentence splitting, and speech synthesis    |
-| `agent/lib/voice-page.ts`     | The page the bot streams: plays speech in order, shows captions, and stops when someone talks over it     |
+| `agent/lib/voice-page.ts`     | The page the bot streams: plays speech in order, draws a waveform, and stops when someone talks over it   |
 | `agent/tools/join_meeting.ts` | Sends a voice bot to a meeting on request, for testing                                                    |
 | `agent/instructions.md`       | How to talk: short spoken sentences, no Markdown, and a heads-up line before tool calls                   |
 
