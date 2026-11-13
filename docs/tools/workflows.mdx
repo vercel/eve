@@ -174,6 +174,47 @@ async *execute(input, ctx) {
 The tool call stays pending until the answer arrives and the body returns. An ordinary Promise or
 Node.js timer inside a step doesn't pause the workflow or survive a restart.
 
+## End the turn after the call
+
+Set `endsTurn` on an `execute` tool when the call's result is the whole answer, such as a form the
+user fills in on the client with [`ctx.ask`](#ask-a-human-ctxask). The turn ends without another
+model call and without a reply once the call's result arrives:
+
+```ts title="agent/tools/refund_form.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Open a refund form and end your turn when the user submits it.",
+  inputSchema: z.object({ invoiceId: z.string() }),
+  async execute({ invoiceId }, ctx) {
+    "use workflow";
+    const answer = await ctx.ask({
+      prompt: `Refund invoice ${invoiceId}?`,
+      display: "confirmation",
+      options: [
+        { id: "refund", label: "Refund", style: "primary" },
+        { id: "cancel", label: "Cancel" },
+      ],
+    });
+    return {
+      invoiceId,
+      outcome: answer.status === "answered" ? answer.optionId : undefined,
+    };
+  },
+  // declare after execute so TypeScript infers `output`
+  endsTurn: (output) => output.outcome !== undefined,
+});
+```
+
+The function receives the call's output: the body's return value, or its last yield when the body
+returns nothing. Otherwise `endsTurn` works as it does on
+[`defineTool`](/docs/tools#end-the-turn-after-a-tool-call), including when eve ignores it. Only an
+`execute` entry point accepts it; `task` and `serve` reject it.
+
+A message the user sends while the call waits still gets a reply: it withdraws the open question,
+the body returns without an `outcome`, and the function returns `false`.
+
 ## Run calls as tasks: `task`
 
 Define `task(input, ctx)` in place of `execute` when the conversation should continue while a call
