@@ -6,7 +6,9 @@ import { isLoopbackHostname } from "#shared/network-address.js";
  * - `"loopback"`: only from a loopback host, such as a local `eve dev`.
  * - `"forwarded-https"`: also when `X-Forwarded-Proto` says the client used HTTPS, for a proxy
  *   that terminates TLS and sets the header itself. Any client can send the header, so use this
- *   only when every request passes through such a proxy.
+ *   only when every request passes through such a proxy, and when the outermost one overwrites
+ *   `X-Forwarded-Proto` and `X-Forwarded-Port` rather than appending to them: the first value is
+ *   read as the client's, so an edge that appends would pass a client's own `https` through.
  * - `"allow"`: from any host, for a network kept private some other way, such as calls between
  *   services in one cluster.
  */
@@ -74,7 +76,11 @@ function validateTransportAndHost(
     scheme !== "https:" &&
     !(scheme === "http:" && (plainHttp === "allow" || isLoopbackHostname(target.hostname)))
   ) {
-    return securityError(`${protocol} endpoints require HTTPS except on loopback.`);
+    return securityError(
+      plainHttp === "forwarded-https"
+        ? `${protocol} endpoints require HTTPS: this request arrived over HTTP without X-Forwarded-Proto: https from the proxy.`
+        : `${protocol} endpoints require HTTPS except on loopback.`,
+    );
   }
 
   const hostFailure = validateHostHeader(request, target);

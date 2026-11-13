@@ -102,12 +102,20 @@ describe("HTTP request guards", () => {
     );
   });
 
-  it("accepts plain HTTP X-Forwarded-Proto says arrived as HTTPS, only under forwarded-https", () => {
+  it("accepts plain HTTP X-Forwarded-Proto says arrived as HTTPS, only under forwarded-https", async () => {
     const forwarded = (headers: Record<string, string> = {}) =>
       request("http://agent.internal:3000/a2a", { "x-forwarded-proto": "https", ...headers });
 
     expect(validateHttpEndpointRequest(forwarded(), "A2A")?.status).toBe(403);
     expect(validateHttpEndpointRequest(forwarded(), "A2A", "forwarded-https")).toBeUndefined();
+    // Refused under forwarded-https, the message points at the proxy header, not loopback.
+    await expect(
+      validateHttpEndpointRequest(
+        request("http://agent.internal:3000/a2a"),
+        "A2A",
+        "forwarded-https",
+      )?.json(),
+    ).resolves.toMatchObject({ error: { message: expect.stringContaining("X-Forwarded-Proto") } });
     // The first value is the client's hop.
     expect(
       validateHttpEndpointRequest(
