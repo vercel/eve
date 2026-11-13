@@ -194,9 +194,6 @@ describe("hosted graph substitutions", () => {
       expect(await bundleImport(plugin, specifier), specifier).toContain(
         "async function ensureDevelopmentSandboxesPrepared() {}",
       );
-      expect(await bundleImport(plugin, specifier), specifier).toContain(
-        "function startDevelopmentSandboxesPrewarm() {}",
-      );
     }
     for (const specifier of [
       "/repo/packages/eve/dist/src/internal/application/optional-package-install.js",

@@ -3,12 +3,7 @@ import {
   readDevelopmentModelCredential,
 } from "#internal/model-auth/development-broker-client.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
-import {
-  isEveDevEnvironment,
-  isEveEvaluationServer,
-} from "#internal/application/dev-environment.js";
-import { startDevelopmentSandboxesPrewarm } from "#execution/sandbox/development-lazy-prewarm.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { resolveGatewayModelCredential } from "#internal/model-auth/gateway-credential.js";
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
@@ -24,24 +19,9 @@ import type { ModelRouting } from "#shared/agent-definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
 async function createAgentInfoPayload(input: NitroArtifactsConfig) {
-  const compiledArtifactsSource = resolveAgentInfoCompiledArtifactsSource(input);
-  const data = await loadAgentInfoManifestData({ compiledArtifactsSource });
-
-  // `eve eval` reads this response once before its first eval, so start the
-  // sandbox template preparation here: it then overlaps evals that do not use a
-  // sandbox instead of stalling the first eval that does.
-  if (
-    isEveEvaluationServer() &&
-    isEveDevEnvironment() &&
-    compiledArtifactsSource.kind === "disk" &&
-    data.manifest.sandbox.providerName !== undefined
-  ) {
-    startDevelopmentSandboxesPrewarm({
-      compiledArtifactsSource,
-      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      providerName: data.manifest.sandbox.providerName,
-    });
-  }
+  const data = await loadAgentInfoManifestData({
+    compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
+  });
 
   const routing =
     data.manifest.config.dynamicModel === undefined

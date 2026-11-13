@@ -55,11 +55,6 @@ export function resolveInstrumentationEnvironment(): ConversationEnvironment {
 /** Environment flag set for a server `eve eval` started to run against. */
 export const EVE_EVALUATION_ENV_FLAG = "EVE_EVALUATION";
 
-/** Reports whether this server was started by `eve eval`. */
-export function isEveEvaluationServer(): boolean {
-  return process.env[EVE_EVALUATION_ENV_FLAG] === "1";
-}
-
 /** Stable identifier for the local eval run this server was started to serve. */
 export const EVE_EVALUATION_RUN_ID_ENV = "EVE_EVALUATION_RUN_ID";
 
