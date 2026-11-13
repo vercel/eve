@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import {
+  fromJsonSchema,
+  type StandardSchemaIssue,
+} from "#compiled/@modelcontextprotocol/server/index.js";
 import { z } from "#compiled/zod/index.js";
 import {
   createMcpStreamableHttpServer,
@@ -280,6 +284,190 @@ describe("stateless MCP Streamable HTTP server", () => {
         },
       },
     });
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("limits validation feedback to the first ten issues without formatting the rest", async () => {
+    const call = vi.fn(async () => ({ content: [] }));
+    const issues: StandardSchemaIssue[] = Array.from({ length: 10 }, (_, index) => ({
+      message: `issue-${index}`,
+      path: ["values", { key: index }],
+    }));
+    const unread = vi.fn(() => "must not be read");
+    issues.push({
+      get message() {
+        return unread();
+      },
+    });
+    const handle = createMcpStreamableHttpServer({
+      authenticate: async () => auth,
+      name: "validation-budget",
+      tools: [
+        defineMcpTool({
+          definition: {
+            name: "reject",
+            inputSchema: {
+              "~standard": { ...z.strictObject({})["~standard"], validate: () => ({ issues }) },
+            },
+          },
+          call,
+        }),
+      ],
+      version: "0",
+    });
+    const body = await jsonRpcResponse(
+      await handle(
+        modernRequest({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "reject", arguments: {} },
+        }),
+      ),
+    );
+    expect(body).toMatchObject({
+      result: {
+        isError: true,
+        structuredContent: {
+          error: {
+            code: "invalid_input",
+            retryable: false,
+            message: expect.stringContaining(
+              "values.9: issue-9 ... (validation details truncated)",
+            ),
+          },
+        },
+      },
+    });
+    expect(unread).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it.each(["message", "path", "deep path"])(
+    "bounds a single oversized validation %s",
+    async (kind) => {
+      const issue = {
+        message: "\u0000".repeat(100_000),
+        ...(kind === "path" ? { path: ["x".repeat(100_000)] } : {}),
+        ...(kind === "deep path" ? { path: Array.from({ length: 10_000 }, () => "x") } : {}),
+      };
+      const call = vi.fn(async () => ({ content: [] }));
+      const handle = createMcpStreamableHttpServer({
+        authenticate: async () => auth,
+        name: "validation-budget",
+        version: "0",
+        tools: [
+          defineMcpTool({
+            definition: {
+              name: "reject",
+              inputSchema: {
+                "~standard": {
+                  ...z.strictObject({})["~standard"],
+                  validate: () => ({ issues: [issue] }),
+                },
+              },
+            },
+            call,
+          }),
+        ],
+      });
+      const response = await handle(
+        modernRequest({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "reject", arguments: {} },
+        }),
+      );
+      const body = (await jsonRpcResponse(response)) as {
+        result: {
+          content: Array<{ text: string }>;
+          structuredContent: { error: { message: string } };
+        };
+      };
+      const message = body.result.structuredContent.error.message;
+      expect(message.length).toBeLessThanOrEqual(4_096);
+      expect(message).toContain("validation details truncated");
+      expect(body.result.content[0]?.text).toBe(message);
+      // JSON escaping and both compatibility fields still have a fixed wire bound.
+      expect(JSON.stringify(body).length).toBeLessThan(50_000);
+      expect(call).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    undefined,
+    "https://json-schema.org/draft/2020-12/schema",
+    "https://json-schema.org/draft/2019-09/schema",
+    "http://json-schema.org/draft-07/schema#",
+    "http://json-schema.org/draft-06/schema#",
+  ])("short-circuits published JSON Schema validation for dialect %s", async ($schema) => {
+    const schema = fromJsonSchema({
+      ...($schema === undefined ? {} : { $schema }),
+      type: "object",
+      properties: { values: { type: "array", items: { type: "string", format: "email" } } },
+    });
+    const valid = { values: ["user@example.com"] };
+    expect(await schema["~standard"].validate(valid)).toEqual({ value: valid });
+    const invalid = await schema["~standard"].validate({ values: ["invalid", "invalid"] });
+    expect(invalid.issues).toBeDefined();
+    expect(JSON.stringify(invalid.issues)).toContain("/values/0");
+    expect(JSON.stringify(invalid.issues)).not.toContain("/values/1");
+  });
+
+  it("bounds a full batch of invalid union-array calls without dispatching tools", async () => {
+    const call = vi.fn(async () => ({ content: [] }));
+    const schema = fromJsonSchema({
+      type: "object",
+      required: ["xs"],
+      properties: {
+        xs: {
+          type: "array",
+          items: {
+            oneOf: Array.from({ length: 4 }, (_, index) => ({
+              type: "object",
+              properties: { kind: { const: String(index) }, id: { type: "string" } },
+              required: ["kind", "id"],
+              additionalProperties: false,
+            })),
+          },
+        },
+      },
+    });
+    const handle = createMcpStreamableHttpServer({
+      authenticate: async () => auth,
+      name: "validation-budget",
+      version: "0",
+      tools: [defineMcpTool({ definition: { name: "t", inputSchema: schema }, call })],
+    });
+    const batch = Array.from({ length: 100 }, (_, id) => ({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: {
+        name: "t",
+        arguments: {
+          xs: Array.from({ length: 2_000 }, () => ({})),
+        },
+      },
+    }));
+    expect(JSON.stringify(batch).length).toBe(609_091);
+    const response = await handle(
+      request(batch, { "mcp-protocol-version": MCP_LEGACY_PROTOCOL_VERSION }),
+    );
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(new TextEncoder().encode(text).byteLength).toBeLessThan(150_000);
+    const results = text.split("\n").filter((line) => line.startsWith("data: "));
+    expect(results).toHaveLength(100);
+    for (const line of results) {
+      expect(JSON.parse(line.slice(6))).toMatchObject({
+        result: {
+          isError: true,
+          structuredContent: { error: { code: "invalid_input", retryable: false } },
+        },
+      });
+    }
     expect(call).not.toHaveBeenCalled();
   });
 

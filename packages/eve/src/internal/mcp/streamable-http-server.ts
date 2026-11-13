@@ -171,7 +171,7 @@ export function defineMcpTool<
           if (checked.issues !== undefined) {
             return toolError({
               code: "invalid_input",
-              message: `Invalid arguments for tool ${input.definition.name}: ${checked.issues.map(formatIssue).join(", ")}`,
+              message: formatInputError(input.definition.name, checked.issues),
               retryable: false,
             });
           }
@@ -205,12 +205,38 @@ function advertiseOnly(schema: StandardSchemaWithJSON): StandardSchemaWithJSON {
   };
 }
 
-function formatIssue(issue: StandardSchemaIssue): string {
-  if (issue.path === undefined || issue.path.length === 0) return issue.message;
-  const path = issue.path
-    .map((segment) => String(typeof segment === "object" ? segment.key : segment))
-    .join(".");
-  return `${path}: ${issue.message}`;
+const MAX_VALIDATION_ISSUES = 10;
+const MAX_VALIDATION_MESSAGE_CHARS = 4_096;
+const VALIDATION_TRUNCATED = " ... (validation details truncated)";
+
+/** Bound work and allocations while formatting, not after joining all issues. */
+function formatInputError(name: string, issues: readonly StandardSchemaIssue[]): string {
+  let message = "Invalid arguments for tool ";
+  const limit = MAX_VALIDATION_MESSAGE_CHARS - VALIDATION_TRUNCATED.length;
+  const append = (part: string): boolean => {
+    const remaining = limit - message.length;
+    message += part.slice(0, remaining);
+    return part.length <= remaining;
+  };
+  if (!append(name) || !append(": ")) return message + VALIDATION_TRUNCATED;
+
+  for (let index = 0; index < Math.min(issues.length, MAX_VALIDATION_ISSUES); index++) {
+    const issue = issues[index]!;
+    if (index > 0 && !append(", ")) return message + VALIDATION_TRUNCATED;
+    if (issue.path !== undefined && issue.path.length > 0) {
+      let first = true;
+      for (const segment of issue.path) {
+        if (!first && !append(".")) return message + VALIDATION_TRUNCATED;
+        first = false;
+        if (!append(String(typeof segment === "object" ? segment.key : segment))) {
+          return message + VALIDATION_TRUNCATED;
+        }
+      }
+      if (!append(": ")) return message + VALIDATION_TRUNCATED;
+    }
+    if (!append(issue.message)) return message + VALIDATION_TRUNCATED;
+  }
+  return issues.length > MAX_VALIDATION_ISSUES ? message + VALIDATION_TRUNCATED : message;
 }
 
 interface McpStreamableHttpServerOptions {
