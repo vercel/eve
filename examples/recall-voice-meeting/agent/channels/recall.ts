@@ -1,6 +1,7 @@
 import { recallChannel } from "@eve/recall";
 import { decide } from "eve/ai";
 
+import { replyModeOf } from "../lib/reply-mode";
 import { voiceRoutes } from "../lib/voice";
 
 export default recallChannel({
@@ -25,10 +26,14 @@ export default recallChannel({
     return answers.addressed.probability >= 0.5;
   },
   events: {
-    // Replies are spoken, so the chat only gets what people need to read or click.
+    // The agent tags each message `[voice]`, `[chat]`, or `[both]`; see
+    // `lib/reply-mode.ts`. Spoken messages also go to the chat when they have
+    // a link, which isn't read aloud.
     async "content.completed"({ data }, { channel }) {
       if (data.kind !== "text" || typeof data.value !== "string") return;
-      if (/https?:\/\//u.test(data.value)) await channel.recall.sendChatMessage(data.value);
+      const { mode, text } = replyModeOf(data.value);
+      if (!text.trim()) return;
+      if (mode !== "voice" || /https?:\/\//u.test(text)) await channel.recall.sendChatMessage(text);
     },
   },
 });

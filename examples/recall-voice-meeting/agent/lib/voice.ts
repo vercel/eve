@@ -9,6 +9,7 @@ import {
 import { gateway, generateSpeech } from "ai";
 import { GET, type RouteDefinition, type RouteHandlerArgs } from "eve/channels";
 
+import { readReplyMode, replyModeOf, type ReplyMode } from "./reply-mode";
 import { VOICE_PAGE_HTML } from "./voice-page";
 
 /** Bot metadata key holding the secret in the bot's voice page URL. */
@@ -157,16 +158,23 @@ async function speak(text: string): Promise<string> {
 /**
  * Cuts the agent's streamed text into sentences as they finish, so the first
  * one is spoken while the model is still writing the rest. Narration before a
- * tool call, such as "On it, let me check.", is spoken too.
+ * tool call, such as "On it, let me check.", is spoken too. A message tagged
+ * `[chat]` is never spoken.
  */
 class SpeechSegmenter {
   /**
    * Only a part's first delta names its kind and turn. `text` is unknown for
    * a part whose first delta this reader missed, such as after a reconnect.
+   * `mode` is unknown until the start of the message rules a tag in or out.
    */
   private readonly parts = new Map<
     string,
-    { buffer: string; text: boolean | undefined; turnId: string | undefined }
+    {
+      buffer: string;
+      text: boolean | undefined;
+      turnId: string | undefined;
+      mode: ReplyMode | undefined;
+    }
   >();
   private readonly say: (turnId: string, text: string) => void;
 
@@ -181,11 +189,18 @@ class SpeechSegmenter {
     let part = this.parts.get(data.partId);
     if (part === undefined) {
       const text = data.kind === undefined ? undefined : data.kind === "text";
-      part = { buffer: "", text, turnId };
+      part = { buffer: "", mode: undefined, text, turnId };
       this.parts.set(data.partId, part);
     }
-    if (part.text !== true) return;
+    if (part.text !== true || part.mode === "chat") return;
     part.buffer += data.delta;
+    if (part.mode === undefined) {
+      const read = readReplyMode(part.buffer);
+      if (read === undefined) return;
+      part.mode = read.mode;
+      part.buffer = read.text;
+      if (part.mode === "chat") return;
+    }
     for (;;) {
       const cut = sentenceEnd(part.buffer);
       if (cut === -1) break;
@@ -197,9 +212,14 @@ class SpeechSegmenter {
   complete(turnId: string | undefined, partId: string, value: string): void {
     const part = this.parts.get(partId);
     this.parts.delete(partId);
-    // A part this reader didn't follow from its start is spoken whole.
-    if (part?.text === true) this.emit(part.turnId ?? turnId, part.buffer);
-    else this.emit(turnId, value);
+    if (part?.text === true && part.mode !== undefined) {
+      if (part.mode !== "chat") this.emit(part.turnId ?? turnId, part.buffer);
+      return;
+    }
+    // A part this reader didn't follow from its start, or one too short to
+    // have ruled out a tag, is read from its final value.
+    const { mode, text } = replyModeOf(value);
+    if (mode !== "chat") this.emit(part?.turnId ?? turnId, text);
   }
 
   private emit(turnId: string | undefined, text: string): void {
