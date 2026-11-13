@@ -18,6 +18,8 @@ Choose the task you want to complete:
 
 ## Change environment variables
 
+`SLACK_CONNECTOR` selects the Vercel Connect Slack connector. It defaults to `slack/placeholder` for compilation without credentials; configure a real connector before sending or receiving Slack messages.
+
 Environment variables choose the Drive the agent uses and configure Slack. For local development, add them to `.env.local` in the project folder. For the deployed agent, add each one to your Vercel project with `vercel env add` followed by its name:
 
 ```sh
@@ -63,7 +65,7 @@ Keep the existing sections on reading and saving files alongside your own guidan
 
 Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
-The same file limits each session to `300_000` input tokens through `maxInputTokensPerSession`. Each model call counts the input it sends, including earlier messages and the file contents the agent has read, so reading many large files reaches the limit sooner. When a session crosses the limit, eve pauses it and asks whether to continue. Increase the limit if sessions pause too often. See [eve's agent configuration](https://eve.dev/docs/agent-config) for output and cost limits.
+The same file limits each session to `300_000` input tokens through the `limits.sessionUsage` callback. Each model call counts the input it sends, including earlier messages and the file contents the agent has read, so reading many large files reaches the limit sooner. When a session crosses the limit, eve pauses it and asks whether to continue. Increase the limit if sessions pause too often. See [eve's agent configuration](https://eve.dev/docs/agent-config) for other usage limits.
 
 ## Add your own files
 

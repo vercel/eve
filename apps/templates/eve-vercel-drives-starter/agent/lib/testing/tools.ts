@@ -19,6 +19,7 @@ const unsupported = (name: string) => (): never => {
 export const toolContext = (toolName: string): ToolContext => ({
   abortSignal: new AbortController().signal,
   callId: "call_1",
+  channel: { kind: "channel:slack", metadata: {} },
   getSandbox: unsupported("a session sandbox"),
   getToken: unsupported("tool auth tokens"),
   messages: [],
@@ -28,5 +29,6 @@ export const toolContext = (toolName: string): ToolContext => ({
     id: "session_1",
     turn: { id: "turn_1", sequence: 1 },
   },
+  to: unsupported("cross-channel delivery"),
   toolName,
 });

@@ -41,7 +41,7 @@ Prefer native integrations. When installation is part of the task, use `pnpm exe
 
 ## Implementation conventions
 
-Keep files in `agent/tools/` small, with reusable behavior in `agent/lib/`. `save_to_drive.ts` is the only authored tool; the other tool files disable eve built-ins. Disabling `write_file` steers the model toward `save_to_drive`. `web_fetch` and `web_search` are removed because they run in the app outside the sandbox's network policy and would give instructions planted in Drive files a way to send file contents out. `bash` and `read_file` stay enabled for reading `/drive`. The filename exemption for `agent/tools/*.ts` in `oxlint.config.ts` exists because eve names tools after their files.
+Keep files in `agent/tools/` small, with reusable behavior in `agent/lib/`. `save_to_drive.ts` is the only authored tool; the other tool files disable eve built-ins. Disabling `write_file` steers the model toward `save_to_drive`. `web_fetch` and `web_search` are removed because they run in the app outside the sandbox's network policy and would give instructions planted in Drive files a way to send file contents out. `bash` and `read_file` stay enabled for reading `/drive`. The filename exemption for `agent/tools/*.ts` in `lint.config.ts` exists because eve names tools after their files.
 
 Keep `scripts/upload-to-drive.ts` limited to argument parsing and output, with upload logic in `scripts/lib/upload.ts` so tests can call it directly. Modules under `scripts/` and the modules they import from `agent/lib/` run under plain Node type stripping, so they import local files with explicit `.ts` extensions.
 
@@ -64,7 +64,7 @@ Use `.env.example` to document new configuration without credentials. When confi
 
 `pnpm dev` opens eve's terminal chat. Local sessions use the same Vercel Sandbox and Drive as the deployment, so they need the Vercel OIDC token from `vercel env pull .env.local`. The token expires after 12 hours, so pull it again when the SDK reports an OIDC credentials error. Local sessions don't look up Slack profiles.
 
-The Slack channel requires `SLACK_CONNECTOR`, so `pnpm exec eve info` and `pnpm build` fail when it is unset. Pull the project's variables with `vercel env pull .env.local`, or set a placeholder value such as `slack/placeholder` when only checking compilation. `pnpm build` also prepares a Vercel Sandbox snapshot, which needs a linked project and credentials.
+The Slack channel uses `SLACK_CONNECTOR`, falling back to `slack/placeholder` so compilation works before Slack is configured. Slack delivery still needs a real connector. Pull the project's variables with `vercel env pull .env.local`. `pnpm build` also prepares a Vercel Sandbox snapshot, which needs a linked project and credentials; use `pnpm exec eve build --skip-sandbox-prewarm` to check compilation without preparing it.
 
 Use the Vercel CLI for project configuration and deployment instructions, including `vercel deploy --prod`, `vercel env add`, and `vercel sandbox`. Confirm unfamiliar flags with `--help`. Provisioning services, uploading to a Drive, or deploying the agent is separate from checking code and documentation.
 
@@ -83,6 +83,8 @@ Write for a person using the template:
 Verify behavior against code and current CLI help. When reviewing a passage, read its surrounding section for contradictions and repeated explanations. After applying an edit, check that the revision didn't introduce new problems from the list above. Formatting and link checks do not replace an editorial review.
 
 ## Validation
+
+`pnpm check` and `pnpm fix` use `lint.config.ts` explicitly to keep its Ultracite rules separate from monorepo linting. `.oxfmtrc.json` contains the resolved Ultracite formatting preset so root tooling needs no template dependencies. Keep it in sync when upgrading Ultracite. Git hooks are opt-in: run `pnpm exec lefthook install` only from a standalone checkout, never from the eve monorepo.
 
 Choose checks that establish the changed behavior. Tests live beside their implementations under `agent/` and `scripts/lib/`, and mock only the Vercel Sandbox and Slack APIs using the fixtures in `agent/lib/testing/`.
 

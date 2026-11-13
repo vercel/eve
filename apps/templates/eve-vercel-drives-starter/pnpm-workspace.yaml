@@ -1,6 +1,6 @@
 minimumReleaseAge: 0
 allowBuilds:
-  lefthook: true
+  lefthook: false
 
 ignoredOptionalDependencies:
   - "@mongodb-js/zstd"

@@ -90,6 +90,7 @@ export const slackThread = (
 /* The `ctx.slack` handle; `request` defaults to an `{ ok: true }` spy. */
 const slackHandle = (overrides: Partial<SlackHandle> = {}): SlackHandle => ({
   channelId: "C123",
+  codeChannel: false,
   request: vi.fn<SlackHandle["request"]>().mockResolvedValue({ ok: true }),
   teamId: "T123",
   threadTs: "100.1",
@@ -115,6 +116,7 @@ export const inboundContext = ({
   cancel: unsupported("session cancellation"),
   clear: unsupported("session clearing"),
   compact: unsupported("session compaction"),
+  end: unsupported("session end"),
   isBotMentioned: vi
     .fn<SlackInboundMessageContext["isBotMentioned"]>()
     .mockReturnValue(false),
@@ -124,7 +126,7 @@ export const inboundContext = ({
   isSubscribed: vi
     .fn<SlackInboundMessageContext["isSubscribed"]>()
     .mockResolvedValue(false),
-  reset: unsupported("session reset"),
+  openCodeChannel: unsupported("code channels"),
   resolveSession: unsupported("session resolution"),
   respond: unsupported("input responses"),
   send: unsupported("session sends"),

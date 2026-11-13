@@ -7,7 +7,6 @@ import type {
   SlackMessage,
 } from "eve/channels/slack";
 
-import { requireEnv } from "../../utils/env";
 import {
   createSlackIdentityResolver,
   formatSlackIdentityContext,
@@ -97,7 +96,7 @@ export const withIdentityContext = (
  *
  * @param config - Native channel overrides.
  * @returns A channel definition whose inbound turns carry Slack profile context.
- * @throws {@link Error} When SLACK_CONNECTOR is missing.
+ * @remarks Without SLACK_CONNECTOR, compilation uses slack/placeholder; Slack delivery still requires a configured connector.
  * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Thread history defaults to messages since the agent's last reply.
  */
 export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
@@ -118,7 +117,7 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
   return slackChannel({
     ...channelConfig,
     credentials: connectSlackCredentials(
-      requireEnv("SLACK_CONNECTOR", "slack/your-agent")
+      process.env.SLACK_CONNECTOR ?? "slack/placeholder"
     ),
     onAppMention: withIdentityContext(handlers.onAppMention, resolveIdentities),
     onDirectMessage: withIdentityContext(
