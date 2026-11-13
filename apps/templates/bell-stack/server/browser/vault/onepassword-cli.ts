@@ -22,22 +22,39 @@ const itemSchema = z.object({
   title: z.string(),
   category: z.literal("LOGIN"),
   fields: z.array(fieldSchema),
-  urls: z.array(z.object({
-    href: z.string(),
-    autofillBehavior: z.string().optional(),
-  })).default([]),
+  urls: z
+    .array(
+      z.object({
+        href: z.string(),
+        autofillBehavior: z.string().optional(),
+      }),
+    )
+    .default([]),
 });
 type CliItem = z.infer<typeof itemSchema>;
 
 export async function listCliLogins(): Promise<SafeLoginItem[]> {
   const run = configuredCli();
   try {
-    const vaults = vaultSchema.array().parse(JSON.parse(await run(["vault", "list", "--format=json"])));
+    const vaults = vaultSchema
+      .array()
+      .parse(JSON.parse(await run(["vault", "list", "--format=json"])));
     const result: SafeLoginItem[] = [];
     for (const vault of vaults) {
-      const items = z.object({ id }).array().parse(JSON.parse(await run([
-        "item", "list", `--vault=${vault.id}`, "--categories=Login", "--format=json",
-      ])));
+      const items = z
+        .object({ id })
+        .array()
+        .parse(
+          JSON.parse(
+            await run([
+              "item",
+              "list",
+              `--vault=${vault.id}`,
+              "--categories=Login",
+              "--format=json",
+            ]),
+          ),
+        );
       for (const overview of items) {
         const item = await readItem(run, vault.id, overview.id);
         result.push({
@@ -56,7 +73,9 @@ export async function listCliLogins(): Promise<SafeLoginItem[]> {
     }
     return result;
   } catch {
-    throw new Error("Could not list 1Password CLI logins. Check the CLI installation, configured account, and vault permissions.");
+    throw new Error(
+      "Could not list 1Password CLI logins. Check the CLI installation, configured account, and vault permissions.",
+    );
   }
 }
 
@@ -73,45 +92,55 @@ export async function readCliLogin(vaultId: string, itemId: string): Promise<One
     if (item.fields.some((field) => field.type?.toUpperCase() === "OTP")) {
       // Ask the CLI for a generated code; never pass the stored OTP seed to the browser.
       const code = await run(["item", "get", `--vault=${vaultId}`, "--otp", "--", itemId])
-        .then((value) => value.trim()).catch(() => "");
+        .then((value) => value.trim())
+        .catch(() => "");
       if (/^\d{6,8}$/.test(code)) totp = code;
     }
-    return { allowedHosts: allowedHosts(item), username, password, ...(totp ? { totp } : {}) };
+    return { allowedHosts: allowedHosts(item), username, password, totp: totp || undefined };
   } catch {
-    throw new Error("Could not read the 1Password CLI login. Check the item handle, configured account, and vault permissions.");
+    throw new Error(
+      "Could not read the 1Password CLI login. Check the item handle, configured account, and vault permissions.",
+    );
   }
 }
 
 async function readItem(run: ReturnType<typeof configuredCli>, vaultId: string, itemId: string) {
-  const item = itemSchema.parse(JSON.parse(await run([
-    "item", "get", `--vault=${vaultId}`, "--format=json", "--", itemId,
-  ])));
+  const item = itemSchema.parse(
+    JSON.parse(await run(["item", "get", `--vault=${vaultId}`, "--format=json", "--", itemId])),
+  );
   if (item.id !== itemId || item.vault.id !== vaultId) throw new Error();
   return item;
 }
 
 function fieldValue(item: CliItem, name: "username" | "password") {
-  return item.fields.find((field) => field.id === name || field.purpose?.toLowerCase() === name)?.value;
+  return item.fields.find((field) => field.id === name || field.purpose?.toLowerCase() === name)
+    ?.value;
 }
 
 function allowedHosts(item: CliItem): string[] {
   // CLI versions may omit autofill policies. This explicit compatibility mode uses saved
   // website hosts; use the default SDK mode to enforce 1Password's Never autofill policy.
-  return [...new Set(item.urls.flatMap((site) => {
-    if (site.autofillBehavior?.toLowerCase() === "never") return [];
-    try {
-      return [new URL(site.href).hostname.toLowerCase()].filter(Boolean);
-    } catch {
-      return [];
-    }
-  }))];
+  return [
+    ...new Set(
+      item.urls.flatMap((site) => {
+        if (site.autofillBehavior?.toLowerCase() === "never") return [];
+        try {
+          return [new URL(site.href).hostname.toLowerCase()].filter(Boolean);
+        } catch {
+          return [];
+        }
+      }),
+    ),
+  ];
 }
 
 function configuredCli() {
   const token = process.env.OP_SERVICE_ACCOUNT_TOKEN?.trim(),
     account = process.env.OP_ACCOUNT?.trim();
   if (!token && !account)
-    throw new Error("Set OP_SERVICE_ACCOUNT_TOKEN or an explicit OP_ACCOUNT account ID for 1Password CLI access.");
+    throw new Error(
+      "Set OP_SERVICE_ACCOUNT_TOKEN or an explicit OP_ACCOUNT account ID for 1Password CLI access.",
+    );
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (name === "OP_CONNECT_HOST" || name === "OP_CONNECT_TOKEN" || name.startsWith("OP_SESSION"))
@@ -122,12 +151,21 @@ function configuredCli() {
   env.OP_DEBUG = "false";
   if (token) env.OP_SERVICE_ACCOUNT_TOKEN = token;
   const accountArgs = token ? [] : [`--account=${account}`];
-  return (args: string[]): Promise<string> => new Promise((resolve, reject) => {
-    execFile("op", [...accountArgs, ...args], {
-      env, encoding: "utf8", timeout: 20_000, maxBuffer: 2 * 1024 * 1024,
-    }, (error, stdout) => {
-      if (error) reject(new Error("The 1Password CLI request failed."));
-      else resolve(stdout);
+  return (args: string[]): Promise<string> =>
+    new Promise((resolve, reject) => {
+      execFile(
+        "op",
+        [...accountArgs, ...args],
+        {
+          env,
+          encoding: "utf8",
+          timeout: 20_000,
+          maxBuffer: 2 * 1024 * 1024,
+        },
+        (error, stdout) => {
+          if (error) reject(new Error("The 1Password CLI request failed."));
+          else resolve(stdout);
+        },
+      );
     });
-  });
 }

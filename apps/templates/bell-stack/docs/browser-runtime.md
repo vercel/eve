@@ -15,21 +15,21 @@ require `STAGEHAND_BROWSER=local`.
 Copy the root [`.env.example`](../.env.example) for Bell and integration settings.
 Hosted browser sessions always disable network logging and recording.
 
-| Variable | Purpose |
-| --- | --- |
-| `STAGEHAND_BROWSER` | `browserbase`, `local`, or `auto`; `auto` uses Browserbase when its API key is present. |
-| `BROWSERBASE_CONTEXT_ID` | Optional existing Context for saved browser state. |
-| `BELL_PUBLIC_URL` | Reachable HTTPS Bell origin for handoff links; loopback HTTP is allowed locally. |
-| `BELL_HANDOFF_SECRET` | Handoff encryption secret, at least 32 bytes. |
-| `BELL_HEADLESS` | Local browser headless mode; defaults to `true`. |
-| `BELL_BROWSER_IDLE_MS` | Browser inactivity timeout; defaults to 30 minutes. |
-| `BELL_CAPTCHA_TIMEOUT_MS` | CAPTCHA wait timeout; defaults to 30 seconds. |
-| `BELL_DRAFT_CONTEXT_TTL_MS` | Unused draft Context lifetime; defaults to seven days. |
-| `BELL_CONTEXT_METADATA_PATH` | Context metadata file; defaults to `.bell/contexts.json`. |
-| `BELL_OPERATOR_USERNAME` / `BELL_OPERATOR_PASSWORD` | Optional HTTP Basic operator credentials for Bell; password must be at least 32 bytes. |
-| `BELL_ONEPASSWORD_BACKEND` | `sdk` (default) or explicitly selected `cli`; there is no automatic fallback between accounts or backends. |
-| `BELL_VAULT_FILE` | Existing encrypted local vault file; defaults to `.bell/vault.enc.json`. |
-| `BELL_VAULT_MASTER_KEY` | Local vault key: 32 bytes encoded as base64 or 64 hexadecimal characters. |
+| Variable                                            | Purpose                                                                                                    |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `STAGEHAND_BROWSER`                                 | `browserbase`, `local`, or `auto`; `auto` uses Browserbase when its API key is present.                    |
+| `BROWSERBASE_CONTEXT_ID`                            | Optional existing Context for saved browser state.                                                         |
+| `BELL_PUBLIC_URL`                                   | Reachable HTTPS Bell origin for handoff links; loopback HTTP is allowed locally.                           |
+| `BELL_HANDOFF_SECRET`                               | Handoff encryption secret, at least 32 bytes.                                                              |
+| `BELL_HEADLESS`                                     | Local browser headless mode; defaults to `true`.                                                           |
+| `BELL_BROWSER_IDLE_MS`                              | Browser inactivity timeout; defaults to 30 minutes.                                                        |
+| `BELL_CAPTCHA_TIMEOUT_MS`                           | CAPTCHA wait timeout; defaults to 30 seconds.                                                              |
+| `BELL_DRAFT_CONTEXT_TTL_MS`                         | Unused draft Context lifetime; defaults to seven days.                                                     |
+| `BELL_CONTEXT_METADATA_PATH`                        | Context metadata file; defaults to `.bell/contexts.json`.                                                  |
+| `BELL_OPERATOR_USERNAME` / `BELL_OPERATOR_PASSWORD` | Optional HTTP Basic operator credentials for Bell; password must be at least 32 bytes.                     |
+| `BELL_ONEPASSWORD_BACKEND`                          | `sdk` (default) or explicitly selected `cli`; there is no automatic fallback between accounts or backends. |
+| `BELL_VAULT_FILE`                                   | Existing encrypted local vault file; defaults to `.bell/vault.enc.json`.                                   |
+| `BELL_VAULT_MASTER_KEY`                             | Local vault key: 32 bytes encoded as base64 or 64 hexadecimal characters.                                  |
 
 The HTTP channel also supports Vercel OIDC. Unauthenticated development access is restricted
 to loopback hosts. Production deployments must protect the web interface and session routes.

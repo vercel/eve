@@ -96,36 +96,49 @@ describe("Baselayer server minting", () => {
         config,
         fetch: async () => new Response("private identity data", { status: 404 }),
       }),
-    ).rejects.toThrow(/^Baselayer could not find this principal in the API key's organization \(HTTP 404\)\./);
+    ).rejects.toThrow(
+      /^Baselayer could not find this principal in the API key's organization \(HTTP 404\)\./,
+    );
   });
 
   it.each(["audience", "expired", "key", "disclosure"])(
     "rejects a credential with the wrong %s",
     async (problem) => {
-      await expect(mintBaselayerCredential(origin, {
-        config,
-        fetch: async (_url, init) => {
-          const request = JSON.parse(init!.body as string);
-          const claims = {
-            aud: problem === "audience" ? "other.example" : request.audience,
-            exp: Math.floor(Date.now() / 1000) + (problem === "expired" ? -1 : 3600),
-            cnf: { jwk: { ...request.agent_key, ...(problem === "key" ? { x: "another-key" } : {}) } },
-          };
-          const wire = `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature~`;
-          return Response.json({
-            audience: request.audience,
-            credential: wire + (problem === "disclosure" ? "unexpected-private-disclosure~" : ""),
-          });
-        },
-      })).rejects.toThrow("invalid, expired, or incorrectly bound");
+      await expect(
+        mintBaselayerCredential(origin, {
+          config,
+          fetch: async (_url, init) => {
+            const request = JSON.parse(init!.body as string);
+            const claims = {
+              aud: problem === "audience" ? "other.example" : request.audience,
+              exp: Math.floor(Date.now() / 1000) + (problem === "expired" ? -1 : 3600),
+              cnf: {
+                jwk:
+                  problem === "key"
+                    ? { ...request.agent_key, x: "another-key" }
+                    : request.agent_key,
+              },
+            };
+            const wire = `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature~`;
+            return Response.json({
+              audience: request.audience,
+              credential: wire + (problem === "disclosure" ? "unexpected-private-disclosure~" : ""),
+            });
+          },
+        }),
+      ).rejects.toThrow("invalid, expired, or incorrectly bound");
     },
   );
 
   it("redacts transport errors", async () => {
-    await expect(mintBaselayerCredential(origin, {
-      config,
-      fetch: async () => { throw new Error("private request details"); },
-    })).rejects.toThrow(/^Baselayer mint request failed\. Check connectivity and retry\.$/);
+    await expect(
+      mintBaselayerCredential(origin, {
+        config,
+        fetch: async () => {
+          throw new Error("private request details");
+        },
+      }),
+    ).rejects.toThrow(/^Baselayer mint request failed\. Check connectivity and retry\.$/);
   });
 
   it("rejects malformed credentials without printing the response", async () => {

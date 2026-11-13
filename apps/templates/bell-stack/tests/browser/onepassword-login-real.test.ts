@@ -14,9 +14,11 @@ describe("opt-in live 1Password login", () => {
     "uses a Login item without exposing credentials to the model",
     async () => {
       const items = await onePasswordVault.list(),
-        item = items.find((candidate) =>
-          candidate.label === "Bell integration test (authenticationtest.com)" &&
-          candidate.allowedHosts.includes("authenticationtest.com"));
+        item = items.find(
+          (candidate) =>
+            candidate.label === "Bell integration test (authenticationtest.com)" &&
+            candidate.allowedHosts.includes("authenticationtest.com"),
+        );
       expect(item).toBeDefined();
       expect(item?.fields).toEqual({
         username: true,
@@ -52,8 +54,11 @@ describe("opt-in live 1Password login", () => {
         expect(page.tree).toContain("Login Success");
         expect(page.tree).toContain("You are now logged in");
         const visible = JSON.stringify({ result, traces: state.traces });
-        expect([login.username, login.password, login.totp]
-          .some((secret) => secret && visible.includes(secret))).toBe(false);
+        expect(
+          [login.username, login.password, login.totp].some(
+            (secret) => secret && visible.includes(secret),
+          ),
+        ).toBe(false);
         console.log(
           JSON.stringify(
             {

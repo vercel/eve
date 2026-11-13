@@ -19,13 +19,20 @@ export function isAllowedBellMessage(message: Pick<LinqMessage, "author" | "raw"
   if (message.author.isBot) return false;
   const incoming = inboundMessage.safeParse(message.raw);
   const receivingNumber = phoneNumber.safeParse(process.env.BELL_LINQ_PHONE_NUMBER?.trim());
-  const allowedSenders = z.array(phoneNumber).nonempty().safeParse(
-    (process.env.BELL_LINQ_ALLOWED_SENDERS ?? "").split(",").map((value) => value.trim()),
-  );
+  const allowedSenders = z
+    .array(phoneNumber)
+    .nonempty()
+    .safeParse(
+      (process.env.BELL_LINQ_ALLOWED_SENDERS ?? "").split(",").map((value) => value.trim()),
+    );
 
-  return incoming.success && receivingNumber.success && allowedSenders.success
-    && incoming.data.chat.owner_handle.handle === receivingNumber.data
-    && allowedSenders.data.includes(incoming.data.sender_handle.handle);
+  return (
+    incoming.success &&
+    receivingNumber.success &&
+    allowedSenders.success &&
+    incoming.data.chat.owner_handle.handle === receivingNumber.data &&
+    allowedSenders.data.includes(incoming.data.sender_handle.handle)
+  );
 }
 
 export default linqChannel({
@@ -41,11 +48,19 @@ export default linqChannel({
     const auth = defaultLinqAuth(message);
     const incoming = inboundMessage.parse(message.raw);
     return {
-      auth: { ...auth, attributes: { ...auth.attributes, bell_watch_chat: incoming.chat.id, bell_watch_sender: incoming.sender_handle.handle, bell_watch_line: incoming.chat.owner_handle.handle } },
+      auth: {
+        ...auth,
+        attributes: {
+          ...auth.attributes,
+          bell_watch_chat: incoming.chat.id,
+          bell_watch_sender: incoming.sender_handle.handle,
+          bell_watch_line: incoming.chat.owner_handle.handle,
+        },
+      },
       context: [
-        "This request arrived through Bell's private Linq iMessage or SMS channel. "
-        + "Reply concisely in this chat. Use the same browser for follow-up requests. "
-        + "For a human-only step, send the human_handoff tool's link and wait for a reply.",
+        "This request arrived through Bell's private Linq iMessage or SMS channel. " +
+          "Reply concisely in this chat. Use the same browser for follow-up requests. " +
+          "For a human-only step, send the human_handoff tool's link and wait for a reply.",
       ],
     };
   },

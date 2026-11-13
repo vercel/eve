@@ -23,7 +23,8 @@ const remember = (events) => {
 
 try {
   const created = await client.sessions.create({
-    message: "Bounded integration test: use run to visit https://example.com/, then snapshot. Reply with the page title. Do not visit other sites, use saved Contexts or vaults, or send messages.",
+    message:
+      "Bounded integration test: use run to visit https://example.com/, then snapshot. Reply with the page title. Do not visit other sites, use saved Contexts or vaults, or send messages.",
     signal: AbortSignal.timeout(90_000),
   });
   session = created.session;
@@ -32,10 +33,12 @@ try {
   assert.equal(first.status, "waiting");
   assert.ok(first.message?.includes("Example Domain"));
   assert.equal(browserIds.size, 1);
-  const second = await (await session.send(
-    "Without navigating, use snapshot to confirm the current page title and URL. Reply briefly.",
-    { signal: AbortSignal.timeout(45_000) },
-  )).result();
+  const second = await (
+    await session.send(
+      "Without navigating, use snapshot to confirm the current page title and URL. Reply briefly.",
+      { signal: AbortSignal.timeout(45_000) },
+    )
+  ).result();
   remember(second.events);
   assert.equal(second.status, "waiting");
   assert.equal(browserIds.size, 1, "Follow-up must reuse the same hosted browser");
@@ -47,7 +50,10 @@ try {
     const snapshot = await session.snapshot();
     completed = snapshot.events.some((event) => event.type === "session.completed");
     if (completed) break;
-    assert.ok(!snapshot.events.some((event) => event.type === "session.failed"), "Session failed during retirement");
+    assert.ok(
+      !snapshot.events.some((event) => event.type === "session.failed"),
+      "Session failed during retirement",
+    );
     await new Promise((resolve) => setTimeout(resolve, 500));
   } while (Date.now() < completionDeadline);
   assert.ok(completed, "Reset must publish session.completed");
@@ -61,24 +67,38 @@ try {
     } while (Date.now() < deadline);
     assert.equal(status, "COMPLETED", "Reset must release the hosted browser");
   }
-  console.log("Live retirement passed: two turns shared one browser; reset emitted completion and Browserbase confirmed COMPLETED.");
+  console.log(
+    "Live retirement passed: two turns shared one browser; reset emitted completion and Browserbase confirmed COMPLETED.",
+  );
 } finally {
   const cleanupErrors = [];
   if (session) {
     // Recover IDs even if a model assertion fails. Do not print private events.
-    try { remember((await session.snapshot()).events); } catch { /* Session may not have started. */ }
-    try { await session.reset({ reason: "Integration test cleanup" }); }
-    catch { cleanupErrors.push("Eve session reset failed"); }
+    try {
+      remember((await session.snapshot()).events);
+    } catch {
+      /* Session may not have started. */
+    }
+    try {
+      await session.reset({ reason: "Integration test cleanup" });
+    } catch {
+      cleanupErrors.push("Eve session reset failed");
+    }
   }
   for (const id of browserIds) {
     try {
       if ((await browserbase.sessions.retrieve(id)).status !== "COMPLETED")
         await browserbase.sessions.update(id, { status: "REQUEST_RELEASE" });
-    } catch { cleanupErrors.push("Browser release failed"); }
+    } catch {
+      cleanupErrors.push("Browser release failed");
+    }
   }
   for (const id of contextIds) {
-    try { await browserbase.contexts.delete(id, { headers: { "Content-Type": null } }); }
-    catch { cleanupErrors.push("Temporary Context deletion failed"); }
+    try {
+      await browserbase.contexts.delete(id, { headers: { "Content-Type": null } });
+    } catch {
+      cleanupErrors.push("Temporary Context deletion failed");
+    }
   }
   if (cleanupErrors.length) throw new Error(cleanupErrors.join("; "));
 }

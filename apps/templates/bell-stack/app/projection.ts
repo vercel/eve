@@ -1,24 +1,18 @@
-export function browserPreview(events: readonly unknown[]) {
+import type { EveMessage } from "eve/react";
+
+export function browserPreview(messages: readonly EveMessage[]) {
   let screenshot: string | undefined;
   let url: string | undefined;
   let httpStatus: number | undefined;
-  for (const value of events) {
-    if (!value || typeof value !== "object") continue;
-    const event = value as {
-      type?: string;
-      data?: {
-        result?: { kind?: string; toolName?: string; isError?: boolean; output?: unknown };
-      };
-    };
-    const result = event.data?.result;
+  for (const part of messages.flatMap((message) => message.parts)) {
     if (
-      event.type !== "action.result" ||
-      result?.kind !== "tool-result" ||
-      result.isError ||
-      !result.output ||
-      typeof result.output !== "object"
+      part.type !== "tool" ||
+      part.state !== "completed" ||
+      !part.output ||
+      typeof part.output !== "object"
     )
       continue;
+    const result = { output: part.output, toolName: part.name };
     const envelope = result.output as {
       result?: Record<string, unknown>;
       workbench?: { screenshotDataUrl?: string; browser?: { url?: string } };

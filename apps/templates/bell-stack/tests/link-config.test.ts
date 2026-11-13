@@ -29,38 +29,78 @@ describe("Link credential boundary", () => {
       { type: "user" as const, id: "", issuer: "linq" },
     ]) {
       expect(() => linkOwner(principal)).toThrow();
-      await expect(linkAuth.getToken({ principal, connection: { url: "" } })).rejects.toMatchObject({ reason: "principal_required" });
+      await expect(linkAuth.getToken({ principal, connection: { url: "" } })).rejects.toMatchObject(
+        { reason: "principal_required" },
+      );
     }
-    expect(linkOwner({ type: "user", issuer: "linq", id: "linq:sender" })).toEqual({ issuer: "linq", id: "linq:sender" });
+    expect(linkOwner({ type: "user", issuer: "linq", id: "linq:sender" })).toEqual({
+      issuer: "linq",
+      id: "linq:sender",
+    });
   });
 
   it("does not expose arbitrary database or transport errors", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const call = safeLinkCall(async () => { throw new Error("postgres://user:secret@host"); });
+    const call = safeLinkCall(async () => {
+      throw new Error("postgres://user:secret@host");
+    });
     await expect(call).rejects.toMatchObject({ reason: "link_unavailable", retryable: false });
     await expect(call).rejects.not.toThrow("secret");
-    expect(log).toHaveBeenCalledWith(JSON.stringify({ event: "link.error", reason: "unexpected_error" }));
+    expect(log).toHaveBeenCalledWith(
+      JSON.stringify({ event: "link.error", reason: "unexpected_error" }),
+    );
   });
 
   it.each([
-    [new LinkSetupError("missing_configuration", "DATABASE_URL"), "missing_configuration", "DATABASE_URL"],
-    [new LinkSetupError("credentials_unreadable", "LINK_TOKEN_ENCRYPTION_KEY"), "credentials_unreadable", "LINK_TOKEN_ENCRYPTION_KEY"],
-    [Object.assign(new Error("private SQL content"), { code: "42P01" }), "database_migration_required", undefined],
-    [Object.assign(new Error("postgres://user:secret@host"), { code: "ECONNREFUSED" }), "database_unavailable", undefined],
+    [
+      new LinkSetupError("missing_configuration", "DATABASE_URL"),
+      "missing_configuration",
+      "DATABASE_URL",
+    ],
+    [
+      new LinkSetupError("credentials_unreadable", "LINK_TOKEN_ENCRYPTION_KEY"),
+      "credentials_unreadable",
+      "LINK_TOKEN_ENCRYPTION_KEY",
+    ],
+    [
+      Object.assign(new Error("private SQL content"), { code: "42P01" }),
+      "database_migration_required",
+      undefined,
+    ],
+    [
+      Object.assign(new Error("postgres://user:secret@host"), { code: "ECONNREFUSED" }),
+      "database_unavailable",
+      undefined,
+    ],
   ])("reports only safe operator diagnostics", async (error, reason, setting) => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(safeLinkCall(async () => { throw error; })).rejects.toMatchObject({ reason: "link_unavailable" });
-    expect(log).toHaveBeenCalledWith(JSON.stringify({ event: "link.error", reason, ...(setting ? { setting } : {}) }));
+    await expect(
+      safeLinkCall(async () => {
+        throw error;
+      }),
+    ).rejects.toMatchObject({ reason: "link_unavailable" });
+    expect(log).toHaveBeenCalledWith(
+      JSON.stringify({ event: "link.error", reason, setting: setting || undefined }),
+    );
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/secret|private SQL/);
   });
 
   it("requires an exact public origin and a 256-bit server key", () => {
-    for (const name of ["DATABASE_URL", "LINK_CLIENT_ID", "LINK_CLIENT_SECRET", "STRIPE_PUBLISHABLE_KEY"])
+    for (const name of [
+      "DATABASE_URL",
+      "LINK_CLIENT_ID",
+      "LINK_CLIENT_SECRET",
+      "STRIPE_PUBLISHABLE_KEY",
+    ])
       vi.stubEnv(name, "test-value");
     vi.stubEnv("BELL_PUBLIC_URL", "http://127.0.0.1:4320");
     vi.stubEnv("LINK_TOKEN_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
     expect(linkConfig().redirectUri).toBe("http://127.0.0.1:4320/api/link/oauth/callback");
-    for (const value of ["http://bell.example", "https://bell.example/path", "https://user:pass@bell.example"] ) {
+    for (const value of [
+      "http://bell.example",
+      "https://bell.example/path",
+      "https://user:pass@bell.example",
+    ]) {
       vi.stubEnv("BELL_PUBLIC_URL", value);
       expect(() => linkConfig()).toThrow();
     }

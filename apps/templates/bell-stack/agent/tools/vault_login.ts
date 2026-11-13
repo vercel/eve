@@ -23,7 +23,10 @@ export default defineTool({
     totpFlow: z.enum(["same_form", "after_submit"]).default("same_form"),
   }),
   async execute(input, ctx) {
-    if (ctx.session.auth?.current?.authenticator === "linq-message") throw new Error("Shared operator vaults are not available over iMessage. Use onepassword_login for personal credentials.");
+    if (ctx.session.auth?.current?.authenticator === "linq-message")
+      throw new Error(
+        "Shared operator vaults are not available over iMessage. Use onepassword_login for personal credentials.",
+      );
     const readLogin = () => {
       if (input.provider === "native") return nativeVault.login(input.itemId);
       if (!input.vaultId) throw new Error("A vault ID is required for a 1Password login.");

@@ -2,7 +2,10 @@ import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import linq from "../agent/channels/linq";
-import { ContextContainer, contextStorage } from "../node_modules/eve/dist/src/context/container.js";
+import {
+  ContextContainer,
+  contextStorage,
+} from "../node_modules/eve/dist/src/context/container.js";
 import { SessionKey } from "../node_modules/eve/dist/src/context/keys.js";
 import type { ChannelAdapter } from "../node_modules/eve/dist/src/channel/adapter.js";
 
@@ -10,6 +13,8 @@ const receivingNumber = "+12025550100";
 const senderNumber = "+12025550123";
 const signingKey = Buffer.from("bell-test-key-for-webhooks-only!!");
 const route = linq.routes.find((entry) => entry.method === "POST")!;
+import { signInFlow } from "./sign-in";
+
 type RouteContext = Parameters<typeof route.handler>[1];
 
 beforeEach(() => {
@@ -17,13 +22,19 @@ beforeEach(() => {
   vi.stubEnv("LINQ_WEBHOOK_SECRET", `whsec_${signingKey.toString("base64")}`);
   vi.stubEnv("BELL_LINQ_PHONE_NUMBER", receivingNumber);
   vi.stubEnv("BELL_LINQ_ALLOWED_SENDERS", senderNumber);
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    const url = input instanceof Request ? input.url : String(input);
-    if (!url.startsWith("https://api.linqapp.com/api/partner/v3/chats/") || !url.endsWith("/read")) {
-      throw new Error(`Unexpected provider request in Linq test: ${url}`);
-    }
-    return new Response(null, { status: 204 });
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (
+        !url.startsWith("https://api.linqapp.com/api/partner/v3/chats/") ||
+        !url.endsWith("/read")
+      ) {
+        throw new Error(`Unexpected provider request in Linq test: ${url}`);
+      }
+      return new Response(null, { status: 204 });
+    }),
+  );
 });
 
 afterEach(() => {
@@ -49,11 +60,15 @@ function message(chatId = randomUUID()) {
   };
 }
 
-async function deliver(event: ReturnType<typeof message>, options: { tamper?: boolean; age?: number; unsigned?: boolean } = {}) {
+async function deliver(
+  event: ReturnType<typeof message>,
+  options: { tamper?: boolean; age?: number; unsigned?: boolean } = {},
+) {
   const body = JSON.stringify(event);
   const timestamp = String(Math.floor(Date.now() / 1_000) - (options.age ?? 0));
   const signature = createHmac("sha256", signingKey)
-    .update(`${event.event_id}.${timestamp}.${body}`).digest("base64");
+    .update(`${event.event_id}.${timestamp}.${body}`)
+    .digest("base64");
   const headers = new Headers({ "content-type": "application/json" });
   if (!options.unsigned) {
     headers.set("webhook-id", event.event_id);
@@ -61,22 +76,44 @@ async function deliver(event: ReturnType<typeof message>, options: { tamper?: bo
     headers.set("webhook-signature", `v1,${signature}`);
   }
   const request = new Request("https://bell.example/eve/v1/linq", {
-    method: "POST", headers, body: options.tamper ? `${body} ` : body,
+    method: "POST",
+    headers,
+    body: options.tamper ? `${body} ` : body,
   });
   const tasks: Promise<unknown>[] = [];
-  const dispatch = vi.fn(async () => undefined);
-  // Stop at the real adapter's Eve dispatch boundary; never run a model or browser.
-  const from = vi.fn(() => new Proxy({}, {
-    get(_target, property) {
-      if (property === "send") return dispatch;
-      throw new Error(`Unexpected Eve operation: ${String(property)}`);
-    },
-  })) as unknown as RouteContext["from"];
-  const unsupported = () => { throw new Error("Unexpected Eve route operation"); };
+  const unsupported = () => {
+    throw new Error("Unexpected eve route operation");
+  };
+  const dispatch = vi.fn(async () => ({
+    deliveryId: "delivery",
+    sessionId: "synthetic-session",
+    accepted: unsupported,
+    result: unsupported,
+    stream: unsupported,
+  }));
+  const from: RouteContext["from"] = vi.fn(() => ({
+    send: dispatch,
+    respond: unsupported,
+    cancel: unsupported,
+    compact: unsupported,
+    clear: unsupported,
+    create: unsupported,
+    end: unsupported,
+  }));
   const response = await route.handler(request, {
-    from, resolveSession: unsupported, attachSession: unsupported, to: unsupported,
-    describe: unsupported, listSkillFiles: unsupported, readSkill: unsupported, invokeTool: unsupported,
-    params: {}, requestIp: null, waitUntil: (task) => { tasks.push(task); },
+    from,
+    resolveSession: unsupported,
+    attachSession: unsupported,
+    to: unsupported,
+    describe: unsupported,
+    listSkillFiles: unsupported,
+    readSkill: unsupported,
+    invokeTool: unsupported,
+    params: {},
+    requestIp: null,
+    waitUntil: (task) => {
+      tasks.push(task);
+    },
   });
   if (!(response instanceof Response)) throw new Error("Expected an HTTP webhook response.");
   for (const task of tasks) await task;
@@ -90,11 +127,22 @@ describe("Bell's signed Linq webhook", () => {
     expect(response.status).toBe(200);
     expect(from).toHaveBeenCalledWith(expect.stringContaining(event.data.chat.id));
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(dispatch).toHaveBeenCalledWith(event.data.parts[0].value, expect.objectContaining({
-      context: [expect.stringContaining("Bell's private Linq")],
-      auth: expect.objectContaining({ principalId: "linq:sender-handle-id", principalType: "user", attributes: expect.objectContaining({ bell_watch_chat: event.data.chat.id, bell_watch_sender: senderNumber, bell_watch_line: receivingNumber }) }),
-      state: { thread: expect.objectContaining({ isDM: true }) },
-    }));
+    expect(dispatch).toHaveBeenCalledWith(
+      event.data.parts[0].value,
+      expect.objectContaining({
+        context: [expect.stringContaining("Bell's private Linq")],
+        auth: expect.objectContaining({
+          principalId: "linq:sender-handle-id",
+          principalType: "user",
+          attributes: expect.objectContaining({
+            bell_watch_chat: event.data.chat.id,
+            bell_watch_sender: senderNumber,
+            bell_watch_line: receivingNumber,
+          }),
+        }),
+        state: { thread: expect.objectContaining({ isDM: true }) },
+      }),
+    );
     expect(fetch).toHaveBeenCalledOnce();
   });
 
@@ -118,23 +166,25 @@ describe("Bell's signed Linq webhook", () => {
       state: { pendingAuthMessageIds: {} },
     };
     const authorization = {
-      displayName: "Link", url: "https://login.link.com/auth?state=opaque-state",
+      displayName: "Link",
+      url: "https://login.link.com/auth?state=opaque-state",
       instructions: "Connect your wallet and return to this chat.",
     };
-    const { adapter } = linq as unknown as { adapter: ChannelAdapter };
+    const adapter = Reflect.get(linq, "adapter") as ChannelAdapter;
     const context = new ContextContainer();
     context.set(SessionKey, { sessionId: "original-eve-session" } as never);
     await contextStorage.run(context, async () => {
-      await adapter["authorization.required"]!(
-        { name: "link", authorization } as never, channel as never,
-      );
-      expect(post).toHaveBeenCalledExactlyOnceWith({ markdown: expect.stringContaining(authorization.url) });
+      const flow = signInFlow(adapter, channel, { name: "link", ...authorization });
+      await flow.open();
+      expect(post).toHaveBeenCalledExactlyOnceWith({
+        markdown: expect.stringContaining(authorization.url),
+      });
       expect(channel.state.pendingAuthMessageIds).toEqual({ link: "oauth-message" });
-      await adapter["authorization.completed"]!(
-        { name: "link", authorization, outcome: "authorized" } as never, channel as never,
-      );
+      await flow.settle();
     });
-    expect(editMessage).toHaveBeenCalledWith("original-linq-chat", "oauth-message", { markdown: "Link connected." });
+    expect(editMessage).toHaveBeenCalledWith("original-linq-chat", "oauth-message", {
+      markdown: "Link connected.",
+    });
     expect(startTyping).toHaveBeenCalledWith("Connected. Resuming...");
     expect(channel.state.pendingAuthMessageIds).toEqual({});
   });
@@ -151,12 +201,42 @@ describe("Bell's signed Linq webhook", () => {
   });
 
   it.each([
-    ["another line", (event: ReturnType<typeof message>) => { event.data.chat.owner_handle.handle = "+12025550199"; }],
-    ["another sender", (event: ReturnType<typeof message>) => { event.data.sender_handle.handle = "+12025550199"; }],
-    ["a group chat", (event: ReturnType<typeof message>) => { event.data.chat.is_group = true; }],
-    ["a bot echo", (event: ReturnType<typeof message>) => { event.data.sender_handle.is_me = true; }],
-    ["an outbound message", (event: ReturnType<typeof message>) => { event.data.direction = "outbound"; }],
-    ["an email handle", (event: ReturnType<typeof message>) => { event.data.sender_handle.handle = "demo@example.com"; }],
+    [
+      "another line",
+      (event: ReturnType<typeof message>) => {
+        event.data.chat.owner_handle.handle = "+12025550199";
+      },
+    ],
+    [
+      "another sender",
+      (event: ReturnType<typeof message>) => {
+        event.data.sender_handle.handle = "+12025550199";
+      },
+    ],
+    [
+      "a group chat",
+      (event: ReturnType<typeof message>) => {
+        event.data.chat.is_group = true;
+      },
+    ],
+    [
+      "a bot echo",
+      (event: ReturnType<typeof message>) => {
+        event.data.sender_handle.is_me = true;
+      },
+    ],
+    [
+      "an outbound message",
+      (event: ReturnType<typeof message>) => {
+        event.data.direction = "outbound";
+      },
+    ],
+    [
+      "an email handle",
+      (event: ReturnType<typeof message>) => {
+        event.data.sender_handle.handle = "demo@example.com";
+      },
+    ],
   ])("ignores a signed message from %s", async (_name, change) => {
     const event = message();
     change(event);

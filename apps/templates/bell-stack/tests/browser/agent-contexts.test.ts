@@ -37,9 +37,14 @@ describe("saved browser contexts", () => {
       expect((await listAgentContexts()).map(({ id }) => id)).toEqual(["context_fixture"]);
 
       await promoteAgentContext("context_draft", "Hacker News");
-      expect(await listAgentContexts()).toContainEqual(expect.objectContaining({
-        id: "context_draft", name: "Hacker News", status: "saved", selected: true,
-      }));
+      expect(await listAgentContexts()).toContainEqual(
+        expect.objectContaining({
+          id: "context_draft",
+          name: "Hacker News",
+          status: "saved",
+          selected: true,
+        }),
+      );
       const state = await metadata.read();
       expect(state.contexts.context_draft.ownerSessionId).toBeUndefined();
       expect(state.contexts.context_draft.expiresAt).toBeUndefined();

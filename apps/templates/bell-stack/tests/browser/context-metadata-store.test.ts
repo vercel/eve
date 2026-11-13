@@ -24,12 +24,16 @@ describe("browser context metadata", () => {
       new ContextMetadataStore(filePath),
       new ContextMetadataStore(path.relative(process.cwd(), filePath)),
     ];
-    await Promise.all(Array.from({ length: 8 }, (_, index) =>
-      stores[index % stores.length].add(`context_${index}`, `Context ${index}`),
-    ));
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        stores[index % stores.length].add(`context_${index}`, `Context ${index}`),
+      ),
+    );
 
     const value = await stores[0].read();
-    expect(Object.keys(value.contexts)).toEqual(Array.from({ length: 8 }, (_, index) => `context_${index}`));
+    expect(Object.keys(value.contexts)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `context_${index}`),
+    );
     expect(value.selectedContextId).toBe("context_0");
     expect(await readdir(directory)).toEqual(["contexts.json"]);
     expect((await stat(filePath)).mode & 0o777).toBe(0o600);
@@ -53,7 +57,11 @@ describe("browser context metadata", () => {
     ]);
 
     const value = await second.read();
-    expect(Object.keys(value.contexts).sort()).toEqual(["context_draft", "context_new", "context_saved"]);
+    expect(Object.keys(value.contexts).sort()).toEqual([
+      "context_draft",
+      "context_new",
+      "context_saved",
+    ]);
     expect(value.selectedContextId).toBe("context_saved");
     expect(value.contexts.context_saved).toMatchObject({ name: "Saved", status: "saved" });
     expect(value.contexts.context_saved).not.toHaveProperty("ownerSessionId");
@@ -77,7 +85,9 @@ describe("browser context metadata", () => {
     JSON.stringify({}),
     JSON.stringify({ contexts: [] }),
     JSON.stringify({ contexts: { context_broken: null } }),
-    JSON.stringify({ contexts: { context_broken: { name: "Broken", createdAt: "bad", updatedAt: "bad" } } }),
+    JSON.stringify({
+      contexts: { context_broken: { name: "Broken", createdAt: "bad", updatedAt: "bad" } },
+    }),
   ])("refuses to overwrite invalid existing data: %s", async (contents) => {
     await writeFile(filePath, contents);
     const store = new ContextMetadataStore(filePath);

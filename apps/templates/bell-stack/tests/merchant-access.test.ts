@@ -176,7 +176,10 @@ describe("one-request merchant header boundary", () => {
   ])("blocks a different first document request without presenting proof", async (request) => {
     const send = vi.fn(async () => ({}));
     const handler = merchantRequestHandler(
-      { send } as never, url, "main", { "KYA-Credential": "private-proof" },
+      { send } as never,
+      url,
+      "main",
+      { "KYA-Credential": "private-proof" },
       new AbortController().signal,
     );
     await handler.handle(event({ request }) as never);

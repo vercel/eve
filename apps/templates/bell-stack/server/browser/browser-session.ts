@@ -10,7 +10,11 @@ import {
   type Page,
 } from "@browserbasehq/stagehand";
 
-import { parseBrowserbaseCaptchaEvent, safeCaptchaPage, type CaptchaSignal } from "../../lib/browser/captcha";
+import {
+  parseBrowserbaseCaptchaEvent,
+  safeCaptchaPage,
+  type CaptchaSignal,
+} from "../../lib/browser/captcha";
 import { addTrace } from "./trace.js";
 import type { BrowserProxyLocation, BrowserState, ConversationState, RunAction } from "./types.js";
 
@@ -65,7 +69,10 @@ export class BrowserSession {
       ensureContext?: (
         currentContextId?: string,
       ) => Promise<{ id: string; status: "draft" | "saved" }>;
-      captcha?: { status: "idle" | "solving" | "solved" | "errored" | "timed_out"; startedAt?: string };
+      captcha?: {
+        status: "idle" | "solving" | "solved" | "errored" | "timed_out";
+        startedAt?: string;
+      };
     } = {},
   ) {
     this.captchaStatus = options.captcha?.status ?? "idle";
@@ -103,8 +110,13 @@ export class BrowserSession {
       if (requested === "browserbase") {
         const apiKey = process.env.BROWSERBASE_API_KEY;
         if (!apiKey) throw new Error("BROWSERBASE_API_KEY is required for Browserbase mode.");
-        if (personalBrowserEnabled() && (this.options.contextId || process.env.BROWSERBASE_CONTEXT_ID))
-          throw new Error("Start a new conversation without a reusable Context for personal 1Password.");
+        if (
+          personalBrowserEnabled() &&
+          (this.options.contextId || process.env.BROWSERBASE_CONTEXT_ID)
+        )
+          throw new Error(
+            "Start a new conversation without a reusable Context for personal 1Password.",
+          );
         const currentContextId = this.options.contextId ?? process.env.BROWSERBASE_CONTEXT_ID;
         if (this.options.ensureContext && !personalBrowserEnabled()) {
           const context = await this.options.ensureContext(currentContextId);
@@ -361,10 +373,23 @@ export class BrowserSession {
     host: string;
     url: string;
   }> {
-    const selectors = [input.usernameTarget, input.passwordTarget, input.submitTarget,
-      input.totpTarget, input.otpSubmitTarget, input.successTarget];
-    if (selectors.some((selector) => selector && (/^\s*(?:xpath=|\/|\()/i.test(selector) || selector.includes(">>"))))
-      throw new Error("Secure login requires CSS selectors in the top-level page; frame selectors are not allowed.");
+    const selectors = [
+      input.usernameTarget,
+      input.passwordTarget,
+      input.submitTarget,
+      input.totpTarget,
+      input.otpSubmitTarget,
+      input.successTarget,
+    ];
+    if (
+      selectors.some(
+        (selector) =>
+          selector && (/^\s*(?:xpath=|\/|\()/i.test(selector) || selector.includes(">>")),
+      )
+    )
+      throw new Error(
+        "Secure login requires CSS selectors in the top-level page; frame selectors are not allowed.",
+      );
     const release = await this.acquireOperation();
     try {
       await this.start();
@@ -583,9 +608,17 @@ export class BrowserSession {
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
           const prior = await this.browserbase.sessions.retrieve(persistedSessionId);
-          if (prior.userMetadata?.networkLogging !== "false" || prior.userMetadata?.sessionRecording !== "false")
+          if (
+            prior.userMetadata?.networkLogging !== "false" ||
+            prior.userMetadata?.sessionRecording !== "false"
+          )
             throw new Error("Session logging and recording settings cannot be verified.");
-          if (personalBrowserEnabled() && (prior.userMetadata?.onepasswordExtension !== process.env.BROWSERBASE_1PASSWORD_EXTENSION_ID || prior.userMetadata?.privateContext !== "true"))
+          if (
+            personalBrowserEnabled() &&
+            (prior.userMetadata?.onepasswordExtension !==
+              process.env.BROWSERBASE_1PASSWORD_EXTENSION_ID ||
+              prior.userMetadata?.privateContext !== "true")
+          )
             throw new Error("The personal 1Password browser settings cannot be verified.");
           const browser = await stagehandBrowserbase.connect({
             apiKey,
@@ -901,11 +934,15 @@ export function browserbaseLaunchOptions(
 ) {
   const contextId = durableContextId ?? process.env.BROWSERBASE_CONTEXT_ID;
   const projectId = process.env.BROWSERBASE_PROJECT_ID;
-  if (personalBrowserEnabled() && contextId) throw new Error("Personal 1Password cannot use a reusable Context.");
+  if (personalBrowserEnabled() && contextId)
+    throw new Error("Personal 1Password cannot use a reusable Context.");
+  const options: { extensionId?: string; projectId?: string } = {};
+  if (personalBrowserEnabled())
+    options.extensionId = process.env.BROWSERBASE_1PASSWORD_EXTENSION_ID!.trim();
+  if (projectId) options.projectId = projectId;
   return {
     apiKey,
-    ...(personalBrowserEnabled() ? { extensionId: process.env.BROWSERBASE_1PASSWORD_EXTENSION_ID!.trim() } : {}),
-    ...(projectId ? { projectId } : {}),
+    ...options,
     proxies: proxyLocation
       ? [
           {
@@ -920,14 +957,19 @@ export function browserbaseLaunchOptions(
       logSession: false,
       recordSession: false,
       solveCaptchas: true,
-      ...(contextId ? { context: { id: contextId, persist: true } } : {}),
+      context: contextId ? { id: contextId, persist: true } : undefined,
     },
     userMetadata: {
       product: "bell",
       transport: "stagehand-v4-eve",
       networkLogging: "false",
       sessionRecording: "false",
-      ...(personalBrowserEnabled() ? { onepasswordExtension: process.env.BROWSERBASE_1PASSWORD_EXTENSION_ID!.trim(), privateContext: "true" } : {}),
+      ...(personalBrowserEnabled()
+        ? {
+            onepasswordExtension: process.env.BROWSERBASE_1PASSWORD_EXTENSION_ID!.trim(),
+            privateContext: "true",
+          }
+        : {}),
     },
   };
 }
@@ -968,7 +1010,7 @@ function originOf(url: string): string | undefined {
 function isLiveSourceUrl(url: string): boolean {
   const parsed = new URL(url);
   const host = parsed.hostname;
-  if (host.includes("google.")) return /^\/maps\/place\//.test(parsed.pathname);
+  if (host.includes("google.")) return parsed.pathname.startsWith("/maps/place/");
   return !DISCOVERY_HOSTS.some((item) => host.includes(item));
 }
 

@@ -50,7 +50,8 @@ const credentials = {
   allowedHosts: ["shop.example"],
 };
 const context = (signal = new AbortController().signal) => ({
-  session: { id: "vault-tool-test" }, abortSignal: signal,
+  session: { id: "vault-tool-test" },
+  abortSignal: signal,
 });
 
 describe("vault login tool boundary", () => {
@@ -84,8 +85,9 @@ describe("vault login tool boundary", () => {
     if (!(schema instanceof z.ZodObject)) throw new Error("Expected a Zod tool schema.");
     const parsed = schema.parse({ ...input, provider: undefined });
     expect(parsed.provider).toBe("onepassword");
-    await expect(vaultLogin.execute({ ...input, vaultId: undefined }, context() as never))
-      .rejects.toThrow("vault ID is required");
+    await expect(
+      vaultLogin.execute({ ...input, vaultId: undefined }, context() as never),
+    ).rejects.toThrow("vault ID is required");
     expect(mocks.login).not.toHaveBeenCalled();
     expect(mocks.secureLogin).not.toHaveBeenCalled();
   });
@@ -96,8 +98,9 @@ describe("vault login tool boundary", () => {
       controller.abort();
       return credentials;
     });
-    await expect(vaultLogin.execute(input, context(controller.signal) as never))
-      .rejects.toMatchObject({ name: "AbortError" });
+    await expect(
+      vaultLogin.execute(input, context(controller.signal) as never),
+    ).rejects.toMatchObject({ name: "AbortError" });
     expect(mocks.secureLogin).not.toHaveBeenCalled();
   });
 
@@ -107,8 +110,9 @@ describe("vault login tool boundary", () => {
       controller.abort();
       return credentials;
     });
-    await expect(vaultLogin.execute({ ...input, provider: "native" }, context(controller.signal) as never))
-      .rejects.toMatchObject({ name: "AbortError" });
+    await expect(
+      vaultLogin.execute({ ...input, provider: "native" }, context(controller.signal) as never),
+    ).rejects.toMatchObject({ name: "AbortError" });
     expect(mocks.secureLogin).not.toHaveBeenCalled();
   });
 

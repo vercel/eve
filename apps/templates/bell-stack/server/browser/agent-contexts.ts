@@ -96,7 +96,11 @@ export async function ensureAgentContext(
           status: current?.status === "draft" ? "draft" : "saved",
         };
       } catch (error) {
-        if (current?.status !== "draft" || !(error instanceof Browserbase.APIError) || error.status !== 404)
+        if (
+          current?.status !== "draft" ||
+          !(error instanceof Browserbase.APIError) ||
+          error.status !== 404
+        )
           throw error;
         await metadata.remove(currentContextId);
       }

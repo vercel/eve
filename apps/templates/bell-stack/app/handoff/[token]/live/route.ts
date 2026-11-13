@@ -1,4 +1,7 @@
-import { BrowserHandoffError, resolveBrowserHandoffLiveViewUrl } from "../../../../server/browser/handoff";
+import {
+  BrowserHandoffError,
+  resolveBrowserHandoffLiveViewUrl,
+} from "../../../../server/browser/handoff";
 
 export const runtime = "nodejs";
 

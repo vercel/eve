@@ -32,8 +32,8 @@ describe("durable Eve task state", () => {
     let state = initializeTask(empty(), "session_fixture", "2026-09-05T00:00:00.000Z");
     state = applyTaskEvent(
       state,
-      event("message.received", "evt_user", {
-        message: "Research durable agents",
+      event("delivery.consumed", "evt_user", {
+        parts: [{ type: "text", text: "Research durable agents" }],
       }),
       "session_fixture",
     );
@@ -66,26 +66,34 @@ describe("durable Eve task state", () => {
   it("does not replay an old turn-start event over a completed turn", () => {
     const started = event("turn.started", "evt_start");
     let state = applyTaskEvent(empty(), started, "session_fixture");
-    state = applyTaskEvent(state, event("turn.completed", "evt_end"), "session_fixture");
+    state = applyTaskEvent(
+      state,
+      event("turn.settled", "evt_end", { outcome: "completed" }),
+      "session_fixture",
+    );
     expect(applyTaskEvent(state, started, "session_fixture")).toBe(state);
     expect(state.status).toBe("idle");
   });
   it("survives human waits and resumes the same workflow", () => {
     let state = applyTaskEvent(
       empty(),
-      event("input.requested", "evt_wait", { prompt: "Enter OTP code" }),
+      event("interaction.opened", "evt_wait", { request: { prompt: "Enter OTP code" } }),
       "session_fixture",
     );
     expect(state).toMatchObject({
       status: "waiting_for_user",
       waitReason: "otp",
     });
-    state = applyTaskEvent(state, event("session.waiting", "evt_parked"), "session_fixture");
+    state = applyTaskEvent(state, event("turn.paused", "evt_parked"), "session_fixture");
     expect(state).toMatchObject({
       status: "waiting_for_user",
       waitReason: "otp",
     });
-    state = applyTaskEvent(state, event("input.resolved", "evt_resume"), "session_fixture");
+    state = applyTaskEvent(
+      state,
+      event("interaction.settled", "evt_resume", { outcome: "accepted" }),
+      "session_fixture",
+    );
     expect(state).toMatchObject({ status: "running", activeStep: "resuming" });
   });
   it("continues a stored task without using or extending legacy bookkeeping", () => {

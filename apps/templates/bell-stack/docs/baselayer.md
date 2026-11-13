@@ -91,14 +91,14 @@ Buy does not configure merchant verification; Linq webhooks still point to Bell.
 
 ## Troubleshooting and verification limits
 
-| Result | Next step |
-| --- | --- |
-| Mint HTTP 404 | Use a current `principal_ref` from the API key's sandbox organization. Baselayer returns the same status for unknown and cross-organization references. |
-| Mint HTTP 409 | Re-verify the identity, then mint again. |
-| `CREDENTIAL_MISSING` on ordinary navigation | Expected: this request has no proof. |
-| `STATUS_UNAVAILABLE` | Check the merchant's access to a current registry status list. Do not bypass revocation checks. |
-| `UNTRUSTED_ISSUER` | Confirm that the merchant's trusted issuer configuration matches Baselayer's issued token format. The agent cannot rewrite a signed issuer claim. |
-| Redirect or profile mismatch | Use the exact protected URL advertised by the merchant's profile. |
+| Result                                      | Next step                                                                                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mint HTTP 404                               | Use a current `principal_ref` from the API key's sandbox organization. Baselayer returns the same status for unknown and cross-organization references. |
+| Mint HTTP 409                               | Re-verify the identity, then mint again.                                                                                                                |
+| `CREDENTIAL_MISSING` on ordinary navigation | Expected: this request has no proof.                                                                                                                    |
+| `STATUS_UNAVAILABLE`                        | Check the merchant's access to a current registry status list. Do not bypass revocation checks.                                                         |
+| `UNTRUSTED_ISSUER`                          | Confirm that the merchant's trusted issuer configuration matches Baselayer's issued token format. The agent cannot rewrite a signed issuer claim.       |
+| Redirect or profile mismatch                | Use the exact protected URL advertised by the merchant's profile.                                                                                       |
 
 The local tests use synthetic credentials and mocked provider responses. They verify mint request
 shape, key and audience binding, proof signatures and nonce refresh, request isolation,

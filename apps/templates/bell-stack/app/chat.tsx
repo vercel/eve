@@ -2,7 +2,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEveAgent } from "eve/react";
-import { Client } from "eve/client";
+import { interactions } from "eve/events";
 import { useState } from "react";
 import { browserPreview } from "./projection";
 
@@ -19,16 +19,12 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
         window.history.replaceState(null, "", `/s/${encodeURIComponent(session.sessionId)}`);
     },
   });
-  const busy = agent.status === "submitted" || agent.status === "streaming";
+  const busy = agent.status === "busy";
   const waiting = busy || agent.status === "resuming" || retiring;
-  const preview = browserPreview(agent.events);
-  const pending = agent.data.messages
-    .flatMap((message) => message.parts)
-    .flatMap((part) => {
-      if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
-      const request = part.toolMetadata?.eve?.inputRequest;
-      return request ? [request] : [];
-    });
+  const preview = browserPreview(agent.messages);
+  const pending = interactions(agent.view).filter(
+    (item) => item.status === "open" && item.request.kind !== "sign-in",
+  );
   async function send(text: string) {
     if (!text.trim() || waiting) return;
     setError("");
@@ -44,9 +40,8 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
     setRetiring(true);
     setError("");
     try {
-      if (agent.session)
-        await new Client({ host: "" }).sessions.attach(agent.session.sessionId).reset();
-      agent.reset();
+      if (agent.session) await agent.end();
+      agent.newSession();
       setInput("");
       router.push("/");
     } catch {
@@ -64,11 +59,7 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
             Bell<span>.</span>
           </h1>
         </div>
-        <button
-          className="new-chat"
-          disabled={waiting}
-          onClick={() => void newConversation()}
-        >
+        <button className="new-chat" disabled={waiting} onClick={() => void newConversation()}>
           New conversation
         </button>
       </header>
@@ -88,7 +79,7 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
             Open demo site ↗
           </button>
           <div className="messages" aria-live="polite">
-            {agent.data.messages
+            {agent.messages
               .filter((message) => message.role === "user" || message.role === "assistant")
               .map((message) => (
                 <article key={message.id} className={message.role}>
@@ -107,8 +98,8 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
               {error || "The agent request failed. Check server configuration and retry."}
             </p>
           )}
-          {pending.map((request) => (
-            <fieldset key={request.requestId}>
+          {pending.map(({ request, interactionId }) => (
+            <fieldset key={interactionId}>
               <legend>{request.prompt}</legend>
               {request.options?.map((option) => (
                 <button
@@ -116,7 +107,7 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
                   type="button"
                   onClick={() =>
                     void agent
-                      .respond([{ requestId: request.requestId, optionId: option.id }])
+                      .respond([{ interactionId, optionId: option.id }])
                       .catch(() => setError("Reply failed. Please retry."))
                   }
                 >
@@ -132,12 +123,12 @@ export default function Chat({ sessionId, demoUrl }: { sessionId?: string; demoU
                     ).trim();
                     if (text)
                       void agent
-                        .respond([{ requestId: request.requestId, text }])
+                        .respond([{ interactionId, text }])
                         .catch(() => setError("Reply failed. Please retry."));
                   }}
                 >
-                  <label htmlFor={`reply-${request.requestId}`}>Your reply</label>
-                  <input id={`reply-${request.requestId}`} name="reply" required />
+                  <label htmlFor={`reply-${interactionId}`}>Your reply</label>
+                  <input id={`reply-${interactionId}`} name="reply" required />
                   <button>Reply</button>
                 </form>
               )}

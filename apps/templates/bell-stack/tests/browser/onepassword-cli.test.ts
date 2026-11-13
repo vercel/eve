@@ -8,7 +8,10 @@ vi.mock("@1password/sdk", () => ({ createClient: mocks.createClient }));
 
 function item() {
   return {
-    id: "login-id", vault: { id: "vault-id" }, title: "Example login", category: "LOGIN",
+    id: "login-id",
+    vault: { id: "vault-id" },
+    title: "Example login",
+    category: "LOGIN",
     fields: [
       { id: "username", purpose: "USERNAME", value: "fixture-private-user" },
       { id: "password", purpose: "PASSWORD", value: "fixture-private-password" },
@@ -26,21 +29,27 @@ function item() {
 
 type Callback = (error: Error | null, stdout: string, stderr: string) => void;
 type Options = { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number };
-const respondWith = (result: unknown) => (
-  _file: string, _args: string[], _options: Options, callback: Callback,
-) => callback(null, typeof result === "string" ? result : JSON.stringify(result), "");
+const respondWith =
+  (result: unknown) => (_file: string, _args: string[], _options: Options, callback: Callback) =>
+    callback(null, typeof result === "string" ? result : JSON.stringify(result), "");
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("BELL_ONEPASSWORD_BACKEND", "cli");
   vi.stubEnv("OP_SERVICE_ACCOUNT_TOKEN", "");
   vi.stubEnv("OP_ACCOUNT", "account-id");
-  mocks.execFile.mockImplementation((file: string, args: string[], options: Options, callback: Callback) => {
-    const result = args.includes("--otp") ? "123456\n"
-      : args.includes("vault") ? [{ id: "vault-id", name: "Agent vault" }]
-      : args.includes("list") ? [{ id: "login-id" }] : item();
-    respondWith(result)(file, args, options, callback);
-  });
+  mocks.execFile.mockImplementation(
+    (file: string, args: string[], options: Options, callback: Callback) => {
+      const result = args.includes("--otp")
+        ? "123456\n"
+        : args.includes("vault")
+          ? [{ id: "vault-id", name: "Agent vault" }]
+          : args.includes("list")
+            ? [{ id: "login-id" }]
+            : item();
+      respondWith(result)(file, args, options, callback);
+    },
+  );
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -48,10 +57,16 @@ afterEach(() => vi.unstubAllEnvs());
 describe("explicit 1Password CLI compatibility", () => {
   it("lists safe metadata without initializing the SDK or returning secrets", async () => {
     const result = await new OnePasswordVault().list();
-    expect(result).toEqual([{
-      itemId: "login-id", vaultId: "vault-id", vaultName: "Agent vault", label: "Example login",
-      allowedHosts: ["example.com"], fields: { username: true, password: true, totp: true },
-    }]);
+    expect(result).toEqual([
+      {
+        itemId: "login-id",
+        vaultId: "vault-id",
+        vaultName: "Agent vault",
+        label: "Example login",
+        allowedHosts: ["example.com"],
+        fields: { username: true, password: true, totp: true },
+      },
+    ]);
     expect(JSON.stringify(result)).not.toContain("fixture-private");
     expect(mocks.createClient).not.toHaveBeenCalled();
     expect(mocks.execFile).toHaveBeenCalledTimes(3);
@@ -60,11 +75,21 @@ describe("explicit 1Password CLI compatibility", () => {
   it("reads credentials and hosts from one scoped item and gets only a generated OTP", async () => {
     const result = await new OnePasswordVault().login("vault-id", "login-id");
     expect(result).toEqual({
-      allowedHosts: ["example.com"], username: "fixture-private-user",
-      password: "fixture-private-password", totp: "123456",
+      allowedHosts: ["example.com"],
+      username: "fixture-private-user",
+      password: "fixture-private-password",
+      totp: "123456",
     });
     expect(mocks.execFile.mock.calls.map((call) => call[1])).toEqual([
-      ["--account=account-id", "item", "get", "--vault=vault-id", "--format=json", "--", "login-id"],
+      [
+        "--account=account-id",
+        "item",
+        "get",
+        "--vault=vault-id",
+        "--format=json",
+        "--",
+        "login-id",
+      ],
       ["--account=account-id", "item", "get", "--vault=vault-id", "--otp", "--", "login-id"],
     ]);
     expect(JSON.stringify(result)).not.toContain("fixture-private-totp-seed");
@@ -81,7 +106,14 @@ describe("explicit 1Password CLI compatibility", () => {
       expect(file).toBe("op");
       expect(args[0]).toBe("--account=account-id");
       expect(options).toMatchObject({ timeout: 20_000, maxBuffer: 2 * 1024 * 1024 });
-      for (const name of ["OP_CONNECT_HOST", "OP_CONNECT_TOKEN", "OP_SESSION", "OP_SESSION_other", "OP_SERVICE_ACCOUNT_TOKEN", "OP_ACCOUNT"])
+      for (const name of [
+        "OP_CONNECT_HOST",
+        "OP_CONNECT_TOKEN",
+        "OP_SESSION",
+        "OP_SESSION_other",
+        "OP_SERVICE_ACCOUNT_TOKEN",
+        "OP_ACCOUNT",
+      ])
         expect(options.env).not.toHaveProperty(name);
       expect(options.env.OP_DEBUG).toBe("false");
     }
@@ -109,28 +141,47 @@ describe("explicit 1Password CLI compatibility", () => {
     expect(mocks.execFile).not.toHaveBeenCalled();
   });
 
-  it.each(["--help", "-", "item/id", "item\nother"])("rejects unsafe item ID %s before spawning", async (itemId) => {
-    await expect(new OnePasswordVault().login("vault-id", itemId)).rejects.toThrow("Invalid 1Password");
-    expect(mocks.execFile).not.toHaveBeenCalled();
-  });
+  it.each(["--help", "-", "item/id", "item\nother"])(
+    "rejects unsafe item ID %s before spawning",
+    async (itemId) => {
+      await expect(new OnePasswordVault().login("vault-id", itemId)).rejects.toThrow(
+        "Invalid 1Password",
+      );
+      expect(mocks.execFile).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects a mismatched item or vault before returning credentials", async () => {
     mocks.execFile.mockImplementation(respondWith({ ...item(), vault: { id: "other-vault" } }));
-    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow("Could not read");
+    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow(
+      "Could not read",
+    );
     expect(mocks.execFile).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["", "fixture-private-seed", "123456\nprivate-error"])("omits unavailable or malformed OTP %j for human handoff", async (otp) => {
-    mocks.execFile.mockImplementationOnce(respondWith(item())).mockImplementationOnce(respondWith(otp));
-    expect(await new OnePasswordVault().login("vault-id", "login-id")).not.toHaveProperty("totp");
-  });
+  it.each(["", "fixture-private-seed", "123456\nprivate-error"])(
+    "omits unavailable or malformed OTP %j for human handoff",
+    async (otp) => {
+      mocks.execFile
+        .mockImplementationOnce(respondWith(item()))
+        .mockImplementationOnce(respondWith(otp));
+      expect(await new OnePasswordVault().login("vault-id", "login-id")).not.toHaveProperty("totp");
+    },
+  );
 
   it("keeps provider stdout and stderr out of errors and allows retry", async () => {
-    mocks.execFile.mockImplementationOnce((_file: string, _args: string[], _options: Options, callback: Callback) => {
-      callback(Object.assign(new Error("fixture-private-provider-error"), {
-        stdout: "fixture-private-secret", stderr: "fixture-private-details",
-      }), "fixture-private-secret", "fixture-private-details");
-    });
+    mocks.execFile.mockImplementationOnce(
+      (_file: string, _args: string[], _options: Options, callback: Callback) => {
+        callback(
+          Object.assign(new Error("fixture-private-provider-error"), {
+            stdout: "fixture-private-secret",
+            stderr: "fixture-private-details",
+          }),
+          "fixture-private-secret",
+          "fixture-private-details",
+        );
+      },
+    );
     const vault = new OnePasswordVault();
     const request = vault.list();
     await expect(request).rejects.toThrow("Could not list 1Password CLI logins");
@@ -141,7 +192,10 @@ describe("explicit 1Password CLI compatibility", () => {
 
   it("sanitizes invalid JSON errors without exposing provider output", async () => {
     mocks.execFile.mockImplementationOnce(respondWith("fixture-private-json"));
-    await expect(new OnePasswordVault().login("vault-id", "login-id"))
-      .rejects.toThrow(new Error("Could not read the 1Password CLI login. Check the item handle, configured account, and vault permissions."));
+    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow(
+      new Error(
+        "Could not read the 1Password CLI login. Check the item handle, configured account, and vault permissions.",
+      ),
+    );
   });
 });

@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { isLinkSandbox, isSandboxRequest } from "../../../../server/link/sandbox";
 
-export const spendRequestId = z.string().min(1).max(255)
+export const spendRequestId = z
+  .string()
+  .min(1)
+  .max(255)
   .regex(/^[A-Za-z0-9_-]+$/, "Invalid Link spend-request ID.");
 export const spendRequestInput = z.strictObject({ id: spendRequestId });
 
@@ -17,9 +20,23 @@ export async function linkMetadataRequest<T>(request: () => T | Promise<T>): Pro
   } catch (error) {
     // The SDK includes provider response bodies in its errors. Do not persist
     // those bodies, while preserving Eve's separate authorization pause signals.
-    if (error instanceof Error && ["LinkApiError", "LinkResponseError", "LinkTransportError", "LinkConfigurationError"].includes(error.name)) {
-      const status = "status" in error && typeof error.status === "number" && Number.isInteger(error.status)
-        && error.status >= 100 && error.status <= 599 ? ` (HTTP ${error.status})` : "";
+    if (
+      error instanceof Error &&
+      [
+        "LinkApiError",
+        "LinkResponseError",
+        "LinkTransportError",
+        "LinkConfigurationError",
+      ].includes(error.name)
+    ) {
+      const status =
+        "status" in error &&
+        typeof error.status === "number" &&
+        Number.isInteger(error.status) &&
+        error.status >= 100 &&
+        error.status <= 599
+          ? ` (HTTP ${error.status})`
+          : "";
       throw new Error(`Link request failed${status}. Check the existing request before retrying.`);
     }
     throw error;
@@ -42,51 +59,71 @@ const metadata = z.object({
   merchant_name: z.string().optional(),
   merchant_url: z.string().optional(),
   context: z.string().optional(),
-  line_items: z.array(z.object({
-    name: z.string(),
-    url: z.string().optional(),
-    image_url: z.string().optional(),
-    description: z.string().optional(),
-    sku: z.string().optional(),
-    totals: z.array(total).optional(),
-    quantity: z.number().optional(),
-    unit_amount: z.number().optional(),
-    product_url: z.string().optional(),
-  })).optional(),
+  line_items: z
+    .array(
+      z.object({
+        name: z.string(),
+        url: z.string().optional(),
+        image_url: z.string().optional(),
+        description: z.string().optional(),
+        sku: z.string().optional(),
+        totals: z.array(total).optional(),
+        quantity: z.number().optional(),
+        unit_amount: z.number().optional(),
+        product_url: z.string().optional(),
+      }),
+    )
+    .optional(),
   totals: z.array(total).optional(),
   approval_url: z.string().optional(),
   activity_url: z.string().optional(),
-  expires_at: z.number().optional(),
-  recurring: z.object({
-    interval: z.string(),
-    interval_count: z.number().optional(),
-  }).nullable().optional(),
-  payment_status_details: z.object({
-    outcome: z.enum(["success", "failure"]),
-    code: z.string().nullable().optional(),
-    decline_code: z.string().nullable().optional(),
-    amount: z.number(),
-    currency: z.string(),
-    created: z.number().nullable().optional(),
-    refund_details: z.object({
+  expires_at: z.iso.datetime().optional(),
+  recurring: z
+    .object({
+      interval: z.string(),
+      interval_count: z.number().optional(),
+    })
+    .nullable()
+    .optional(),
+  payment_status_details: z
+    .object({
+      outcome: z.enum(["success", "failure"]),
+      code: z.string().nullable().optional(),
+      decline_code: z.string().nullable().optional(),
       amount: z.number(),
       currency: z.string(),
-      state: z.string(),
-      created: z.number(),
-    }).nullable().optional(),
-  }).nullable().optional(),
-  status_details: z.object({
-    requires_action: z.object({
-      failure_code: z.string().optional(),
-      next_action: z.object({
-        type: z.string().optional(),
-        display_message: z.string().optional(),
-        action_url: z.string().nullable().optional(),
-        resolution: z.string().optional(),
-        expires_at: z.number().nullable().optional(),
-      }).optional(),
-    }).optional(),
-  }).nullable().optional(),
+      created: z.number().nullable().optional(),
+      refund_details: z
+        .object({
+          amount: z.number(),
+          currency: z.string(),
+          state: z.string(),
+          created: z.number(),
+        })
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
+  status_details: z
+    .object({
+      requires_action: z
+        .object({
+          failure_code: z.string().optional(),
+          next_action: z
+            .object({
+              type: z.string().optional(),
+              display_message: z.string().optional(),
+              action_url: z.string().nullable().optional(),
+              resolution: z.string().optional(),
+              expires_at: z.iso.datetime().nullable().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .nullable()
+    .optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -99,7 +136,7 @@ export function spendRequestMetadata(value: unknown) {
 
 export function spendRequestListMetadata(value: unknown) {
   if (!Array.isArray(value)) throw new Error("Unexpected Link spend-request list.");
-  return value.map(spendRequestMetadata).filter(item => isSandboxRequest(item.id));
+  return value.map(spendRequestMetadata).filter((item) => isSandboxRequest(item.id));
 }
 
 export function spendApprovalMetadata(value: unknown) {

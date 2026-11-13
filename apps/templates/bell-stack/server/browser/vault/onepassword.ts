@@ -49,7 +49,9 @@ export class OnePasswordVault {
       }
       return items;
     } catch {
-      throw new Error("Could not list 1Password logins. Check the configured account and vault permissions.");
+      throw new Error(
+        "Could not list 1Password logins. Check the configured account and vault permissions.",
+      );
     }
   }
 
@@ -61,7 +63,9 @@ export class OnePasswordVault {
     try {
       item = await client.items.get(vaultId, itemId);
     } catch {
-      throw new Error("Could not read the 1Password login. Check the item handle and vault permissions.");
+      throw new Error(
+        "Could not read the 1Password login. Check the item handle and vault permissions.",
+      );
     }
     if (item.category !== sdk.ItemCategory.Login)
       throw new Error("The selected 1Password item is not a Login.");
@@ -71,7 +75,7 @@ export class OnePasswordVault {
       throw new Error("The selected 1Password Login must contain a username and password.");
     const otp = item.fields.find((field) => field.fieldType === sdk.ItemFieldType.Totp),
       totp = otp?.details?.type === "Otp" ? otp.details.content.code : undefined;
-    return { allowedHosts: allowedHosts(item), username, password, ...(totp ? { totp } : {}) };
+    return { allowedHosts: allowedHosts(item), username, password, totp: totp || undefined };
   }
 
   private getClient(): Promise<Client> {
@@ -79,7 +83,9 @@ export class OnePasswordVault {
       const token = process.env.OP_SERVICE_ACCOUNT_TOKEN?.trim(),
         account = process.env.OP_ACCOUNT?.trim();
       if (!token && !account)
-        throw new Error("Set OP_SERVICE_ACCOUNT_TOKEN for hosted 1Password access or OP_ACCOUNT for the local desktop app.");
+        throw new Error(
+          "Set OP_SERVICE_ACCOUNT_TOKEN for hosted 1Password access or OP_ACCOUNT for the local desktop app.",
+        );
       this.client = (async () => {
         try {
           const sdk = await import("@1password/sdk");
@@ -90,7 +96,9 @@ export class OnePasswordVault {
           });
         } catch {
           this.client = undefined;
-          throw new Error("Could not connect to 1Password. Check the configured account and authorization.");
+          throw new Error(
+            "Could not connect to 1Password. Check the configured account and authorization.",
+          );
         }
       })();
     }
@@ -108,13 +116,17 @@ function backend(): "sdk" | "cli" {
 }
 
 function allowedHosts(item: Item): string[] {
-  return [...new Set(item.websites.flatMap((site) => {
-    if (site.autofillBehavior === "Never") return [];
-    try {
-      const host = new URL(site.url).hostname.toLowerCase();
-      return host ? [host] : [];
-    } catch {
-      return [];
-    }
-  }))];
+  return [
+    ...new Set(
+      item.websites.flatMap((site) => {
+        if (site.autofillBehavior === "Never") return [];
+        try {
+          const host = new URL(site.url).hostname.toLowerCase();
+          return host ? [host] : [];
+        } catch {
+          return [];
+        }
+      }),
+    ),
+  ];
 }

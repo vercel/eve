@@ -4,7 +4,9 @@ import { BrowserCancellationError, runWithCancellation } from "../../agent/lib/c
 
 describe("browser operation cancellation", () => {
   it("does not start queued work after cancellation cleanup", async () => {
-    const controller = new AbortController(), operation = vi.fn(), cleanup = vi.fn(async () => undefined);
+    const controller = new AbortController(),
+      operation = vi.fn(),
+      cleanup = vi.fn(async () => undefined);
     const pending = runWithCancellation(controller.signal, operation, cleanup);
     controller.abort();
     await expect(pending).rejects.toBeInstanceOf(BrowserCancellationError);
@@ -13,9 +15,13 @@ describe("browser operation cancellation", () => {
   });
 
   it("never starts work for a previously aborted turn", async () => {
-    const controller = new AbortController(), operation = vi.fn(), cleanup = vi.fn(async () => undefined);
+    const controller = new AbortController(),
+      operation = vi.fn(),
+      cleanup = vi.fn(async () => undefined);
     controller.abort();
-    await expect(runWithCancellation(controller.signal, operation, cleanup)).rejects.toBeInstanceOf(BrowserCancellationError);
+    await expect(runWithCancellation(controller.signal, operation, cleanup)).rejects.toBeInstanceOf(
+      BrowserCancellationError,
+    );
     expect(operation).not.toHaveBeenCalled();
     expect(cleanup).toHaveBeenCalledOnce();
   });

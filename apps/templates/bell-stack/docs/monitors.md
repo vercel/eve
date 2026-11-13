@@ -24,7 +24,7 @@ Monitor tables are independent of Link OAuth and can use the same database. Use 
 Configure a scheduler to call `/api/parallel/monitors/process` every minute. Both GET and POST require `Authorization: Bearer <CRON_SECRET>`. For Vercel, add this to your deployment's `vercel.json` and configure `CRON_SECRET` in the environment:
 
 ```json
-{"crons":[{"path":"/api/parallel/monitors/process","schedule":"* * * * *"}]}
+{ "crons": [{ "path": "/api/parallel/monitors/process", "schedule": "* * * * *" }] }
 ```
 
 Vercel supplies the bearer header on its GET request. Hobby only supports daily cron jobs; minute-level delivery requires a suitable plan or an external scheduler making authenticated POST requests. Deploying the code alone does not activate processing. Verify successful scheduler invocations before creating a watch. The worker processes at most 30 jobs per invocation with a 20-second work-start budget, 8-second provider timeouts, and 60-second leases. The route allows 60 seconds for the final request and database cleanup.

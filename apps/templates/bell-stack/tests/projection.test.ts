@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { browserPreview } from "../app/projection";
 
-const event = (output: unknown, isError = false) => ({
-  type: "action.result",
-  data: { result: { kind: "tool-result", output, isError } },
+const event = (
+  output: unknown,
+  isError = false,
+  name = "snapshot",
+): import("eve/react").EveMessage => ({
+  id: "message",
+  role: "assistant",
+  parts: [
+    {
+      type: "tool",
+      callId: "call",
+      stepIndex: 0,
+      kind: "tool",
+      name,
+      label: name,
+      state: isError ? "failed" : "completed",
+      output,
+    },
+  ],
 });
 describe("shared browser output in the Bell panel", () => {
   it("reads the browser runtime's nested screenshot", () => {
@@ -44,11 +60,15 @@ describe("shared browser output in the Bell panel", () => {
     ).toEqual({ url: undefined, screenshot: undefined, httpStatus: undefined });
   });
   it("does not show a previous HTTP 200 after an ordinary browser visit", () => {
-    const ordinary = event({ result: { completed: true, url: "https://example.com/protected" } });
+    const ordinary = event(
+      { result: { completed: true, url: "https://example.com/protected" } },
+      false,
+      "run",
+    );
     expect(
       browserPreview([
         event({ httpStatus: 200, screenshot: "data:image/png;base64,aA==" }),
-        { ...ordinary, data: { result: { ...ordinary.data.result, toolName: "run" } } },
+        ordinary,
       ]),
     ).toEqual({
       url: "https://example.com/protected",
@@ -57,23 +77,39 @@ describe("shared browser output in the Bell panel", () => {
     });
   });
   it("clears the previous page's capture and status after a login redirects", () => {
-    expect(browserPreview([
-      event({ url: "https://shop.example/login", httpStatus: 200, screenshot: "data:image/png;base64,aA==" }),
-      event({
-        result: { status: "complete" },
-        workbench: { browser: { url: "https://shop.example/account" } },
-      }),
-    ])).toEqual({
+    expect(
+      browserPreview([
+        event({
+          url: "https://shop.example/login",
+          httpStatus: 200,
+          screenshot: "data:image/png;base64,aA==",
+        }),
+        event({
+          result: { status: "complete" },
+          workbench: { browser: { url: "https://shop.example/account" } },
+        }),
+      ]),
+    ).toEqual({
       url: "https://shop.example/account",
       screenshot: undefined,
       httpStatus: undefined,
     });
   });
   it("keeps a new page's own capture and status when its URL changes", () => {
-    expect(browserPreview([
-      event({ url: "https://shop.example/login", httpStatus: 200, screenshot: "data:image/png;base64,aA==" }),
-      event({ url: "https://shop.example/account", httpStatus: 403, screenshot: "data:image/png;base64,bA==" }),
-    ])).toEqual({
+    expect(
+      browserPreview([
+        event({
+          url: "https://shop.example/login",
+          httpStatus: 200,
+          screenshot: "data:image/png;base64,aA==",
+        }),
+        event({
+          url: "https://shop.example/account",
+          httpStatus: 403,
+          screenshot: "data:image/png;base64,bA==",
+        }),
+      ]),
+    ).toEqual({
       url: "https://shop.example/account",
       screenshot: "data:image/png;base64,bA==",
       httpStatus: 403,

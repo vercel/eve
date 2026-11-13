@@ -19,13 +19,17 @@ describe("opt-in hosted CAPTCHA marker fixture", () => {
       let fixtureBrowser: Browser | undefined;
       try {
         const fixture = "https://bell-fixture.invalid/captcha";
-        fixtureBrowser = await session.withHostedPage(new AbortController().signal, (_page, connectUrl) =>
-          chromium.connectOverCDP(connectUrl));
+        fixtureBrowser = await session.withHostedPage(
+          new AbortController().signal,
+          (_page, connectUrl) => chromium.connectOverCDP(connectUrl),
+        );
         // Fulfill locally over CDP: the hosted browser cannot reach a localhost HTTP server.
-        await fixtureBrowser.contexts()[0].route(fixture, route => route.fulfill({
-          contentType: "text/html",
-          body: "<title>captcha fixture</title><h1>After solve</h1><script>console.log('browserbase-solving-started');setTimeout(()=>console.log('browserbase-solving-finished'),50)</script>",
-        }));
+        await fixtureBrowser.contexts()[0].route(fixture, (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: "<title>captcha fixture</title><h1>After solve</h1><script>console.log('browserbase-solving-started');setTimeout(()=>console.log('browserbase-solving-finished'),50)</script>",
+          }),
+        );
         const result = await session.run([
           { action: "goto", url: fixture },
           { action: "wait", milliseconds: 150 },
@@ -45,10 +49,7 @@ describe("opt-in hosted CAPTCHA marker fixture", () => {
         } finally {
           await session.close();
         }
-        expect(
-          (session as unknown as { captchaSubscriptions: Map<string, unknown> })
-            .captchaSubscriptions.size,
-        ).toBe(0);
+        expect((Reflect.get(session, "captchaSubscriptions") as Map<string, unknown>).size).toBe(0);
       }
     },
     60_000,

@@ -53,11 +53,11 @@ still need a reachable HTTPS application host. See
 
 3. In the [Linq dashboard](https://dashboard.linqapp.com/api-tooling), create a webhook subscription:
 
-   | Setting | Value |
-   | --- | --- |
-   | Target URL | `https://<your reachable Bell host>/eve/v1/linq?version=2026-02-03` |
-   | Event | `message.received` |
-   | Phone-number filter | Your `BELL_LINQ_PHONE_NUMBER` receiving line |
+   | Setting             | Value                                                               |
+   | ------------------- | ------------------------------------------------------------------- |
+   | Target URL          | `https://<your reachable Bell host>/eve/v1/linq?version=2026-02-03` |
+   | Event               | `message.received`                                                  |
+   | Phone-number filter | Your `BELL_LINQ_PHONE_NUMBER` receiving line                        |
 
    Save the subscription's signing secret as `LINQ_WEBHOOK_SECRET`, then restart Bell. The target
    is the Bell application. Best Buy is the website Bell visits, so do not enter it as the webhook

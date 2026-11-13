@@ -116,7 +116,10 @@ export async function resolveBrowserHandoffLiveViewUrl(
       if (!apiKey) configurationError();
       const browserbase = new Browserbase({ apiKey });
       const session = await browserbase.sessions.retrieve(browserSessionId);
-      if (session.userMetadata?.networkLogging !== "false" || session.userMetadata?.sessionRecording !== "false")
+      if (
+        session.userMetadata?.networkLogging !== "false" ||
+        session.userMetadata?.sessionRecording !== "false"
+      )
         throw new BrowserHandoffError("unavailable", "The browser handoff is not available.");
       const debug = await browserbase.sessions.debug(browserSessionId);
       return debug.debuggerFullscreenUrl;

@@ -1,4 +1,8 @@
-import { personalBrowserEnabled, withPersonalBrowserLock } from "../../server/onepassword/browser-policy";
+import {
+  personalBrowserEnabled,
+  withPersonalBrowserLock,
+  type PersonalBrowserContext,
+} from "../../server/onepassword/browser-policy";
 import {
   createAgentContext,
   ensureAgentContext,
@@ -8,8 +12,15 @@ import {
   selectAgentContext,
 } from "../../server/browser/agent-contexts.js";
 import { BrowserSession, CaptchaHandoffError } from "../../server/browser/browser-session.js";
-import { withBrowserPrivacyLock } from "../../server/browser/privacy-lock";
-import type { BrowserProxyLocation, ConversationState, TraceEvent } from "../../server/browser/types.js";
+import {
+  withBrowserPrivacyLock,
+  type BrowserPrivacyContext,
+} from "../../server/browser/privacy-lock";
+import type {
+  BrowserProxyLocation,
+  ConversationState,
+  TraceEvent,
+} from "../../server/browser/types.js";
 import { runWithCancellation } from "./cancellation";
 import {
   applyCaptchaTransition,
@@ -22,7 +33,11 @@ import {
   type DurableCaptchaRecord,
 } from "./task-state";
 
-type BrowserOperation<T> = (browser: BrowserSession) => Promise<T>;
+type BrowserOperationContext = BrowserPrivacyContext & PersonalBrowserContext;
+type BrowserOperation<T> = (
+  browser: BrowserSession,
+  context: BrowserOperationContext,
+) => Promise<T>;
 
 interface BrowserRuntime {
   browser: BrowserSession;
@@ -83,17 +98,31 @@ export async function runBrowserOperation<T>(
   operation: BrowserOperation<T>,
   includeScreenshot = false,
 ): Promise<BrowserToolOutput<T>> {
-  return withBrowserPrivacyLock(sessionId,
-    () => withPersonalBrowserLock(sessionId, () => runBrowserOperationUnlocked(sessionId, operation, includeScreenshot)),
-    undefined, Boolean(taskState.get().browser.sessionId));
+  return withBrowserPrivacyLock(
+    sessionId,
+    (privacy) =>
+      withPersonalBrowserLock(sessionId, (personal) =>
+        runBrowserOperationUnlocked(sessionId, operation, includeScreenshot, {
+          ...privacy,
+          ...personal,
+        }),
+      ),
+    undefined,
+    Boolean(taskState.get().browser.sessionId),
+  );
 }
 
-async function runBrowserOperationUnlocked<T>(sessionId: string, operation: BrowserOperation<T>, includeScreenshot: boolean): Promise<BrowserToolOutput<T>> {
+async function runBrowserOperationUnlocked<T>(
+  sessionId: string,
+  operation: BrowserOperation<T>,
+  includeScreenshot: boolean,
+  context: BrowserOperationContext,
+): Promise<BrowserToolOutput<T>> {
   const runtime = getRuntime(sessionId);
   scheduleIdleClose(sessionId, runtime);
   const traceStart = runtime.state.traces.length;
   let settled = false;
-  const pending = operation(runtime.browser).finally(() => {
+  const pending = operation(runtime.browser, context).finally(() => {
     settled = true;
   });
   while (!settled) {
@@ -146,8 +175,7 @@ function commitCaptchaQueue(runtime: BrowserRuntime): void {
 
 export async function saveBrowserRuntime(sessionId: string): Promise<void> {
   const runtime = runtimes.get(sessionId);
-  if (runtime)
-    taskState.update((current) => updateTaskBrowser(current, runtime.state.browser));
+  if (runtime) taskState.update((current) => updateTaskBrowser(current, runtime.state.browser));
 }
 
 export async function closeBrowserRuntime(sessionId: string): Promise<void> {
@@ -158,12 +186,17 @@ export async function closeBrowserRuntime(sessionId: string): Promise<void> {
     (taskState.get().browser.sessionId ? getRuntime(sessionId) : undefined);
   if (runtime) {
     if (runtime.idleTimer) clearTimeout(runtime.idleTimer);
-    runtime.closing ??= runtime.browser.close().then(() => {
-      runtimes.delete(sessionId);
-      taskState.update((current) =>
-        closeTaskBrowser(updateTaskBrowser(current, runtime.state.browser)),
-      );
-    }).finally(() => { runtime.closing = undefined; });
+    runtime.closing ??= runtime.browser
+      .close()
+      .then(() => {
+        runtimes.delete(sessionId);
+        taskState.update((current) =>
+          closeTaskBrowser(updateTaskBrowser(current, runtime.state.browser)),
+        );
+      })
+      .finally(() => {
+        runtime.closing = undefined;
+      });
     return runtime.closing;
   }
   taskState.update(closeTaskBrowser);
@@ -328,13 +361,17 @@ function createRuntimeBrowser(
     contextId,
     proxyLocation,
     captcha: taskState.get().captcha,
-    ensureContext: personalBrowserEnabled() ? undefined : async (currentContextId) => {
-      const context = await ensureAgentContext(sessionId, currentContextId);
-      state.browser.contextId = context.id;
-      state.browser.contextStatus = context.status;
-      taskState.update((current) => recordTaskBrowserContext(current, context.id, context.status));
-      return { id: context.id, status: context.status };
-    },
+    ensureContext: personalBrowserEnabled()
+      ? undefined
+      : async (currentContextId) => {
+          const context = await ensureAgentContext(sessionId, currentContextId);
+          state.browser.contextId = context.id;
+          state.browser.contextStatus = context.status;
+          taskState.update((current) =>
+            recordTaskBrowserContext(current, context.id, context.status),
+          );
+          return { id: context.id, status: context.status };
+        },
   });
 }
 
@@ -360,10 +397,7 @@ function scheduleIdleClose(sessionId: string, runtime: BrowserRuntime): void {
 // Channel callbacks also run when Eve ends a session outside a turn.
 // Global stream hooks do not run on that path in Eve 0.79.1.
 export const browserChannelEvents = {
-  async "session.completed"(_event: unknown, _channel: unknown, ctx: { session: { id: string } }) {
+  async "session.ended"(_event: unknown, ctx: { session: { id: string } }) {
     await closeBrowserRuntime(ctx.session.id);
-  },
-  async "session.failed"(event: { sessionId: string }) {
-    await closeBrowserRuntime(event.sessionId);
   },
 };

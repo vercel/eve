@@ -68,6 +68,7 @@ The Eve catalog's static-token quick start is not Bell's configuration.
    restarts and identical on all instances. Back it up separately from PostgreSQL. Replacing it
    without re-encrypting records makes existing grants unreadable, including for revocation.
    Use your database provider's verified TLS configuration; do not disable certificate checks.
+
 4. From the repository root, with `DATABASE_URL` exported in your shell, apply the migration:
 
    ```sh
@@ -77,6 +78,7 @@ The Eve catalog's static-token quick start is not Bell's configuration.
    Apply before accepting Link requests. It is safe to rerun and does not migrate browser data.
    The application needs SELECT/INSERT/UPDATE/DELETE on these tables. Schema management can use
    a separate database role.
+
 5. Restart Bell. Expose `/api/link/oauth/callback` and Eve's
    `/eve/v1/connections/.../callback/...` routes without an interactive login wall. Opaque OAuth
    state and the framework callback capability protect these routes. Keep the existing web and
@@ -156,13 +158,13 @@ Database downtime, a wrong encryption key, or missing configuration fails closed
 errors exclude provider bodies, tokens, and database credentials. The server emits a sanitized
 `link.error` diagnostic with one of these reasons:
 
-| Reason | Operator action |
-| --- | --- |
-| `missing_configuration` / `invalid_configuration` | Fix the named environment variable; values are never logged. |
-| `database_migration_required` | Apply the migration to the configured database. |
-| `database_unavailable` | Check database connectivity and credentials. |
-| `credentials_unreadable` | Restore the encryption key used for existing grants. |
-| `unexpected_error` | Check deployment health and reproduce with the regression tests; raw errors are withheld. |
+| Reason                                            | Operator action                                                                           |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `missing_configuration` / `invalid_configuration` | Fix the named environment variable; values are never logged.                              |
+| `database_migration_required`                     | Apply the migration to the configured database.                                           |
+| `database_unavailable`                            | Check database connectivity and credentials.                                              |
+| `credentials_unreadable`                          | Restore the encryption key used for existing grants.                                      |
+| `unexpected_error`                                | Check deployment health and reproduce with the regression tests; raw errors are withheld. |
 
 New instances need the same database and encryption key.
 

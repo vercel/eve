@@ -10,8 +10,7 @@
 - Link by Stripe: Payments
 - Linq: Messaging Infrastruture
 - 1Password: Authentication
-- Baselayer: Identity 
-
+- Baselayer: Identity
 
 ## Run locally
 
@@ -24,30 +23,26 @@ pnpm install --frozen-lockfile
 cp .env.example .env
 ```
 
-Set `OPENAI_API_KEY` and `BROWSERBASE_API_KEY` in `.env`. For ordinary browsing, set `BELL_DEMO_URL` to your target website. 
+Set `OPENAI_API_KEY` and `BROWSERBASE_API_KEY` in `.env`. For ordinary browsing, set `BELL_DEMO_URL` to your target website.
 Set `PARALLEL_API_KEY` to enable public-web research. Keep research inputs public; use the browser for authenticated pages and actions.
 
 ```sh
 pnpm dev
 ```
 
-
 ## Start here
 
-| Integration | What it does | Guide |
-| --- | --- | --- |
-| Browserbase + Stagehand | Browser sessions, automation, saved Contexts, and human handoff | [Browser runtime](docs/browser-runtime.md) |
-| Eve by Vercel | Agent configuration, tools, conversation state, and channels | [Eve in Bell](docs/repository.md#eve-by-vercel) |
-| Parallel | Public-web research and persistent watches with configurable frequency | Set `PARALLEL_API_KEY` in `.env`; [watch setup](docs/monitors.md) |
-| Linq | iMessage and SMS through a signed webhook and sender allowlist | [Messaging setup](docs/linq.md) |
-| Link by Stripe | Wallet authorization, spend approval, and checkout through Linq | [Sandbox and wallet setup](docs/link.md) |
-| 1Password | Operator credentials and OTP; personal Agentic Autofill is disabled by default | [Operator access](docs/browser-runtime.md#credentials-and-otp) · [Personal access status](docs/onepassword.md) |
-| Baselayer | Proves a verified person is behind the agent, using short-lived credentials | [Verified identity](docs/baselayer.md) |
-
+| Integration             | What it does                                                                   | Guide                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Browserbase + Stagehand | Browser sessions, automation, saved Contexts, and human handoff                | [Browser runtime](docs/browser-runtime.md)                                                                     |
+| Eve by Vercel           | Agent configuration, tools, conversation state, and channels                   | [Eve in Bell](docs/repository.md#eve-by-vercel)                                                                |
+| Parallel                | Public-web research and persistent watches with configurable frequency         | Set `PARALLEL_API_KEY` in `.env`; [watch setup](docs/monitors.md)                                              |
+| Linq                    | iMessage and SMS through a signed webhook and sender allowlist                 | [Messaging setup](docs/linq.md)                                                                                |
+| Link by Stripe          | Wallet authorization, spend approval, and checkout through Linq                | [Sandbox and wallet setup](docs/link.md)                                                                       |
+| 1Password               | Operator credentials and OTP; personal Agentic Autofill is disabled by default | [Operator access](docs/browser-runtime.md#credentials-and-otp) · [Personal access status](docs/onepassword.md) |
+| Baselayer               | Proves a verified person is behind the agent, using short-lived credentials    | [Verified identity](docs/baselayer.md)                                                                         |
 
 See the [repository layout and implementation map](docs/repository.md) to extend Bell.
-
-
 
 ## Development
 
@@ -58,7 +53,6 @@ pnpm check
 Runs tests, type checking, lint, and the production build. [Live provider checks](docs/provider-tests.md) are opt-in.
 
 Bell is a sample app for one trusted operator. Before deploying, configure application authentication and durable storage using the [browser runtime guide](docs/browser-runtime.md).
-
 
 ## License
 

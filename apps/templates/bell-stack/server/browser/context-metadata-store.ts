@@ -5,14 +5,17 @@ import { z } from "zod";
 
 const metadataSchema = z.object({
   selectedContextId: z.string().optional(),
-  contexts: z.record(z.string(), z.object({
-    name: z.string(),
-    createdAt: z.iso.datetime(),
-    updatedAt: z.iso.datetime(),
-    status: z.enum(["draft", "saved"]).optional(),
-    ownerSessionId: z.string().optional(),
-    expiresAt: z.iso.datetime().optional(),
-  })),
+  contexts: z.record(
+    z.string(),
+    z.object({
+      name: z.string(),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+      status: z.enum(["draft", "saved"]).optional(),
+      ownerSessionId: z.string().optional(),
+      expiresAt: z.iso.datetime().optional(),
+    }),
+  ),
 });
 
 export type ContextMetadataFile = z.infer<typeof metadataSchema>;
@@ -38,7 +41,9 @@ export class ContextMetadataStore {
     try {
       return metadataSchema.parse(JSON.parse(contents));
     } catch (error) {
-      throw new Error("Browser context metadata is invalid; refusing to overwrite it.", { cause: error });
+      throw new Error("Browser context metadata is invalid; refusing to overwrite it.", {
+        cause: error,
+      });
     }
   }
 

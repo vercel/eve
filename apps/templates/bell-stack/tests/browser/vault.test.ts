@@ -11,15 +11,18 @@ import { generateTotp } from "../../server/browser/vault/totp";
 const directories: string[] = [];
 const masterKey = Buffer.alloc(32, 7);
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "bell-vault-")), path = join(directory, "vault.json");
+  const directory = await mkdtemp(join(tmpdir(), "bell-vault-")),
+    path = join(directory, "vault.json");
   directories.push(directory);
   await copyFile(new URL("./fixtures/native-vault.json", import.meta.url), path);
   return { path, vault: new NativeVault(path, masterKey) };
 }
 async function replacePayload(path: string, payload: unknown) {
-  const store = JSON.parse(await readFile(path, "utf8")), dataKey = Buffer.alloc(32, 8);
+  const store = JSON.parse(await readFile(path, "utf8")),
+    dataKey = Buffer.alloc(32, 8);
   const seal = (key: Buffer, text: Buffer) => {
-    const iv = Buffer.alloc(12, 3), cipher = createCipheriv("aes-256-gcm", key, iv);
+    const iv = Buffer.alloc(12, 3),
+      cipher = createCipheriv("aes-256-gcm", key, iv);
     return {
       iv: iv.toString("base64"),
       ciphertext: Buffer.concat([cipher.update(text), cipher.final()]).toString("base64"),
@@ -33,7 +36,9 @@ async function replacePayload(path: string, payload: unknown) {
 afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+  );
 });
 
 describe("existing local encrypted vaults", () => {
@@ -41,15 +46,17 @@ describe("existing local encrypted vaults", () => {
     const { vault } = await fixture();
     vi.useFakeTimers();
     vi.setSystemTime(59000);
-    expect(await vault.list()).toEqual([{
-      provider: "native",
-      itemId: "fixture-login",
-      label: "Demo",
-      allowedHosts: ["authenticationtest.com"],
-      fields: { username: true, password: true, totp: true },
-      createdAt: "2026-09-05T00:00:00.000Z",
-      updatedAt: "2026-09-05T00:00:00.000Z",
-    }]);
+    expect(await vault.list()).toEqual([
+      {
+        provider: "native",
+        itemId: "fixture-login",
+        label: "Demo",
+        allowedHosts: ["authenticationtest.com"],
+        fields: { username: true, password: true, totp: true },
+        createdAt: "2026-09-05T00:00:00.000Z",
+        updatedAt: "2026-09-05T00:00:00.000Z",
+      },
+    ]);
     expect(await vault.login("fixture-login")).toEqual({
       allowedHosts: ["authenticationtest.com"],
       username: "fixture-user",
@@ -59,26 +66,33 @@ describe("existing local encrypted vaults", () => {
     expect(JSON.stringify(await vault.list())).not.toMatch(/fixture-password|fixture-user|JBSWY/);
   });
 
-  it.each(["base64", "hex"] as const)("uses Bell configuration with a %s master key", async (encoding) => {
-    const { path } = await fixture();
-    vi.stubEnv("BELL_VAULT_FILE", path);
-    vi.stubEnv("BELL_VAULT_MASTER_KEY", masterKey.toString(encoding));
-    await expect(new NativeVault().login("fixture-login"))
-      .resolves.toMatchObject({ username: "fixture-user", password: "fixture-password" });
-  });
+  it.each(["base64", "hex"] as const)(
+    "uses Bell configuration with a %s master key",
+    async (encoding) => {
+      const { path } = await fixture();
+      vi.stubEnv("BELL_VAULT_FILE", path);
+      vi.stubEnv("BELL_VAULT_MASTER_KEY", masterKey.toString(encoding));
+      await expect(new NativeVault().login("fixture-login")).resolves.toMatchObject({
+        username: "fixture-user",
+        password: "fixture-password",
+      });
+    },
+  );
 
   it("rejects a wrong key without exposing cryptographic details", async () => {
     const { path } = await fixture();
-    await expect(new NativeVault(path, Buffer.alloc(32, 9)).login("fixture-login"))
-      .rejects.toThrow("Could not decrypt the local vault login");
+    await expect(new NativeVault(path, Buffer.alloc(32, 9)).login("fixture-login")).rejects.toThrow(
+      "Could not decrypt the local vault login",
+    );
   });
 
   it("rejects missing or malformed master keys", async () => {
     const { path } = await fixture();
     for (const key of ["", "too-short"]) {
       vi.stubEnv("BELL_VAULT_MASTER_KEY", key);
-      await expect(new NativeVault(path).login("fixture-login"))
-        .rejects.toThrow("Set BELL_VAULT_MASTER_KEY");
+      await expect(new NativeVault(path).login("fixture-login")).rejects.toThrow(
+        "Set BELL_VAULT_MASTER_KEY",
+      );
     }
   });
 
@@ -93,15 +107,18 @@ describe("existing local encrypted vaults", () => {
     await expect(vault.list()).rejects.toThrow("Could not read the local vault");
   });
 
-  it.each(["invalid-host", "duplicate-id", "invalid-box"])("rejects %s records", async (failure) => {
-    const { path, vault } = await fixture();
-    const store = JSON.parse(await readFile(path, "utf8"));
-    if (failure === "invalid-host") store.records[0].allowedHosts = ["https://shop.example/path"];
-    if (failure === "duplicate-id") store.records.push(store.records[0]);
-    if (failure === "invalid-box") store.records[0].payload.iv = "AA==";
-    await writeFile(path, JSON.stringify(store));
-    await expect(vault.login("fixture-login")).rejects.toThrow("Could not read the local vault");
-  });
+  it.each(["invalid-host", "duplicate-id", "invalid-box"])(
+    "rejects %s records",
+    async (failure) => {
+      const { path, vault } = await fixture();
+      const store = JSON.parse(await readFile(path, "utf8"));
+      if (failure === "invalid-host") store.records[0].allowedHosts = ["https://shop.example/path"];
+      if (failure === "duplicate-id") store.records.push(store.records[0]);
+      if (failure === "invalid-box") store.records[0].payload.iv = "AA==";
+      await writeFile(path, JSON.stringify(store));
+      await expect(vault.login("fixture-login")).rejects.toThrow("Could not read the local vault");
+    },
+  );
 
   it("detects ciphertext tampering", async () => {
     const { path, vault } = await fixture();
@@ -110,13 +127,17 @@ describe("existing local encrypted vaults", () => {
     encrypted[0] ^= 1;
     store.records[0].payload.ciphertext = encrypted.toString("base64");
     await writeFile(path, JSON.stringify(store));
-    await expect(vault.login("fixture-login")).rejects.toThrow("Could not decrypt the local vault login");
+    await expect(vault.login("fixture-login")).rejects.toThrow(
+      "Could not decrypt the local vault login",
+    );
   });
 
   it("rejects malformed decrypted payloads without exposing their contents", async () => {
     const { path, vault } = await fixture();
     await replacePayload(path, { password: "private-payload" });
-    await expect(vault.login("fixture-login")).rejects.toThrow("Could not decrypt the local vault login");
+    await expect(vault.login("fixture-login")).rejects.toThrow(
+      "Could not decrypt the local vault login",
+    );
   });
 
   it("treats a not-yet-created local vault as empty", async () => {
@@ -128,9 +149,15 @@ describe("existing local encrypted vaults", () => {
 
   it("preserves password login when an invalid OTP needs human handoff", async () => {
     const { path, vault } = await fixture();
-    await replacePayload(path, { username: "fixture-user", password: "fixture-password", totpSecret: "invalid!" });
+    await replacePayload(path, {
+      username: "fixture-user",
+      password: "fixture-password",
+      totpSecret: "invalid!",
+    });
     await expect(vault.login("fixture-login")).resolves.toEqual({
-      allowedHosts: ["authenticationtest.com"], username: "fixture-user", password: "fixture-password",
+      allowedHosts: ["authenticationtest.com"],
+      username: "fixture-user",
+      password: "fixture-password",
     });
   });
 

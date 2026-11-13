@@ -11,7 +11,14 @@ export default defineTool({
   approval: create_spend_request.approval,
   async execute(input, ctx) {
     ctx.abortSignal.throwIfAborted();
-    const result = spendRequestMetadata(await linkMetadataRequest(() => create_spend_request.execute(sandboxPurchase(input), freshLinkContext(ctx, undefined, "create"))));
+    const result = spendRequestMetadata(
+      await linkMetadataRequest(() =>
+        create_spend_request.execute(
+          sandboxPurchase(input),
+          freshLinkContext(ctx, undefined, "create"),
+        ),
+      ),
+    );
     rememberSandboxRequest(result.id);
     return result;
   },

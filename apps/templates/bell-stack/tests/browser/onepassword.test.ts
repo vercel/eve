@@ -31,20 +31,45 @@ function loginItem(): Item {
     category: ItemCategory.Login,
     fields: [
       { id: "username", title: "username", fieldType: ItemFieldType.Text, value: "fixture-user" },
-      { id: "password", title: "password", fieldType: ItemFieldType.Concealed, value: "fixture-password" },
       {
-        id: "otp", title: "OTP", fieldType: ItemFieldType.Totp, value: "fixture-totp-seed",
+        id: "password",
+        title: "password",
+        fieldType: ItemFieldType.Concealed,
+        value: "fixture-password",
+      },
+      {
+        id: "otp",
+        title: "OTP",
+        fieldType: ItemFieldType.Totp,
+        value: "fixture-totp-seed",
         details: { type: "Otp", content: { code: "123456" } },
       },
     ],
     websites: [
-      { url: "https://EXAMPLE.com/login", label: "website", autofillBehavior: AutofillBehavior.ExactDomain },
-      { url: "https://example.com/", label: "duplicate", autofillBehavior: AutofillBehavior.ExactDomain },
-      { url: "https://blocked.example/", label: "no autofill", autofillBehavior: AutofillBehavior.Never },
+      {
+        url: "https://EXAMPLE.com/login",
+        label: "website",
+        autofillBehavior: AutofillBehavior.ExactDomain,
+      },
+      {
+        url: "https://example.com/",
+        label: "duplicate",
+        autofillBehavior: AutofillBehavior.ExactDomain,
+      },
+      {
+        url: "https://blocked.example/",
+        label: "no autofill",
+        autofillBehavior: AutofillBehavior.Never,
+      },
       { url: "invalid", label: "invalid", autofillBehavior: AutofillBehavior.ExactDomain },
     ],
-    sections: [], notes: "fixture-private-note", tags: [], version: 1, files: [],
-    createdAt: new Date("2026-01-01"), updatedAt: new Date("2026-01-01"),
+    sections: [],
+    notes: "fixture-private-note",
+    tags: [],
+    version: 1,
+    files: [],
+    createdAt: new Date("2026-01-01"),
+    updatedAt: new Date("2026-01-01"),
   };
 }
 
@@ -71,19 +96,34 @@ describe("1Password vault", () => {
       { id: "login-id", category: ItemCategory.Login },
     ]);
     const result = await new OnePasswordVault().list();
-    expect(result).toEqual([{
-      itemId: "login-id", vaultId: "vault-id", vaultName: "Agent vault", label: "Example login",
-      allowedHosts: ["example.com"], fields: { username: true, password: true, totp: true },
-    }]);
+    expect(result).toEqual([
+      {
+        itemId: "login-id",
+        vaultId: "vault-id",
+        vaultName: "Agent vault",
+        label: "Example login",
+        allowedHosts: ["example.com"],
+        fields: { username: true, password: true, totp: true },
+      },
+    ]);
     expect(sdk.getItem).toHaveBeenCalledExactlyOnceWith("vault-id", "login-id");
-    for (const secret of ["fixture-user", "fixture-password", "fixture-totp-seed", "fixture-private-note", "123456"])
+    for (const secret of [
+      "fixture-user",
+      "fixture-password",
+      "fixture-totp-seed",
+      "fixture-private-note",
+      "123456",
+    ])
       expect(JSON.stringify(result)).not.toContain(secret);
   });
 
   it("uses one scoped read for credentials, permitted hosts, and computed OTP", async () => {
     const result = await new OnePasswordVault().login("vault-id", "login-id");
     expect(result).toEqual({
-      allowedHosts: ["example.com"], username: "fixture-user", password: "fixture-password", totp: "123456",
+      allowedHosts: ["example.com"],
+      username: "fixture-user",
+      password: "fixture-password",
+      totp: "123456",
     });
     expect(sdk.getItem).toHaveBeenCalledExactlyOnceWith("vault-id", "login-id");
     expect(sdk.listVaults).not.toHaveBeenCalled();
@@ -92,16 +132,23 @@ describe("1Password vault", () => {
 
   it("does not substitute a TOTP seed or provider error for an unavailable code", async () => {
     const item = loginItem();
-    item.fields[2].details = { type: "Otp", content: { errorMessage: "fixture-private-provider-error" } };
+    item.fields[2].details = {
+      type: "Otp",
+      content: { errorMessage: "fixture-private-provider-error" },
+    };
     sdk.getItem.mockResolvedValue(item);
     expect(await new OnePasswordVault().login("vault-id", "login-id")).toEqual({
-      allowedHosts: ["example.com"], username: "fixture-user", password: "fixture-password",
+      allowedHosts: ["example.com"],
+      username: "fixture-user",
+      password: "fixture-password",
     });
   });
 
   it("rejects non-Login items even when they have username and password fields", async () => {
     sdk.getItem.mockResolvedValue({ ...loginItem(), category: ItemCategory.SecureNote });
-    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow("not a Login");
+    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow(
+      "not a Login",
+    );
     expect(await new OnePasswordVault().list()).toEqual([]);
   });
 
@@ -109,8 +156,12 @@ describe("1Password vault", () => {
     const item = loginItem();
     item.fields.find((candidate) => candidate.id === field)!.value = "";
     sdk.getItem.mockResolvedValue(item);
-    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow("must contain a username and password");
-    expect((await new OnePasswordVault().list())[0].fields[field as "username" | "password"]).toBe(false);
+    await expect(new OnePasswordVault().login("vault-id", "login-id")).rejects.toThrow(
+      "must contain a username and password",
+    );
+    expect((await new OnePasswordVault().list())[0].fields[field as "username" | "password"]).toBe(
+      false,
+    );
   });
 
   it("prefers the service account and reuses its client", async () => {
@@ -119,7 +170,9 @@ describe("1Password vault", () => {
     await vault.list();
     await vault.login("vault-id", "login-id");
     expect(sdk.createClient).toHaveBeenCalledExactlyOnceWith({
-      auth: "fixture-service-token", integrationName: "Bell", integrationVersion: "0.1.0",
+      auth: "fixture-service-token",
+      integrationName: "Bell",
+      integrationVersion: "0.1.0",
     });
   });
 
@@ -129,7 +182,8 @@ describe("1Password vault", () => {
     await new OnePasswordVault().list();
     expect(sdk.createClient).toHaveBeenCalledWith({
       auth: expect.objectContaining({ accountName: "Desktop account" }),
-      integrationName: "Bell", integrationVersion: "0.1.0",
+      integrationName: "Bell",
+      integrationVersion: "0.1.0",
     });
   });
 
@@ -144,7 +198,9 @@ describe("1Password vault", () => {
     sdk.createClient.mockRejectedValueOnce(new Error("fixture-private-provider-error"));
     const vault = new OnePasswordVault();
     const request = vault.list();
-    await expect(request).rejects.toThrow(new Error("Could not connect to 1Password. Check the configured account and authorization."));
+    await expect(request).rejects.toThrow(
+      new Error("Could not connect to 1Password. Check the configured account and authorization."),
+    );
     await expect(request).rejects.not.toHaveProperty("cause");
     expect(await vault.list()).toHaveLength(1);
     expect(sdk.createClient).toHaveBeenCalledTimes(2);
@@ -163,7 +219,11 @@ describe("1Password vault", () => {
     const method = { vaults: sdk.listVaults, items: sdk.listItems, item: sdk.getItem }[operation]!;
     method.mockRejectedValueOnce(new Error("fixture-private-provider-error"));
     const request = new OnePasswordVault().list();
-    await expect(request).rejects.toThrow(new Error("Could not list 1Password logins. Check the configured account and vault permissions."));
+    await expect(request).rejects.toThrow(
+      new Error(
+        "Could not list 1Password logins. Check the configured account and vault permissions.",
+      ),
+    );
     await expect(request).rejects.not.toHaveProperty("cause");
     expect(cli.listCliLogins).not.toHaveBeenCalled();
   });
@@ -171,7 +231,9 @@ describe("1Password vault", () => {
   it("sanitizes credential read errors", async () => {
     sdk.getItem.mockRejectedValueOnce(new Error("fixture-private-provider-error"));
     const request = new OnePasswordVault().login("vault-id", "login-id");
-    await expect(request).rejects.toThrow(new Error("Could not read the 1Password login. Check the item handle and vault permissions."));
+    await expect(request).rejects.toThrow(
+      new Error("Could not read the 1Password login. Check the item handle and vault permissions."),
+    );
     await expect(request).rejects.not.toHaveProperty("cause");
     expect(cli.readCliLogin).not.toHaveBeenCalled();
   });

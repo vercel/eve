@@ -39,12 +39,17 @@ describe("opt-in Browserbase restart recovery", () => {
       let fixtureBrowser: Browser | undefined;
       let parked = false;
       try {
-        fixtureBrowser = await session.withHostedPage(new AbortController().signal, (_page, connectUrl) =>
-          chromium.connectOverCDP(connectUrl));
+        fixtureBrowser = await session.withHostedPage(
+          new AbortController().signal,
+          (_page, connectUrl) => chromium.connectOverCDP(connectUrl),
+        );
         // Keep the fixture in the hosted page so the second process can resume it.
-        await fixtureBrowser.contexts()[0].route(fixture, route => route.fulfill({
-          contentType: "text/html", body: page,
-        }));
+        await fixtureBrowser.contexts()[0].route(fixture, (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: page,
+          }),
+        );
         await session.run([
           { action: "goto", url: fixture },
           { action: "fill", target: "#username", value: "public-test-user" },

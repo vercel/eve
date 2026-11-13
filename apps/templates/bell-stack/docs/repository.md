@@ -25,14 +25,14 @@ lifecycle; channel callbacks also handle terminal-session cleanup. Restart Bell 
 
 ## Integration implementation
 
-| Integration | Implementation | Guide |
-| --- | --- | --- |
-| Browserbase + Stagehand | [Browser runtime](../agent/lib/browser-runtime.ts), [session management](../server/browser/browser-session.ts) | [Browser configuration](browser-runtime.md) |
-| Eve by Vercel | [Agent](../agent/agent.ts), [channels](../agent/channels/), [hooks](../agent/hooks/) | [Eve in Bell](#eve-by-vercel) |
-| Linq | [Channel and sender policy](../agent/channels/linq.ts) | [Messaging setup](linq.md) |
-| Link by Stripe | [Eve extension and tools](../agent/extensions/link/), [authorization](../agent/lib/link-auth.ts), [server implementation](../server/link/) | [Sandbox and wallet setup](link.md) |
-| 1Password | [Operator SDK/CLI access](../server/browser/vault/onepassword.ts), [personal authorization](../agent/lib/onepassword-auth.ts), [personal server implementation](../server/onepassword/) | [Operator credentials](browser-runtime.md#credentials-and-otp), [personal access status](onepassword.md) |
-| Baselayer | [Agent tool](../agent/tools/merchant_access.ts), [credential minting](../server/baselayer.ts), [merchant verification](../server/verified-merchant.ts) | [Merchant access](baselayer.md) |
+| Integration             | Implementation                                                                                                                                                                          | Guide                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Browserbase + Stagehand | [Browser runtime](../agent/lib/browser-runtime.ts), [session management](../server/browser/browser-session.ts)                                                                          | [Browser configuration](browser-runtime.md)                                                              |
+| Eve by Vercel           | [Agent](../agent/agent.ts), [channels](../agent/channels/), [hooks](../agent/hooks/)                                                                                                    | [Eve in Bell](#eve-by-vercel)                                                                            |
+| Linq                    | [Channel and sender policy](../agent/channels/linq.ts)                                                                                                                                  | [Messaging setup](linq.md)                                                                               |
+| Link by Stripe          | [Eve extension and tools](../agent/extensions/link/), [authorization](../agent/lib/link-auth.ts), [server implementation](../server/link/)                                              | [Sandbox and wallet setup](link.md)                                                                      |
+| 1Password               | [Operator SDK/CLI access](../server/browser/vault/onepassword.ts), [personal authorization](../agent/lib/onepassword-auth.ts), [personal server implementation](../server/onepassword/) | [Operator credentials](browser-runtime.md#credentials-and-otp), [personal access status](onepassword.md) |
+| Baselayer               | [Agent tool](../agent/tools/merchant_access.ts), [credential minting](../server/baselayer.ts), [merchant verification](../server/verified-merchant.ts)                                  | [Merchant access](baselayer.md)                                                                          |
 
 Personal 1Password Agentic Autofill is implemented but disabled by default pending hosted extension
 support and live verification. Keep `ONEPASSWORD_ENABLED=false` and the extension ID unset as

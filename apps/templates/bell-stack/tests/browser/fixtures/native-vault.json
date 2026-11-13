@@ -5,9 +5,7 @@
       "version": 1,
       "id": "fixture-login",
       "label": "Demo",
-      "allowedHosts": [
-        "authenticationtest.com"
-      ],
+      "allowedHosts": ["authenticationtest.com"],
       "hasTotp": true,
       "createdAt": "2026-09-05T00:00:00.000Z",
       "updatedAt": "2026-09-05T00:00:00.000Z",

@@ -33,7 +33,7 @@ export async function verifiedMerchantAccess(
       scope: access.scope,
       level: "L2",
       attempts: attempt,
-      ...(code ? { code } : {}),
+      code: code || undefined,
     };
   }
   throw new Error("Merchant verification did not complete.");
