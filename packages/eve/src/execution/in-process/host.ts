@@ -105,6 +105,13 @@ export interface InProcessHost {
   readonly sessionHost: SessionHost;
   /** How many of `sessionId`'s turn steps are running now. */
   stepsRunning(sessionId: string): number;
+  /** Counts `work` as in flight here until it settles; see {@link InProcessHost.idle}. */
+  working<T>(work: () => Promise<T>): Promise<T>;
+  /**
+   * Resolves once nothing here is working: no delivery, step or session start is in flight, so
+   * every session and run waits on a message, a person or a timer.
+   */
+  idle(): Promise<void>;
   /** Delivers a command to the session holding `token`. */
   deliverCommand<TCommand extends SessionCommand>(
     token: string,
@@ -123,7 +130,12 @@ export function createInProcessHost(
 ): InProcessHost {
   const lines = createMemoryLineStore();
   const stepBoundary = options.stepBoundary ?? structuredCloneBoundary;
-  const inboxes = createMemoryInboxRegistry(stepBoundary);
+  const work = createWorkCounter();
+  const registry = createMemoryInboxRegistry(stepBoundary);
+  const inboxes: MemoryInboxRegistry = {
+    ...registry,
+    deliver: (token, payload) => work.count(() => registry.deliver(token, payload)),
+  };
   const timers: InProcessTimers = createInProcessTimers();
   const running = new Map<string, Promise<void>>();
   const steps = new Map<string, number>();
@@ -181,46 +193,49 @@ export function createInProcessHost(
   };
   const runTurnStep = turnStepOn(stepHost);
 
+  const applyRunMessages = applyRunMessagesOn({
+    // A remote child can't be opened here, so no run reports one.
+    recordRemoteBinding: async () => unavailable("A remote agent"),
+    stopLate,
+  });
+  const dispatchRuns = dispatchCoordinationOn(runs.startRun);
   const sessionHost: SessionHost = {
     toolStubs,
-    applyRunMessages: applyRunMessagesOn({
-      // A remote child can't be opened here, so no run reports one.
-      recordRemoteBinding: async () => unavailable("A remote agent"),
-      stopLate,
-    }),
-    dispatchRuns: dispatchCoordinationOn(runs.startRun),
+    applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
+    dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
     /**
      * One turn step, whose data crosses the host's step boundary each way as it would a
      * deployment's serializer. Its stream and signals are services, which cross as they are.
      */
-    async runTurnStep(input) {
-      const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
-      const { sessionId } = input.sessionState;
-      steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
-      try {
-        // Each attempt receives its own copy of the input and its own writable, as each of a
-        // Workflow step's does.
-        const result = await attempts.run(
-          {
-            name: "turnStep",
-            sessionId,
-            ...(abortSignal !== undefined && { signal: abortSignal }),
-          },
-          async (attempt) => ({
-            ...(await acrossStepBoundary(stepBoundary, data)),
-            abortSignal,
-            sessionWritable: attempts.writable(attempt, sessionWritable),
-            steeringSignal,
-          }),
-          runTurnStep,
-        );
-        return await acrossStepBoundary(stepBoundary, result);
-      } finally {
-        const left = (steps.get(sessionId) ?? 1) - 1;
-        if (left === 0) steps.delete(sessionId);
-        else steps.set(sessionId, left);
-      }
-    },
+    runTurnStep: (input) =>
+      work.count(async () => {
+        const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
+        const { sessionId } = input.sessionState;
+        steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
+        try {
+          // Each attempt receives its own copy of the input and its own writable, as each of a
+          // Workflow step's does.
+          const result = await attempts.run(
+            {
+              name: "turnStep",
+              sessionId,
+              ...(abortSignal !== undefined && { signal: abortSignal }),
+            },
+            async (attempt) => ({
+              ...(await acrossStepBoundary(stepBoundary, data)),
+              abortSignal,
+              sessionWritable: attempts.writable(attempt, sessionWritable),
+              steeringSignal,
+            }),
+            runTurnStep,
+          );
+          return await acrossStepBoundary(stepBoundary, result);
+        } finally {
+          const left = (steps.get(sessionId) ?? 1) - 1;
+          if (left === 0) steps.delete(sessionId);
+          else steps.set(sessionId, left);
+        }
+      }),
     until: (at) => timers.until(at),
   };
 
@@ -249,6 +264,8 @@ export function createInProcessHost(
     running,
     sessionHost,
     stepsRunning: (sessionId) => steps.get(sessionId) ?? 0,
+    working: (counted) => work.count(counted),
+    idle: () => work.idle(),
     onDispose(release) {
       releases.push(release);
     },
@@ -256,10 +273,53 @@ export function createInProcessHost(
       // Runs end first, while their sessions still listen, so each session hears its runs' ends
       // instead of waiting out a run that can no longer reach it.
       await runs.stopAll("The in-process host is stopping.");
+      // A session in a turn ends it, as a reset does: with its runs gone, a turn that keeps
+      // calling its model would never park, and closing its addresses wouldn't stop it.
+      await Promise.all(
+        [...running.keys()].map((sessionId) =>
+          inboxes
+            .deliver(
+              sessionCommandHookToken(sessionId),
+              identifyCommand({ deliveryId: `in-process-dispose:${sessionId}`, kind: "reset" }),
+            )
+            .catch(() => {}),
+        ),
+      );
       inboxes.closeAll();
       await Promise.all(running.values());
       timers.dispose();
       for (const release of releases.splice(0)) release();
+    },
+  };
+}
+
+/** Work in flight on a host, and a wait for none to be. */
+function createWorkCounter() {
+  let inFlight = 0;
+  const waiters = new Set<() => void>();
+  return {
+    async count<T>(work: () => Promise<T>): Promise<T> {
+      inFlight += 1;
+      try {
+        return await work();
+      } finally {
+        inFlight -= 1;
+        if (inFlight === 0) {
+          for (const resolve of waiters) resolve();
+          waiters.clear();
+        }
+      }
+    },
+    async idle(): Promise<void> {
+      // Rest must hold across macrotasks: what settled work starts next is in flight by then.
+      for (let quiet = 0; quiet < 3;) {
+        if (inFlight > 0) {
+          quiet = 0;
+          await new Promise<void>((resolve) => waiters.add(resolve));
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+        quiet = inFlight === 0 ? quiet + 1 : 0;
+      }
     },
   };
 }

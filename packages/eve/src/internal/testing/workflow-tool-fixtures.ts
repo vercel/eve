@@ -443,3 +443,11 @@ async function trySendNote(ctx: WorkflowStepToolContext) {
     return { refused: (error as Error).message };
   }
 }
+
+/** Sleeps for `input.ms`, durably, then reports it: a turn that waits on a timer. */
+export async function napWorkflow(input: { readonly ms?: number }): Promise<{ slept: number }> {
+  "use workflow";
+  const ms = input.ms ?? 1_000;
+  await workflowSleep(ms);
+  return { slept: ms };
+}
