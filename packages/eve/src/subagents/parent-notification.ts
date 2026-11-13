@@ -11,13 +11,13 @@ import {
   SUBAGENT_ADAPTER_KIND,
   type SubagentAdapterState,
 } from "#subagents/adapter-state.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { isHookNotFound } from "#shared/run-errors.js";
 import { createLogger } from "#internal/logging.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { resumeRoutedHook } from "#execution/hook-routes.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import {
   REMOTE_CALLBACK_NOT_PENDING,
@@ -340,7 +340,7 @@ async function resumeSettledTurnHook(
       results: [result],
     });
   } catch (error) {
-    if (!HookNotFoundError.is(error)) {
+    if (!isHookNotFound(error)) {
       throw error;
     }
 

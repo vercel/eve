@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
@@ -24,6 +25,9 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
+
+// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
+installWorkflowHost();
 
 const resumeHookMock = vi.mocked(resumeHook);
 const fetchMock = vi.fn();

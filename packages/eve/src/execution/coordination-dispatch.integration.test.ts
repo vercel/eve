@@ -1,9 +1,9 @@
 import type { AnyEventRequest } from "@workflow/world";
 import { describe, expect, it, vi } from "vitest";
-import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
+import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { withParkedStep } from "#internal/testing/session-machine.js";
 import { mintClearance } from "#harness/clearance.js";

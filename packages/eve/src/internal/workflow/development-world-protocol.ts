@@ -2,8 +2,6 @@ import type { DevelopmentGenerationAvailability } from "#internal/workflow/devel
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
 
-export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
-
 /**
  * Whether development serves this app's Workflow World from the CLI parent.
  * The parent's world creation and the generated worker plugin must agree on
@@ -17,10 +15,7 @@ export function usesParentDevelopmentWorkflowWorld(
 ): boolean {
   return resolveWorkflowWorldImport(configuredWorld ?? "local") === "@workflow/world-local";
 }
-export const DEVELOPMENT_WORKFLOW_SECRET_ENV = "EVE_DEV_WORKFLOW_TRANSPORT_SECRET";
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
-export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;
-export const DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER = "x-eve-dev-workflow-transport";
 export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery";
 
 /**

@@ -1,4 +1,4 @@
-import { getStepMetadata } from "#compiled/@workflow/core/index.js";
+import { isRetriedStep } from "#execution/hosts.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -82,16 +82,36 @@ const log = createLogger("execution.publish-session-events");
  */
 export type SessionEventOrigin = "own" | "relayed";
 
-/** The session a step publishes to: its stream and the state it starts from. */
-export interface SessionStepState {
+/** What a host hands a session step: the session's stream and the state the step starts from. */
+export interface SessionStepInput {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
-/** A {@link SessionStepState} with the conversation history, for a step that reads or changes it. */
-export interface SessionHistoryStepState extends SessionStepState {
+/** A {@link SessionStepInput} with the conversation history, for a step that reads or changes it. */
+export interface SessionHistoryStepInput extends SessionStepInput {
   readonly history: HarnessModelMessage[];
+}
+
+/** A step's input once the step has entered: whether it runs again is decided. */
+export type Entered<I extends object> = Omit<I, "rerun"> & {
+  /** Whether this attempt runs the step again, decided once at its entry ({@link enterSessionStep}). */
+  readonly rerun: boolean;
+};
+
+/** The session a step publishes to, as the step runs. */
+export type SessionStepState = Entered<SessionStepInput>;
+
+/** A {@link SessionStepState} with the conversation history. */
+export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
+
+/**
+ * Enters a session step: decides, once, whether this attempt runs it again, which it does when
+ * the durable host retried it.
+ */
+export function enterSessionStep<I extends object>(input: I): Entered<I> {
+  return { ...input, rerun: isRetriedStep() };
 }
 
 /** The context and session state a publication leaves behind. */
@@ -151,6 +171,8 @@ export interface RestoredSessionStep {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  /** Whether this attempt runs the step again, decided once at its entry ({@link enterSessionStep}). */
+  readonly rerun: boolean;
 }
 
 /** A {@link RestoredSessionStep} with the history, so its publication sees a whole session. */
@@ -163,6 +185,7 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
     ctx: await deserializeContext(step.serializedContext),
     durableSession: readDurableSession(step.sessionState),
     sessionWritable: step.sessionWritable,
+    rerun: step.rerun,
   };
 }
 
@@ -249,6 +272,7 @@ async function publishInSessionScope<T>(
   enterSessionProjection(ctx, step.durableSession.state);
   // The step decides from its checkpoint, so a retry writes again what its attempt wrote.
   const orphaned = await readOrphanedLines({
+    rerun: step.rerun,
     sessionId: step.durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: step.sessionWritable,
@@ -371,16 +395,16 @@ export interface OrphanedLine {
 const interruptedAttempts = new WeakMap<WritableStream<Uint8Array>, readonly OrphanedLine[]>();
 
 /**
- * The lines an interrupted earlier attempt of this step wrote after the checkpoint: none on a
- * first attempt, unless `always`, for a step that recovers what a failed step's attempts left.
+ * The lines an earlier attempt of this step wrote after the checkpoint, for an attempt that
+ * `rerun`s it; none on a first attempt, without reading the stream.
  */
 export async function readOrphanedLines(input: {
   readonly sessionId: string;
   readonly position: number;
   readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly always?: boolean;
+  readonly rerun: boolean;
 }): Promise<readonly OrphanedLine[]> {
-  if (input.always !== true && !isRetriedStep()) return [];
+  if (!input.rerun) return [];
   const { sessionId, sessionWritable, position: first } = input;
   let lines = interruptedAttempts.get(sessionWritable);
   if (lines === undefined) {
@@ -423,15 +447,6 @@ export function followInterruptedAttempt(
     },
     state,
   });
-}
-
-function isRetriedStep(): boolean {
-  try {
-    return getStepMetadata().attempt > 1;
-  } catch (error) {
-    if (error instanceof Error && error.name === "NotInStepContextError") return false;
-    throw error;
-  }
 }
 
 async function readLinesFrom(sessionId: string, first: number): Promise<OrphanedLine[]> {

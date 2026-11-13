@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { scheduleCollectionTools } from "#context/schedule-collection-tools.js";
 import { z } from "#compiled/zod/index.js";
 import {
@@ -20,6 +21,9 @@ import { evaluateApproval } from "#approval/evaluation.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
+
+// An occurrence runs on Workflow, the durable host a step bundle installs; this realm loads none.
+installWorkflowHost();
 
 const alice = {
   attributes: {},

@@ -72,7 +72,7 @@ async function forwardToParentStep(input: {
   try {
     // The workflow runtime loads only when a child forwards, so the channel adapters every
     // session context restores stay free of it.
-    const { resumeRoutedHook } = await import("#execution/hook-routes.js");
+    const { resumeRoutedHook } = await import("#execution/hosts.js");
     await resumeRoutedHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     log.warn("failed to forward a child's interaction to its parent", {

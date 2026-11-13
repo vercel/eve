@@ -118,6 +118,8 @@ describe("the schedule handle an occurrence callback receives", () => {
 
     await dispatchScheduledOccurrence({
       bundle,
+      // No channel starts a session here, so nothing uses it.
+      runtime: {} as never,
       collection: "requests",
       definition,
       occurrence: {

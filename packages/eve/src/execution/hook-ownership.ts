@@ -58,7 +58,7 @@ export function isHookForceClaimedError(error: unknown): error is {
   );
 }
 
-function createHookConflictError(
+export function createHookConflictError(
   token: string,
   conflictingRunId: string,
 ): Error & {

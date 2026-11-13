@@ -1,8 +1,8 @@
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
-import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { pollUntil } from "#execution/workflow-runtime.js";
-import { resumeRoutedHook, routedRunEnded } from "#execution/hook-routes.js";
+import { isRunTargetGone } from "#shared/run-errors.js";
+import { pollUntil } from "#shared/poll-until.js";
+import { resumeRoutedHook, routedRunEnded } from "#execution/hosts.js";
 
 const INTERRUPT: WorkflowToolRunControlMessage = { kind: "interrupt" };
 
@@ -24,7 +24,7 @@ export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Pro
       await resumeRoutedHook(run.hookToken, INTERRUPT);
       return true;
     } catch (error) {
-      if (!isTaskWorkflowTargetGone(error)) throw error;
+      if (!isRunTargetGone(error)) throw error;
     }
     return (await routedRunEnded(run.runId)) ? true : undefined;
   }, RUN_START_TIMEOUT_MS);

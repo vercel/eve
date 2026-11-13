@@ -2,11 +2,9 @@ import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
-import { signInsAnswered, type SignInAnswer } from "#subagents/event-proxy-step.js";
-import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
-import { setEveAttributes } from "#runtime/attributes/emit.js";
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
@@ -30,6 +28,7 @@ import {
   ChannelInstrumentationKey,
   HandleEventKey,
   ToolChannelKey,
+  ToolStubsKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -74,6 +73,7 @@ import {
   foldOrphanedLines,
   openSessionEventPublisher,
   readOrphanedLines,
+  type Entered,
 } from "#execution/publish-session-events.js";
 import {
   readInterruptedAttempt,
@@ -94,10 +94,10 @@ import {
   readHitlState,
   ResumeSignInKey,
   settleSignIns,
+  signInsAnswered,
   signInsEnded,
+  type SignInAnswer,
 } from "#harness/hitl/index.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createDurableSessionValues,
   readDurableSession,
@@ -110,7 +110,8 @@ import {
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { toolStubPlayback, type ToolStubHost } from "#execution/tool-stub-host.js";
+import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
@@ -119,6 +120,7 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
+import { signInDelivery, type DurableHost } from "#execution/hosts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
@@ -133,50 +135,25 @@ interface PendingStepAttributes {
 /**
  * What a session step needs from the host that runs it, beyond its input: where its callbacks
  * reach it, where the session's attributes go, and the runtime its durable calls start in.
- * Workflow is one host (`turnStep`).
+ * Workflow is one host (`workflow-host/turn-step.ts`).
  */
 export interface SessionStepHost {
   /** The base URL sign-in and hook callbacks reach this session at, when the host serves them. */
   readonly callbackBaseUrl?: string;
   /** Records the session's attributes, such as its title. */
-  setAttributes(attributes: Parameters<typeof setEveAttributes>[0]): Promise<void>;
+  setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
   /** The runtime a durable call, such as a workflow tool's, starts in. */
   readonly createRuntime: CreateRuntime;
+  /** Answers a stubbed eval's tool calls; see {@link ToolStubHost}. */
+  readonly toolStubs?: ToolStubHost;
+  /**
+   * With `callbackBaseUrl`: the host's delivery, through which a sign-in callback reaches its
+   * asker's inbox, so the askers waiting on the same grant hear the session's own answer.
+   */
+  readonly deliver?: DurableHost["deliver"];
 }
 
-/** The Workflow host: its run's metadata, attributes, and runtime. */
-async function workflowStepHost(): Promise<SessionStepHost> {
-  let callbackBaseUrl: string | undefined;
-  try {
-    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-    const metadata = getWorkflowMetadata();
-    if (typeof metadata.url === "string")
-      callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url);
-  } catch {
-    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
-  }
-  return { callbackBaseUrl, createRuntime: createWorkflowRuntime, setAttributes: setEveAttributes };
-}
-
-/** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
-export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
-  "use step";
-  if (input.handover !== undefined) {
-    traceSessionHandover(
-      "inbox_unblocked",
-      input.sessionState.sessionId,
-      input.handover.attemptKey,
-      {
-        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
-        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
-        "eve.handoff.applied_at_clock": "workflow",
-      },
-    );
-  }
-  return await turnStepOn(await workflowStepHost())(input);
-}
-
-/** A turn step on `host`: the step `turnStep` runs inside Workflow's `"use step"` boundary. */
+/** A turn step on `host`: Workflow runs it inside its `"use step"` boundary (`turnStep`). */
 export function turnStepOn(
   host: SessionStepHost,
 ): (input: TurnStepInput) => Promise<TurnStepResult> {
@@ -194,7 +171,7 @@ export function turnStepOn(
 
 /** One session step, on whichever host runs it. */
 async function runSessionStep(
-  input: TurnStepInput,
+  input: Entered<TurnStepInput>,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
@@ -206,7 +183,7 @@ async function runSessionStep(
 }
 
 async function runSessionStepBody(
-  input: TurnStepInput,
+  input: Entered<TurnStepInput>,
   pendingAttributes: PendingStepAttributes,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
@@ -224,7 +201,7 @@ async function runSessionStepBody(
     sessionId: durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: input.sessionWritable,
-    always: input.recover !== undefined,
+    rerun: input.recover !== undefined || input.rerun,
   });
   const interrupted =
     orphaned.length > 0 || input.recover !== undefined
@@ -251,11 +228,11 @@ async function runSessionStepBody(
       const authResults = matches.map((match) => match.result);
       // The children waiting on the same grant hear this session's answer, as it hears theirs.
       const baseUrl = ctx.get(CallbackBaseUrlKey);
-      if (baseUrl !== undefined) {
+      if (baseUrl !== undefined && host.deliver !== undefined) {
         const own = ownCallbacks(durableSession.sessionId, baseUrl);
         const tables = storedProjection(durableSession.state).view;
         await settleSignIns(
-          resumeSignInCallback,
+          signInDelivery(host.deliver),
           matches.flatMap(({ challenge, result }) => {
             const answer = ownSignInAnswer(tables, challenge, result.callback);
             if (answer !== undefined) return signInsAnswered(tables, answer, own);
@@ -724,12 +701,17 @@ async function runSessionStepBody(
               startSessionPrewarmers(ctx, "turn");
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
-            ctx.setVirtualContext(ResumeSignInKey, resumeSignInCallback);
+            if (host.deliver !== undefined)
+              ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
+            const stubs = ctx.get(ToolStubsKey);
+            if (stubs !== undefined)
+              ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(host.toolStubs, stubs));
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({
+                createRuntime: host.createRuntime,
                 delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadBundle: () => bundle,
+                loadAgent: () => agent,
               }),
             });
             const schemaSession =
