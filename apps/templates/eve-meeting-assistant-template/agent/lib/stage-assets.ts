@@ -24,8 +24,17 @@ let socket = null;
 // ones until it drains, so a slow viewer never builds a backlog.
 const viewers = new Set();
 
+// Recall shares pages at 15 frames a second at most; more only costs bandwidth.
+const FRAME_MS = 1000 / 15;
+
 function send(viewer) {
-  if (frame === null || viewer.busy) return;
+  if (frame === null || viewer.busy || viewer.timer) return;
+  const wait = viewer.sentAt + FRAME_MS - Date.now();
+  if (wait > 0) {
+    viewer.timer = setTimeout(() => { viewer.timer = null; send(viewer); }, wait);
+    return;
+  }
+  viewer.sentAt = Date.now();
   const ready = viewer.response.write(
     "--frame\\r\\nContent-Type: image/jpeg\\r\\nContent-Length: " + frame.length + "\\r\\n\\r\\n",
   ) && viewer.response.write(frame) && viewer.response.write("\\r\\n");
@@ -36,9 +45,11 @@ function send(viewer) {
 }
 
 function connect() {
-  // Recall shares pages at 15 frames a second at most.
-  const ws = new WebSocket("ws://127.0.0.1:" + process.env.AGENT_BROWSER_STREAM_PORT + "/?maxFps=15");
-  ws.onopen = () => { socket = ws; };
+  const ws = new WebSocket("ws://127.0.0.1:" + process.env.AGENT_BROWSER_STREAM_PORT);
+  ws.onopen = () => {
+    socket = ws;
+    ws.send(JSON.stringify({ type: "config", maxFps: 15 }));
+  };
   ws.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
@@ -96,9 +107,12 @@ createServer(async (request, response) => {
         "content-type": "multipart/x-mixed-replace; boundary=frame",
         "x-accel-buffering": "no",
       });
-      const viewer = { response, busy: false };
+      const viewer = { response, busy: false, sentAt: 0, timer: null };
       viewers.add(viewer);
-      request.on("close", () => viewers.delete(viewer));
+      request.on("close", () => {
+        viewers.delete(viewer);
+        clearTimeout(viewer.timer);
+      });
       return send(viewer);
     }
     if (request.method === "GET" && name === "frame.jpg") {
