@@ -18,6 +18,7 @@ describe("callsEndTurn", () => {
 
   it("ends the turn when an ending call runs beside other calls", async () => {
     expect(await callsEndTurn([call("browser__close"), call("no_reply")], tools)).toBe(true);
+    expect(await callsEndTurn([call("no_reply"), call("browser__close")], tools)).toBe(true);
   });
 
   it("ends the turn whatever its sibling calls' outcomes", async () => {
