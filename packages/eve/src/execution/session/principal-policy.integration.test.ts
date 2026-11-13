@@ -45,14 +45,24 @@ const scriptedModel = markMockModel(
           toolName: "hold_open",
         });
       }
+      const reportResults = prompt.flatMap((message) =>
+        message.role === "tool"
+          ? message.content.flatMap((part) =>
+              part.type === "tool-result" && part.toolName === "report_access" ? [part] : [],
+            )
+          : [],
+      );
       const users = prompt.filter((message) => message.role === "user").length;
-      const reports = toolResults.filter((name) => name === "report_access").length;
-      return reports < users - 1
-        ? toolCallStreamResult({
-            input: "{}",
-            toolCallId: `call-report-${String(reports)}`,
-            toolName: "report_access",
-          })
+      if (reportResults.length < users - 1) {
+        return toolCallStreamResult({
+          input: "{}",
+          toolCallId: `call-report-${String(reportResults.length)}`,
+          toolName: "report_access",
+        });
+      }
+      const latest = reportResults.at(-1);
+      return latest?.output.type === "error-text"
+        ? textStreamResult(`The tool reported: ${latest.output.value}`)
         : textStreamResult("Done.");
     },
     modelId: "scripted-model",
@@ -106,7 +116,7 @@ interface SteeringRun {
 async function withSteeringRun(
   name: string,
   body: (run: SteeringRun) => Promise<void>,
-  options: { readonly approval?: Approval } = {},
+  options: { readonly approval?: Approval; readonly uncaught?: boolean } = {},
 ) {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -143,6 +153,9 @@ async function withSteeringRun(
             approval: options.approval,
             description: "Report the identity and token this call may use.",
             execute: async (_input, ctx) => {
+              if (options.uncaught === true) {
+                return { token: (await ctx.getToken(userAuth)).token };
+              }
               let token: string | undefined;
               let reason: string | undefined;
               try {
@@ -273,6 +286,44 @@ describe("principal policy", () => {
         token: "token-for-alice",
       });
     });
+  }, 60_000);
+
+  // The other cases catch turn_steered inside the tool, so only this one proves the failure
+  // reaches the model.
+  it("a held call fails as a tool error the model reads, and the turn goes on", async () => {
+    const holdOpenCalls = new Set<string>();
+    await withSteeringRun(
+      "principal-policy-uncaught",
+      async (run) => {
+        const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
+        await run.send(BOB, "Actually include everyone.", "keep");
+        run.release();
+        const turn = await run.next("turn after the failed call");
+        const seen = [...started, ...turn];
+
+        expect(run.reports).toEqual([]);
+        const reportCall = filterEventsByType(seen, "call.requested").find(
+          (event) => event.data.capability.name === "report_access",
+        )?.data.callId;
+        expect(reportCall).toBeDefined();
+        expect(
+          filterEventsByType(seen, "call.settled").find((event) => event.data.callId === reportCall)
+            ?.data.outcome,
+        ).toBe("failed");
+        const reply = filterEventsByType(seen, "content.completed").find(
+          (event) => event.data.kind === "text" && event.data.phase === "reply",
+        )?.data.value;
+        expect(typeof reply).toBe("string");
+        expect(reply).toContain("A message from bob joined this turn after its caller last spoke");
+        expect(reply).toContain(`tool "report_access" can't use the caller's identity`);
+        expect(filterEventsByType(seen, "turn.started")).toHaveLength(1);
+        const settled = filterEventsByType(seen, "turn.settled");
+        expect(settled).toHaveLength(1);
+        expect(settled[0]?.data.outcome).toBe("completed");
+        expect(filterEventsByType(seen, "interaction.opened")).toEqual([]);
+      },
+      { uncaught: true },
+    );
   }, 60_000);
 
   it("steered() asks only the turn's caller, and the caller's approval releases the identity", async () => {

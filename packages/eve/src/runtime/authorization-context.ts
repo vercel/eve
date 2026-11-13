@@ -6,6 +6,7 @@ import {
   createAuthorizationExecution,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
+import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 
 /** Shared getToken/requireAuth capability, independent of the executing tool or workflow. */
 export function createAuthorizationContext(input: {
@@ -17,10 +18,18 @@ export function createAuthorizationContext(input: {
   const inlineAuthState: InlineAuthState = {};
   const resolve = (provider: ToolAuthProvider, options?: ToolAuthOptions) =>
     buildInlineScopedAuthorization({ ...input, inlineAuthState, provider, options });
+  // An inline provider's scope is eve's own key, so the hold names the tool the model called.
+  const hold = (scoped: ScopedAuthorization): void => {
+    if (input.boundResponder === undefined && scoped.authorization.principalType === "user") {
+      holdCallerIdentity(scoped.scope, undefined, `tool "${input.scope}"`);
+    }
+  };
   return {
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
-      return await execution.getToken(resolve(provider, options));
+      const scoped = resolve(provider, options);
+      hold(scoped);
+      return await execution.getToken(scoped);
     },
     /**
      * The given responder's stored token, resolved through this execution's
@@ -38,7 +47,9 @@ export function createAuthorizationContext(input: {
     },
     requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
       if (provider === undefined) throw missingProviderError("ctx.requireAuth");
-      return execution.requireAuth(resolve(provider, options));
+      const scoped = resolve(provider, options);
+      hold(scoped);
+      return execution.requireAuth(scoped);
     },
     run: execution.run,
   };

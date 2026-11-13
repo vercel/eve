@@ -43,11 +43,15 @@ export function turnSteeredMessage(
 }
 
 /** Refuses the caller's identity to a call the model made while other people steer the turn. */
-export function holdCallerIdentity(connectionName: string, ctx?: AlsContext): void {
+export function holdCallerIdentity(
+  connectionName: string,
+  ctx?: AlsContext,
+  subject = `connection "${connectionName}"`,
+): void {
   const steeredBy = steeringModelCall(ctx);
   if (steeredBy === undefined) return;
   throw new ConnectionAuthorizationFailedError(connectionName, {
-    message: turnSteeredMessage(steeredBy, `connection "${connectionName}"`),
+    message: turnSteeredMessage(steeredBy, subject),
     reason: "turn_steered",
     retryable: false,
   });
