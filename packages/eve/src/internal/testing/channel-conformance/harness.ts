@@ -319,6 +319,8 @@ export interface ClientDriver {
    * that origin from the eve channel's routes until the client closes.
    */
   open(host: string, wait: Wait): Promise<ClientView>;
+  /** Releases what the client keeps between cells, once the file's last cell is done. */
+  dispose?(): Promise<void>;
 }
 
 /** A running client, as a person sees and uses it. */
@@ -876,7 +878,11 @@ async function converse(
       return delivery;
     }
 
-    const dispatch: Dispatch = async (request) => {
+    // A client's origin can outlive this conversation and serve its requests from the async
+    // context it started in, another conversation's runtime session. Each request runs in this
+    // one's, so the deliveries it starts resolve this agent's compiled modules.
+    const dispatch: Dispatch = (request) => runtime.run(() => serve(request));
+    const serve: Dispatch = async (request) => {
       const { params, route } = findRoute(channel, request);
       const pending: Promise<unknown>[] = [];
       const args = attachRouteSessionCreator<RouteHandlerArgs>(
