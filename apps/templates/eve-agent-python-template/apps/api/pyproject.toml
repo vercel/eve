@@ -1,0 +1,30 @@
+[project]
+name = "eve-nextjs-fastapi-api"
+version = "0.1.0"
+description = "FastAPI service for the eve Agent with Python template: Python tools for the agent and backend APIs for the web app."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.143.0",
+  "psycopg[binary]>=3.3.6",
+  "sqlmodel>=0.0.48",
+]
+
+[dependency-groups]
+dev = [
+  "fastapi[standard]>=0.143.0",
+  # starlette.testclient (FastAPI's TestClient) imports httpx2 and deprecates plain httpx.
+  "httpx2>=2.13.1",
+  "pytest>=8.4.0",
+  "ruff>=0.14.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

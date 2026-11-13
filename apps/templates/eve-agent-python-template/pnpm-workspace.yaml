@@ -1,0 +1,14 @@
+packages:
+  - "."
+
+minimumReleaseAgeExclude:
+  - eve
+  - ai
+  - zod
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  # Optional native compression add-ons pulled in by just-bash (local sandbox); not needed.
+  "@mongodb-js/zstd": false
+  node-liblzma: false
