@@ -176,7 +176,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   const delivered = calledFinalOutput && !finalOutputRejected;
   const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
-  // The model reads what it hasn't yet: its calls' results, unless every call ended the turn; a
+  // The model reads what it hasn't yet: its calls' results, unless a call ended the turn; a
   // provider-run call's outcome; and input that joined the turn while it ran.
   const continueLoop =
     !delivered &&
@@ -217,9 +217,11 @@ function answerCallsThatWontRun(
 }
 
 /**
- * Whether the step ends the turn: every tool call targets a tool that can end
- * the turn and succeeded, and each `endsTurn` function accepts its call's
- * `execute` output. A failed or invalid call lets the model recover instead.
+ * Whether the step ends the turn: some tool call targets a tool that can end
+ * the turn, succeeded, and its `endsTurn` function, if any, accepts its call's
+ * `execute` output. Its sibling calls have already settled by then, so they
+ * run to completion whatever their outcome. A failed or invalid ending call
+ * lets the model recover instead.
  */
 async function stepEndsTurn(
   result: HarnessStepResult,
@@ -261,24 +263,21 @@ export interface EndingCall {
 }
 
 /**
- * Whether every call ends the turn: each targets a tool that can end it and succeeded, and each
- * `endsTurn` function accepts its call's output. Every call qualifies before any function runs.
+ * Whether some call ends the turn: it targets a tool that can end it, succeeded, and its
+ * `endsTurn` function, if any, accepts its call's output. Other calls in the same step, which have
+ * all settled, don't keep the turn going. Functions run in call order until one accepts.
  */
 export async function callsEndTurn(
   calls: readonly EndingCall[],
   endsTurnTools: EndsTurnTools,
 ): Promise<boolean> {
-  if (calls.length === 0) return false;
-  const ending = calls.flatMap((call) => {
+  for (const call of calls) {
     const endsTurn = endsTurnTools.get(call.toolName);
-    return endsTurn === undefined || call.failed ? [] : [{ call, endsTurn }];
-  });
-  if (ending.length !== calls.length) return false;
-  for (const { call, endsTurn } of ending) {
-    if (typeof endsTurn !== "function") continue;
-    if (!(await callEndsTurn(endsTurn, call.output, call))) return false;
+    if (endsTurn === undefined || call.failed) continue;
+    if (typeof endsTurn !== "function") return true;
+    if (await callEndsTurn(endsTurn, call.output, call)) return true;
   }
-  return true;
+  return false;
 }
 
 /** A throwing `endsTurn` function keeps the turn going rather than failing it. */

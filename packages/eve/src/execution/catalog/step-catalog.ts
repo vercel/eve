@@ -38,7 +38,7 @@ import { createSkillLoader, type CatalogSkill } from "./skills.js";
 
 /** Appended to the model-facing description of every tool with `endsTurn: true`. */
 const ENDS_TURN_TOOL_NOTE =
-  "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
+  "Calling this tool ends your turn once it succeeds, after any other tool calls in the same step finish: do not write a reply, and you will not see those calls' results. If it fails, you will see the error and can continue.";
 
 /** What a step can run: its tools as the session sees them, with its connections and skills. */
 export interface Callable {
