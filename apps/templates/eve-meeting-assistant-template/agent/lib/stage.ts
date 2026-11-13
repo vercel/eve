@@ -28,8 +28,11 @@ const shownPage = defineState<{ pageId: string; url: string; follow: boolean } |
 /** What the bot is sharing, or `null` when it isn't. */
 const sharing = defineState<{ botId: string; url: string } | null>("meetings.sharing", () => null);
 
-/** Starts the bridge in the session's sandbox and returns the URL that shows the browser. */
-export async function startStage(ctx: Ctx): Promise<string> {
+/**
+ * Starts the bridge in the session's sandbox and returns the URL that shows
+ * the browser, and whether the bridge is new, so a share must reload it.
+ */
+export async function startStage(ctx: Ctx): Promise<{ url: string; restarted: boolean }> {
   const sandbox = await ctx.getSandbox(environment);
   let url = stage.get();
   if (url === null) {
@@ -39,8 +42,11 @@ export async function startStage(ctx: Ctx): Promise<string> {
     stage.update(() => url);
   }
   const shell: Shell = async (command) => await sandbox.run({ command });
-  await startBridge(shell, { key: new URL(url).pathname.split("/")[1]!, interactive: false });
-  return url;
+  const restarted = await startBridge(shell, {
+    key: new URL(url).pathname.split("/")[1]!,
+    interactive: false,
+  });
+  return { url, restarted };
 }
 
 export async function openInBrowser(ctx: Ctx, url: string): Promise<void> {
@@ -93,9 +99,9 @@ function outputMedia(botId: string) {
 }
 
 /** Shares `url` as the bot's screen. The camera keeps showing the voice page. */
-export async function shareScreen(botId: string, url: string): Promise<void> {
+export async function shareScreen(botId: string, url: string, reload = false): Promise<void> {
   const current = sharing.get();
-  if (current?.botId === botId && current.url === url) return;
+  if (!reload && current?.botId === botId && current.url === url) return;
   if (current?.botId === botId) await stopScreenShare();
   // `@eve/recall`'s startOutputMedia uses the camera, which the voice page holds.
   await callRecallApi({

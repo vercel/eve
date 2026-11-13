@@ -43,6 +43,10 @@ function send(viewer) {
   }
 }
 
+// A page that doesn't change sends no frames, so resend the latest one: the
+// viewer can then tell a quiet page from a dead connection.
+setInterval(() => { for (const viewer of viewers) send(viewer); }, 3000);
+
 function connect() {
   const ws = new WebSocket("ws://127.0.0.1:" + process.env.AGENT_BROWSER_STREAM_PORT);
   ws.onopen = () => {
@@ -152,11 +156,57 @@ export const SCREEN_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<img id="screen" alt="" src="stream.mjpg">
+<img id="screen" alt="">
 <script>
-  // The stream ends when the sandbox restarts the bridge; reconnect.
-  const screen = document.getElementById("screen");
-  screen.onerror = () => setTimeout(() => { screen.src = "stream.mjpg?t=" + Date.now(); }, 1000);
+  // Reads the MJPEG stream with fetch rather than an <img>, which freezes
+  // without an error when a proxy closes the connection. Reconnects when the
+  // stream ends or goes quiet; the bridge resends a frame every few seconds.
+  function watch(show) {
+    let controller;
+    let timer;
+    const restart = () => { controller?.abort(); clearTimeout(timer); setTimeout(connect, 500); };
+    const stall = () => { clearTimeout(timer); timer = setTimeout(restart, 10000); };
+    async function connect() {
+      controller = new AbortController();
+      stall();
+      try {
+        const response = await fetch("stream.mjpg?t=" + Date.now(), { signal: controller.signal, cache: "no-store" });
+        const reader = response.body.getReader();
+        let buffer = new Uint8Array(0);
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const joined = new Uint8Array(buffer.length + value.length);
+          joined.set(buffer);
+          joined.set(value, buffer.length);
+          buffer = joined;
+          for (;;) {
+            const text = new TextDecoder().decode(buffer.subarray(0, Math.min(buffer.length, 200)));
+            const header = /Content-Length: (\\d+)\\r\\n\\r\\n/.exec(text);
+            if (header === null) break;
+            const start = header.index + header[0].length;
+            const end = start + Number(header[1]);
+            if (buffer.length < end) break;
+            show(new Blob([buffer.slice(start, end)], { type: "image/jpeg" }));
+            stall();
+            buffer = buffer.slice(end);
+          }
+        }
+      } catch {}
+      restart();
+    }
+    connect();
+  }
+  function showOn(element) {
+    let previous;
+    return (blob) => {
+      const url = URL.createObjectURL(blob);
+      element.src = url;
+      if (previous) URL.revokeObjectURL(previous);
+      previous = url;
+    };
+  }
+  watch(showOn(document.getElementById("screen")));
 </script>
 </body>
 </html>
@@ -201,8 +251,55 @@ export const SIGN_IN_HTML = `<!doctype html>
 <script>
   const screen = document.getElementById("screen");
   const status = document.getElementById("status");
-  screen.src = "stream.mjpg";
-  screen.onerror = () => setTimeout(() => { screen.src = "stream.mjpg?t=" + Date.now(); }, 1000);
+  // Reads the MJPEG stream with fetch rather than an <img>, which freezes
+  // without an error when a proxy closes the connection. Reconnects when the
+  // stream ends or goes quiet; the bridge resends a frame every few seconds.
+  function watch(show) {
+    let controller;
+    let timer;
+    const restart = () => { controller?.abort(); clearTimeout(timer); setTimeout(connect, 500); };
+    const stall = () => { clearTimeout(timer); timer = setTimeout(restart, 10000); };
+    async function connect() {
+      controller = new AbortController();
+      stall();
+      try {
+        const response = await fetch("stream.mjpg?t=" + Date.now(), { signal: controller.signal, cache: "no-store" });
+        const reader = response.body.getReader();
+        let buffer = new Uint8Array(0);
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const joined = new Uint8Array(buffer.length + value.length);
+          joined.set(buffer);
+          joined.set(value, buffer.length);
+          buffer = joined;
+          for (;;) {
+            const text = new TextDecoder().decode(buffer.subarray(0, Math.min(buffer.length, 200)));
+            const header = /Content-Length: (\\d+)\\r\\n\\r\\n/.exec(text);
+            if (header === null) break;
+            const start = header.index + header[0].length;
+            const end = start + Number(header[1]);
+            if (buffer.length < end) break;
+            show(new Blob([buffer.slice(start, end)], { type: "image/jpeg" }));
+            stall();
+            buffer = buffer.slice(end);
+          }
+        }
+      } catch {}
+      restart();
+    }
+    connect();
+  }
+  function showOn(element) {
+    let previous;
+    return (blob) => {
+      const url = URL.createObjectURL(blob);
+      element.src = url;
+      if (previous) URL.revokeObjectURL(previous);
+      previous = url;
+    };
+  }
+  watch(showOn(screen));
 
   function post(name, value) {
     return fetch(name, { method: "POST", body: JSON.stringify(value) }).then((response) => {
