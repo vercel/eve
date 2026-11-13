@@ -1231,9 +1231,15 @@ async function waitForRest(
       const states = await Promise.all(
         sessions.map(async (session) => {
           const tail = await internalSession(session).getStreamTailIndex();
-          const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
-          const idle = (await host.runningSteps(session.id)).length === 0;
-          return { resting: waiting && idle, tail };
+          const tailEvents = await readThroughTail(session, Math.max(tail, 0));
+          // A delivery the channel ignored settles alone, behind the turn it left waiting.
+          const waiting =
+            tailEvents.some(endsTurn) ||
+            (tailEvents.length > 0 &&
+              tailEvents.every(({ type }) => type.startsWith("delivery.")) &&
+              idle(viewOfEvents(await readThroughTail(session)).view));
+          const stepsDone = (await host.runningSteps(session.id)).length === 0;
+          return { resting: waiting && stepsDone, tail };
         }),
       );
       const tails = states.map((state) => state.tail).join(",");
