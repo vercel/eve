@@ -8,13 +8,14 @@ last_updated: "2026-11-13"
 
 ## Summary
 
-A turn can need the caller's own credential before its first model call, such as a model
-provider credential that each person brings. eve's sign-in flow starts only from a tool call, so
-an agent has no way to require that credential before the model runs.
+Some agents need the caller's own credential for the model call itself. For example, an agent
+that bills each person's model usage to that person's provider account needs their API key
+before the first model call. eve starts a sign-in only when a tool asks for a token, and the
+model call runs before any tool.
 
-This proposal gives dynamic values the `ctx.getToken(provider)` and `ctx.requireAuth(provider)`
-that tools already have. A sign-in that either one needs, before or during the model call, pauses
-the turn on that sign-in. The model call runs once the caller signs in.
+Tools already call `ctx.getToken(provider)` and `ctx.requireAuth(provider)`. This proposal adds
+both to the context of `defineDynamic`. A dynamic `model` then gets the caller's token before
+each model call, and eve runs the same sign-in flow as for a tool.
 
 ## Authoring API
 
@@ -33,52 +34,48 @@ export default defineAgent({
 });
 ```
 
-`DynamicModelContext`, and so every dynamic value's context, gains two methods:
+| Method                                | Behavior                                                    |
+| ------------------------------------- | ----------------------------------------------------------- |
+| `ctx.getToken(provider, options?)`    | Returns the caller's token, or starts a sign-in.            |
+| `ctx.requireAuth(provider, options?)` | Drops the cached token and starts a sign-in. Never returns. |
 
-| Method                                | Behavior                                                                    |
-| ------------------------------------- | --------------------------------------------------------------------------- |
-| `ctx.getToken(provider, options?)`    | Returns the caller's token, or asks for a sign-in when the caller has none. |
-| `ctx.requireAuth(provider, options?)` | Evicts the cached token and asks for a fresh sign-in. Never returns.        |
+Both accept the same providers and options as their tool counterparts, and share eve's token
+cache and callback route. eve keys these sign-ins under the agent, not under a tool:
+`connect("x/y")` becomes `agent__x_y`.
 
-Both take the same providers and options as a tool's `ctx.getToken`: `connect("...")`, a custom
-interactive definition, or a plain `{ getToken }`. They share eve's token cache and callback
-route. A dynamic value's providers sign in under the `agent` scope, so the sign-in for
-`connect("x/y")` is `agent__x_y`.
-
-eve never inspects provider errors. The app maps a provider's rejection to
-`ctx.requireAuth(provider)`, for example in AI SDK middleware around the model it returns.
+eve doesn't read provider errors. When a provider rejects a token, the app calls
+`ctx.requireAuth(provider)`, for example from AI SDK middleware around the model.
 
 ## Semantics
 
-| Situation                                   | What eve does                                                                                      |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Token present                               | The model call runs with it.                                                                       |
-| No token, before the model call             | No model run starts. eve opens a sign-in with a turn subject and pauses the turn.                  |
-| Caller signs in                             | The sign-in settles `accepted`. The same turn evaluates the model again and runs the model call.   |
-| `requireAuth` during the model call         | eve abandons that model run (`model.settled` `abandoned`), opens the sign-in, and pauses the turn. |
-| Provider rejects the token just issued      | The turn fails with `reason: "token_rejected_after_authorization"`.                                |
-| Scheduled turn                              | The turn fails with `reason: "sign_in_unavailable"`. eve opens no sign-in.                         |
-| A message arrives while the sign-in is open | The message withdraws the sign-in, as it does for a tool's sign-in.                                |
-| Sign-in declined or cancelled in this turn  | The turn fails with the sign-in's reason. eve doesn't ask again in this turn.                      |
-| Subagent                                    | eve relays the child's sign-in to the parent on the same path as a child's tool sign-in.           |
+| Situation                                       | What eve does                                                                    |
+| ----------------------------------------------- | -------------------------------------------------------------------------------- |
+| The caller has a token                          | eve runs the model call with it.                                                 |
+| The caller has no token                         | eve starts no model call. It opens the sign-in for the turn and pauses the turn. |
+| The caller signs in                             | eve evaluates the model again and runs the model call in the same turn.          |
+| The app calls `requireAuth` during a model call | eve ends that model call as `abandoned`, opens the sign-in, and pauses the turn. |
+| The provider rejects the token from sign-in     | eve fails the turn with `token_rejected_after_authorization`.                    |
+| A schedule started the turn                     | eve fails the turn with `sign_in_unavailable` and opens no sign-in.              |
+| A new message arrives during the sign-in        | eve withdraws the sign-in, as for a tool's sign-in.                              |
+| The caller declined or cancelled this sign-in   | eve fails the turn with the sign-in's reason and doesn't ask again in this turn. |
+| A subagent needs the sign-in                    | eve passes it to the parent, as for a subagent tool's sign-in.                   |
 
-The turn's input parks with the sign-in, as it does at the session usage gate, so the resumed
-turn reads the same prompt.
+eve saves the turn's input with the sign-in, the same way the session usage limit pauses a turn,
+so the resumed turn reads the same prompt.
 
 ```text
-turn.started ─▶ evaluate dynamic values ─┬─ token ──────────▶ model.requested ─▶ …
-                                         └─ sign-in needed ─▶ interaction.opened (sign-in)
-                                                               turn.paused
-callback ─▶ interaction.settled (accepted) ─▶ evaluate again ─▶ model.requested ─▶ …
+turn.started ─▶ evaluate dynamic values ─┬─ token ────▶ model.requested ─▶ …
+                                         └─ no token ─▶ interaction.opened (sign-in)
+                                                         turn.paused
+sign-in callback ─▶ interaction.settled (accepted) ─▶ evaluate again ─▶ model.requested ─▶ …
 ```
 
 ## Boundaries
 
-- Authorization-required errors from dynamic values and the model call reach the same
-  `handleAuthorizationError` as tools. The sign-in itself, its channels' cards, and its callback
-  are unchanged.
-- The protocol is unchanged. Sign-ins already accept a `turnId` subject.
-- A value that rebuilds a remote agent's credentials for a child runs without a sign-in, so its
-  `getToken` throws.
-- `ctx.memo` keeps results in the session. Authors call `getToken` outside a memo; eve reuses
+- Dynamic values and model calls hand authorization errors to the same handler as tools. The
+  sign-in, its channel cards and its callback stay the same.
+- The protocol stays the same. Sign-ins already accept a turn as their subject.
+- When eve rebuilds a remote agent's credentials for a subagent, no sign-in can run, so
+  `getToken` throws there.
+- Call `getToken` outside `ctx.memo`. A memo keeps its result in the session; eve already reuses
   the token within a step.

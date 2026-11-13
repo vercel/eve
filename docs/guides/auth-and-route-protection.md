@@ -494,7 +494,7 @@ Inline providers derive a stable auth key from Vercel Connect metadata when avai
 
 ### Before a model call
 
-When the model call itself needs the caller's credential, such as a provider API key that each person brings, resolve it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` as a tool's:
+When the model call itself needs the caller's credential, such as each person's own provider API key, get it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` methods as a tool's:
 
 ```ts title="agent/agent.ts"
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -511,9 +511,9 @@ export default defineAgent({
 });
 ```
 
-- When the caller has no token, the model call doesn't run. eve opens the sign-in, pauses the turn, and evaluates the model again once the caller signs in. The same turn continues; the caller sends no new message.
-- When the provider rejects a token during the model call, call `ctx.requireAuth(provider)` from your model code, such as AI SDK middleware that recognizes the provider's error. eve abandons that model run, opens the sign-in, and runs the model call again once the caller signs in.
-- A scheduled turn fails with `reason: "sign_in_unavailable"` and opens no sign-in.
+- When the caller has no token, eve starts no model call. It opens the sign-in and pauses the turn. Once the caller signs in, eve evaluates the model again and continues the same turn.
+- When the provider rejects the token during a model call, call `ctx.requireAuth(provider)` from your model code, for example from AI SDK middleware. eve ends that model call, opens the sign-in, and runs the call again once the caller signs in.
+- When a schedule started the turn, eve fails it with `reason: "sign_in_unavailable"` and opens no sign-in.
 
 Call `ctx.getToken` outside `ctx.memo`: a memo keeps its result in the session, and eve already reuses the token within a step.
 
