@@ -3,7 +3,7 @@
 // do not change a Dockerfile keep the same image, so sandbox templates survive
 // eve upgrades.
 const EVE_SANDBOX_IMAGE_TAG = "dockerfile-a22b7f0d63c2";
-const EVE_GIT_SANDBOX_IMAGE_TAG = "git-b28f5b670399";
+const EVE_GIT_SANDBOX_IMAGE_TAG = "git-d74c717f1d17";
 
 const tag = process.env.EVE_SANDBOX_IMAGE_TAG?.trim() || EVE_SANDBOX_IMAGE_TAG;
 
