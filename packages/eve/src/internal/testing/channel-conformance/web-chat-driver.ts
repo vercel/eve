@@ -77,11 +77,18 @@ export function webChatDriver(): ClientDriver {
     async open(host, wait) {
       const assets = await (bundled ??= bundleTemplate());
       const server = await servePage(host, assets);
-      const browser = await (shared ??= launchBrowser());
+      const browser = await (shared ??= launchBrowser().catch((error: unknown) => {
+        // A browser that failed to start is tried again by the next cell.
+        shared = undefined;
+        throw error;
+      }));
       const page = await browser.newPage();
       const close = async () => {
-        await page.close();
-        await server.close();
+        try {
+          await page.close();
+        } finally {
+          await server.close();
+        }
       };
       // A card can re-render between reading a button and using it; fail fast and read again.
       page.setDefaultTimeout(2_000);
