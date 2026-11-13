@@ -10,7 +10,10 @@ import { renderDefaultSlackTaskCard, withTaskCards } from "./task-card.js";
 const turnId = "turn_0";
 const scope = { runId: "run_0", turnId };
 
-function harness(audience: "private" | "public" = "private") {
+function harness(
+  audience: "private" | "public" = "private",
+  taskCard: Parameters<typeof withTaskCards>[1] = renderDefaultSlackTaskCard,
+) {
   const requests: { method: string; body: Record<string, unknown> }[] = [];
   const channel = {
     slack: {
@@ -23,13 +26,18 @@ function harness(audience: "private" | "public" = "private") {
   };
   const view = emptySessionView();
   let position = 0;
-  const events = withTaskCards({}, renderDefaultSlackTaskCard);
+  const events = withTaskCards({}, taskCard);
+  const session = { id: "session_0" };
   /** Commits `facts` as the server does, then runs each through the channel with the view after. */
   async function commit(...facts: SessionEvent[]): Promise<SessionView> {
     foldLine(view, { at: `2026-10-13T00:00:${String(10 + position)}.000Z`, facts }, position, {
       retention: "operational",
     });
-    await events.committed?.({ facts, position }, { channel, view: snapshotOf(view) } as never);
+    await events.committed?.({ facts, position }, {
+      channel,
+      session,
+      view: snapshotOf(view),
+    } as never);
     position += 1;
     return view;
   }
@@ -111,6 +119,24 @@ describe("Slack task cards", () => {
     expect(posts).toHaveLength(2);
     expect(JSON.stringify(posts[1]?.body.blocks)).not.toContain("c_1");
     expect(JSON.stringify(posts[1]?.body.blocks)).toContain("c_2");
+  });
+
+  it("tells the renderer which session and turn a card belongs to", async () => {
+    const owners: string[] = [];
+    const { commit } = harness("private", (card) => {
+      owners.push(`${card.sessionId}/${card.turnId}`);
+      return renderDefaultSlackTaskCard(card);
+    });
+    await commit(
+      { data: {}, type: "session.started" },
+      { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+    );
+    await commit(
+      { data: { cause: { deliveryId: "d_0" }, follows: null, turnId }, type: "turn.started" },
+      { data: { owner: { turnId }, runId: "run_0" }, scope, type: "model.requested" },
+    );
+    await commit(requested("c_1"), ...started("c_1", "t_1"));
+    expect(new Set(owners)).toEqual(new Set(["session_0/turn_0"]));
   });
 
   it("names what a blocked task asks only in a private conversation", async () => {

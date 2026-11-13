@@ -71,7 +71,7 @@ describe("task cards read from the server's tables", () => {
         },
       ],
     ]);
-    const [card] = taskCards(working, turnId, "private");
+    const [card] = taskCards(working, "session_0", turnId, "private");
     expect(card?.state).toBe("blocked");
     expect(card?.calls.map((row) => [row.callId, row.taskId])).toEqual([
       ["plan", undefined],
@@ -91,7 +91,7 @@ describe("task cards read from the server's tables", () => {
       [settled("research", { message: "Use us-east. It is closest." })],
       [{ data: { outcome: "completed", taskId: "t_1" }, type: "task.ended" }],
     ]);
-    const [done] = taskCards(finished, turnId, "private");
+    const [done] = taskCards(finished, "session_0", turnId, "private");
     expect(done?.state).toBe("finished");
     expect(done?.calls.map((row) => row.callId)).toEqual(["plan", "research"]);
   });
@@ -105,7 +105,7 @@ describe("task cards read from the server's tables", () => {
       [requested("second", "researcher", "agent")],
       [...startsTask("second", "t_2", "researcher")],
     ]);
-    const cards = taskCards(view, turnId, "private");
+    const cards = taskCards(view, "session_0", turnId, "private");
     expect(cards.map((card) => [card.since, card.state])).toEqual([
       [0, "finished"],
       [5, "working"],
@@ -124,6 +124,8 @@ describe("task cards read from the server's tables", () => {
       [...startsTask("second", "t_2", "researcher"), requested("third", "researcher", "agent")],
       [...startsTask("third", "t_3", "researcher")],
     ]);
-    expect(taskCards(view, turnId, "private").map((card) => card.calls.length)).toEqual([3]);
+    expect(
+      taskCards(view, "session_0", turnId, "private").map((card) => card.calls.length),
+    ).toEqual([3]);
   });
 });
