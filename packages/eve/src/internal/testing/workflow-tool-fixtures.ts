@@ -184,12 +184,21 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
   return token.slice("secret:".length);
 }
 
-export async function* confirmDeployWorkflow(
+export async function* confirmDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  return yield* confirmDeploy(input, ctx);
+}
+
+/** `confirmDeployWorkflow`'s plain body, as the in-process host runs it. */
+export function confirmDeployBody(): WorkflowBody {
+  return stampedWorkflowBody(confirmDeployWorkflow, confirmDeploy);
+}
+
+async function* confirmDeploy(
   input: DeployInput,
   ctx: WorkflowToolContext,
 ): AsyncGenerator<string, { readonly approved: boolean; readonly service: string }> {
-  "use workflow";
-
   const plan = await planDeployStep(input.service);
   yield "awaiting approval";
   const answer = await ctx.ask({
@@ -290,11 +299,20 @@ export async function failingDeployWorkflow(input: DeployInput): Promise<never> 
   throw new Error(`deploy of ${input.service} exploded`);
 }
 
-export async function* reportingDeployWorkflow(
-  input: DeployInput,
-): AsyncGenerator<string, { readonly plan: string }> {
+export async function* reportingDeployWorkflow(input: DeployInput) {
   "use workflow";
 
+  return yield* reportingDeploy(input);
+}
+
+/** `reportingDeployWorkflow`'s plain body, as the in-process host runs it. */
+export function reportingDeployBody(): WorkflowBody {
+  return stampedWorkflowBody(reportingDeployWorkflow, reportingDeploy);
+}
+
+async function* reportingDeploy(
+  input: DeployInput,
+): AsyncGenerator<string, { readonly plan: string }> {
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
   return { plan };

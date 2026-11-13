@@ -42,6 +42,14 @@ export interface HostedRoute {
    * it enters (`enterSessionStep`).
    */
   stepAttempt?(): number | undefined;
+  /** How the session `sessionId` is called back, when it runs here and can be. */
+  signInCallbacks?(sessionId: string): SignInCallbacks | undefined;
+}
+
+/** Where a session's sign-in callbacks point, and how a callback reaches its asker. */
+export interface SignInCallbacks {
+  readonly callbackBaseUrl: string;
+  readonly deliver: DurableHost["deliver"];
 }
 
 /**
@@ -132,6 +140,22 @@ function durableHostFor(id: string): DurableHost {
  */
 export function installedDurableHost(): DurableHost | undefined {
   return hosts().durable;
+}
+
+/**
+ * How the session `sessionId`, whose step runs now, is called back: by the route that runs it,
+ * or by the durable host from the step's run. `undefined` when it can't be.
+ */
+export function sessionSignInCallbacks(sessionId: string): SignInCallbacks | undefined {
+  for (const route of hosts().routes) {
+    const callbacks = route.signInCallbacks?.(sessionId);
+    if (callbacks !== undefined) return callbacks;
+  }
+  const { durable } = hosts();
+  const callbackBaseUrl = durable?.callbackBaseUrl();
+  return durable === undefined || callbackBaseUrl === undefined
+    ? undefined
+    : { callbackBaseUrl, deliver: durable.deliver };
 }
 
 /** Whether the step running now is a retry of an attempt that may have written already. */

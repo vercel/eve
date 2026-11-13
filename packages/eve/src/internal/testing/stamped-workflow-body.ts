@@ -6,7 +6,7 @@ import { workflowBodyOf, type WorkflowBody } from "#tools/workflow-body.js";
  * missing stamp means the transform didn't run on this module, which this reports instead of
  * guessing an id.
  */
-export function stampedWorkflowBody<F extends (...args: never[]) => Promise<unknown>>(
+export function stampedWorkflowBody<F extends (...args: never[]) => unknown>(
   workflow: F,
   body: F,
 ): WorkflowBody {

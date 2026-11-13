@@ -17,9 +17,6 @@ const TEST_CALLBACK_BASE_URL = "http://test-session.in-process";
 // session from the initial entry, reads its stream, and delivers to its hooks with
 // `resumeRoutedHook`, which reaches a session wherever it runs. Tests that check what Workflow
 // itself does (its runs, its replay) keep running on Workflow.
-//
-// TODO(#6309): `sign-in-fan-in.integration.test.ts` also stays on Workflow, not because it's about
-// Workflow but because children settling one shared sign-in grant don't yet work in process.
 
 /** Which host a session test runs its sessions on. */
 export type TestSessionHostKind = "workflow" | "in-process";

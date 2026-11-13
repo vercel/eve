@@ -11,6 +11,7 @@ import {
   resumeRoutedHook,
   resumeRoutedSessionInbox,
   type DurableHost,
+  type SignInCallbacks,
 } from "#execution/hosts.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import {
@@ -167,15 +168,16 @@ export function createInProcessHost(
     remote: undefined,
   });
 
+  const signInCallbacks: SignInCallbacks | undefined =
+    options.callbackBaseUrl === undefined
+      ? undefined
+      : { callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""), deliver: deliverRouted };
   const stepHost: SessionStepHost = {
     createRuntime: () => NO_STEP_RUNTIME,
     // Attributes belong to a Workflow run; an in-process session has none.
     setAttributes: async () => {},
     toolStubs,
-    ...(options.callbackBaseUrl !== undefined && {
-      callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""),
-      deliver: deliverRouted,
-    }),
+    ...signInCallbacks,
   };
   const runTurnStep = turnStepOn(stepHost);
 
@@ -233,6 +235,8 @@ export function createInProcessHost(
       runEnded: (runId) => runs.runEnded(runId),
       cancelRun: (runId, reason) => runs.cancelRun(runId, reason),
       stepAttempt: () => attempts.current(),
+      // A session's steps outside its turn steps, such as relaying a child's sign-in, call back.
+      signInCallbacks: (sessionId) => (running.has(sessionId) ? signInCallbacks : undefined),
     }),
   );
 

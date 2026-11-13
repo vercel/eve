@@ -1,13 +1,13 @@
 import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 
 /**
- * A workflow tool's body as a plain function, under the id its `"use workflow"` function has.
- * Workflow registers the transformed function itself; a host without Workflow, such as the
- * in-process one, runs this body in its place.
+ * A workflow tool's body as a plain function or generator, under the id its `"use workflow"`
+ * function has. Workflow registers the transformed function itself; a host without Workflow, such
+ * as the in-process one, runs this body in its place.
  */
 export interface WorkflowBody {
   readonly workflowId: string;
-  readonly body: (...args: never[]) => Promise<unknown>;
+  readonly body: (...args: never[]) => unknown;
 }
 
 /**
@@ -15,7 +15,7 @@ export interface WorkflowBody {
  * that transformed it stamped (a dev build's and a package's differ). `undefined` when no build
  * transformed it: then no tool names it as a workflow, so there's nothing to register.
  */
-export function workflowBodyOf<F extends (...args: never[]) => Promise<unknown>>(
+export function workflowBodyOf<F extends (...args: never[]) => unknown>(
   workflow: F,
   body: F,
 ): WorkflowBody | undefined {
