@@ -92,7 +92,18 @@ export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerAr
         delivery,
         requestId: deliverySource.requestId,
       });
-      return { ...handle, deliveryId: delivery.deliveryId };
+      // Not a spread: reading `events` opens a live read of the session's stream, which these
+      // callers never consume or cancel.
+      return {
+        get events() {
+          return handle.events;
+        },
+        sessionId: handle.sessionId,
+        ...(handle.claimedContinuation !== undefined && {
+          claimedContinuation: handle.claimedContinuation,
+        }),
+        deliveryId: delivery.deliveryId,
+      };
     },
   );
   if (ports.skillFiles !== undefined) attachSkillFileSource(args, ports.skillFiles);

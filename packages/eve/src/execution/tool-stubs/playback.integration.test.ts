@@ -1,3 +1,4 @@
+// @linux-only: tool stub replay on Workflow
 import { jsonSchema } from "ai";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
@@ -26,6 +27,8 @@ import {
 } from "#execution/tool-stubs/steps.js";
 import { STUB_CONTEXT_KEY } from "#tool-stubs/types.js";
 
+// It checks the playback Workflow serves on a hook and the failures it publishes for eval
+// verification, which an in-process session doesn't keep, so it runs on Workflow.
 describe("durable tool stub playback", () => {
   it("allocates concurrent calls once and reuses an earlier result after later workflow resumes", async () => {
     const runtime = await createTestRuntime({ agent: { name: "stub-playback" } });

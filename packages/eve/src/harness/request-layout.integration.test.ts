@@ -1,3 +1,4 @@
+// @linux-only: model request assembly; compiled from memory
 import { MockLanguageModelV4 } from "ai/test";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { describe, expect, it } from "vitest";

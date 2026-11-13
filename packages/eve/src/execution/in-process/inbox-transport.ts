@@ -13,6 +13,15 @@ import { received, type Crossing, type StepBoundary } from "./step-boundary.js";
 // Workflow, and its owner can keep it before it's queued (`keep`). An owner can reserve tokens it
 // opens later; what arrives for one waits until it opens. Nothing here survives the process.
 
+/**
+ * When an owner reads what arrived. `immediate` hands each payload over at once, so two
+ * deliveries made back to back are read one at a time. `batched` holds every payload until the
+ * next macrotask, then hands them over in the order they arrived, so back-to-back deliveries are
+ * read together, as Workflow's replay reads every hook payload that arrived while its run was
+ * starting.
+ */
+export type DeliveryTiming = "immediate" | "batched";
+
 /** What a session's address reads. */
 export type Arrival = SessionInboxPayload | WorkflowToolRunMessageBatch;
 
@@ -29,7 +38,11 @@ export type Delivery =
 interface Address<T> {
   readonly owner: string;
   readonly queue: T[];
+  /** What arrived and waits for the next macrotask (`batched`), in order. */
+  readonly pending: T[];
   readonly waiters: Set<() => void>;
+  /** Called when the reader asks for the next payload, after taking one. */
+  pulled: (() => void) | undefined;
   disposed: boolean;
   /** Reads `crossing` as the address's own payload, keeps it when asked, and queues it. */
   accept(crossing: Crossing, options: { readonly keep: boolean }): Promise<void>;
@@ -73,10 +86,20 @@ export interface MemoryInboxRegistry {
   holdsAny(owner: string): boolean;
   /** Closes every open address, so each owner reads nothing more. */
   closeAll(): void;
+  /**
+   * Resolves once every owner has heard what was delivered so far: at once when deliveries are
+   * `immediate`, and on the next macrotask when they're `batched`.
+   */
+  heard(): Promise<void>;
 }
 
+const nextMacrotask = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 /** Addresses whose payloads cross `boundary` once each, as hook payloads cross Workflow's. */
-export function createMemoryInboxRegistry(boundary: StepBoundary): MemoryInboxRegistry {
+export function createMemoryInboxRegistry(
+  boundary: StepBoundary,
+  options: { readonly deliveries?: DeliveryTiming } = {},
+): MemoryInboxRegistry {
   const held = new Map<string, Address<unknown>>();
   const sessionAddresses = new Map<string, Address<Arrival>>();
   const opened = new Set<Address<unknown>>();
@@ -90,7 +113,42 @@ export function createMemoryInboxRegistry(boundary: StepBoundary): MemoryInboxRe
     for (const resolve of address.waiters) resolve();
     address.waiters.clear();
   };
+  // Pending payloads' addresses, one entry per payload, in the order the payloads arrived.
+  const arrivals: Address<unknown>[] = [];
+  let flushing: Promise<void> | undefined;
+  /**
+   * Hands what's pending over in arrival order. An owner reading at the time takes each payload
+   * before the next is handed over, as Workflow replays one hook event at a time, so payloads
+   * for different addresses of one session reach it in the order they arrived; one that's slow
+   * to read again holds the rest back for one macrotask at most.
+   */
+  const flush = async (): Promise<void> => {
+    await nextMacrotask();
+    while (arrivals.length > 0) {
+      const address = arrivals.shift()!;
+      const payload = address.pending.shift();
+      // Closing the address handed it over already.
+      if (payload === undefined) continue;
+      address.queue.push(payload);
+      if (address.waiters.size === 0) continue;
+      const pulled = new Promise<void>((resolve) => (address.pulled = resolve));
+      wake(address);
+      await Promise.race([pulled, nextMacrotask()]);
+      address.pulled = undefined;
+    }
+    flushing = undefined;
+  };
+  const arrived = (address: Address<unknown>, payload: unknown): void => {
+    if (options.deliveries !== "batched") {
+      address.queue.push(payload);
+      return wake(address);
+    }
+    address.pending.push(payload);
+    arrivals.push(address);
+    flushing ??= flush();
+  };
   const close = (token: string, address: Address<unknown>): void => {
+    address.queue.push(...address.pending.splice(0));
     address.disposed = true;
     opened.delete(address);
     wake(address);
@@ -127,18 +185,20 @@ export function createMemoryInboxRegistry(boundary: StepBoundary): MemoryInboxRe
       disposed: closed,
       owner,
       queue: [],
+      pending: [],
       waiters: new Set(),
+      pulled: undefined,
       async accept(crossing, options) {
         const payload = await received<T>(boundary, crossing);
         if (options.keep) await keep?.(token, payload);
-        created.queue.push(payload);
-        wake(created);
+        arrived(created, payload);
       },
       async *[Symbol.asyncIterator]() {
         while (true) {
           const next = created.queue.shift();
           if (next !== undefined) {
             yield next;
+            created.pulled?.();
             continue;
           }
           if (created.disposed) return;
@@ -152,6 +212,11 @@ export function createMemoryInboxRegistry(boundary: StepBoundary): MemoryInboxRe
 
   return {
     holder: (token) => held.get(token)?.owner,
+    async heard() {
+      if (options.deliveries !== "batched") return;
+      await nextMacrotask();
+      while (flushing !== undefined) await flushing;
+    },
     holdsAny: (owner) => [...held.values()].some((address) => address.owner === owner),
 
     async deliver(token, payload) {
@@ -216,6 +281,7 @@ export function createMemoryInboxRegistry(boundary: StepBoundary): MemoryInboxRe
     closeAll() {
       closed = true;
       for (const open of opened) {
+        open.queue.push(...open.pending.splice(0));
         open.disposed = true;
         wake(open);
       }

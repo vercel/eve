@@ -1,3 +1,4 @@
+// @linux-only: sign-in flow
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";

@@ -110,7 +110,11 @@
       "dependsOn": ["build:js"],
       "env": ["PLAYWRIGHT_BROWSERS_PATH"]
     },
-    "test:framework-fixtures": {
+    "test:build": {
+      "cache": false,
+      "dependsOn": ["build"]
+    },
+    "test:public-types": {
       "cache": false,
       "dependsOn": ["build"]
     },

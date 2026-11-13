@@ -1,3 +1,4 @@
+// @linux-only: auto() routing
 import { Experimental_DecisionMockModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

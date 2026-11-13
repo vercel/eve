@@ -1,3 +1,4 @@
+// @linux-only: attachment staging into in-memory just-bash/mock sandbox
 import type { FilePart, ModelMessage, ToolResultPart, UserContent } from "ai";
 import { describe, expect, it, vi } from "vitest";
 

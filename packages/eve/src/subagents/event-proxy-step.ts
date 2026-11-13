@@ -21,7 +21,7 @@ import {
 } from "#harness/hitl/index.js";
 import { relay, relayedMirror } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { installedDurableHost, signInDelivery } from "#execution/hosts.js";
+import { sessionSignInCallbacks, signInDelivery } from "#execution/hosts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
@@ -58,13 +58,13 @@ export async function emitProxiedSubagentEvent(
   const { hookPayload, runId, workflowAsk } = input;
   // The other askers hear a sign-in's answer before the relay commits: a delivery that fails
   // fails this step, and its retry delivers them again from the same state.
-  const host = installedDurableHost();
-  const baseUrl = host?.callbackBaseUrl();
+  const { sessionId } = input.durableSession;
+  const callbacks = sessionSignInCallbacks(sessionId);
   const own =
-    baseUrl === undefined ? undefined : ownCallbacks(input.durableSession.sessionId, baseUrl);
-  if (host !== undefined && own !== undefined) {
+    callbacks === undefined ? undefined : ownCallbacks(sessionId, callbacks.callbackBaseUrl);
+  if (callbacks !== undefined && own !== undefined) {
     const tables = storedProjection(input.durableSession.state).view;
-    await settleSignIns(signInDelivery(host.deliver), [
+    await settleSignIns(signInDelivery(callbacks.deliver), [
       ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
         signInsAnswered(tables, answer, own),
       ),

@@ -1,3 +1,4 @@
+// @linux-only: session edge cases; compiled from memory; Workflow + in-process cells
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type { DeliverPayload, SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";

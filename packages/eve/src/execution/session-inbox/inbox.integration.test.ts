@@ -1,3 +1,4 @@
+// @linux-only: session inbox hooks on Workflow
 import { describe, expect, it } from "vitest";
 
 import {

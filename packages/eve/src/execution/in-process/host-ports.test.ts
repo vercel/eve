@@ -72,6 +72,34 @@ describe("the in-process inbox transport", () => {
     await bob.dispose();
   });
 
+  it("hands each delivery over at once by default", async () => {
+    const registry = createMemoryInboxRegistry(structuredCloneBoundary);
+    const inbox = createSessionInbox(registry.transportFor("session-alice"));
+    await inbox.claimSessionHook("alice");
+    const next = inbox.next();
+    await registry.deliver("alice", send("first"));
+    await expect(next).resolves.toEqual(send("first"));
+    await inbox.dispose();
+  });
+
+  it("holds batched deliveries until the next macrotask, then hands them over in order", async () => {
+    const registry = createMemoryInboxRegistry(structuredCloneBoundary, { deliveries: "batched" });
+    const inbox = createSessionInbox(registry.transportFor("session-alice"));
+    await inbox.claimSessionHooks(["alice", "alice-commands"]);
+    const compact: SessionCommand = { deliveryId: "compact-1", kind: "compact" };
+    const clear: SessionCommand = { deliveryId: "clear-1", kind: "clear" };
+
+    // Back to back, to two of the session's addresses: two commands, then a message behind them.
+    await registry.deliver("alice-commands", compact);
+    await registry.deliver("alice-commands", clear);
+    await registry.deliver("alice", send("Bob asks again."));
+    expect(inbox.hasPending()).toBe(false);
+
+    await registry.heard();
+    expect(inbox.drain()).toEqual([compact, clear, send("Bob asks again.")]);
+    await inbox.dispose();
+  });
+
   it("ends every reader when the registry closes", async () => {
     const registry = createMemoryInboxRegistry(structuredCloneBoundary);
     const inbox = createSessionInbox(registry.transportFor("session-alice"));

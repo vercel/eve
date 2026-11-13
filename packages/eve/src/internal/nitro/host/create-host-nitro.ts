@@ -240,6 +240,7 @@ function toNitroConfig(
 }
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
+  "connection-drain": "src/internal/nitro/host/connection-drain-plugin.ts",
   "local-schedules": "src/internal/nitro/host/local-schedules-runtime-plugin.ts",
   "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
 } as const;

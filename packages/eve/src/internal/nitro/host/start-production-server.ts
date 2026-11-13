@@ -7,12 +7,17 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
 import { EVE_SCHEDULES_DISABLED_ENV } from "#internal/schedules/disabled.js";
-import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
+import {
+  BuiltServerPortInUseError,
+  readBuiltServerStartFailure,
+} from "#shared/built-server-start-failure.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
 const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
+// How many probed ports an ephemeral start tries before it reports the failure.
+const EPHEMERAL_PORT_ATTEMPTS = 3;
 // srvx prints this line only after its own listener is bound.
 const LISTENING_URL_PATTERN = /Listening on:?\s+(https?:\/\/\S+)/;
 // On SIGTERM, srvx closes the server for up to 5s before Nitro's close hooks
@@ -188,13 +193,47 @@ export async function startProductionServer(
   await loadDevelopmentEnvironmentFiles(appRoot);
 
   const host = options.host ?? DEFAULT_PRODUCTION_SERVER_HOST;
-  const port = await resolveListenPort({
-    host,
-    port: options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT,
-  });
+  const requestedPort = options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT;
+  // An ephemeral request picks a port by binding one and releasing it, so a
+  // parallel process can claim it before this child binds. Retry with a fresh
+  // port instead of failing the start.
+  for (let attempt = 1; ; attempt += 1) {
+    const port = await resolveListenPort({ host, port: requestedPort });
+    const retryable = requestedPort === 0 && attempt < EPHEMERAL_PORT_ATTEMPTS;
+    try {
+      return await spawnBuiltServer({
+        appRoot,
+        host,
+        port,
+        retryable,
+        schedules: options.schedules,
+        serverEntry,
+      });
+    } catch (error) {
+      if (!retryable || !(error instanceof BuiltServerPortInUseError)) throw error;
+    }
+  }
+}
+
+async function spawnBuiltServer(input: {
+  readonly appRoot: string;
+  readonly host: string;
+  readonly port: number;
+  /** Whether a taken port is retried; its startup stderr is then held until the start settles. */
+  readonly retryable: boolean;
+  readonly schedules: boolean | undefined;
+  readonly serverEntry: string;
+}): Promise<ProductionServerHandle> {
+  const { appRoot, host, port, serverEntry } = input;
   // Startup output is kept only for URL detection and startup diagnostics.
   // After readiness it is dropped so a long-running server does not grow it.
   let output = "";
+  // Startup stderr of a retryable attempt, written once the start settles unless it is retried.
+  let heldStderr: Buffer[] | undefined = input.retryable ? [] : undefined;
+  const releaseStderr = (write: boolean) => {
+    if (write) for (const chunk of heldStderr ?? []) process.stderr.write(chunk);
+    heldStderr = undefined;
+  };
   let ready = false;
   let closing = false;
   let startError: unknown;
@@ -216,7 +255,7 @@ export async function startProductionServer(
   delete env.CI;
   delete env.SERVER_SHUTDOWN_TIMEOUT;
   delete env.NITRO_UNIX_SOCKET;
-  if (options.schedules === false) {
+  if (input.schedules === false) {
     env[EVE_SCHEDULES_DISABLED_ENV] = "1";
   }
 
@@ -232,7 +271,8 @@ export async function startProductionServer(
   });
   child.stderr?.on("data", (chunk: Buffer) => {
     if (!ready) output += chunk.toString("utf8");
-    process.stderr.write(chunk);
+    if (heldStderr === undefined) process.stderr.write(chunk);
+    else heldStderr.push(chunk);
   });
 
   const wait = new Promise<void>((resolveWait, rejectWait) => {
@@ -268,6 +308,7 @@ export async function startProductionServer(
     });
     ready = true;
     output = "";
+    releaseStderr(true);
 
     return {
       async close() {
@@ -282,6 +323,7 @@ export async function startProductionServer(
   } catch (error) {
     closing = true;
     await terminate(child);
+    releaseStderr(!(input.retryable && error instanceof BuiltServerPortInUseError));
 
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("Timed out waiting for built eve server to respond.", { cause: error });

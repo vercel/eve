@@ -1,10 +1,11 @@
+// @linux-only: ctx.conversation
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
@@ -136,7 +137,7 @@ async function deliverSlackEvent(
   if (route === undefined || !isHttpRouteDefinition(route)) {
     throw new Error("Expected the Slack webhook route.");
   }
-  const runtime = createInProcessRuntime({
+  const runtime = createTestInProcessRuntime({
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
   });
   const operations = createChannelOperations<unknown>({

@@ -41,6 +41,10 @@ interface WorkflowHookLike {
 
 /**
  * Waits for a Workflow hook in integration tests.
+ *
+ * Polls the run's hooks, which is cheap, and reads the event log only for a hook that exists, to
+ * see whether the run has already received it. Reading the whole log on every poll costs one file
+ * read per event of the run, many times over.
  */
 export async function waitForHook(
   run: WorkflowRunLike,
@@ -48,27 +52,22 @@ export async function waitForHook(
 ): Promise<WorkflowHookLike> {
   const world = await getWorld();
   const timeout = options.timeout ?? 30_000;
-  const pollInterval = options.pollInterval ?? 100;
+  const pollInterval = options.pollInterval ?? 25;
   const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
-    const [hooks, events] = await Promise.all([
-      world.hooks.list({ runId: run.runId }).then((result) => result.data),
-      fetchAllEvents(world, run.runId),
-    ]);
-    const receivedCorrelationIds = new Set(
-      events
-        .filter((event) => event.eventType === "hook_received")
-        .map((event) => event.correlationId),
-    );
-    const pendingHook = hooks.find(
-      (hook) =>
-        !receivedCorrelationIds.has(hook.hookId) &&
-        (options.token === undefined || hook.token === options.token),
+    const hooks = await world.hooks.list({ runId: run.runId }).then((result) => result.data);
+    const candidates = hooks.filter(
+      (hook) => options.token === undefined || hook.token === options.token,
     );
 
-    if (pendingHook !== undefined) {
-      return pendingHook;
+    if (candidates.length > 0) {
+      const receivedCorrelationIds = await receivedHookIds(world, run.runId, candidates);
+      const pendingHook = candidates.find((hook) => !receivedCorrelationIds.has(hook.hookId));
+
+      if (pendingHook !== undefined) {
+        return pendingHook;
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -97,28 +96,24 @@ export async function waitForHookOwner(
   }
 }
 
-async function fetchAllEvents(
+/** The ids of `hooks` the run has already received, read from the events correlated with each. */
+async function receivedHookIds(
   world: Awaited<ReturnType<typeof getWorld>>,
   runId: string,
-): Promise<WorkflowEventLike[]> {
-  const allEvents: WorkflowEventLike[] = [];
-  let cursor: string | undefined;
+  hooks: readonly WorkflowHookLike[],
+): Promise<Set<string>> {
+  const received = await Promise.all(
+    hooks.map(async (hook) => {
+      const events = await world.events.listByCorrelationId({
+        correlationId: hook.hookId,
+        resolveData: "none",
+        runId,
+      });
+      return events.data.some((event: WorkflowEventLike) => event.eventType === "hook_received")
+        ? hook.hookId
+        : undefined;
+    }),
+  );
 
-  do {
-    const pagination: { cursor?: string; limit: number } = { limit: 1000 };
-
-    if (cursor !== undefined) {
-      pagination.cursor = cursor;
-    }
-
-    const result = await world.events.list({
-      pagination,
-      resolveData: "none",
-      runId,
-    });
-    allEvents.push(...result.data);
-    cursor = result.hasMore === true && result.cursor !== null ? result.cursor : undefined;
-  } while (cursor !== undefined);
-
-  return allEvents;
+  return new Set(received.filter((hookId) => hookId !== undefined));
 }

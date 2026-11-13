@@ -2,14 +2,13 @@ import { Agent } from "node:http";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  materializeScenarioApp,
   type ScenarioAppDescriptor,
-  useScenarioApp,
 } from "../../src/internal/testing/scenario-app.js";
 import {
-  DEV_SERVER_AGENT_DESCRIPTOR,
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
   TRANSACTIONAL_REBUILD_DESCRIPTOR,
   createInstrumentationSource,
@@ -20,18 +19,27 @@ import {
   hasKnownDevServerFailure,
   readDevelopmentRevision,
   requestWithAgent,
+  type RunningEveDev,
   startEveDev,
   waitForCondition,
   waitForPath,
   withinDeadline,
 } from "#internal/testing/dev-server-harness.js";
 
-const scenarioApp = useScenarioApp();
-
-const WEBSOCKET_DEV_SERVER_DESCRIPTOR: ScenarioAppDescriptor = {
-  ...DEV_SERVER_AGENT_DESCRIPTOR,
+// One app serves every test: the transactional channel's worker id and
+// instrumentation marker, a held stream, a WebSocket, and an env marker.
+const CONNECTIONS_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...TRANSACTIONAL_REBUILD_DESCRIPTOR,
   files: {
-    ...DEV_SERVER_AGENT_DESCRIPTOR.files,
+    ...TRANSACTIONAL_REBUILD_DESCRIPTOR.files,
+    "agent/channels/env-generation.ts": [
+      'import { defineChannel, GET } from "eve/channels";',
+      "",
+      "export default defineChannel({",
+      '  routes: [GET("/env-generation", () => new Response(process.env.EVE_WEBSOCKET_RELOAD ?? "initial"))],',
+      "});",
+      "",
+    ].join("\n"),
     "agent/channels/socket.ts": [
       'import { defineChannel, WS } from "eve/channels";',
       "",
@@ -45,20 +53,13 @@ const WEBSOCKET_DEV_SERVER_DESCRIPTOR: ScenarioAppDescriptor = {
       "});",
       "",
     ].join("\n"),
-  },
-};
-const STREAM_PROMOTION_DESCRIPTOR: ScenarioAppDescriptor = {
-  ...TRANSACTIONAL_REBUILD_DESCRIPTOR,
-  files: {
-    ...TRANSACTIONAL_REBUILD_DESCRIPTOR.files,
-    "agent/channels/dev-generation.ts": [
+    "agent/channels/held-stream.ts": [
       'import { existsSync, watch } from "node:fs";',
       'import { join } from "node:path";',
       'import { defineChannel, GET } from "eve/channels";',
       "",
       "export default defineChannel({",
       "  routes: [",
-      '    GET("/instrumentation-marker", () => new Response(String(globalThis.__EVE_INSTRUMENTATION_MARKER__ ?? "missing"))),',
       '    GET("/held-stream", () => {',
       '      const releasePath = join(process.cwd(), ".stream-release");',
       "      let releaseWatcher: ReturnType<typeof watch> | undefined;",
@@ -166,73 +167,99 @@ async function waitForWebSocketEvent<T>(
   });
 }
 
+// Each test only checks changes it makes, so the tests share one server.
 describe("eve dev server live connections", () => {
+  let appRoot: string;
+  let cleanupApp: (() => Promise<void>) | undefined;
+  let server: RunningEveDev;
+
+  beforeAll(async () => {
+    const app = await materializeScenarioApp(CONNECTIONS_DESCRIPTOR);
+    appRoot = app.appRoot;
+    try {
+      server = await startEveDev(appRoot);
+    } catch (error) {
+      await app.cleanup();
+      throw error;
+    }
+    cleanupApp = app.cleanup;
+  }, DEV_SERVER_SCENARIO_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server?.stop();
+    await cleanupApp?.();
+  }, DEV_SERVER_SCENARIO_TIMEOUT_MS);
+
+  /** Server output written from now on. */
+  function outputFromNow(): () => string {
+    const stdoutStart = server.stdout().length;
+    const stderrStart = server.stderr().length;
+    return () => `${server.stdout().slice(stdoutStart)}\n${server.stderr().slice(stderrStart)}`;
+  }
+
   it(
     "keeps streams and parent control routes alive while a structural candidate is prepared",
     async () => {
-      const app = await scenarioApp(STREAM_PROMOTION_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-      const candidateStartedPath = join(app.appRoot, ".candidate-started");
-      const candidateReadyPath = join(app.appRoot, ".candidate-ready");
-      const streamReleasePath = join(app.appRoot, ".stream-release");
+      const output = outputFromNow();
+      const candidateStartedPath = join(appRoot, ".candidate-started");
+      const candidateReadyPath = join(appRoot, ".candidate-ready");
+      const streamReleasePath = join(appRoot, ".stream-release");
 
-      try {
-        const initialRevision = await readDevelopmentRevision(server.url);
-        const streamResponse = await fetch(new URL("/held-stream", server.url));
-        if (streamResponse.body === null) {
-          throw new Error("Held stream response did not include a body.");
-        }
-        const reader = streamResponse.body.getReader();
-        const firstChunk = await withinDeadline(
-          reader.read(),
-          "Timed out waiting for the first stream chunk.",
-        );
-        expect(new TextDecoder().decode(firstChunk.value)).toBe("first\n");
-
-        // The parent-owned control route must answer continuously through
-        // candidate preparation and promotion, not merely at spot checks.
-        const revisionFailures: string[] = [];
-        let stopRevisionPolling = false;
-        const revisionPoller = (async () => {
-          while (!stopRevisionPolling) {
-            try {
-              await readDevelopmentRevision(server.url);
-            } catch (error) {
-              revisionFailures.push(String(error));
-            }
-            await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-          }
-        })();
-
-        await writeFile(
-          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
-          createBlockedInstrumentationSource(),
-        );
-        const rebuild = forceDevelopmentRebuild(server.url);
-        await waitForPath(candidateStartedPath);
-
-        await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
-        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
-
-        await writeFile(candidateReadyPath, "ready");
-        await withinDeadline(rebuild, "Timed out waiting for candidate promotion.");
-        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
-
-        stopRevisionPolling = true;
-        await revisionPoller;
-        expect(revisionFailures, revisionFailures.join("\n")).toEqual([]);
-
-        await writeFile(streamReleasePath, "release");
-        const secondChunk = await withinDeadline(
-          reader.read(),
-          "Timed out waiting for the retired worker stream.",
-        );
-        expect(new TextDecoder().decode(secondChunk.value)).toBe("second\n");
-        await expect(reader.read()).resolves.toEqual(expect.objectContaining({ done: true }));
-        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
-      } finally {
-        await server.stop();
+      const initialRevision = await readDevelopmentRevision(server.url);
+      const initialMarker = await fetchText(server.url, "/instrumentation-marker");
+      expect(initialMarker).not.toBe("two");
+      const streamResponse = await fetch(new URL("/held-stream", server.url));
+      if (streamResponse.body === null) {
+        throw new Error("Held stream response did not include a body.");
       }
+      const reader = streamResponse.body.getReader();
+      const firstChunk = await withinDeadline(
+        reader.read(),
+        "Timed out waiting for the first stream chunk.",
+      );
+      expect(new TextDecoder().decode(firstChunk.value)).toBe("first\n");
+
+      // The parent-owned control route must answer continuously through
+      // candidate preparation and promotion, not merely at spot checks.
+      const revisionFailures: string[] = [];
+      let stopRevisionPolling = false;
+      const revisionPoller = (async () => {
+        while (!stopRevisionPolling) {
+          try {
+            await readDevelopmentRevision(server.url);
+          } catch (error) {
+            revisionFailures.push(String(error));
+          }
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+        }
+      })();
+
+      await writeFile(
+        join(appRoot, "agent", "instrumentation", "reload.ts"),
+        createBlockedInstrumentationSource(),
+      );
+      const rebuild = forceDevelopmentRebuild(server.url);
+      await waitForPath(candidateStartedPath);
+
+      await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
+      await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe(initialMarker);
+
+      await writeFile(candidateReadyPath, "ready");
+      await withinDeadline(rebuild, "Timed out waiting for candidate promotion.");
+      await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
+
+      stopRevisionPolling = true;
+      await revisionPoller;
+      expect(revisionFailures, revisionFailures.join("\n")).toEqual([]);
+
+      await writeFile(streamReleasePath, "release");
+      const secondChunk = await withinDeadline(
+        reader.read(),
+        "Timed out waiting for the retired worker stream.",
+      );
+      expect(new TextDecoder().decode(secondChunk.value)).toBe("second\n");
+      await expect(reader.read()).resolves.toEqual(expect.objectContaining({ done: true }));
+      expect(hasKnownDevServerFailure(output())).toBe(false);
     },
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
@@ -240,8 +267,7 @@ describe("eve dev server live connections", () => {
   it(
     "serves a kept-alive connection across a structural worker replacement",
     async () => {
-      const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
+      const output = outputFromNow();
       const agent = new Agent({ keepAlive: true, maxSockets: 1 });
 
       try {
@@ -249,22 +275,21 @@ describe("eve dev server live connections", () => {
         expect(first.localPort).toBeDefined();
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
+          join(appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("keep-alive-two"),
         );
         await forceDevelopmentRebuild(server.url, agent);
         await waitForCondition(
           async () => (await fetchText(server.url, "/instrumentation-marker")) === "keep-alive-two",
-          `Timed out waiting for the structural replacement.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+          () => `Timed out waiting for the structural replacement.\n\n${output()}`,
         );
 
         const second = await requestWithAgent(new URL("/worker-id", server.url).href, agent);
         expect(second.localPort).toBe(first.localPort);
         expect(second.body).not.toBe(first.body);
-        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+        expect(hasKnownDevServerFailure(output())).toBe(false);
       } finally {
         agent.destroy();
-        await server.stop();
       }
     },
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
@@ -273,8 +298,7 @@ describe("eve dev server live connections", () => {
   it(
     "keeps an admitted websocket on its worker while a ready replacement is promoted",
     async () => {
-      const app = await scenarioApp(WEBSOCKET_DEV_SERVER_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
+      const output = outputFromNow();
       const socketUrl = new URL("/socket", server.url);
       socketUrl.protocol = "ws:";
       const socket = new WebSocket(socketUrl);
@@ -285,11 +309,11 @@ describe("eve dev server live connections", () => {
         socket.send("before");
         await expect(firstMessage).resolves.toBe("hidden:127.0.0.1:before");
 
-        await writeFile(join(app.appRoot, ".env.local"), "EVE_WEBSOCKET_RELOAD=1\n");
-        await waitForCondition(async () => {
-          const generation = await fetch(new URL("/dev-generation", server.url));
-          return (await generation.text()) === "1";
-        }, `Timed out waiting for websocket worker replacement.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`);
+        await writeFile(join(appRoot, ".env.local"), "EVE_WEBSOCKET_RELOAD=1\n");
+        await waitForCondition(
+          async () => (await fetchText(server.url, "/env-generation")) === "1",
+          () => `Timed out waiting for websocket worker replacement.\n\n${output()}`,
+        );
 
         const nextMessage = waitForWebSocketMessage(socket);
         socket.send("after");
@@ -300,7 +324,6 @@ describe("eve dev server live connections", () => {
           socket.close();
           await closed;
         }
-        await server.stop();
       }
     },
     DEV_SERVER_SCENARIO_TIMEOUT_MS,

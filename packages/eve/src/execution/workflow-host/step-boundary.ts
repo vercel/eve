@@ -9,7 +9,8 @@ const IN_PROCESS_RUN_ID = "in-process";
 /**
  * Workflow's own step serializer, for an in-process host that should hand its steps exactly what
  * a deployment would. It's opt-in (`createInProcessRuntime(config, { stepBoundary })`), so the
- * in-process host itself never loads Workflow.
+ * in-process host itself never loads Workflow; tests get it by default
+ * (`internal/testing/in-process-runtime.ts`).
  */
 export const workflowStepBoundary: StepBoundary = {
   send: async (value) => ({

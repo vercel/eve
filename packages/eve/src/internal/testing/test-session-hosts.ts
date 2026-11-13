@@ -1,10 +1,10 @@
 import type { Runtime } from "#channel/types.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
+import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { sessionLineStore } from "#execution/hosts.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { WorkflowBody } from "#tools/workflow-body.js";
@@ -16,9 +16,6 @@ const TEST_CALLBACK_BASE_URL = "http://test-session.in-process";
 // session from the initial entry, reads its stream, and delivers to its hooks with
 // `resumeRoutedHook`, which reaches a session wherever it runs. Tests that check what Workflow
 // itself does (its runs, its replay) keep running on Workflow.
-//
-// TODO(#6309): `sign-in-fan-in.integration.test.ts` also stays on Workflow, not because it's about
-// Workflow but because children settling one shared sign-in grant don't yet work in process.
 
 /** Which host a session test runs its sessions on. */
 export type TestSessionHostKind = "workflow" | "in-process";
@@ -50,21 +47,24 @@ export async function startTestSession(
      * runs; Workflow runs their twins, which the test tier's bundler registers.
      */
     readonly workflows?: readonly WorkflowBody[];
+    /** Turn steps that lose their completion, or fail, and run again; the in-process host's only. */
+    readonly stepFaults?: StepFaults;
   } = {},
 ): Promise<TestSessionRun> {
   if (host === "workflow") {
+    if (options.stepFaults !== undefined)
+      throw new Error("Step faults are the in-process host's; Workflow's steps fail on their own.");
     const run = await startSessionOwner(workflowEntry, [entry]);
     const runtime = createWorkflowRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     });
     return { runId: run.runId, readable: run.readable, cancel: () => run.cancel(), runtime };
   }
-  const runtime = createInProcessRuntime(
+  const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
-    // Workflow's own step serializer, so a payload a deployment couldn't carry fails here too.
     {
       callbackBaseUrl: options.callbackBaseUrl ?? TEST_CALLBACK_BASE_URL,
-      stepBoundary: workflowStepBoundary,
+      ...(options.stepFaults !== undefined && { stepFaults: options.stepFaults }),
     },
   );
   for (const { body, workflowId } of options.workflows ?? [])
