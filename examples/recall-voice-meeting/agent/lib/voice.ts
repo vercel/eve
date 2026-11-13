@@ -9,7 +9,7 @@ import {
 import { gateway, generateSpeech } from "ai";
 import { GET, type RouteDefinition, type RouteHandlerArgs } from "eve/channels";
 
-import { readReplyMode, replyModeOf, type ReplyMode } from "./reply-mode";
+import { isChatLine, readReplyMode, replyModeOf, type ReplyMode } from "./reply-mode";
 import { VOICE_PAGE_HTML } from "./voice-page";
 
 /** Bot metadata key holding the secret in the bot's voice page URL. */
@@ -112,7 +112,12 @@ async function streamSpeech(
           if (!resuming) skipLine ??= line;
           if (line === skipLine) continue;
 
-          if (event.type === "content.delta") {
+          if (event.type === "delivery.consumed") {
+            const lines = event.data.parts.flatMap((part) =>
+              part.kind === "text" ? [part.text] : [],
+            );
+            segmenter.heard(event.data.turnId, lines);
+          } else if (event.type === "content.delta") {
             segmenter.delta(event.scope?.turnId, event.data);
           } else if (event.type === "content.completed" && event.data.kind === "text") {
             const { partId, value } = event.data;
@@ -176,10 +181,21 @@ class SpeechSegmenter {
       mode: ReplyMode | undefined;
     }
   >();
+  /** Turns that someone started by speaking, rather than only in the chat. */
+  private readonly spokenTurns = new Set<string>();
   private readonly say: (turnId: string, text: string) => void;
 
   constructor(say: (turnId: string, text: string) => void) {
     this.say = say;
+  }
+
+  heard(turnId: string, lines: readonly string[]): void {
+    if (lines.some((line) => !isChatLine(line))) this.spokenTurns.add(turnId);
+  }
+
+  /** Where an untagged message goes: aloud for a spoken request, nowhere for a chat one. */
+  private untagged(turnId: string | undefined): ReplyMode {
+    return turnId !== undefined && !this.spokenTurns.has(turnId) ? "chat" : "voice";
   }
 
   delta(
@@ -197,7 +213,7 @@ class SpeechSegmenter {
     if (part.mode === undefined) {
       const read = readReplyMode(part.buffer);
       if (read === undefined) return;
-      part.mode = read.mode;
+      part.mode = read.mode ?? this.untagged(part.turnId);
       part.buffer = read.text;
       if (part.mode === "chat") return;
     }
@@ -218,8 +234,9 @@ class SpeechSegmenter {
     }
     // A part this reader didn't follow from its start, or one too short to
     // have ruled out a tag, is read from its final value.
+    const owner = part?.turnId ?? turnId;
     const { mode, text } = replyModeOf(value);
-    if (mode !== "chat") this.emit(part?.turnId ?? turnId, text);
+    if ((mode ?? this.untagged(owner)) !== "chat") this.emit(owner, text);
   }
 
   private emit(turnId: string | undefined, text: string): void {
