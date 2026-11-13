@@ -18,6 +18,7 @@ import {
 } from "#execution/session-event-stream.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { bootInitialOwner } from "#execution/session/owner-boot.js";
+import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { runPreparedSession } from "#execution/session/program.js";
 import { createUlid } from "#shared/ulid.js";
 import { createInProcessHost, type InProcessHost, type InProcessHostOptions } from "./host.js";
@@ -38,6 +39,13 @@ export interface InProcessRuntime extends Runtime {
   holds(token: string): boolean;
   /** How many of `sessionId`'s turn steps are running now. */
   stepsRunning(sessionId: string): number;
+  /**
+   * Starts a session from the initial entry Workflow's `workflowEntry` takes, for tests written
+   * against it.
+   */
+  startEntry(
+    entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
+  ): Promise<{ readonly sessionId: string }>;
   /** Makes an authored workflow tool's body, its `"use workflow"` function's twin, run here. */
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
   /**
@@ -71,59 +79,72 @@ export function createInProcessRuntime(
 function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcessRuntime {
   const { inboxes, lines, running } = host;
 
+  /**
+   * Boots and runs a session from its initial entry, as Workflow's `workflowEntry` does. When
+   * another session holds the continuation token, the message went to it, and that's the one.
+   */
+  const startEntry = async (
+    entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
+    continuationToken: string | undefined,
+  ): Promise<{ readonly sessionId: string; readonly claimedContinuation: boolean }> => {
+    const sessionId = `session_${createUlid()}`;
+    const sessionWritable = lines.open(sessionId);
+    host.onDispose(registerSessionLineStore(sessionId, lines));
+    const boot = await bootInitialOwner(
+      { ...entry, ownerDeploymentId: host.deploymentId },
+      sessionId,
+      {
+        inboxTransport: inboxes.transportFor(sessionId),
+        sessionWritable,
+        // No timer ends a session here.
+        timeouts: () => undefined,
+        async settleContinuationConflict({ command, continuationToken: token }) {
+          if (inboxes.holder(token) === undefined)
+            throw new Error(`No session here holds continuation "${token}".`);
+          await host.deliverCommand(token, command);
+        },
+      },
+    );
+    if (boot === undefined) {
+      const holder = inboxes.holder(continuationToken ?? "");
+      if (holder === undefined) throw new Error("The session's address is held elsewhere.");
+      return { claimedContinuation: false, sessionId: holder };
+    }
+    const session = runPreparedSession(boot.session, boot.inbox, host.sessionHost).then(
+      () => undefined,
+      // The session's stream records how it ended.
+      () => undefined,
+    );
+    running.set(sessionId, session);
+    void session.finally(() => running.delete(sessionId));
+    return { claimedContinuation: true, sessionId };
+  };
+
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
       const prepared = await prepareInitialEntry(config, input);
-      const sessionId = `session_${createUlid()}`;
-      const sessionWritable = lines.open(sessionId);
-      host.onDispose(registerSessionLineStore(sessionId, lines));
-      const boot = await bootInitialOwner(
-        { ...prepared.entry, ownerDeploymentId: host.deploymentId },
-        sessionId,
-        {
-          inboxTransport: inboxes.transportFor(sessionId),
-          sessionWritable,
-          // No timer ends a session here.
-          timeouts: () => undefined,
-          async settleContinuationConflict({ command, continuationToken }) {
-            if (inboxes.holder(continuationToken) === undefined)
-              throw new Error(`No session here holds continuation "${continuationToken}".`);
-            await host.deliverCommand(continuationToken, command);
-          },
-        },
-      );
-      if (boot === undefined) {
-        // Another session holds the continuation token, and the message went to it.
-        const holder = inboxes.holder(input.continuationToken ?? "");
-        if (holder === undefined) throw new Error("The session's address is held elsewhere.");
+      const started = await startEntry(prepared.entry, input.continuationToken);
+      const delivery = prepared.input.delivery;
+      if (!started.claimedContinuation) {
         // As Workflow's handle for a start that lost the address: it created nothing.
         return {
           claimedContinuation: false,
-          events: readSessionEventStream(holder),
-          sessionId: holder,
-          ...(prepared.input.delivery !== undefined && {
-            deliveryId: prepared.input.delivery.deliveryId,
-          }),
+          events: readSessionEventStream(started.sessionId),
+          sessionId: started.sessionId,
+          ...(delivery !== undefined && { deliveryId: delivery.deliveryId }),
         };
       }
-      const session = runPreparedSession(boot.session, boot.inbox, host.sessionHost).then(
-        () => undefined,
-        // The session's stream records how it ended.
-        () => undefined,
-      );
-      running.set(sessionId, session);
-      void session.finally(() => running.delete(sessionId));
       let events: ReadableStream | undefined;
       return {
         get events() {
-          return (events ??= readSessionEventStream(sessionId));
+          return (events ??= readSessionEventStream(started.sessionId));
         },
-        sessionId,
-        ...(prepared.input.delivery !== undefined && {
-          deliveryId: prepared.input.delivery.deliveryId,
-        }),
+        sessionId: started.sessionId,
+        ...(delivery !== undefined && { deliveryId: delivery.deliveryId }),
       };
     },
+
+    startEntry: (entry) => startEntry(entry, undefined),
 
     async dispatchContinuation<TCommand extends SessionCommand>(
       input: DispatchContinuationInput<TCommand>,

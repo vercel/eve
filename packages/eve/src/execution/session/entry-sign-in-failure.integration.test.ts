@@ -6,7 +6,6 @@ import {
   ConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -16,8 +15,8 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
@@ -111,18 +110,16 @@ describe("workflowEntry sign-in failure", () => {
     });
 
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "List my issues, then create one." },
-          serializedContext: buildSerializedContext({
-            auth: alice,
-            channelKind: "http",
-            continuationToken: "http:workflow-entry-sign-in-failure",
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "List my issues, then create one." },
+        serializedContext: buildSerializedContext({
+          auth: alice,
+          channelKind: "http",
+          continuationToken: "http:workflow-entry-sign-in-failure",
+        }),
+      });
       const stream = captureEvents(run);
 
       try {
@@ -132,7 +129,7 @@ describe("workflowEntry sign-in failure", () => {
         )!.data;
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -175,7 +172,7 @@ describe("workflowEntry sign-in failure", () => {
         expect(JSON.stringify(refused?.data)).toContain("already failed in this turn");
 
         // The refusal lasts the turn: the next one asks for the sign-in again.
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           auth: alice,
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

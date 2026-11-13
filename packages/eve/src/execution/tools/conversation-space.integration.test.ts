@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
@@ -136,12 +136,13 @@ async function deliverSlackEvent(
   if (route === undefined || !isHttpRouteDefinition(route)) {
     throw new Error("Expected the Slack webhook route.");
   }
+  const runtime = createInProcessRuntime({
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+  });
   const operations = createChannelOperations<unknown>({
     adapter: resolved.adapter,
     channelName: "slack",
-    runtime: createWorkflowRuntime({
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-    }),
+    runtime,
   });
   const pending: Promise<unknown>[] = [];
   await route.handler(
@@ -164,5 +165,10 @@ async function deliverSlackEvent(
       waitUntil: (task) => void pending.push(task),
     },
   );
-  await Promise.all(pending);
+  try {
+    await Promise.all(pending);
+  } finally {
+    // It holds a process-wide route and live sessions until it's disposed.
+    await runtime.dispose();
+  }
 }
