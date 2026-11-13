@@ -1,0 +1,41 @@
+{
+  "name": "eve-sre-agent-template",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Meet sre, an eve incident response agent.",
+  "license": "MIT",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*"
+  },
+  "scripts": {
+    "build": "eve build",
+    "check": "ultracite check",
+    "dev": "eve dev",
+    "eval": "eve eval",
+    "fix": "ultracite fix",
+    "test": "node --test --experimental-test-module-mocks \"agent/**/*.test.ts\"",
+    "typecheck": "tsc",
+    "validate": "pnpm run check && pnpm run typecheck && eve info"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.8",
+    "@github-tools/eve-extension": "^0.3.2",
+    "@vercel/blob": "2.4.0",
+    "@vercel/connect": "0.4.2",
+    "ai": "^7.0.137",
+    "eve": "0.83.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.9",
+    "@types/node": "24.12.2",
+    "microsandbox": "^0.5.10",
+    "typescript": "7.0.2",
+    "ultracite": "^7.10.5"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=24"
+  }
+}
