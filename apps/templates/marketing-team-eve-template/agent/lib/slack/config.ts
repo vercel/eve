@@ -192,16 +192,19 @@ export const slackSessionAuth = (
   }
   const isService = bot && !onBehalfOfUserId;
   const team = message.installationTeamId || message.teamId;
+  const attributes: Record<string, string> = {
+    channel_id: message.channelId,
+    thread_ts: message.threadTs || message.ts,
+    user_id: userId,
+  };
+  if (!bot && message.author?.userName) {
+    attributes.user_name = message.author.userName;
+  }
+  if (message.teamId) {
+    attributes.team_id = message.teamId;
+  }
   return {
-    attributes: {
-      channel_id: message.channelId,
-      thread_ts: message.threadTs || message.ts,
-      user_id: userId,
-      ...(!bot && message.author?.userName
-        ? { user_name: message.author.userName }
-        : {}),
-      ...(message.teamId ? { team_id: message.teamId } : {}),
-    },
+    attributes,
     authenticator: "slack-webhook",
     issuer: team ? `slack:${team}` : "slack",
     principalId: slackPrincipalId({ isService, team, userId }),

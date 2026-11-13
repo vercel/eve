@@ -228,17 +228,21 @@ export default defineTool({
     ];
     try {
       const { botToken } = slackCredentials;
-      const post = (body: Record<string, unknown>) =>
-        callSlackApi({
-          body: {
-            channel,
-            unfurl_links: false,
-            ...(threadTs ? { thread_ts: threadTs } : {}),
-            ...body,
-          },
+      const post = (body: Record<string, unknown>) => {
+        const payload: Record<string, unknown> = {
+          channel,
+          unfurl_links: false,
+          ...body,
+        };
+        if (threadTs) {
+          payload.thread_ts = threadTs;
+        }
+        return callSlackApi({
+          body: payload,
           botToken,
           operation: "chat.postMessage",
         });
+      };
       const withBlocks = await post({ blocks, text });
       if (withBlocks.ok === true) {
         return { channel, posted: true };

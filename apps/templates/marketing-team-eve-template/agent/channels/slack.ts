@@ -219,12 +219,11 @@ function suggestedPromptsTarget(
       return;
     }
     const threadTs = thread?.thread_ts;
-    return {
-      channelId,
-      ...(typeof threadTs === "string" && threadTs.length > 0
-        ? { threadTs }
-        : {}),
-    };
+    const target: SuggestedPromptsTarget = { channelId };
+    if (typeof threadTs === "string" && threadTs.length > 0) {
+      target.threadTs = threadTs;
+    }
+    return target;
   }
   if (event.type === "app_home_opened" && event.tab === "messages") {
     const channelId = event.channel;
@@ -256,14 +255,17 @@ async function setSuggestedPrompts(
     return;
   }
   try {
+    const body: Record<string, unknown> = {
+      channel_id: target.channelId,
+      prompts: SUGGESTED_PROMPTS,
+      title: SUGGESTED_PROMPTS_TITLE,
+    };
+    if (target.threadTs) {
+      body.thread_ts = target.threadTs;
+    }
     const response = await ctx.slack.request(
       "assistant.threads.setSuggestedPrompts",
-      {
-        channel_id: target.channelId,
-        prompts: SUGGESTED_PROMPTS,
-        title: SUGGESTED_PROMPTS_TITLE,
-        ...(target.threadTs ? { thread_ts: target.threadTs } : {}),
-      }
+      body
     );
     if (response.ok !== true) {
       console.warn("assistant.threads.setSuggestedPrompts returned not-ok", {

@@ -23,7 +23,7 @@ const message = (overrides: Record<string, unknown>): SlackMessage =>
     threadTs: "",
     ts: "100.1",
     ...overrides,
-  }) as unknown as SlackMessage;
+  }) as SlackMessage;
 
 const human = message({ author: { isBot: false, userId: "U1" } });
 const workflow = message({

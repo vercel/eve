@@ -148,8 +148,8 @@ export const reservedNamespaceForPath = (
  * Find the reserved namespace a Blob URL points at, if any.
  *
  * @remarks
- * A Blob URL embeds the object pathname as its URL path. Unparseable input is treated as
- * not reserved; the caller's own URL validation handles malformed URLs.
+ * Blob resolves URL-encoded pathnames. Decode before checking reserved prefixes, and
+ * reject malformed escapes rather than allowing an ambiguous path through.
  *
  * @param url - A full Blob URL.
  * @returns The matching namespace, or `null` when the URL addresses a normal asset.
@@ -158,9 +158,9 @@ export const reservedNamespaceForUrl = (
   url: string
 ): ReservedNamespace | null => {
   try {
-    return reservedNamespaceForPath(new URL(url).pathname);
+    return reservedNamespaceForPath(decodeURIComponent(new URL(url).pathname));
   } catch {
-    return null;
+    return { label: "an invalid or ambiguous Blob path" };
   }
 };
 

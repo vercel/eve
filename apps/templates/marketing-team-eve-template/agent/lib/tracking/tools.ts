@@ -72,12 +72,15 @@ export const buildTrackedLinkTool = (
         campaign: normalizedCampaign,
         links: links.map(({ url, content }) => {
           const normalizedContent = content ? normalizeTag(content) : "";
-          const tracked = addTrackingParams(url, {
+          const params: Record<string, string> = {
             utm_campaign: normalizedCampaign,
             utm_medium: medium,
             utm_source: surface,
-            ...(normalizedContent ? { utm_content: normalizedContent } : {}),
-          });
+          };
+          if (normalizedContent) {
+            params.utm_content = normalizedContent;
+          }
+          const tracked = addTrackingParams(url, params);
           return tracked
             ? { original: url, tracked }
             : {
