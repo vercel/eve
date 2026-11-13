@@ -45,18 +45,16 @@ function messageIdOf(call: PlatformCall): number {
 
 function inlineOptions(call: PlatformCall): RenderedOption[] {
   const messageId = messageIdOf(call);
-  return ((call.body as MessageBody).reply_markup?.inline_keyboard ?? [])
-    .flat()
-    .flatMap((button) =>
-      button.callback_data === undefined
-        ? []
-        : [
-            {
-              handle: { data: button.callback_data, messageId } satisfies PressHandle,
-              label: button.text,
-            },
-          ],
-    );
+  return ((call.body as MessageBody).reply_markup?.inline_keyboard ?? []).flat().flatMap((button) =>
+    button.callback_data === undefined
+      ? []
+      : [
+          {
+            handle: { data: button.callback_data, messageId } satisfies PressHandle,
+            label: button.text,
+          },
+        ],
+  );
 }
 
 /**

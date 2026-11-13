@@ -3,8 +3,8 @@ import { defineEvalConfig } from "eve/evals";
 
 export default defineEvalConfig({
   judge: { model: e2eJudgeModel() },
-  // Deterministic model turns reach nested Workflow waits immediately. Keep
-  // separate evals from competing with the child workflows they are testing.
-  maxConcurrency: 1,
+  // Evals hold independent sessions on one eval server, and the world-local
+  // queue and template preparation accept concurrent evals, so run four at once.
+  maxConcurrency: 4,
   timeoutMs: 120_000,
 });

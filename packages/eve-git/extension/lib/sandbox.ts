@@ -10,3 +10,5 @@ export {
   type GitHubShellInput,
   type GitHubShellOutput,
 } from "./github-shell.ts";
+export { DEFAULT_EVE_GIT_SANDBOX_IMAGE } from "eve/sandbox/docker";
+export { VERCEL_EVE_GIT_SANDBOX_IMAGE } from "eve/sandbox/vercel";

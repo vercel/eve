@@ -21,7 +21,10 @@ import type {
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
-import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import {
+  VERCEL_EVE_GIT_SANDBOX_IMAGE,
+  VERCEL_EVE_SANDBOX_IMAGE,
+} from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
   createVercelNetworkPolicySetter,
@@ -103,9 +106,10 @@ export function createVercelSandbox(
     timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
+  const image = createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE;
   const usesEveBase =
     createOptions.source === undefined &&
-    (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE) === VERCEL_EVE_SANDBOX_IMAGE;
+    (image === VERCEL_EVE_SANDBOX_IMAGE || image === VERCEL_EVE_GIT_SANDBOX_IMAGE);
 
   return {
     async onSessionEnd(context, state, { signal }) {
@@ -124,10 +128,7 @@ export function createVercelSandbox(
         const templateKey = `eve-sbx-tpl-vercel-${context
           .templateKey({
             createOptions: vercelIdentityOptions(createOptions),
-            resolvedImage:
-              createOptions.source === undefined
-                ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
-                : undefined,
+            resolvedImage: createOptions.source === undefined ? image : undefined,
             version: 4,
           })
           .slice(0, 32)}`;

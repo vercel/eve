@@ -1,5 +1,6 @@
 // @linux-only: hook state reaches model calls
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
+import { context, propagation, trace } from "@opentelemetry/api";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -145,6 +146,11 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
 describe("state a turn.started hook writes", () => {
   afterEach(async () => {
     await shutdownInstrumentationProviders();
+    // Shutdown flushes the otel integration but leaves its global registration, which would
+    // refuse the next file's tracer provider in a worker that shares.
+    trace.disable();
+    context.disable();
+    propagation.disable();
     delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
     delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
   });

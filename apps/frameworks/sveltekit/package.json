@@ -12,10 +12,10 @@
   "dependencies": {
     "@sveltejs/adapter-vercel": "^6.3.5",
     "@sveltejs/kit": "^2.63.0",
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.5",
     "eve": "workspace:*",
-    "svelte": "^5.0.0",
-    "vite": "^8.3.3",
+    "svelte": "^5.57.3",
+    "vite": "^8.3.8",
     "zod": "catalog:"
   },
   "devDependencies": {

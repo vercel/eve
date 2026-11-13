@@ -1,4 +1,17 @@
-import { load } from "#compiled/js-yaml/index.js";
+import { CORE_SCHEMA, loadAll, mergeTag } from "#compiled/js-yaml/index.js";
+
+// YAML 1.2 core scalars keep dates as strings, so parsed YAML stays JSON data.
+// `<<` merge keys keep working in eval data files and OpenAPI specs.
+const schema = CORE_SCHEMA.withTags(mergeTag);
+
+/** Loads a single YAML document. An empty or comment-only source loads as `{}`. */
+function loadDocument(source: string): unknown {
+  const documents = loadAll(source, { schema });
+  if (documents.length > 1) {
+    throw new Error("Expected a single YAML document, but found more than one.");
+  }
+  return documents[0] ?? {};
+}
 
 /** A document split into its YAML frontmatter and body. */
 export interface FrontmatterDocument {
@@ -20,8 +33,8 @@ export function hasFrontmatter(source: string): boolean {
  * Splits a document into YAML frontmatter and body. Returns `undefined` when
  * the document has no complete `---` block.
  *
- * Frontmatter is always data: js-yaml's default schema has no code-evaluating
- * types, and a fence that names any language other than YAML, such as `---js`,
+ * Frontmatter is always data: the YAML schema has no code-evaluating types,
+ * and a fence that names any language other than YAML, such as `---js`,
  * throws instead of being interpreted.
  */
 export function parseFrontmatter(source: string): FrontmatterDocument | undefined {
@@ -39,7 +52,7 @@ export function parseFrontmatter(source: string): FrontmatterDocument | undefine
 
   const yaml = rest.slice(0, closing.index);
   return {
-    data: (yaml.trim() === "" ? undefined : load(yaml)) ?? {},
+    data: loadDocument(yaml),
     content: rest.slice(closing.index + closing[0].length),
   };
 }
@@ -51,5 +64,5 @@ export function parseFrontmatter(source: string): FrontmatterDocument | undefine
  */
 export function parseYaml(source: string): unknown {
   const frontmatter = parseFrontmatter(source);
-  return frontmatter === undefined ? (load(source) ?? {}) : frontmatter.data;
+  return frontmatter === undefined ? loadDocument(source) : frontmatter.data;
 }

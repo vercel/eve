@@ -20,7 +20,7 @@ import {
   readSessionRecordHistory,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
-import { resetUnitRealm } from "#internal/testing/reset-unit-realm.js";
+import { resetTestRealm } from "#internal/testing/reset-test-realm.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import {
   sessionCommandHookToken,
@@ -103,7 +103,7 @@ function durableHost(name: string): DurableHost {
 // durable host it needs. What it installs stays until the next test clears the realm.
 describe("the hosts in a realm", () => {
   beforeEach(() => {
-    resetUnitRealm();
+    resetTestRealm();
     durable.reached = [];
     durable.attempt = undefined;
     durable.callbackBaseUrl = undefined;
