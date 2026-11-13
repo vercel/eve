@@ -27,6 +27,7 @@ import {
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
+import { validateTimezone } from "#runtime/schedules/validation.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -463,7 +464,7 @@ function normalizeSkillFiles(
  */
 export function normalizeScheduleDefinition(value: unknown, message: string): ScheduleDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["cron", "content", "run"], message);
+  expectOnlyKnownKeys(record, ["cron", "timezone", "content", "run"], message);
 
   const cron = expectString(record.cron, message);
   const hasContent = record.content !== undefined;
@@ -480,7 +481,22 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
     );
   }
 
-  const definition: { cron: string; content?: string; run?: ScheduleRunHandler } = { cron };
+  const definition: {
+    cron: string;
+    timezone?: string;
+    content?: string;
+    run?: ScheduleRunHandler;
+  } = { cron };
+
+  if (record.timezone !== undefined) {
+    try {
+      definition.timezone = validateTimezone(expectString(record.timezone, message));
+    } catch (error) {
+      throw new Error(
+        `${message} "timezone" must be an IANA timezone such as "America/New_York". ${(error as Error).message}`,
+      );
+    }
+  }
 
   if (hasContent) {
     definition.content = expectString(record.content, message);

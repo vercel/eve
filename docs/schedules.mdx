@@ -45,6 +45,7 @@ Every schedule provides a `cron` and exactly one of `content` or `run`. The buil
 ```ts
 interface ScheduleDefinition {
   cron: string;
+  timezone?: string; // IANA timezone for `cron`; defaults to UTC
   content?: string; // fire-and-forget prompt
   run?: (args: ScheduleHandlerArgs) => Promise<void> | void; // handler
 }
@@ -58,7 +59,25 @@ interface ScheduleHandlerArgs {
 
 A schedule with `content` needs no code at runtime. A schedule with `run` stays loaded at runtime so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
-`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, schedules run in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cadence, but a built app served with `eve start` does. In development, use the [dispatch route](#trigger-a-schedule-while-iterating).
+`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. Schedules run in UTC unless they set `timezone`, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cadence, but a built app served with `eve start` does. In development, use the [dispatch route](#trigger-a-schedule-while-iterating).
+
+### Timezones
+
+Set `timezone` to an IANA timezone to evaluate `cron` in local time. The schedule follows daylight saving time, so this one fires at 09:00 in New York all year:
+
+```ts title="agent/schedules/standup.ts"
+import { defineSchedule } from "eve/schedules";
+
+export default defineSchedule({
+  cron: "0 9 * * 1-5",
+  timezone: "America/New_York",
+  content: "Post the standup summary.",
+});
+```
+
+A markdown schedule sets `timezone` in its frontmatter next to `cron`. An invalid timezone fails the build.
+
+Only Vercel builds support `timezone`. A build for `eve start` fails when a schedule sets one, because its cron runner can only use the server's local time. For those builds, write `cron` in UTC.
 
 The name comes from the path under `schedules/`, so `agent/schedules/billing/sweep.ts` is `"billing/sweep"`. Mounted extensions can add schedules from `extension/schedules/`. The mount name becomes a prefix: `extension/schedules/sweep.ts` mounted as `crm` is `"crm__sweep"`, with the same cron expression. Declared subagents can't have a `schedules/` directory.
 

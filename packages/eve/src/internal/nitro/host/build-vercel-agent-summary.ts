@@ -121,6 +121,7 @@ function toScheduleEntry(schedule: CompiledScheduleDefinition): VercelEveSchedul
   return {
     name: schedule.name,
     cron: schedule.cron,
+    ...(schedule.timezone !== undefined && { timezone: schedule.timezone }),
     logicalPath: schedule.logicalPath,
   };
 }

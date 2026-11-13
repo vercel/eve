@@ -414,6 +414,26 @@ describe("normalizeScheduleDefinition", () => {
       ),
     ).toThrow(`Unknown key "${field}"`);
   });
+
+  it("keeps a trimmed IANA timezone", () => {
+    expect(
+      normalizeScheduleDefinition(
+        { cron: "0 9 * * *", timezone: " America/New_York ", content: "Send a digest." },
+        "Expected the schedule config to match the public eve shape.",
+      ),
+    ).toEqual({ cron: "0 9 * * *", timezone: "America/New_York", content: "Send a digest." });
+  });
+
+  it("rejects a timezone that is not an IANA timezone", () => {
+    expect(() =>
+      normalizeScheduleDefinition(
+        { cron: "0 9 * * *", timezone: "Mars/Olympus", content: "Send a digest." },
+        "Expected the schedule config to match the public eve shape.",
+      ),
+    ).toThrow(
+      'Expected the schedule config to match the public eve shape. "timezone" must be an IANA timezone such as "America/New_York". Invalid IANA timezone: Mars/Olympus',
+    );
+  });
 });
 
 describe("normalizeInstructionsDefinition", () => {

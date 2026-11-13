@@ -54,6 +54,24 @@ describe("Vercel schedule delivery", () => {
     expect(config.routes).not.toContainEqual(expect.objectContaining({ dest: "/_vercel/tasks" }));
   });
 
+  it("evaluates a schedule's cron in its timezone", async () => {
+    const outputDir = await buildForVercel({
+      ...AGENT_FILES,
+      "agent/schedules/standup.md":
+        '---\ncron: "0 9 * * 1-5"\ntimezone: America/New_York\n---\nPost the standup.\n',
+    });
+    const config = await readOutputConfig(outputDir);
+
+    expect(config.schedules).toEqual({
+      "eve.digest": { schedule: "0 9 * * *", function: "_vercel/tasks" },
+      "eve.standup": {
+        schedule: "0 9 * * 1-5",
+        timezone: "America/New_York",
+        function: "_vercel/tasks",
+      },
+    });
+  });
+
   it("keeps the private Vercel Schedules function in Vercel service builds", async () => {
     const outputDir = await buildForVercel({
       ...AGENT_FILES,

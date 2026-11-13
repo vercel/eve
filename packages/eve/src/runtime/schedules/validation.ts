@@ -88,7 +88,7 @@ export function validateScheduleListLimit(limit: number | undefined): number | u
   return limit;
 }
 
-function validateTimezone(timezone: string): string {
+export function validateTimezone(timezone: string): string {
   const normalized = timezone.trim();
   if (normalized.length === 0 || normalized.length > 50) {
     throw new Error("Schedule timezone must be a valid IANA timezone.");

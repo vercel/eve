@@ -238,6 +238,20 @@ describe("createHostRouteTable", () => {
     );
   });
 
+  it("rejects schedule timezones outside Vercel builds", () => {
+    const daily = { ...DAILY, timezone: "America/New_York" };
+
+    expect(table({ scheduleRegistrations: [daily], vercel: true }).scheduleTasks).toMatchObject([
+      { timezone: "America/New_York" },
+    ]);
+    expect(
+      table({ mode: "development", scheduleRegistrations: [daily], vercel: false }).scheduleTasks,
+    ).toEqual([]);
+    expect(() => table({ scheduleRegistrations: [daily], vercel: false })).toThrow(
+      'Schedule "daily" (schedules/daily.md) sets timezone "America/New_York", but only Vercel builds support schedule timezones. Deploy to Vercel, or remove "timezone" and write the cron expression in UTC.',
+    );
+  });
+
   it.each([
     { mode: "development", vercel: false, world: undefined, direct: false },
     { mode: "development", vercel: false, world: "@workflow/world-postgres", direct: true },

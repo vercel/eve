@@ -8,6 +8,7 @@ export type GenericScheduleRunHandler<TArgs> = (args: TArgs) => Promise<void> | 
 /** Constraint shape that bounds the authored keys accepted by {@link defineSchedule}. */
 export interface GenericScheduleDefinitionFields<TArgs> {
   readonly cron: string;
+  readonly timezone?: string;
   readonly content?: string;
   readonly run?: GenericScheduleRunHandler<TArgs>;
 }
@@ -28,11 +29,21 @@ export interface GenericScheduleDefinitionFields<TArgs> {
 export type GenericScheduleDefinition<TArgs> =
   | {
       readonly cron: string;
+      /**
+       * IANA timezone the `cron` expression is evaluated in, such as
+       * `"America/New_York"`. Defaults to UTC. Requires Vercel Schedules.
+       */
+      readonly timezone?: string;
       readonly content: string;
       readonly run?: never;
     }
   | {
       readonly cron: string;
+      /**
+       * IANA timezone the `cron` expression is evaluated in, such as
+       * `"America/New_York"`. Defaults to UTC. Requires Vercel Schedules.
+       */
+      readonly timezone?: string;
       readonly content?: never;
       readonly run: GenericScheduleRunHandler<TArgs>;
     };

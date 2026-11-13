@@ -2,7 +2,11 @@ import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/b
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
-import type { HostRouteTable, HostRouteVercelFunction } from "#internal/nitro/host/host-routes.js";
+import type {
+  HostRouteTable,
+  HostRouteVercelFunction,
+  HostScheduleTask,
+} from "#internal/nitro/host/host-routes.js";
 import { createEveScheduleQueueTrigger } from "#internal/schedules/consumer-route.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import {
@@ -90,10 +94,37 @@ export function createEveVercelOptions(input: {
         slug: EVE_PACKAGE_NAME,
         version: resolveInstalledPackageInfo().version,
       },
+      ...createTimezoneSchedules(input.routeTable.scheduleTasks),
     },
     // Schedules run through a private function only Vercel Schedules can invoke.
     // Explicit, so an inherited `NITRO_VERCEL_SCHEDULES` can't change delivery.
     schedules: "private" as const,
     functionRules,
   };
+}
+
+/**
+ * Nitro's `scheduledTasks` has no timezone, so a schedule with one replaces
+ * the entry Nitro generates under the same name: Nitro merges authored
+ * `config.schedules` over its own. Nitro keeps eve's task names as schedule
+ * names, since they use only characters Vercel allows.
+ */
+function createTimezoneSchedules(tasks: readonly HostScheduleTask[]) {
+  const schedules = Object.fromEntries(
+    tasks.flatMap((task) =>
+      task.timezone === undefined
+        ? []
+        : [
+            [
+              task.nitroTaskName,
+              {
+                schedule: task.cron,
+                timezone: task.timezone,
+                function: VERCEL_SCHEDULES_FUNCTION_ROUTE.slice(1),
+              },
+            ],
+          ],
+    ),
+  );
+  return Object.keys(schedules).length > 0 ? { schedules } : {};
 }

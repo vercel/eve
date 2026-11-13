@@ -37,6 +37,7 @@ export function compileScheduleDefinition(
 
   const compiled = {
     cron: definition.cron,
+    ...(definition.timezone !== undefined && { timezone: definition.timezone }),
     hasRun: definition.run !== undefined,
     logicalPath: source.logicalPath,
     name: deriveScheduleName(source.logicalPath),

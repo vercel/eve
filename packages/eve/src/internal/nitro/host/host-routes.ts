@@ -165,6 +165,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
     }),
   }));
   assertUniqueScheduleNames(scheduleTasks);
+  if (!input.vercel) assertNoScheduleTimezones(scheduleTasks);
   return {
     routes: routes.map((route) => withHeadAllow(route, routes)),
     scheduleTasks,
@@ -183,6 +184,16 @@ function assertUniqueScheduleNames(tasks: readonly HostScheduleTask[]): void {
     }
     byName.set(task.nitroTaskName, task);
   }
+}
+
+// Nitro's in-process cron runner evaluates every schedule in the server's
+// local time, so a timezone would be ignored without warning.
+function assertNoScheduleTimezones(tasks: readonly HostScheduleTask[]): void {
+  const task = tasks.find((candidate) => candidate.timezone !== undefined);
+  if (task === undefined) return;
+  throw new Error(
+    `Schedule "${task.scheduleId}" (${task.logicalPath}) sets timezone "${task.timezone}", but only Vercel builds support schedule timezones. Deploy to Vercel, or remove "timezone" and write the cron expression in UTC.`,
+  );
 }
 
 /**

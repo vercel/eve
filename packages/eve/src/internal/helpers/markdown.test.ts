@@ -177,6 +177,20 @@ What's the temp in NYC?`;
     );
   });
 
+  it("lowers a schedule markdown timezone", () => {
+    expect(
+      lowerScheduleMarkdown(`---
+cron: "0 9 * * 1-5"
+timezone: Europe/London
+---
+Post the standup summary.`),
+    ).toEqual({
+      cron: "0 9 * * 1-5",
+      timezone: "Europe/London",
+      content: "Post the standup summary.",
+    });
+  });
+
   it("requires schedule markdown to declare frontmatter", () => {
     expect(() => lowerScheduleMarkdown("just a body")).toThrow(
       'Schedule markdown must start with YAML frontmatter declaring "cron".',

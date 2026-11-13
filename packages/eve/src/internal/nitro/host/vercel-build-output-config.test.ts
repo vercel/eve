@@ -184,4 +184,26 @@ describe("createEveVercelOptions", () => {
       },
     });
   });
+
+  it("declares Vercel schedules only for tasks with a timezone", () => {
+    const options = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      routeTable: {
+        ...routeTable,
+        scheduleTasks: [
+          DAILY_TASK,
+          { ...DAILY_TASK, nitroTaskName: "eve.standup", timezone: "America/New_York" },
+        ],
+      },
+    });
+
+    expect(options?.config.schedules).toEqual({
+      "eve.standup": {
+        schedule: "0 0 * * *",
+        timezone: "America/New_York",
+        function: "_vercel/tasks",
+      },
+    });
+  });
 });
