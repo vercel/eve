@@ -12,16 +12,34 @@ import {
 } from "#context/keys.js";
 import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
+import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import {
   createScheduleCollectionClient,
   type ScheduleCollectionClient,
 } from "#runtime/schedules/collection-client.js";
 
-/** Binds a dynamic schedules definition to a client whose scope is authorized on every operation. */
+/**
+ * Binds a dynamic schedules definition to a client whose scope is authorized on every operation.
+ * A definition with named `scopes` takes the one to act in as `options.scope`.
+ */
 export async function schedules<TPayload, TPrepared = TPayload>(
   collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
+  options: { readonly scope?: string } = {},
 ): Promise<ScheduleClient<TPayload>> {
-  return await bindScheduleCollection(collection);
+  if (collection.scopes === undefined) {
+    if (options.scope !== undefined)
+      throw new Error(
+        `schedules(): this definition declares no "scopes", so it takes no scope "${options.scope}".`,
+      );
+    return await bindScheduleCollection(collection);
+  }
+  if (options.scope === undefined)
+    throw new Error(
+      `schedules(): this definition declares scopes; pass one as { scope }: ${Object.keys(collection.scopes).join(", ")}.`,
+    );
+  return await bindScheduleCollection(
+    namedScopeDefinition(collection, options.scope) as typeof collection,
+  );
 }
 
 /** Shared binding for model approval preview and code-only client access. */

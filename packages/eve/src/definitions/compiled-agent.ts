@@ -7,7 +7,7 @@ import { serializeDurableCompiledArtifactsSource } from "#runtime/durable-compil
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent, SessionAgentSettings } from "#runtime/sessions/session-agent.js";
 import { declared, type ResolvedScheduleCollection } from "#runtime/types.js";
-import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
+import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 import { type AgentContents, settingsOf } from "./agent-definitions.js";
 import { createSessionAgent } from "./session-agent.js";
 import { connectionDefinition } from "./connections.js";
@@ -104,9 +104,9 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
           .filter((memory) => memory.offersTools === true)
           .map(memoryToolsDefinition),
       ],
-      scheduleTools: declared(agent, "schedules")
-        .filter((collection) => collection.offersTools === true)
-        .map(scheduleToolsDefinition),
+      scheduleTools: scheduleToolsDefinitions(
+        declared(agent, "schedules").filter((collection) => collection.offersTools === true),
+      ),
     },
     instructions: declared(agent, "instructions").map(instructionsDefinition),
     model: [staticModel, model].filter((definition) => definition !== undefined),
@@ -115,12 +115,49 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
   };
 }
 
-/** A schedule collection's tools, as the tool file `agent/tools/schedule__<name>.ts` would offer them. */
-function scheduleToolsDefinition(collection: ResolvedScheduleCollection): Definition {
-  const slug = scheduleCollectionToolPrefix(collection.name);
-  return toolsDefinition({ logicalPath: `tools/${slug}.ts`, slug }, async () => {
-    // Loaded where it runs: the schedule client reaches Workflow, which the harness doesn't.
-    const { scheduleCollectionTools } = await import("#context/schedule-collection-tools.js");
-    return scheduleCollectionTools(collection.definition, collection.name);
-  });
+/**
+ * Each collection's tools, as the tool file `agent/tools/schedule__<name>.ts` would offer them.
+ * The named scopes of one definition share the one set its name gives.
+ */
+function scheduleToolsDefinitions(
+  collections: readonly ResolvedScheduleCollection[],
+): readonly Definition[] {
+  const scoped = new Map<string, ResolvedScheduleCollection[]>();
+  const definitions: Definition[] = [];
+  for (const collection of collections) {
+    const slug = scheduleCollectionToolSlot(collection);
+    const source = { logicalPath: `tools/${slug}.ts`, slug };
+    if (collection.namedScope === undefined) {
+      definitions.push(
+        toolsDefinition(source, async () => {
+          // Loaded where it runs: the schedule client reaches Workflow, which the harness doesn't.
+          const { scheduleCollectionTools } = await import("#context/schedule-collection-tools.js");
+          return scheduleCollectionTools(collection.definition, collection.name);
+        }),
+      );
+      continue;
+    }
+    const scopes = scoped.get(slug);
+    if (scopes !== undefined) {
+      scopes.push(collection);
+      continue;
+    }
+    const opened = [collection];
+    scoped.set(slug, opened);
+    definitions.push(
+      toolsDefinition(source, async () => {
+        const { scheduleScopesTools } = await import("#context/schedule-collection-tools.js");
+        return scheduleScopesTools(
+          opened.map((scope) => ({
+            collection: scope.name,
+            definition: scope.definition,
+            scope: scope.namedScope!.name,
+            description: scope.namedScope!.description,
+          })),
+          slug,
+        );
+      }),
+    );
+  }
+  return definitions;
 }

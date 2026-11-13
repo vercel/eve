@@ -1,3 +1,4 @@
+import { REQUESTER_ONLY_FEEDBACK, sameResponder } from "#approval/requester-only.js";
 import { transition } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -34,8 +35,6 @@ import type { Answer } from "#shared/input.js";
 
 const UNAUTHENTICATED_FEEDBACK = "Authentication is required to respond to this approval.";
 const INVALID_FEEDBACK = "Respond to this approval with Approve or Cancel.";
-const REQUESTER_ONLY_FEEDBACK =
-  "Only the person who requested this action can respond to this approval.";
 const UNAVAILABLE_REASON =
   "The tool this approval was for is no longer available, so the call won't run.";
 const TEMPORARILY_UNAVAILABLE_REASON =
@@ -329,16 +328,6 @@ function decisionOf(response: Answer): "approve" | "deny" | undefined {
   if (response.optionId === "approve") return "approve";
   if (response.optionId === "deny") return "deny";
   return undefined;
-}
-
-/** Whether two auth contexts name the same principal. */
-export function sameResponder(left: SessionAuthContext, right: SessionAuthContext): boolean {
-  return (
-    left.authenticator === right.authenticator &&
-    (left.issuer ?? "") === (right.issuer ?? "") &&
-    left.principalType === right.principalType &&
-    left.principalId === right.principalId
-  );
 }
 
 async function withTimeout<T>(promise: Promise<T> | T): Promise<T> {

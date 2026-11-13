@@ -59,6 +59,7 @@ export default defineDynamicSchedules({
 | `id`             | Name from the file path    | Names the definition and the schedules stored under it. See [Keep a stable identity](#keep-a-stable-identity).                    |
 | `description`    | None                       | Text added to each management tool's description.                                                                                 |
 | `scope`          | `byPrincipal`              | Decides which caller can manage which schedules.                                                                                  |
+| `scopes`         | None                       | Named scopes, in place of `scope`, for schedules with more than one owner. See [Declare named scopes](#declare-named-scopes).     |
 | `provider`       | `vercelScheduleProvider()` | Stores schedules and fires them. See [Choose a provider and test locally](#choose-a-provider-and-test-locally).                   |
 | `preparePayload` | None                       | Checks and reshapes the payload before eve saves it. See [Prepare payloads and destinations](#prepare-payloads-and-destinations). |
 | `tool`           | `true`                     | How the model reaches the management tools. See [Expose management tools](#expose-management-tools).                              |
@@ -116,6 +117,59 @@ approval: {
 ```
 
 `toolInput.payload` is also the prepared payload. Approval policies apply only to model calls, not to code that uses `schedules(definition)`. So eve rejects `approval` with `tool: false`, in TypeScript and at runtime. Approvals don't bypass `scope` checks.
+
+### Declare named scopes
+
+Some schedules have more than one owner: a person's own, and the ones a channel shares. Declare each owner as a named scope with `scopes`, in place of `scope`:
+
+```ts title="agent/schedules/workflows.ts"
+export default defineDynamicSchedules({
+  inputSchema: z.object({ task: z.string() }).strict(),
+  scopes: {
+    personal: byPrincipal,
+    channel: {
+      description: "Shared with everyone in the current channel.",
+      // currentChannel is application code. Return null where no channel applies.
+      resolve: (context) => currentChannel(context),
+    },
+  },
+  // auth, run
+});
+```
+
+The definition still offers one set of tools, named for the file: `schedule__workflows__create`, `schedule__workflows__list`, and so on. Each takes a `scope` input, here `"personal"` or `"channel"`, and the model sees each scope's `description` beside its name. The named scope's resolver authorizes the call, as `scope` does for a definition without names.
+
+A scope is a resolver function, or an object that also says what the scope does differently:
+
+| Field            | Purpose                                                                                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `resolve`        | Required. Authorizes each operation and returns the namespace, as `scope` does.                                   |
+| `description`    | Tells the model what the scope holds, beside its name. Without it, only the name is shown.                        |
+| `id`             | The name the scope's schedules are stored under. Defaults to `<definition>/<scope>`, such as `workflows/channel`. |
+| `preparePayload` | Replaces the definition's `preparePayload` for this scope. It returns the same shape.                             |
+| `run`            | Replaces the definition's `run` for this scope.                                                                   |
+| `approval`       | Policies that replace the definition's for this scope, operation by operation.                                    |
+
+The definition's `description` is added to every management tool as common instructions. A scope's `description` explains only that scope, beside its name in the tool's `scope` input.
+
+`inputSchema`, `auth`, `events`, `tool`, and `provider` are the definition's, for every scope. A shared `preparePayload` or `scope` resolver reads which scope it acts for from `context.scopeName`.
+
+Each scope stores its schedules apart, so `occurrence.collection` is the scope's stored name. To turn two existing definitions into one, set each scope's `id` to the old definition's name, and the schedules already stored there keep running:
+
+```ts
+scopes: {
+  personal: { id: "personal-tasks", resolve: byPrincipal },
+  channel: { id: "channel-tasks", resolve: (context) => currentChannel(context) },
+},
+```
+
+| With named scopes   | Behavior                                                                                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `once()` grants     | Kept for each scope. Approving an operation for `"personal"` doesn't approve it for `"channel"`.                                                                                                                    |
+| A response policy   | Decides who answers that scope's approvals. A scope without one keeps the default: only the requester answers. Once any scope sets one for an operation, each answer to that tool needs an authenticated responder. |
+| Replacing the tools | The tool file named for the definition, `agent/tools/schedule__workflows.ts`, replaces or disables the set.                                                                                                         |
+| The client          | `schedules(definition, { scope: "channel" })` binds one scope.                                                                                                                                                      |
+| Names that clash    | The build fails when a scope's stored name, or the definition's tool name, is already another definition's.                                                                                                         |
 
 ## Use the authenticated client
 

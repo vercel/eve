@@ -453,6 +453,8 @@ export const compiledScheduleCollectionDefinitionSchema = z
     providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    /** Set when the collection is one named scope of a definition: the definition's name, and the scope's. */
+    namedScope: z.object({ definition: z.string(), name: z.string() }).strict().optional(),
     tools: z.union([z.boolean(), z.literal("deferred")]).optional(),
   })
   .strict();

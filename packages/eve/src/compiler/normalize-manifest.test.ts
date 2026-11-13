@@ -71,15 +71,21 @@ function registry(modules: readonly ProgrammaticAgentModule[]) {
 }
 
 function scheduleCollection(
-  options: { readonly id?: string; readonly provider?: ScheduleProvider } = {},
+  options: {
+    readonly id?: string;
+    readonly provider?: ScheduleProvider;
+    readonly scopes?: Record<string, unknown>;
+    readonly tool?: false;
+  } = {},
 ) {
-  return defineDynamicSchedules({
+  const shared = {
     provider: inMemoryScheduleProvider(),
     inputSchema: z.object({ task: z.string() }),
     auth: () => null,
     run: async () => {},
-    ...options,
-  });
+  };
+  // The compiler reads `scopes` from the value; these tests don't need it in the type.
+  return defineDynamicSchedules({ ...shared, ...options } as typeof shared);
 }
 
 describe("compileAgentManifest source graph", () => {
@@ -637,6 +643,147 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow('both name their tools "schedule__billing-requests"');
+  });
+
+  describe("named schedule scopes", () => {
+    const scopes = {
+      personal: () => "alice",
+      channel: { id: "team-workflows", resolve: () => ["channel", "C1"] },
+    };
+    const workflows: ProgrammaticAgentModule = {
+      logicalPath: "schedules/workflows.ts",
+      loadNamespace: async () => ({ default: scheduleCollection({ scopes }) }),
+    };
+
+    it("stores each scope apart and offers the definition's one set of tools", async () => {
+      const compileWith = async (extra: readonly ProgrammaticAgentModule[]) => {
+        const sourceRegistry = registry([workflows, ...extra]);
+        const compiled = await compileAgentManifest(manifest(), {
+          sourceRegistries: [sourceRegistry],
+        });
+        const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+          frameworkAgentSourceRegistry,
+          sourceRegistry,
+        ]);
+        return {
+          compiled,
+          resolved: declared(await resolveAgent({ manifest: compiled, moduleMap }), "schedules"),
+        };
+      };
+
+      const offered = await compileWith([]);
+      expect(
+        offered.compiled.scheduleCollections.map(({ logicalPath, name, namedScope }) => ({
+          logicalPath,
+          name,
+          namedScope,
+        })),
+      ).toEqual([
+        {
+          logicalPath: "schedules/workflows.ts",
+          name: "workflows/personal",
+          namedScope: { definition: "workflows", name: "personal" },
+        },
+        {
+          logicalPath: "schedules/workflows.ts",
+          name: "team-workflows",
+          namedScope: { definition: "workflows", name: "channel" },
+        },
+      ]);
+      expect(offered.resolved).toEqual([
+        expect.objectContaining({ name: "workflows/personal", offersTools: true }),
+        expect.objectContaining({ name: "team-workflows", offersTools: true }),
+      ]);
+      // Each scope resolves to its own definition, with only its own resolver.
+      const [personal, channel] = offered.resolved.map((collection) => collection.definition);
+      expect(personal).not.toBe(channel);
+      expect(personal!.scopes).toBeUndefined();
+      expect(await channel!.scope!({} as never)).toEqual(["channel", "C1"]);
+
+      const disabled = await compileWith([
+        {
+          logicalPath: "tools/schedule__workflows.ts",
+          loadNamespace: async () => ({ default: disableTool() }),
+        },
+      ]);
+      expect(disabled.resolved).toEqual([
+        expect.not.objectContaining({ offersTools: true }),
+        expect.not.objectContaining({ offersTools: true }),
+      ]);
+      await expect(
+        compileWith([
+          {
+            logicalPath: "tools/schedule__team-workflows.ts",
+            loadNamespace: async () => ({ default: disableTool() }),
+          },
+        ]),
+      ).rejects.toThrow("disables a slot with no lower-precedence source");
+    });
+
+    it.each([
+      [
+        "another collection already stores under a scope's name",
+        { logicalPath: "schedules/workflows/personal.ts", options: {} },
+        'both resolve to the name "workflows/personal"',
+      ],
+      [
+        "another collection has the definition's name",
+        { logicalPath: "schedules/other.ts", options: { id: "workflows" } },
+        'both name their tools "schedule__workflows"',
+      ],
+    ])("rejects named scopes when %s", async (_label, other, message) => {
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [
+            registry([
+              {
+                logicalPath: other.logicalPath,
+                loadNamespace: async () => ({ default: scheduleCollection(other.options) }),
+              },
+              workflows,
+            ]),
+          ],
+        }),
+      ).rejects.toThrow(message);
+    });
+
+    it.each([
+      ["both scope and scopes", { scope: () => "x", scopes }, 'Set "scope" or "scopes", not both'],
+      ["no scopes", { scopes: {} }, '"scopes" must declare at least one scope'],
+      [
+        "a scope name a tool input can't take",
+        { scopes: { "my scope": () => "x" } },
+        '"scopes.my scope" must be named with',
+      ],
+      [
+        "a scope named for the object prototype",
+        { scopes: Object.fromEntries([["__proto__", () => "x"]]) },
+        '"scopes.__proto__" must be named with',
+      ],
+      [
+        "a scope approval and no tools",
+        { tool: false, scopes: { personal: { resolve: () => "x", approval: {} } } },
+        '"scopes.personal.approval" cannot be configured when tool is false',
+      ],
+      [
+        "a scope without a resolver",
+        { scopes: { personal: { id: "mine" } } },
+        '"scopes.personal" "resolve" is required',
+      ],
+    ])("rejects a definition with %s", async (_label, options, message) => {
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [
+            registry([
+              {
+                logicalPath: "schedules/workflows.ts",
+                loadNamespace: async () => ({ default: scheduleCollection(options as never) }),
+              },
+            ]),
+          ],
+        }),
+      ).rejects.toThrow(message);
+    });
   });
 
   it("disables a collection's tools through the tool file named for its explicit id", async () => {
