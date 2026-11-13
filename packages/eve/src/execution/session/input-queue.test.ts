@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf, steeredByAfter } from "#execution/session/principal.js";
 
 function signInCallback(attemptId: string) {
   return {
@@ -225,6 +225,26 @@ describe("SessionInputQueue", () => {
     const emptied = reverse.takeSteering(new Set([firstWith, secondWithout]), turn)?.delivery;
     // An earlier message's list must not survive the merge; a parent that omits it means empty.
     expect(emptied && "steeredBy" in emptied).toBe(false);
+  });
+
+  it("keeps the turn's steered list unless its caller is the sender", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "BOB" };
+    const steered = [bob];
+
+    // Input without a sender could be anyone's, so it cannot release the caller's hold.
+    expect(steeredByAfter(steered, alice, undefined)).toBe(steered);
+    expect(steeredByAfter(steered, alice, null)).toBe(steered);
+    // Only the caller's own message releases it.
+    expect(steeredByAfter(steered, alice, alice)).toEqual([]);
+    // Anyone else is listed once, so a repeat leaves the list alone.
+    expect(steeredByAfter(steered, alice, bob)).toBe(steered);
+    expect(steeredByAfter([], alice, bob)).toEqual([bob]);
   });
 
   it("lets a queued message steer a held turn only when it arrived after the hold", () => {

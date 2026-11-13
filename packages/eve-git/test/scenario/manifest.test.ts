@@ -103,6 +103,12 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
     description: "Read the project metadata.",
     repository: "acme/project",
   });
-  assert.equal(tool.approval({ toolInput: input }), "not-applicable");
+  assert.equal(
+    tool.approval({
+      session: { id: "manifest-gh", auth: { current: null, initiator: null, steeredBy: [] } },
+      toolInput: input,
+    }),
+    "not-applicable",
+  );
   assert.equal(typeof tool.execute, "function");
 });

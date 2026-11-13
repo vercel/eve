@@ -116,3 +116,51 @@ test("with a user principal, guidance describes the caller's token instead of re
     );
   }
 });
+
+test("an app-installation gh command asks the caller when another person steers the turn", async () => {
+  const config = {
+    connector: "github/acme-bot",
+    authorize: () => true,
+    broker: async () => {},
+  };
+  const steered = {
+    abortSignal: new AbortController().signal,
+    callId: "call-gh",
+    session: {
+      auth: {
+        current: {
+          attributes: {},
+          authenticator: "jwt",
+          principalId: "alice",
+          principalType: "user",
+        },
+        initiator: null,
+        steeredBy: [
+          { attributes: {}, authenticator: "jwt", principalId: "bob", principalType: "user" },
+        ],
+      },
+      id: "steered-gh",
+    },
+    toolInput: {
+      command: "gh repo view acme/project",
+      description: "Read the project metadata.",
+      repository: "acme/project",
+    },
+    toolName: "gh",
+  };
+
+  extension({ github: { ...config, principalType: "app" } });
+  const { tool: installation } = await resolve();
+  assert.ok(installation && "approval" in installation);
+  // An installation token is shared, so the caller decides before someone else's command runs.
+  assert.equal(
+    (installation.approval as (ctx: never) => unknown)(steered as never),
+    "user-approval",
+  );
+
+  extension({ github: { ...config, principalType: "user" } });
+  const { tool: caller } = await resolve();
+  assert.ok(caller && "approval" in caller);
+  // The caller's own token is held by the identity hold instead, so no prompt is needed.
+  assert.equal((caller.approval as (ctx: never) => unknown)(steered as never), "not-applicable");
+});

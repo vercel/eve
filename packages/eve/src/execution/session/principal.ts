@@ -59,17 +59,17 @@ export function continueTurnAuth<T extends SessionAuthContext | null | undefined
 }
 
 /**
- * The turn's `steeredBy` once a message sent as `sender` joins it: the caller's own message
- * clears the list, and anyone else's adds them once. A message without auth acts as the caller.
+ * The turn's `steeredBy` once a message sent as `sender` joins it: only the caller's own
+ * identified message clears the list, and anyone else's adds them once. Input without a sender
+ * could be anyone's, so it leaves the list as it is rather than releasing the caller's hold.
  */
 export function steeredByAfter(
   steeredBy: readonly SessionAuthContext[],
   caller: SessionAuthContext | null | undefined,
   sender: SessionAuthContext | null | undefined,
 ): readonly SessionAuthContext[] {
-  if (sender === undefined || sender === null || principalOf(sender) === principalOf(caller)) {
-    return [];
-  }
+  if (sender === undefined || sender === null) return steeredBy;
+  if (principalOf(sender) === principalOf(caller)) return [];
   return steeredBy.some((person) => principalOf(person) === principalOf(sender))
     ? steeredBy
     : [...steeredBy, sender];

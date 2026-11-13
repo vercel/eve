@@ -8,4 +8,4 @@ Set `principalPolicy` on a channel or a message to let another person's message 
 
 `"adopt-sender"` also joins the message and makes the sender the turn's caller from the next model call. `steeredBy` is absent, so the identity hold does not apply.
 
-The `steered()` policy from `eve/tools/approval` asks the caller before a call made while steered. Use it for tools that authorize from `ctx.session.auth.current` in their own code. The default, `"match-caller"`, keeps current behavior.
+The `steered()` policy from `eve/tools/approval` asks the caller before a call made while steered. Use it for tools that authorize from `ctx.session.auth.current` in their own code. The git extension's `gh` tool asks the same way in app-installation mode. The default, `"match-caller"`, keeps current behavior.

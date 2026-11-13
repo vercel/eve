@@ -301,7 +301,7 @@ One delivery can answer requests from several batches. Each answer stands as it 
 
 When steering interrupts model generation, the interrupted run ends `interrupted` with any usage the provider reported. The new message's `delivery.consumed` and the next `model.requested` for the same `turnId` follow.
 
-Multiple steering messages keep their arrival order and may be folded into one input at the next boundary. A message accepted after the turn ends starts the next turn.
+Messages from one sender keep their arrival order and may be folded into one input at the next boundary. Another sender's messages are read at a later boundary, and start their own turn if the turn ends first. A message accepted after the turn ends starts the next turn.
 
 ## Cancel the in-flight turn
 

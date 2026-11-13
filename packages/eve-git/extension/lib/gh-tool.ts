@@ -1,4 +1,5 @@
 import { defineTool } from "eve/tools";
+import { steered } from "eve/tools/approval";
 import { z } from "zod";
 
 import {
@@ -30,6 +31,8 @@ export function ghToolDescription(scope: keyof typeof GH_TOOL_SCOPE): string {
 
 export const GH_TOOL_DESCRIPTION = ghToolDescription("repository");
 
+const whenSteered = steered();
+
 const ghOutputSchema = z.object({
   exitCode: z.number().int(),
   stderr: z.string(),
@@ -44,7 +47,13 @@ export function defineGhTool(
 ) {
   return defineTool({
     description,
-    approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
+    approval: (ctx) => {
+      const status = githubShellApproval(ctx.toolInput as GitHubShellInput | undefined);
+      // An installation token is shared: only the access policy's check of the caller guards it,
+      // so a call made while someone else steers the turn asks the caller first.
+      if (status !== "not-applicable" || github()?.principalType === "user") return status;
+      return whenSteered(ctx) ?? status;
+    },
     inputSchema: githubShellInputSchema,
     outputSchema: ghOutputSchema,
     label: {

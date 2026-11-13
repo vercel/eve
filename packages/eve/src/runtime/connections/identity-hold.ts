@@ -18,8 +18,9 @@ export function withModelCall<T>(fn: () => T): T {
 
 /**
  * Whether a call the model made runs while other people steer the turn, so it may not use the
- * caller's identity. False when the caller spoke last, and for eve's own work for the caller,
- * such as listing a connection's tools.
+ * caller's identity. False when the caller spoke last, and for eve's own work outside a call the
+ * model made, such as the tool listing before a model call; a listing eve runs inside a model's
+ * call, through `eve__search` or `eve__tool`, is held.
  */
 export function steeredModelCall(ctx: AlsContext | undefined = contextStorage.getStore()): boolean {
   return contextScopeValue(MODEL_CALL) === true && (ctx?.get(SteeredByKey) ?? []).length > 0;

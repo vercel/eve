@@ -93,6 +93,8 @@ With no turn running, a message starts a turn as its sender, whatever its `princ
 
 A `"retain-caller"` or `"adopt-sender"` message from another person joins only when three conditions hold. Its `turnPolicy` is `"steer"`, it has a signed-in sender, and no approval, question, or sign-in is open in the session. A message sent with `auth: null`, or as an anonymous caller, follows `"match-caller"`. While a request is open, the message waits. It joins when the turn continues, or starts its own turn if the turn ends first. If any other condition fails, it waits like a `"match-caller"` message.
 
+A joined message steers like the caller's own, interrupting the model before it answers and ending waits on `execute` workflow tool calls; see [Overlapping messages](/docs/channels#overlapping-messages).
+
 Set `principalPolicy` on a channel definition, such as `defineChannel({ principalPolicy: "retain-caller" })`, or in a built-in channel's config. Set it for one server-side send with `send(message, { auth, principalPolicy })`, or return it from a Slack message hook as `{ auth, principalPolicy: "adopt-sender" }`. A message's value wins over its channel's. It cannot be set from an HTTP request body or the client SDK, because it decides whose access a message can reach.
 
 ### Adopt the sender as the caller
@@ -109,7 +111,7 @@ Use `"adopt-sender"` when the last person to speak should own the turn and that 
 
 `ctx.session.auth.steeredBy` lists the people, other than the caller, whose messages joined the running turn. The list covers messages since the caller last sent a message or approved a call. eve sets it only while at least one such person exists. Otherwise it is absent, including when a turn starts and in every session with one person. `if (ctx.session.auth.steeredBy)` therefore means someone else is steering this turn.
 
-It is cleared when the caller sends a message, the caller approves a call, or a turn starts. A message that adopts its sender clears it. A denial does not clear it, and an approval from anyone else does not clear it.
+It is cleared when the caller sends a message, the caller approves a call, or a turn starts. A message that adopts its sender clears it. A message sent without a signed-in sender never releases the hold. A denial does not clear it, and an approval from anyone else does not clear it.
 
 Read it anywhere `ctx.session` is available: tools, approval policies, dynamic functions, and hooks. A workflow tool call or local subagent started while it is set sees the same list.
 
@@ -117,14 +119,16 @@ Read it anywhere `ctx.session` is available: tools, approval policies, dynamic f
 
 While `steeredBy` is set, a call the model makes cannot get the caller's identity from eve. The call fails before anything is sent, no sign-in starts, and the turn does not pause.
 
-| Call                                                                                              | Result                                                                        |
-| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| The caller's token for a user-scoped connection's tools, `ctx.getToken()`, or `ctx.requireAuth()` | Fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. |
-| A tool call on an MCP connection with `forwardPrincipal`                                          | Fails with the same error and reason.                                         |
-| Connection event subscriptions                                                                    | Fails with the same error and reason.                                         |
-| A call to a remote agent with `forwardPrincipal`                                                  | Fails with an error that carries the same message.                            |
-| Dynamic schedule tools                                                                            | Fails with an error that carries the same message.                            |
-| App-scoped credentials, listing a connection's tools, or `ctx.approval.responder.getToken()`      | Available.                                                                    |
+| Call                                                                                                  | Result                                                                        |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| The caller's token for a user-scoped connection's tools, `ctx.getToken()`, or `ctx.requireAuth()`     | Fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. |
+| A tool call on an MCP connection with `forwardPrincipal`                                              | Fails with the same error and reason.                                         |
+| Connection event subscriptions                                                                        | Fails with the same error and reason.                                         |
+| A call to a remote agent with `forwardPrincipal`                                                      | Fails with an error that carries the same message.                            |
+| Dynamic schedule tools                                                                                | Fails with an error that carries the same message.                            |
+| App-scoped credentials, or `ctx.approval.responder.getToken()`                                        | Available.                                                                    |
+| eve's own listing of a connection's tools before a model call                                         | Available.                                                                    |
+| A listing of a user-scoped connection's tools that a call starts through `eve__search` or `eve__tool` | Held; the connection shows as unavailable with the same message.              |
 
 The model reads a message like:
 
@@ -163,6 +167,7 @@ Among approvals, only the caller's own clears `steeredBy`. One approval covers l
 
 - With `"retain-caller"`, tools that authorize from `ctx.session.auth.current` in their own code need `approval: steered()`.
 - Dynamic functions run before every model call as the caller and are not calls. With `"retain-caller"`, read `steeredBy` there.
+- Extension tools and subagents can check the caller too, and you can't add an approval to them. With `"retain-caller"`, set `approval: steered()` in `agent.ts` to ask the caller before every call made while steered. See [Gate every call from one policy](/docs/human-in-the-loop#gate-every-call-from-one-policy).
 - The channel must show the model who sent each message. Slack does. eve adds no attribution.
 - A steering message can ask the model to repeat anything already in the conversation.
 - Memory: a turn is saved under the caller it has when it is saved. `"retain-caller"` saves it under the original caller; `"adopt-sender"` saves it under the sender. Messages other people sent are included.

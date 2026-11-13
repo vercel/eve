@@ -186,6 +186,61 @@ async function withSession(
   });
 }
 
+/** A gated tool that keeps the parent's turn running until the test releases it. */
+function holdOpenTool(gate: Promise<void>) {
+  return {
+    loadNamespace: async () => ({
+      default: defineTool({
+        description: "Wait for the test to release this call.",
+        execute: async () => {
+          await gate;
+          return { released: true };
+        },
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: "tools/hold_open.ts",
+  };
+}
+
+/** Records the identity and token each `report_access` call may use. */
+function reportAccessTool(
+  reports: AccessReport[],
+  options: { readonly approval?: Approval; readonly uncaught?: boolean } = {},
+) {
+  return {
+    loadNamespace: async () => ({
+      default: defineTool({
+        approval: options.approval,
+        description: "Report the identity and token this call may use.",
+        execute: async (_input, ctx) => {
+          if (options.uncaught === true) {
+            return { token: (await ctx.getToken(userAuth)).token };
+          }
+          let token: string | undefined;
+          let reason: string | undefined;
+          try {
+            token = (await ctx.getToken(userAuth)).token;
+          } catch (error) {
+            if (!isConnectionAuthorizationFailedError(error)) throw error;
+            reason = error.reason;
+          }
+          const report = {
+            caller: ctx.session.auth.current?.principalId ?? null,
+            steeredBy: ctx.session.auth.steeredBy?.map((person) => person.principalId),
+            token,
+            reason,
+          };
+          reports.push(report);
+          return report;
+        },
+        inputSchema: {},
+      }),
+    }),
+    logicalPath: "tools/report_access.ts",
+  };
+}
+
 /**
  * Starts a session where Alice asks for hold_open, and hands `body` the run. The model calls
  * hold_open, then report_access once per user message after the first, then replies.
@@ -206,52 +261,7 @@ async function withSteeringRun(
       message: "Use hold_open.",
       model: scriptedModel,
       release: () => release(),
-      modules: [
-        {
-          loadNamespace: async () => ({
-            default: defineTool({
-              description: "Wait for the test to release this call.",
-              execute: async () => {
-                await gate;
-                return { released: true };
-              },
-              inputSchema: {},
-            }),
-          }),
-          logicalPath: "tools/hold_open.ts",
-        },
-        {
-          loadNamespace: async () => ({
-            default: defineTool({
-              approval: options.approval,
-              description: "Report the identity and token this call may use.",
-              execute: async (_input, ctx) => {
-                if (options.uncaught === true) {
-                  return { token: (await ctx.getToken(userAuth)).token };
-                }
-                let token: string | undefined;
-                let reason: string | undefined;
-                try {
-                  token = (await ctx.getToken(userAuth)).token;
-                } catch (error) {
-                  if (!isConnectionAuthorizationFailedError(error)) throw error;
-                  reason = error.reason;
-                }
-                const report = {
-                  caller: ctx.session.auth.current?.principalId ?? null,
-                  steeredBy: ctx.session.auth.steeredBy?.map((person) => person.principalId),
-                  token,
-                  reason,
-                };
-                reports.push(report);
-                return report;
-              },
-              inputSchema: {},
-            }),
-          }),
-          logicalPath: "tools/report_access.ts",
-        },
-      ],
+      modules: [holdOpenTool(gate), reportAccessTool(reports, options)],
     },
     async (session) => {
       await body({
@@ -383,6 +393,73 @@ async function withSignInRun(
     },
     async (session) => {
       await body({ ...session, tokens });
+    },
+  );
+}
+
+/**
+ * Starts a session whose parent delegates to a local child after hold_open, and hands `body` the
+ * run plus what the child's report_access read.
+ */
+async function withSubagentRun(
+  body: (run: SessionRun & { readonly reports: AccessReport[] }) => Promise<void>,
+) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const reports: AccessReport[] = [];
+  const model = markMockModel(
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        const raw = JSON.stringify(prompt);
+        const first = JSON.stringify(prompt.find((message) => message.role === "user")?.content);
+        if (first.includes("CHILD:")) {
+          return raw.includes(`"toolName":"report_access"`)
+            ? textStreamResult("Child done.")
+            : toolCallStreamResult({
+                input: "{}",
+                toolCallId: "call-report",
+                toolName: "report_access",
+              });
+        }
+        const called = (tool: string) => raw.includes(`"toolName":"${tool}"`);
+        if (!called("hold_open")) {
+          return toolCallStreamResult({
+            input: "{}",
+            toolCallId: "call-hold_open",
+            toolName: "hold_open",
+          });
+        }
+        if (!called("agent")) {
+          return toolCallStreamResult({
+            input: JSON.stringify({ message: "CHILD: report access." }),
+            toolCallId: "call-agent",
+            toolName: "agent",
+          });
+        }
+        return called("eve__task_wait")
+          ? textStreamResult("Parent done.")
+          : toolCallStreamResult({
+              input: "{}",
+              toolCallId: "call-wait",
+              toolName: "eve__task_wait",
+            });
+      },
+      modelId: "scripted-model",
+      provider: "eve-test",
+    }),
+  );
+  await withSession(
+    "principal-policy-subagent",
+    {
+      message: "Use hold_open, then ask the child.",
+      model,
+      release: () => release(),
+      modules: [holdOpenTool(gate), reportAccessTool(reports)],
+    },
+    async (session) => {
+      await body({ ...session, reports });
     },
   );
 }
@@ -638,6 +715,28 @@ describe("principal policy", () => {
       expect(signedInAt).toBeGreaterThanOrEqual(0);
       expect(consumedAt).toBeGreaterThan(signedInAt);
       // Alice's turn ended before Bob's message was read, so it started its own turn.
+    });
+  }, 60_000);
+
+  // The list is handed to child sessions by hand, so nothing else would notice if that stopped.
+  it("a steered turn's local subagent is held too", async () => {
+    const holdOpenCalls = new Set<string>();
+    await withSubagentRun(async (run) => {
+      const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
+      await run.send(BOB, "Actually include everyone.", "retain-caller");
+      run.release();
+      const turn = await run.nextUntil("parent turn end", (event) => event.type === "turn.settled");
+      const seen = [...started, ...turn];
+
+      expect(run.reports).toEqual([
+        {
+          caller: "alice",
+          reason: "turn_steered",
+          steeredBy: ["bob"],
+          token: undefined,
+        },
+      ]);
+      expect(filterEventsByType(seen, "turn.started")).toHaveLength(1);
     });
   }, 60_000);
 });
