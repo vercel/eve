@@ -1,5 +1,17 @@
 # eve
 
+## 1.0.0-rc.14
+
+Released 2026-11-13 · [Compare with 1.0.0-rc.13](https://github.com/vercel/eve/compare/eve%401.0.0-rc.13...eve%401.0.0-rc.14)
+
+### Features
+
+- Add optional IANA timezones to fixed schedules so jobs can keep a local time across daylight saving changes.
+  Set `timezone` in `defineSchedule` or Markdown frontmatter on Vercel and self-hosted Node servers. Omitting it preserves the host's existing behavior. Other Nitro presets reject explicit timezones. ([#6311](https://github.com/vercel/eve/pull/6311))
+- `defineWorkflowTool` tools with an `execute` entry point now accept `endsTurn`, so a workflow that waits for the user can end the turn without a model reply.
+  Pass `true`, or a function that receives the call's output. `task` and `serve` entry points still reject it.
+  Thanks @matchai for requesting this, and @xcscxr for the implementation plan in #5337. ([#6336](https://github.com/vercel/eve/pull/6336))
+
 ## 1.0.0-rc.13
 
 Released 2026-11-12 · [Compare with 1.0.0-rc.12](https://github.com/vercel/eve/compare/eve%401.0.0-rc.12...eve%401.0.0-rc.13)

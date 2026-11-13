@@ -235,22 +235,48 @@ async function stepEndsTurn(
       if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
     }
   }
-  const succeeded = toolCalls.every((toolCall) => {
-    const output = outputs.get(toolCall.toolCallId);
-    return (
-      endsTurnTools.has(toolCall.toolName) && output !== undefined && !isToolResultError(output)
-    );
-  });
-  if (!succeeded) return false;
   const executeOutputs = new Map(
     (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
   );
-  for (const toolCall of toolCalls) {
-    const endsTurn = endsTurnTools.get(toolCall.toolName);
+  return await callsEndTurn(
+    toolCalls.map((toolCall) => {
+      const output = outputs.get(toolCall.toolCallId);
+      return {
+        failed: output === undefined || isToolResultError(output),
+        output: executeOutputs.get(toolCall.toolCallId),
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+      };
+    }),
+    endsTurnTools,
+  );
+}
+
+/** A call as the turn rule reads it: `failed` when it has no result or an error result. */
+export interface EndingCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly failed: boolean;
+  readonly output: unknown;
+}
+
+/**
+ * Whether every call ends the turn: each targets a tool that can end it and succeeded, and each
+ * `endsTurn` function accepts its call's output. Every call qualifies before any function runs.
+ */
+export async function callsEndTurn(
+  calls: readonly EndingCall[],
+  endsTurnTools: EndsTurnTools,
+): Promise<boolean> {
+  if (calls.length === 0) return false;
+  const ending = calls.flatMap((call) => {
+    const endsTurn = endsTurnTools.get(call.toolName);
+    return endsTurn === undefined || call.failed ? [] : [{ call, endsTurn }];
+  });
+  if (ending.length !== calls.length) return false;
+  for (const { call, endsTurn } of ending) {
     if (typeof endsTurn !== "function") continue;
-    if (!(await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))) {
-      return false;
-    }
+    if (!(await callEndsTurn(endsTurn, call.output, call))) return false;
   }
   return true;
 }
@@ -310,10 +336,11 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
  * otherwise the structured value (or prose) ends the turn and the session
  * waits for the next message, and the schema, scoped to the turn, clears.
  */
-async function settleTurn(
+export async function settleTurn(
   step: Step,
   input: {
-    readonly result: HarnessStepResult;
+    /** The step's response, which only an output-schema turn reads. */
+    readonly result?: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
@@ -329,7 +356,7 @@ async function settleTurn(
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
-  const structured = extractFinalOutput(result);
+  const structured = result === undefined ? undefined : extractFinalOutput(result);
   // The schema belongs to the settled turn. A later conversation turn that
   // omits outputSchema must not inherit its contract.
   if (structured === undefined) {
