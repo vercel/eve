@@ -1,6 +1,9 @@
 packages:
   - "."
 
+overrides:
+  "dompurify@>=3.0.0 <3.4.17": 3.4.17
+
 minimumReleaseAgeExclude:
   - eve
   - ai

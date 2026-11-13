@@ -13,9 +13,12 @@ export default defineTool({
       notes: taskNotesSchema.nullable().optional().describe("New notes, or null to clear them."),
       completed: z.boolean().optional(),
     })
-    .refine(({ title, notes, completed }) => [title, notes, completed].some((v) => v !== undefined), {
-      message: "Pass at least one of title, notes, or completed.",
-    }),
+    .refine(
+      ({ title, notes, completed }) => [title, notes, completed].some((v) => v !== undefined),
+      {
+        message: "Pass at least one of title, notes, or completed.",
+      },
+    ),
   outputSchema: taskSchema,
   label: {
     start: ({ id, completed }) =>

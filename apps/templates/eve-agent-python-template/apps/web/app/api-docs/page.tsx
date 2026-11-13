@@ -90,10 +90,7 @@ function ApiReferenceSkeleton() {
 
 function ApiSectionView({ section }: { section: ApiSection }) {
   return (
-    <section
-      className="scroll-mt-[calc(var(--header-height)+1.5rem)] space-y-3"
-      id={section.tag}
-    >
+    <section className="scroll-mt-[calc(var(--header-height)+1.5rem)] space-y-3" id={section.tag}>
       <h2 className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
         {section.tag}
       </h2>

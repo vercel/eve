@@ -4,12 +4,7 @@ import type { InferComponentProps } from "@json-render/core";
 import { defineRegistry, JSONUIProvider, Renderer } from "@json-render/react";
 import type { Spec } from "@json-render/react";
 import { shadcnComponents } from "@json-render/shadcn";
-import {
-  ArrowDownRightIcon,
-  ArrowUpRightIcon,
-  ExternalLinkIcon,
-  ImageIcon,
-} from "lucide-react";
+import { ArrowDownRightIcon, ArrowUpRightIcon, ExternalLinkIcon, ImageIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
@@ -62,9 +57,7 @@ const { registry: uiRegistry } = defineRegistry(uiCatalog, {
  * Parses a `render_ui` tool input against the shared catalog, props included.
  * Parsing fails while the input is still streaming in or when it is invalid.
  */
-export const uiSpecSchema = z.custom<Spec>(
-  (value) => strictUiSpecSchema.safeParse(value).success
-);
+export const uiSpecSchema = z.custom<Spec>((value) => strictUiSpecSchema.safeParse(value).success);
 
 /**
  * Renders a validated `render_ui` spec.
@@ -146,29 +139,22 @@ function ResultCard({
       <CardImage pageUrl={url} src={card.imageUrl} />
       <div className="space-y-1.5 p-3">
         <div className="flex items-start gap-2">
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {card.title}
-          </p>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">{card.title}</p>
           {url === null ? null : (
             <ExternalLinkIcon className="text-muted-foreground mt-0.5 size-3.5 shrink-0" />
           )}
         </div>
         {card.subtitle === null ? null : (
-          <p className="text-muted-foreground truncate text-xs">
-            {card.subtitle}
-          </p>
+          <p className="text-muted-foreground truncate text-xs">{card.subtitle}</p>
         )}
         {card.description === null ? null : (
-          <p className="text-muted-foreground line-clamp-3 text-sm">
-            {card.description}
-          </p>
+          <p className="text-muted-foreground line-clamp-3 text-sm">{card.description}</p>
         )}
       </div>
     </>
   );
 
-  const className =
-    "bg-card flex h-full flex-col overflow-hidden rounded-lg border text-left";
+  const className = "bg-card flex h-full flex-col overflow-hidden rounded-lg border text-left";
 
   return url === null ? (
     <div className={className}>{body}</div>
@@ -212,9 +198,7 @@ function usePreviewImage(pageUrl: string | null): string | undefined {
     };
   }, [pageUrl]);
 
-  return preview?.pageUrl === pageUrl
-    ? (preview.image ?? undefined)
-    : undefined;
+  return preview?.pageUrl === pageUrl ? (preview.image ?? undefined) : undefined;
 }
 
 /**
@@ -302,12 +286,10 @@ function Metric({
             "flex items-center gap-1 text-xs",
             trend === "up" && "text-success",
             trend === "down" && "text-destructive",
-            (trend === null || trend === "neutral") && "text-muted-foreground"
+            (trend === null || trend === "neutral") && "text-muted-foreground",
           )}
         >
-          {trend === "up" || trend === "down" ? (
-            <TrendIcon className="size-3.5" />
-          ) : null}
+          {trend === "up" || trend === "down" ? <TrendIcon className="size-3.5" /> : null}
           {change}
         </p>
       )}
@@ -337,9 +319,7 @@ function ProgressBar({
   const percent = Math.min(100, Math.max(0, (value / total) * 100));
   return (
     <div className="space-y-2">
-      {label === null ? null : (
-        <p className="text-muted-foreground text-xs">{label}</p>
-      )}
+      {label === null ? null : <p className="text-muted-foreground text-xs">{label}</p>}
       <progress
         className="bg-muted [&::-moz-progress-bar]:bg-foreground/60 [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-foreground/60 block h-1.5 w-full appearance-none overflow-hidden rounded-full [&::-moz-progress-bar]:rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:rounded-full"
         max={100}
@@ -404,9 +384,7 @@ function CaptionedImage({
         <CardImage alt={alt} src={src} />
       </div>
       {caption === null ? null : (
-        <figcaption className="text-muted-foreground text-xs">
-          {caption}
-        </figcaption>
+        <figcaption className="text-muted-foreground text-xs">{caption}</figcaption>
       )}
     </figure>
   );
@@ -460,10 +438,7 @@ function StepList({
           key={`${item.title}:${item.meta ?? ""}:${item.description ?? ""}`}
         >
           {index < items.length - 1 ? (
-            <span
-              aria-hidden="true"
-              className="bg-border absolute top-7 bottom-0 left-3 w-px"
-            />
+            <span aria-hidden="true" className="bg-border absolute top-7 bottom-0 left-3 w-px" />
           ) : null}
           <span className="bg-muted text-muted-foreground flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium">
             {index + 1}
@@ -472,15 +447,11 @@ function StepList({
             <div className="flex items-baseline justify-between gap-3">
               <p className="text-sm font-medium">{item.title}</p>
               {item.meta === null ? null : (
-                <p className="text-muted-foreground shrink-0 text-xs">
-                  {item.meta}
-                </p>
+                <p className="text-muted-foreground shrink-0 text-xs">{item.meta}</p>
               )}
             </div>
             {item.description === null ? null : (
-              <p className="text-muted-foreground text-sm">
-                {item.description}
-              </p>
+              <p className="text-muted-foreground text-sm">{item.description}</p>
             )}
           </div>
         </li>
@@ -520,11 +491,7 @@ function ChatHeading({
   readonly text: string;
 }) {
   const Tag = level ?? "h2";
-  return (
-    <Tag className={cn("font-semibold tracking-tight", HEADING_SIZES[Tag])}>
-      {text}
-    </Tag>
-  );
+  return <Tag className={cn("font-semibold tracking-tight", HEADING_SIZES[Tag])}>{text}</Tag>;
 }
 
 /**

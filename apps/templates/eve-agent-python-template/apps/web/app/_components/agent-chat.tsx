@@ -82,8 +82,7 @@ export function AgentChat({
   const [hasInputText, setHasInputText] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agent = useEveAgent({
-    initialSession:
-      sessionId === undefined ? undefined : { sessionId, streamIndex: 0 },
+    initialSession: sessionId === undefined ? undefined : { sessionId, streamIndex: 0 },
     resume: sessionId !== undefined,
     onSessionChange(session) {
       if (session === undefined) {
@@ -109,11 +108,7 @@ export function AgentChat({
     try {
       await agent.cancel();
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to cancel the response."
-      );
+      setActionError(error instanceof Error ? error.message : "Unable to cancel the response.");
     }
   };
 
@@ -125,14 +120,9 @@ export function AgentChat({
 
     setActionError(undefined);
     try {
-      await agent.send(
-        text,
-        view.isBusy ? { turnPolicy: "steer" as const } : undefined
-      );
+      await agent.send(text, view.isBusy ? { turnPolicy: "steer" as const } : undefined);
     } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "Unable to send your message."
-      );
+      setActionError(error instanceof Error ? error.message : "Unable to send your message.");
       // PromptInput clears the box on submit; put the text back for a retry
       // unless the visitor has started typing something else.
       const textarea = textareaRef.current;
@@ -183,9 +173,7 @@ export function AgentChat({
               await agent.respond(answers);
             } catch (error) {
               setActionError(
-                error instanceof Error
-                  ? error.message
-                  : "Unable to send your response."
+                error instanceof Error ? error.message : "Unable to send your response.",
               );
               // Rethrow so the question or approval re-enables for a retry.
               throw error;
@@ -199,17 +187,15 @@ export function AgentChat({
           "mx-auto w-full px-4 sm:px-6",
           view.showConversationLayout
             ? "from-background via-background absolute bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t to-transparent pt-4 pb-6"
-            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-16"
+            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-16",
         )}
       >
         {view.showConversationLayout ? null : (
           <div className="flex flex-col items-center gap-3 text-center">
-            <h1 className="text-4xl font-medium tracking-tighter sm:text-5xl">
-              {AGENT_NAME}
-            </h1>
+            <h1 className="text-4xl font-medium tracking-tighter sm:text-5xl">{AGENT_NAME}</h1>
             <p className="text-muted-foreground max-w-md text-base text-balance">
-              Manage tasks, crunch numbers, and analyze text with an agent
-              whose tools run in Python.
+              Manage tasks, crunch numbers, and analyze text with an agent whose tools run in
+              Python.
             </p>
           </div>
         )}
@@ -259,8 +245,7 @@ export function AgentChat({
  * @param error - The agent client's current error.
  */
 function useSignInRedirect(error: Error | undefined) {
-  const isUnauthenticated =
-    error instanceof ClientError && error.status === 401;
+  const isUnauthenticated = error instanceof ClientError && error.status === 401;
   useEffect(() => {
     if (!isUnauthenticated) {
       return;
@@ -315,14 +300,13 @@ function getChatView(
     readonly sessionId: string | undefined;
     /** Whether to show the conversation layout before any messages. */
     readonly sessionless: boolean;
-  }
+  },
 ): ChatView {
   const isBusy = agent.status === "busy";
   const isResuming = agent.status === "resuming";
   const canCancel = activeTurn(agent.view) !== undefined;
   const pending = getPendingAssistant(agent, isBusy);
-  const turnFailure =
-    isBusy || isResuming ? undefined : getLatestTurnFailure(agent.view);
+  const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.view);
   const errorMessage = actionError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent =
     sessionless || agent.messages.length > 0 || errorMessage !== undefined;
@@ -347,10 +331,7 @@ function getChatView(
  * @param isBusy - Whether a turn is submitted or streaming.
  * @returns Whether to show the indicator, and the message ID it hides.
  */
-function getPendingAssistant(
-  agent: EveAgent,
-  isBusy: boolean
-): PendingAssistant {
+function getPendingAssistant(agent: EveAgent, isBusy: boolean): PendingAssistant {
   const lastMessage = agent.messages.at(-1);
   if (!isBusy) {
     return { hiddenMessageId: undefined, showThinking: false };
@@ -363,7 +344,7 @@ function getPendingAssistant(
       part.type !== "text" &&
       part.type !== "reasoning" &&
       part.type !== "tool" &&
-      part.type !== "interaction"
+      part.type !== "interaction",
   );
   return {
     hiddenMessageId: isEmptyShell ? lastMessage.id : undefined,
@@ -388,9 +369,7 @@ function ChatConversation({
   /** Whether the page opened on an existing session. */
   readonly isInitialSession: boolean;
   /** Submits answers to questions and approvals. */
-  readonly onAnswers: (
-    responses: readonly AgentAnswer[]
-  ) => Promise<void>;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => Promise<void>;
   /** The derived {@link ChatView}. */
   readonly view: ChatView;
 }) {
@@ -415,20 +394,15 @@ function ChatConversation({
           message.id === view.hiddenMessageId ? null : (
             <AgentMessage
               canRespond={canRespond}
-              isStreaming={
-                agent.status === "busy" &&
-                message.id === messages.at(-1)?.id
-              }
+              isStreaming={agent.status === "busy" && message.id === messages.at(-1)?.id}
               key={message.id}
               message={message}
               onAnswers={onAnswers}
             />
-          )
+          ),
         )}
         {view.showPendingThinking ? <PendingThinking /> : null}
-        {view.errorMessage === undefined ? null : (
-          <ErrorMessage message={view.errorMessage} />
-        )}
+        {view.errorMessage === undefined ? null : <ErrorMessage message={view.errorMessage} />}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>

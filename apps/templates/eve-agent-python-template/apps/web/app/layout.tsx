@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 
 export const metadata: Metadata = {
   title: "eve Agent with Python",
-  description: "An eve agent with Python tools, deployed as one Vercel project with Vercel Services.",
+  description:
+    "An eve agent with Python tools, deployed as one Vercel project with Vercel Services.",
 };
 
 export default function RootLayout({ children }: { readonly children: ReactNode }) {

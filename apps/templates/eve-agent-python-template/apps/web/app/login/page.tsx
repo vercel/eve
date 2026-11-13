@@ -23,11 +23,7 @@ export default function LoginPage({
  * Reads the auth mode and `next` per request, so a static shell never bakes in the
  * build-time environment.
  */
-async function LoginCard({
-  searchParams,
-}: {
-  readonly searchParams: Promise<{ next?: string }>;
-}) {
+async function LoginCard({ searchParams }: { readonly searchParams: Promise<{ next?: string }> }) {
   const { next = "/" } = await searchParams;
   const mode = getAuthMode();
   if (mode === "local-dev") {
@@ -52,9 +48,8 @@ async function LoginCard({
           <LoginForm next={next} />
         ) : (
           <div className="rounded-lg border border-dashed bg-muted/50 p-4 text-sm text-muted-foreground">
-            Set <code className="font-mono text-xs text-foreground">EVE_CHAT_PASSWORD</code> in
-            the Vercel project&apos;s environment variables (16+ characters recommended), then
-            redeploy.
+            Set <code className="font-mono text-xs text-foreground">EVE_CHAT_PASSWORD</code> in the
+            Vercel project&apos;s environment variables (16+ characters recommended), then redeploy.
           </div>
         )}
       </CardContent>

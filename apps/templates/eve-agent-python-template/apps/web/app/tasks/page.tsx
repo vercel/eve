@@ -15,8 +15,8 @@ export default function TasksPage() {
   return (
     <main className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8">
       <PageHeader title="Tasks">
-        Stored by the FastAPI <code className="font-mono text-xs">/v1/tasks</code> API (Postgres
-        in production, SQLite locally). Ask the agent on the Chat page to add, complete, or delete
+        Stored by the FastAPI <code className="font-mono text-xs">/v1/tasks</code> API (Postgres in
+        production, SQLite locally). Ask the agent on the Chat page to add, complete, or delete
         tasks too.
       </PageHeader>
 

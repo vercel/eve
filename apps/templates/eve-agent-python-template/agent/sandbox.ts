@@ -2,8 +2,7 @@ import { defineSandbox } from "eve/sandbox";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
-const deployed =
-  process.env.VERCEL === "1" && process.env.VERCEL_ENV !== "development";
+const deployed = process.env.VERCEL === "1" && process.env.VERCEL_ENV !== "development";
 
 /**
  * Sandbox environment for the agent: Vercel Sandbox when deployed, just-bash locally.
@@ -20,7 +19,5 @@ export const environment = deployed
  * @returns The opened sandbox for the configured environment.
  */
 export default defineSandbox(async () =>
-  deployed
-    ? await environment.open({ networkPolicy: "deny-all" })
-    : await environment.open()
+  deployed ? await environment.open({ networkPolicy: "deny-all" }) : await environment.open(),
 );

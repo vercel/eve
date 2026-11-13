@@ -150,12 +150,46 @@ const checkVercelServices = async (template, destination) => {
     // withEve generates and owns the agent services.
     if (service.framework === "eve") continue;
     const label = `Template "${template}" vercel.ts service "${name}"`;
+    const serviceRoot = join(destination, service.root ?? ".");
+    if (service.framework === undefined && typeof service.entrypoint === "string") {
+      if (
+        !existsSync(join(serviceRoot, "pyproject.toml")) ||
+        !existsSync(join(serviceRoot, "uv.lock"))
+      ) {
+        throw new Error(
+          `${label} must declare pyproject.toml and uv.lock for Python service validation.`,
+        );
+      }
+      if (!/^[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*:[a-zA-Z_]\w*$/.test(service.entrypoint)) {
+        throw new Error(`${label} must use a Python module:attribute ASGI entrypoint.`);
+      }
+      await run(template, "uv", ["sync", "--frozen", "--all-groups"], { cwd: serviceRoot });
+      await run(template, "uv", ["run", "--no-sync", "ruff", "check", "."], { cwd: serviceRoot });
+      await run(template, "uv", ["run", "--no-sync", "ruff", "format", "--check", "."], {
+        cwd: serviceRoot,
+      });
+      await run(template, "uv", ["run", "--no-sync", "pytest"], { cwd: serviceRoot });
+      await run(
+        template,
+        "uv",
+        [
+          "run",
+          "--no-sync",
+          "python",
+          "-c",
+          "import importlib, sys; module, name = sys.argv[1].split(':'); app = getattr(importlib.import_module(module), name); assert callable(app), 'ASGI entrypoint must be callable'",
+          service.entrypoint,
+        ],
+        { cwd: serviceRoot },
+      );
+      built++;
+      continue;
+    }
     if (!VERCEL_WEB_FRAMEWORKS.has(service.framework)) {
       throw new Error(
         `${label} uses framework ${JSON.stringify(service.framework)}, which is not a Vercel Framework Preset slug. Use one of: ${[...VERCEL_WEB_FRAMEWORKS].join(", ")}.`,
       );
     }
-    const serviceRoot = join(destination, service.root ?? ".");
     if (existsSync(join(serviceRoot, "package.json"))) continue;
     if (!service.buildCommand) {
       throw new Error(
@@ -177,7 +211,18 @@ const checkTemplate = async (template, tarball, tarballName) => {
   const destination = join(temporaryDirectory, template);
   cpSync(source, destination, {
     filter: (path) =>
-      !["node_modules", ".next", ".nuxt", ".output", ".eve", ".vercel"].includes(basename(path)),
+      ![
+        "node_modules",
+        ".venv",
+        ".pytest_cache",
+        ".ruff_cache",
+        "__pycache__",
+        ".next",
+        ".nuxt",
+        ".output",
+        ".eve",
+        ".vercel",
+      ].includes(basename(path)),
     recursive: true,
   });
 

@@ -3,13 +3,7 @@
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 import { Button } from "@/components/ui/button";
@@ -59,11 +53,7 @@ export const Conversation = ({
   </StickToBottom>
 );
 
-function ConversationScrollRestoration({
-  storageKey,
-}: {
-  readonly storageKey: string;
-}) {
+function ConversationScrollRestoration({ storageKey }: { readonly storageKey: string }) {
   const { scrollRef, scrollToBottom, state } = useStickToBottomContext();
   const restoredKeyRef = useRef<string | undefined>(undefined);
 
@@ -93,7 +83,7 @@ function ConversationScrollRestoration({
         JSON.stringify({
           atBottom: state.isAtBottom || state.isNearBottom,
           scrollTop: scrollElement.scrollTop,
-        })
+        }),
       );
     };
     let frame: number | undefined;
@@ -135,8 +125,7 @@ function readScrollPosition(value: string | null):
       atBottom?: unknown;
       scrollTop?: unknown;
     };
-    return typeof parsed.atBottom === "boolean" &&
-      typeof parsed.scrollTop === "number"
+    return typeof parsed.atBottom === "boolean" && typeof parsed.scrollTop === "number"
       ? { atBottom: parsed.atBottom, scrollTop: parsed.scrollTop }
       : undefined;
   } catch {
@@ -147,21 +136,13 @@ function readScrollPosition(value: string | null):
 /**
  *
  */
-export type ConversationContentProps = ComponentProps<
-  typeof StickToBottom.Content
->;
+export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 
 /**
  *
  */
-export const ConversationContent = ({
-  className,
-  ...props
-}: ConversationContentProps) => (
-  <StickToBottom.Content
-    className={cn("flex flex-col gap-8 p-4", className)}
-    {...props}
-  />
+export const ConversationContent = ({ className, ...props }: ConversationContentProps) => (
+  <StickToBottom.Content className={cn("flex flex-col gap-8 p-4", className)} {...props} />
 );
 
 /**
@@ -172,10 +153,7 @@ export type ConversationTopFadeProps = ComponentProps<"div">;
 /**
  *
  */
-export const ConversationTopFade = ({
-  className,
-  ...props
-}: ConversationTopFadeProps) => {
+export const ConversationTopFade = ({ className, ...props }: ConversationTopFadeProps) => {
   const { contentRef, scrollRef } = useStickToBottomContext();
   const [isVisible, setIsVisible] = useState(false);
 
@@ -213,7 +191,7 @@ export const ConversationTopFade = ({
       className={cn(
         "from-background via-background/80 pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-linear-to-b to-transparent transition-opacity duration-150",
         isVisible ? "opacity-100" : "opacity-0",
-        className
+        className,
       )}
       data-slot="conversation-top-fade"
     />
@@ -243,7 +221,7 @@ export const ConversationEmptyState = ({
   <div
     className={cn(
       "flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
-      className
+      className,
     )}
     {...props}
   >
@@ -252,9 +230,7 @@ export const ConversationEmptyState = ({
         {icon && <div className="text-muted-foreground">{icon}</div>}
         <div className="space-y-1">
           <h3 className="text-sm font-medium">{title}</h3>
-          {description && (
-            <p className="text-muted-foreground text-sm">{description}</p>
-          )}
+          {description && <p className="text-muted-foreground text-sm">{description}</p>}
         </div>
       </>
     )}
@@ -291,7 +267,7 @@ export const ConversationScrollButton = ({
         aria-label="Scroll to bottom"
         className={cn(
           "dark:bg-background dark:hover:bg-muted absolute bottom-32 left-[50%] translate-x-[-50%] rounded-full",
-          className
+          className,
         )}
         onClick={handleScrollToBottom}
         size="icon"
@@ -314,18 +290,14 @@ const getMessageText = (message: UIMessage): string =>
 /**
  *
  */
-export type ConversationDownloadProps = Omit<
-  ComponentProps<typeof Button>,
-  "onClick"
-> & {
+export type ConversationDownloadProps = Omit<ComponentProps<typeof Button>, "onClick"> & {
   messages: UIMessage[];
   filename?: string;
   formatMessage?: (message: UIMessage, index: number) => string;
 };
 
 const defaultFormatMessage = (message: UIMessage): string => {
-  const roleLabel =
-    message.role.charAt(0).toUpperCase() + message.role.slice(1);
+  const roleLabel = message.role.charAt(0).toUpperCase() + message.role.slice(1);
   return `**${roleLabel}:** ${getMessageText(message)}`;
 };
 
@@ -334,10 +306,7 @@ const defaultFormatMessage = (message: UIMessage): string => {
  */
 export const messagesToMarkdown = (
   messages: UIMessage[],
-  formatMessage: (
-    message: UIMessage,
-    index: number
-  ) => string = defaultFormatMessage
+  formatMessage: (message: UIMessage, index: number) => string = defaultFormatMessage,
 ): string => messages.map((msg, i) => formatMessage(msg, i)).join("\n\n");
 
 /**
@@ -368,7 +337,7 @@ export const ConversationDownload = ({
     <Button
       className={cn(
         "dark:bg-background dark:hover:bg-muted absolute top-4 right-4 rounded-full",
-        className
+        className,
       )}
       onClick={handleDownload}
       size="icon"

@@ -11,7 +11,7 @@ import { lastRenderedTurn } from "../lib/ui-state";
 const componentList = Object.entries(uiCatalog.data.components)
   .map(
     ([name, component]) =>
-      `- ${name}: ${component.description}\n  props: ${describeComponentProps(name)}`
+      `- ${name}: ${component.description}\n  props: ${describeComponentProps(name)}`,
   )
   .join("\n");
 
@@ -27,7 +27,7 @@ ${componentList}`,
     const turnId = ctx.session.turn.id;
     if (lastRenderedTurn.get().turnId === turnId) {
       throw new Error(
-        "You already showed UI in this reply, and the person can see it. Don't call render_ui again. Finish with one short sentence."
+        "You already showed UI in this reply, and the person can see it. Don't call render_ui again. Finish with one short sentence.",
       );
     }
     lastRenderedTurn.update(() => ({ turnId }));

@@ -5,11 +5,7 @@ import { ChevronRightIcon, TerminalIcon, WrenchIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 import { CodeBlock } from "./code-block";
@@ -64,9 +60,7 @@ const statusLabels: Record<ToolPart["state"], string> = {
  */
 export const getStatusIndicator = (status: ToolPart["state"]) =>
   status === "output-available" ? null : (
-    <span
-      className={cn("text-sm", status === "output-error" && "text-destructive")}
-    >
+    <span className={cn("text-sm", status === "output-error" && "text-destructive")}>
       {statusLabels[status]}
     </span>
   );
@@ -82,15 +76,14 @@ export const ToolHeader = ({
   toolName,
   ...props
 }: ToolHeaderProps) => {
-  const derivedName =
-    type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
+  const derivedName = type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
   const displayName = title ?? derivedName;
 
   return (
     <CollapsibleTrigger
       className={cn(
         "text-muted-foreground hover:text-foreground flex w-full items-center gap-2 py-0.5 text-left transition-colors",
-        className
+        className,
       )}
       {...props}
     >
@@ -118,7 +111,7 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
       "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground data-[state=closed]:animate-out data-[state=open]:animate-in space-y-4 py-2 outline-none",
-      className
+      className,
     )}
     {...props}
   />
@@ -144,14 +137,10 @@ export const BashToolContent = ({
   ...props
 }: BashToolContentProps) => {
   const command = getRecordValue(input, "command");
-  const stdout =
-    getRecordValue(output, "stdout") ??
-    (typeof output === "string" ? output : "");
+  const stdout = getRecordValue(output, "stdout") ?? (typeof output === "string" ? output : "");
   const stderr = getRecordValue(output, "stderr") ?? errorText ?? "";
   const exitCode = getRecordValue(output, "exitCode");
-  const hasResult = Boolean(
-    stdout || stderr || (typeof exitCode === "number" && exitCode !== 0)
-  );
+  const hasResult = Boolean(stdout || stderr || (typeof exitCode === "number" && exitCode !== 0));
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
@@ -167,18 +156,12 @@ export const BashToolContent = ({
             <span className="text-muted-foreground mb-2 block font-sans text-[10px] tracking-wide uppercase">
               Output
             </span>
-            {stdout ? (
-              <span className="block">{String(stdout).trimEnd()}</span>
-            ) : null}
+            {stdout ? <span className="block">{String(stdout).trimEnd()}</span> : null}
             {stderr ? (
-              <span className="text-destructive block">
-                {String(stderr).trimEnd()}
-              </span>
+              <span className="text-destructive block">{String(stderr).trimEnd()}</span>
             ) : null}
             {typeof exitCode === "number" && exitCode !== 0 ? (
-              <span className="text-muted-foreground block">
-                Exited with code {exitCode}
-              </span>
+              <span className="text-muted-foreground block">Exited with code {exitCode}</span>
             ) : null}
           </code>
         </pre>
@@ -187,18 +170,13 @@ export const BashToolContent = ({
   );
 };
 
-const getRecordValue = (
-  value: unknown,
-  key: string
-): string | number | undefined => {
+const getRecordValue = (value: unknown, key: string): string | number | undefined => {
   if (typeof value !== "object" || value === null || !(key in value)) {
     return undefined;
   }
 
   const property = value[key as keyof typeof value];
-  return typeof property === "string" || typeof property === "number"
-    ? property
-    : undefined;
+  return typeof property === "string" || typeof property === "number" ? property : undefined;
 };
 
 /**
@@ -212,10 +190,7 @@ export type ToolInputProps = ComponentProps<"div"> & {
  *
  */
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div
-    className={cn("bg-muted/50 overflow-hidden rounded-md", className)}
-    {...props}
-  >
+  <div className={cn("bg-muted/50 overflow-hidden rounded-md", className)} {...props}>
     <span className="text-muted-foreground block px-3 pt-3 font-sans text-[10px] tracking-wide uppercase">
       Parameters
     </span>
@@ -240,12 +215,7 @@ export type ToolOutputProps = ComponentProps<"div"> & {
 /**
  *
  */
-export const ToolOutput = ({
-  className,
-  output,
-  errorText,
-  ...props
-}: ToolOutputProps) => {
+export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
   if (!(output || errorText)) {
     return null;
   }
@@ -261,23 +231,15 @@ export const ToolOutput = ({
       />
     );
   } else if (typeof output === "string") {
-    Output = (
-      <CodeBlock
-        className={compactCodeBlockClassName}
-        code={output}
-        language="json"
-      />
-    );
+    Output = <CodeBlock className={compactCodeBlockClassName} code={output} language="json" />;
   }
 
   return (
     <div
       className={cn(
         "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-        errorText
-          ? "bg-destructive/10 text-destructive"
-          : "bg-muted/50 text-foreground",
-        className
+        errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
+        className,
       )}
       {...props}
     >

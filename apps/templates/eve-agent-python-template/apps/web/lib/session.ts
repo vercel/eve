@@ -22,7 +22,6 @@ export async function hasAccess(): Promise<boolean> {
   return isAuthorized(await getSessionToken());
 }
 
-
 /** Whether the browser is signed in with the shared password (not just local dev). */
 export async function hasPasswordSession(): Promise<boolean> {
   return verifyPasswordSessionToken(await getSessionToken());

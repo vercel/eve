@@ -19,7 +19,9 @@ async function forward(request: NextRequest, { params }: Context): Promise<Respo
     method: request.method,
     headers: {
       accept: request.headers.get("accept") ?? "application/json",
-      ...(hasBody ? { "content-type": request.headers.get("content-type") ?? "application/json" } : {}),
+      ...(hasBody
+        ? { "content-type": request.headers.get("content-type") ?? "application/json" }
+        : {}),
     },
     body: hasBody ? await request.arrayBuffer() : undefined,
     cache: "no-store",

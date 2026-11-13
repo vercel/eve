@@ -45,7 +45,10 @@ interface OpenApiOperation {
   operationId?: string;
   parameters?: OpenApiParameter[];
   requestBody?: { content?: Record<string, { schema?: JsonSchema }> };
-  responses?: Record<string, { description?: string; content?: Record<string, { schema?: JsonSchema }> }>;
+  responses?: Record<
+    string,
+    { description?: string; content?: Record<string, { schema?: JsonSchema }> }
+  >;
 }
 
 export interface OpenApiDocument {
@@ -109,9 +112,10 @@ function toEndpoint(
     method,
     path,
     summary: operation.summary ?? `${method} ${path}`,
-    description: [operation.description, noContent ? `Responds ${status} with no body.` : undefined]
-      .filter(Boolean)
-      .join(" ") || undefined,
+    description:
+      [operation.description, noContent ? `Responds ${status} with no body.` : undefined]
+        .filter(Boolean)
+        .join(" ") || undefined,
     parameters: (operation.parameters ?? [])
       .filter((parameter) => parameter.in !== "cookie")
       .map((parameter) => ({
@@ -121,7 +125,11 @@ function toEndpoint(
         description: describe(parameter.schema ?? {}, schemas, parameter.description),
         location: parameter.in as SchemaParameter["location"],
       })),
-    requestBody: toBody(operation.requestBody?.content?.["application/json"]?.schema, schemas, "body"),
+    requestBody: toBody(
+      operation.requestBody?.content?.["application/json"]?.schema,
+      schemas,
+      "body",
+    ),
     responseBody: toBody(responseSchema, schemas, "response"),
   };
 }
@@ -210,7 +218,9 @@ function describe(
   override?: string,
 ): string | undefined {
   const inner = resolve(nonNull(schema), schemas);
-  const parts = [override ?? schema.description ?? (refName(nonNull(schema)) ? undefined : inner.description)];
+  const parts = [
+    override ?? schema.description ?? (refName(nonNull(schema)) ? undefined : inner.description),
+  ];
   parts.push(range(inner.minLength, inner.maxLength, "characters"));
   parts.push(range(inner.minimum, inner.maximum, undefined));
   parts.push(range(inner.minItems, inner.maxItems, "items"));

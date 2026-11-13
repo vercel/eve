@@ -19,7 +19,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
-export async function createTask(_state: TaskFormState, formData: FormData): Promise<TaskFormState> {
+export async function createTask(
+  _state: TaskFormState,
+  formData: FormData,
+): Promise<TaskFormState> {
   if (!(await hasAccess())) {
     return { error: SESSION_EXPIRED };
   }

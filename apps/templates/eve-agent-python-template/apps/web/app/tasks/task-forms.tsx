@@ -163,10 +163,7 @@ export function TaskRow({ task }: { readonly task: Task }) {
 
   return (
     <li
-      className={cn(
-        "flex items-start gap-3 px-6 py-3 transition-opacity",
-        pending && "opacity-60",
-      )}
+      className={cn("flex items-start gap-3 px-6 py-3 transition-opacity", pending && "opacity-60")}
     >
       <Checkbox
         aria-label={completed ? `Reopen ${task.title}` : `Complete ${task.title}`}

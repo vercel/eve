@@ -7,5 +7,5 @@ import { defineState } from "eve/context";
  */
 export const lastRenderedTurn = defineState<{ readonly turnId: string | null }>(
   "ui.lastRenderedTurn",
-  () => ({ turnId: null })
+  () => ({ turnId: null }),
 );

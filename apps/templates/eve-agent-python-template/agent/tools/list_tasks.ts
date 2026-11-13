@@ -19,7 +19,9 @@ export default defineTool({
       .int()
       .min(0)
       .optional()
-      .describe("Tasks to skip, for paging. If a full page comes back, list again with offset += limit."),
+      .describe(
+        "Tasks to skip, for paging. If a full page comes back, list again with offset += limit.",
+      ),
   }),
   outputSchema: listTasksOutputSchema,
   label: {

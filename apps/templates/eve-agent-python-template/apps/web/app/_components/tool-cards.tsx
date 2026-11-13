@@ -1,12 +1,7 @@
 "use client";
 
 import type { EveToolPart } from "eve/react";
-import {
-  ArrowRightIcon,
-  CheckCircle2Icon,
-  CircleIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { ArrowRightIcon, CheckCircle2Icon, CircleIcon, Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -22,10 +17,7 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-import {
-  statsSchema,
-  textAnalysisSchema,
-} from "../../../../agent/lib/python-tools";
+import { statsSchema, textAnalysisSchema } from "../../../../agent/lib/python-tools";
 import type { Stats, TextAnalysis } from "../../../../agent/lib/python-tools";
 import {
   deleteTaskOutputSchema,
@@ -128,9 +120,7 @@ function ToolCard({
         {badge === undefined ? null : <CardAction>{badge}</CardAction>}
       </CardHeader>
       <CardContent className="px-4">{children}</CardContent>
-      {footer === undefined ? null : (
-        <CardFooter className="px-4">{footer}</CardFooter>
-      )}
+      {footer === undefined ? null : <CardFooter className="px-4">{footer}</CardFooter>}
     </Card>
   );
 }
@@ -153,9 +143,7 @@ function Metric({
   return (
     <div className="space-y-0.5">
       <p className="text-muted-foreground text-xs">{label}</p>
-      <p className="text-lg font-semibold tracking-tight tabular-nums">
-        {value}
-      </p>
+      <p className="text-lg font-semibold tracking-tight tabular-nums">{value}</p>
     </div>
   );
 }
@@ -200,22 +188,15 @@ function TaskListCard({
               <TaskStatusIcon completed={task.completed} />
               <div className="min-w-0 flex-1">
                 <p
-                  className={cn(
-                    "truncate",
-                    task.completed && "text-muted-foreground line-through"
-                  )}
+                  className={cn("truncate", task.completed && "text-muted-foreground line-through")}
                 >
                   {task.title}
                 </p>
                 {task.notes === null || task.notes === "" ? null : (
-                  <p className="text-muted-foreground truncate text-xs">
-                    {task.notes}
-                  </p>
+                  <p className="text-muted-foreground truncate text-xs">{task.notes}</p>
                 )}
               </div>
-              <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                #{task.id}
-              </span>
+              <span className="text-muted-foreground shrink-0 font-mono text-xs">#{task.id}</span>
             </li>
           ))}
         </ul>
@@ -237,15 +218,9 @@ function TaskStatusIcon({
   readonly completed: boolean;
 }) {
   return completed ? (
-    <CheckCircle2Icon
-      aria-label="Completed"
-      className="text-success mt-0.5 size-4 shrink-0"
-    />
+    <CheckCircle2Icon aria-label="Completed" className="text-success mt-0.5 size-4 shrink-0" />
   ) : (
-    <CircleIcon
-      aria-label="Open"
-      className="text-muted-foreground mt-0.5 size-4 shrink-0"
-    />
+    <CircleIcon aria-label="Open" className="text-muted-foreground mt-0.5 size-4 shrink-0" />
   );
 }
 
@@ -273,7 +248,7 @@ function TaskCard({
           <span
             className={cn(
               "min-w-0 break-words",
-              task.completed && "text-muted-foreground line-through"
+              task.completed && "text-muted-foreground line-through",
             )}
           >
             {task.title}
@@ -283,15 +258,10 @@ function TaskCard({
     >
       <div className="space-y-2">
         {task.notes === null || task.notes === "" ? null : (
-          <p className="text-muted-foreground text-sm whitespace-pre-wrap">
-            {task.notes}
-          </p>
+          <p className="text-muted-foreground text-sm whitespace-pre-wrap">{task.notes}</p>
         )}
         <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-          <Badge
-            className={cn(task.completed && "text-success")}
-            variant="outline"
-          >
+          <Badge className={cn(task.completed && "text-success")} variant="outline">
             {task.completed ? "Completed" : "Open"}
           </Badge>
           <span className="font-mono">#{task.id}</span>
@@ -371,9 +341,7 @@ export function StatsCard({
             ) : null}
             {stats.quartiles === null ? null : (
               <div className="flex gap-4 px-3 py-2">
-                <dt className="text-muted-foreground w-1/3 shrink-0">
-                  Quartiles
-                </dt>
+                <dt className="text-muted-foreground w-1/3 shrink-0">Quartiles</dt>
                 <dd className="min-w-0 flex-1 tabular-nums">
                   {stats.quartiles
                     .map((q, index) => `Q${index + 1} ${formatNumber(q)}`)

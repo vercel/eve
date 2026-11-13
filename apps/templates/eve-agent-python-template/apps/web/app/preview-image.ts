@@ -14,19 +14,13 @@ const MAX_CACHED = 500;
 
 const MAX_REDIRECTS = 3;
 
-const IMAGE_KEYS = [
-  "og:image",
-  "og:image:secure_url",
-  "twitter:image",
-  "twitter:image:src",
-];
+const IMAGE_KEYS = ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"];
 
 const HEAD_END_PATTERN = /<\/head>/iu;
 const META_TAG_PATTERN = /<meta\b[^<>]{0,2048}>/giu;
 const KEY_ATTRIBUTE_PATTERN =
   /\s(?:property|name)\s*=\s*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')/iu;
-const CONTENT_ATTRIBUTE_PATTERN =
-  /\scontent\s*=\s*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')/iu;
+const CONTENT_ATTRIBUTE_PATTERN = /\scontent\s*=\s*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')/iu;
 
 const cache = new Map<string, Promise<string | null>>();
 
@@ -92,7 +86,7 @@ const publicLookup: LookupFunction = (hostname, options, callback) => {
       return;
     }
     if (options.all) {
-      (callback as unknown as (error: null, addresses: LookupAddress[]) => void)(null, addresses);
+      callback(null, addresses);
     } else {
       callback(null, first.address, first.family);
     }
@@ -155,7 +149,7 @@ function get(url: URL, signal: AbortSignal): Promise<IncomingMessage> {
 async function fetchPage(
   url: URL,
   signal: AbortSignal,
-  hops: number
+  hops: number,
 ): Promise<{ response: IncomingMessage; url: URL } | null> {
   if (!isFetchable(url)) {
     return null;
@@ -214,9 +208,7 @@ function findImageMeta(html: string): string | undefined {
       images.set(key, content);
     }
   }
-  return IMAGE_KEYS.map((key) => images.get(key)).find(
-    (image) => image !== undefined
-  );
+  return IMAGE_KEYS.map((key) => images.get(key)).find((image) => image !== undefined);
 }
 
 /**
@@ -253,11 +245,7 @@ async function readHead(response: IncomingMessage): Promise<string> {
  * @throws {@link Error} When the page can't be fetched, times out, or responds with an error.
  */
 async function findPreviewImage(pageUrl: string): Promise<string | null> {
-  const page = await fetchPage(
-    new URL(pageUrl),
-    AbortSignal.timeout(TIMEOUT_MS),
-    0
-  );
+  const page = await fetchPage(new URL(pageUrl), AbortSignal.timeout(TIMEOUT_MS), 0);
   if (page === null) {
     return null;
   }

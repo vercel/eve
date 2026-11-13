@@ -70,8 +70,7 @@ export const uiCatalog = defineCatalog(schema, {
     Grid: shadcnComponentDefinitions.Grid,
     Heading: shadcnComponentDefinitions.Heading,
     Image: {
-      description:
-        "A real image with optional caption. Only use an image URL you actually found.",
+      description: "A real image with optional caption. Only use an image URL you actually found.",
       props: z.object({
         alt: z.string(),
         caption: z.string().nullable(),
@@ -82,14 +81,11 @@ export const uiCatalog = defineCatalog(schema, {
       description:
         "Label and value rows for details such as opening hours, specs, or contact info.",
       props: z.object({
-        items: z
-          .array(z.object({ label: z.string(), value: z.string() }))
-          .min(1),
+        items: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
       }),
     },
     Link: {
-      description:
-        "A text link to a page you actually found. Opens in a new tab.",
+      description: "A text link to a page you actually found. Opens in a new tab.",
       props: z.object({
         href: webUrl,
         label: z.string(),
@@ -123,9 +119,7 @@ export const uiCatalog = defineCatalog(schema, {
         subtitle: z
           .string()
           .nullable()
-          .describe(
-            "One short line of key facts, such as the suburb or price."
-          ),
+          .describe("One short line of key facts, such as the suburb or price."),
         title: z.string(),
         url: webUrl.nullable(),
       }),
@@ -142,7 +136,7 @@ export const uiCatalog = defineCatalog(schema, {
               description: z.string().nullable(),
               meta: z.string().nullable(),
               title: z.string(),
-            })
+            }),
           )
           .min(1),
       }),
@@ -165,8 +159,8 @@ const components: Readonly<
 export const uiSpecSchema = uiCatalog.zodSchema().superRefine((spec, ctx) => {
   const inCardRow = new Set(
     Object.values(spec.elements).flatMap((element) =>
-      element.type === "CardRow" ? (element.children ?? []) : []
-    )
+      element.type === "CardRow" ? (element.children ?? []) : [],
+    ),
   );
   for (const [key, element] of Object.entries(spec.elements)) {
     if (element.type === "ResultCard" && !inCardRow.has(key)) {

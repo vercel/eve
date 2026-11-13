@@ -6,35 +6,35 @@ These instructions are for agents maintaining the repository. The agent's behavi
 
 ## Project map
 
-| Change | Location |
-| --- | --- |
-| Agent identity, when to use each tool, and response style | `agent/instructions.md` |
-| Model and session limits | `agent/agent.ts` |
-| Tools | `agent/tools/` |
-| Hooks that react to session events, such as resetting the `render_ui` guard | `agent/hooks/` |
-| Backend client used by the agent's tools, and shared with the web app | `agent/lib/backend.ts` |
-| Zod schemas for tasks and Python tool results, shared with the chat's cards | `agent/lib/tasks.ts` and `agent/lib/python-tools.ts` |
-| Components the agent can render with `render_ui` | `agent/lib/ui-catalog.ts`, rendered by `apps/web/app/_components/ui-registry.tsx`, with sortable tables in `data-table.tsx` and link preview images from `apps/web/app/preview-image.ts` |
-| HTTP channel and caller auth | `agent/channels/eve.ts` |
-| Sandbox and its network policy | `agent/sandbox.ts` |
-| Backend app, routers, and error handlers | `apps/api/main.py` and `apps/api/routers/` |
-| Database connection and table creation | `apps/api/core/config.py` and `apps/api/core/db.py` |
-| Task table and request schemas | `apps/api/models/task.py` |
-| Backend tests | `apps/api/tests/` |
-| Shared-password tokens, used by the agent and the web app | `apps/web/lib/password-auth.ts` |
-| Access rule and checks for the web app | `apps/web/lib/auth-mode.ts`, `apps/web/proxy.ts`, and `hasAccess()` in `apps/web/lib/session.ts` |
-| Sign-in and sign-out | `apps/web/app/login/` |
-| Backend client for Server Components, Server Actions, and route handlers | `apps/web/lib/backend.ts` |
-| Backend proxy for client components | `apps/web/app/api/backend/[[...path]]/route.ts` |
-| Chat layout, composer, and session handling | `apps/web/app/_components/agent-chat.tsx` |
-| Messages, tool calls, questions, and approvals | `apps/web/app/_components/agent-message.tsx` |
-| Cards for task and Python tool results | `apps/web/app/_components/tool-cards.tsx` |
-| Tasks, Backend, and API pages | `apps/web/app/tasks/`, `apps/web/app/backend/`, and `apps/web/app/api-docs/` |
-| Header, navigation, and page metadata | `apps/web/app/layout.tsx` and `apps/web/components/nav.tsx` |
-| Theme colors and global styles | `apps/web/app/globals.css` |
-| Vercel services, routes, and the backend binding | `vercel.ts` |
-| Python lint and format rules | `[tool.ruff]` in `apps/api/pyproject.toml` |
-| Setup and customization guidance | `README.md` and `CUSTOMIZATION.md` |
+| Change                                                                      | Location                                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent identity, when to use each tool, and response style                   | `agent/instructions.md`                                                                                                                                                                  |
+| Model and session limits                                                    | `agent/agent.ts`                                                                                                                                                                         |
+| Tools                                                                       | `agent/tools/`                                                                                                                                                                           |
+| Hooks that react to session events, such as resetting the `render_ui` guard | `agent/hooks/`                                                                                                                                                                           |
+| Backend client used by the agent's tools, and shared with the web app       | `agent/lib/backend.ts`                                                                                                                                                                   |
+| Zod schemas for tasks and Python tool results, shared with the chat's cards | `agent/lib/tasks.ts` and `agent/lib/python-tools.ts`                                                                                                                                     |
+| Components the agent can render with `render_ui`                            | `agent/lib/ui-catalog.ts`, rendered by `apps/web/app/_components/ui-registry.tsx`, with sortable tables in `data-table.tsx` and link preview images from `apps/web/app/preview-image.ts` |
+| HTTP channel and caller auth                                                | `agent/channels/eve.ts`                                                                                                                                                                  |
+| Sandbox and its network policy                                              | `agent/sandbox.ts`                                                                                                                                                                       |
+| Backend app, routers, and error handlers                                    | `apps/api/main.py` and `apps/api/routers/`                                                                                                                                               |
+| Database connection and table creation                                      | `apps/api/core/config.py` and `apps/api/core/db.py`                                                                                                                                      |
+| Task table and request schemas                                              | `apps/api/models/task.py`                                                                                                                                                                |
+| Backend tests                                                               | `apps/api/tests/`                                                                                                                                                                        |
+| Shared-password tokens, used by the agent and the web app                   | `apps/web/lib/password-auth.ts`                                                                                                                                                          |
+| Access rule and checks for the web app                                      | `apps/web/lib/auth-mode.ts`, `apps/web/proxy.ts`, and `hasAccess()` in `apps/web/lib/session.ts`                                                                                         |
+| Sign-in and sign-out                                                        | `apps/web/app/login/`                                                                                                                                                                    |
+| Backend client for Server Components, Server Actions, and route handlers    | `apps/web/lib/backend.ts`                                                                                                                                                                |
+| Backend proxy for client components                                         | `apps/web/app/api/backend/[[...path]]/route.ts`                                                                                                                                          |
+| Chat layout, composer, and session handling                                 | `apps/web/app/_components/agent-chat.tsx`                                                                                                                                                |
+| Messages, tool calls, questions, and approvals                              | `apps/web/app/_components/agent-message.tsx`                                                                                                                                             |
+| Cards for task and Python tool results                                      | `apps/web/app/_components/tool-cards.tsx`                                                                                                                                                |
+| Tasks, Backend, and API pages                                               | `apps/web/app/tasks/`, `apps/web/app/backend/`, and `apps/web/app/api-docs/`                                                                                                             |
+| Header, navigation, and page metadata                                       | `apps/web/app/layout.tsx` and `apps/web/components/nav.tsx`                                                                                                                              |
+| Theme colors and global styles                                              | `apps/web/app/globals.css`                                                                                                                                                               |
+| Vercel services, routes, and the backend binding                            | `vercel.ts`                                                                                                                                                                              |
+| Python lint and format rules                                                | `[tool.ruff]` in `apps/api/pyproject.toml`                                                                                                                                               |
+| Setup and customization guidance                                            | `README.md` and `CUSTOMIZATION.md`                                                                                                                                                       |
 
 `apps/web/components/ui/` and `apps/web/components/ai-elements/` are copies from the shadcn/ui and AI Elements registries, and `pnpm dlx shadcn add` overwrites them. Make template-specific changes in `apps/web/app/`, and edit these folders only to fix a defect.
 
@@ -126,13 +126,13 @@ Verify behavior against the code and current CLI help, and reread each section a
 
 Choose checks that establish the changed behavior.
 
-| Command | Purpose |
-| --- | --- |
+| Command          | Purpose                                                       |
+| ---------------- | ------------------------------------------------------------- |
 | `pnpm typecheck` | TypeScript checks for the agent, the web app, and `vercel.ts` |
-| `pnpm test` | Backend tests with pytest |
-| `pnpm lint:api` | Ruff lint and format checks for the backend |
-| `pnpm build` | Production build of the agent and the web app |
-| `pnpm build:eve` | Production build of the agent |
-| `pnpm build:web` | Production build of the web app |
+| `pnpm test`      | Backend tests with pytest                                     |
+| `pnpm lint:api`  | Ruff lint and format checks for the backend                   |
+| `pnpm build`     | Production build of the agent and the web app                 |
+| `pnpm build:eve` | Production build of the agent                                 |
+| `pnpm build:web` | Production build of the web app                               |
 
 Run `pnpm typecheck` after every TypeScript change, and `pnpm test` and `pnpm lint:api` after every backend change. Run `pnpm build:web` when changing pages, Server Actions, styles, or dependencies of the web app, since some Next.js rules are checked only at build time. State which checks ran and what remains untested in a browser.

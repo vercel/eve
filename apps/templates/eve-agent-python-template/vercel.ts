@@ -17,6 +17,7 @@ const config = await withEve({
     web: {
       framework: "nextjs",
       root: "apps/web",
+      buildCommand: "node ../../node_modules/next/dist/bin/next build",
       bindings: backendBinding,
     },
     api: {

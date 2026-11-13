@@ -17,14 +17,13 @@ export async function backendJson<T>(
   init: Omit<RequestInit, "body"> & { json?: unknown } = {},
 ): Promise<T> {
   const { json, headers, ...rest } = init;
+  const requestHeaders = new Headers({ accept: "application/json" });
+  if (json !== undefined) requestHeaders.set("content-type", "application/json");
+  new Headers(headers).forEach((value, key) => requestHeaders.set(key, value));
   const response = await fetch(backendUrl(path), {
     cache: "no-store",
     ...rest,
-    headers: {
-      accept: "application/json",
-      ...(json !== undefined ? { "content-type": "application/json" } : {}),
-      ...headers,
-    },
+    headers: requestHeaders,
     body: json !== undefined ? JSON.stringify(json) : undefined,
   });
 

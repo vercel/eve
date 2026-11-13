@@ -10,10 +10,10 @@ Web chat built on [eve](https://eve.dev/docs/guides/frontend/nextjs), [Next.js](
 
 Vercel's project setup flow will create a repository in your Git account and a Vercel project. You'll then be prompted to add the following environment variable and database:
 
-| Setting | What to enter |
-| --- | --- |
-| `EVE_CHAT_PASSWORD` | The password visitors enter before they can use the app. Share it with the people who should have access. |
-| Neon | Configure the Neon integration to create a Postgres database. It sets the `DATABASE_URL` environment variable, which the backend uses to store tasks. |
+| Setting             | What to enter                                                                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EVE_CHAT_PASSWORD` | The password visitors enter before they can use the app. Share it with the people who should have access.                                             |
+| Neon                | Configure the Neon integration to create a Postgres database. It sets the `DATABASE_URL` environment variable, which the backend uses to store tasks. |
 
 When the deploy finishes, open the deployment URL and enter the password. Then ask the agent to add a task, such as "Add a task to renew the domain", and open Tasks to see it.
 
@@ -37,14 +37,14 @@ The agent lives in [agent/](agent/), the chat and the other pages live in [apps/
 
 Ask the agent to add, complete, or delete tasks and it calls the same FastAPI endpoints that the Tasks page uses. Changes made in the chat or on the page show up in both. For statistics or text analysis it runs Python code in the backend instead of doing the math itself. You can reload the page to return to the conversation later, or share its link with anyone who has the password.
 
-| Tool | File | What the chat shows |
-| --- | --- | --- |
-| `list_tasks`, `create_task`, and `update_task` | [agent/tools/](agent/tools/) | Task cards from the shared task list |
-| `delete_task` | [delete_task.ts](agent/tools/delete_task.ts) | Asks for your approval before it deletes the task |
-| `compute_stats` | [compute_stats.ts](agent/tools/compute_stats.ts) | Mean, median, quartiles, and other statistics, computed in Python |
-| `analyze_text` | [analyze_text.ts](agent/tools/analyze_text.ts) | Word counts, reading time, readability, and the most common words, computed in Python |
-| `render_ui` | [render_ui.ts](agent/tools/render_ui.ts) | Result cards, metrics, tables, and other components from a fixed catalog |
-| `ask_question` | [ask_question.ts](agent/tools/ask_question.ts) | Options to choose from, or a field to type an answer |
+| Tool                                           | File                                             | What the chat shows                                                                   |
+| ---------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `list_tasks`, `create_task`, and `update_task` | [agent/tools/](agent/tools/)                     | Task cards from the shared task list                                                  |
+| `delete_task`                                  | [delete_task.ts](agent/tools/delete_task.ts)     | Asks for your approval before it deletes the task                                     |
+| `compute_stats`                                | [compute_stats.ts](agent/tools/compute_stats.ts) | Mean, median, quartiles, and other statistics, computed in Python                     |
+| `analyze_text`                                 | [analyze_text.ts](agent/tools/analyze_text.ts)   | Word counts, reading time, readability, and the most common words, computed in Python |
+| `render_ui`                                    | [render_ui.ts](agent/tools/render_ui.ts)         | Result cards, metrics, tables, and other components from a fixed catalog              |
+| `ask_question`                                 | [ask_question.ts](agent/tools/ask_question.ts)   | Options to choose from, or a field to type an answer                                  |
 
 The Backend page shows which Python and FastAPI versions the backend runs and has a form that computes statistics with the same Python endpoint as `compute_stats`. The API page lists every endpoint the backend describes in its OpenAPI document.
 
@@ -67,7 +67,7 @@ pnpm dev:all
 
 Choose your deployed project when `vercel link` prompts you. `vercel env pull .env.local` saves your project's development environment variables to `.env.local`, including the token that lets the agent call models through [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
 
-`pnpm dev:all` starts the web app, agent, and backend together with `vercel dev`, and routes requests to them the same way a deployment does. Open the URL it prints and send a message. When `EVE_CHAT_PASSWORD` is unset, the app opens without a password. When `DATABASE_URL` is unset, the backend stores tasks in a SQLite file at `apps/api/.data/dev.sqlite3`. 
+`pnpm dev:all` starts the web app, agent, and backend together with `vercel dev`, and routes requests to them the same way a deployment does. Open the URL it prints and send a message. When `EVE_CHAT_PASSWORD` is unset, the app opens without a password. When `DATABASE_URL` is unset, the backend stores tasks in a SQLite file at `apps/api/.data/dev.sqlite3`.
 
 To chat with the agent in your terminal instead, run `pnpm dev:api` and `pnpm dev:eve` in two terminals.
 
@@ -88,14 +88,14 @@ vercel deploy --prod
 
 ## Customization
 
-| Customize | Where |
-| --- | --- |
-| Persona and response style | [agent/instructions.md](agent/instructions.md) |
-| Tools | [agent/tools/](agent/tools/) |
-| Backend endpoints and Python tools | [apps/api/routers/](apps/api/routers/) |
-| Cards for task and Python tool results | [apps/web/app/\_components/tool-cards.tsx](apps/web/app/_components/tool-cards.tsx) |
-| Components the agent can render | [agent/lib/ui-catalog.ts](agent/lib/ui-catalog.ts) and [apps/web/app/\_components/ui-registry.tsx](apps/web/app/_components/ui-registry.tsx) |
-| Chat interface | [apps/web/app/\_components/](apps/web/app/_components/) |
+| Customize                              | Where                                                                                                                                        |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Persona and response style             | [agent/instructions.md](agent/instructions.md)                                                                                               |
+| Tools                                  | [agent/tools/](agent/tools/)                                                                                                                 |
+| Backend endpoints and Python tools     | [apps/api/routers/](apps/api/routers/)                                                                                                       |
+| Cards for task and Python tool results | [apps/web/app/\_components/tool-cards.tsx](apps/web/app/_components/tool-cards.tsx)                                                          |
+| Components the agent can render        | [agent/lib/ui-catalog.ts](agent/lib/ui-catalog.ts) and [apps/web/app/\_components/ui-registry.tsx](apps/web/app/_components/ui-registry.tsx) |
+| Chat interface                         | [apps/web/app/\_components/](apps/web/app/_components/)                                                                                      |
 
 For more ways to customize the template, including adding backend endpoints and Python tools, using your own authentication provider, and connecting another eve agent such as the [eve Data Analyst Template](https://github.com/vercel-labs/eve-data-analyst-template), see the [customization guide](CUSTOMIZATION.md).
 

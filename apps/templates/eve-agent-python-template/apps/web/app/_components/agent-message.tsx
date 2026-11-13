@@ -3,25 +3,12 @@
 import type { Spec } from "@json-render/react";
 import { signInEnding, type Interaction } from "eve/events";
 import type { EveMessage, EveMessagePart, EveToolPart } from "eve/react";
-import {
-  CheckCircleIcon,
-  ChevronRightIcon,
-  ExternalLinkIcon,
-  XCircleIcon,
-} from "lucide-react";
+import { CheckCircleIcon, ChevronRightIcon, ExternalLinkIcon, XCircleIcon } from "lucide-react";
 import { Fragment, useState, type SubmitEvent } from "react";
 import { z } from "zod";
 
-import {
-  Message,
-  MessageContent,
-  MessageResponse,
-} from "@/components/ai-elements/message";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
   BashToolContent,
   Tool,
@@ -31,11 +18,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Questionnaire,
   QuestionnaireActions,
@@ -90,9 +73,7 @@ export function AgentMessage({
   /** Submits answers to questions and approvals. */
   readonly onAnswers: OnAnswers;
 }) {
-  const lastTextIndex = message.parts.findLastIndex(
-    (part) => part.type === "text"
-  );
+  const lastTextIndex = message.parts.findLastIndex((part) => part.type === "text");
   const hasAssistantText =
     message.role === "assistant" &&
     message.parts.some((part) => part.type === "text" && part.text.length > 0);
@@ -110,13 +91,9 @@ export function AgentMessage({
               key={partKey(part, index)}
               onAnswers={onAnswers}
               part={part}
-              showCaret={
-                isStreaming &&
-                message.role === "assistant" &&
-                index === lastTextIndex
-              }
+              showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
             />
-          )
+          ),
         )}
       </MessageContent>
     </Message>
@@ -152,13 +129,7 @@ function AgentMessagePart({
     case "file":
       return null;
     case "interaction":
-      return (
-        <InteractionPrompt
-          canRespond={canRespond}
-          interaction={part}
-          onAnswers={onAnswers}
-        />
-      );
+      return <InteractionPrompt canRespond={canRespond} interaction={part} onAnswers={onAnswers} />;
     case "tool": {
       const spec = renderUiSpec(part);
       if (spec === null) return null;
@@ -208,9 +179,7 @@ function GenericTool({ part }: { readonly part: EveToolPart }) {
       />
       <ToolContent>
         {part.state === "streaming" ? (
-          <pre className="overflow-x-auto text-xs whitespace-pre-wrap">
-            {part.inputText}
-          </pre>
+          <pre className="overflow-x-auto text-xs whitespace-pre-wrap">{part.inputText}</pre>
         ) : part.name === "bash" ? (
           <BashToolContent
             errorText={part.error?.message}
@@ -230,7 +199,7 @@ function GenericTool({ part }: { readonly part: EveToolPart }) {
 
 /** Maps eve's tool states to the status vocabulary used by the shared tool UI. */
 function toolHeaderState(
-  state: EveToolPart["state"]
+  state: EveToolPart["state"],
 ):
   | "approval-requested"
   | "input-available"
@@ -288,11 +257,7 @@ function InteractionPrompt({
     );
   }
   return (
-    <InteractionActions
-      canRespond={canRespond}
-      interaction={interaction}
-      onAnswers={onAnswers}
-    />
+    <InteractionActions canRespond={canRespond} interaction={interaction} onAnswers={onAnswers} />
   );
 }
 
@@ -308,8 +273,7 @@ function QuestionRequest({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const options = interaction.request.options ?? [];
-  const acceptsFreeform =
-    interaction.request.allowFreeform === true || options.length === 0;
+  const acceptsFreeform = interaction.request.allowFreeform === true || options.length === 0;
   const answer = interaction.answer;
   const isLocked = !canRespond || isSubmitting || answer !== undefined;
 
@@ -395,9 +359,7 @@ function AnsweredQuestion({
 }) {
   const options = interaction.request.options ?? [];
   const label =
-    options.find(({ id }) => id === answer.optionId)?.label ??
-    answer.text ??
-    answer.optionId;
+    options.find(({ id }) => id === answer.optionId)?.label ?? answer.text ?? answer.optionId;
 
   return (
     <div className="w-full max-w-md rounded-md border text-sm">
@@ -422,7 +384,7 @@ function AnsweredQuestion({
                     "flex items-center gap-2",
                     option.id === answer.optionId
                       ? "text-foreground font-medium"
-                      : "text-muted-foreground"
+                      : "text-muted-foreground",
                   )}
                   key={option.id}
                 >
@@ -445,7 +407,7 @@ const inputSummary = z.record(z.string(), z.unknown()).transform((input) =>
   Object.entries(input).flatMap(([name, value]) => {
     const parsed = scalar.safeParse(value);
     return parsed.success ? [[name, String(parsed.data)] as const] : [];
-  })
+  }),
 );
 
 /** Renders approval actions and settled approval outcomes. */
@@ -495,7 +457,7 @@ function InteractionActions({
               ? "text-success"
               : interaction.outcome === "declined"
                 ? "text-destructive"
-                : "text-muted-foreground"
+                : "text-muted-foreground",
           )}
         />
         <span className="text-foreground font-medium">{label}</span>
@@ -579,9 +541,7 @@ function SignInPrompt({ interaction }: { readonly interaction: Interaction }) {
   return (
     <div className="border-info/30 bg-info/5 w-full max-w-md space-y-3 rounded-md border p-3">
       <p className="text-sm font-medium">
-        {complete
-          ? `${name} ${signInEnding(interaction.outcome ?? "failed")}`
-          : `Connect ${name}`}
+        {complete ? `${name} ${signInEnding(interaction.outcome ?? "failed")}` : `Connect ${name}`}
       </p>
       <p className="text-muted-foreground text-sm">
         {complete ? interaction.reason : interaction.request.prompt}
@@ -607,7 +567,7 @@ function SignInPrompt({ interaction }: { readonly interaction: Interaction }) {
 /** Chooses a consistent visual treatment for an interaction option. */
 function optionVariant(
   style: "danger" | "default" | "primary" | undefined,
-  index: number
+  index: number,
 ): "default" | "destructive" | "outline" {
   if (style === "danger") return "destructive";
   return style === "primary" || index === 0 ? "default" : "outline";

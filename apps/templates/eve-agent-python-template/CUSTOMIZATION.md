@@ -23,11 +23,11 @@ Choose the task you want to complete:
 
 The template reads these environment variables:
 
-| Environment variable | What it controls |
-| --- | --- |
-| `EVE_CHAT_PASSWORD` | The password visitors enter on the `/login` page. Without it, the deployed app sends every visitor to a notice asking you to set it. |
-| `DATABASE_URL` | The Postgres database that stores tasks. The Neon integration sets it. Without it, a deployment's task endpoints return an error that the Tasks page explains, and local development uses a SQLite file. |
-| `BACKEND_URL` | The backend's private URL. The [service binding](#change-how-the-app-deploys) in `vercel.ts` sets it for the agent and the web app, so leave it unset. |
+| Environment variable | What it controls                                                                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EVE_CHAT_PASSWORD`  | The password visitors enter on the `/login` page. Without it, the deployed app sends every visitor to a notice asking you to set it.                                                                     |
+| `DATABASE_URL`       | The Postgres database that stores tasks. The Neon integration sets it. Without it, a deployment's task endpoints return an error that the Tasks page explains, and local development uses a SQLite file. |
+| `BACKEND_URL`        | The backend's private URL. The [service binding](#change-how-the-app-deploys) in `vercel.ts` sets it for the agent and the web app, so leave it unset.                                                   |
 
 Add `EVE_CHAT_PASSWORD` to your Vercel project with `vercel env add` followed by its name:
 
@@ -61,16 +61,16 @@ Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway mo
 
 Each file in [agent/tools/](agent/tools/) defines one tool, and eve names the tool after the file. The template includes eight:
 
-| Tool | File | What it does |
-| --- | --- | --- |
-| `list_tasks` | [list_tasks.ts](agent/tools/list_tasks.ts) | Lists tasks from the backend, open tasks first |
-| `create_task` | [create_task.ts](agent/tools/create_task.ts) | Adds a task |
-| `update_task` | [update_task.ts](agent/tools/update_task.ts) | Renames a task, changes its notes, or marks it completed |
-| `delete_task` | [delete_task.ts](agent/tools/delete_task.ts) | Deletes a task after you approve it |
-| `compute_stats` | [compute_stats.ts](agent/tools/compute_stats.ts) | Computes statistics for a list of numbers in Python |
-| `analyze_text` | [analyze_text.ts](agent/tools/analyze_text.ts) | Measures length, readability, and reading time of text in Python |
-| `render_ui` | [render_ui.ts](agent/tools/render_ui.ts) | Shows answers as UI built from the [component catalog](#add-a-component-the-agent-can-render) |
-| `ask_question` | [ask_question.ts](agent/tools/ask_question.ts) | Asks the person a question with options and waits for the answer |
+| Tool            | File                                             | What it does                                                                                  |
+| --------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `list_tasks`    | [list_tasks.ts](agent/tools/list_tasks.ts)       | Lists tasks from the backend, open tasks first                                                |
+| `create_task`   | [create_task.ts](agent/tools/create_task.ts)     | Adds a task                                                                                   |
+| `update_task`   | [update_task.ts](agent/tools/update_task.ts)     | Renames a task, changes its notes, or marks it completed                                      |
+| `delete_task`   | [delete_task.ts](agent/tools/delete_task.ts)     | Deletes a task after you approve it                                                           |
+| `compute_stats` | [compute_stats.ts](agent/tools/compute_stats.ts) | Computes statistics for a list of numbers in Python                                           |
+| `analyze_text`  | [analyze_text.ts](agent/tools/analyze_text.ts)   | Measures length, readability, and reading time of text in Python                              |
+| `render_ui`     | [render_ui.ts](agent/tools/render_ui.ts)         | Shows answers as UI built from the [component catalog](#add-a-component-the-agent-can-render) |
+| `ask_question`  | [ask_question.ts](agent/tools/ask_question.ts)   | Asks the person a question with options and waits for the answer                              |
 
 To remove a tool, delete its file and remove it from `agent/instructions.md`. If the tool has a card, remove its entry from `CARD_RENDERERS` in [tool-cards.tsx](apps/web/app/_components/tool-cards.tsx).
 
@@ -258,17 +258,17 @@ In `agent/channels/eve.ts`, remove `passwordAuth` and add `none()` from `eve/cha
 
 ## Customize the chat interface
 
-| Change | Location |
-| --- | --- |
-| Agent name on the home page | `AGENT_NAME` in [agent-chat.tsx](apps/web/app/_components/agent-chat.tsx) |
-| Page titles and description, and the logo's label | `metadata` in [layout.tsx](apps/web/app/layout.tsx) and each page, and the logo link in `layout.tsx` |
-| Header links to the **Chat**, **Tasks**, **Backend**, and **API** pages | `links` in [nav.tsx](apps/web/components/nav.tsx) |
-| Logo | [logo-mark.tsx](apps/web/components/logo-mark.tsx) and [icon.svg](apps/web/app/icon.svg) |
-| Messages, tool calls, questions, and approvals | [agent-message.tsx](apps/web/app/_components/agent-message.tsx) |
-| Cards for task and Python tool results | [tool-cards.tsx](apps/web/app/_components/tool-cards.tsx) |
-| Tasks page | [apps/web/app/tasks/](apps/web/app/tasks/) |
-| Sign-in page | [apps/web/app/login/](apps/web/app/login/) |
-| Colors for light and dark mode, including the `--success`, `--info`, and `--warning` status colors on cards | [globals.css](apps/web/app/globals.css) |
+| Change                                                                                                      | Location                                                                                             |
+| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Agent name on the home page                                                                                 | `AGENT_NAME` in [agent-chat.tsx](apps/web/app/_components/agent-chat.tsx)                            |
+| Page titles and description, and the logo's label                                                           | `metadata` in [layout.tsx](apps/web/app/layout.tsx) and each page, and the logo link in `layout.tsx` |
+| Header links to the **Chat**, **Tasks**, **Backend**, and **API** pages                                     | `links` in [nav.tsx](apps/web/components/nav.tsx)                                                    |
+| Logo                                                                                                        | [logo-mark.tsx](apps/web/components/logo-mark.tsx) and [icon.svg](apps/web/app/icon.svg)             |
+| Messages, tool calls, questions, and approvals                                                              | [agent-message.tsx](apps/web/app/_components/agent-message.tsx)                                      |
+| Cards for task and Python tool results                                                                      | [tool-cards.tsx](apps/web/app/_components/tool-cards.tsx)                                            |
+| Tasks page                                                                                                  | [apps/web/app/tasks/](apps/web/app/tasks/)                                                           |
+| Sign-in page                                                                                                | [apps/web/app/login/](apps/web/app/login/)                                                           |
+| Colors for light and dark mode, including the `--success`, `--info`, and `--warning` status colors on cards | [globals.css](apps/web/app/globals.css)                                                              |
 
 To add a shadcn/ui component, run the shadcn CLI with `-c apps/web`. The web app has no `package.json` of its own, so check that any dependency the component needs lands in the root `package.json`:
 
@@ -298,14 +298,14 @@ See [eve's Vercel Sandbox documentation](https://eve.dev/docs/sandbox/vercel) fo
 
 ## Remove features
 
-| Feature | Files to remove or change |
-| --- | --- |
-| Tasks | Remove the four task tools in `agent/tools/`, `agent/lib/tasks.ts`, `apps/web/app/tasks/`, `apps/api/routers/tasks.py`, `apps/api/models/task.py`, and `apps/api/tests/test_tasks.py`. Then remove the task router from `apps/api/main.py`, the task models from `apps/api/models/__init__.py`, the `Task` export from `apps/web/lib/backend.ts`, the task cards and their imports from `tool-cards.tsx`, the Tasks section of `agent/instructions.md`, and the Tasks link in `nav.tsx` |
-| Python tools | Remove `agent/tools/compute_stats.ts`, `agent/tools/analyze_text.ts`, `agent/lib/python-tools.ts`, `apps/api/routers/tools.py`, and `apps/web/components/stats-form.tsx`. Then remove the tools router from `apps/api/main.py`, the `/tools` tests from `apps/api/tests/test_api.py`, the statistics cards and their imports from `tool-cards.tsx`, the Python tools section of `agent/instructions.md`, and the statistics card on the Backend page |
-| Questions | Remove `agent/tools/ask_question.ts` |
-| Web search and fetching | Add `agent/tools/web_search.ts` and `agent/tools/web_fetch.ts`, each exporting `disableTool()` |
-| Sandbox tools | Add `agent/tools/bash.ts`, `agent/tools/read_file.ts`, and `agent/tools/write_file.ts`, each exporting `disableTool()` |
-| Password | Follow [Use your own sign-in](#use-your-own-sign-in) or [Make the app public](#make-the-app-public) |
+| Feature                 | Files to remove or change                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tasks                   | Remove the four task tools in `agent/tools/`, `agent/lib/tasks.ts`, `apps/web/app/tasks/`, `apps/api/routers/tasks.py`, `apps/api/models/task.py`, and `apps/api/tests/test_tasks.py`. Then remove the task router from `apps/api/main.py`, the task models from `apps/api/models/__init__.py`, the `Task` export from `apps/web/lib/backend.ts`, the task cards and their imports from `tool-cards.tsx`, the Tasks section of `agent/instructions.md`, and the Tasks link in `nav.tsx` |
+| Python tools            | Remove `agent/tools/compute_stats.ts`, `agent/tools/analyze_text.ts`, `agent/lib/python-tools.ts`, `apps/api/routers/tools.py`, and `apps/web/components/stats-form.tsx`. Then remove the tools router from `apps/api/main.py`, the `/tools` tests from `apps/api/tests/test_api.py`, the statistics cards and their imports from `tool-cards.tsx`, the Python tools section of `agent/instructions.md`, and the statistics card on the Backend page                                    |
+| Questions               | Remove `agent/tools/ask_question.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Web search and fetching | Add `agent/tools/web_search.ts` and `agent/tools/web_fetch.ts`, each exporting `disableTool()`                                                                                                                                                                                                                                                                                                                                                                                          |
+| Sandbox tools           | Add `agent/tools/bash.ts`, `agent/tools/read_file.ts`, and `agent/tools/write_file.ts`, each exporting `disableTool()`                                                                                                                                                                                                                                                                                                                                                                  |
+| Password                | Follow [Use your own sign-in](#use-your-own-sign-in) or [Make the app public](#make-the-app-public)                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Test and deploy your changes
 

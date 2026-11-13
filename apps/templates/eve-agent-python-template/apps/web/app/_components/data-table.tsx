@@ -60,10 +60,10 @@ export function DataTable({
             header,
             id: `${index}:${header}`,
             sortFn: "alphanumeric",
-          })
-        )
+          }),
+        ),
       ),
-    [columns]
+    [columns],
   );
   const data = useMemo(() => [...rows], [rows]);
   const table = useTable({ columns: tableColumns, data, features });
@@ -92,9 +92,7 @@ export function DataTable({
                       <table.FlexRender header={header} />
                       <SortIcon
                         className={
-                          sorted === "none"
-                            ? "size-3.5 opacity-40"
-                            : "text-foreground size-3.5"
+                          sorted === "none" ? "size-3.5 opacity-40" : "text-foreground size-3.5"
                         }
                       />
                     </button>
@@ -117,9 +115,7 @@ export function DataTable({
         </tbody>
       </table>
       {caption === null ? null : (
-        <p className="text-muted-foreground border-t px-3 py-2 text-xs">
-          {caption}
-        </p>
+        <p className="text-muted-foreground border-t px-3 py-2 text-xs">{caption}</p>
       )}
     </div>
   );

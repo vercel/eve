@@ -41,8 +41,7 @@ function Links({ pathname }: { readonly pathname: string | null }) {
   return (
     <div className="flex items-center gap-1">
       {links.map(({ href, label }) => {
-        const active =
-          pathname !== null && (href === "/" ? onChat : pathname.startsWith(href));
+        const active = pathname !== null && (href === "/" ? onChat : pathname.startsWith(href));
         const props = {
           "aria-current": active ? ("page" as const) : undefined,
           className: cn(

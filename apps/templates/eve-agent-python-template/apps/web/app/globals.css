@@ -119,13 +119,8 @@ body {
   font-family: var(--font-sans);
 }
 
-
 .is-user [data-streamdown="inline-code"] {
-  background-color: color-mix(
-    in oklab,
-    var(--primary-foreground) 15%,
-    transparent
-  );
+  background-color: color-mix(in oklab, var(--primary-foreground) 15%, transparent);
 }
 
 @utility scrollbar-thin {

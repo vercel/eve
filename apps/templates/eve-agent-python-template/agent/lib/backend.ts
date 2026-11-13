@@ -53,12 +53,11 @@ export async function backendRequest<T>(path: string, request: BackendRequest = 
   }
 
   const hasBody = request.body !== undefined;
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (hasBody) headers["content-type"] = "application/json";
   const response = await fetch(url, {
     method: request.method ?? (hasBody ? "POST" : "GET"),
-    headers: {
-      accept: "application/json",
-      ...(hasBody ? { "content-type": "application/json" } : {}),
-    },
+    headers,
     body: hasBody ? JSON.stringify(request.body) : undefined,
   });
 
