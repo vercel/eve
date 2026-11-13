@@ -1,8 +1,8 @@
 /**
  * The page a Recall bot streams as its camera and microphone. It plays the
  * agent's speech from `voice/stream`, draws a dot-matrix waveform that follows
- * the meeting while people talk and eve's own voice while it speaks, and stops
- * talking when someone in the meeting talks over it.
+ * the meeting while people talk and eve's own voice while it speaks, shows when
+ * eve is thinking, and stops talking when someone in the meeting talks over it.
  */
 export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
 <html lang="en">
@@ -13,9 +13,9 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0a0a; color: #ededed;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   #wave { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-  #name { position: fixed; top: 28px; left: 32px; font-size: 22px; font-weight: 600;
+  #name { position: fixed; top: 32px; left: 40px; font-size: 34px; font-weight: 600;
     letter-spacing: -0.04em; color: #a1a1a1; }
-  #status { position: fixed; bottom: 24px; width: 100%; text-align: center; font-size: 18px; color: #555; }
+  #status { position: fixed; bottom: 32px; width: 100%; text-align: center; font-size: 26px; color: #555; }
 </style>
 </head>
 <body>
@@ -110,9 +110,12 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
 
   // Dot-matrix waveform. Each column is the loudness from a moment ago, so speech
   // scrolls out from the right edge. Gray while the meeting talks, white with blue
-  // tips while eve speaks, a dim breathing center line when it's quiet.
-  const GAP = 14;
+  // tips while eve speaks, a blue glow sweeping the center while eve thinks, and a
+  // dim breathing center line when it's quiet. Faint ripples spread from the
+  // center throughout. The grid is coarse so it still reads in a small video tile.
+  const GAP = 26;
   const HISTORY_RATE = 40;
+  const RIPPLE_PERIOD = 7;
   const WHITE = [237, 237, 237];
   const BLUE = [0, 112, 243];
   const GRAY_400 = [143, 143, 143];
@@ -121,13 +124,14 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
   const outputSamples = new Float32Array(output.fftSize);
   const meetingSamples = new Float32Array(1024);
   const history = new Float32Array(256);
-  const weights = { idle: 1, listening: 0, speaking: 0 };
+  const weights = { idle: 1, listening: 0, thinking: 0, speaking: 0 };
   let head = 0;
   let historyClock = 0;
   let levels = new Float32Array(0);
   let meetingLevel = 0;
   let outputLevel = 0;
   let heardAt = -Infinity;
+  let thinking = false;
   let width = 0;
   let height = 0;
   let last = performance.now();
@@ -151,6 +155,12 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     return current + (target - current) * (1 - Math.exp(-dt * rate));
   }
 
+  function currentState(now) {
+    if (playing !== null) return "speaking";
+    if (now - heardAt < 600) return "listening";
+    return thinking ? "thinking" : "idle";
+  }
+
   function tick(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -163,7 +173,7 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     }
     if (meetingLevel > 0.08) heardAt = now;
 
-    const state = playing !== null ? "speaking" : now - heardAt < 600 ? "listening" : "idle";
+    const state = currentState(now);
     const ease = 1 - Math.exp(-dt * 4.5);
     for (const key in weights) weights[key] += ((key === state ? 1 : 0) - weights[key]) * ease;
 
@@ -178,42 +188,72 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     requestAnimationFrame(tick);
   }
 
+  // How much a ring spreading from the center lights a dot that far away, 0 to 1.
+  function ripple(distance, maxDistance, t) {
+    let glow = 0;
+    for (const offset of [0, RIPPLE_PERIOD / 2]) {
+      const phase = ((t + offset) % RIPPLE_PERIOD) / RIPPLE_PERIOD;
+      const ring = (distance - phase * maxDistance) / (GAP * 1.6);
+      glow += Math.exp(-ring * ring) * (1 - phase) * (1 - phase);
+    }
+    return glow;
+  }
+
   function draw(t) {
     ctx.clearRect(0, 0, width, height);
-    const cols = Math.floor((width - GAP * 2) / GAP);
-    const rows = Math.floor((height - GAP * 2) / GAP) | 1;
+    const cols = Math.floor((width - GAP) / GAP);
+    const rows = Math.floor((height - GAP) / GAP) | 1;
     const left = (width - (cols - 1) * GAP) / 2;
     const top = (height - (rows - 1) * GAP) / 2;
     const mid = (rows - 1) / 2;
+    const maxDistance = Math.hypot(width, height) / 2;
     if (levels.length !== cols) levels = new Float32Array(cols);
     const active = weights.listening + weights.speaking;
     const lit = mix(GRAY_400, WHITE, weights.speaking);
     const tip = mix(lit, BLUE, weights.speaking * 0.9);
-    const dot = GAP / 9;
+    const thinkGlow = mix(BLUE, WHITE, 0.25);
+    // The thinking glow sweeps back and forth across the middle rows.
+    const sweep = 0.5 + 0.42 * Math.sin(t * 1.7);
+    const rippleStrength = 0.22 * (1 - weights.speaking * 0.6);
+    const dot = GAP * 0.13;
 
     for (let c = 0; c < cols; c++) {
-      const x = c / (cols - 1);
+      const x = cols > 1 ? c / (cols - 1) : 0.5;
       const envelope = Math.pow(Math.sin(Math.PI * x), 0.7);
-      const ago = Math.floor((cols - 1 - c) * 0.55);
+      const ago = Math.floor((cols - 1 - c) * 0.9);
       const sample = history[(head - 1 - ago + history.length * 4) % history.length];
       levels[c] += (clamp01(sample * envelope * 1.25) * active - levels[c]) * 0.35;
       const reach = levels[c] * mid;
       const idleGlow = weights.idle * (0.25 + 0.12 * Math.sin(t * 1.4 + (1 - Math.abs(x - 0.5) * 2) * 3));
+      const along = (x - sweep) * cols / 5;
+      const think = weights.thinking * Math.exp(-along * along) * (0.75 + 0.25 * Math.sin(t * 6 + c));
+      const px = left + c * GAP;
 
       for (let r = 0; r < rows; r++) {
         const dy = Math.abs(r - mid);
+        const py = top + r * GAP;
         let color = GRAY_900;
-        let alpha = 0.55;
-        let size = 1.2 * dot;
+        let alpha = 0.6;
+        let radius = dot;
         const on = clamp01(reach + 0.6 - dy);
         if (on > 0) {
           color = mix(GRAY_900, dy > reach - 1.2 ? tip : lit, on);
-          alpha = 0.55 + on * 0.45;
-          size = (1.2 + on * 0.5) * dot;
+          alpha = 0.6 + on * 0.4;
+          radius = dot * (1 + on * 0.35);
         }
         if (dy < 0.5) color = mix(color, GRAY_400, idleGlow);
+        const thought = think * clamp01(1.6 - dy * 0.55);
+        if (thought > 0.01) {
+          color = mix(color, thinkGlow, thought);
+          alpha = Math.max(alpha, 0.6 + thought * 0.4);
+          radius = Math.max(radius, dot * (1 + thought * 0.3));
+        }
+        const wave = rippleStrength * ripple(Math.hypot(px - width / 2, py - height / 2), maxDistance, t);
+        if (wave > 0.005) color = mix(color, GRAY_400, wave);
         ctx.fillStyle = rgba(color, alpha);
-        ctx.fillRect(left + c * GAP - size / 2, top + r * GAP - size / 2, size, size);
+        ctx.beginPath();
+        ctx.arc(px, py, radius, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
   }
@@ -257,6 +297,7 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
         const message = JSON.parse(line);
         if (message.type === "cursor") cursor = message.cursor;
         else if (message.type === "say") enqueue(message);
+        else if (message.type === "turn") thinking = message.thinking;
       }
     }
   }

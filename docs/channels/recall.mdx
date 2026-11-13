@@ -144,7 +144,7 @@ The default `content.completed` handler posts each reply to the meeting chat, in
 
 The bot doesn't take private chat messages. Everyone in the meeting shares one session, so anything the agent reads stays in history that any participant can ask about later. When someone sends the bot a private Zoom chat message, the bot replies privately that it can't take private messages, and the message never reaches the session or `onMeetingEvent`.
 
-Webex bots can't send chat messages. The channel replies only in text; it doesn't speak. To have the bot answer out loud, stream a page with Output Media that plays the agent's replies, as the [voice meeting example](https://github.com/vercel/eve/tree/main/examples/recall-voice-meeting) does. See [Extra routes](#extra-routes).
+Webex bots can't send chat messages. The channel replies only in text; it doesn't speak. To have the bot answer out loud, stream a page with Output Media that plays the agent's replies, as the [eve Meeting Assistant template](https://github.com/vercel/eve/tree/main/apps/templates/eve-meeting-assistant-template) does. See [Extra routes](#extra-routes).
 
 ### Overlapping messages
 

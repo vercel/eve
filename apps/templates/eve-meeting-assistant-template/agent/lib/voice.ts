@@ -9,8 +9,9 @@ import {
 import { gateway, generateSpeech } from "ai";
 import { GET, type RouteDefinition, type RouteHandlerArgs } from "eve/channels";
 
-import { isChatLine, readReplyMode, replyModeOf, type ReplyMode } from "./reply-mode";
-import { VOICE_PAGE_HTML } from "./voice-page";
+import { isChatLine, readReplyMode, replyModeOf, type ReplyMode } from "./reply-mode.js";
+import { VOICE_ENABLED } from "./voice-mode.js";
+import { VOICE_PAGE_HTML } from "./voice-page.js";
 
 /** Bot metadata key holding the secret in the bot's voice page URL. */
 const VOICE_KEY = "eve_voice_key";
@@ -20,12 +21,12 @@ const SPEECH_VOICE = process.env.VOICE_SPEECH_VOICE ?? "alloy";
 const MAX_SEGMENT_CHARS = 240;
 
 /**
- * The `POST /bot/` body for a bot that speaks: the channel's config plus an
+ * The `POST /bot/` body for the meeting bot: the channel's config plus an
  * Output Media page at `<webhook route>/voice`. The page URL carries a random
  * key, stored in the bot's metadata, that the page trades for the bot's
  * session. The webhook URL's query, such as a protection bypass, carries over.
  */
-export function voiceBotConfig(input: {
+export function meetingBotConfig(input: {
   readonly meetingUrl: string;
   readonly greeting?: string;
 }): Record<string, unknown> {
@@ -61,9 +62,10 @@ export function voiceRoutes(route = "/eve/v1/recall"): RouteDefinition<RecallCha
 }
 
 /**
- * Follows the meeting's session and answers with NDJSON: each sentence the
- * agent writes, synthesized as MP3, in order. `cursor` resumes after the last
- * line the page saw; a first connect starts at the session's tail.
+ * Follows the meeting's session and answers with NDJSON: when a turn starts
+ * and settles, and, with voice on, each sentence the agent writes, synthesized
+ * as MP3, in order. `cursor` resumes after the last line the page saw; a first
+ * connect starts at the session's tail.
  */
 async function streamSpeech(
   request: Request,
@@ -100,9 +102,10 @@ async function streamSpeech(
           controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
         });
       };
-      const segmenter = new SpeechSegmenter((turnId, text) =>
-        write(speak(text).then((audio) => ({ audio, text, turnId, type: "say" }))),
-      );
+      const segmenter = new SpeechSegmenter((turnId, text) => {
+        if (VOICE_ENABLED)
+          write(speak(text).then((audio) => ({ audio, text, turnId, type: "say" })));
+      });
 
       // Starting at the tail rereads its last line, which was already played.
       let skipLine: number | undefined;
@@ -112,7 +115,12 @@ async function streamSpeech(
           if (!resuming) skipLine ??= line;
           if (line === skipLine) continue;
 
-          if (event.type === "delivery.consumed") {
+          // The page shows that eve is thinking from when a turn starts until it settles or waits on someone.
+          if (event.type === "turn.started") {
+            write(Promise.resolve({ thinking: true, type: "turn" }));
+          } else if (event.type === "turn.settled" || event.type === "turn.paused") {
+            write(Promise.resolve({ thinking: false, type: "turn" }));
+          } else if (event.type === "delivery.consumed") {
             const lines = event.data.parts.flatMap((part) =>
               part.kind === "text" ? [part.text] : [],
             );
