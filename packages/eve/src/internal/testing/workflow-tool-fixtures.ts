@@ -13,6 +13,8 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowStepToolContext, WorkflowToolContext } from "#tools/workflow-definition.js";
+import { stampedWorkflowBody } from "#internal/testing/stamped-workflow-body.js";
+import type { WorkflowBody } from "#tools/workflow-body.js";
 import { defineChannel, POST } from "#public/channels/index.js";
 import {
   ConnectionAuthorizationFailedError,
@@ -199,6 +201,30 @@ export async function waitingForCleanupWorkflow(): Promise<void> {
   await workflowSleep("1h");
 }
 
+/**
+ * `waitingForCleanupWorkflow` in process: it waits an hour, or until its call is stopped, which
+ * on Workflow cancels its run outright. The timer doesn't hold the process open if a test fails
+ * before its call is stopped.
+ */
+export function waitingForCleanupBody(): WorkflowBody {
+  return stampedWorkflowBody(
+    waitingForCleanupWorkflow as (input: unknown, ctx: WorkflowToolContext) => Promise<void>,
+    async (_input: unknown, ctx: WorkflowToolContext) => {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3_600_000).unref();
+        ctx.abortSignal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    },
+  );
+}
+
 export async function answerWithResponderWorkflow(
   _input: DeployInput,
   ctx: WorkflowToolContext,
@@ -214,14 +240,23 @@ export async function answerWithResponderWorkflow(
 }
 
 /** Returns `ctx.ask()`'s answer as-is; a selected option carries `text: undefined`. */
-export async function returnAskAnswerWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
-  "use workflow";
-
+async function returnAskAnswer(_input: DeployInput, ctx: WorkflowToolContext) {
   return await ctx.ask({
     display: "confirmation",
     options: [{ id: "approve", label: "Approve" }],
     prompt: "Apply this change?",
   });
+}
+
+export async function returnAskAnswerWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  return await returnAskAnswer(input, ctx);
+}
+
+/** `returnAskAnswerWorkflow`'s plain body, as the in-process host runs it. */
+export function returnAskAnswerBody(): WorkflowBody {
+  return stampedWorkflowBody(returnAskAnswerWorkflow, returnAskAnswer);
 }
 
 /** Asks two questions at once, so answering one leaves the other pending. */
@@ -326,9 +361,18 @@ export async function receiveDelegatedResultWorkflow(token: string): Promise<unk
   return await result;
 }
 
-export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolContext) {
-  "use workflow";
+async function reportCaller(_input: unknown, ctx: WorkflowToolContext) {
   return { caller: ctx.session.auth.current?.principalId ?? null };
+}
+
+export async function reportCallerWorkflow(input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await reportCaller(input, ctx);
+}
+
+/** `reportCallerWorkflow`'s plain body, as the in-process host runs it. */
+export function reportCallerBody(): WorkflowBody {
+  return stampedWorkflowBody(reportCallerWorkflow, reportCaller);
 }
 
 export async function failingServeWorkflow(): Promise<never> {

@@ -376,13 +376,34 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
  * doesn't have. `undefined` for a rule that runs on both hosts.
  */
 function inProcessGap(rule: string): string | undefined {
-  if (rule.includes("run ended outside eve"))
+  if (rule.includes("run ended"))
     return "it cancels the session's Workflow run, which an in-process session doesn't have";
   return undefined;
 }
 
+/**
+ * The channel whose whole contract also runs on Workflow. Every channel's runs in process; on
+ * Workflow, the others run only the rules the in-process host can't (`inProcessGap`), so each
+ * rule still runs somewhere, and Workflow keeps one channel end to end.
+ *
+ * Web chat's budget-prompt rules can still time out on Workflow: a typed answer and the message
+ * behind it can be joined into one input while the prompt is open (vercel/eve#6307). In process
+ * the two rarely queue together, which hides the bug rather than fixing it.
+ */
+const WORKFLOW_CHANNEL = "web-chat";
+
+/** Whether `rule` of `channel` runs on `host`. */
+function runsOn(
+  host: ConformanceHostKind,
+  channel: keyof typeof channelConformance,
+  rule: string,
+): boolean {
+  if (host === "in-process") return true;
+  return channel === WORKFLOW_CHANNEL || inProcessGap(rule) !== undefined;
+}
+
 /** The hosts each channel's contract runs on. */
-const HOSTS: readonly ConformanceHostKind[] = ["workflow", "in-process"];
+const HOSTS: readonly ConformanceHostKind[] = ["in-process", "workflow"];
 
 /**
  * Declares the channel contract cells for one channel directory. Each channel gets
@@ -396,6 +417,7 @@ export function describeChannelConformance(channel: keyof typeof channelConforma
   );
   describe.each(cases)("$name channel contract ($host)", ({ entry, host }) => {
     for (const rule of channelContract) {
+      if (!runsOn(host, channel, rule.rule)) continue;
       const gap = host === "in-process" ? inProcessGap(rule.rule) : undefined;
       const cell: Cell =
         gap === undefined ? cellOf(entry, rule) : { kind: "unsupported", reason: gap };
