@@ -1,3 +1,4 @@
+// @linux-only: interrupted step adoption
 import { commitOf } from "#harness/session-machine/commit.js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";

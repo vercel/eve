@@ -1,3 +1,4 @@
+// @linux-only: model attempt retry accounting
 import { APICallError, jsonSchema, TypeValidationError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";

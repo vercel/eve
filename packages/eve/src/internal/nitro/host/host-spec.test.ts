@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
@@ -8,11 +8,13 @@ import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
+import { z } from "zod";
 
 const APP_ROOT = "/tmp/weather-agent";
 const DEVELOPMENT: HostMode = { kind: "development" };
@@ -26,6 +28,8 @@ interface AgentVariant {
   readonly sandbox?: "just-bash" | "vercel";
   readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly websocket?: boolean;
+  /** A dynamic schedule collection on Vercel's provider. */
+  readonly dynamicSchedules?: boolean;
 }
 
 async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") {
@@ -46,6 +50,19 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
       logicalPath: "channels/voice.ts",
       loadNamespace: async () => ({
         default: defineChannel({ routes: [WS("/eve/v1/voice/ws", async () => ({ open() {} }))] }),
+      }),
+    });
+  }
+  if (variant.dynamicSchedules === true) {
+    modules.push({
+      logicalPath: "schedules/reminders.ts",
+      loadNamespace: async () => ({
+        default: defineDynamicSchedules({
+          auth: () => null,
+          inputSchema: z.object({ task: z.string() }),
+          run: async () => {},
+          tool: false,
+        }),
       }),
     });
   }
@@ -144,11 +161,31 @@ function spec(
   });
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("createHostSpec", () => {
   it("captures traces locally in dev and adds no other runtime plugin", async () => {
     const development = spec(await compileAgent(), DEVELOPMENT);
     expect(development.runtime.localTracing).toBe(true);
     expect(development.runtimePlugins).toEqual([]);
+  });
+
+  // The consumer needs vc dev's local Queues API, so an agent with only static schedules must boot
+  // without it.
+  it("adds the local schedules consumer under vc dev only for an agent with a Vercel collection", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", "1");
+    const staticOnly = await compileAgent();
+    expect(spec(staticOnly, DEVELOPMENT).runtimePlugins).not.toContain("local-schedules");
+    const dynamic = await compileAgent({ dynamicSchedules: true });
+    expect(dynamic.scheduleCollections?.map(({ providerKind }) => providerKind)).toEqual([
+      "vercel",
+    ]);
+    expect(spec(dynamic, DEVELOPMENT).runtimePlugins).toContain("local-schedules");
+    expect(spec(dynamic, PRODUCTION).runtimePlugins).not.toContain("local-schedules");
   });
 
   it("lets authored instrumentation replace local tracing and wrap the server entry", async () => {

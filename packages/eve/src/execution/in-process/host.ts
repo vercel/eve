@@ -11,6 +11,7 @@ import {
   resumeRoutedHook,
   resumeRoutedSessionInbox,
   type DurableHost,
+  type SignInCallbacks,
 } from "#execution/hosts.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import {
@@ -28,9 +29,14 @@ import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
 import { applyRunMessagesOn } from "#execution/tools/workflow/apply-run-messages.js";
 import { isHookNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
-import { createMemoryInboxRegistry, type MemoryInboxRegistry } from "./inbox-transport.js";
+import {
+  createMemoryInboxRegistry,
+  type DeliveryTiming,
+  type MemoryInboxRegistry,
+} from "./inbox-transport.js";
 import { createMemoryLineStore, type MemoryLineStore } from "./line-store.js";
 import { createInProcessRuns, type InProcessRuns } from "./runs.js";
+import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
@@ -88,6 +94,18 @@ export interface InProcessHostOptions {
    * sign-in back, as a Workflow session outside a run can't.
    */
   readonly callbackBaseUrl?: string;
+  /**
+   * @internal Turn steps that lose their completion, or fail, and run again, as on Workflow.
+   * Only the test hosts in `internal/testing` pass it; production hosts have no faults.
+   */
+  readonly stepFaults?: StepFaults;
+  /** How long disposing waits for running turns to park before it resets their sessions: 5s. */
+  readonly disposeGraceMs?: number;
+  /**
+   * When sessions and runs read what's delivered, and a session the end of its turn step
+   * (`DeliveryTiming`); at once by default.
+   */
+  readonly deliveries?: DeliveryTiming;
 }
 
 export interface InProcessHost {
@@ -101,6 +119,13 @@ export interface InProcessHost {
   readonly sessionHost: SessionHost;
   /** How many of `sessionId`'s turn steps are running now. */
   stepsRunning(sessionId: string): number;
+  /** Counts `work` as in flight here until it settles; see {@link InProcessHost.idle}. */
+  working<T>(work: () => Promise<T>): Promise<T>;
+  /**
+   * Resolves once nothing here is working: no delivery, step or session start is in flight, so
+   * every session and run waits on a message, a person or a timer.
+   */
+  idle(): Promise<void>;
   /** Delivers a command to the session holding `token`. */
   deliverCommand<TCommand extends SessionCommand>(
     token: string,
@@ -119,12 +144,20 @@ export function createInProcessHost(
 ): InProcessHost {
   const lines = createMemoryLineStore();
   const stepBoundary = options.stepBoundary ?? structuredCloneBoundary;
-  const inboxes = createMemoryInboxRegistry(stepBoundary);
+  const work = createWorkCounter();
+  const registry = createMemoryInboxRegistry(stepBoundary, {
+    ...(options.deliveries !== undefined && { deliveries: options.deliveries }),
+  });
+  const inboxes: MemoryInboxRegistry = {
+    ...registry,
+    deliver: (token, payload) => work.count(() => registry.deliver(token, payload)),
+  };
   const timers: InProcessTimers = createInProcessTimers();
   const running = new Map<string, Promise<void>>();
   const steps = new Map<string, number>();
   const releases: (() => void)[] = [];
   const toolStubs = createInProcessToolStubs();
+  const attempts = createStepAttempts(options.stepFaults);
 
   const deliverCommand: InProcessHost["deliverCommand"] = async (token, command) => {
     const identified = identifyCommand(command);
@@ -163,46 +196,65 @@ export function createInProcessHost(
     remote: undefined,
   });
 
+  const signInCallbacks: SignInCallbacks | undefined =
+    options.callbackBaseUrl === undefined
+      ? undefined
+      : { callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""), deliver: deliverRouted };
   const stepHost: SessionStepHost = {
     createRuntime: () => NO_STEP_RUNTIME,
     // Attributes belong to a Workflow run; an in-process session has none.
     setAttributes: async () => {},
     toolStubs,
-    ...(options.callbackBaseUrl !== undefined && {
-      callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""),
-      deliver: deliverRouted,
-    }),
+    ...signInCallbacks,
   };
   const runTurnStep = turnStepOn(stepHost);
 
+  const applyRunMessages = applyRunMessagesOn({
+    // A remote child can't be opened here, so no run reports one.
+    recordRemoteBinding: async () => unavailable("A remote agent"),
+    stopLate,
+  });
+  const dispatchRuns = dispatchCoordinationOn(runs.startRun);
   const sessionHost: SessionHost = {
     toolStubs,
-    applyRunMessages: applyRunMessagesOn({
-      // A remote child can't be opened here, so no run reports one.
-      recordRemoteBinding: async () => unavailable("A remote agent"),
-      stopLate,
-    }),
-    dispatchRuns: dispatchCoordinationOn(runs.startRun),
+    applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
+    dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
     /**
      * One turn step, whose data crosses the host's step boundary each way as it would a
      * deployment's serializer. Its stream and signals are services, which cross as they are.
      */
-    async runTurnStep(input) {
-      const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
-      const { sessionId } = input.sessionState;
-      steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
-      try {
-        const crossed = await acrossStepBoundary(stepBoundary, data);
-        return await acrossStepBoundary(
-          stepBoundary,
-          await runTurnStep({ ...crossed, abortSignal, sessionWritable, steeringSignal }),
-        );
-      } finally {
-        const left = (steps.get(sessionId) ?? 1) - 1;
-        if (left === 0) steps.delete(sessionId);
-        else steps.set(sessionId, left);
-      }
-    },
+    runTurnStep: (input) =>
+      work.count(async () => {
+        const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
+        const { sessionId } = input.sessionState;
+        steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
+        try {
+          // Each attempt receives its own copy of the input and its own writable, as each of a
+          // Workflow step's does.
+          const result = await attempts.run(
+            {
+              name: "turnStep",
+              sessionId,
+              ...(abortSignal !== undefined && { signal: abortSignal }),
+            },
+            async (attempt) => ({
+              ...(await acrossStepBoundary(stepBoundary, data)),
+              abortSignal,
+              sessionWritable: attempts.writable(attempt, sessionWritable),
+              steeringSignal,
+            }),
+            runTurnStep,
+          );
+          return await acrossStepBoundary(stepBoundary, result);
+        } finally {
+          const left = (steps.get(sessionId) ?? 1) - 1;
+          if (left === 0) steps.delete(sessionId);
+          else steps.set(sessionId, left);
+          // On Workflow, a session reads a step's end when its run next replays, with every hook
+          // payload that arrived by then. With batched deliveries, so does this one.
+          await inboxes.heard();
+        }
+      }),
     until: (at) => timers.until(at),
   };
 
@@ -216,6 +268,9 @@ export function createInProcessHost(
       },
       runEnded: (runId) => runs.runEnded(runId),
       cancelRun: (runId, reason) => runs.cancelRun(runId, reason),
+      stepAttempt: () => attempts.current(),
+      // A session's steps outside its turn steps, such as relaying a child's sign-in, call back.
+      signInCallbacks: (sessionId) => (running.has(sessionId) ? signInCallbacks : undefined),
     }),
   );
 
@@ -228,6 +283,8 @@ export function createInProcessHost(
     running,
     sessionHost,
     stepsRunning: (sessionId) => steps.get(sessionId) ?? 0,
+    working: (counted) => work.count(counted),
+    idle: () => work.idle(),
     onDispose(release) {
       releases.push(release);
     },
@@ -235,10 +292,77 @@ export function createInProcessHost(
       // Runs end first, while their sessions still listen, so each session hears its runs' ends
       // instead of waiting out a run that can no longer reach it.
       await runs.stopAll("The in-process host is stopping.");
+      // A turn still running gets a grace to park, as a server's shutdown gives its requests.
+      // One that never does, such as a turn whose runs ended and that keeps calling its model, is
+      // reset: closing its addresses wouldn't stop it.
+      if (!(await restsWithin(work, options.disposeGraceMs ?? DISPOSE_GRACE_MS))) {
+        await Promise.all(
+          [...running.keys()].map((sessionId) =>
+            registry
+              .deliver(
+                sessionCommandHookToken(sessionId),
+                identifyCommand({ deliveryId: `in-process-dispose:${sessionId}`, kind: "reset" }),
+              )
+              .catch(() => {}),
+          ),
+        );
+      }
       inboxes.closeAll();
       await Promise.all(running.values());
       timers.dispose();
       for (const release of releases.splice(0)) release();
+    },
+  };
+}
+
+/** How long disposing waits for running turns to park before it resets their sessions. */
+const DISPOSE_GRACE_MS = 5_000;
+
+/** Whether the host comes to rest within `ms`. */
+async function restsWithin(
+  work: ReturnType<typeof createWorkCounter>,
+  ms: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.idle().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Work in flight on a host, and a wait for none to be. */
+function createWorkCounter() {
+  let inFlight = 0;
+  const waiters = new Set<() => void>();
+  return {
+    async count<T>(work: () => Promise<T>): Promise<T> {
+      inFlight += 1;
+      try {
+        return await work();
+      } finally {
+        inFlight -= 1;
+        if (inFlight === 0) {
+          for (const resolve of waiters) resolve();
+          waiters.clear();
+        }
+      }
+    },
+    async idle(): Promise<void> {
+      // Rest must hold across macrotasks: what settled work starts next is in flight by then.
+      for (let quiet = 0; quiet < 3;) {
+        if (inFlight > 0) {
+          quiet = 0;
+          await new Promise<void>((resolve) => waiters.add(resolve));
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+        quiet = inFlight === 0 ? quiet + 1 : 0;
+      }
     },
   };
 }

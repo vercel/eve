@@ -1,3 +1,4 @@
+// @linux-only: cross-version handoff on Workflow; in-memory history fixtures
 import { expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";

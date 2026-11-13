@@ -1,3 +1,4 @@
+// @linux-only: tool loop cancellation
 import type { SessionEvent } from "#protocol/session-event.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel } from "ai";

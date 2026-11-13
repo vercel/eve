@@ -23,6 +23,17 @@ function readWorkflowCode(buildDir: string): Promise<string> {
   return readFile(join(buildDir, "workflows.code.txt"), "utf8");
 }
 
+/** The production server's bundled modules, joined. */
+async function readServerSources(outputDir: string): Promise<string> {
+  const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
+  const sources = await Promise.all(
+    serverFiles
+      .filter((file) => file.endsWith(".mjs"))
+      .map((file) => readFile(join(outputDir, "server", file), "utf8")),
+  );
+  return sources.join("\n");
+}
+
 describe("authored workflow scope", () => {
   const scenarioApp = useScenarioApp();
 
@@ -66,39 +77,26 @@ export async function deliver() {
         },
       });
       const appRoot = await realpath(app.appRoot);
-      const workspace = await createApplicationBuildWorkspace(appRoot);
+      // One build: the server run below drives the aliased workflow, so the
+      // driver code the output embeds already proves the aliases resolved.
+      const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
+      const serverSource = await readServerSources(outputDir);
+      expect(serverSource).toContain(ALIAS_MARKER);
+      expect(serverSource).not.toContain('require("@/lib/describe")');
+      const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
       try {
-        const host = await prepareProductionApplicationHost(workspace);
-        const builder = new WorkflowBundleBuilder({
-          agentName: host.compileResult.manifest.config.name,
-          appRoot,
-          compiledArtifactsBootstrapPath: host.compiledArtifacts.bootstrapPath,
-          outDir: workspace.workflow.buildDir,
-          rootDir: resolvePackageRoot(),
-          authoredWorkflowModules: host.compiledArtifacts.authoredWorkflowModules,
+        expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
+        const response = await fetch(new URL("/workflow-api", server.url), {
+          signal: AbortSignal.timeout(30_000),
         });
-        await builder.build();
-        const code = await readWorkflowCode(workspace.workflow.buildDir);
-        expect(code).toContain(ALIAS_MARKER);
-        expect(code).not.toContain('require("@/lib/describe")');
-        await buildApplication(appRoot, { skipSandboxPrewarm: false });
-        const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
-        try {
-          expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
-          const response = await fetch(new URL("/workflow-api", server.url), {
-            signal: AbortSignal.timeout(30_000),
-          });
-          expect(response.status).toBe(200);
-          expect(await response.json()).toEqual({
-            marker: ALIAS_MARKER,
-            returnedUndefined: true,
-            payload: "approved",
-          });
-        } finally {
-          await server.close();
-        }
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          marker: ALIAS_MARKER,
+          returnedUndefined: true,
+          payload: "approved",
+        });
       } finally {
-        await removeApplicationBuildWorkspace(workspace);
+        await server.close();
       }
     },
   );
@@ -172,15 +170,10 @@ export async function deliver() {
     });
     const appRoot = join(await realpath(app.appRoot), input.member);
     const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
-    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
-    const serverCode = await Promise.all(
-      serverFiles
-        .filter((file) => file.endsWith(".mjs"))
-        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
-    );
-    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
+    const serverSource = await readServerSources(outputDir);
+    expect(serverSource).toContain(STEP_ASSET_MARKER);
     // The host bundles the driver code as a plain string, so the marker appears in the output.
-    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
+    expect(serverSource).toContain(WORKFLOW_ASSET_MARKER);
   });
 
   // The host and workflow bundles leave dependency imports to the host bundler,
@@ -208,13 +201,8 @@ export async function deliver() {
     const outputDir = await buildApplication(await realpath(app.appRoot), {
       skipSandboxPrewarm: false,
     });
-    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
-    const serverCode = await Promise.all(
-      serverFiles
-        .filter((file) => file.endsWith(".mjs"))
-        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
-    );
-    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
-    expect(serverCode.some((code) => code.includes(WORKFLOW_ASSET_MARKER))).toBe(true);
+    const serverSource = await readServerSources(outputDir);
+    expect(serverSource).toContain(STEP_ASSET_MARKER);
+    expect(serverSource).toContain(WORKFLOW_ASSET_MARKER);
   });
 });
