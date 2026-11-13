@@ -58,7 +58,14 @@ export default {
     { declaration: await loadDeclaration("zod.d.ts"), input: "zod", outputPath: "index" },
     { input: "zod/v4/core", outputPath: "v4/core" },
     { input: "zod/v3", outputPath: "v3" },
+    { input: "zod/v4/locales/en.js", outputPath: "v4/locales/en" },
   ],
   platform: "neutral",
-  sharedSpecifiers: { zod: "index", "zod/v3": "v3", "zod/v4": "index", "zod/v4/core": "v4/core" },
+  sharedSpecifiers: {
+    zod: "index",
+    "zod/v3": "v3",
+    "zod/v4": "index",
+    "zod/v4/core": "v4/core",
+    "zod/v4/locales/en.js": "v4/locales/en",
+  },
 };

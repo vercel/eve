@@ -1,4 +1,5 @@
 import { decideWithMetadata } from "#ai/decision-adapter.js";
+import type { DecisionQuestion } from "#ai/decision-types.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { AssertionCollector } from "#evals/assertions/collector.js";
 import { formatDiagnosticValue, toDiagnosticMetadataValue } from "#evals/diagnostics.js";
@@ -59,7 +60,7 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
       (async () => {
         const capturedState = structuredClone(state);
         const capturedQuestions = structuredClone(questions);
-        const decisionQuestions = Object.fromEntries(
+        const decisionQuestions: Record<string, DecisionQuestion> = Object.fromEntries(
           Object.entries(capturedQuestions).map(([id, question]) => {
             if (question.type !== "choice") return [id, question];
             const { expected, ...decisionQuestion } = question;

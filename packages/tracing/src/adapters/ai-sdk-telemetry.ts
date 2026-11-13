@@ -8,7 +8,7 @@ import type {
 } from "../operations.js";
 import { modelContent, modelUsage } from "./ai-sdk-payload.js";
 
-type Event<K extends keyof Telemetry> = Parameters<NonNullable<Telemetry[K]>>[0];
+type Event<K extends keyof Telemetry & `on${string}`> = Parameters<NonNullable<Telemetry[K]>>[0];
 
 export interface AiSdkTelemetryOptions {
   /** The turn a generation records. Called once per AI SDK call. */

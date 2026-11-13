@@ -57,6 +57,8 @@ export const decisionModel: Exclude<Experimental_DecisionModel, string> = {
     if (serialized.includes("service unavailable")) {
       throw new Error("Decision service unavailable.");
     }
+    const route = questions.route;
+    if (route?.type !== "choice") throw new Error("The fixture decides only the route choice.");
     const choice = serialized.includes("difficult") ? "openai/large" : "openai/small";
     return {
       answers: {
@@ -64,7 +66,7 @@ export const decisionModel: Exclude<Experimental_DecisionModel, string> = {
           type: "choice",
           choice,
           probabilities: Object.fromEntries(
-            Object.keys(questions.route!.criteria!).map((key) => [key, key === choice ? 1 : 0]),
+            Object.keys(route.criteria).map((key) => [key, key === choice ? 1 : 0]),
           ),
         },
       },

@@ -15,10 +15,10 @@
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
     "@eve/agent-browser": "workspace:*",
-    "@vercel/connect": "2.2.0",
+    "@vercel/connect": "2.9.2",
     "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
-    "just-bash": "3.1.0",
+    "just-bash": "3.6.0",
     "zod": "catalog:"
   },
   "devDependencies": {

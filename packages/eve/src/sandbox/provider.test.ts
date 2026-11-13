@@ -226,7 +226,15 @@ describe("public sandbox types", () => {
   });
 
   it("keeps SandboxSession assignable to the AI SDK sandbox session", () => {
-    expectTypeOf<SandboxSession>().toExtend<Omit<Experimental_SandboxSession, "description">>();
+    // AI SDK 7.0.172 added `stat`, `listDirectory`, and `deleteFile`, and
+    // overloads `spawn` so `stdin: true` returns a required `stdin`. eve
+    // sessions do not offer those yet; the remaining members stay compatible.
+    expectTypeOf<SandboxSession>().toExtend<
+      Omit<
+        Experimental_SandboxSession,
+        "description" | "stat" | "listDirectory" | "deleteFile" | "spawn"
+      >
+    >();
   });
 
   it("keeps SandboxNetworkPolicy within the Vercel Sandbox network policy shape", () => {

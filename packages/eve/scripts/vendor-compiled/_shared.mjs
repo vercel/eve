@@ -138,12 +138,12 @@ export function createDeclarationCopier({
       for (const specifier of collectRelativeDeclarationReferences(sourceText)) {
         const candidates = /\.d\.[cm]?ts$/u.test(specifier)
           ? [specifier]
-          : /\.[cm]?js$/u.test(specifier)
+          : /\.[cm]?[jt]s$/u.test(specifier)
             ? [
                 specifier
-                  .replace(/\.js$/u, ".d.ts")
-                  .replace(/\.mjs$/u, ".d.mts")
-                  .replace(/\.cjs$/u, ".d.cts"),
+                  .replace(/\.[jt]s$/u, ".d.ts")
+                  .replace(/\.m[jt]s$/u, ".d.mts")
+                  .replace(/\.c[jt]s$/u, ".d.cts"),
               ]
             : [`${specifier}.d.ts`, `${specifier}/index.d.ts`];
         let resolved;

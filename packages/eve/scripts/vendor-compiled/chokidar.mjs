@@ -1,8 +1,8 @@
 import { loadDeclaration } from "./_shared.mjs";
 
 /**
- * Vendor config for `chokidar` v5. v5 dropped the optional `fsevents`
- * native binding (already gone in v4) and relies entirely on `fs.watch`,
+ * Vendor config for `chokidar` v6. It has no optional `fsevents` native
+ * binding (gone since v4) and relies entirely on `fs.watch`,
  * so the bundle has no native dependencies to stub. `readdirp` is the
  * only transitive dependency and rolldown's normal graph walk inlines it.
  *
