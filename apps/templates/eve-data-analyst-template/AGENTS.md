@@ -50,7 +50,7 @@ Prefer native integrations. When installation is part of the task, use `pnpm exe
 
 ## Implementation conventions
 
-Keep files in `agent/tools/` to one-line re-exports, with behavior in `agent/lib/`. The filename exemption for `agent/tools/*.ts` in `oxlint.config.ts` exists because eve names tools after their files.
+Keep files in `agent/tools/` to one-line re-exports, with behavior in `agent/lib/`. The filename exemption for `agent/tools/*.ts` in `lint.config.ts` exists because eve names tools after their files.
 
 Modules the setup scripts import run under Node's built-in type stripping, so they and everything they import must use `#lib/...` or `#scripts/...` imports and erasable TypeScript syntax only. This covers `agent/lib/analyst/` (except `approval*.ts` and `thread-role*.ts`), `agent/lib/json.ts`, `agent/lib/slack-ids.ts`, `agent/lib/slack-text.ts`, `agent/lib/values.ts`, and `scripts/`. Eval files follow eve's docs and use `.js` specifiers for relative imports.
 
@@ -105,7 +105,7 @@ Each layer below works on its own, so keep every one of them complete:
 
 `pnpm dev` opens eve's terminal chat as the `local-dev` principal, which gets `ANALYST_DEFAULT_ROLE` and can answer its own approval prompts. Local sessions use `just-bash`, skip Slack profile lookups, and keep memory while the server runs. Slack tables and charts post in Slack threads.
 
-The hosted agent uses Vercel Sandbox and stores memory in a private Vercel Blob store. The Slack channel requires `SLACK_CONNECTOR`, so `pnpm exec eve info`, `pnpm build`, and `pnpm eval` fail when it is unset; use `slack/placeholder` when only checking compilation. Database settings are validated when a tool first runs, so builds succeed before the database is configured.
+The hosted agent uses Vercel Sandbox and stores memory in a private Vercel Blob store. The Slack channel uses `SLACK_CONNECTOR`, falling back to `slack/placeholder` so compilation works before Slack is configured. Slack delivery still needs a real connector. Database settings are validated when a tool first runs, so builds succeed before the database is configured.
 
 Use the Vercel CLI for project configuration and deployment instructions, including `vercel deploy --prod` and `vercel env add`. Provisioning services or deploying the agent is separate from checking code and documentation.
 
@@ -128,6 +128,8 @@ Write for a person using the template:
 Verify behavior against code and current CLI help, and reread each section as a whole for contradictions and repetition.
 
 ## Validation
+
+`pnpm check` and `pnpm fix` use `lint.config.ts` explicitly to keep its Ultracite rules separate from monorepo linting. `.oxfmtrc.json` contains the resolved Ultracite formatting preset so root tooling needs no template dependencies. Keep it in sync when upgrading Ultracite. Git hooks are opt-in: run `pnpm exec lefthook install` only from a standalone checkout, never from the eve monorepo.
 
 Choose checks that establish the changed behavior. Tests live beside their implementations under `agent/` and `scripts/`.
 

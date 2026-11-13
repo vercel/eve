@@ -7,7 +7,6 @@ import type {
   SlackMessage,
 } from "eve/channels/slack";
 
-import { requireEnv } from "../../utils/env";
 import { isString } from "../../values";
 import {
   createSlackIdentityResolver,
@@ -232,7 +231,7 @@ export const createSlackInboundHandlers = ({
  *
  * @param config - Native channel overrides and optional reply or approval presentation settings.
  * @returns A channel definition with authenticated inbound routing and shared event renderers.
- * @throws {@link Error} When SLACK_CONNECTOR is missing.
+ * @remarks Without SLACK_CONNECTOR, compilation uses slack/placeholder; Slack delivery still requires a configured connector.
  * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name.
  */
 export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
@@ -258,7 +257,7 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
       threadContext,
     }),
     credentials: connectSlackCredentials(
-      requireEnv("SLACK_CONNECTOR", "slack/your-agent")
+      process.env.SLACK_CONNECTOR ?? "slack/placeholder"
     ),
     // Caller renderers stay outermost so they can wrap the shared rendering.
     renderers: [

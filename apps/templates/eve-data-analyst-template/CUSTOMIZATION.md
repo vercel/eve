@@ -21,6 +21,8 @@ Choose the task you want to complete:
 
 ## Change environment variables
 
+`SLACK_CONNECTOR` selects the Vercel Connect Slack connector. It defaults to `slack/placeholder` for compilation without credentials; configure a real connector before sending or receiving Slack messages.
+
 You can customize the agent's behavior and features with environment variables. For local development, add them to `.env.local` in the project folder. For the deployed agent, add each one to your Vercel project with `vercel env add` followed by its name:
 
 ```sh

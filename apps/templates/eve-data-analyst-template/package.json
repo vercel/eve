@@ -19,9 +19,8 @@
     "db:setup-sql": "node --env-file-if-exists=.env.local scripts/setup-sql.ts",
     "db:doctor": "node --env-file-if-exists=.env.local scripts/doctor.ts",
     "typecheck": "tsc",
-    "check": "ultracite check",
-    "fix": "ultracite fix",
-    "prepare": "lefthook install || exit 0",
+    "check": "oxlint --config lint.config.ts && oxfmt --check",
+    "fix": "oxlint --config lint.config.ts --fix && oxfmt --write",
     "test": "vitest run",
     "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run knip",
     "knip": "knip"
