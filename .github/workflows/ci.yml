@@ -192,8 +192,9 @@ jobs:
         with:
           pull: "true"
 
-      # The scenario tier of every package with one. Its public-types scenario
-      # typechecks against the framework apps' installed dependencies.
+      # The scenario tier of every package with one, plus the extension fixture
+      # its scenarios build and the framework apps its public-types scenario
+      # typechecks against.
       - name: Install dependencies
         uses: ./.github/actions/pnpm-install
         with:
@@ -205,6 +206,7 @@ jobs:
             @eve/computer-use...
             @eve/agent-desktop...
             ./e2e/fixtures/agent-self-modification
+            extensions...
             ./apps/frameworks/*
 
       - name: Run scenario tests
