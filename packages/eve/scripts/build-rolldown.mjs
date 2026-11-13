@@ -137,12 +137,18 @@ const EXCLUDED_FILE_PATTERNS = [
   // On-demand web-template generator, not shipped runtime. Mirrors the
   // src/setup/build.ts entry in tsconfig.build.json's exclude.
   /\/setup\/build\.ts$/,
+  // The in-process test host's Workflow serializer boundary; only tests load it. Mirrors
+  // tsconfig.build.json's exclude.
+  /\/execution\/workflow-host\/step-boundary\.ts$/,
 ];
 
-// Subtrees of `src/` that are pure test infrastructure. Mirrors the
-// `exclude` list in `tsconfig.build.json` so the dist tree contains
-// exactly the same set of compilation units the declaration emit covers.
-const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
+// Subtrees of `src/` that are pure test infrastructure, the in-process test host among them.
+// Mirrors the `exclude` list in `tsconfig.build.json` so the dist tree contains exactly the same
+// set of compilation units the declaration emit covers.
+const EXCLUDED_DIRECTORIES = new Set([
+  join("internal", "testing"),
+  join("execution", "in-process"),
+]);
 
 /**
  * Packages externalized at bundle time so rolldown never inlines them
