@@ -7,8 +7,16 @@ const ASIDE = "I think the staging numbers looked fine";
 
 describe("recallChannel listening", () => {
   it("hears talk that isn't addressed to it without a model call or withdrawing an approval", async () => {
+    const heard: (readonly string[])[] = [];
     await withChannelConversation(
-      recallDriver({ overheard: (text) => text === ASIDE }),
+      recallDriver({
+        overheard: (text) => text === ASIDE,
+        // The default: chat, and speech that names the bot.
+        shouldRespond: ({ event, line, transcript }) => {
+          heard.push(transcript);
+          return event.type === "chat" || line.includes("Eve");
+        },
+      }),
       async (conversation) => {
         await conversation.say('Use deploy_release to ship release "v2.4".');
         await conversation.waitForQuestion("Deploy release v2.4 to production?");
@@ -20,6 +28,12 @@ describe("recallChannel listening", () => {
 
         await conversation.say("approve");
         expect(await conversation.waitForToolResult("deploy_release")).toEqual({ deployed: true });
+        await conversation.waitForRest();
+
+        // What it heard while the approval was open reaches its next turn.
+        await conversation.say("What did I miss?");
+        await conversation.waitForReplyTo("What did I miss?");
+        expect(heard.at(-1)).toEqual([`Alice: ${ASIDE}`]);
       },
     );
   }, 60_000);

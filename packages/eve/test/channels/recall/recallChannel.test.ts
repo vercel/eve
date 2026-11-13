@@ -148,6 +148,8 @@ describe("recallChannel webhook", () => {
 });
 
 describe("recallChannel deliver", () => {
+  const durable = new WeakMap<object, Map<string, unknown>>();
+
   async function deliver(
     channel: ReturnType<typeof recallChannel>,
     state: Record<string, unknown>,
@@ -157,9 +159,15 @@ describe("recallChannel deliver", () => {
     const { send } = await post(signed(payload));
     const [, delivery] = send.mock.calls[0]!;
     if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
+    if (!durable.has(state)) durable.set(state, new Map());
+    const values = durable.get(state)!;
+    const ctx = {
+      get: (key: { name: string }) => values.get(key.name),
+      set: (key: { name: string }, value: unknown) => (values.set(key.name, value), value),
+    };
     return await channel.adapter.deliver!(
       { context: delivery.context, message: delivery.message, state: delivery.state },
-      { state } as never,
+      { ctx, state } as never,
     );
   }
 
@@ -172,7 +180,8 @@ describe("recallChannel deliver", () => {
 
     expect(input?.message).toBe("Alice: Eve, file that");
     expect(input?.context?.at(-1)).toContain("Alice: the login page times out");
-    expect(state.transcript).toEqual([]);
+    const next = await deliver(channel, state, "Eve, anything else?");
+    expect(next?.context?.join("\n")).not.toContain("the login page times out");
   });
 
   it("asks shouldRespond with the recent transcript, and falls back to name matching if it throws", async () => {

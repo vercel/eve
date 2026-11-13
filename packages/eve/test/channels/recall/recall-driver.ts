@@ -1,4 +1,4 @@
-import { recallChannel, signRecallWebhook } from "@eve/recall";
+import { type RecallChannelConfig, recallChannel, signRecallWebhook } from "@eve/recall";
 import {
   type ChannelDriver,
   type PlatformCall,
@@ -29,7 +29,7 @@ interface ChatBody {
  * participant privately. Messages `overheard` picks are spoken without naming
  * the bot, as people talking to each other do. Messages `privately` picks are
  * typed to the bot alone. `spoken` phrases a spoken message, by default
- * `Eve, <text>`.
+ * `Eve, <text>`. `shouldRespond` replaces the channel's default.
  */
 export function recallDriver(
   options: {
@@ -38,6 +38,7 @@ export function recallDriver(
     readonly overheard?: (text: string, person: Person) => boolean;
     readonly privately?: (text: string, person: Person) => boolean;
     readonly spoken?: (text: string) => string;
+    readonly shouldRespond?: RecallChannelConfig["shouldRespond"];
   } = {},
 ): ChannelDriver {
   const input = options.input ?? "chat";
@@ -128,6 +129,7 @@ export function recallDriver(
       recallChannel({
         api: { apiBaseUrl: API_BASE_URL, fetch: recordingFetch(record, decode) },
         credentials: { apiKey: API_KEY, verificationSecret: SECRET },
+        shouldRespond: options.shouldRespond,
       }),
     message: (text, person) => message(text, person),
     findOptions(call, prompt) {

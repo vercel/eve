@@ -52,6 +52,12 @@ const MAX_WEBHOOK_BYTES = 256 * 1024;
  * which would otherwise bring the posted messages back.
  */
 const PostedOutboxKey = new ContextKey<number>("recall.posted-outbox");
+/**
+ * Lines the agent heard but didn't answer since its last turn, oldest first.
+ * Durable context, not channel state, because eve restores channel state after
+ * a delivery a held turn ignores.
+ */
+const TranscriptKey = new ContextKey<string[]>("recall.transcript");
 
 /** A `deliver` result with nothing to deliver, so the line starts no turn. */
 const IGNORED = {};
@@ -71,8 +77,6 @@ export interface RecallChannelState extends PromptQueueState {
   botName?: string;
   /** The bot's recent chat messages, newest last, to drop when they echo back under another name. */
   sentChat?: string[];
-  /** Lines the agent heard but didn't answer since its last turn, oldest first. */
-  transcript?: string[];
   /** @internal The request eve's prompt queue last showed, which a typed reply answers. */
   shownPromptId?: string;
   /** The options of the prompt last shown, so a spoken or loosely typed reply can pick one. */
@@ -287,25 +291,25 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       // the name Recall shows and what the bot just sent.
       if (isOwnChat(event, channel.state)) return IGNORED;
 
-      const transcript = channel.state.transcript ?? [];
+      const ctx = adapterContextOf(channel);
+      const transcript = ctx.get(TranscriptKey) ?? [];
       const line = payload.message;
       if (!(await shouldRespond({ botName, event, line, transcript }))) {
         // Between turns the session parks without a model call; during a held
         // turn eve ignores the delivery, so a pending prompt stays open.
-        channel.state.transcript = [...transcript, line].slice(-MAX_TRANSCRIPT_LINES);
+        ctx.set(TranscriptKey, [...transcript, line].slice(-MAX_TRANSCRIPT_LINES));
         return IGNORED;
       }
-      channel.state.transcript = [];
+      const { state: _state, ...delivery } = payload;
       const option =
         "text" in event ? shownOptionIn(channel.state, event.text, botName) : undefined;
-      if (option === undefined && transcript.length === 0) return;
-      const { state: _state, ...delivery } = payload;
+      // An answer resumes the held turn, so what was heard waits for the next one.
+      if (option !== undefined) return { ...delivery, answerText: option.id };
+      if (transcript.length === 0) return;
+      ctx.set(TranscriptKey, []);
       return {
         ...delivery,
-        ...(option !== undefined && { answerText: option.id }),
-        ...(transcript.length > 0 && {
-          context: [...(payload.context ?? []), formatTranscript(transcript)],
-        }),
+        context: [...(payload.context ?? []), formatTranscript(transcript)],
       };
     },
 
