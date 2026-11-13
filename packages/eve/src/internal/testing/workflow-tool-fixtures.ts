@@ -36,6 +36,15 @@ export async function deployServiceWorkflow(
   return { callId: ctx.callId, plan, sessionId: ctx.session.id };
 }
 
+/** `deployServiceWorkflow`'s plain body, as the in-process host runs it. */
+export function deployServiceBody(): WorkflowBody {
+  return stampedWorkflowBody(deployServiceWorkflow, async (input, ctx) => ({
+    callId: ctx.callId,
+    plan: `plan:${input.service}`,
+    sessionId: ctx.session.id,
+  }));
+}
+
 export async function authorizedDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
   "use workflow";
   const plan = await planDeployStep(input.service);

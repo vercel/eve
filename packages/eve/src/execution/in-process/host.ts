@@ -31,6 +31,7 @@ import { createUlid } from "#shared/ulid.js";
 import { createMemoryInboxRegistry, type MemoryInboxRegistry } from "./inbox-transport.js";
 import { createMemoryLineStore, type MemoryLineStore } from "./line-store.js";
 import { createInProcessRuns, type InProcessRuns } from "./runs.js";
+import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
@@ -88,6 +89,8 @@ export interface InProcessHostOptions {
    * sign-in back, as a Workflow session outside a run can't.
    */
   readonly callbackBaseUrl?: string;
+  /** For tests: turn steps that lose their completion, or fail, and run again, as on Workflow. */
+  readonly stepFaults?: StepFaults;
 }
 
 export interface InProcessHost {
@@ -125,6 +128,7 @@ export function createInProcessHost(
   const steps = new Map<string, number>();
   const releases: (() => void)[] = [];
   const toolStubs = createInProcessToolStubs();
+  const attempts = createStepAttempts(options.stepFaults);
 
   const deliverCommand: InProcessHost["deliverCommand"] = async (token, command) => {
     const identified = identifyCommand(command);
@@ -192,11 +196,23 @@ export function createInProcessHost(
       const { sessionId } = input.sessionState;
       steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
       try {
-        const crossed = await acrossStepBoundary(stepBoundary, data);
-        return await acrossStepBoundary(
-          stepBoundary,
-          await runTurnStep({ ...crossed, abortSignal, sessionWritable, steeringSignal }),
+        // Each attempt receives its own copy of the input and its own writable, as each of a
+        // Workflow step's does.
+        const result = await attempts.run(
+          {
+            name: "turnStep",
+            sessionId,
+            ...(abortSignal !== undefined && { signal: abortSignal }),
+          },
+          async (attempt) => ({
+            ...(await acrossStepBoundary(stepBoundary, data)),
+            abortSignal,
+            sessionWritable: attempts.writable(attempt, sessionWritable),
+            steeringSignal,
+          }),
+          runTurnStep,
         );
+        return await acrossStepBoundary(stepBoundary, result);
       } finally {
         const left = (steps.get(sessionId) ?? 1) - 1;
         if (left === 0) steps.delete(sessionId);
@@ -216,6 +232,7 @@ export function createInProcessHost(
       },
       runEnded: (runId) => runs.runEnded(runId),
       cancelRun: (runId, reason) => runs.cancelRun(runId, reason),
+      stepAttempt: () => attempts.current(),
     }),
   );
 

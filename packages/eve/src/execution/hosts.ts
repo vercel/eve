@@ -14,12 +14,13 @@ import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-e
 // asks whether the durable step it runs in is a retry, and runs on any host.
 //
 // A host that keeps sessions and runs in this process (the in-process host) registers a route for
-// the hooks and runs it holds, and each session stream it keeps. A durable host whose state lives
-// elsewhere (Workflow) is installed: it answers for every id no route holds, and names the attempt
-// of the step running now. Workflow installs itself with the code that runs on it (its builtin
-// steps, which every Workflow step bundle registers, and `createWorkflowRuntime`), so a realm that
-// never loads Workflow never reaches it, and one that runs Workflow's steps can't miss it. Without
-// an installed host, an id no route holds is gone, and no step is a retry.
+// the hooks and runs it holds, each session stream it keeps, and the attempt of the step it runs
+// now. A durable host whose state lives elsewhere (Workflow) is installed: it answers for every id
+// no route holds, and names the attempt of any other step. Workflow installs itself with the code
+// that runs on it (its builtin steps, which every Workflow step bundle registers, and
+// `createWorkflowRuntime`), so a realm that never loads Workflow never reaches it, and one that
+// runs Workflow's steps can't miss it. Without an installed host, an id no route holds is gone,
+// and only a route's step can be a retry.
 
 /** What one host in this realm holds. Each answer is `undefined` for an id it never held. */
 export interface HostedRoute {
@@ -36,6 +37,11 @@ export interface HostedRoute {
    * its abort signal keeps running until it returns.
    */
   cancelRun(runId: string, reason: string): boolean | undefined;
+  /**
+   * The attempt of its step entering now: 1 for its first, more for a retry. A step reads it as
+   * it enters (`enterSessionStep`).
+   */
+  stepAttempt?(): number | undefined;
 }
 
 /**
@@ -130,7 +136,15 @@ export function installedDurableHost(): DurableHost | undefined {
 
 /** Whether the step running now is a retry of an attempt that may have written already. */
 export function isRetriedStep(): boolean {
-  return (hosts().durable?.stepAttempt() ?? 1) > 1;
+  return (stepAttempt() ?? 1) > 1;
+}
+
+function stepAttempt(): number | undefined {
+  for (const route of hosts().routes) {
+    const attempt = route.stepAttempt?.();
+    if (attempt !== undefined) return attempt;
+  }
+  return hosts().durable?.stepAttempt();
 }
 
 /**

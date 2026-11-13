@@ -1,5 +1,6 @@
 import type { Runtime } from "#channel/types.js";
 import { createInProcessRuntime } from "#execution/in-process/runtime.js";
+import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { sessionLineStore } from "#execution/hosts.js";
@@ -50,9 +51,13 @@ export async function startTestSession(
      * runs; Workflow runs their twins, which the test tier's bundler registers.
      */
     readonly workflows?: readonly WorkflowBody[];
+    /** Turn steps that lose their completion, or fail, and run again; the in-process host's only. */
+    readonly stepFaults?: StepFaults;
   } = {},
 ): Promise<TestSessionRun> {
   if (host === "workflow") {
+    if (options.stepFaults !== undefined)
+      throw new Error("Step faults are the in-process host's; Workflow's steps fail on their own.");
     const run = await startSessionOwner(workflowEntry, [entry]);
     const runtime = createWorkflowRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
@@ -65,6 +70,7 @@ export async function startTestSession(
     {
       callbackBaseUrl: options.callbackBaseUrl ?? TEST_CALLBACK_BASE_URL,
       stepBoundary: workflowStepBoundary,
+      ...(options.stepFaults !== undefined && { stepFaults: options.stepFaults }),
     },
   );
   for (const { body, workflowId } of options.workflows ?? [])
