@@ -991,8 +991,8 @@ The event carries:
 
 - `callbackId`, `viewId`, and `privateMetadata` from the view.
 - `user`, `teamId` (the person's workspace), `installationTeamId` (whose credentials `ctx.slack` uses), and `enterpriseId`.
-- `values`, one string per input keyed by `action_id`: the text, selected date, or selected option.
-- `raw`, the complete Slack payload. Read checkboxes, multi-selects, and time pickers from `raw.view.state.values`, keyed by block ID and then `action_id`.
+- `values`, one string per input keyed by `action_id`: the text, date, time, option, user, conversation, or channel. A date-time picker gives Unix seconds. An empty input is `""`.
+- `raw`, the complete Slack payload. Checkboxes, multi-selects, and rich text are `""` in `values`; read them from `raw.view.state.values`, keyed by block ID and then `action_id`.
 
 A modal has no thread or session, so `ctx` has only `ctx.slack` and `ctx.waitUntil`. Put an ID in `private_metadata` that names your record, look it up on submit, and check that `event.user` may change it. Handle a second submission of the same record before sending anything, such as an email. `private_metadata` comes back as you set it, so it identifies the record but doesn't prove who may act on it.
 

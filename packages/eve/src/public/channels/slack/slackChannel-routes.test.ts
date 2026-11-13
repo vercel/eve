@@ -172,6 +172,12 @@ describe("slackChannel custom modals", () => {
     },
     reason: { choice: { type: "static_select", selected_option: { value: "tone" } } },
     follow_up: { day: { type: "datepicker", selected_date: "2026-10-06" } },
+    call: {
+      hour: { type: "timepicker", selected_time: "09:30" },
+      starts: { type: "datetimepicker", selected_date_time: 1791451800 },
+    },
+    owner: { person: { type: "users_select", selected_user: "U_BOB" } },
+    room: { where: { type: "conversations_select", selected_conversation: "C_SALES" } },
     notes: { optional: { type: "plain_text_input", value: null } },
   };
 
@@ -220,6 +226,10 @@ describe("slackChannel custom modals", () => {
         correct: "",
         choice: "tone",
         day: "2026-10-06",
+        hour: "09:30",
+        starts: "1791451800",
+        person: "U_BOB",
+        where: "C_SALES",
         optional: "",
       },
     });

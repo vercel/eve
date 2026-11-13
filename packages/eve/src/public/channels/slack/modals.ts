@@ -96,7 +96,10 @@ function modalContext(event: SlackModalEvent, dispatch: ModalDispatch): SlackMod
   };
 }
 
-/** Chat SDK's modal values: one string per action ID, keeping a control's first value field. */
+/**
+ * Chat SDK's modal values, one string per action ID, extended to every
+ * single-value Block Kit control. Controls with several values read as "".
+ */
 function modalValues(view: Record<string, unknown>): Record<string, string> {
   const state = isRecord(view.state) ? view.state : undefined;
   const blocks = isRecord(state?.values) ? state.values : {};
@@ -106,10 +109,16 @@ function modalValues(view: Record<string, unknown>): Record<string, string> {
     for (const [actionId, input] of Object.entries(block)) {
       if (!isRecord(input)) continue;
       const selected = isRecord(input.selected_option) ? input.selected_option : undefined;
+      const dateTime = input.selected_date_time;
       values[actionId] =
         readString(input.value) ??
         readString(input.selected_date) ??
+        readString(input.selected_time) ??
+        (typeof dateTime === "number" ? String(dateTime) : undefined) ??
         readString(selected?.value) ??
+        readString(input.selected_user) ??
+        readString(input.selected_conversation) ??
+        readString(input.selected_channel) ??
         "";
     }
   }

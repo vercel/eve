@@ -653,8 +653,10 @@ export interface SlackModalEvent {
 export interface SlackModalSubmitEvent extends SlackModalEvent {
   /**
    * One string per input, keyed by action ID, as in Chat SDK's
-   * `ModalSubmitEvent.values`: the text value, selected date, or selected
-   * option. Multi-value and other controls need `raw.view.state.values`.
+   * `ModalSubmitEvent.values`: the text, date, time, Unix date-time, option,
+   * user, conversation, or channel. An empty input, and a control with several
+   * values such as checkboxes or a multi-select, is `""`; read those from
+   * `raw.view.state.values`.
    */
   readonly values: Readonly<Record<string, string>>;
 }
