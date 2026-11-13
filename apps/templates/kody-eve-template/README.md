@@ -14,7 +14,7 @@ Kody is a personal GitHub maintainer agent built on [eve](https://eve.dev), made
 
 ## Deploy
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=kody-eve-template&repository-name=kody-eve-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fkody-eve-template&env=RESEND_API_KEY,RESEND_WEBHOOK_SECRET,RESEND_FROM_ADDRESS,DIGEST_REPO,DIGEST_EMAIL&envDescription=Resend%20API%20key%20%2B%20inbound%20webhook%20secret%2C%20a%20verified%20sender%20address%2C%20and%20the%20digest%20repo%2Frecipient.&connect=%5B%7B%22type%22%3A%22github%22%2C%22env%22%3A%22GITHUB_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fgithub%22%7D%2C%7B%22type%22%3A%22linear%22%2C%22env%22%3A%22LINEAR_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Flinear%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22public%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=kody-eve-template&repository-name=kody-eve-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fkody-eve-template&env=RESEND_API_KEY,RESEND_WEBHOOK_SECRET,RESEND_FROM_ADDRESS,DIGEST_REPO,DIGEST_EMAIL&envDescription=Resend%20API%20key%20%2B%20inbound%20webhook%20secret%2C%20a%20verified%20sender%20address%2C%20and%20the%20digest%20repo%2Frecipient.&connect=%5B%7B%22type%22%3A%22github%22%2C%22env%22%3A%22GITHUB_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fgithub%22%7D%2C%7B%22type%22%3A%22linear%22%2C%22env%22%3A%22LINEAR_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Flinear%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D)
 
 Deploying with the button provisions everything the agent needs and wires it up for you:
 
@@ -53,23 +53,23 @@ Set `RESEND_API_KEY` (used by both the email channel and the Resend MCP connecti
 ### Redis, Blob, and digest config
 
 - `REDIS_URL`: thread state for the email channel (`@chat-adapter/state-redis`). Any Redis works; the [Upstash for Redis](https://vercel.com/marketplace/upstash/upstash-kv) marketplace integration sets the variable automatically when you connect a store.
-- A Vercel Blob store connected to the project, for the preference tools: `vercel blob create-store <name> --access public --yes`.
+- A private Vercel Blob store connected to the project, for the preference tools: `vercel blob create-store <name> --access private --yes`. Existing public stores must be replaced; delete old public preference objects because changing the app does not revoke their URLs.
 - `DIGEST_REPO` (e.g. `owner/repo`) and `DIGEST_EMAIL`: what the weekly digest covers and who receives it. Both are required at build time; a missing value fails discovery with a clear error instead of deploying a digest that cannot send.
 
 ## Tech stack
 
-| Layer | Technology |
-| --- | --- |
-| Agent framework | [eve](https://eve.dev) |
-| Language | TypeScript (strict, ESM) |
+| Layer                  | Technology                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent framework        | [eve](https://eve.dev)                                                                                                                                                          |
+| Language               | TypeScript (strict, ESM)                                                                                                                                                        |
 | GitHub surface & tools | eve GitHub channel + [GitHub Tools eve extension](https://github-tools.com/frameworks/eve-extension) (maintainer preset), via [Vercel Connect](https://vercel.com/docs/connect) |
-| Linear surface & tools | eve Linear channel (Agent Sessions) via [Vercel Connect](https://vercel.com/docs/connect) + Linear MCP |
-| Email surface | Resend, via the [Chat SDK](https://chat-sdk.dev) channel (`@resend/chat-sdk-adapter`) with Redis state |
-| Email sending | Resend MCP (`mcp.resend.com`) |
-| Preference storage | [Vercel Blob](https://vercel.com/docs/vercel-blob) |
-| Model access | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) |
-| Sandbox | [Vercel Sandbox](https://vercel.com/docs/sandbox) |
-| Lint & format | [Ultracite](https://www.ultracite.ai/) (Biome) |
+| Linear surface & tools | eve Linear channel (Agent Sessions) via [Vercel Connect](https://vercel.com/docs/connect) + Linear MCP                                                                          |
+| Email surface          | Resend, via the [Chat SDK](https://chat-sdk.dev) channel (`@resend/chat-sdk-adapter`) with Redis state                                                                          |
+| Email sending          | Resend MCP (`mcp.resend.com`)                                                                                                                                                   |
+| Preference storage     | [Vercel Blob](https://vercel.com/docs/vercel-blob)                                                                                                                              |
+| Model access           | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway)                                                                                                                         |
+| Sandbox                | [Vercel Sandbox](https://vercel.com/docs/sandbox)                                                                                                                               |
+| Lint & format          | [Ultracite](https://www.ultracite.ai/) (Biome)                                                                                                                                  |
 
 GitHub and Linear credentials are brokered by [Vercel Connect](https://vercel.com/docs/connect); Blob and the model authenticate with the project's [Vercel OIDC](https://vercel.com/docs/oidc) token. The only static credentials are the Resend API key and inbound webhook secret.
 
@@ -130,7 +130,8 @@ import { defineRemoteAgent } from "eve";
 import { vercelOidc } from "eve/agents/auth";
 
 export default defineRemoteAgent({
-  url: () => process.env.CONTENT_AGENT_URL ?? "https://your-content-agent.vercel.app",
+  url: () =>
+    process.env.CONTENT_AGENT_URL ?? "https://your-content-agent.vercel.app",
   description:
     "Drafts blog posts, LinkedIn and X posts, release notes, and newsletters in the house voice. " +
     "Pass the surface, the source material, and any constraints in the message.",

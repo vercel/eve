@@ -37,7 +37,7 @@ const MAX_NEW_INPUT_TOKENS_PER_WINDOW = 40_000_000;
  */
 export default defineAgent({
   build: { externalDependencies: ["@vercel/connect"] },
-  compaction: { thresholdPercent: 0.75 },
+  compaction: { threshold: 0.75 },
   limits: {
     sessionUsage: ({ window }) =>
       window.outputTokens >= MAX_OUTPUT_TOKENS_PER_WINDOW ||

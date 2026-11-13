@@ -44,7 +44,7 @@ export default defineTool({
     }
     try {
       const blob = await put(key, preferences, {
-        access: "public",
+        access: "private",
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: "text/markdown",

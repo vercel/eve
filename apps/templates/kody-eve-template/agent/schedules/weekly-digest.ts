@@ -36,12 +36,12 @@ const fromAddress = requireEnv("RESEND_FROM_ADDRESS", "kody@yourdomain.com");
  *   instead of producing a schedule that cannot send.
  */
 export default defineSchedule({
-  cron: "0 9 * * 1",
-  markdown: [
+  content: [
     `Fetch all open issues on ${digestRepo} using the GitHub tools, compose this week's issues digest, and email it to ${digestEmail} using the Resend email tools.`,
     `Send from ${fromAddress}. Never send from any other address.`,
     "Fetch the issues fresh in this run; never reuse counts or lists from earlier context. Issue lists come back one page at a time: while a result has `hasMore: true`, call again with its `nextPage` until you have every open issue.",
     `Subject line: "Weekly issues digest: ${digestRepo}" followed by the date. The body is the digest itself, with no preamble or commentary about the task.`,
     "Load the digest-format skill and follow it for the digest's structure: the grouping, one-line issue summaries, citations, overview, and the closing invitation to reply.",
   ].join("\n\n"),
+  cron: "0 9 * * 1",
 });

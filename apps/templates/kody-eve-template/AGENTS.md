@@ -22,7 +22,7 @@ npx eve info        # print the discovered surface + discovery diagnostics
 pnpm validate       # check + typecheck + eve info in one command
 ```
 
-There is no unit-test suite. **Verify changes with `pnpm validate` (lint, typecheck, and discovery diagnostics must all report 0 errors / 0 warnings), then exercise the agent in the `pnpm dev` TUI.**
+Run `pnpm test` for the private preference storage regression. **Verify changes with `pnpm validate` (lint, typecheck, and discovery diagnostics must all report 0 errors / 0 warnings), then exercise the agent in the `pnpm dev` TUI.**
 
 ## eve conventions
 
@@ -52,7 +52,7 @@ There is no unit-test suite. **Verify changes with `pnpm validate` (lint, typech
 - **Never commit secrets.** `.env*` is gitignored. Connector UIDs are read from env (`GITHUB_CONNECTOR`, `LINEAR_CONNECTOR`); GitHub and Linear auth is brokered by Vercel Connect (Linear is app-scoped through `linearAuth`; tokens are resolved per call and never exposed to the model) and Blob auth is via the project's OIDC token. The Resend MCP connection and the Resend chat-sdk adapter authenticate with `RESEND_API_KEY` (plus `RESEND_WEBHOOK_SECRET` for inbound), read from env and never committed. Other config comes from env too: `DIGEST_REPO`, `DIGEST_EMAIL`, `RESEND_FROM_ADDRESS` and optional `RESEND_FROM_NAME` (the sender identity, resolved at build time; the name falls back to "Kody"), `REDIS_URL` for `@chat-adapter/state-redis`. The email channel reads the same two sender variables, so channel replies and agent-sent mail share one identity.
 - If you ever build a `RegExp` from data, escape it (literal match) and bound the input length.
 - Gate irreversible or high-impact actions behind `approval` (here: `clear_user_preferences`).
-- For per-user storage, derive the key from the resolved principal (`ctx.session.auth.current`), never from model input — see `agent/lib/user-preferences.ts`. The preference files live under the reserved `user-preferences/` Blob prefix, reachable only through the principal-scoped preference tools.
+- For per-user storage, derive the key from the resolved principal (`ctx.session.auth.current`), never from model input — see `agent/lib/user-preferences.ts`. The preference files live in a private Blob store under the reserved `user-preferences/` prefix, reachable only through the principal-scoped preference tools.
 
 ## Before committing
 

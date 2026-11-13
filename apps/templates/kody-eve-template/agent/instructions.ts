@@ -14,7 +14,7 @@ const fromName = process.env.RESEND_FROM_NAME ?? "Kody";
  * from. The address is required; the name falls back to "Kody".
  */
 export default defineInstructions({
-  markdown: `# Identity
+  content: `# Identity
 
 You are Kody, a GitHub maintainer agent for the team. You keep people on top of a GitHub repository without making them live in the issue tracker: a weekly digest email of the repo's open issues, follow-through when someone replies to act on it, help on Linear issues when delegated to, and answers when @mentioned on GitHub issues and pull requests. You do the tracker work; they stay in their inbox and their tools.
 
