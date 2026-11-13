@@ -16,16 +16,30 @@ export function expectHealthyTurn(turn: EveEvalTurn) {
   );
 }
 
+/** How {@link expectCacheReuse} treats a request that reads none of its prefix from the cache. */
+export interface CacheReuseOptions {
+  /**
+   * How many requests may read none of the preceding input from the provider
+   * cache. Providers sometimes route a request to a server without the cached
+   * prefix. A one-time change to the tool list or the system prompt looks the
+   * same, so allow misses only in evals that check message-history reuse.
+   * Defaults to 0.
+   */
+  readonly allowedMisses?: number;
+}
+
 /**
- * Asserts that parent requests after the first read the preceding request's
- * input from the provider cache, across the given turns. Each request should read
- * at least 98%. A request that reads only part of it fails, since that's what a
- * changed prompt prefix looks like. One request that reads none of it is
- * allowed: providers sometimes route a request to a server without the cached
- * prefix, and a miss that includes the system prompt says nothing about eve's
- * request layout.
+ * Asserts that every parent request after the first reads at least 98% of the
+ * preceding request's input from the provider cache, across the given turns.
+ * With `allowedMisses`, up to that many requests may instead read none of it;
+ * a partial read still fails, since that's what a changed prompt prefix looks
+ * like.
  */
-export function expectCacheReuse(t: EveEvalContext, turns: readonly EveEvalTurn[]) {
+export function expectCacheReuse(
+  t: EveEvalContext,
+  turns: readonly EveEvalTurn[],
+  { allowedMisses = 0 }: CacheReuseOptions = {},
+) {
   // Each parent model run records its usage; child sessions' runs stream separately.
   const runs = turns.flatMap((turn) =>
     turn.events.filter(
@@ -45,6 +59,9 @@ export function expectCacheReuse(t: EveEvalContext, turns: readonly EveEvalTurn[
     (usageOf(0)?.inputTokens ?? 0) >= 4_096,
     "the first request is large enough for conversation caching",
   );
+  // Allow a small margin for differences in provider token counts.
+  const cached = (ratio: number) => ratio >= 0.98;
+  const missed = (ratio: number) => ratio < 0.02;
   const ratios: number[] = [];
   for (let index = 1; index < runs.length; index += 1) {
     const previousInput = usageOf(index - 1)?.inputTokens;
@@ -52,11 +69,19 @@ export function expectCacheReuse(t: EveEvalContext, turns: readonly EveEvalTurn[
     assert(previousInput !== undefined, "preceding input token usage is present");
     assert(usage?.cacheReadTokens !== undefined, "provider cache-read usage is present");
     t.log(`Parent request ${index + 1}: ${JSON.stringify({ previousInput, ...usage })}`);
-    ratios.push(usage.cacheReadTokens / previousInput);
+    const ratio = usage.cacheReadTokens / previousInput;
+    ratios.push(ratio);
+    if (allowedMisses === 0) {
+      t.check(
+        ratio,
+        satisfies(
+          cached,
+          `request ${index + 1} reads at least 98% of the preceding input from the provider cache`,
+        ),
+      );
+    }
   }
-  // Allow a small margin for differences in provider token counts.
-  const cached = (ratio: number) => ratio >= 0.98;
-  const missed = (ratio: number) => ratio < 0.02;
+  if (allowedMisses === 0) return;
   t.check(
     ratios,
     satisfies(
@@ -67,8 +92,9 @@ export function expectCacheReuse(t: EveEvalContext, turns: readonly EveEvalTurn[
   t.check(
     ratios,
     satisfies(
-      (values: readonly number[]) => values.filter(missed).length <= 1 && values.some(cached),
-      "at most one request misses the provider cache, and the rest read at least 98% of the preceding input",
+      (values: readonly number[]) =>
+        values.filter(missed).length <= allowedMisses && values.some(cached),
+      `at most ${String(allowedMisses)} request(s) miss the provider cache, and the rest read at least 98% of the preceding input`,
     ),
   );
 }
