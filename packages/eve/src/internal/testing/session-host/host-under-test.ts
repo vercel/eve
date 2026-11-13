@@ -3,11 +3,10 @@ import { vi } from "vitest";
 
 import type { Runtime } from "#channel/types.js";
 import { forgetSessionLive } from "#definitions/state.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { currentTestWorld, type StoredWait } from "#internal/testing/workflow-test-world.js";
 import { cancelRun } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -127,12 +126,10 @@ export const workflowHost: SessionHostKind = {
 
 async function makeInProcessHost(setup: HostSetup = {}): Promise<HostUnderTest> {
   const failed = { writes: 0 };
-  const runtime = createInProcessRuntime(
+  const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
     {
       callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL,
-      // Workflow's own step serializer, so a payload a deployment couldn't carry fails here too.
-      stepBoundary: workflowStepBoundary,
       ...(setup.faults !== undefined && { stepFaults: inProcessFaults(setup.faults, failed) }),
     },
   );

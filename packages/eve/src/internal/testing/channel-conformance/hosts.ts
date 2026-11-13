@@ -1,8 +1,7 @@
 import type { Runtime } from "#channel/types.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { currentTestWorld } from "#internal/testing/workflow-test-world.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -74,10 +73,9 @@ function workflowHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): 
 }
 
 function inProcessHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): ConformanceHost {
-  const runtime = createInProcessRuntime(
+  const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource },
-    // Workflow's own step serializer, so a payload a deployment couldn't carry fails here too.
-    { callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL, stepBoundary: workflowStepBoundary },
+    { callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL },
   );
   // The test agent's workflow tools, as the plain bodies their `"use workflow"` twins wrap.
   for (const { body, workflowId } of questionWorkflowBodies())

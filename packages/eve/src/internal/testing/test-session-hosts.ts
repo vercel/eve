@@ -1,11 +1,10 @@
 import type { Runtime } from "#channel/types.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { sessionLineStore } from "#execution/hosts.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { WorkflowBody } from "#tools/workflow-body.js";
@@ -61,12 +60,10 @@ export async function startTestSession(
     });
     return { runId: run.runId, readable: run.readable, cancel: () => run.cancel(), runtime };
   }
-  const runtime = createInProcessRuntime(
+  const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
-    // Workflow's own step serializer, so a payload a deployment couldn't carry fails here too.
     {
       callbackBaseUrl: options.callbackBaseUrl ?? TEST_CALLBACK_BASE_URL,
-      stepBoundary: workflowStepBoundary,
       ...(options.stepFaults !== undefined && { stepFaults: options.stepFaults }),
     },
   );

@@ -10,8 +10,7 @@ import { defineTool } from "#tools/definition.js";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -160,10 +159,7 @@ describe("the in-process runtime", () => {
     });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       try {
         const here = await approveAndDeny(inProcess, "alice-approvals-in-process");
         const ranHere = ran.splice(0);
@@ -195,10 +191,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-parity" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       try {
         const messages = [
           "Alice asks for the weekly summary.",
@@ -228,10 +221,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-controls" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const run = async (runtime: Runtime, token: string) => {
         const alice = address(runtime, token);
         const first = await alice.send("Alice asks for the weekly summary.", { auth: null });
@@ -272,10 +262,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-race" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const race = async (runtime: Runtime, token: string) => {
         const created = await Promise.all([
           address(runtime, `${token}-create`).create({ auth: null }),
@@ -310,10 +297,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-end" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const run = async (runtime: Runtime, token: string) => {
         const alice = address(runtime, token);
         const first = await (await alice.send("Alice asks.", { auth: null })).result();
@@ -351,10 +335,7 @@ describe("the in-process runtime", () => {
     });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const run = async (runtime: Runtime, token: string) => {
         const alice = address(runtime, token);
         const asked = await (await alice.send("Deploy and publish.", { auth: null })).result();
@@ -397,7 +378,7 @@ describe("the in-process runtime", () => {
   it("ends its sessions when disposed", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-dispose" } });
     await test.run(async () => {
-      const runtime = createInProcessRuntime({
+      const runtime = createTestInProcessRuntime({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
       const sent = await address(runtime, "alice-dispose").send("Alice says hello.", {
@@ -446,7 +427,7 @@ describe("the in-process runtime", () => {
       },
     });
     await test.run(async () => {
-      const runtime = createInProcessRuntime(
+      const runtime = createTestInProcessRuntime(
         { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
         { disposeGraceMs: 50 },
       );
@@ -474,7 +455,7 @@ describe("the in-process runtime", () => {
   it("finds no session for a command to one it never ran", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-durable" } });
     await test.run(async () => {
-      const runtime = createInProcessRuntime({
+      const runtime = createTestInProcessRuntime({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
       try {
