@@ -38,8 +38,9 @@ export interface CodeChannelSurfacesOptions {
  * without affecting the turn.
  */
 export function codeChannelSurfaces(options: CodeChannelSurfacesOptions = {}): SlackRenderer {
-  const syncs = options.syncAfter
-    ? (name: string) => options.syncAfter!.includes(name)
+  const { syncAfter } = options;
+  const syncs = syncAfter
+    ? (name: string) => syncAfter.includes(name)
     : (name: string) => DEFAULT_SYNC_TOOLS.has(name) || isGhTool(name);
   return defineSlackRenderer({
     events: {
