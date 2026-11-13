@@ -86,6 +86,21 @@ describe("defineEvalConfig", () => {
     expect(defineEvalConfig({ judge: {} }).judge).toEqual({});
   });
 
+  it("accepts targetAuth with a per-request token resolver", () => {
+    const token = () => "fresh-token";
+    expect(defineEvalConfig({ targetAuth: { bearer: token } }).targetAuth).toEqual({
+      bearer: token,
+    });
+  });
+
+  it("rejects a targetAuth without exactly one scheme", () => {
+    for (const targetAuth of ["token", null, {}, { bearer: "a", vercelOidc: { token: "b" } }]) {
+      expect(() => defineInvalidConfig({ targetAuth: targetAuth as never })).toThrow(
+        "`targetAuth` must set exactly one of `bearer`, `basic`, or `vercelOidc`",
+      );
+    }
+  });
+
   it("rejects a non-positive maxConcurrency", () => {
     expect(() => defineInvalidConfig({ maxConcurrency: 0 })).toThrow(
       "`maxConcurrency` must be a positive integer",

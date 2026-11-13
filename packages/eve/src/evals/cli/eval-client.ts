@@ -1,5 +1,5 @@
 import { Client } from "#client/client.js";
-import type { ClientOptions } from "#client/types.js";
+import type { ClientAuth, ClientOptions } from "#client/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import {
@@ -10,16 +10,21 @@ import {
 import type { EveEvalTargetHandle } from "#evals/types.js";
 
 /**
- * Synchronous {@link ClientOptions} for an eval target: local needs no auth,
- * remote stays anonymous unless `EVE_EVAL_AUTH_TOKEN` sets a static bearer or
- * `EVE_EVAL_OIDC_TOKEN` sets a token for Vercel Trusted Sources.
- * Ambient Vercel credentials need the async {@link createEvalClient}.
+ * Synchronous {@link ClientOptions} for an eval target. The config's
+ * `targetAuth` applies to local and remote targets; on a remote target,
+ * `EVE_EVAL_AUTH_TOKEN` (static bearer) or `EVE_EVAL_OIDC_TOKEN` (Vercel
+ * Trusted Sources) takes precedence. Without any of them, local needs no auth
+ * and remote stays anonymous here; ambient Vercel credentials need the async
+ * {@link createEvalClient}.
  */
 export function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
+  targetAuth?: ClientAuth,
 ): ClientOptions {
   if (target.kind === "local") {
-    return { baseUrl: target.url };
+    return targetAuth === undefined
+      ? { baseUrl: target.url }
+      : { baseUrl: target.url, auth: targetAuth, redirect: "manual" };
   }
 
   const options = resolveDevelopmentClientOptions(target.url);
@@ -36,6 +41,9 @@ export function resolveEvalClientOptions(
   if (oidcToken) {
     return { ...options, auth: { vercelOidc: { token: oidcToken } }, redirect: "manual" };
   }
+  if (targetAuth !== undefined) {
+    return { ...options, auth: targetAuth, redirect: "manual" };
+  }
 
   return options;
 }
@@ -43,6 +51,8 @@ export function resolveEvalClientOptions(
 interface CreateEvalClientOptions {
   /** Working directory for Vercel lookup and the fallback on-disk project link. */
   readonly workspaceRoot?: string;
+  /** Credentials from the eval config's `targetAuth`. */
+  readonly targetAuth?: ClientAuth;
   /** Test seams for the two authority-resolution boundaries. */
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;
 }
@@ -52,7 +62,7 @@ export async function createEvalClient(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
   options: CreateEvalClientOptions = {},
 ): Promise<Client> {
-  const base = resolveEvalClientOptions(target);
+  const base = resolveEvalClientOptions(target, options.targetAuth);
   if (target.kind === "local" || base.auth !== undefined || options.workspaceRoot === undefined) {
     return new Client(base);
   }
