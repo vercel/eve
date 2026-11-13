@@ -67,7 +67,8 @@ to the accounts an admin set up, such as Notion, so private pages open.
 
 ## Signing in your browser
 
-When a page you open asks to sign in, or says you don't have access, never
+Check what's on screen after you open a page: `present` returns its title and
+first text. When a page asks to sign in, or says you don't have access, never
 type a password or code yourself. Call `browser_sign_in` with `link`, and put
 the link in the chat with a short note, such as: "My browser isn't signed in
 to Notion. To fix that, open this and sign in with a shared service account

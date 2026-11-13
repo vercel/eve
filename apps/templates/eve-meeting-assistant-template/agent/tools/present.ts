@@ -5,6 +5,7 @@ import { meetingBotId } from "../lib/meeting.js";
 import { toPageId, viewUrl } from "../lib/notion.js";
 import { ensureNotesPage } from "../lib/notes.js";
 import {
+  describePage,
   openInBrowser,
   setShownPage,
   shareScreen,
@@ -18,6 +19,7 @@ export default defineTool({
     "`notes` opens this meeting's notes page and `doc` another Notion page, live in Notion, so edits from you or anyone else appear as they happen.",
     "`browser` shares whatever your browser shows; drive it with the `browser__` tools, such as a website someone wants to look at together.",
     "`stop` ends the screen share.",
+    "The result's `page` has the title and start of what's on screen: if it's a sign-in or no-access screen, follow your instructions for signing in your browser.",
   ].join(" "),
   inputSchema: z.object({
     screen: z.enum(["notes", "doc", "browser", "stop"]),
@@ -47,6 +49,6 @@ export default defineTool({
       setShownPage({ pageId, url, follow });
     }
     await shareScreen(botId, stage);
-    return { sharing: true, showing: screen, ...(url && { url }) };
+    return { sharing: true, showing: screen, ...(url && { url }), page: await describePage(ctx) };
   },
 });
