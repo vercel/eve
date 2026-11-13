@@ -99,7 +99,7 @@ Beyond Linear, eve keeps the meeting's notes in Notion, starts and edits docs on
 - **Screen.** "eve, put the plan on screen" opens the page in Firefox on eve's desktop, in the session's [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox), and screen-shares the desktop through Output Media. The camera page keeps showing when eve listens, thinks, and talks. While a doc is up, the view scrolls to each block eve edits. "eve, show us the venue's site" drives the same browser with `eve/extensions/computer-use`.
 - **Outside guests.** Set `MEETING_INTERNAL_DOMAINS=acme.com` to have eve leave when someone from another domain joins, matched against the emails Recall reports.
 
-The pieces are `agent/lib/notion.ts` and `agent/lib/notes.ts` for Notion, the `take_notes`, `create_doc`, `read_doc`, `edit_doc`, `search_notion`, and `present` tools, `agent/lib/stage.ts` and `agent/sandbox.ts` for the shared desktop, and `agent/instructions/notes-docs-screen.md`.
+The pieces are `agent/lib/notion.ts` and `agent/lib/notes.ts` for Notion, the `take_notes`, `create_doc`, `read_doc`, `edit_doc`, `search_notion`, `present`, and `scroll_screen` tools, `agent/lib/stage.ts` and `agent/sandbox.ts` for the shared desktop, and `agent/instructions/notes-docs-screen.md`.
 
 To set it up, create a Notion page for meeting notes, such as "Meetings", connect it to a Notion integration (**…** > **Connections**), and set its general access to **Anyone on the web with link**, which its subpages inherit, so eve's signed-out browser can show them. Store the integration's token in Vercel Connect:
 
@@ -115,6 +115,7 @@ Then set:
 NOTION_CONNECTOR=<connector-uid>   # from `vercel connect list`; or set NOTION_TOKEN instead
 NOTION_PARENT_PAGE_ID=...          # the Meetings page's id or link
 MEETING_INTERNAL_DOMAINS=acme.com  # optional
+MEETING_DECISION_MODEL=...         # optional; a decision model your AI Gateway team allows, such as openai/gpt-6-luna-decisions
 ```
 
 For the end-of-meeting notes, add a workspace webhook in the Recall dashboard for bot status changes, pointed at `/eve/v1/recall`. `agent/channels/eve.ts` lets `eve remote connect` reach a production deployment with the project's Vercel OIDC token: pass `-H "authorization: Bearer $VERCEL_OIDC_TOKEN"` after `vercel env pull`.

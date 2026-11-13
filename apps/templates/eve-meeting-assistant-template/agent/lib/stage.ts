@@ -6,6 +6,7 @@ import { startComputerUse } from "eve/extensions/computer-use/sandbox";
 import type { ToolContext } from "eve/tools";
 
 import { environment, STAGE_PORT } from "../sandbox.js";
+import { toPageId } from "./notion.js";
 import { STAGE_HTML, STAGE_SERVER } from "./stage-assets.js";
 
 // The meeting bot shares one web page as its screen through Recall Output
@@ -95,8 +96,7 @@ export function setShownPage(page: { pageId: string; url: string; follow: boolea
 
 /**
  * Scrolls the page on screen to a block eve just edited, unless people asked
- * the view to stay put. Navigating to the block's anchor makes Notion scroll
- * to it and flash it.
+ * the view to stay put.
  */
 export async function followEdit(
   ctx: Pick<ToolContext, "getSandbox">,
@@ -105,20 +105,48 @@ export async function followEdit(
 ): Promise<void> {
   const shown = shownPage.get();
   if (!shown?.follow || blockId === undefined || shown.pageId !== pageId) return;
-  const url = `${shown.url.replace(/#.*$/u, "")}#${blockId.replace(/-/gu, "")}`;
-  if (!/^https:\/\/[^\s']+$/u.test(url)) return;
-  await run(
-    await openSandbox(ctx),
-    [
-      `export DISPLAY=${DISPLAY}`,
-      "window=$(xdotool search --onlyvisible --class firefox-esr | head -n 1)",
-      '[ -n "$window" ] || exit 0',
-      'xdotool windowactivate --sync "$window"',
+  await scrollShownPage(ctx, { block: blockId });
+}
+
+/**
+ * Scrolls the Notion page on screen: to a block, by navigating to its anchor,
+ * which makes Notion scroll to it and flash it, or by a screen or to an end,
+ * with the mouse wheel over the page.
+ */
+export async function scrollShownPage(
+  ctx: Pick<ToolContext, "getSandbox">,
+  to: { readonly block: string } | "up" | "down" | "top" | "bottom",
+): Promise<void> {
+  const shown = shownPage.get();
+  if (shown === null)
+    throw new Error("No Notion page is on screen. Show one with `present` first.");
+  const focus = [
+    `export DISPLAY=${DISPLAY}`,
+    "window=$(xdotool search --onlyvisible --class firefox-esr | head -n 1)",
+    '[ -n "$window" ] || { echo "Firefox isn\'t open" >&2; exit 1; }',
+    'xdotool windowactivate --sync "$window"',
+  ];
+  let steps: string[];
+  if (typeof to === "object") {
+    const url = `${shown.url.replace(/#.*$/u, "")}#${toPageId(to.block)}`;
+    if (!/^https:\/\/[^\s']+$/u.test(url)) throw new Error("The page's link can't be scrolled to.");
+    steps = [
       "xdotool key --clearmodifiers ctrl+l",
       `xdotool type --clearmodifiers --delay 1 '${url}'`,
       "xdotool key --clearmodifiers Return",
-    ].join("\n"),
-  );
+    ];
+  } else {
+    // Wheel clicks over the middle of the page, where Notion's scroll area is:
+    // about one screen for up and down, and plenty for the ends.
+    const clicks = to === "up" || to === "down" ? 8 : 200;
+    const button = to === "up" || to === "top" ? 4 : 5;
+    steps = [
+      'eval "$(xdotool getwindowgeometry --shell "$window")"',
+      'xdotool mousemove --window "$window" $((WIDTH / 2)) $((HEIGHT / 2))',
+      `xdotool click --repeat ${clicks} --delay 15 ${button}`,
+    ];
+  }
+  await run(await openSandbox(ctx), [...focus, ...steps].join("\n"));
 }
 
 /** Stops streaming the desktop, when it was started. */

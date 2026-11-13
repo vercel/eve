@@ -5,6 +5,8 @@ import { replyModeOf } from "../lib/reply-mode.js";
 import { VOICE_ENABLED } from "../lib/voice-mode.js";
 import { voiceRoutes } from "../lib/voice.js";
 
+const DECISION_MODEL = process.env.MEETING_DECISION_MODEL?.trim();
+
 /** After this many lines nobody asked eve about, it takes a quiet turn to update the notes. */
 const NOTES_EVERY_LINES = 25;
 
@@ -48,6 +50,9 @@ export default recallChannel({
     // fast decision model judges the line against the recent conversation.
     // If it throws or times out, the channel falls back to name matching.
     const { answers } = await decide({
+      // Defaults to eve's decision model. Set it when your AI Gateway team doesn't
+      // allow that provider, such as `openai/gpt-6-luna-decisions`.
+      ...(DECISION_MODEL && { model: DECISION_MODEL }),
       state: { assistant: botName, recentTranscript: transcript.slice(-10), latest: line },
       questions: {
         addressed: {

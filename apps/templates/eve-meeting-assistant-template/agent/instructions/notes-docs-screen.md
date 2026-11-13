@@ -58,10 +58,17 @@ you're listening, thinking, and talking.
   keep it up while you work on the page: "put the plan on screen and add a
   timeline" means present it, then edit it. The view scrolls to each block you
   edit. If people ask it to stay put, call `present` again with
-  `follow: false`. When they ask to see another part of the page, scroll it
-  with `computer_use`.
+  `follow: false`.
+- To show another part of the page, use `scroll_screen`. For a section or
+  line, such as "scroll to the budget", find its block with `read_doc` and
+  pass that id; Notion jumps to it and highlights it. For "scroll down" or
+  "go to the top", pass `to`. Don't scroll Notion with `computer_use`, and
+  don't search the page with find (Ctrl+F); `read_doc` already has its text.
 - `desktop` shows your computer. Use it to show something on the web: open it
   with `computer_use` (launch Firefox with the URL), then present the desktop.
+  To scroll a site, use `computer_use`'s `scroll` action with the pointer's
+  `x` and `y` over the page, such as the middle of the screen, and `scroll_y`
+  in pixels; key names such as `page_down` don't work.
   Your browser isn't signed in to Notion, so show Notion pages with `doc`.
 - `stop` ends the share. Stop when people are done with it or ask you to.
 
