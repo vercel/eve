@@ -202,7 +202,12 @@ describe("createHostSpec", () => {
     const production = spec(manifest, PRODUCTION);
     const development = spec(manifest, DEVELOPMENT);
 
-    expect(production.runtimePlugins).toEqual(["skill-files", "sandbox-shutdown"]);
+    expect(production.runtimePlugins).toEqual([
+      "skill-files",
+      "sandbox-shutdown",
+      "connection-drain",
+    ]);
+    expect(spec(manifest, VERCEL).runtimePlugins).not.toContain("connection-drain");
     expect(production.runtime.localTracing).toBe(false);
     expect(production.externals.pruneDevelopmentRuntime).toBe(true);
     expect(development.runtimePlugins).not.toContain("skill-files");
