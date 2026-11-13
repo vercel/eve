@@ -1,6 +1,6 @@
 # eve Meeting Assistant
 
-An [eve](https://eve.dev) agent that joins Zoom, Google Meet, and Microsoft Teams calls through a [Recall.ai](https://recall.ai) bot, answers out loud, and keeps Linear in sync with the conversation. Say "eve, open a Linear ticket for this and assign Bob", and it says it's on it, opens the issue, and puts the link in the meeting chat. Ask in the chat, and it answers in the chat.
+An [eve](https://eve.dev) agent that joins Zoom, Google Meet, and Microsoft Teams calls through a [Recall.ai](https://recall.ai) bot, answers out loud, and keeps Linear in sync with the conversation. Ask "eve, who's assigned the login bug?" and it answers out loud in a sentence. Say "eve, open a Linear ticket for this and assign Bob", and it opens the issue without a word and puts the link in the meeting chat. Ask in the chat, and it answers in the chat.
 
 Set `MEETING_VOICE=off` to have it answer only in the meeting chat. The bot's camera still shows when it's listening and thinking.
 
@@ -18,7 +18,7 @@ Recall joins the call, transcribes it, and posts each final utterance and chat m
 
 The bot shows a page from the agent as its camera, using Recall's [Output Media](https://docs.recall.ai/docs/stream-media). The page holds one request open to `/eve/v1/recall/voice/stream`, which follows the meeting's session. It draws a dot-matrix waveform that follows whoever is talking and shows when eve is thinking.
 
-With voice on, the same route cuts the model's streamed reply into sentences and synthesizes each through [AI Gateway](https://vercel.com/docs/ai-gateway) speech models, so the first sentence plays while the model is still writing the rest. The agent starts each message with `[voice]`, `[chat]`, or `[both]`: it answers out loud when asked out loud, in the chat when asked in the chat, and switches to the chat when someone asks it to stay quiet or people are talking with each other. When someone talks over eve, the page stops playback and drops the rest of that reply.
+With voice on, the same route cuts the model's streamed reply into sentences and synthesizes each through [AI Gateway](https://vercel.com/docs/ai-gateway) speech models, so the first sentence plays while the model is still writing the rest. The agent starts each message with `[voice]`, `[chat]`, or `[both]`: it speaks only to answer spoken questions, confirms actions in the chat, answers chat messages in the chat, and switches to the chat when someone asks it to stay quiet or people are talking with each other. When someone talks over eve, the page stops playback and drops the rest of that reply.
 
 The main pieces are:
 
