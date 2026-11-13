@@ -15,7 +15,8 @@ import type { EveEvalConfig, EveEvalConfigInput } from "#evals/types.js";
  * Throws on invalid input: a non-positive or non-integer `maxConcurrency` or `repeat`,
  * a negative or non-finite `timeoutMs`, non-array `reporters`, a
  * non-function `setup` or `teardown`, or a `targetAuth` without exactly one of
- * `bearer`, `basic`, or `vercelOidc`.
+ * `bearer`, `basic`, or `vercelOidc` holding a string or function token (and,
+ * for `basic`, a string `username`).
  */
 export function defineEvalConfig<TContext = undefined>(
   input: EveEvalConfigInput<TContext>,
@@ -58,13 +59,31 @@ function validateEvalConfigInput(input: EveEvalConfigInput): void {
 
   if (input.targetAuth !== undefined && !isTargetAuth(input.targetAuth)) {
     throw new Error(
-      "Eval config `targetAuth` must set exactly one of `bearer`, `basic`, or `vercelOidc`, as in `{ bearer: () => getToken() }`.",
+      "Eval config `targetAuth` must set exactly one of `bearer` (a token), `basic` (a string `username` and a `password` token), or `vercelOidc` (a `token`), where a token is a string or a function returning one, as in `{ bearer: () => getToken() }`.",
     );
   }
 }
 
 function isTargetAuth(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) return false;
+  if (!isRecord(value)) return false;
   const schemes = ["bearer", "basic", "vercelOidc"].filter((key) => key in value);
-  return schemes.length === 1;
+  if (schemes.length !== 1) return false;
+
+  // Check the chosen scheme's value too, so an unset environment variable
+  // (`{ bearer: process.env.TOKEN }`) fails here instead of on the first request.
+  if ("bearer" in value) return isTokenValue(value.bearer);
+  if ("basic" in value) {
+    const basic = value.basic;
+    return isRecord(basic) && typeof basic.username === "string" && isTokenValue(basic.password);
+  }
+  const oidc = value.vercelOidc;
+  return isRecord(oidc) && isTokenValue(oidc.token);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isTokenValue(value: unknown): boolean {
+  return typeof value === "string" || typeof value === "function";
 }
