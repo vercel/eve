@@ -406,19 +406,26 @@ type DynamicSchedulesOptions<
   /** Defaults to vercelScheduleProvider(): hosted production scheduling, process-local storage in eve dev. */
   readonly provider?: ScheduleProvider;
 } & (
-    | { readonly tool: false; readonly approval?: never }
-    | {
+    | ({ readonly tool: false; readonly approval?: never } & ScopeOptions<
+        CodeOnlyNamedScope<TInput, NoInfer<TPrepared>>
+      >)
+    | ({
         readonly tool?: true | "deferred";
         readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
-      }
-  ) &
-  (
-    | { readonly scope?: ScheduleScopeResolver; readonly scopes?: never }
-    | {
-        readonly scope?: never;
-        readonly scopes: Readonly<Record<string, ScheduleNamedScope<TInput, NoInfer<TPrepared>>>>;
-      }
+      } & ScopeOptions<ScheduleNamedScope<TInput, NoInfer<TPrepared>>>)
   );
+
+/** One `scope`, or named `scopes`, never both. */
+type ScopeOptions<TNamedScope> =
+  | { readonly scope?: ScheduleScopeResolver; readonly scopes?: never }
+  | { readonly scope?: never; readonly scopes: Readonly<Record<string, TNamedScope>> };
+
+/** A named scope of a definition without tools, which has no approval policies to replace. */
+type CodeOnlyNamedScope<TPayload, TPrepared> =
+  | ScheduleScopeResolver
+  | (Omit<Exclude<ScheduleNamedScope<TPayload, TPrepared>, ScheduleScopeResolver>, "approval"> & {
+      readonly approval?: never;
+    });
 
 /**
  * Defines dynamic schedules: schedules created at runtime whose occurrences invoke `run`.

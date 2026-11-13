@@ -234,6 +234,8 @@ describe("schedule creation and invocation", () => {
           resolve: () => ["channel", "C1"],
           approval: {
             list: () => "user-approval",
+            // A request-only policy object gates no responses, as for one collection.
+            enable: { request: () => "user-approval" },
             create: {
               request: () => "user-approval",
               response: ({ payload }) =>
@@ -350,6 +352,10 @@ describe("schedule creation and invocation", () => {
       await expect(
         response({ request: { callId: "any", toolInput: input("personal") } } as never),
       ).resolves.toEqual({ status: "allowed" });
+
+      expect(
+        (tools.schedule__workflows__enable!.approval as ApprovalConfiguration).response,
+      ).toBeUndefined();
 
       const list = tools.schedule__workflows__list!;
       for (const scope of ["personal", "channel"])

@@ -196,7 +196,12 @@ function scheduleTools(
           : await resolveApprovalPolicy(routed.policy)(routed.context);
       },
     };
-    if (members.some((member) => typeof policyOf(member) === "object"))
+    // As for one collection: only a scope that sets a response policy gates the tool's responses.
+    const gates = (member: ScheduleToolsMember) => {
+      const policy = policyOf(member);
+      return typeof policy === "object" && policy.response !== undefined;
+    };
+    if (members.some(gates))
       approval.response = async (context) => {
         const policy = policyOf(memberOf(context.request.toolInput));
         return typeof policy === "object" && policy.response !== undefined

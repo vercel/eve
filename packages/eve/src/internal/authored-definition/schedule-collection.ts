@@ -151,8 +151,13 @@ export function normalizeScheduleCollectionDefinition(
         throw new Error(
           `${at} "id" must be 1 to 64 ASCII letters, digits, underscores, and dashes, with "/" only between segments.`,
         );
-      if (scope.approval !== undefined)
+      if (scope.approval !== undefined) {
+        if (record.tool === false)
+          throw new Error(
+            `${message} "scopes.${name}.approval" cannot be configured when tool is false.`,
+          );
         expectApprovals(scope.approval, message, `scopes.${name}.approval`);
+      }
     }
   }
   if (record.tool === false && record.approval !== undefined)

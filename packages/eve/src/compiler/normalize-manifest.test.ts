@@ -75,6 +75,7 @@ function scheduleCollection(
     readonly id?: string;
     readonly provider?: ScheduleProvider;
     readonly scopes?: Record<string, unknown>;
+    readonly tool?: false;
   } = {},
 ) {
   const shared = {
@@ -753,6 +754,11 @@ describe("compileAgentManifest source graph", () => {
         "a scope name a tool input can't take",
         { scopes: { "my scope": () => "x" } },
         '"scopes.my scope" must be named with',
+      ],
+      [
+        "a scope approval and no tools",
+        { tool: false, scopes: { personal: { resolve: () => "x", approval: {} } } },
+        '"scopes.personal.approval" cannot be configured when tool is false',
       ],
       [
         "a scope without a resolver",

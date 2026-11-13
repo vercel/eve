@@ -161,13 +161,13 @@ scopes: {
 },
 ```
 
-| With named scopes   | Behavior                                                                                                                      |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `once()` grants     | Kept for each scope. Approving an operation for `"personal"` doesn't approve it for `"channel"`.                              |
-| A response policy   | When one scope sets a response policy for `create` or `update`, the tool requires an authenticated responder for every scope. |
-| Replacing the tools | The tool file named for the definition, `agent/tools/schedule__workflows.ts`, replaces or disables the set.                   |
-| The client          | `schedules(definition, { scope: "channel" })` binds one scope.                                                                |
-| Names that clash    | The build fails when a scope's stored name, or the definition's tool name, is already another definition's.                   |
+| With named scopes   | Behavior                                                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `once()` grants     | Kept for each scope. Approving an operation for `"personal"` doesn't approve it for `"channel"`.                       |
+| A response policy   | When one scope sets a response policy for an operation, that tool requires an authenticated responder for every scope. |
+| Replacing the tools | The tool file named for the definition, `agent/tools/schedule__workflows.ts`, replaces or disables the set.            |
+| The client          | `schedules(definition, { scope: "channel" })` binds one scope.                                                         |
+| Names that clash    | The build fails when a scope's stored name, or the definition's tool name, is already another definition's.            |
 
 ## Use the authenticated client
 
