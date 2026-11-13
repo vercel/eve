@@ -134,6 +134,7 @@ const instructions = entry.extend({
 
 const schedule = entry.extend({
   cron: z.string(),
+  timezone: z.string().optional(),
   hasRun: z.boolean(),
   markdown: z.string().optional(),
 });

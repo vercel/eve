@@ -34,6 +34,14 @@ export async function parkedAnchorWorkflow(input: { readonly token: string }): P
   await gate;
 }
 
+/** Parks like a task run on its control hook and returns the first control message it gets. */
+export async function parkedTaskRunWorkflow(input: { readonly token: string }): Promise<unknown> {
+  "use workflow";
+
+  using control = createHook<unknown>({ token: input.token });
+  return await control;
+}
+
 /**
  * Holds `token` until another run force-claims it, reads what arrived before
  * the takeover, then takes the token back and returns the next payload.

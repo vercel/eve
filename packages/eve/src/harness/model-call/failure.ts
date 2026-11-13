@@ -151,9 +151,9 @@ function withoutTurnInput(
 }
 
 /**
- * Compaction could not bring the history under the limit. The next attempt
- * would fail the same way, so the session ends with the message instead of
- * the step being retried.
+ * Compaction can't fit the request in the model's context window, so the provider isn't called.
+ * Only the turn fails: the session waits for its next message, which can fit once the agent's
+ * instructions, tools or memory shrink.
  */
 export async function reportCompactionFailure(
   step: Step,
@@ -161,17 +161,11 @@ export async function reportCompactionFailure(
 ): Promise<StepResult> {
   const { sessionId } = step.session;
   log.error(error.message, { sessionId, turnId: step.position().turnId });
-  await step.apply(
-    fail(step.view(), {
-      code: "COMPACTION_FAILED",
-      message: error.message,
-      terminal: true,
-    }),
-  );
+  await step.apply(fail(step.view(), { code: "COMPACTION_FAILED", message: error.message }));
+  step.session = { ...step.session, outputSchema: undefined };
   return {
-    next: step.hasDelegatedCaller
-      ? { done: true, isError: true, output: error.message }
-      : { done: true, output: "" },
+    next: null,
     session: step.session,
+    settledTurn: { isError: true, output: error.message },
   };
 }

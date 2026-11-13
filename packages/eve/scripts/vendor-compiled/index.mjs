@@ -45,6 +45,7 @@ import clackCore from "./@clack/core.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
+import croner from "./croner.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
 import immer from "./immer.mjs";
@@ -72,6 +73,7 @@ export const MODULES = [
   clackCore,
   chokidar,
   commander,
+  croner,
   eventsourceParserStream,
   envRunner,
   eveCatalog,

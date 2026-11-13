@@ -3,7 +3,6 @@
 `eve/experimental/extensions/custom-skills` lets the people talking to an agent save their own versioned skills: personal skills that follow a user everywhere, and shared skills for everyone in a channel or group chat. It is experimental and may change in any release.
 
 - User-facing docs: [`docs/experimental/custom-skills.md`](../../docs/experimental/custom-skills.md)
-- Design and invariants: [`research/custom-skills.md`](../../research/custom-skills.md)
 
 This private `@eve/custom-skills` workspace package is the extension's source of truth. eve's build copies `extension/` into `packages/eve/src/extensions/custom-skills/extension` and publishes it as `eve/experimental/extensions/custom-skills`, with helpers at `/policies` and `/repository`.
 

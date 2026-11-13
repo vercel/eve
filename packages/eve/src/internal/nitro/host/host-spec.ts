@@ -40,6 +40,7 @@ export interface HostDirectories {
 export type HostRuntimePlugin =
   | "instrumentation"
   | "local-schedules"
+  | "timezone-schedules"
   | "sandbox-shutdown"
   | "skill-files";
 
@@ -110,6 +111,11 @@ export function createHostSpec(
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
     ...(development && usesLocalVercelSchedules(manifest) ? (["local-schedules"] as const) : []),
+    ...(!development &&
+    preset !== "vercel" &&
+    routes.scheduleTasks.some((task) => task.timezone !== undefined)
+      ? (["timezone-schedules"] as const)
+      : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
   ];
 

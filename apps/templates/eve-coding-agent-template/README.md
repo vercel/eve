@@ -34,7 +34,7 @@ agent/
 
 ## Getting started
 
-Requires Node.js 24, pnpm, and the [Vercel CLI](https://vercel.com/docs/cli).
+Requires Node.js 26, pnpm, and the [Vercel CLI](https://vercel.com/docs/cli).
 
 ```bash
 pnpm install

@@ -19,11 +19,11 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "24.x",
+    "@types/node": "26.x",
     "typescript": "7.0.2"
   },
   "engines": {
-    "node": "24.x"
+    "node": "26.x"
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "pnpm@12.17.0"
 }

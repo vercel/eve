@@ -4,7 +4,7 @@ This guide covers the database-free starter, local development, long-term memory
 
 ## Prerequisites
 
-- Node.js 24 or newer
+- Node.js 26
 - pnpm through Corepack
 - A Vercel account
 - Vercel CLI, either installed globally or run with `pnpm dlx`

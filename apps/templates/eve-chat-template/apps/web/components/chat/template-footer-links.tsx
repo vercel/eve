@@ -17,7 +17,7 @@ Fork or clone the template into a new project, customize the agent if I ask, ver
 
 Use the repository README, docs/setup-and-deploy.md, and scripts/setup.sh as the source of truth. Prefer the one-shot setup script when possible:
 
-1. Confirm prerequisites: Node.js 24+, pnpm/Corepack, Vercel CLI, a Vercel account/team, and authentication with vercel login.
+1. Confirm prerequisites: Node.js 26, pnpm/Corepack, Vercel CLI, a Vercel account/team, and authentication with vercel login.
 2. Create/fork/clone the eve-chat-template subtree from vercel/eve.
 3. Install dependencies with pnpm install.
 4. Link the Vercel project with vercel link, using --scope <team-slug> if I provide one.

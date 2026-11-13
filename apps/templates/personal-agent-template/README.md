@@ -71,7 +71,7 @@ On Vercel, [`vercel.ts`](./vercel.ts) composes the peer `web` (Nuxt) and `eve` (
 
 ### Self-hosting
 
-**Requirements:** Node.js 24+, pnpm
+**Requirements:** Node.js 26, pnpm
 
 ```bash
 git clone https://github.com/vercel-labs/personal-agent-template.git

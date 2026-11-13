@@ -1,0 +1,23 @@
+{
+  "name": "json-render-slack-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@json-render/chat": "0.22.0",
+    "@json-render/core": "0.22.0",
+    "ai": "^7.0.137",
+    "eve": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "chat": "4.44.0",
+    "typescript": "7.0.2"
+  }
+}

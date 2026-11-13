@@ -29,7 +29,7 @@ commits need both.
 
 ## Prerequisites
 
-- **Node.js 24+** — see [`.nvmrc`](./.nvmrc) (`nvm use` or `fnm use`)
+- **Node.js 26** — pinned in [`.nvmrc`](./.nvmrc) (`nvm use` or `fnm use`)
 - **pnpm** — the version pinned in [`package.json`](./package.json) (`corepack enable` handles this automatically)
 
 ## Getting started

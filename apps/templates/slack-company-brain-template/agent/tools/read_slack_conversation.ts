@@ -1,0 +1,111 @@
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import {
+  callSlack,
+  mentionedUserIds,
+  nameMentions,
+  slackTeamId,
+  slackUserNames,
+} from "../lib/slack.ts";
+
+interface SlackHistoryMessage {
+  readonly ts: string;
+  readonly user?: string;
+  readonly text?: string;
+  readonly thread_ts?: string;
+  readonly reply_count?: number;
+  readonly username?: string;
+  readonly bot_profile?: { readonly name?: string };
+}
+
+const unavailable = (message: string) => ({ unavailable: true, message });
+
+// Reads one public channel's recent history, or one thread, with the bot token.
+// Unlike search, it needs no action token, so it also works in scheduled tasks
+// and followed-thread replies. Slack requires the bot to be in the channel.
+// Needs the `channels:read` and `channels:history` scopes.
+export default defineTool({
+  label: {
+    start: ({ threadTs }) => (threadTs ? "Reading a Slack thread" : "Reading a Slack channel"),
+  },
+  description:
+    "Read recent messages in a public Slack channel, or one thread with threadTs, such as a search match's ts. The agent must be a member of the channel. Never reads private channels or DMs. " +
+    "A channel reads newest first and a thread oldest first. When the result has nextCursor, call again with it to read further, such as later replies in a long thread.",
+  inputSchema: z.object({
+    channelId: z
+      .string()
+      .regex(/^C[A-Z0-9]+$/, "Pass a public channel ID, such as C01234ABCDE.")
+      .describe("Channel ID, such as a search match's channelId or the ID in <#C…|name>."),
+    threadTs: z.string().optional().describe("Timestamp of the thread's root message."),
+    limit: z.number().int().min(1).max(100).optional().describe("Maximum messages. Default 20."),
+    cursor: z
+      .string()
+      .optional()
+      .describe("nextCursor from a previous read of the same channel or thread."),
+  }),
+  async execute({ channelId, threadTs, limit, cursor }, ctx) {
+    const auth = ctx.session.auth.current;
+    const teamId = slackTeamId(auth);
+    if (auth?.authenticator !== "slack-webhook" || !teamId) {
+      return unavailable("Slack is only readable in Slack conversations.");
+    }
+
+    const info = await callSlack<{
+      channel: { name?: string; is_private?: boolean; is_im?: boolean; is_mpim?: boolean };
+    }>(teamId, "conversations.info", { channel: channelId });
+    if (!info.ok || !info.channel) {
+      return unavailable(`Slack couldn't find channel ${channelId} (${info.error ?? "unknown"}).`);
+    }
+    if (info.channel.is_private || info.channel.is_im || info.channel.is_mpim) {
+      return unavailable("That conversation is private. This tool reads public channels only.");
+    }
+
+    const page = { channel: channelId, limit: limit ?? 20, cursor };
+    const response = await callSlack<{
+      messages: SlackHistoryMessage[];
+      response_metadata: { next_cursor?: string };
+    }>(
+      teamId,
+      threadTs ? "conversations.replies" : "conversations.history",
+      threadTs ? { ...page, ts: threadTs } : page,
+    );
+    if (!response.ok) {
+      if (response.error === "not_in_channel") {
+        return unavailable(
+          `The agent isn't in #${info.channel.name ?? channelId}. A member can invite it; until then, answer from search results you already have.`,
+        );
+      }
+      throw new Error(`Slack read failed: ${response.error ?? "unknown error"}`);
+    }
+
+    const messages = response.messages ?? [];
+    const names = await slackUserNames(
+      teamId,
+      messages.flatMap((message) => [message.user, ...mentionedUserIds(message.text ?? "")]),
+    );
+    const anchor = threadTs ?? messages[0]?.ts;
+    const link = anchor
+      ? await callSlack<{ permalink: string }>(teamId, "chat.getPermalink", {
+          channel: channelId,
+          message_ts: anchor,
+        })
+      : undefined;
+    return {
+      channel: info.channel.name,
+      permalink: link?.permalink,
+      messages: messages.map((message) => ({
+        ts: message.ts,
+        author:
+          (message.user && names.get(message.user)) ||
+          message.bot_profile?.name ||
+          message.username,
+        userId: message.user,
+        text: nameMentions(message.text ?? "", names),
+        replyCount: message.reply_count || undefined,
+        threadTs: message.reply_count ? message.ts : undefined,
+      })),
+      // Slack returns an empty string on the last page.
+      nextCursor: response.response_metadata?.next_cursor || undefined,
+    };
+  },
+});

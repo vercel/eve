@@ -92,6 +92,7 @@ export type ResolvedSkillDefinition = Readonly<
 export type ResolvedScheduleDefinition = Readonly<
   SourceRef & {
     readonly cron: string;
+    readonly timezone?: string;
     readonly name: string;
     readonly markdown?: string;
     readonly hasRun: boolean;

@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.0.0-rc.10",
+  "version": "1.0.0-rc.13",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -677,6 +677,7 @@
     "chat": "4.42.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
+    "croner": "11.0.0",
     "dd-trace": "6.20.1",
     "emulate": "0.6.0",
     "env-runner": "0.3.11",

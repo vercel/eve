@@ -236,7 +236,7 @@ await runDiscordGatewayRelay({
 If you commit a `package-lock.json` in `daemon/`, the image installs from it too:
 
 ```dockerfile title="daemon/Dockerfile"
-FROM node:24-slim
+FROM node:26-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
@@ -270,7 +270,7 @@ https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applic
 
 ### Run the relay outside Vercel
 
-`runDiscordGatewayRelay` runs on any host that keeps a Node.js 24 process up, such as a VM, container platform, or home server. The agent can stay on Vercel. Off Vercel, change three things:
+`runDiscordGatewayRelay` runs on any host that keeps a Node.js 24 or newer process up, such as a VM, container platform, or home server. The agent can stay on Vercel. Off Vercel, change three things:
 
 - **Credentials.** Other hosts have no Vercel OIDC token for Connect, so give the relay the bot token directly. The agent can keep using Connect.
 - **URL.** Pass the agent's URL as `url`, because `VERCEL_PROJECT_PRODUCTION_URL` isn't set.

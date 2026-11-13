@@ -360,8 +360,8 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
   if (status !== undefined) {
     // 408/409/429 and 5xx are retryable server conditions. Non-retryable
     // 4xx responses usually point to a structural problem (invalid key,
-    // context exceeded, malformed prompt) that repeating the same request
-    // will not fix.
+    // malformed prompt) that repeating the same request will not fix. The
+    // catalog keeps a context-window rejection recoverable above.
     if (status === 408 || status === 409 || status === 429 || status >= 500) return "retry";
     if (isAmbiguousGatewayInternalBadRequest(signals)) return "recoverable";
     if (status >= 400 && status < 500) return "terminal";

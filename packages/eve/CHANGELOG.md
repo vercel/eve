@@ -1,5 +1,96 @@
 # eve
 
+## 1.0.0-rc.13
+
+Released 2026-11-12 · [Compare with 1.0.0-rc.12](https://github.com/vercel/eve/compare/eve%401.0.0-rc.12...eve%401.0.0-rc.13)
+
+### Features
+
+- eve now targets Node.js 26: new projects pin `engines.node` and `@types/node` to `26.x`, so Vercel deploys them on the `nodejs26.x` runtime, and the default sandbox image and generated Discord relay Dockerfile run Node.js 26.
+  eve still supports Node.js 24 and later. When eve updates the `package.json` of an existing project that pins `engines.node` to another major, such as `24.x`, it now sets `26.x` and prints a warning. SvelteKit apps deployed to Vercel need `@sveltejs/adapter-vercel` 6.3.5 or later to build on Node.js 26. ([#6304](https://github.com/vercel/eve/pull/6304))
+
+### Bug Fixes
+
+- `eve dev` no longer answers every second request with an empty `400 Bad Request` when the client sends `Connection: close` and the agent replies with a keep-alive response such as an MCP SSE stream, as happens behind the `vercel dev` proxy. ([#6298](https://github.com/vercel/eve/pull/6298))
+
+## 1.0.0-rc.12
+
+Released 2026-11-12 · [Compare with 1.0.0-rc.11](https://github.com/vercel/eve/compare/eve%401.0.0-rc.11...eve%401.0.0-rc.12)
+
+### Features
+
+- Slack tool approvals now render as one card that holds the prompt, the tool input, and the **Approve** and **Deny** buttons.
+  The card replaces the separate approval card and collapsed **Tool input** block. It lists up to 10 top-level input fields within a fixed size budget, and a batch of large approvals splits across messages, so a click's callback stays bounded however large the input is. Approvals without input keep the compact card. An answered approval keeps its input preview as a record of what was approved, where eve used to delete the separate tool-input message when the request ended.
+  If you call `renderInteractionBlocks` from `eve/channels/slack`, an approval with tool input now returns one `container` block whose `child_blocks` hold the input preview and an `actions` block, instead of a `card` with `actions` followed by a **Tool input** container. Code that reads `actions` or stamps `block_id`s on interactive blocks should also look inside `child_blocks`. ([#6271](https://github.com/vercel/eve/pull/6271))
+
+## 1.0.0-rc.11
+
+Released 2026-11-12 · [Compare with 1.0.0-rc.10](https://github.com/vercel/eve/compare/eve%401.0.0-rc.10...eve%401.0.0-rc.11)
+
+### Features
+
+- Add `ctx.conversation.space`, which names the place a conversation happens, such as a Slack channel, so tools, approval policies, dynamic values, and memory scopes can share data per place.
+  Slack, Discord, Teams, Telegram, Linq, Photon, and Chat SDK channels report a space with a stable `id` namespaced by platform and workspace, a `type` of `direct` or `shared`, a `visibility` of `public` or `private` when the platform says, and a `workspaceId` where the platform has one. Custom channels report theirs with a new `space({ state })` hook beside `audience`. Tools and memory scope resolvers can now read `ctx.conversation`, which dynamic values already had. ([#6111](https://github.com/vercel/eve/pull/6111))
+- Add the experimental `eve/experimental/extensions/custom-skills` extension, which lets the people talking to an agent save their own versioned skills, for themselves or shared with everyone in a channel or group chat.
+  Each skill has immutable versions and one live version, with drafts, publish and rollback, and `always`, `on-demand`, or `deferred` application modes saved per version. A validator and an approval rule you can replace decide which descriptions and instructions are accepted and which changes run, ask a person, or are refused, and the approval card shows the content that would go live. Shared skills follow the conversation's `ctx.conversation.space` on Slack, Discord, Teams, Telegram, and Chat SDK channels. Every skill has a stable ID beside its name. Skills are stored in any `eve/memory/file` document backend, Vercel Blob by default, in a documented, versioned layout whose index lists every scope for admin views, or in your own `SkillRepository` from `eve/experimental/extensions/custom-skills/repository`; `eve/experimental/extensions/custom-skills/policies` exports the built-in scopes, validator, and approval rule to compose your own. ([#6106](https://github.com/vercel/eve/pull/6106))
+- Dynamic schedules' `auth` and `run` callbacks receive a `schedule` handle that disables or deletes the schedule that fired, and `auth` can return only `{ attributes }` to run as the stored creator.
+  An `auth` that returns `null` now fails the occurrence permanently: on Vercel the occurrence is acknowledged without redelivery and `occurrence.failed` fires once, instead of after ten deliveries. The same applies when `auth` returns a principal other than the creator or a value of another shape. An error that `auth` throws is still retried. If your `auth` turns a failed lookup into `null`, make it throw instead, or an outage will fail occurrences without a retry.
+  The handle and the `auth` result are exported as `ScheduleHandle` and `ScheduleAuthResult`. ([#6211](https://github.com/vercel/eve/pull/6211))
+- Add an optional `id` to the experimental `defineDynamicSchedules`, so a schedule collection keeps its stored schedules when its file is renamed or moved.
+  Without `id`, the collection's name still comes from its path under `agent/schedules/`. To move a collection, set `id` to its old path-derived name. A collection that a mounted extension contributes uses its `id` as written, without the mount prefix.
+  `eve build` now fails when two collections, or a collection and a static schedule, in one agent resolve to the same name. A tool file that replaces or disables a collection's tools is named for the resolved name, `agent/tools/schedule__<name>.ts`. ([#6212](https://github.com/vercel/eve/pull/6212))
+- Clarify the experimental dynamic schedules types and error messages, and deprecate the top-level identity fields of `ScheduleOccurrenceEvent` in favor of `occurrence`.
+  The `scope` and `preparePayload` contexts are now exported as `ScheduleScopeResolverContext` and `SchedulePreparePayloadContext`. No fields were removed and runtime behavior is unchanged. ([#6213](https://github.com/vercel/eve/pull/6213))
+- Slack's `approvalChannel` accepts `"ephemeral"` to show an approval or `ctx.ask()` question only to the person who started the turn, in the thread.
+  Everyone else sees a `Waiting on` note naming that person, which shows the outcome once the request ends. The card needs only the `chat:write` scope and keeps the conversation in the thread, unlike `"direct-message"`. A click replaces the card with the answer, because Slack can't edit an ephemeral message later. ([#6270](https://github.com/vercel/eve/pull/6270))
+- Slack renderers can handle `call.input` to show a tool call's arguments while the model is still writing them.
+  This lets a renderer post a draft of what a call will produce, such as a card, and edit it as the arguments stream in. eve's default rendering ignores `call.input`, so existing channels behave the same. ([#6112](https://github.com/vercel/eve/pull/6112))
+- Explain more prominently that `defineDynamic` functions run before every model call, so network requests, database queries, API calls, and sandbox reads belong inside `ctx.memo`. ([#6278](https://github.com/vercel/eve/pull/6278))
+- Fix `vercelBlob()` from `eve/memory/file/vercel` so a document whose key contains `/` can be read back after it is written.
+  Before, such a read returned nothing, so the next write tried to create the document again and failed because it already existed. ([#6106](https://github.com/vercel/eve/pull/6106))
+
+### Bug Fixes
+
+- Let `auto()` route messages longer than 16,000 characters using the configured decision provider's input limits.
+  The decider receives the full text of the turn's opening input and up to seven earlier user and assistant messages. Larger inputs can increase decision cost and latency. Provider input-limit errors use the configured `fallback`, like other decision failures. ([#6273](https://github.com/vercel/eve/pull/6273))
+- When a finished `bash` command's output is truncated, the result again keeps the start of a very long last line and the lines before it.
+  The truncation note again gives the whole output's line count (`showing last N of M lines`), and memory stays bounded however much the command prints.
+  Thanks @zackleman for reporting this in #5925 and for the implementation plan this fix follows. ([#6248](https://github.com/vercel/eve/pull/6248))
+- A context compaction's summary request during a turn now exports its own `chat <model>` span under the turn's `invoke_agent` span, with its token usage, cost, and `ai.settings.context.eve.compaction.request=summary`, so traces no longer undercount compacting turns.
+  Model spans now also carry `agent.turn.id`. `@vercel/agent-runs` adds `TurnOperation.modelCall` for model calls a turn makes outside its steps.
+  Thanks @zackleman for reporting this in #5922. ([#6251](https://github.com/vercel/eve/pull/6251))
+- When a session stream write fails, the turn step now stops writing and fails at once, so Workflow retries it with a fresh stream, instead of retrying the model call, steering, or reporting a model call failure to the stream that just failed.
+  Previously, eve read a failed write as a model call error: it retried the provider request, logged that it was "parking session for retry by the user", and tried to write a failure that could never arrive. The retried step closes the model attempt the write cut as `abandoned`, as it does for any interrupted step.
+  Thanks @zackleman for reporting this in #5917. ([#6264](https://github.com/vercel/eve/pull/6264))
+- A turn whose step fails every Workflow retry now settles `failed` with code `TURN_FAILED`, a fixed message, and an error id, instead of the thrown error's class and raw message, which could carry prompt text or tool input.
+  eve's own log line for the failure records that error id and the thrown error's class, but not its message or details, and the recovery step's stored input carries only the class. Workflow's own step-failure log still includes the error's stack.
+  A turn cancelled while its failing step was between retries now settles `cancelled` and keeps its input in history, instead of settling `failed` with the step's error.
+  Thanks @zackleman for reporting this and proposing the fix in #5915. ([#6261](https://github.com/vercel/eve/pull/6261))
+- Turns no longer resume a session's sandbox in the background when they start, so a turn that never uses the sandbox no longer wakes it; the first tool or file operation that needs it resumes it instead. ([#6187](https://github.com/vercel/eve/pull/6187))
+- Keep a session open when its requests outgrow the compaction threshold or the model's context window.
+  When the agent's instructions, tools, memory, and context leave no room under `compaction.threshold`, eve logs a warning and compacts against the model's context window instead of ending the session with `COMPACTION_FAILED`. When they don't fit the window either, only the turn fails with `COMPACTION_FAILED`. When a provider rejects a request as longer than the model's context window, only the turn fails with `MODEL_CALL_FAILED`, and the session can receive another message.
+  Thanks @zackleman for reporting this in #5921. ([#6262](https://github.com/vercel/eve/pull/6262))
+- Sessions that started on eve 0.69 through 0.83 and delegated to a subagent now move to the new deployment instead of staying on the old one until they end.
+  An idle resumable task no longer keeps such a session on its earlier deployment: the move ends the task's old run, and the model starts a new task on the current build when it needs one. A task that is still working, or has results the model hasn't read, still keeps the session where it is until that clears.
+  Thanks @zackleman for reporting this and for the implementation plan in #5927. ([#6260](https://github.com/vercel/eve/pull/6260))
+- Answers eve discards, such as an empty answer it asks the model for again or a `content-filter` answer that fails the turn, now record their usage on the session stream and count toward session usage and `limits.sessionUsage`, like a steered answer always has.
+  A reissued answer's `usage.recorded` follows its `model.retried`; a failed run's follows its `model.settled`. Thanks @zackleman for reporting this in #5918. ([#6253](https://github.com/vercel/eve/pull/6253))
+- Model calls now retry when a stream chunk fails the provider's schema (`AI_TypeValidationError`) or when AI Gateway's provider stream ends before the response finishes (`gateway_stream_terminated`).
+  Thanks @zackleman for reporting these in #5911 and #5912. ([#6249](https://github.com/vercel/eve/pull/6249))
+- A root session whose `otel({ tracePolicy })` withholds inputs or outputs, or drops the trace, no longer tags its workflow run as content-visible, so observability stops showing run data the policy excludes.
+  A trace policy can only hide content its audience would show by default. A private or unknown-audience run stays hidden even when its policy records content, because Agent Runs' `exportPolicy` may still redact those spans. Sessions without OpenTelemetry keep the audience default.
+  Thanks @zackleman for reporting the related visibility gap in #5931. ([#6294](https://github.com/vercel/eve/pull/6294))
+- Steering no longer discards a model call that is streaming a tool call's input, so the model doesn't write a long input twice.
+  The call finishes, the tool runs, and the new message applies at the next step boundary in the same turn.
+  Thanks @zackleman for reporting this and proposing the fix in #5929. ([#6257](https://github.com/vercel/eve/pull/6257))
+- Sessions recorded before eve 1.0 now read the way a current eve records them, and opening a subagent's stream through such a parent no longer re-reads the parent's whole history on every open and reconnect, which could make long sessions answer 404 `descendant_unavailable`.
+  eve now verifies the child against only the parent's stored line at the requested position, whichever eve version wrote it.
+  A question or approval that a subagent relayed before eve 1.0 now reads as a current relayed request: it names the task it came from when there is one, and carries the subagent's session, request, and the call it asks about. A relayed approval no longer reads as an approval of the parent's own subagent call.
+  Turns recorded before eve 1.0 now keep their trace context when read: each converted `turn.started` carries the `trace` its stored line recorded, as a turn a current eve runs does. A malformed recorded trace reads as absent instead of failing the line's schema.
+  Thanks @zackleman for reporting these in #5928, #5933, and #5934. ([#6250](https://github.com/vercel/eve/pull/6250))
+- Vercel sandboxes refresh or replace expired and near-expiry `VERCEL_OIDC_TOKEN` credentials before template builds to avoid 403 `invalidToken` errors.
+  When `VERCEL_TEAM_ID` (or `VERCEL_ORG_ID`) and `VERCEL_PROJECT_ID` were set, eve used `VERCEL_OIDC_TOKEN` directly without checking its expiry, so a build that started after the token expired failed while preparing sandbox templates. eve now resolves the OIDC token through the Vercel OIDC helper, which attempts refresh within five minutes of expiry, and falls back to `VERCEL_TOKEN` when it is set and the OIDC token can't be used. ([#6188](https://github.com/vercel/eve/pull/6188))
+
 ## 1.0.0-rc.10
 
 Released 2026-11-11 · [Compare with 1.0.0-rc.9](https://github.com/vercel/eve/compare/eve%401.0.0-rc.9...eve%401.0.0-rc.10)

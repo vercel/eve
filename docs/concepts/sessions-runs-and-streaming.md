@@ -206,6 +206,8 @@ Before the next model request, eve repairs a local tool call in saved history th
 
 A failed model run, turn, or session carries `error: { code, message, id?, hint? }` on its `model.settled`, `turn.settled`, or `session.ended`. `id` is a support id that eve's server logs also carry, and `hint` is a remedy when eve recognizes the failure.
 
+When a turn's step fails every Workflow retry with an error outside the model and tool paths, such as a storage write that keeps failing, the turn settles `failed` with code `TURN_FAILED`, a fixed message, and an `id`. The thrown error can carry request content, so eve keeps its message and details off the stream and off its own log line for the failure, which records that `id` and the error's class name. Workflow's own step-failure log still includes the error's stack. A turn cancelled while its step was retrying settles `cancelled` instead.
+
 A turn that ends closes what it left open in the same line. Running calls and open requests for input end `interrupted`, and their pending answers end `withdrawn`. A task can outlive its turn and stays open.
 
 A session that fails ends its turn `cancelled`, because the session failed, not the turn. The error is on `session.ended`, and `failure(view, turnId)` reads it for that turn. Built-in channels post one notice for it.
@@ -219,6 +221,8 @@ When a model call fails transiently before publishing anything, the run records 
 A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message. A refusal note replaces the turn's input in conversation history, and the refused response's partial output stays out of history. Completed tool calls and their results stay, so the model knows which actions already ran. Removing the input doesn't guarantee recovery: retained history or tool results can still trigger the provider's filter. Other failed model calls keep the turn's input in history.
 
 OpenAI's `cyber_policy` and `bio_policy` refusals also fail only their turn, with `MODEL_CALL_FAILED`, and the session can receive another message.
+
+A provider's rejection of a request longer than the model's context window also fails only its turn, with `MODEL_CALL_FAILED` and a `hint`. [Compaction](./default-harness#compaction) explains how eve keeps requests under the window.
 
 ## Query session state
 

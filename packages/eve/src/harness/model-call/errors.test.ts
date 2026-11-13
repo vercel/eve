@@ -357,6 +357,39 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(err)).toBe("recoverable");
   });
 
+  // The session stays open: a later message can fit once compaction or a smaller agent makes room.
+  it.each([
+    {
+      title: "Anthropic's 400",
+      error: directApiCallError({
+        message: "prompt is too long: 215000 tokens > 200000 maximum",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "Bedrock's 400 relayed by AI Gateway",
+      error: gatewayModelCallError({
+        gatewayName: "GatewayInvalidRequestError",
+        gatewayType: "invalid_request_error",
+        statusCode: 400,
+        upstreamMessage: "Input is too long for requested model.",
+        upstreamType: "invalid_request_error",
+      }),
+    },
+    {
+      title: "OpenAI's stream error",
+      error: normalizeModelStreamError({
+        code: "context_length_exceeded",
+        message: "Your input exceeds the context window of this model.",
+        sequence_number: 1,
+        type: "error",
+      }),
+    },
+  ])("returns recoverable when the provider rejects a request as too long: $title", ({ error }) => {
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(summarizeKnownError(error)?.id).toBe("model-context-overflow");
+  });
+
   it("returns terminal for structural 4xx errors", () => {
     for (const statusCode of [400, 401, 403, 404, 413]) {
       const err = Object.assign(new Error("bad req"), { statusCode });

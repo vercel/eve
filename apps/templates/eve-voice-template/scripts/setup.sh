@@ -27,8 +27,8 @@ for cmd in vercel node pnpm openssl; do
 done
 
 NODE_MAJOR=$(node -e 'console.log(process.versions.node.split(".")[0])')
-if [ "$NODE_MAJOR" -lt 24 ]; then
-  echo "eve requires Node.js 24 or newer. You are running $(node -v). Please upgrade Node.js and try again."
+if [ "$NODE_MAJOR" -lt 26 ]; then
+  echo "This template requires Node.js 26 or newer. You are running $(node -v). Please upgrade Node.js and try again."
   exit 1
 fi
 

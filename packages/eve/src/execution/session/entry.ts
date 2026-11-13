@@ -26,9 +26,11 @@ import {
   readSessionStreamTailStep,
   signalSessionAnchorStep,
   signalSessionOwnerActivationStep,
+  endRetiredTaskRunsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
 import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -95,6 +97,8 @@ interface PreparedSuccessor {
   readonly serializedContext: Record<string, unknown>;
   /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
   readonly importedTurnCount?: number;
+  /** Task runs the successor leaves behind, which it ends once it holds the session. */
+  readonly retiredTaskRuns?: readonly TaskRunAddress[];
 }
 
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
@@ -141,10 +145,11 @@ async function prepareSuccessor(
       serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
     };
   }
-  const { checkpoint, turnCount } = migration.imported;
+  const { checkpoint, retiredRuns, turnCount } = migration.imported;
   return {
     checkpoint,
     importedTurnCount: turnCount,
+    retiredTaskRuns: retiredRuns,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
 }
@@ -230,6 +235,9 @@ async function bootHandoffOwner(
     return undefined;
   }
   abandonHandoverIfRunEnds(inbox, { attemptKey, sourceRunId });
+  // Their runs answer the session's addresses, which this run now holds.
+  if (prepared.retiredTaskRuns !== undefined && prepared.retiredTaskRuns.length > 0)
+    await endRetiredTaskRunsStep({ runs: prepared.retiredTaskRuns, sessionId });
   return await startSuccessor(input, inbox, prepared);
 }
 

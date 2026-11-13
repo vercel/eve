@@ -9,6 +9,7 @@ packages:
   - apps/fixtures/*
   - apps/frameworks/*
   - e2e/fixtures/*
+  - examples/*
   - packages/*
 
 allowBuilds:
@@ -102,8 +103,8 @@ minimumReleaseAgeExclude:
   - "@chat-adapter/x@4.42.0"
   - "@nimble-way/eve@0.1.1"
   - "@shadcn/registry@0.1.3"
-  - "@stripe/link-integrations-eve@0.2.0"
-  - "@stripe/link-sdk@0.9.0"
+  - "@stripe/link-integrations-eve@0.5.0"
+  - "@stripe/link-sdk@3.1.0"
   - "chat@4.42.0"
   - "claude-mem@15.18.1"
 patchedDependencies:
