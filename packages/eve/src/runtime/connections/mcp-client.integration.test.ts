@@ -23,6 +23,7 @@ describe.each(["static", "dynamic"] as const)(
     let client: McpConnectionClient;
     let discoveryError: { code: number; message: string; data?: unknown } | undefined;
     let discoveryDelayMs: number;
+    let discoveryUnreachable: boolean;
     let initializeError: { code: number; message: string } | undefined;
     let initializeProtocolVersion: string;
     let callResult: Record<string, unknown>;
@@ -74,6 +75,7 @@ describe.each(["static", "dynamic"] as const)(
         message: "Unsupported protocol version",
       };
       discoveryDelayMs = 0;
+      discoveryUnreachable = false;
       initializeError = undefined;
       initializeProtocolVersion = "2025-11-25";
       callResult = { content: [{ type: "text", text: "fixture-user" }] };
@@ -96,6 +98,7 @@ describe.each(["static", "dynamic"] as const)(
         let result: Record<string, unknown>;
         switch (message.method) {
           case "server/discover":
+            if (discoveryUnreachable) throw new TypeError("fetch failed");
             await new Promise((resolve) => setTimeout(resolve, discoveryDelayMs));
             if (discoveryError !== undefined) {
               return Response.json({ jsonrpc: "2.0", id: message.id, error: discoveryError });
@@ -186,6 +189,13 @@ describe.each(["static", "dynamic"] as const)(
       await createClient();
       discoveryError = { ...discoveryError!, code };
       await expect(client.connect()).rejects.toMatchObject({ code });
+      expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
+    });
+
+    it("fails without initialize when discovery cannot reach the server", async () => {
+      await createClient();
+      discoveryUnreachable = true;
+      await expect(client.connect()).rejects.toThrow("fetch failed");
       expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
     });
 

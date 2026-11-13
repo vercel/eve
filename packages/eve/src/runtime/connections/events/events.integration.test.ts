@@ -243,6 +243,13 @@ it.each([3_600_000, null])(
       const request = JSON.parse(String(init.body));
       methods.push(request.method);
       if (request.id === undefined) return new Response(null, { status: 202 });
+      if (request.method === "server/discover") {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: { code: -32601, message: "Method not found" },
+        });
+      }
       let result;
       if (request.method === "initialize") {
         result = {

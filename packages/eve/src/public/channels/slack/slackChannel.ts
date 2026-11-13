@@ -2044,9 +2044,7 @@ async function openCodeChannelFromMessage(input: {
     state: opened.state,
   });
   // Slack auth a hook passes names the origin thread; the session runs in the channel.
-  const moved = <T extends { readonly auth?: SessionAuthContext | null }>(
-    options: T | undefined,
-  ) =>
+  const moved = <T extends { readonly auth?: SessionAuthContext | null }>(options: T | undefined) =>
     options?.auth ? { ...options, auth: codeChannelAuth(options.auth, opened.channelId) } : options;
   return {
     ...operations,

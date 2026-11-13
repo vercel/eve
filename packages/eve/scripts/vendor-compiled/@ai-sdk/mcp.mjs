@@ -32,36 +32,33 @@ function patchMcpSourcePlugin(name, replacements) {
   };
 }
 
-// Streamable HTTP always answers, so a slow `server/discover` is not a legacy
-// signal: the MCP spec falls back there only on a 4xx. Upstream caps the probe
-// at 1 s on every transport and then downgrades modern-only servers to
-// `initialize`. Remove once @ai-sdk/mcp ships vercel/ai#22042.
-const waitForHttpProtocolDiscovery = patchMcpSourcePlugin("wait-for-http-discovery", [
-  [
-    "timeout: DEFAULT_PROTOCOL_DISCOVERY_TIMEOUT",
-    "timeout: this.transport instanceof HttpMCPTransport ? void 0 : DEFAULT_PROTOCOL_DISCOVERY_TIMEOUT",
-  ],
-]);
-
 // The SDK already returns to legacy initialize for ordinary discovery failures,
-// but treats every -32022 as fatal. Negotiate only when the server lists a legacy
-// version this client supports, and preserve the highest overlapping version.
+// but on a -32022 that lists a legacy version it throws and asks the caller to
+// set `protocolVersionDiscovery: false`. Negotiate instead when the server lists
+// a legacy version this client supports, and keep the highest overlapping one.
 const supportedProtocolVersionFallback = patchMcpSourcePlugin(
   "supported-protocol-version-fallback",
   [
     [
-      "\t\t\tif (MCPClientError.isInstance(error) && error.code != null && MODERN_PROTOCOL_ERROR_CODES.includes(error.code)) throw error;",
-      `\t\t\tif (MCPClientError.isInstance(error) && error.code != null && MODERN_PROTOCOL_ERROR_CODES.includes(error.code)) {
-\t\t\t\tif (error.code !== -32022 || !Array.isArray(error.data?.supported)) throw error;
-\t\t\t\tconst supportedVersions = error.data.supported;
-\t\t\t\tconst protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find(
-\t\t\t\t\t(version) =>
-\t\t\t\t\t\tversion !== LATEST_PROTOCOL_VERSION && supportedVersions.includes(version),
-\t\t\t\t);
-\t\t\t\tif (protocolVersion === void 0) throw error;
-\t\t\t\tthis.protocolVersion = protocolVersion;
-\t\t\t\treturn false;
-\t\t\t}`,
+      [
+        '\t\t\t\t\tif (!supportedVersions.includes(this.protocolVersion) && supportedVersions.some((version) => version <= "2025-11-25" && SUPPORTED_PROTOCOL_VERSIONS.includes(version))) throw new MCPClientError({',
+        '\t\t\t\t\t\tmessage: `MCP server rejected protocol version ${this.protocolVersion} during discovery. Server-supported versions: ${supportedVersions.join(", ")}. The client does not automatically switch to legacy initialization after this error. If this is a known legacy server, set protocolVersionDiscovery: false to use initialize.`,',
+        "\t\t\t\t\t\tcode: error.code,",
+        "\t\t\t\t\t\tdata: error.data,",
+        "\t\t\t\t\t\tstatusCode: error.statusCode,",
+        "\t\t\t\t\t\turl: error.url,",
+        "\t\t\t\t\t\tresponseBody: error.responseBody,",
+        "\t\t\t\t\t\tcause: error",
+        "\t\t\t\t\t});",
+      ].join("\n"),
+      `\t\t\t\t\tconst protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find(
+\t\t\t\t\t\t(version) =>
+\t\t\t\t\t\t\tversion !== LATEST_PROTOCOL_VERSION && supportedVersions.includes(version),
+\t\t\t\t\t);
+\t\t\t\t\tif (protocolVersion !== void 0) {
+\t\t\t\t\t\tthis.protocolVersion = protocolVersion;
+\t\t\t\t\t\treturn false;
+\t\t\t\t\t}`,
     ],
     [
       '\t\t\tthis.protocolEra = "legacy";\n\t\t\tthis.protocolVersion = LATEST_LEGACY_PROTOCOL_VERSION;\n\t\t\tthis.setTransportProtocolVersion(this.protocolVersion);',
@@ -147,12 +144,7 @@ export default {
   packageName: "@ai-sdk/mcp",
   compiledPath: "@ai-sdk/mcp",
   chunkGroup: "workflow",
-  plugins: [
-    waitForHttpProtocolDiscovery,
-    supportedProtocolVersionFallback,
-    singleInboundSseStream,
-    boundedSessionTermination,
-  ],
+  plugins: [supportedProtocolVersionFallback, singleInboundSseStream, boundedSessionTermination],
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },

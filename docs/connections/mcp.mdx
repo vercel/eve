@@ -202,6 +202,8 @@ export default defineMcpClientConnection({
 });
 ```
 
+A server that answers `server/discover` with a JSON-RPC error or an HTTP error status other than `401` also gets `initialize`. If the `server/discover` request fails before the server answers, for example because the server drops the connection, the connection fails instead. Turn discovery off for a server that can't handle that request.
+
 With `protocolVersionDiscovery: false`, eve skips `server/discover` and starts with `initialize`. It proposes `2025-11-25` and agrees on a version the server supports. Dynamic connections can return this option too.
 
 ## Forward the caller to an eve agent
