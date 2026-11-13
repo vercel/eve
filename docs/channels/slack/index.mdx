@@ -295,7 +295,9 @@ export default slackChannel({
 });
 ```
 
-Use `onShortcut` for message and global shortcuts, `onInteraction` for your own buttons, and `onEvent` for other Events API events such as `team_join`.
+Use `onShortcut` for message and global shortcuts, `onInteraction` for your own message buttons, and `onEvent` for other Events API events such as `team_join`.
+
+For custom modal submissions, modal-close callbacks, and dynamic select options, use [`chatSdkChannel` with the Slack adapter](/docs/channels/chat-sdk/reference#cards-and-modals). The returned `bot` exposes Chat SDK's handlers directly. These callbacks are not exposed by `slackChannel`, and choosing the Chat SDK channel also means using its credential, state, rendering, and session-target APIs.
 
 ## Enable code channels
 

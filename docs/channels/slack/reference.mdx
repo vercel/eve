@@ -89,6 +89,8 @@ Hooks don't post anything. eve still acknowledges the message, shows progress, a
 
 `onInteraction(action, ctx)` handles clicks on your own buttons and selects (`block_actions`). Clicks on eve's approval and question controls go to `onAnswers(ctx, submission)` instead. To open a modal from a button, pass `action.triggerId` to `ctx.slack.request("views.open", { trigger_id, view })` within about 3 seconds. To replace or delete the message the click came from, POST to `action.responseUrl`, for example `{ "delete_original": true }`. That is the only way to change an ephemeral message. eve adds the clicking user's Slack ID to the model message.
 
+For custom modal submissions, modal-close callbacks, or dynamic select options, use the [Chat SDK channel's cards and modals](/docs/channels/chat-sdk/reference#cards-and-modals). It exposes Chat SDK's `bot.onModalSubmit`, `bot.onModalClose`, and `bot.onOptionsLoad`. The first-class `slackChannel` does not expose these handlers; its `onInteraction` receives message-backed actions, not custom modal submissions.
+
 `onShortcut(shortcut, ctx)` handles message and global shortcuts configured under **Interactivity & Shortcuts**. It receives the callback ID, user, workspace, and trigger ID, plus the message and channel for a message shortcut.
 
 `onSlashCommand(command, ctx)` handles **Slash Commands**. It receives the command, argument text, user, channel, workspace, trigger ID, and response URL. Both handlers can call the Slack API for the workspace. eve acknowledges the request immediately while the handler runs in the background:
@@ -921,7 +923,7 @@ export default slackChannel({
 
 - Handle your own button and select callbacks in `onInteraction`. For eve's approval and question controls, use the [HITL helpers](#render-and-decode-hitl-controls-yourself).
 - `thread.post({ card })` converts the card with `cardToBlocks(card)`, and with `cardToFallbackText(card)` unless you pass `fallbackText`.
-- Message cards don't support modals, text inputs, or external selects. For a custom modal, send native Slack view data with `ctx.slack.request("views.open", ...)`.
+- Message cards don't support modals, text inputs, or external selects. `ctx.slack.request("views.open", ...)` can open a native view, but `slackChannel` acknowledges custom modal submissions without delivering them to an authored hook. For a form you need to process, use the [Chat SDK channel's modal handlers](/docs/channels/chat-sdk/reference#cards-and-modals).
 
 ### Proactive sessions
 

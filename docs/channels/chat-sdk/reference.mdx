@@ -92,6 +92,7 @@ A turn starts when a handler you register on `bot` calls `send`:
 - `bot.onNewMention(thread, message)` fires on a new `@mention`, or a new inbound thread on surfaces like email. Call `thread.subscribe()` so later replies in the thread keep reaching the agent.
 - `bot.onSubscribedMessage(thread, message)` fires on later messages in a subscribed thread.
 - `bot.onAction`, `bot.onReaction`, and `bot.onSlashCommand` fire for adapters that emit them.
+- `bot.onModalSubmit`, `bot.onModalClose`, and `bot.onOptionsLoad` handle forms and dynamic selects. See [Cards and modals](#cards-and-modals).
 
 `send(message, options)` starts or resumes the eve session. The `thread` you pass picks the session, so replies land on that thread:
 
@@ -114,6 +115,116 @@ bot.onAction("approve_deploy", async (event) => {
   await respond([{ interactionId: event.value, optionId: "approve" }], { thread: event.thread });
 });
 ```
+
+## Cards and modals
+
+`bot` is a Chat SDK `Chat` instance, not a separate eve handler API. Register Chat SDK handlers directly, and import card and modal builders from `chat`. eve serves the adapter's webhook and keeps its background work alive; the adapter handles interactive callbacks and acknowledgement responses.
+
+| Chat SDK API                             | Use                                                                           |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `bot.onAction(actionId, handler)`        | Handle a button or select action. `event.raw` preserves the platform payload. |
+| `event.openModal(modal)`                 | Open a form from an action or slash command, using its short-lived trigger.   |
+| `bot.onModalSubmit(callbackId, handler)` | Validate a submitted form and accept it or return a modal response.           |
+| `bot.onModalClose(callbackId, handler)`  | Handle cancellation or closing when the modal sets `notifyOnClose: true`.     |
+| `bot.onOptionsLoad(actionId, handler)`   | Supply options for an external select from `event.query`.                     |
+
+These handlers also accept an array of IDs, or a handler without an ID filter. Availability and controls depend on the adapter. See the [Chat SDK documentation](https://chat-sdk.dev/docs) for its full UI API.
+
+### Open and validate a Slack form
+
+For a Slack app with custom forms, use `chatSdkChannel` with `@chat-adapter/slack`:
+
+```bash
+npm install eve@latest chat @chat-adapter/slack @chat-adapter/state-memory
+```
+
+This example posts a review button when mentioned, opens a modal on click, and previews the submitted text. It does not start an eve turn, save a review, or send an email.
+
+```ts title="agent/channels/slack.ts"
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { createSlackAdapter } from "@chat-adapter/slack";
+import { Actions, Button, Card, CardText, Modal, TextInput } from "chat";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send, respond } = chatSdkChannel({
+  userName: "Review Bot",
+  adapters: {
+    slack: createSlackAdapter({
+      botToken: process.env.SLACK_BOT_TOKEN,
+      signingSecret: process.env.SLACK_SIGNING_SECRET,
+    }),
+  },
+  state: createMemoryState(), // Use a persistent state adapter in production.
+});
+
+bot.onNewMention(async (thread) => {
+  await thread.post(
+    Card({
+      children: [
+        CardText("Alice's follow-up draft is ready for review."),
+        Actions([Button({ id: "edit_draft", label: "Edit", value: "draft-123" })]),
+      ],
+    }),
+  );
+});
+
+bot.onAction("edit_draft", async (event) => {
+  await event.openModal(
+    Modal({
+      callbackId: "sales_review",
+      title: "Review draft",
+      privateMetadata: event.value,
+      notifyOnClose: true,
+      children: [TextInput({ id: "line", label: "Follow-up line", multiline: true })],
+    }),
+  );
+});
+
+bot.onModalSubmit("sales_review", async (event) => {
+  const line = event.values.line;
+  if (!line?.trim()) {
+    return { action: "errors", errors: { line: "Enter a follow-up line." } };
+  }
+  return {
+    action: "update",
+    modal: Modal({
+      callbackId: "sales_review",
+      title: "Review preview",
+      privateMetadata: event.privateMetadata,
+      notifyOnClose: true,
+      children: [TextInput({ id: "line", label: "Follow-up line", initialValue: line })],
+    }),
+  };
+});
+
+export default channel;
+```
+
+Set the Slack app's **Event Subscriptions** and **Interactivity & Shortcuts** Request URLs to `/eve/v1/slack` on your deployment. Enable the `app_mention` event and the `app_mentions:read` and `chat:write` bot scopes, then install the app. The adapter manages credentials and signature verification; this configuration does not automatically inherit the first-class Slack channel's Vercel Connect setup. Do not mount both channels at the same webhook path. See [Slack setup](/docs/channels/slack/reference#manage-slack-credentials-yourself) for app settings.
+
+### Submission responses and context
+
+A modal submit handler returns Chat SDK's response shape, not Slack's `response_action` payload:
+
+| Return value                                           | Effect on Slack                              |
+| ------------------------------------------------------ | -------------------------------------------- |
+| Nothing or `{ action: "close" }`                       | Closes the submitted modal.                  |
+| `{ action: "errors", errors: { [inputId]: message } }` | Keeps the modal open and shows field errors. |
+| `{ action: "update", modal }`                          | Replaces the modal view.                     |
+| `{ action: "push", modal }`                            | Adds a modal view to the stack.              |
+| `{ action: "clear" }`                                  | Closes the modal stack.                      |
+
+Finish validation within Slack's three-second acknowledgement deadline. Handle expected failures by returning errors rather than throwing: Chat SDK logs modal-handler exceptions, and a thrown exception does not reliably keep a form open.
+
+`event.openModal(...)` records the originating conversation in your state adapter. A later submission can include `event.relatedThread`, `event.relatedMessage`, and `event.relatedChannel` while that saved context is available. `event.privateMetadata` carries your own review ID. A modal opened outside this helper can still reach `onModalSubmit`, but it has no automatically restored conversation. For a native Slack view created outside Chat SDK, read its `private_metadata` from `event.raw.view.private_metadata`; `event.privateMetadata` expects Chat SDK's metadata encoding.
+
+To hand the result to eve, use `send(message, { thread: event.relatedThread, auth })` to start or continue a turn. Use `respond(answers, { thread: event.relatedThread, auth })` to answer a pending question or approval instead. Check that `relatedThread` exists first. Authorize `event.user` against the stored review, persist accepted changes, and reject stale or repeated decisions before sending an email. A private metadata ID identifies a review; it does not authorize access.
+
+### Native Block Kit state
+
+Chat SDK's normalized `event.values` is a string map keyed by input ID. It is not the full Slack form state. For native controls such as checkboxes, multi-selects, and time pickers, validate and read the complete payload from `event.raw.view.state.values`. The same raw-payload escape hatch is available on action events for forms whose state arrives with a button click.
+
+Keep native payload parsing in your app's Slack-specific code. Slack field-error keys are block IDs; Chat SDK's modal builders use each input ID as its block ID. Do not assume every Block Kit control has a Chat SDK builder or a normalized value. Chat SDK's modal context also depends on its state adapter; use persistent storage for production review flows.
 
 ## Steering
 
