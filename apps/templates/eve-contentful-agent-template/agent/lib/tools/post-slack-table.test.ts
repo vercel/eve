@@ -271,7 +271,7 @@ describe("bounded table fallback", () => {
       failed: false,
       posted: true,
     });
-    const harness = messageCompletedHarness(replyEvents["message.completed"]);
+    const harness = messageCompletedHarness(replyEvents["content.completed"]);
     await harness.complete();
     expect(harness.next).not.toHaveBeenCalled();
   });

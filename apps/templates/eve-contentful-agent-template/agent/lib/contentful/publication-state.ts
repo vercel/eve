@@ -1,6 +1,7 @@
 import type { JsonValue } from "../json";
 import { defineState } from "../state";
 import { configurationKey } from "./config";
+import type { LocaleContext } from "./locale";
 /**
  * eve session persistence for frozen publication scope, preview delivery, and write progress.
  *
@@ -29,12 +30,16 @@ const plans = defineState<Record<string, SavedPublication>>(
   "contentful.contentful-publication-plans",
   () => ({})
 );
-const save = (callId: string, plan: ContentfulPublicationPlan) => {
+const save = (
+  callId: string,
+  plan: ContentfulPublicationPlan,
+  localeContext?: LocaleContext
+) => {
   plans.update((current) => ({
     ...current,
     [callId]: {
       configuration: configurationKey(),
-      locale: contentLocale(),
+      locale: contentLocale(localeContext),
       plan: structuredClone(plan),
       previewMessageId: current[callId]?.previewMessageId ?? null,
     },
@@ -63,20 +68,26 @@ const existingPlan = (callId: string, input: JsonValue) => {
  *
  * @param callId - Nonempty tool call ID, unique within the active eve session.
  * @param input - Publication input whose parsed fingerprint binds this call to its scope.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns A copy of the existing plan, or a newly prepared and saved plan.
  * @throws {@link Error} If input differs from the saved call, preparation fails, or eve state is unavailable.
  * @remarks Uses the current eve session. Repeated evaluation does not reread or expand a saved plan.
  */
 export const getOrPrepareContentfulPublication = async (
   callId: string,
-  input: JsonValue
+  input: JsonValue,
+  localeContext?: LocaleContext
 ): Promise<ContentfulPublicationPlan> => {
   const existing = existingPlan(callId, input);
   if (existing) {
     return existing.plan;
   }
-  const plan = await prepareContentfulPublication(input);
-  save(callId, plan);
+  const plan = await prepareContentfulPublication(
+    input,
+    undefined,
+    localeContext
+  );
+  save(callId, plan, localeContext);
   return plan;
 };
 
@@ -131,6 +142,7 @@ export const recordContentfulPublicationPreview = (
  * @param callId - Tool call ID owning the plan in the active eve session.
  * @param input - Original publication input; changed input requires a new call.
  * @param signal - Cancellation forwarded to frozen-plan verification and execution.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Publication outcomes, including previously recorded partial results without retrying.
  * @throws {@link Error} If the input/plan is invalid, required preview delivery is missing, or preflight fails.
  * @throws {@link Error} If session-state access or a progress checkpoint fails.
@@ -140,7 +152,8 @@ export const recordContentfulPublicationPreview = (
 export const publishPlannedContentfulEntries = async (
   callId: string,
   input: JsonValue,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulPublicationOutcome> => {
   const saved = existingPlan(callId, input);
   if (!saved) {
@@ -148,7 +161,7 @@ export const publishPlannedContentfulEntries = async (
       "No saved publication plan exists for this call. Request a new publication call."
     );
   }
-  if (saved.locale !== contentLocale()) {
+  if (saved.locale !== contentLocale(localeContext)) {
     throw new Error(
       "Contentful locale changed. Prepare a new publication plan."
     );
@@ -158,7 +171,7 @@ export const publishPlannedContentfulEntries = async (
   }
   const output = await executeContentfulPublication(
     saved.plan,
-    (progress) => save(callId, progress),
+    (progress) => save(callId, progress, localeContext),
     signal
   );
   if (output.complete) {

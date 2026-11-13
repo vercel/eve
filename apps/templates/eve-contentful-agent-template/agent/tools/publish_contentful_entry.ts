@@ -24,7 +24,8 @@ export default defineTool({
         await requireContentfulEditor({ session });
         const plan = await withContentfulLocale(
           contentfulPublishInputSchema.parse(toolInput).space,
-          () => getOrPrepareContentfulPublication(callId, toolInput)
+          (localeContext) =>
+            getOrPrepareContentfulPublication(callId, toolInput, localeContext)
         );
         if (!plan.requiresApproval) {
           return "not-applicable";
@@ -66,10 +67,16 @@ export default defineTool({
    * @param input - Validated publication roots and the exact versions the caller read.
    * @param ctx - Authenticated tool context carrying cancellation and session identity.
    * @returns Ordered publication outcomes, including resources left untouched after a failure.
+   * @param localeContext - Explicit locale selection and per-operation schema cache.
    */
-  execute: withLocale(async (input, ctx) => {
+  execute: withLocale(async (input, ctx, localeContext) => {
     await requireContentfulEditor(ctx);
-    return publishPlannedContentfulEntries(ctx.callId, input, ctx.abortSignal);
+    return publishPlannedContentfulEntries(
+      ctx.callId,
+      input,
+      ctx.abortSignal,
+      localeContext
+    );
   }),
   inputSchema: contentfulPublishInputSchema,
   toModelOutput(output: ContentfulPublicationOutcome) {

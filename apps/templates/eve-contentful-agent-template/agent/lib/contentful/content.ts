@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { JsonObject, JsonValue } from "../json";
 import { isString, isObject } from "../values";
+import type { LocaleContext } from "./locale";
 /**
  * Pure configured-locale content rendering, normalization, publication-status helpers,
  * and reference traversal shared by queries and publication planning.
@@ -22,13 +23,15 @@ import type {
  *
  * @param fields - Localized CMA fields, or undefined for an entry without fields.
  * @param key - Field ID to inspect.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns The localized string, or null when the field is absent or not a string.
  */
 export const readString = (
   fields: LocalizedFields | undefined,
-  key: string
+  key: string,
+  localeContext?: LocaleContext
 ): string | null => {
-  const value = fields?.[key]?.[contentLocale()];
+  const value = fields?.[key]?.[contentLocale(localeContext)];
   return isString(value) ? value : null;
 };
 
@@ -235,22 +238,24 @@ const TITLE_FIELDS = [
  * Finds a display title without assuming a particular Contentful content model.
  *
  * @param fields - Localized fields in which common title names are tried before other strings.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns The first nonempty title candidate in the active locale, or null.
  */
 export const guessTitle = (
-  fields: LocalizedFields | undefined
+  fields: LocalizedFields | undefined,
+  localeContext?: LocaleContext
 ): string | null => {
   if (!fields) {
     return null;
   }
   for (const key of TITLE_FIELDS) {
-    const value = readString(fields, key);
+    const value = readString(fields, key, localeContext);
     if (value) {
       return value;
     }
   }
   for (const key of Object.keys(fields)) {
-    const value = readString(fields, key);
+    const value = readString(fields, key, localeContext);
     if (value) {
       return value;
     }
@@ -269,6 +274,7 @@ const MAX_TOTAL_CHARS = 80_000;
  *
  * @param rawFields - Localized fields; absent or null configured-locale values are omitted.
  * @param linked - Best-effort resolved link metadata, matched by resource kind and ID.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Flattened fields and a flag indicating whether any text was clipped.
  * @remarks Renders rich text, replaces links with metadata or identity placeholders, and
  * keeps empty strings/arrays. Text is limited to 20,000 characters per value and 80,000
@@ -276,7 +282,8 @@ const MAX_TOTAL_CHARS = 80_000;
  */
 export const flattenFields = (
   rawFields: LocalizedFields,
-  linked: LinkedItem[]
+  linked: LinkedItem[],
+  localeContext?: LocaleContext
 ) => {
   const linkedById = new Map(linked.map((l) => [`${l.type}:${l.id}`, l]));
   let budget = MAX_TOTAL_CHARS;
@@ -321,7 +328,7 @@ export const flattenFields = (
 
   const fields: JsonObject = {};
   for (const [key, perLocale] of Object.entries(rawFields)) {
-    const value = perLocale[contentLocale()];
+    const value = perLocale[contentLocale(localeContext)];
     if (value !== undefined && value !== null) {
       fields[key] = flatten(value);
     }
@@ -394,11 +401,13 @@ const pointer = (key: string) =>
  *
  * @param fields - Localized entry fields, including nested JSON and rich text.
  * @param options - Enables per-block sections with indexes and hashes for targeted patches.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Nonempty text sections identified by JSON-pointer-compatible field paths.
  */
 export const contentSections = (
   fields: LocalizedFields,
-  options: { richTextBlocks?: boolean } = {}
+  options: { richTextBlocks?: boolean } = {},
+  localeContext?: LocaleContext
 ): ContentSection[] => {
   const sections: ContentSection[] = [];
 
@@ -422,7 +431,7 @@ export const contentSections = (
     }
   };
   for (const [key, locales] of Object.entries(fields)) {
-    visit(locales[contentLocale()], `/${pointer(key)}`);
+    visit(locales[contentLocale(localeContext)], `/${pointer(key)}`);
   }
   return sections;
 };

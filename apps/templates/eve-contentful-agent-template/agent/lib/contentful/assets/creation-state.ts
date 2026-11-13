@@ -11,6 +11,7 @@ import { configurationKey } from "../config";
 import type { ContentfulCreationResult } from "../create";
 import { createContentfulEntry } from "../create";
 import { contentfulCreateInputSchema } from "../input-schemas";
+import type { LocaleContext } from "../locale";
 import { contentLocale } from "../locale";
 import { pageKindInSpace, QUERY_SPACES } from "../model";
 import {
@@ -38,6 +39,7 @@ const creations = defineState<Record<string, ContentfulAssetCreationPlan>>(
  * @param callId - Current tool call ID; required with the session ID for pages and asset-backed operations.
  * @param signal - Optional cancellation passed to preparation and resource execution.
  * @param readFile - Optional session-scoped attachment reader, supplied by the tool adapter.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns A direct result for supporting entries without assets, or saved per-resource creation progress.
  * @throws {@link Error} If inputs/IDs are invalid, recovery is unknown or mismatched, or preparation/state access fails.
  * @remarks Page and asset-backed replays with the same initial call ID report saved progress; only
@@ -51,7 +53,8 @@ export const createContentfulEntryWithAssets = async (
   sessionId: string,
   callId: string,
   signal?: AbortSignal,
-  readFile?: ReadAssetFile
+  readFile?: ReadAssetFile,
+  localeContext?: LocaleContext
 ): Promise<ContentfulCreationResult | ContentfulAssetCreationResult> => {
   const parsed = contentfulCreateInputSchema.parse(input);
   if (
@@ -59,7 +62,7 @@ export const createContentfulEntryWithAssets = async (
     parsed.resumeFrom === null &&
     !pageKindInSpace(QUERY_SPACES[parsed.space], parsed.contentTypeId)
   ) {
-    return createContentfulEntry(parsed, signal);
+    return createContentfulEntry(parsed, signal, localeContext);
   }
   if (!(sessionId && callId)) {
     throw new Error(
@@ -86,7 +89,7 @@ export const createContentfulEntryWithAssets = async (
   if (
     plan &&
     (plan.configuration !== configurationKey() ||
-      plan.locale !== contentLocale())
+      plan.locale !== contentLocale(localeContext))
   ) {
     throw new Error(
       "Contentful configuration or locale changed. Inspect existing resources before starting a new operation."
@@ -101,13 +104,19 @@ export const createContentfulEntryWithAssets = async (
       [recoveryId]: structuredClone(value),
     }));
   if (!plan) {
-    plan = await prepareContentfulAssetCreation(parsed, recoveryId, signal);
+    plan = await prepareContentfulAssetCreation(
+      parsed,
+      recoveryId,
+      signal,
+      localeContext
+    );
     save(plan);
   }
   return executeContentfulAssetCreation(
     structuredClone(plan),
     save,
     signal,
-    readFile
+    readFile,
+    localeContext
   );
 };

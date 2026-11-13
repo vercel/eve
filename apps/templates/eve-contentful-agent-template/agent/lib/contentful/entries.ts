@@ -17,6 +17,7 @@ import {
   flattenFields,
   guessTitle,
 } from "./content";
+import type { LocaleContext } from "./locale";
 import { contentLocale, projectEntryLocale } from "./locale";
 import {
   APP_HOST,
@@ -225,16 +226,18 @@ const assetUrl = (file: { url?: string } | undefined): string | undefined => {
  * @param base - Allowlisted CMA space/environment base path for referenced resources.
  * @param rawFields - Parent entry fields whose nested link objects should be collected.
  * @param signal - Cancellation signal for linked-resource reads.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Available linked-resource summaries keyed by referenced ID.
  */
 const resolveLinked = async (
   base: string,
   rawFields: LocalizedFields,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<LinkedItem[]> => {
   const links = new Map<string, Link>();
   for (const perLocale of Object.values(rawFields)) {
-    collectLinks(perLocale[contentLocale()], links);
+    collectLinks(perLocale[contentLocale(localeContext)], links);
   }
   const idsOf = (linkType: string) =>
     [...links.values()]
@@ -264,12 +267,12 @@ const resolveLinked = async (
   const projectedEntries = await Promise.all(
     entries.map(async (raw): Promise<LinkedItem[]> => {
       try {
-        const item = await projectEntryLocale(base, raw, signal);
+        const item = await projectEntryLocale(base, raw, signal, localeContext);
         return [
           {
             contentType: item.sys.contentType?.sys.id,
             id: item.sys.id,
-            title: guessTitle(item.fields),
+            title: guessTitle(item.fields, localeContext),
             type: "Entry",
           },
         ];
@@ -282,9 +285,9 @@ const resolveLinked = async (
     ...projectedEntries.flat(),
     ...assets.map((item): LinkedItem => ({
       id: item.sys.id,
-      title: item.fields?.title?.[contentLocale()] ?? null,
+      title: item.fields?.title?.[contentLocale(localeContext)] ?? null,
       type: "Asset",
-      url: assetUrl(item.fields?.file?.[contentLocale()]),
+      url: assetUrl(item.fields?.file?.[contentLocale(localeContext)]),
     })),
   ];
 };
@@ -300,6 +303,7 @@ const resolveLinked = async (
  *
  * @param url - A URL in one of the shapes accepted by {@link parseEntryUrl}.
  * @param signal - Cancellation forwarded to all requests; secondary lookup failures remain best-effort.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns The {@link NormalizedEntry} for that URL.
  * @throws {@link Error} Error when the URL is not a supported URL format, when no entry matches a
  * configured website slug, or when the entry request itself fails.
@@ -314,7 +318,8 @@ const resolveLinked = async (
  */
 export const getEntry = async (
   url: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<NormalizedEntry> => {
   const ref = parseEntryUrl(url);
   if (!ref) {
@@ -332,11 +337,16 @@ export const getEntry = async (
   const contentTypeId = entry.sys.contentType?.sys.id ?? "unknown";
   const page =
     ref.kind === "slug" ? ref.page : pageKindInSpace(spaceId, contentTypeId);
-  const projected = await projectEntryLocale(base, entry, signal);
+  const projected = await projectEntryLocale(
+    base,
+    entry,
+    signal,
+    localeContext
+  );
   const rawFields = projected.fields ?? {};
 
-  const linked = await resolveLinked(base, rawFields, signal);
-  const { fields, truncated } = flattenFields(rawFields, linked);
+  const linked = await resolveLinked(base, rawFields, signal, localeContext);
+  const { fields, truncated } = flattenFields(rawFields, linked, localeContext);
 
   return {
     contentTypeId,
@@ -525,6 +535,7 @@ const requireCurrentCursor = (
  * @param signal - Optional cancellation passed to entry resolution.
  * @param options - richTextJson adds each top-level RichText block's raw JSON. Those
  * blocks are never split, and a page always includes at least one section.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Up to 12,000 characters with field paths, RichText block indexes and hashes,
  * linked identities, and a continuation cursor.
  * @throws {@link Error} If the URL/cursor is invalid, the entry/version changed or is unavailable, or the read fails.
@@ -537,7 +548,8 @@ export const readEntryContent = async (
   url: string,
   cursor: string | null,
   signal?: AbortSignal,
-  options: { richTextJson?: boolean } = {}
+  options: { richTextJson?: boolean } = {},
+  localeContext?: LocaleContext
 ): Promise<ContentReadResult> => {
   const started = Date.now();
   const mode = options.richTextJson ? "json" : "text";
@@ -565,11 +577,16 @@ export const readEntryContent = async (
   const projected = await projectEntryLocale(
     spacePath(spaceId, environmentId),
     entry,
-    signal
+    signal,
+    localeContext
   );
-  const allSections = contentSections(projected.fields ?? {}, {
-    richTextBlocks: true,
-  });
+  const allSections = contentSections(
+    projected.fields ?? {},
+    {
+      richTextBlocks: true,
+    },
+    localeContext
+  );
   const sectionIndex = continuation?.section ?? 0;
   const offset = continuation?.offset ?? 0;
   if (
@@ -601,7 +618,7 @@ export const readEntryContent = async (
       : null;
   const links = new Map<string, Link>();
   for (const locales of Object.values(projected.fields ?? {})) {
-    collectLinks(locales[contentLocale()], links);
+    collectLinks(locales[contentLocale(localeContext)], links);
   }
   console.info("contentful.content_read", {
     elapsedMs: Date.now() - started,

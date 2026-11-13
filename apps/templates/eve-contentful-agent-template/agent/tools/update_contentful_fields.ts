@@ -20,15 +20,17 @@ export default defineTool({
    * @param input - Validated entry changes, expected versions, optional assets, and recovery ID.
    * @param ctx - Authenticated tool context carrying cancellation and session identity.
    * @returns Ordered entry-save outcomes and, when applicable, durable asset recovery receipts.
+   * @param localeContext - Explicit locale selection and per-operation schema cache.
    */
-  execute: withLocale(async (input, ctx) => {
+  execute: withLocale(async (input, ctx, localeContext) => {
     await requireContentfulEditor(ctx);
     return updateContentfulFieldsWithAssets(
       input,
       ctx.session.id,
       ctx.callId,
       ctx.abortSignal,
-      sandboxAssetReader(() => ctx.getSandbox())
+      sandboxAssetReader(() => ctx.getSandbox()),
+      localeContext
     );
   }),
   inputSchema: contentfulAssetUpdateInputSchema,

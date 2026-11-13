@@ -10,6 +10,7 @@ import { entryStatus, queryFieldReferences } from "./content";
 import type { QueryReference } from "./content";
 import { contentfulQueryInputSchema } from "./input-schemas";
 import type { ContentfulQueryInput } from "./input-schemas";
+import type { LocaleContext } from "./locale";
 import { contentLocale, projectEntryLocale } from "./locale";
 import type { ContentfulSpaceId } from "./model";
 import { APP_HOST, CONTENTFUL_ID, QUERY_SPACES, spacePath } from "./model";
@@ -146,14 +147,15 @@ interface ReferenceBudget {
 /* Extract structure from complete API fields; never serialize article prose. */
 const queryEntryReferences = (
   entry: RawQueryEntry,
-  budget: ReferenceBudget
+  budget: ReferenceBudget,
+  localeContext?: LocaleContext
 ) => {
   const references: QueryReference[] = [];
   const scannedFields: string[] = [];
   let found = 0;
   let unsupported = 0;
   for (const [key, locales] of Object.entries(entry.fields ?? {})) {
-    const value = locales[contentLocale()];
+    const value = locales[contentLocale(localeContext)];
     if (value === undefined) {
       continue;
     }
@@ -190,13 +192,14 @@ const queryEntryReferences = (
 /* Keep JSON values intact; report oversized values separately from missing fields. */
 const queryEntryFields = (
   entry: RawQueryEntry,
-  budget: { remaining: number }
+  budget: { remaining: number },
+  localeContext?: LocaleContext
 ) => {
   const fields: [string, JsonValue][] = [];
   const truncatedFields: string[] = [];
   // Empty-object braces are reserved up front; count keys, punctuation and values.
   for (const [key, locales] of Object.entries(entry.fields ?? {})) {
-    const value = locales[contentLocale()];
+    const value = locales[contentLocale(localeContext)];
     if (value === undefined) {
       continue;
     }
@@ -317,6 +320,7 @@ const queryEntryUsers = async (
  *
  * @param input - Structured query input; null limit/skip mean 25/0, and null result mode means fields.
  * @param signal - Optional cancellation for the entry request and actor lookups.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Selected values or references with pagination, truncation, and coverage metadata.
  * @throws {@link Error} If input/query parameters are invalid or an entry/actor request fails or is cancelled.
  * @remarks Reference completeness applies only to selected fields of returned entries.
@@ -326,7 +330,8 @@ const queryEntryUsers = async (
  */
 export const runContentfulQuery = async (
   input: ContentfulQueryInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulQueryResult> => {
   const parsed = contentfulQueryInputSchema.parse(input);
   const effectiveParameters = customQueryParameters(parsed);
@@ -350,7 +355,7 @@ export const runContentfulQuery = async (
     : { unresolvedUserIds: null, users: null };
   const projected = await Promise.all(
     collection.items.map((entry) =>
-      projectEntryLocale(spacePath(spaceId), entry, signal)
+      projectEntryLocale(spacePath(spaceId), entry, signal, localeContext)
     )
   );
   const entries = projected.map((entry) => ({
@@ -375,10 +380,11 @@ export const runContentfulQuery = async (
             sys: entry.sys,
           }
         : entry,
-      budget
+      budget,
+      localeContext
     ),
     ...(resultMode === "references"
-      ? queryEntryReferences(entry, referenceBudget)
+      ? queryEntryReferences(entry, referenceBudget, localeContext)
       : { referenceCoverage: null, references: null }),
   }));
   return {

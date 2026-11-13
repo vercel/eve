@@ -1,3 +1,4 @@
+import { interaction } from "eve/events";
 import { defineHook } from "eve/hooks";
 
 import { defineState } from "../../state";
@@ -10,20 +11,20 @@ const pendingResume = defineState<string | null>(
 
 export default defineHook({
   events: {
-    "input.resolved"(event, ctx) {
+    "interaction.settled"(event, ctx) {
       if (ctx.channel.kind !== "channel:slack") {
         return;
       }
-      const continued = event.data.resolutions.some(
-        (resolution) =>
-          resolution.kind === "session-limit" &&
-          resolution.outcome === "answered" &&
-          resolution.response?.optionId === "continue"
-      );
+      const request = interaction(ctx.view, event.data.interactionId);
+      const continued =
+        request?.request.kind === "budget" && event.data.outcome === "accepted";
       if (!continued) {
         return;
       }
-      const sourceTurnId = event.data.turnId;
+      const sourceTurnId = request?.turnId;
+      if (!sourceTurnId) {
+        return;
+      }
       if (visualizationReceipts.get()?.turnId === sourceTurnId) {
         pendingResume.update(() => sourceTurnId);
       }

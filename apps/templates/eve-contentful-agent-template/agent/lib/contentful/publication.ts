@@ -16,6 +16,7 @@ import {
 import type { QueryReference } from "./content";
 import { contentfulPublishInputSchema } from "./input-schemas";
 import type { ContentfulPublishInput } from "./input-schemas";
+import type { LocaleContext } from "./locale";
 import { projectEntryLocale } from "./locale";
 import {
   APP_HOST,
@@ -207,7 +208,8 @@ const publicationItem = async (
   target: PublicationTarget,
   raw: RawEntry,
   requestedVersion: number | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<PublicationItem> => {
   // SAFETY: Planning only supplies resources read through readPublicationTarget, which validates a positive integer version.
   const expectedVersion = raw.sys.version as number;
@@ -232,9 +234,14 @@ const publicationItem = async (
   }
   const display =
     target.kind === "Entry"
-      ? await projectEntryLocale(spacePath(QUERY_SPACES[space]), raw, signal)
+      ? await projectEntryLocale(
+          spacePath(QUERY_SPACES[space]),
+          raw,
+          signal,
+          localeContext
+        )
       : raw;
-  const slug = readString(display.fields, "slug");
+  const slug = readString(display.fields, "slug", localeContext);
   return {
     ...target,
     alreadyPublished: entryStatus(raw.sys) === "published",
@@ -247,7 +254,8 @@ const publicationItem = async (
     role: requested ? "requested" : "dependency",
     status: entryStatus(raw.sys),
     title:
-      readString(display.fields, "title") ?? readString(display.fields, "name"),
+      readString(display.fields, "title", localeContext) ??
+      readString(display.fields, "name", localeContext),
     url: page && slug ? publicUrl(page, slug) : null,
   };
 };
@@ -258,7 +266,8 @@ const planPublicationTarget = async (
   target: PublicationTarget,
   raw: RawEntry,
   requestedVersion: number | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   const requested = requestedVersion !== undefined;
   const linkedPage =
@@ -286,7 +295,14 @@ const planPublicationTarget = async (
   }
   const item = retainLive
     ? null
-    : await publicationItem(plan.space, target, raw, requestedVersion, signal);
+    : await publicationItem(
+        plan.space,
+        target,
+        raw,
+        requestedVersion,
+        signal,
+        localeContext
+      );
   // Unchanged components can link to edited children. Unrequested live pages
   // remain boundaries, while component-only calls retain live reference edits.
   const traverse = plan.requiresApproval
@@ -306,6 +322,8 @@ const planPublicationTarget = async (
  *
  * @param input - One space and 1–20 requested entry IDs with expected versions.
  * @param signal - Optional cancellation for root reads and dependency traversal.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Dependency-first items, retained live versions, and the approval requirement.
  * @throws {@link Error} If input, identity, versions, references, or asset processing state are invalid.
  * @throws {@link Error} If a read fails, cancellation occurs, or traversal encounters a cycle or graph limit.
@@ -315,7 +333,8 @@ const planPublicationTarget = async (
  */
 export const prepareContentfulPublication = async (
   input: JsonValue,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulPublicationPlan> => {
   const parsed = contentfulPublishInputSchema.parse(input);
   const { space, entries } = parsed;
@@ -342,7 +361,8 @@ export const prepareContentfulPublication = async (
       target,
       raw,
       expectedVersion,
-      signal
+      signal,
+      localeContext
     );
     rootEntries.set(entryId, raw);
     plan.requiresApproval ||= item.page !== null;
@@ -375,7 +395,8 @@ export const prepareContentfulPublication = async (
       target,
       raw,
       requestedVersion,
-      signal
+      signal,
+      localeContext
     );
     if (item) {
       publicationCount += 1;

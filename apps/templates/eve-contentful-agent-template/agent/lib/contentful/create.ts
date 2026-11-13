@@ -13,6 +13,7 @@ import {
 } from "./field-validation";
 import { contentfulCreateInputSchema } from "./input-schemas";
 import type { ContentfulCreateInput } from "./input-schemas";
+import type { LocaleContext } from "./locale";
 import { fieldLocale } from "./locale";
 import type { ContentfulSpaceId } from "./model";
 import {
@@ -61,6 +62,7 @@ export type ContentfulCreationResult = CreatedEntryIdentity &
  * @param input - Parsed creation input with asset placeholders already replaced by reserved links.
  * @param signal - Optional cancellation for model/reference reads and preflight checks.
  * @param pendingAssets - Reserved assets owned by this operation; exempt from live-target lookup.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns A localized field payload, environment path, and configured space ID.
  * @throws {@link Error} If supplied fields/references are invalid, a supporting entry is incomplete, or a read fails.
  * @remarks Only explicitly configured component types bypass draft creation. Pages may omit required fields,
@@ -70,7 +72,8 @@ export type ContentfulCreationResult = CreatedEntryIdentity &
 export const prepareCreation = async (
   input: ContentfulCreateInput,
   signal?: AbortSignal,
-  pendingAssets: ReadonlySet<string> = new Set()
+  pendingAssets: ReadonlySet<string> = new Set(),
+  localeContext?: LocaleContext
 ): Promise<PreparedCreation> => {
   signal?.throwIfAborted();
   const spaceId = QUERY_SPACES[input.space];
@@ -142,7 +145,8 @@ export const prepareCreation = async (
         fieldId,
         {
           [fieldLocale(
-            model.fields.find((field) => field.id === fieldId) ?? {}
+            model.fields.find((field) => field.id === fieldId) ?? {},
+            localeContext
           )]: value,
         },
       ])
@@ -172,6 +176,7 @@ const createdVersion = (created: RawEntry, contentTypeId: string): number => {
  *
  * @param input - Creation input with both `assets` and `resumeFrom` set to null.
  * @param signal - Optional cancellation; after creation, interruption retains the returned ID.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns The created identity and a `published` or `unconfirmed` publication outcome.
  * @throws {@link Error} If validation fails, creation cannot be confirmed, or no usable entry ID is returned.
  * @remarks Publication failure is returned rather than thrown once a valid new ID is known.
@@ -180,7 +185,8 @@ const createdVersion = (created: RawEntry, contentTypeId: string): number => {
  */
 export const createContentfulEntry = async (
   input: ContentfulCreateInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulCreationResult> => {
   const parsed = contentfulCreateInputSchema.parse(input);
   if (pageKindInSpace(QUERY_SPACES[parsed.space], parsed.contentTypeId)) {
@@ -193,7 +199,12 @@ export const createContentfulEntry = async (
       "Asset-backed creation requires the saved creation workflow."
     );
   }
-  const prepared = await prepareCreation(parsed, signal);
+  const prepared = await prepareCreation(
+    parsed,
+    signal,
+    undefined,
+    localeContext
+  );
   let created: RawEntry;
   try {
     created = await callApi<RawEntry>(`${prepared.base}/entries`, {}, signal, {

@@ -14,7 +14,8 @@ export default defineTool({
     "Fetch a Contentful entry from its web-app URL or a configured public website URL. Read the entry before answering questions about or summarizing its content. " +
     "Returns content type, version, status, fields, and a Contentful link. Rich text is rendered as plain text; linked entries/assets resolve to titles, not their bodies. Use read_contentful_content when content is truncated.",
   execute: withLocale(
-    async ({ url }, ctx) => await getEntry(url, ctx.abortSignal)
+    async ({ url }, ctx, localeContext) =>
+      await getEntry(url, ctx.abortSignal, localeContext)
   ),
   inputSchema: z.object({
     url: z

@@ -99,7 +99,7 @@ Use a skill for a procedure the agent only needs for certain tasks. The existing
 
 Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `anthropic/claude-opus-5.5-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
-The same file limits each session to `5_000_000` input tokens and `100_000` output tokens through `maxInputTokensPerSession` and `maxOutputTokensPerSession`. Increase the input limit if sessions stop after reading large amounts of content, or the output limit if they stop after generating long responses. See [eve's agent configuration](https://eve.dev/docs/agent-config) for the supported settings.
+The same file uses `limits.sessionUsage` to ask whether to continue after `5_000_000` new input tokens or `100_000` output tokens. Cached input does not count toward this threshold. Each approved continuation starts a new usage window. Increase either threshold to allow more work before the next prompt. See [eve's agent configuration](https://eve.dev/docs/agent-config) for the supported settings.
 
 The [current-time instructions](agent/instructions/current-time.ts) add a UTC timestamp at the start of each turn. If you add regional date conventions, explain the intended timezone in your instructions so editorial dates remain unambiguous.
 
@@ -156,7 +156,7 @@ To restrict editing or approval to designated people, follow the [team directory
 
 ### Customize approval cards and handle failed operations
 
-To change the approval card's wording or layout, edit [publication-message.ts](agent/lib/contentful/publication-message.ts). Keep the list of entries and assets visible so the approver knows what will be published. The button handling in [publication-input.ts](agent/lib/contentful/publication-input.ts) also checks that Slack received the card before accepting approval; preserve this check.
+To change the approval card's wording or layout, edit [publication-message.ts](agent/lib/contentful/publication-message.ts). Keep the list of entries and assets visible so the approver knows what will be published. [publication-input.ts](agent/lib/contentful/publication-input.ts) supplies the preview, and eve posts its native approval controls separately. Publication stays blocked until Slack confirms preview delivery; preserve this check and eve's authenticated response handling.
 
 Before publishing, the agent checks whether the entries have changed since the request was prepared. Publication stops at the first failure, so inspect the reported results before retrying: some items may already be live. If an operation involving asset uploads returns a recovery ID, give that ID to the agent and ask it to resume the operation. The saved record lets it reuse uploads that already succeeded.
 

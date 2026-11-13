@@ -12,6 +12,7 @@ import type {
   ContentfulAssetUpdateInput,
   ContentfulEntryUpdate,
 } from "../input-schemas";
+import type { LocaleContext } from "../locale";
 import { contentLocale } from "../locale";
 import type { RawQueryEntry } from "../types";
 import {
@@ -76,13 +77,15 @@ const resolvedEntries = (
  * @param input - Untrusted JSON parsed by the asset-update schema.
  * @param recoveryId - Stable validated identifier used to reserve asset IDs.
  * @param signal - Cancellation signal for read-only update preparation.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns A durable plan with validated entry snapshots and reserved asset checkpoints.
  * @throws {@link Error} When input, entry versions, fields, or references are invalid.
  */
 export const prepareContentfulAssetUpdate = async (
   input: JsonValue,
   recoveryId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulAssetUpdatePlan> => {
   const parsed = contentfulAssetUpdateInputSchema.parse(input);
   updateFieldIdSchema.parse(recoveryId);
@@ -97,7 +100,8 @@ export const prepareContentfulAssetUpdate = async (
       parsed.space,
       request,
       signal,
-      pendingAssets
+      pendingAssets,
+      localeContext
     );
     entries.push({
       error: null,
@@ -113,7 +117,7 @@ export const prepareContentfulAssetUpdate = async (
     entries,
     error: null,
     input: { ...parsed, resumeFrom: null },
-    locale: contentLocale(),
+    locale: contentLocale(localeContext),
     recoveryId,
   };
 };
@@ -188,7 +192,8 @@ const comparableUpdate = (prepared: PreparedUpdate) => ({
 const validatePendingUpdates = async (
   plan: ContentfulAssetUpdatePlan,
   pendingAssets: ReadonlySet<string>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   for await (const entry of plan.entries) {
     if (entry.stage === "saved") {
@@ -199,7 +204,8 @@ const validatePendingUpdates = async (
       plan.input.space,
       entry.request,
       signal,
-      pendingAssets
+      pendingAssets,
+      localeContext
     );
     if (
       !isDeepStrictEqual(
@@ -252,6 +258,7 @@ export const contentfulAssetUpdateResult = (
  * @param save - Persists a cloned checkpoint after each relevant transition.
  * @param signal - Cancellation signal for reads, writes, and asset processing.
  * @param readFile - Optional session attachment reader for assets not yet uploaded.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Current recovery receipts, including partial outcomes when execution fails.
  * @remarks Assets publish first; existing entry fields are then saved at their prepared versions.
  */
@@ -259,7 +266,8 @@ export const executeContentfulAssetUpdate = async (
   plan: ContentfulAssetUpdatePlan,
   save: (plan: ContentfulAssetUpdatePlan) => void,
   signal?: AbortSignal,
-  readFile?: ReadAssetFile
+  readFile?: ReadAssetFile,
+  localeContext?: LocaleContext
 ) => {
   const record = () => save(structuredClone(plan));
   plan.error = null;
@@ -275,16 +283,17 @@ export const executeContentfulAssetUpdate = async (
     await validatePendingUpdates(
       plan,
       new Set(plan.assets.map(({ id }) => id)),
-      signal
+      signal,
+      localeContext
     );
-    await refreshAssets(plan, signal);
+    await refreshAssets(plan, signal, localeContext);
     record();
     const files = await prepareAssetUploads(plan, readFile, record, signal);
-    await publishAssets(plan, files, record, signal);
-    await refreshAssets(plan, signal);
+    await publishAssets(plan, files, record, signal, localeContext);
+    await refreshAssets(plan, signal, localeContext);
     record();
     // All assets now exist. Validate references normally and catch edits made during upload.
-    await validatePendingUpdates(plan, new Set(), signal);
+    await validatePendingUpdates(plan, new Set(), signal, localeContext);
     for await (const entry of plan.entries) {
       if (entry.stage === "saved") {
         continue;

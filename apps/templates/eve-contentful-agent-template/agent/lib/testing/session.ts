@@ -98,12 +98,16 @@ export const toolContext = (
   ...sessionContext(options),
   abortSignal: new AbortController().signal,
   callId: "call-1",
+  channel: { kind: "channel:slack", metadata: {} },
   getToken: () => {
     throw new Error("This test does not provide connection tokens.");
   },
   messages: [],
   requireAuth: () => {
     throw new Error("This test does not provide connection auth.");
+  },
+  to: () => {
+    throw new Error("This test does not provide channel delivery.");
   },
   toolName: options.toolName ?? "tool",
 });
@@ -122,7 +126,6 @@ export const approvalContext = <TInput extends JsonObject>(
 ): ApprovalContext<TInput> => ({
   ...sessionContext(options),
   abortSignal: new AbortController().signal,
-  approvedTools: new Set(),
   callId: "call-1",
   // eve's conditional `ApprovalToolInput` does not resolve for a generic input.
   // SAFETY: TInput is constrained to JSON objects, which are the accepted tool-input branch of eve’s conditional approval type.

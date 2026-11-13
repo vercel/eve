@@ -1,40 +1,38 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import { callApi } from "./api";
 import { configuredSpaces, environmentId } from "./config";
 import { spacePath } from "./model";
 import type { RawContentType, RawEntry } from "./types";
 
-interface LocaleContext {
+/** Locale selection and schema cache owned by one Contentful operation. */
+export interface LocaleContext {
   defaultLocale: string;
   locale: string;
   models: Map<string, Promise<RawContentType>>;
 }
 
-const context = new AsyncLocalStorage<LocaleContext>();
-
 /**
- * Reads the locale bound to the current asynchronous Contentful operation.
+ * Reads the locale supplied by the current Contentful operation.
  *
+ * @param context - Explicit locale selection and per-operation schema cache.
  * @returns The operation locale, explicit environment override, or en-US for standalone helpers.
  */
-export const contentLocale = (): string =>
-  context.getStore()?.locale ?? (process.env.CONTENTFUL_LOCALE || "en-US");
+export const contentLocale = (context?: LocaleContext): string =>
+  context?.locale ?? (process.env.CONTENTFUL_LOCALE || "en-US");
 
 /**
  * Runs an operation with the configured override or the space's default Contentful locale.
  *
  * @typeParam T - Result produced by the wrapped operation.
  * @param space - Configured space alias or raw space ID.
- * @param run - Callback executed after resolving its isolated asynchronous locale context.
+ * @param run - Callback receiving the operation's explicit locale context.
  * @param signal - Cancellation signal for the locale lookup.
  * @returns The callback's result after completion.
  * @throws {@link Error} When the space is unconfigured or Contentful has no default locale.
- * @remarks Concurrent operations retain separate locale contexts.
+ * @remarks Pass the callback's context to every locale-aware helper; concurrent operations never share it.
  */
 export const withContentfulLocale = async <T>(
   space: string,
-  run: () => T | Promise<T>,
+  run: (context: LocaleContext) => T | Promise<T>,
   signal?: AbortSignal
 ): Promise<T> => {
   const spaceId = configuredSpaces()[space] ?? space;
@@ -46,26 +44,27 @@ export const withContentfulLocale = async <T>(
   if (!defaultLocale) {
     throw new Error("Contentful did not return a default locale.");
   }
-  return context.run(
-    {
-      defaultLocale,
-      locale: process.env.CONTENTFUL_LOCALE || defaultLocale,
-      models: new Map(),
-    },
-    run
-  );
+  return run({
+    defaultLocale,
+    locale: process.env.CONTENTFUL_LOCALE || defaultLocale,
+    models: new Map(),
+  });
 };
 
 /**
  * Selects the storage locale for an entry field using its content-type definition.
  *
  * @param field - Field definition; shared fields use the environment's default locale.
+ * @param context - Explicit locale selection and per-operation schema cache.
  * @returns Selected translation locale for localized fields, otherwise the default locale.
  */
-export const fieldLocale = (field: { localized?: boolean }): string =>
+export const fieldLocale = (
+  field: { localized?: boolean },
+  context?: LocaleContext
+): string =>
   field.localized
-    ? contentLocale()
-    : (context.getStore()?.defaultLocale ?? "en-US");
+    ? contentLocale(context)
+    : (context?.defaultLocale ?? "en-US");
 
 /**
  * Projects shared entry fields into the selected locale for existing read renderers.
@@ -74,17 +73,19 @@ export const fieldLocale = (field: { localized?: boolean }): string =>
  * @param base - Space/environment API path containing the entry and its content type.
  * @param entry - Unmodified CMA entry to project for reading.
  * @param signal - Cancellation signal for content-type lookup.
+ * @param context - Explicit locale selection and per-operation schema cache.
  * @returns Read-only projection; missing translations remain missing and assets are not projected.
  * @remarks Never use this projection for writes or publication traversal. The original entry is
- * unchanged. Content-type reads are cached only within the current asynchronous operation.
+ * unchanged. Content-type reads are cached only within the supplied operation context.
  */
 export const projectEntryLocale = async <T extends RawEntry>(
   base: string,
   entry: T,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  context?: LocaleContext
 ): Promise<T> => {
-  const selected = contentLocale();
-  const defaultLocale = context.getStore()?.defaultLocale ?? "en-US";
+  const selected = contentLocale(context);
+  const defaultLocale = context?.defaultLocale ?? "en-US";
   if (selected === defaultLocale || !entry.fields) {
     return entry;
   }
@@ -95,7 +96,7 @@ export const projectEntryLocale = async <T extends RawEntry>(
     );
   }
   const path = `${base}/content_types/${contentTypeId}`;
-  const models = context.getStore()?.models;
+  const models = context?.models;
   let pending = models?.get(path);
   if (!pending) {
     pending = callApi<RawContentType>(path, {}, signal);
@@ -117,7 +118,7 @@ export const projectEntryLocale = async <T extends RawEntry>(
           // Synthetic projections such as _displayField lack schema metadata.
           return [key, values];
         }
-        return [key, { [selected]: values[fieldLocale(field)] }];
+        return [key, { [selected]: values[fieldLocale(field, context)] }];
       })
     ),
   };

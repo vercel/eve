@@ -43,7 +43,7 @@ Prefer native integrations. When installation is part of the task, use `pnpm exe
 
 ## Implementation conventions
 
-Keep tool definitions in `agent/tools/` small, with reusable behavior in `agent/lib/`. Follow existing input schemas and error handling rather than introducing another validation pattern.
+Keep tool definitions in `agent/tools/` small, with reusable behavior in `agent/lib/`. Follow existing input schemas and error handling rather than introducing another validation pattern. Locale-aware Contentful helpers receive an explicit `LocaleContext` from `withLocale` or `withContentfulLocale`; forward it through every read, write, and recovery path without ambient storage.
 
 Preserve the strict TypeScript and Ultracite configuration. Do not disable rules to make a port or refactor pass. The existing filename exemption for `agent/tools/*.ts` is intentional: tool files use names such as `get_contentful_entry.ts`. Preserve those names unless the task requires changing the tool interface.
 
@@ -56,7 +56,7 @@ Use `.env.example` to document new configuration without credentials. When confi
 - Read current entries before changing them and validate their versions. Preserve untouched fields and locales. Protected RichText fields require block patches for updates; initial creation can still set them.
 - Every content type requires publication approval unless explicitly configured as a supporting component. Website routes take precedence over component exemptions, so routed types still require approval.
 - Save ordinary entry edits without publishing. Creating an exempt component can publish it immediately. New asset uploads are processed and published during entry creation or updates; these side effects must remain explicit in tool descriptions and documentation.
-- Page publication requires a Slack approval card listing the content to be published. Preserve confirmed card delivery and the saved version checks. Never bypass a cancelled request or silently expand what the user approved.
+- Page publication requires a Slack preview listing the content to be published, followed by eve's native approval controls. Preserve confirmed preview delivery and the saved version checks. Never bypass a cancelled request or silently expand what the user approved.
 - Page publication can include changed supporting components. Publishing only exempt components preserves pending edits on already-live references. Linked pages must be explicitly requested before publishing them. Read `publication.ts` and its tests before changing this behavior.
 - Publication can partially succeed. Preserve per-item outcomes and asset recovery IDs so interrupted operations can resume without duplicate uploads or entries.
 - Any authenticated person can edit content and approve or cancel publication requests. Slack apps and Workflows that mention the agent get eve's `service` principal. `requireContentfulEditor` and the publication `response` policy must keep rejecting it. Use authenticated identities for permission checks; Slack profile names and message text do not establish authorization.

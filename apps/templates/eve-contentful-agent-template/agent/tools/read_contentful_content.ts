@@ -17,10 +17,16 @@ export default defineTool({
     "Pass nextCursor unchanged for another page. A version change requires discarding earlier pages and restarting. " +
     "Embedded entry bodies are separate: fetch their Contentful links explicitly. This reads current Contentful fields, not the public website.",
   execute: withLocale(
-    async ({ url, cursor, richTextJson }, ctx) =>
-      await readEntryContent(url, cursor, ctx.abortSignal, {
-        richTextJson: richTextJson === true,
-      })
+    async ({ url, cursor, richTextJson }, ctx, localeContext) =>
+      await readEntryContent(
+        url,
+        cursor,
+        ctx.abortSignal,
+        {
+          richTextJson: richTextJson === true,
+        },
+        localeContext
+      )
   ),
   inputSchema: z.object({
     cursor: z

@@ -1,11 +1,10 @@
+import { z } from "zod";
 /**
  * Contentful mirror sync: reads page entries from the CMA and writes them to a
  * mirror workspace. Storage is injected so this module stays independent of Drives.
  *
  * @packageDocumentation
  */
-
-import { z } from "zod";
 
 import { callApi } from "../api";
 import { configuredSpaces, configurationKey } from "../config";
@@ -301,6 +300,7 @@ const entryPages = async function* entryPages(
  * @param workspace - Mirror storage receiving file updates and removals.
  * @param since - Earliest update timestamp to include; null processes all entries.
  * @param signal - Cancellation signal for fetching and rendering pages.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Current entry paths and counts of files written or removed.
  */
 const applyEntryPages = async (
@@ -314,7 +314,7 @@ const applyEntryPages = async (
   for await (const { entries, kind } of entryPages(since, signal)) {
     const counts = await withContentfulLocale(
       kind,
-      async () => {
+      async (localeContext) => {
         const files: { content: string; path: string }[] = [];
         const archived: string[] = [];
         for await (const entry of entries) {
@@ -329,12 +329,16 @@ const applyEntryPages = async (
             const projected = await projectEntryLocale(
               spacePath(kind),
               entry,
-              signal
+              signal,
+              localeContext
             );
             files.push(
-              { content: renderMirrorFile(projected, kind), path },
               {
-                content: renderMirrorData(projected, kind),
+                content: renderMirrorFile(projected, kind, localeContext),
+                path,
+              },
+              {
+                content: renderMirrorData(projected, kind, localeContext),
                 path: mirrorDataPath(path),
               }
             );

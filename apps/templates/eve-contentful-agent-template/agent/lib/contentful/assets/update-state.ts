@@ -6,6 +6,7 @@ import type { JsonValue } from "../../json";
 import { defineState } from "../../state";
 import { configurationKey } from "../config";
 import { contentfulAssetUpdateInputSchema } from "../input-schemas";
+import type { LocaleContext } from "../locale";
 import { contentLocale } from "../locale";
 import { updateContentfulFields } from "../update";
 import type { ReadAssetFile } from "./files";
@@ -29,6 +30,7 @@ const updates = defineState<Record<string, ContentfulAssetUpdatePlan>>(
  * @param callId - Tool call identity used to make initial replay idempotent.
  * @param signal - Cancellation signal for preparation and execution.
  * @param readFile - Optional sandbox reader for staged image attachments.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Ordinary update results or durable asset-backed recovery receipts.
  * @throws {@link Error} When recovery is unknown, inputs changed, or deployment configuration drifted.
  */
@@ -37,7 +39,8 @@ export const updateContentfulFieldsWithAssets = async (
   sessionId: string,
   callId: string,
   signal?: AbortSignal,
-  readFile?: ReadAssetFile
+  readFile?: ReadAssetFile,
+  localeContext?: LocaleContext
 ): Promise<
   | Awaited<ReturnType<typeof updateContentfulFields>>
   | ReturnType<typeof contentfulAssetUpdateResult>
@@ -46,7 +49,8 @@ export const updateContentfulFieldsWithAssets = async (
   if (parsed.assets === null && parsed.resumeFrom === null) {
     return updateContentfulFields(
       { entries: parsed.entries, space: parsed.space },
-      signal
+      signal,
+      localeContext
     );
   }
   if (!(sessionId && callId)) {
@@ -72,7 +76,7 @@ export const updateContentfulFieldsWithAssets = async (
   if (
     plan &&
     (plan.configuration !== configurationKey() ||
-      plan.locale !== contentLocale())
+      plan.locale !== contentLocale(localeContext))
   ) {
     throw new Error(
       "Contentful configuration or locale changed. Inspect existing resources before starting a new operation."
@@ -87,13 +91,19 @@ export const updateContentfulFieldsWithAssets = async (
       [recoveryId]: structuredClone(value),
     }));
   if (!plan) {
-    plan = await prepareContentfulAssetUpdate(parsed, recoveryId, signal);
+    plan = await prepareContentfulAssetUpdate(
+      parsed,
+      recoveryId,
+      signal,
+      localeContext
+    );
     save(plan);
   }
   return executeContentfulAssetUpdate(
     structuredClone(plan),
     save,
     signal,
-    readFile
+    readFile,
+    localeContext
   );
 };

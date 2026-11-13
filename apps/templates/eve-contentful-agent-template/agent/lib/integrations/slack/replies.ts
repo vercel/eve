@@ -12,15 +12,18 @@ import { visualizationReceipts } from "./visualizations/receipts";
  * failures propagate rather than triggering a potentially duplicate post.
  */
 export const replyEvents = {
-  async "message.completed"(event, channel, _ctx, renderNext) {
-    if (event.finishReason === "tool-calls") {
+  async "content.completed"(event, _ctx, renderNext) {
+    if (event.data.phase !== "reply" || event.data.kind !== "text") {
       await renderNext();
       return;
     }
-    channel.state.pendingToolCallMessage = null;
-
     const receipt = visualizationReceipts.get();
-    if (receipt?.turnId === event.turnId && receipt.posted && !receipt.failed) {
+    if (
+      receipt !== null &&
+      receipt.turnId === event.scope?.turnId &&
+      receipt.posted &&
+      !receipt.failed
+    ) {
       return;
     }
     await renderNext();

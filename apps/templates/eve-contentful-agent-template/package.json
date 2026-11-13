@@ -24,9 +24,9 @@
     "@vercel/connect": "2.2.0",
     "@vercel/sandbox": "3.5.1",
     "ai": "^7.0.128",
-    "eve": "^0.75.1",
+    "eve": "1.0.0-rc.17",
     "just-bash": "3.1.0",
-    "zod": "4.5.4"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "24.x",

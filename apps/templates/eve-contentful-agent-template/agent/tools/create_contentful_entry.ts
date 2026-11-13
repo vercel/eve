@@ -20,15 +20,17 @@ export default defineTool({
    * @param input - Creation fields, declared assets, and optional recovery ID validated by contentfulCreateInputSchema.
    * @param ctx - Authenticated tool context carrying cancellation and session identity.
    * @returns Creation outcome with reserved identities, asset progress, and the applicable publication target.
+   * @param localeContext - Explicit locale selection and per-operation schema cache.
    */
-  execute: withLocale(async (input, ctx) => {
+  execute: withLocale(async (input, ctx, localeContext) => {
     await requireContentfulEditor(ctx);
     return createContentfulEntryWithAssets(
       input,
       ctx.session.id,
       ctx.callId,
       ctx.abortSignal,
-      sandboxAssetReader(() => ctx.getSandbox())
+      sandboxAssetReader(() => ctx.getSandbox()),
+      localeContext
     );
   }),
   inputSchema: contentfulCreateInputSchema,

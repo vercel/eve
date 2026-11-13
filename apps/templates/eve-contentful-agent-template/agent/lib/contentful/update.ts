@@ -16,6 +16,7 @@ import type {
   ContentfulEntryUpdate,
   ContentfulUpdateInput,
 } from "./input-schemas";
+import type { LocaleContext } from "./locale";
 import { fieldLocale } from "./locale";
 import { APP_HOST, CONTENTFUL_ID, QUERY_SPACES, spacePath } from "./model";
 import type { RawContentType, RawEntry, RawQueryEntry } from "./types";
@@ -27,6 +28,7 @@ import type { RawContentType, RawEntry, RawQueryEntry } from "./types";
  * @param parsed - Entry identity, expected version, and requested field changes.
  * @param signal - Cancellation signal for entry, schema, and reference reads.
  * @param pendingAssets - Asset IDs reserved by the same prepared operation but not yet published.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Before/after snapshots and identity metadata for a version-bound save.
  * @throws {@link Error} When the version, field values, schema, policy, or linked resources fail validation.
  */
@@ -34,7 +36,8 @@ export const prepareUpdate = async (
   space: ContentfulUpdateInput["space"],
   parsed: ContentfulEntryUpdate,
   signal?: AbortSignal,
-  pendingAssets: ReadonlySet<string> = new Set()
+  pendingAssets: ReadonlySet<string> = new Set(),
+  localeContext?: LocaleContext
 ) => {
   signal?.throwIfAborted();
   const spaceId = QUERY_SPACES[space];
@@ -77,7 +80,7 @@ export const prepareUpdate = async (
       );
     }
     const locales = { ...fields.get(change.fieldId) };
-    const selectedLocale = fieldLocale(field);
+    const selectedLocale = fieldLocale(field, localeContext);
     const write = resolveUpdateChange(field, change, locales[selectedLocale]);
     validateUpdateChange(field, write, { contentTypeId, space });
     if (change.operation === "unset") {
@@ -196,6 +199,7 @@ interface ContentfulUpdateResult {
  *
  * @param input - One space and 1–20 fixed entries, each with expected version and exact field changes.
  * @param signal - Optional cancellation for preparation and saves; cancellation rejects the call.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Ordered updated/failed/unattempted results for a completed or partially failed batch.
  * @throws {@link Error} If input/preparation fails or cancellation occurs, including after earlier saves succeeded.
  * @remarks All entries validate before the first write. Each save uses its expected version,
@@ -204,13 +208,16 @@ interface ContentfulUpdateResult {
  */
 export const updateContentfulFields = async (
   input: ContentfulUpdateInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulUpdateResult> => {
   const { space, entries } = contentfulUpdateInputSchema.parse(input);
   const prepared: PreparedUpdate[] = [];
   for await (const entry of entries) {
     try {
-      prepared.push(await prepareUpdate(space, entry, signal));
+      prepared.push(
+        await prepareUpdate(space, entry, signal, undefined, localeContext)
+      );
     } catch (error) {
       signal?.throwIfAborted();
       throw new Error(

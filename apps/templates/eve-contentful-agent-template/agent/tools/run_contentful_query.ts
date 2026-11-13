@@ -20,9 +20,11 @@ export default defineTool({
    * @param input - Validated space, CMA query parameters, and result projection settings.
    * @param ctx - Authenticated tool context carrying cancellation and session identity.
    * @returns Current entry data with pagination, truncation, and reference coverage metadata.
+   * @param localeContext - Explicit locale selection and per-operation schema cache.
    */
   execute: withLocale(
-    async (input, ctx) => await runContentfulQuery(input, ctx.abortSignal)
+    async (input, ctx, localeContext) =>
+      await runContentfulQuery(input, ctx.abortSignal, localeContext)
   ),
   inputSchema: contentfulQueryInputSchema,
 });

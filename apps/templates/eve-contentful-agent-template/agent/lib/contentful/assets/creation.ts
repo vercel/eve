@@ -15,6 +15,7 @@ import {
   updateFieldIdSchema,
 } from "../input-schemas";
 import type { ContentfulCreateInput } from "../input-schemas";
+import type { LocaleContext } from "../locale";
 import { contentLocale } from "../locale";
 import { APP_HOST } from "../model";
 import type { LocalizedFields, RawEntry } from "../types";
@@ -108,6 +109,7 @@ export const contentfulCreationInputsMatch = (
  * @param input - Page or asset-backed creation input; every declared asset key must be referenced.
  * @param recoveryId - Stable operation ID used to derive reserved entry and asset IDs.
  * @param signal - Optional cancellation during model and existing-reference reads.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns A serializable plan with resolved fields and all resources marked unattempted.
  * @throws {@link Error} If input, placeholders, model fields, or existing references are invalid, or a read fails.
  * @remarks IDs are reserved locally, not created in CMA. Persist the plan before execution;
@@ -116,7 +118,8 @@ export const contentfulCreationInputsMatch = (
 export const prepareContentfulAssetCreation = async (
   input: JsonValue,
   recoveryId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ): Promise<ContentfulAssetCreationPlan> => {
   const parsed = contentfulCreateInputSchema.parse(input);
   updateFieldIdSchema.parse(recoveryId);
@@ -125,7 +128,8 @@ export const prepareContentfulAssetCreation = async (
   const prepared = await prepareCreation(
     contentfulCreateInputSchema.parse({ ...parsed, fields }),
     signal,
-    new Set(assets.map(({ id }) => id))
+    new Set(assets.map(({ id }) => id)),
+    localeContext
   );
   if (!parsed.assets && prepared.publicationTarget !== "draft") {
     throw new Error("A supporting-entry creation plan requires assets.");
@@ -137,7 +141,7 @@ export const prepareContentfulAssetCreation = async (
     error: null,
     fields: prepared.fields,
     input: { ...parsed, resumeFrom: null },
-    locale: contentLocale(),
+    locale: contentLocale(localeContext),
     publicationTarget: prepared.publicationTarget,
     recoveryId,
   };
@@ -206,6 +210,7 @@ export const contentfulAssetCreationResult = (
  * @param save - Synchronous checkpoint callback receiving a structured clone of progress.
  * @param signal - Optional cancellation for reads, writes, and bounded processing waits.
  * @param readFile - Optional attachment reader; only needed for files not yet uploaded.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Per-resource progress; operation failures and cancellation are reported in `error`.
  * @throws {@link Error} If saving the failure checkpoint itself fails.
  * @remarks Assets are created, processed, and published before their entry. Pages stop at
@@ -218,7 +223,8 @@ export const executeContentfulAssetCreation = async (
   plan: ContentfulAssetCreationPlan,
   save: (plan: ContentfulAssetCreationPlan) => void,
   signal?: AbortSignal,
-  readFile?: ReadAssetFile
+  readFile?: ReadAssetFile,
+  localeContext?: LocaleContext
 ): Promise<ContentfulAssetCreationResult> => {
   const record = () => save(structuredClone(plan));
   plan.error = null;
@@ -230,7 +236,8 @@ export const executeContentfulAssetCreation = async (
         fields: resolveAssetFields(plan.input.fields, plan.assets),
       }),
       signal,
-      new Set(plan.assets.map(({ id }) => id))
+      new Set(plan.assets.map(({ id }) => id)),
+      localeContext
     );
     if (
       prepared.publicationTarget !== (plan.publicationTarget ?? "published")
@@ -239,13 +246,13 @@ export const executeContentfulAssetCreation = async (
         "Creation publication target no longer matches the content type. Inspect the saved operation before recovery."
       );
     }
-    await refreshAssets(plan, signal);
+    await refreshAssets(plan, signal, localeContext);
     if (plan.entry.stage !== "notAttempted") {
       await refreshCreationEntry(plan, signal);
     }
     record();
     const files = await prepareAssetUploads(plan, readFile, record, signal);
-    await publishAssets(plan, files, record, signal);
+    await publishAssets(plan, files, record, signal, localeContext);
     if (contentfulAssetCreationResult(plan).complete) {
       return contentfulAssetCreationResult(plan);
     }

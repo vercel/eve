@@ -4,6 +4,7 @@ import type { JsonValue } from "../../json";
 import { isObject, isString } from "../../values";
 import { contentSections, queryFieldReferences } from "../content";
 import type { QueryReference } from "../content";
+import type { LocaleContext } from "../locale";
 /**
  * Layout, rendering, and manifest of the Contentful mirror stored on a Vercel Drive.
  * The mirror is a discovery index only: Contentful stays the source of truth.
@@ -155,17 +156,19 @@ const isScalar = (value: JsonValue): boolean => !isObject(value);
  *
  * @param entry - Locale-projected CMA entry, as passed to {@link renderMirrorFile}.
  * @param kind - Raw configured space ID containing the entry.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Single-line JSON terminated by a newline, readable with DuckDB's `read_json`.
  */
 export const renderMirrorData = (
   entry: RawEntry,
-  kind: ListableKind
+  kind: ListableKind,
+  localeContext?: LocaleContext
 ): string => {
-  const summary = summarizeEntry(entry, kind);
+  const summary = summarizeEntry(entry, kind, localeContext);
   const fields: Record<string, JsonValue> = {};
   const references: QueryReference[] = [];
   for (const [key, locales] of Object.entries(entry.fields ?? {})) {
-    const value = locales[contentLocale()];
+    const value = locales[contentLocale(localeContext)];
     if (value === undefined) {
       continue;
     }
@@ -205,12 +208,18 @@ export const renderMirrorData = (
 };
 
 /* Join each top-level list of strings into one comma-separated value. */
-const joinStringLists = (fields: LocalizedFields): LocalizedFields =>
+const joinStringLists = (
+  fields: LocalizedFields,
+  localeContext?: LocaleContext
+): LocalizedFields =>
   Object.fromEntries(
     Object.entries(fields).map(([key, locales]) => {
-      const value = locales[contentLocale()];
+      const value = locales[contentLocale(localeContext)];
       return Array.isArray(value) && value.every((item) => isString(item))
-        ? [key, { ...locales, [contentLocale()]: value.join(", ") }]
+        ? [
+            key,
+            { ...locales, [contentLocale(localeContext)]: value.join(", ") },
+          ]
         : [key, locales];
     })
   );
@@ -220,14 +229,16 @@ const joinStringLists = (fields: LocalizedFields): LocalizedFields =>
  *
  * @param entry - CMA entry whose configured-locale text fields should be indexed.
  * @param kind - Raw configured space ID containing the entry.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Markdown containing entry metadata and plain-text field sections.
  * @remarks Linked entries are not inlined; rich text becomes plain text and string lists become comma-separated text.
  */
 export const renderMirrorFile = (
   entry: RawEntry,
-  kind: ListableKind
+  kind: ListableKind,
+  localeContext?: LocaleContext
 ): string => {
-  const summary = summarizeEntry(entry, kind);
+  const summary = summarizeEntry(entry, kind, localeContext);
   // Tuples keep the metadata in reading order.
   const metadata: [string, string | number | null][] = [
     ["entryId", summary.entryId],
@@ -254,7 +265,11 @@ export const renderMirrorFile = (
     date: _date,
     ...textFields
   } = entry.fields ?? {};
-  for (const { field, text } of contentSections(joinStringLists(textFields))) {
+  for (const { field, text } of contentSections(
+    joinStringLists(textFields, localeContext),
+    undefined,
+    localeContext
+  )) {
     lines.push("", `## ${field}`, "", text);
   }
   return `${lines.join("\n")}\n`;

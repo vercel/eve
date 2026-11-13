@@ -43,12 +43,15 @@ const responseContext = (
   },
   request: {
     callId: "call-1",
+    interactionId: "approval-1",
     principal: slackAuth(),
-    requestId: "approval-1",
     toolInput: input,
     toolName: "publish_contentful_entry",
   },
-  response: { decision, principal: slackAuth({ userId: "UOTHER" }) },
+  response: {
+    decision: decision === "cancel" ? "deny" : decision,
+    principal: slackAuth({ userId: "UOTHER" }),
+  },
   session: {
     id: "session-1",
     initiator: slackAuth(),
@@ -104,9 +107,9 @@ describe("template configuration", () => {
     );
     const values = await Promise.all(
       ["docs", "site"].map((space) =>
-        withContentfulLocale(space, async () => {
+        withContentfulLocale(space, async (localeContext) => {
           await Promise.resolve();
-          return contentLocale();
+          return contentLocale(localeContext);
         })
       )
     );

@@ -11,6 +11,7 @@ import type {
   ContentfulCreateInput,
   newContentfulAssetSchema,
 } from "../input-schemas";
+import type { LocaleContext } from "../locale";
 import { contentLocale } from "../locale";
 import { APP_HOST, QUERY_SPACES, spacePath } from "../model";
 import type { RawEntry } from "../types";
@@ -120,8 +121,11 @@ export const creationResourcePath = (
 
 const assetFileUrlSchema = z.url({ protocol: /^https$/u });
 
-const processedAssetUrl = (raw: RawEntry): string | null => {
-  const file = raw.fields?.file?.[contentLocale()];
+const processedAssetUrl = (
+  raw: RawEntry,
+  localeContext?: LocaleContext
+): string | null => {
+  const file = raw.fields?.file?.[contentLocale(localeContext)];
   if (!(file && isObject(file) && "url" in file && isString(file.url))) {
     return null;
   }
@@ -133,9 +137,10 @@ const processedAssetUrl = (raw: RawEntry): string | null => {
 const verifyCreationAsset = (
   raw: RawEntry,
   expected: z.infer<typeof newContentfulAssetSchema>,
-  upload?: AssetUploadState
+  upload?: AssetUploadState,
+  localeContext?: LocaleContext
 ) => {
-  const file = raw.fields?.file?.[contentLocale()];
+  const file = raw.fields?.file?.[contentLocale(localeContext)];
   if (
     !(
       file &&
@@ -144,14 +149,14 @@ const verifyCreationAsset = (
       file.fileName === expected.fileName &&
       "contentType" in file &&
       file.contentType === expected.contentType &&
-      readString(raw.fields, "title") === expected.title
+      readString(raw.fields, "title", localeContext) === expected.title
     )
   ) {
     throw new Error(
       `Asset ${raw.sys.id} no longer matches the requested file metadata.`
     );
   }
-  if (!processedAssetUrl(raw)) {
+  if (!processedAssetUrl(raw, localeContext)) {
     const source = assetFileSource(expected, upload);
     const actual =
       "sourceUrl" in expected
@@ -249,7 +254,8 @@ export const recordCreationRead = (
 const refreshCreationAsset = async (
   plan: ContentfulAssetPlan,
   index: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   const asset = plan.assets[index];
   const raw = await readCreationResource(
@@ -260,8 +266,13 @@ const refreshCreationAsset = async (
   if (!raw) {
     return;
   }
-  verifyCreationAsset(raw, (plan.input.assets ?? [])[index], asset.upload);
-  const processed = processedAssetUrl(raw) !== null;
+  verifyCreationAsset(
+    raw,
+    (plan.input.assets ?? [])[index],
+    asset.upload,
+    localeContext
+  );
+  const processed = processedAssetUrl(raw, localeContext) !== null;
   verifyCreationVersion(raw, asset, processed);
   recordCreationRead(raw, asset, processed);
 };
@@ -271,16 +282,18 @@ const refreshCreationAsset = async (
  *
  * @param plan - Plan whose asset versions and stages are updated from verified CMA reads.
  * @param signal - Cancellation signal for reconciliation requests.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Completes after every attempted asset has been checked.
  * @throws {@link Error} When an asset changed outside the operation or has an incompatible publication state.
  */
 export const refreshAssets = async (
   plan: ContentfulAssetPlan,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   for await (const index of plan.assets.keys()) {
     if (plan.assets[index].stage !== "notAttempted") {
-      await refreshCreationAsset(plan, index, signal);
+      await refreshCreationAsset(plan, index, signal, localeContext);
     }
   }
 };
@@ -289,7 +302,8 @@ const waitForCreationAsset = async (
   plan: ContentfulAssetPlan,
   index: number,
   record: () => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   for await (const attempt of Array.from(
     { length: 10 },
@@ -298,7 +312,7 @@ const waitForCreationAsset = async (
     if (attempt > 0) {
       await assetRuntime.delay(1000, undefined, { signal });
     }
-    await refreshCreationAsset(plan, index, signal);
+    await refreshCreationAsset(plan, index, signal, localeContext);
     record();
     if (plan.assets[index].stage === "processed") {
       return;
@@ -354,7 +368,8 @@ const createAndPublishAsset = async (
   index: number,
   files: Map<number, Uint8Array>,
   record: () => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   const asset = plan.assets[index];
   const spec = (plan.input.assets ?? [])[index];
@@ -368,13 +383,13 @@ const createAndPublishAsset = async (
       body: JSON.stringify({
         fields: {
           file: {
-            [contentLocale()]: {
+            [contentLocale(localeContext)]: {
               contentType: spec.contentType,
               fileName: spec.fileName,
               ...assetFileSource(spec, asset.upload),
             },
           },
-          title: { [contentLocale()]: spec.title },
+          title: { [contentLocale(localeContext)]: spec.title },
         },
       }),
       headers: {
@@ -382,7 +397,7 @@ const createAndPublishAsset = async (
       },
       method: "PUT",
     });
-    verifyCreationAsset(raw, spec, asset.upload);
+    verifyCreationAsset(raw, spec, asset.upload, localeContext);
     verifyCreationVersion(raw, asset, false);
     // SAFETY: verifyCreationVersion above checked this resource identity and positive safe-integer version.
     asset.version = raw.sys.version as number;
@@ -397,7 +412,7 @@ const createAndPublishAsset = async (
     asset.stage = "processing";
     record();
     await callApi<undefined>(
-      `${path}/files/${contentLocale()}/process`,
+      `${path}/files/${contentLocale(localeContext)}/process`,
       {},
       signal,
       {
@@ -405,7 +420,7 @@ const createAndPublishAsset = async (
         method: "PUT",
       }
     );
-    await waitForCreationAsset(plan, index, record, signal);
+    await waitForCreationAsset(plan, index, record, signal, localeContext);
   }
   await publishCreationResource(plan, asset, "assets", record, signal);
 };
@@ -417,16 +432,25 @@ const createAndPublishAsset = async (
  * @param files - Validated attachment bytes keyed by asset index for this invocation only.
  * @param record - Persists progress before uncertain writes and after confirmed transitions.
  * @param signal - Cancellation signal for asset requests and processing waits.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
  * @returns Completes only after all declared assets are confirmed published.
  */
 export const publishAssets = async (
   plan: ContentfulAssetPlan,
   files: Map<number, Uint8Array>,
   record: () => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localeContext?: LocaleContext
 ) => {
   for await (const index of plan.assets.keys()) {
-    await createAndPublishAsset(plan, index, files, record, signal);
+    await createAndPublishAsset(
+      plan,
+      index,
+      files,
+      record,
+      signal,
+      localeContext
+    );
   }
 };
 

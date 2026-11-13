@@ -13,8 +13,6 @@ import hook, {
   warmOnTurnStart,
 } from "./warm-hook";
 
-const meta = { at: "2026-10-20T00:00:00.000Z", id: "event-1" };
-
 const started: Experimental_SandboxProcess = {
   kill: () => Promise.resolve(),
   stderr: new ReadableStream(),
@@ -31,18 +29,14 @@ const warmContext = () => {
   return { ctx: { getSandbox }, getSandbox, spawn };
 };
 
-type Action = HookEvent<"actions.requested">["data"]["actions"][number];
-
-const loadSkill = (skill: string): Action => ({
-  callId: `call-${skill}`,
-  input: { skill },
-  kind: "load-skill",
-});
-
-const requested = (actions: Action[]): HookEvent<"actions.requested"> => ({
-  data: { actions, sequence: 3, stepIndex: 0, turnId: "turn-1" },
-  meta,
-  type: "actions.requested",
+const requested = (skill: string): HookEvent<"call.requested"> => ({
+  data: {
+    callId: `call-${skill}`,
+    capability: { kind: "skill", name: skill },
+    input: { skill },
+    owner: { turnId: "turn-1" },
+  },
+  type: "call.requested",
 });
 
 beforeEach(() => {
@@ -54,7 +48,7 @@ beforeEach(() => {
 describe("mirror warm hook", () => {
   it("subscribes to skill loads and turn starts", () => {
     expect(Object.keys(hook.events ?? {}).toSorted()).toEqual([
-      "actions.requested",
+      "call.requested",
       "turn.started",
     ]);
   });
@@ -67,17 +61,14 @@ describe("mirror warm hook", () => {
 
   it("ignores other skills", async () => {
     const { ctx, getSandbox } = warmContext();
-    await warmOnSkillLoad(requested([loadSkill("contentful_api")]), ctx);
+    await warmOnSkillLoad(requested("contentful_api"), ctx);
     await warmOnTurnStart(ctx);
     expect(getSandbox).not.toHaveBeenCalled();
   });
 
   it("warms when the SQL skill loads, then at the start of each later turn", async () => {
     const { ctx, spawn } = warmContext();
-    await warmOnSkillLoad(
-      requested([loadSkill("contentful_api"), loadSkill(MIRROR_SQL_SKILL)]),
-      ctx
-    );
+    await warmOnSkillLoad(requested(MIRROR_SQL_SKILL), ctx);
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledWith({ command: MIRROR_PREFETCH_COMMAND });
 
@@ -88,7 +79,7 @@ describe("mirror warm hook", () => {
   it("remembers SQL use without warming in local sessions", async () => {
     vi.stubEnv("VERCEL", "");
     const { ctx, getSandbox } = warmContext();
-    await warmOnSkillLoad(requested([loadSkill(MIRROR_SQL_SKILL)]), ctx);
+    await warmOnSkillLoad(requested(MIRROR_SQL_SKILL), ctx);
     await warmOnTurnStart(ctx);
     expect(getSandbox).not.toHaveBeenCalled();
     expect(testState.get("contentful.mirror-sql-used")).toBe(true);

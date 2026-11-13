@@ -2,6 +2,7 @@ import type { ToolContext } from "eve/tools";
 
 import { parseEntryUrl } from "./entries";
 import { withContentfulLocale } from "./locale";
+import type { LocaleContext } from "./locale";
 import { PAGE_ROUTES } from "./model";
 
 /**
@@ -10,12 +11,17 @@ import { PAGE_ROUTES } from "./model";
  * @typeParam I - Tool input containing a space alias or supported URL.
  * @typeParam O - Result produced by the original executor.
  * @param execute - Executor called only after the target space and locale are resolved.
- * @returns An executor that preserves input, context, cancellation, and asynchronous locale scope.
+ * @param localeContext - Explicit locale selection and per-operation schema cache.
+ * @returns An executor that forwards input, cancellation, and an explicit operation-local locale context.
  * @throws {@link Error} When neither a configured space nor a supported entry URL is available.
  */
 export const withLocale =
   <I extends { space?: string; url?: string }, O>(
-    execute: (input: I, ctx: ToolContext) => O | Promise<O>
+    execute: (
+      input: I,
+      ctx: ToolContext,
+      localeContext: LocaleContext
+    ) => O | Promise<O>
   ) =>
   (input: I, ctx: ToolContext): Promise<O> => {
     const ref = input.url ? parseEntryUrl(input.url) : null;
@@ -30,7 +36,7 @@ export const withLocale =
     }
     return withContentfulLocale(
       space,
-      () => execute(input, ctx),
+      (localeContext) => execute(input, ctx, localeContext),
       ctx.abortSignal
     );
   };

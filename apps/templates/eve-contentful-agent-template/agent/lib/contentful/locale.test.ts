@@ -98,7 +98,9 @@ describe("Contentful field locale selection", () => {
     "reads shared fields and references with %s as default, without translation fallback",
     async (defaultLocale) => {
       const { entry, fake } = fixture(defaultLocale);
-      const result = await withContentfulLocale("docs", () => getEntry(url));
+      const result = await withContentfulLocale("docs", (localeContext) =>
+        getEntry(url, undefined, localeContext)
+      );
       expect(result.fields).toMatchObject({
         body: "Shared paragraph",
         refs: [{ title: "Shared author", type: "Entry" }],
@@ -107,8 +109,14 @@ describe("Contentful field locale selection", () => {
       });
       expect(result.fields).not.toHaveProperty("missing");
       expect(entry.fields.slug).toEqual({ [defaultLocale]: "shared-slug" });
-      const content = await withContentfulLocale("docs", () =>
-        readEntryContent(url, null, undefined, { richTextJson: true })
+      const content = await withContentfulLocale("docs", (localeContext) =>
+        readEntryContent(
+          url,
+          null,
+          undefined,
+          { richTextJson: true },
+          localeContext
+        )
       );
       expect(content.sections).toContainEqual(
         expect.objectContaining({ field: "/body", text: "Shared paragraph" })
@@ -122,17 +130,22 @@ describe("Contentful field locale selection", () => {
 
   it("creates shared fields in the default locale and translated fields in the selected locale", async () => {
     const { fake } = fixture("de-DE");
-    const result = await withContentfulLocale("docs", () =>
-      prepareCreation({
-        assets: null,
-        contentTypeId: "guide",
-        fields: [
-          { fieldId: "slug", value: "new-slug" },
-          { fieldId: "title", value: "Titre" },
-        ],
-        resumeFrom: null,
-        space: "docs",
-      })
+    const result = await withContentfulLocale("docs", (localeContext) =>
+      prepareCreation(
+        {
+          assets: null,
+          contentTypeId: "guide",
+          fields: [
+            { fieldId: "slug", value: "new-slug" },
+            { fieldId: "title", value: "Titre" },
+          ],
+          resumeFrom: null,
+          space: "docs",
+        },
+        undefined,
+        undefined,
+        localeContext
+      )
     );
     expect(result.fields).toEqual({
       slug: { "de-DE": "new-slug" },
@@ -145,19 +158,25 @@ describe("Contentful field locale selection", () => {
     "prepares shared-field %s without touching translations",
     async (operation) => {
       const { fake } = fixture("de-DE");
-      const result = await withContentfulLocale("docs", () =>
-        prepareUpdate("docs", {
-          changes: [
-            {
-              fieldId: "slug",
-              operation,
-              value: operation === "set" ? "new-slug" : null,
-            },
-            { fieldId: "title", operation: "set", value: "Titre" },
-          ],
-          entryId: "example",
-          expectedVersion: 7,
-        })
+      const result = await withContentfulLocale("docs", (localeContext) =>
+        prepareUpdate(
+          "docs",
+          {
+            changes: [
+              {
+                fieldId: "slug",
+                operation,
+                value: operation === "set" ? "new-slug" : null,
+              },
+              { fieldId: "title", operation: "set", value: "Titre" },
+            ],
+            entryId: "example",
+            expectedVersion: 7,
+          },
+          undefined,
+          undefined,
+          localeContext
+        )
       );
       const body = JSON.parse(result.body);
       expect(body.fields.slug).toEqual(
@@ -174,8 +193,14 @@ describe("Contentful field locale selection", () => {
 
   it("patches shared RichText at its default locale and rejects stale block hashes", async () => {
     const { fake } = fixture("de-DE");
-    const result = await withContentfulLocale("docs", () =>
-      prepareUpdate("docs", patchChange(richTextBlockHash(block)))
+    const result = await withContentfulLocale("docs", (localeContext) =>
+      prepareUpdate(
+        "docs",
+        patchChange(richTextBlockHash(block)),
+        undefined,
+        undefined,
+        localeContext
+      )
     );
     expect(JSON.parse(result.body).fields.body).toEqual({
       "de-DE": {
@@ -189,8 +214,14 @@ describe("Contentful field locale selection", () => {
       },
     });
     await expect(
-      withContentfulLocale("docs", () =>
-        prepareUpdate("docs", patchChange("000000000000"))
+      withContentfulLocale("docs", (localeContext) =>
+        prepareUpdate(
+          "docs",
+          patchChange("000000000000"),
+          undefined,
+          undefined,
+          localeContext
+        )
       )
     ).rejects.toThrow(
       "Block 0 does not match its hash. Read the entry again and use the current block indexes and hashes."
@@ -213,8 +244,8 @@ describe("Contentful field locale selection", () => {
       skip: null,
       space: "docs",
     };
-    const result = await withContentfulLocale("docs", () =>
-      runContentfulQuery(query)
+    const result = await withContentfulLocale("docs", (localeContext) =>
+      runContentfulQuery(query, undefined, localeContext)
     );
     expect(result.entries[0].fields).toEqual({
       slug: "shared-slug",
@@ -246,12 +277,12 @@ describe("Contentful field locale selection", () => {
     );
     const results = await Promise.all(
       ["docs", "site"].map((space) =>
-        withContentfulLocale(space, async () => {
+        withContentfulLocale(space, async (localeContext) => {
           await Promise.resolve();
           return [
-            contentLocale(),
-            fieldLocale({ localized: false }),
-            fieldLocale({ localized: true }),
+            contentLocale(localeContext),
+            fieldLocale({ localized: false }, localeContext),
+            fieldLocale({ localized: true }, localeContext),
           ];
         })
       )
