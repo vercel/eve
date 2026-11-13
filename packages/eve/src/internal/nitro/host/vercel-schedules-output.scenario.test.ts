@@ -75,11 +75,29 @@ process.exit(0);
 `,
       ],
       {
-        env: { ...process.env, PORT: "0", TZ: "UTC" },
+        // Vitest sets TEST, which keeps Nitro's and eve's schedule runners idle.
+        env: { ...process.env, PORT: "0", TEST: "", TZ: "UTC" },
         timeout: 15_000,
       },
     );
     expect(stdout).toContain("timezone-task-fired-once");
+  });
+
+  it("rejects schedule timezones for unsupported Nitro presets", async () => {
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("NITRO_PRESET", "node-cluster");
+    const { appRoot } = await createAppRoot("eve-cluster-timezone-", {
+      packageName: "timezone-agent",
+      files: {
+        ...AGENT_FILES,
+        "agent/schedules/pacific.md":
+          '---\ncron: "0 9 * * *"\ntimezone: America/Los_Angeles\n---\nSend the Pacific digest.\n',
+      },
+    });
+
+    await expect(buildApplication(appRoot, { skipSandboxPrewarm: true })).rejects.toThrow(
+      'Schedule timezones require the node-server or Vercel host. The "node-cluster" Nitro preset is not supported.',
+    );
   });
 
   it("runs schedules through a private Vercel Schedules function", async () => {

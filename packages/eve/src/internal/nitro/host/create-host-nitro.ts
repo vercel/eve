@@ -100,28 +100,31 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     workflowWorldPluginPath: locations.compiledArtifacts.workflowWorldPluginPath,
     timezoneRunner: spec.runtimePlugins.includes("timezone-schedules"),
   });
+  const timezoneSchedulesConfigPath = join(locations.buildDir, "eve-timezone-schedules.json");
   const timezoneSchedulesPlugin = spec.runtimePlugins.includes("timezone-schedules")
-    ? await createTimezoneSchedulesPlugin(spec)
+    ? createTimezoneSchedulesPlugin(timezoneSchedulesConfigPath)
     : undefined;
 
   const nitro = await createNitro(
     toNitroConfig(spec, { routes, skillFilesPlugin, timezoneSchedulesPlugin, workflowArtifacts }),
     createNitroLoadOptions(locations.buildDir),
   );
-  if (timezoneSchedulesPlugin !== undefined && nitro.options.preset !== "node-server") {
-    throw new Error(
-      `Schedule timezones require the node-server or Vercel host. The "${nitro.options.preset}" Nitro preset is not supported. Build for Node and run with eve start, or deploy to Vercel.`,
+  if (timezoneSchedulesPlugin !== undefined) {
+    if (nitro.options.preset !== "node-server") {
+      await nitro.close().catch(() => undefined);
+      throw new Error(
+        `Schedule timezones require the node-server or Vercel host. The "${nitro.options.preset}" Nitro preset is not supported. Build for Node and run with eve start, or deploy to Vercel.`,
+      );
+    }
+    await writeFile(
+      timezoneSchedulesConfigPath,
+      JSON.stringify(spec.routes.scheduleTasks.filter((task) => task.timezone !== undefined)),
     );
   }
   return nitro;
 }
 
-async function createTimezoneSchedulesPlugin(spec: HostSpec): Promise<string> {
-  const configPath = join(spec.locations.buildDir, "eve-timezone-schedules.json");
-  await writeFile(
-    configPath,
-    JSON.stringify(spec.routes.scheduleTasks.filter((task) => task.timezone !== undefined)),
-  );
+function createTimezoneSchedulesPlugin(configPath: string): string {
   return [
     `import data from ${stringifyNitroDataImportSpecifier("text", configPath)};`,
     `import { installTimezoneSchedules } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/nitro/host/timezone-schedules-runtime.ts"))};`,

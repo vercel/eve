@@ -15,6 +15,8 @@ export function installTimezoneSchedules(
   },
   schedules: readonly TimezoneSchedule[],
 ): void {
+  // Match Nitro's schedule runner, which stays idle under TEST.
+  if (process.env.TEST) return;
   const jobs: Cron[] = [];
   let closed = false;
   app.hooks.hook("close", () => {

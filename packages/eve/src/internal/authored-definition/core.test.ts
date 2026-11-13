@@ -414,6 +414,18 @@ describe("normalizeScheduleDefinition", () => {
     },
   );
 
+  it.each([
+    ["america/los_angeles", "America/Los_Angeles"],
+    [" utc ", "UTC"],
+  ])("canonicalizes schedule timezone %j", (timezone, expected) => {
+    expect(
+      normalizeScheduleDefinition(
+        { cron: "0 13 * * *", timezone, content: "Send a digest." },
+        "schedules/digest.ts:",
+      ),
+    ).toMatchObject({ timezone: expected });
+  });
+
   it.each(["approval", "needsApproval"])("rejects the removed %s field", (field) => {
     expect(() =>
       normalizeScheduleDefinition(

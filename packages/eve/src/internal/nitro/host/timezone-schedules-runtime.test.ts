@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installTimezoneSchedules } from "#internal/nitro/host/timezone-schedules-runtime.js";
 
 const { runTask } = vi.hoisted(() => ({ runTask: vi.fn(async () => ({})) }));
@@ -19,13 +19,28 @@ function install(cron: string, timezone = "America/Los_Angeles", ready = Promise
   );
 }
 
+beforeEach(() => {
+  vi.stubEnv("TEST", "");
+});
+
 afterEach(() => {
   for (const close of closers.splice(0)) close();
   vi.useRealTimers();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("self-hosted timezone schedules", () => {
+  it("stays idle under TEST, like Nitro's schedule runner", async () => {
+    vi.stubEnv("TEST", "true");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-15T20:59:59Z"));
+    install("0 13 * * *");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(runTask).not.toHaveBeenCalled();
+    expect(closers).toEqual([]);
+  });
+
   it.each([
     ["2026-01-15T20:59:59Z", "2026-01-15T21:00:00Z"],
     ["2026-07-15T19:59:59Z", "2026-07-15T20:00:00Z"],
