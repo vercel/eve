@@ -38,10 +38,10 @@ import type { HarnessAction } from "#public/definitions/harness.js";
 import {
   continueWithNote,
   decideNext,
-  decidesNext,
   failHarness,
   harnessed,
   settleWithReply,
+  waitOnTasks,
 } from "#harness/stack/kernel.js";
 import { runHarnessCalls } from "#harness/stack/calls.js";
 
@@ -183,17 +183,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     next: null,
     session: step.session,
   };
-  const stack = await decidesNext(step);
-  if (stack === undefined) {
-    if (continueLoop) return { next: step.runStep, session: step.session };
-    // No turn ends while its tasks work: the session waits for one to settle, then calls the model
-    // again in the same turn.
-    if (workingTasks.length > 0) return held;
-    // Text written before an `endsTurn` call was narration, not the reply.
-    return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
-  }
-  // The harness decides, with eve's own answer below it. The kernel still holds a turn whose tasks
-  // work, and refuses a model call with nothing new to read.
+  // The harness decides, with eve's own answer below it: for an agent with none, eve's answer is
+  // what happens. The kernel still holds a turn whose tasks work, and refuses a model call with
+  // nothing new to read.
   const native = nativeNext(step, {
     continueLoop,
     output: delivered ? finalOutput : undefined,
@@ -201,7 +193,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     workingTasks,
   });
   const decided = await harnessed(step, () =>
-    decideNext(step, stack, {
+    decideNext(step, {
       lastStep: {
         endsTurn,
         text: endsTurn ? null : stepOutput,
@@ -224,14 +216,13 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     }
     return runHarnessCalls(step, action.call);
   }
+  if ("wait" in action) return action === native ? held : waitOnTasks(step, action.wait.tasks);
+  // No turn ends while its tasks work: the session waits for one to settle, then decides again.
   if (workingTasks.length > 0) return held;
   // eve's own answer, passed through, settles the way it always does: its reply, or the schema's
   // failure.
   if (action === native) {
     return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
-  }
-  if ("wait" in action) {
-    return failHarness(step, "HARNESS_INVALID", "The harness waited on tasks, but none work.");
   }
   if ("fail" in action) return failHarness(step, "HARNESS_FAILED_TURN", action.fail);
   return settleWithReply(step, action.settle);

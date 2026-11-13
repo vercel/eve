@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 const THINKING_SUFFIX = "-thinking";
-const MODEL_METADATA_KIND = "eve-model-metadata";
+export const MODEL_METADATA_KIND = "eve-model-metadata";
 const MODEL_METADATA_VERSION = 1;
 
 export const catalogModelProviderSchema = z

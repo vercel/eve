@@ -201,13 +201,20 @@ describe("next", () => {
 });
 
 describe("request stages", () => {
-  it("shows the model a history it never records", async () => {
+  it("changes one call as it's sent, never what's recorded", async () => {
     const run = harnessed(
       defineHarness({
-        history: async (_ctx, below) => [
-          ...(await below()),
-          { content: "You are talking to a viewer.", role: "user" } satisfies ModelMessage,
-        ],
+        request: async (_ctx, below) => {
+          const request = await below();
+          return {
+            ...request,
+            messages: [
+              ...request.messages,
+              { content: "You are talking to a viewer.", role: "user" } satisfies ModelMessage,
+            ],
+            tools: new Map([...request.tools].filter(([name]) => name !== "bash")),
+          };
+        },
       }),
       ["Hi, viewer."],
     );
@@ -216,7 +223,59 @@ describe("request stages", () => {
 
     expect(textOf(run.prompts()[0]!.at(-1)!)).toBe("You are talking to a viewer.");
     expect(run.session().history.map(textOf)).not.toContain("You are talking to a viewer.");
+    const offered = (run.model.doStreamCalls[0]!.tools ?? []).map((entry) => entry.name);
+    expect(offered).toContain("echo");
+    expect(offered).not.toContain("bash");
     expect(run.violations).toEqual([]);
+  });
+
+  it("fails the turn when a request offers a tool the call doesn't have", async () => {
+    const run = harnessed(
+      defineHarness({
+        request: async (_ctx, below) => {
+          const request = await below();
+          const made = { deferred: false, description: "Made up.", name: "made_up" };
+          return { ...request, tools: new Map([...request.tools, ["made_up", made]]) };
+        },
+      }),
+      ["unused"],
+    );
+
+    const result = await run.turn("hi");
+
+    expect(result.settledTurn).toEqual(expect.objectContaining({ isError: true }));
+    expect(run.prompts()).toHaveLength(0);
+  });
+
+  it("places a turn's context ahead of its input, kept for later calls", async () => {
+    let asked = 0;
+    const run = harnessed(
+      defineHarness({
+        context: async (_ctx, below) => {
+          asked += 1;
+          return [...(await below()), { content: "Recalled: likes tea.", role: "user" }];
+        },
+        next: async (ctx, below) => {
+          const action = await below();
+          if (!("settle" in action) || ctx.continuations > 0) return action;
+          return { model: { note: "Once more." } };
+        },
+      }),
+      ["First.", "Second."],
+      // A context the session carries from step to step, as a deployed session's does.
+      { askable: true },
+    );
+
+    await run.turn("What do I drink?");
+
+    expect(asked).toBe(1);
+    for (const prompt of run.prompts()) {
+      const texts = prompt.filter((message) => message.role === "user").map(textOf);
+      const recalled = texts.indexOf("Recalled: likes tea.");
+      expect(recalled).toBeGreaterThanOrEqual(0);
+      expect(texts[recalled + 1]).toBe("What do I drink?");
+    }
+    expect(run.session().history.map(textOf)).not.toContain("Recalled: likes tea.");
   });
 
   it("filters the tools and adds to the instructions", async () => {
@@ -380,6 +439,30 @@ describe("call", () => {
     expect(run.violations).toEqual([]);
   });
 
+  it("shows the model the harness's calls as the framework's, not its own", async () => {
+    const run = harnessed(
+      defineHarness({
+        next: (ctx, below) => {
+          if (ctx.input !== "/status" || ctx.lastStep !== undefined) return below();
+          const call = ctx.calls.find((entry) => entry.tool === "echo");
+          if (call === undefined) return { call: [{ tool: "echo" }] };
+          return call.status === "settled" ? { model: {} } : below();
+        },
+      }),
+      ["All good."],
+    );
+
+    const result = await run.turn("/status");
+
+    expect(result.settledTurn).toEqual({ output: "All good." });
+    const prompt = run.prompts()[0]!;
+    expect(prompt.some((message) => message.role === "tool")).toBe(false);
+    expect(prompt.map(textOf).join("\n")).toMatch(/harness made these calls itself.*echo/s);
+    // History keeps them as calls, for the gate.
+    expect(run.session().history.some((message) => message.role === "tool")).toBe(true);
+    expect(run.violations).toEqual([]);
+  });
+
   it("refuses a call to a tool that isn't there", async () => {
     const run = harnessed(defineHarness({ next: () => ({ call: [{ tool: "nope" }] }) }), []);
 
@@ -427,22 +510,63 @@ describe("structured settle", () => {
 });
 
 describe("admit", () => {
-  it("records who may steer the turn, for the session loop", async () => {
-    const run = harnessed(defineHarness({ admit: () => ({ steer: "nobody" }) }), ["Hi."]);
+  it("records that the harness admits, so the session loop asks it about each message", async () => {
+    const run = harnessed(defineHarness({ admit: () => ({ action: "queue" }) }), ["Hi."]);
 
     await run.turn("hi");
 
-    expect(run.session().state?.["eve.harness.steer"]).toBe("nobody");
+    expect(run.session().state?.["eve.harness.admits"]).toBe(true);
+  });
+
+  it("records nothing for a harness without the stage", async () => {
+    const run = harnessed(defineHarness({ instructions: "Be brief." }), ["Hi."]);
+
+    await run.turn("hi");
+
+    expect(run.session().state?.["eve.harness.admits"]).toBeUndefined();
+  });
+});
+
+describe("notes", () => {
+  it("counts a turn's notes in the session, not its history", async () => {
+    const run = harnessed(
+      defineHarness({
+        next: async (ctx, below) => {
+          const action = await below();
+          if (!("settle" in action) || ctx.continuations > 1) return action;
+          return { model: { note: `Note ${ctx.continuations + 1}.` } };
+        },
+      }),
+      ["One.", "Two.", "Three."],
+    );
+
+    const result = await run.turn("hi");
+
+    expect(result.settledTurn).toEqual({ output: "Three." });
+    expect(run.session().state?.["eve.harness.notes"]).toEqual(
+      expect.objectContaining({ count: 2 }),
+    );
+  });
+});
+
+describe("wait", () => {
+  it("fails a wait on tasks that don't work, rather than hold the turn forever", async () => {
+    const run = harnessed(defineHarness({ next: () => ({ wait: { tasks: ["nothing-1"] } }) }), []);
+
+    const result = await run.turn("hi");
+
+    expect(result.settledTurn).toEqual(expect.objectContaining({ isError: true }));
+    expect(result.held).toBeUndefined();
   });
 });
 
 describe("compact's view of eve's threshold", () => {
   it("says whether eve would compact, without compacting", async () => {
-    const seen: { due: boolean; requested: boolean }[] = [];
+    const seen: { pastThreshold: boolean; requested: boolean }[] = [];
     const run = harnessed(
       defineHarness({
         compact: (ctx) => {
-          seen.push({ due: ctx.due, requested: ctx.requested });
+          seen.push({ pastThreshold: ctx.pastThreshold, requested: ctx.requested });
           return undefined;
         },
       }),
@@ -451,7 +575,7 @@ describe("compact's view of eve's threshold", () => {
 
     await run.turn("hi");
 
-    expect(seen).toEqual([{ due: false, requested: false }]);
+    expect(seen).toEqual([{ pastThreshold: false, requested: false }]);
     expect(run.facts.map((fact) => fact.type)).not.toContain("context.started");
   });
 });

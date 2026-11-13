@@ -111,7 +111,7 @@ function modelDefinition(
 }
 
 /** Resolves a model result to what the slot records, and the provider the process holds. */
-async function keptModel(
+export async function keptModel(
   result: unknown,
   modelMetadata: () => Promise<ModelMetadata>,
 ): Promise<Kept> {

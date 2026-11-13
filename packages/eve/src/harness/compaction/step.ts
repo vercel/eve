@@ -53,12 +53,7 @@ import {
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import { fromHarnessMessages, stepHarnessContext } from "#harness/stack/kernel.js";
-import {
-  changesStage,
-  type HarnessStack,
-  runStage,
-  sessionHarness,
-} from "#definitions/harness/stack.js";
+import { type HarnessStack, runStage, sessionHarness } from "#definitions/harness/stack.js";
 
 const log = createLogger("harness.tool-loop");
 /**
@@ -115,55 +110,52 @@ export async function compactHistory(step: Step): Promise<StepResult> {
         promptMessages: before,
         requestEnvelopeTokens: compaction.requestEnvelopeTokens,
       });
+    // The harness's `compact` decides here too: eve's summary is below it, and what it returns
+    // instead is the compaction this delivery asked for.
     const stack = await sessionHarness(step.ctx);
-    if (!changesStage(stack, "compact")) await eve(messages, change);
-    else {
-      // The harness's `compact` decides here too: eve's summary is below it, and what it returns
-      // instead is the compaction this delivery asked for.
-      const config = compaction;
-      const envelope = compaction.requestEnvelopeTokens;
-      let committed: HarnessModelMessage[] | undefined;
-      // The delivery's change records the first compaction; any after it gets a change of its own.
-      let opened = false;
-      const nextChange = (): LazyChange => {
-        if (!opened) {
-          opened = true;
-          return change;
-        }
-        const { projection } = step.view();
-        return lazyChange(step, {
-          changeId: nextChangeId(projection),
-          prompt: messages,
-          runId: nextRunId(projection),
-          started: { cause: { deliveryId }, kind: "compaction" },
-        });
-      };
-      const decided = await runStage(
-        stack,
-        "compact",
-        {
-          ...stepHarnessContext(step),
-          due: true,
-          requested: true,
-          summarize: async (some?: readonly ModelMessage[]) => {
-            const before = some === undefined ? messages : fromHarnessMessages(some);
-            committed = await eve(before, nextChange());
-            return committed ?? before;
-          },
-          threshold: config.threshold,
-          tokens: getInputTokenCount(messages, config, envelope, envelope),
+    const config = compaction;
+    const envelope = compaction.requestEnvelopeTokens;
+    let committed: HarnessModelMessage[] | undefined;
+    // The delivery's change records the first compaction; any after it gets a change of its own.
+    let opened = false;
+    const nextChange = (): LazyChange => {
+      if (!opened) {
+        opened = true;
+        return change;
+      }
+      const { projection } = step.view();
+      return lazyChange(step, {
+        changeId: nextChangeId(projection),
+        prompt: messages,
+        runId: nextRunId(projection),
+        started: { cause: { deliveryId }, kind: "compaction" },
+      });
+    };
+    const decided = await runStage(
+      stack,
+      "compact",
+      () => ({
+        ...stepHarnessContext(step),
+        pastThreshold: true,
+        requested: true,
+        summarize: async (some?: readonly ModelMessage[]) => {
+          const before = some === undefined ? messages : fromHarnessMessages(some);
+          committed = await eve(before, nextChange());
+          return committed ?? before;
         },
-        async () => {
-          if (stack.naked) return undefined;
-          committed = await eve(messages, nextChange());
-          return committed;
-        },
-      );
-      if (decided !== undefined && decided !== committed) {
-        const rewritten = fromHarnessMessages(decided);
-        if (committed === undefined || !isDeepStrictEqual(rewritten, committed)) {
-          await rewriteHistory(step, nextChange(), rewritten);
-        }
+        threshold: config.threshold,
+        tokens: getInputTokenCount(messages, config, envelope, envelope),
+      }),
+      async () => {
+        if (stack.naked) return undefined;
+        committed = await eve(messages, nextChange());
+        return committed;
+      },
+    );
+    if (decided !== undefined && decided !== committed) {
+      const rewritten = fromHarnessMessages(decided);
+      if (committed === undefined || !isDeepStrictEqual(rewritten, committed)) {
+        await rewriteHistory(step, nextChange(), rewritten);
       }
     }
   } catch (error) {
@@ -189,9 +181,7 @@ export async function historyBeforeCall(
   step: Step,
   input: BeforeCallInput,
 ): Promise<HarnessModelMessage[] | undefined> {
-  const stack = await sessionHarness(step.ctx);
-  if (!changesStage(stack, "compact")) return await nativeHistoryBeforeCall(step, input);
-  return await harnessHistoryBeforeCall(step, stack, input);
+  return await harnessHistoryBeforeCall(step, await sessionHarness(step.ctx), input);
 }
 
 interface BeforeCallInput {
@@ -216,13 +206,14 @@ async function harnessHistoryBeforeCall(
   const prompt = validateHarnessModelMessages(input.promptMessages);
   const config = compactionConfig(step);
   const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
-  const tokens = getInputTokenCount(prompt, config, input.requestEnvelopeTokens, previousEnvelope);
+  const tokens = () =>
+    getInputTokenCount(prompt, config, input.requestEnvelopeTokens, previousEnvelope);
   let committed: HarnessModelMessage[] | undefined;
   const summarize = async (messages?: readonly ModelMessage[]) => {
     const before = messages === undefined ? input.messages : fromHarnessMessages(messages);
     committed = await summarizeHistory(step, {
       compaction: config,
-      change: lazyChange(step, compactionStart(step, prompt, tokens)),
+      change: lazyChange(step, compactionStart(step, prompt, tokens())),
       compact: true,
       messages: before,
       model: input.model,
@@ -232,14 +223,14 @@ async function harnessHistoryBeforeCall(
     });
     return committed ?? before;
   };
-  const ctx = {
+  const ctx = () => ({
     ...stepHarnessContext(step),
-    due: shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope),
+    pastThreshold: shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope),
     requested: false,
     summarize,
     threshold: config.threshold,
-    tokens,
-  };
+    tokens: tokens(),
+  });
   const decided = await runStage(stack, "compact", ctx, async () => {
     if (stack.naked) return undefined;
     committed = await nativeHistoryBeforeCall(step, input);
@@ -250,7 +241,7 @@ async function harnessHistoryBeforeCall(
   if (committed !== undefined && isDeepStrictEqual(messages, committed)) return committed;
   return await rewriteHistory(
     step,
-    lazyChange(step, compactionStart(step, prompt, tokens)),
+    lazyChange(step, compactionStart(step, prompt, tokens())),
     messages,
   );
 }

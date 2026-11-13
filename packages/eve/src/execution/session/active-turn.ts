@@ -5,11 +5,12 @@ import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import { admitDeliveryStep } from "#execution/session/admit-delivery-step.js";
 import {
+  harnessAdmits,
   isSteeringDelivery,
   isSteeringMessage,
   type SteeringOptions,
-  steeringPolicyOf,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
@@ -59,6 +60,8 @@ export class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
   private readonly mappedForHeldRequest = new Set<number>();
+  /** Deliveries the harness's `admit` kept out of the turn: they wait for it to end. */
+  private readonly keptOut = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
   /** The cancel control that stopped this turn, when it named its delivery. */
@@ -67,7 +70,7 @@ export class ActiveTurn {
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
-  private readonly owner: Omit<SteeringTurn, "steer">;
+  private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
@@ -91,7 +94,7 @@ export class ActiveTurn {
     this.input = input;
     this.caller = owner.caller;
     this.#control = owner.control === true;
-    this.owner = { callerCallId: owner.caller?.callId, principal: owner.principal };
+    this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
     this.expectedTurnId = activeTurnId(
       turnPosition(storedProjection(readDurableSession(input.cursor.sessionState).state)),
     );
@@ -112,19 +115,32 @@ export class ActiveTurn {
       delivery.kind === "deliver" &&
       !this.input.queue.isDuplicate(delivery) &&
       isSteeringMessage(delivery, this.identity) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests
+      !this.input.cursor.sessionState.hasProxyInputRequests &&
+      // The harness decides at the boundary whether the message joins, so the step runs on.
+      !this.harnessAdmits
     )
       this.steeringController.abort();
   };
 
-  /** Who steers the turn now: its owner, as the harness's latest `admit` lets them. */
-  private get identity(): SteeringTurn {
-    const { state } = readDurableSession(this.input.cursor.sessionState);
-    return { ...this.owner, steer: steeringPolicyOf(state) };
-  }
-
   get signal(): AbortSignal {
     return this.controller.signal;
+  }
+
+  /** The session's harness decides what each message that arrives does. */
+  private get harnessAdmits(): boolean {
+    return harnessAdmits(readDurableSession(this.input.cursor.sessionState).state);
+  }
+
+  /** The admitted deliveries that may join the turn: all but those its harness kept out. */
+  private joinable(options?: SteeringOptions): ReadonlySet<number> {
+    if (this.keptOut.size === 0) return this.admitted;
+    const held = options?.heldSince;
+    // A turn waiting on its own person still hears them, whatever the harness said.
+    return new Set(
+      [...this.admitted].filter(
+        (sequence) => !this.keptOut.has(sequence) || (held !== undefined && sequence >= held),
+      ),
+    );
   }
 
   dispose(): void {
@@ -159,7 +175,11 @@ export class ActiveTurn {
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(
+        this.joinable(options),
+        this.identity,
+        options,
+      );
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
@@ -295,9 +315,14 @@ export class ActiveTurn {
   private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
-      case "delivery":
-        this.admitted.add(admitted.admission.sequence);
+      case "delivery": {
+        const { delivery, sequence } = admitted.admission;
+        if (!settled && this.harnessAdmits && !(await this.harnessAdmit(sequence, delivery))) {
+          return false;
+        }
+        this.admitted.add(sequence);
         return true;
+      }
       case "runtime-action-result":
         this.runtimeResults.push({
           kind: "runtime-action-result",
@@ -338,6 +363,28 @@ export class ActiveTurn {
   }
 
   /**
+   * Asks the session's harness what a message that arrived during the turn does. One kept out
+   * waits for the turn to end, alone when it starts a turn of its own; one dropped leaves the
+   * queue, settled with the harness's reason. Returns whether the turn still admits it.
+   */
+  private async harnessAdmit(sequence: number, delivery: DeliverHookPayload): Promise<boolean> {
+    const { action } = await this.input.cursor.advance((state) =>
+      admitDeliveryStep({
+        ...state,
+        delivery,
+        joins: isSteeringDelivery(delivery, this.identity),
+      }),
+    );
+    if (action === "drop") {
+      this.input.queue.replaceDelivery(sequence, undefined);
+      return false;
+    }
+    if (action === "turn") this.input.queue.keepApart(sequence);
+    if (action !== "join") this.keptOut.add(sequence);
+    return true;
+  }
+
+  /**
    * During a runtime wait, descendant-bound answers cannot wait for the
    * boundary. Returns whether a newly routed delivery still steers: it
    * answered nothing, so its message is for the model.
@@ -366,7 +413,8 @@ export class ActiveTurn {
         this.admitted.delete(sequence);
         continue;
       }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
+      if (!this.keptOut.has(sequence) && isSteeringMessage(routed.remainder, this.identity))
+        steered = true;
     }
     return steered;
   }

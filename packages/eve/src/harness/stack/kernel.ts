@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolSet } from "ai";
 
 import { Validator } from "#compiled/@cfworker/json-schema/index.js";
 
@@ -7,6 +7,13 @@ import { turnReplyPart } from "#harness/session-machine/content.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { complete, fail } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
+import { activeTurnIdOf } from "#protocol/session-projection.js";
+import {
+  isTaskWorking,
+  readTaskTable,
+  tasksWithResults,
+  workingTasks,
+} from "#execution/tasks/table.js";
 import {
   createFrameworkUserMessage,
   type HarnessModelMessage,
@@ -19,21 +26,34 @@ import { createErrorId, createLogger } from "#internal/logging.js";
 import type {
   HarnessAction,
   HarnessAdmission,
+  HarnessAdmitContext,
   HarnessContext,
+  HarnessDelivery,
+  HarnessRequest,
   HarnessStep,
+  HarnessTask,
+  HarnessTools,
 } from "#public/definitions/harness.js";
 import type { JsonValue } from "#shared/json.js";
-import { HARNESS_NOTE_KEY, harnessContext } from "#definitions/harness/context.js";
-import { STEERING_POLICY_STATE_KEY } from "#execution/session/input-queue.js";
 import {
-  changesStage,
-  type HarnessStack,
+  HARNESS_NOTE_KEY,
+  harnessContext,
+  partsOf,
+  sectionsOf,
+} from "#definitions/harness/context.js";
+import { EMPTY_TOOLS, type Section } from "#definitions/definition.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { HARNESS_ADMITS_STATE_KEY } from "#execution/session/input-queue.js";
+import type { ContextContainer } from "#context/container.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import {
+  hasStage,
   NothingBelowError,
   runStage,
   sessionHarness,
 } from "#definitions/harness/stack.js";
 
-// Where the kernel asks the harness: what the model reads of the history on each call, and what
+// Where the kernel asks the harness: the last change to each model call before it's sent, and what
 // happens next in the turn. eve's own answer is each stage's bottom; the kernel checks what the
 // stack decides before it acts, so no layer can end a turn its tasks still work in, or loop the
 // model on nothing new.
@@ -43,6 +63,54 @@ const log = createLogger("harness.stack");
 /** The notes a harness can add in one turn before the kernel fails it. */
 export const MAX_HARNESS_NOTES = 10;
 
+/** Where the session counts the notes the harness added in the open turn. */
+const HARNESS_NOTES_STATE_KEY = "eve.harness.notes";
+
+/** The notes the harness added in the open turn. */
+function notesOf(step: Step): number {
+  const turnId = activeTurnIdOf(step.view().projection);
+  const kept = step.session.state?.[HARNESS_NOTES_STATE_KEY] as
+    | { readonly count?: unknown; readonly turnId?: unknown }
+    | undefined;
+  return turnId !== undefined && kept?.turnId === turnId && typeof kept.count === "number"
+    ? kept.count
+    : 0;
+}
+
+/** The session's tasks, as a harness reads them. */
+function tasksOf(step: Step): readonly HarnessTask[] {
+  return readTaskTable(step.session.state).tasks.map((record) => ({
+    results: record.results.map((result): JsonValue =>
+      result.status === "completed" ? result.output : { error: result.error },
+    ),
+    status: record.cancelled === true ? "cancelled" : isTaskWorking(record) ? "running" : "idle",
+    taskId: record.id,
+    tool: record.name,
+  }));
+}
+
+/**
+ * The harness waits on tasks itself: on those it names that still work. A wait on none would
+ * hold the turn forever, so it fails instead.
+ */
+export async function waitOnTasks(step: Step, tasks: readonly string[]): Promise<StepResult> {
+  const working = new Set(workingTasks(readTaskTable(step.session.state)).map(({ id }) => id));
+  const taskIds = tasks.filter((taskId) => working.has(taskId));
+  if (taskIds.length === 0) {
+    return await failHarness(
+      step,
+      "HARNESS_INVALID",
+      "The harness waited on tasks, but none it named work.",
+    );
+  }
+  return { held: { kind: "tasks", taskIds }, next: null, session: step.session };
+}
+
+/** Whether a task's results arrived that the model hasn't read: the harness reads them first. */
+export function hasUnreadTaskResults(step: Step): boolean {
+  return tasksWithResults(readTaskTable(step.session.state)).length > 0;
+}
+
 /** What a step's stages read. */
 export function stepHarnessContext(
   step: Step,
@@ -51,6 +119,8 @@ export function stepHarnessContext(
   const draft = stepDraft(step);
   return harnessContext(step.ctx, {
     history: step.session.history,
+    notes: notesOf(step),
+    tasks: tasksOf(step),
     ...(input.lastStep !== undefined && { lastStep: input.lastStep }),
     ...(input.pending !== undefined && { pending: input.pending }),
     system: async () => await (await draft).system(),
@@ -59,20 +129,72 @@ export function stepHarnessContext(
   });
 }
 
-/** What the model reads of `messages` on this call, after the harness's `history` stage. */
-export async function projectHistory(
+/** One model call as the kernel sends it: the system prompt's sections, messages, and tools. */
+export interface CallRequest {
+  readonly sections: readonly Section[];
+  readonly messages: readonly HarnessModelMessage[];
+  readonly tools: ToolSet;
+}
+
+/**
+ * The call the `request` stage makes of `request`, the last change before it's sent, or
+ * `undefined` when no layer has one. It runs after context is placed, so it reads the call as the
+ * model would. What it returns is used once: the history the step commits is unchanged. It may
+ * narrow the tools, never add one, since a tool's code is its definition's.
+ */
+export async function shapeRequest(
   step: Step,
-  messages: HarnessModelMessage[],
-): Promise<HarnessModelMessage[]> {
+  request: CallRequest,
+): Promise<CallRequest | undefined> {
   const stack = await sessionHarness(step.ctx);
-  if (!changesStage(stack, "history")) return messages;
-  const projected = await runStage(
+  if (!hasStage(stack, "request")) return undefined;
+  const offered = toRequestTools(request.tools);
+  // Below every layer, naked or not, is the call as the agent's definitions built it.
+  const shaped = await runStage(
     stack,
-    "history",
-    stepHarnessContext(step),
-    async () => messages,
+    "request",
+    () => stepHarnessContext(step),
+    async (): Promise<HarnessRequest> => ({
+      instructions: partsOf(request.sections),
+      messages: request.messages,
+      tools: offered,
+    }),
   );
-  return fromHarnessMessages(projected);
+  const tools: ToolSet = {};
+  for (const [name, tool] of shaped.tools) {
+    const was = request.tools[name];
+    if (was === undefined || tool.name !== name) {
+      throw new Error(
+        `The harness's \`request\` offered a tool "${tool.name}" the call doesn't have. A request can only narrow the tools.`,
+      );
+    }
+    tools[name] =
+      tool.description === descriptionOf(was)
+        ? was
+        : ({ ...was, description: tool.description } as ToolSet[string]);
+  }
+  // The structured reply tool is the caller's contract, which no harness narrows away.
+  const reply = request.tools[REPLY_TOOL_NAME];
+  if (reply !== undefined) tools[REPLY_TOOL_NAME] ??= reply;
+  return {
+    messages: fromHarnessMessages(shaped.messages),
+    sections: sectionsOf(request.sections, shaped.instructions, "request"),
+    tools,
+  };
+}
+
+function toRequestTools(tools: ToolSet): HarnessTools {
+  return new Map(
+    Object.entries(tools).map(([name, tool]) => [
+      name,
+      { deferred: false, description: descriptionOf(tool), name },
+    ]),
+  );
+}
+
+/** A tool's description as the request shows it: one the AI SDK computes per call reads empty. */
+function descriptionOf(tool: ToolSet[string]): string {
+  return typeof tool.description === "string" ? tool.description : "";
 }
 
 /**
@@ -88,37 +210,62 @@ export function fromHarnessMessages(messages: readonly ModelMessage[]): HarnessM
 }
 
 /**
- * Asks the harness's `admit` stage who may steer the turn, and records it where the session loop
- * reads it, at every step. eve's own answer, `"caller"`, is below every layer, naked or not:
- * admission is the kernel's, which a harness can only narrow.
+ * Records whether the session's harness has an `admit` stage, where the session loop reads it, so
+ * the loop asks the harness about each message that arrives during a turn only when it has one.
  */
-export async function recordAdmission(step: Step): Promise<void> {
+export async function recordAdmits(step: Step): Promise<void> {
   const stack = await sessionHarness(step.ctx);
-  if (!stack.layers.some((layer) => typeof layer.definition.admit === "function")) return;
-  const decided = await runStage(
-    stack,
-    "admit",
-    stepHarnessContext(step),
-    async (): Promise<HarnessAdmission> => ({ steer: "caller" }),
-  );
-  const steer = decided.steer === "nobody" ? "nobody" : "caller";
-  if (step.session.state?.[STEERING_POLICY_STATE_KEY] === steer) return;
+  const admits = stack.layers.some((layer) => typeof layer.definition.admit === "function");
+  if ((step.session.state?.[HARNESS_ADMITS_STATE_KEY] === true) === admits) return;
+  const { [HARNESS_ADMITS_STATE_KEY]: _was, ...state } = step.session.state ?? {};
   step.session = {
     ...step.session,
-    state: { ...step.session.state, [STEERING_POLICY_STATE_KEY]: steer },
+    state: admits ? { ...state, [HARNESS_ADMITS_STATE_KEY]: true } : state,
   };
 }
 
-/** Whether the kernel asks the stack what's next, rather than acting on eve's own answer. */
-export async function decidesNext(step: Step): Promise<HarnessStack | undefined> {
-  const stack = await sessionHarness(step.ctx);
-  return changesStage(stack, "next") ? stack : undefined;
+/**
+ * What a message that arrived during a turn does, as the stack's `admit` decides, with eve's own
+ * answer at its bottom, naked or not: admission is the kernel's, which a harness only narrows.
+ */
+export async function decideAdmission(
+  container: ContextContainer,
+  input: {
+    readonly delivery: HarnessDelivery;
+    readonly eve: HarnessAdmission["action"];
+    readonly view: SessionView;
+  },
+): Promise<HarnessAdmission> {
+  const stack = await sessionHarness(container);
+  // A message is decided without reading the conversation, so deciding stays cheap.
+  const ctx = (): HarnessAdmitContext => ({
+    ...harnessContext(container, {
+      history: [],
+      system: async () => [],
+      tools: async () => EMPTY_TOOLS,
+      view: input.view,
+    }),
+    delivery: input.delivery,
+  });
+  const decided = await runStage(stack, "admit", ctx, async (): Promise<HarnessAdmission> => ({
+    action: input.eve,
+  }));
+  if (!ADMIT_ACTIONS.has(decided.action)) {
+    throw new Error(
+      `The harness's \`admit\` returned "${String(decided.action)}". Return join, queue, turn, or drop.`,
+    );
+  }
+  return decided;
 }
 
-/** What the stack decides comes next, with eve's own answer at its bottom. */
+const ADMIT_ACTIONS = new Set(["join", "queue", "turn", "drop"]);
+
+/**
+ * What the stack decides comes next, with eve's own answer at its bottom. Every agent's turn goes
+ * through here: with no layer that changes `next`, the answer is eve's own.
+ */
 export async function decideNext(
   step: Step,
-  stack: HarnessStack,
   input: {
     readonly native: HarnessAction;
     readonly lastStep?: HarnessStep;
@@ -126,11 +273,16 @@ export async function decideNext(
     readonly pending?: readonly ModelMessage[];
   },
 ): Promise<HarnessAction> {
-  const ctx = stepHarnessContext(step, input);
-  return await runStage(stack, "next", ctx, async () => {
-    if (stack.naked) throw new NothingBelowError("next", stack);
-    return input.native;
-  });
+  const stack = await sessionHarness(step.ctx);
+  return await runStage(
+    stack,
+    "next",
+    () => stepHarnessContext(step, input),
+    async () => {
+      if (stack.naked) throw new NothingBelowError("next", stack);
+      return input.native;
+    },
+  );
 }
 
 /** The harness asked for another model call: its note joins history, counted against the cap. */
@@ -148,9 +300,7 @@ export async function continueWithNote(
     );
   }
   const turnId = activeTurnId(step.position());
-  const notes = step.session.history.filter(
-    (message) => message.role === "user" && message.metadata?.[HARNESS_NOTE_KEY] === turnId,
-  ).length;
+  const notes = notesOf(step);
   if (notes >= MAX_HARNESS_NOTES) {
     return await failHarness(
       step,
@@ -162,6 +312,12 @@ export async function continueWithNote(
     [HARNESS_NOTE_KEY]: turnId,
   });
   step.session = changeHistory(step.session, { append: [message] });
+  // Counted in the session's state, not its history: a compaction that drops notes doesn't
+  // reset the count.
+  step.session = {
+    ...step.session,
+    state: { ...step.session.state, [HARNESS_NOTES_STATE_KEY]: { count: notes + 1, turnId } },
+  };
   return { next: step.runStep, session: step.session };
 }
 

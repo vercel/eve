@@ -65,8 +65,10 @@ import {
   recoverModelCall,
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
-import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
-import { projectHistory } from "#harness/stack/kernel.js";
+import { renderSystem } from "#definitions/definition.js";
+import { stepDraft, stepMessages } from "#definitions/step.js";
+import { shapeRequest } from "#harness/stack/kernel.js";
+import { showHarnessCalls } from "#harness/stack/shown-calls.js";
 import { modelInstructions, type RequestMessages, withTrailingUserNote } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
@@ -266,8 +268,11 @@ export class ModelCaller {
     return usage;
   }
 
-  /** The call's system prompt and messages, from the step's harness. */
-  private async buildRequest(): Promise<void> {
+  /**
+   * The call's system prompt and messages, from the step's definitions, and the tools it offers,
+   * after the harness's `request` stage.
+   */
+  private async buildRequest(tools: ToolSet): Promise<ToolSet> {
     const { prompt, step } = this;
     const call = {
       currentInput: new Set(this.turnMessages),
@@ -275,18 +280,21 @@ export class ModelCaller {
       record: prompt.messages,
     };
     const draft = await stepDraft(step, call);
-    this.system = await stepSystem(step, draft);
+    const sections = await draft.system();
     const messages = await stepMessages(draft, {
       call,
-      // What the model reads of the record: the prompt's projection, then the harness's.
-      project: async (record) =>
-        await projectHistory(step, projectPrompt({ ...prompt, messages: [...record] })),
+      // What the model reads of the record: the prompt's projection, with the harness's calls
+      // shown as the framework's.
+      project: (record) => showHarnessCalls(projectPrompt({ ...prompt, messages: [...record] })),
     });
+    const shaped = await shapeRequest(step, { messages: messages.view, sections, tools });
+    this.system = renderSystem(shaped?.sections ?? sections);
     this.request = {
       history: messages.record,
       historyState: messages.historyState,
-      nonSystemMessages: messages.view,
+      nonSystemMessages: shaped === undefined ? messages.view : [...shaped.messages],
     };
+    return shaped?.tools ?? tools;
   }
 
   /**
@@ -312,12 +320,13 @@ export class ModelCaller {
   }
 
   private async prepare(options: ModelCallOptions): Promise<ToolSet> {
-    const tools = await prepareModelTools(this.step, {
-      catalog: this.input.catalog,
-      disabledProviderTools: options.disabledProviderTools,
-      profile: this.profile,
-    });
-    await this.buildRequest();
+    const tools = await this.buildRequest(
+      await prepareModelTools(this.step, {
+        catalog: this.input.catalog,
+        disabledProviderTools: options.disabledProviderTools,
+        profile: this.profile,
+      }),
+    );
     this.requestEnvelopeTokens = await estimateRequestEnvelope({
       history: this.projectedMessages,
       ...this.framing(options, this.request.nonSystemMessages),

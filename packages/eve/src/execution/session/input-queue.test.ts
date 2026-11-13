@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  isSteeringDelivery,
-  SessionInputQueue,
-  STEERING_POLICY_STATE_KEY,
-  steeringPolicyOf,
-} from "#execution/session/input-queue.js";
+import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { principalOf } from "#execution/session/principal.js";
 
 function signInCallback(attemptId: string) {
@@ -132,28 +127,25 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
   });
-});
 
-describe("a harness's steering policy", () => {
-  const message = {
-    kind: "deliver" as const,
-    payloads: [{ message: "Also check Lisbon." }],
-  };
-  const turn = { callerCallId: undefined, principal: principalOf(undefined) };
+  it("starts a turn of its own for a delivery kept apart, as a harness's admit says", () => {
+    const queue = new SessionInputQueue([]);
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const send = (message: string) =>
+      queue.enqueueDelivery({ auth: alice, kind: "deliver", payloads: [{ message }] })!.sequence;
 
-  it("lets nobody steer, so a message waits for the next turn", () => {
-    expect(isSteeringDelivery(message, { ...turn, steer: "caller" })).toBe(true);
-    expect(isSteeringDelivery(message, { ...turn, steer: "nobody" })).toBe(false);
-  });
+    const first = send("Summarize the thread.");
+    const apart = send("/status");
+    const last = send("And the action items.");
+    queue.keepApart(apart);
 
-  it("still lets the turn's own person through while it waits on them", () => {
-    expect(isSteeringDelivery(message, { ...turn, steer: "nobody" }, { heldOnPerson: true })).toBe(
-      true,
-    );
-  });
-
-  it("reads eve's own rule when the harness said nothing", () => {
-    expect(steeringPolicyOf(undefined)).toBe("caller");
-    expect(steeringPolicyOf({ [STEERING_POLICY_STATE_KEY]: "nobody" })).toBe("nobody");
+    expect(queue.takeNext()).toMatchObject({ sequences: [first] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [apart] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [last] });
   });
 });

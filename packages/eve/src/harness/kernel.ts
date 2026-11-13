@@ -45,16 +45,21 @@ import { commitTurnInput, previewPrompt } from "#harness/step/prompt.js";
 import {
   continueWithNote,
   decideNext,
-  decidesNext,
   failHarness,
   harnessed,
-  recordAdmission,
+  hasUnreadTaskResults,
+  recordAdmits,
   settleWithReply,
+  waitOnTasks,
 } from "#harness/stack/kernel.js";
 import { endsOnHarnessResults, runHarnessCalls } from "#harness/stack/calls.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
+import type { HarnessAction } from "#public/definitions/harness.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
+
+/** eve's own answer when a turn's input or its harness's calls arrive: call the model. */
+const NATIVE_OPENING: HarnessAction = { model: {} };
 const eveVersion = resolveInstalledPackageInfo().version;
 
 /**
@@ -140,8 +145,8 @@ export function createKernel(config: KernelConfig): StepFn {
   ): Promise<StepResult> {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
-    // Who may steer the turn until the next step, as the harness says.
-    const admission = await harnessed(step, () => recordAdmission(step));
+    // Whether the session loop asks the harness about each message that arrives.
+    const admission = await harnessed(step, () => recordAdmits(step));
     if ("failed" in admission) return admission.failed;
 
     // A step takes what arrived, in order: the runtime's results, then people's answers, then
@@ -166,13 +171,11 @@ export function createKernel(config: KernelConfig): StepFn {
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
     }
-    // New input, or the results of calls it made: the harness reads them before the model, so
-    // it can answer without the model, as a slash command does.
-    const reads = turn.messages.length > 0 || endsOnHarnessResults(step);
-    const opening = reads ? await decidesNext(step) : undefined;
-    if (opening !== undefined) {
+    // New input, the results of calls it made, or a task's results: the harness reads them before
+    // the model, so it can answer without the model, as a slash command does.
+    if (turn.messages.length > 0 || endsOnHarnessResults(step) || hasUnreadTaskResults(step)) {
       const decided = await harnessed(step, () =>
-        decideNext(step, opening, { native: { model: {} }, pending: turn.messages }),
+        decideNext(step, { native: NATIVE_OPENING, pending: turn.messages }),
       );
       if ("failed" in decided) return decided.failed;
       const action = decided.value;
@@ -183,7 +186,7 @@ export function createKernel(config: KernelConfig): StepFn {
         if ("call" in action) return runHarnessCalls(step, action.call);
         if ("settle" in action) return settleWithReply(step, action.settle);
         if ("fail" in action) return failHarness(step, "HARNESS_FAILED_TURN", action.fail);
-        return failHarness(step, "HARNESS_INVALID", "The harness waited on tasks, but none work.");
+        return waitOnTasks(step, action.wait.tasks);
       }
     }
     return runModelStep(step, {

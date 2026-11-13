@@ -1,11 +1,12 @@
 import type { ContextReader } from "#context/key.js";
-import { sessionAgent } from "#definitions/agent.js";
+import { sessionDefinitions } from "#definitions/agent.js";
 import type { Harness, HarnessDefinition } from "#public/definitions/harness.js";
 
-// A session's harness stack, and how a stage runs over it. The stack is the agent's own harness
-// (outermost), then each mounted extension's in mount order, then eve's own behavior, which each
-// stage supplies as its `bottom`. A layer with `extends: false` ends the stack: nothing under it
-// runs, eve's behavior included.
+// A session's harness stack, and how a stage runs over it. Every layer is one of the agent's
+// definitions, in the agent's one ordered list: a later definition wraps the ones before it, so the
+// stack, outermost first, is the layers in reverse. The agent's own harness comes last (outermost),
+// after each mounted extension's, and eve's own behavior is each stage's `bottom`. A layer with
+// `extends: false` ends the stack: nothing under it runs, eve's behavior included.
 
 /** One layer, and where it came from, for errors. */
 export interface HarnessLayer {
@@ -43,16 +44,28 @@ export function stackOf(
   return { layers, naked: false };
 }
 
-/** The session's stack, as its agent holds it. */
+/** The session's stack: the layers among its definitions, outermost first. */
 export async function sessionHarness(ctx: Pick<ContextReader, "get">): Promise<HarnessStack> {
-  return (await sessionAgent(ctx).harness?.()) ?? EMPTY_STACK;
+  const layers = (await sessionDefinitions(ctx))
+    .flatMap((definition) => (definition.layer === undefined ? [] : [definition.layer]))
+    .reverse();
+  if (layers.length === 0) return EMPTY_STACK;
+  return { layers, naked: layers.some((layer) => layer.definition.extends === false) };
 }
 
-export type StageName = "next" | "admit" | "tools" | "instructions" | "history" | "compact";
+export type StageName =
+  | "next"
+  | "model"
+  | "tools"
+  | "instructions"
+  | "context"
+  | "request"
+  | "admit"
+  | "compact";
 
-/** Whether some layer changes `stage` as a function, or the stack is naked, so eve's own isn't it. */
-export function changesStage(stack: HarnessStack, stage: StageName): boolean {
-  return stack.naked || stack.layers.some((layer) => typeof layer.definition[stage] === "function");
+/** Whether some layer changes `stage` as a function. */
+export function hasStage(stack: HarnessStack, stage: StageName): boolean {
+  return stack.layers.some((layer) => typeof layer.definition[stage] === "function");
 }
 
 /** A stage the stack has nothing below for: a naked harness asked the layers below it. */
@@ -61,16 +74,6 @@ export class NothingBelowError extends Error {
   constructor(stage: StageName, stack: HarnessStack) {
     super(
       `"${stack.layers.at(-1)?.label ?? "the harness"}" says \`extends: false\`, so its "${stage}" stage has nothing below it to call.`,
-    );
-  }
-}
-
-/** A stage read itself through `ctx.harness`, which would wait on itself forever. */
-export class HarnessCycleError extends Error {
-  override readonly name = "HarnessCycleError";
-  constructor(stage: StageName) {
-    super(
-      `The "${stage}" stage read itself through ctx.harness. Call below() for what's under it.`,
     );
   }
 }
@@ -85,24 +88,28 @@ function stageFn<C, T>(value: unknown): StageFn<C, T> | undefined {
  * Runs `stage` over the stack: the outermost layer that defines it as a function runs first, and
  * each `below()` runs the next one down, then `bottom`, each at most once. `bottom` is eve's own
  * stage, or under a naked stack what the caller says is below everything (the agent's own tools,
- * or nothing). A layer that defines a stage as a value contributes elsewhere, not here.
+ * or nothing). A layer that defines a stage as a value contributes elsewhere, not here. Every
+ * agent runs its stages here, so `ctx` is made only when a layer reads it: an agent with no
+ * harness pays for nothing but `bottom`.
  */
 export async function runStage<C, T>(
   stack: HarnessStack,
   stage: StageName,
-  ctx: C,
+  ctx: () => C,
   bottom: () => Promise<T>,
 ): Promise<T> {
   const functions = stack.layers.flatMap((layer) => {
     const fn = stageFn<C, T>(layer.definition[stage]);
     return fn === undefined ? [] : [{ fn, label: layer.label }];
   });
+  if (functions.length === 0) return await bottom();
+  const made = ctx();
   const below = (index: number): (() => Promise<T>) => {
-    let made: Promise<T> | undefined;
+    let result: Promise<T> | undefined;
     return () =>
-      (made ??= Promise.resolve().then(() => {
+      (result ??= Promise.resolve().then(() => {
         const layer = functions[index];
-        return layer === undefined ? bottom() : layer.fn(ctx, below(index + 1));
+        return layer === undefined ? bottom() : layer.fn(made, below(index + 1));
       }));
   };
   return await below(0)();

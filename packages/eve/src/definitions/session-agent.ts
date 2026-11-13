@@ -7,7 +7,6 @@ import type {
 } from "#runtime/sessions/session-agent.js";
 import { agentDefinitionsOf, type AgentContents } from "./agent-definitions.js";
 import type { Definition } from "./definition.js";
-import { EMPTY_STACK } from "./harness/stack.js";
 
 // The one implementation of the session-agent port. What produces an agent (a compiled bundle,
 // `#definitions/compiled-agent.js`) says where each of its parts comes from; this reads each on
@@ -39,25 +38,13 @@ export function createSessionAgent(input: SessionAgentInput): SessionAgent {
   let reference: SessionAgentReference | undefined;
   let settings: SessionAgentSettings | undefined;
   let definitions: Promise<readonly Definition[]> | undefined;
-  let contents: Promise<AgentContents> | undefined;
-  // Read once: the definitions and the harness are both built from the same contents.
-  const readContents = (): Promise<AgentContents> => {
-    if (contents === undefined) {
-      const reading = input.contents();
-      contents = reading;
-      reading.catch(() => {
-        if (contents === reading) contents = undefined;
-      });
-    }
-    return contents;
-  };
   return {
     adapters: input.adapters,
     ...(input.compiled !== undefined && { compiled: input.compiled }),
     connections: input.connections,
     definitions: () => {
       if (definitions === undefined) {
-        const building = readContents().then(agentDefinitionsOf);
+        const building = input.contents().then(agentDefinitionsOf);
         definitions = building;
         // A failed build is tried again by the next caller.
         building.catch(() => {
@@ -67,7 +54,6 @@ export function createSessionAgent(input: SessionAgentInput): SessionAgent {
       return definitions;
     },
     delegates: input.delegates,
-    harness: async () => (await readContents()).harness ?? EMPTY_STACK,
     roster: input.roster,
     revision: input.revision,
     sandbox: input.sandbox,

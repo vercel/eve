@@ -19,6 +19,7 @@ import type { StepResult } from "#harness/types.js";
 import type { HarnessAction } from "#public/definitions/harness.js";
 import { toModelSchema } from "#tools/schema.js";
 import { failHarness } from "./kernel.js";
+import { HARNESS_CALL_ID_PREFIX } from "./shown-calls.js";
 
 // Calls a harness makes itself, such as a slash command's: requested under the turn (not a model
 // run), validated against their tools' schemas, and run through the same gate as the model's, so
@@ -66,7 +67,7 @@ export async function runHarnessCalls(step: Step, calls: Calls): Promise<StepRes
     if (checked?.success === false) return await refused("with input its schema rejects");
     toolCalls.push({
       input: checked === undefined ? (call.input ?? {}) : checked.value,
-      toolCallId: `call_${turnId.replace(/[^\w-]/g, "_")}_h${made + index}`,
+      toolCallId: `${HARNESS_CALL_ID_PREFIX}${turnId.replace(/[^\w-]/g, "_")}_${made + index}`,
       toolName: call.tool,
       type: "tool-call",
     } as TypedToolCall<ToolSet>);

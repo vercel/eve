@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { defineHarness } from "#public/definitions/harness.js";
-import { changesStage, runStage, stackOf } from "./stack.js";
+import { hasStage, runStage, stackOf } from "./stack.js";
 
-const ctx = {};
+const ctx = () => ({});
 
 describe("defineHarness", () => {
   it("flattens harnesses and layers into one stack, outermost first", () => {
@@ -32,7 +32,8 @@ describe("stackOf", () => {
     ]);
     expect(stack.naked).toBe(true);
     expect(stack.layers.map((layer) => layer.label)).toEqual(["agent"]);
-    expect(changesStage(stack, "history")).toBe(true);
+    expect(hasStage(stack, "next")).toBe(true);
+    expect(hasStage(stack, "request")).toBe(false);
   });
 });
 
@@ -42,7 +43,7 @@ describe("runStage", () => {
     const stack = stackOf([
       {
         harness: defineHarness({
-          history: async (_ctx, below) => {
+          context: async (_ctx, below) => {
             order.push("agent");
             return [...(await below()), { content: "agent", role: "assistant" }];
           },
@@ -51,7 +52,7 @@ describe("runStage", () => {
       },
       {
         harness: defineHarness({
-          history: async (_ctx, below) => {
+          context: async (_ctx, below) => {
             order.push("ext");
             return [...(await below()), { content: "ext", role: "assistant" }];
           },
@@ -59,7 +60,7 @@ describe("runStage", () => {
         label: "ext",
       },
     ]);
-    const messages = await runStage(stack, "history", ctx, async () => {
+    const messages = await runStage(stack, "context", ctx, async () => {
       order.push("eve");
       return [{ content: "eve", role: "assistant" as const }];
     });
@@ -98,5 +99,23 @@ describe("runStage", () => {
       return { model: {} };
     });
     expect(made).toBe(1);
+  });
+
+  it("makes no context for a stack with nothing to read it", async () => {
+    let made = false;
+    const stack = stackOf([
+      { harness: defineHarness({ instructions: "only a value" }), label: "agent" },
+    ]);
+    const action = await runStage(
+      stack,
+      "next",
+      () => {
+        made = true;
+        return {};
+      },
+      async () => ({ model: {} }),
+    );
+    expect(action).toEqual({ model: {} });
+    expect(made).toBe(false);
   });
 });

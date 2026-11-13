@@ -5,16 +5,20 @@ import { sessionFrameOf } from "#definitions/frame.js";
 import { section, type Section, type ToolEntry, type ToolTable } from "#definitions/definition.js";
 import { type HarnessModelMessage, turnAnchorOf } from "#harness/messages.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { HarnessCycleError } from "./stack.js";
+import { keyOf, toJson } from "#definitions/memos.js";
+import { sessionIdOf } from "#definitions/state.js";
 import { currentView } from "#harness/session-machine/current.js";
 import { callTurn } from "#protocol/session-projection/selectors.js";
 import type {
   HarnessCall,
   HarnessContext,
+  HarnessMemo,
   HarnessStep,
+  HarnessTask,
   HarnessTool,
   HarnessTools,
 } from "#public/definitions/harness.js";
+import type { JsonValue } from "#shared/json.js";
 
 // What a harness reads, and the public shapes of the parts of a model call it changes: tools by
 // name, and the system prompt as its parts.
@@ -32,31 +36,28 @@ export interface HarnessWhere {
   readonly lastStep?: HarnessStep;
   readonly tools: () => Promise<ToolTable>;
   readonly system: () => Promise<readonly Section[]>;
+  /** The session's tasks, where the step holds them. */
+  readonly tasks?: readonly HarnessTask[];
+  /** The notes the harness added in the open turn, as the session counts them. */
+  readonly notes?: number;
+  /** A memo that survives retries, where the step can keep one. */
+  readonly memo?: HarnessMemo;
 }
 
-export function harnessContext(
-  container: ContextReader,
-  where: HarnessWhere,
-  /** The request stage this context runs, which can't read itself through `ctx.harness`. */
-  running?: "tools" | "instructions",
-): HarnessContext {
+export function harnessContext(container: ContextReader, where: HarnessWhere): HarnessContext {
   const tables = where.view ?? currentView(container);
   const frame = sessionFrameOf(container, { view: tables });
   const turnId = frame.turn?.status === "settled" ? undefined : frame.turn?.id;
   return {
     ...frame,
     calls: turnId === undefined ? [] : callsOf(tables, turnId),
-    continuations: turnId === undefined ? 0 : notesIn(where.history, turnId),
+    continuations: where.notes ?? 0,
     harness: {
-      instructions: async () => {
-        if (running === "instructions") throw new HarnessCycleError("instructions");
-        return partsOf(await where.system());
-      },
-      tools: async () => {
-        if (running === "tools") throw new HarnessCycleError("tools");
-        return toPublicTools(await where.tools());
-      },
+      instructions: async () => partsOf(await where.system()),
+      tools: async () => toPublicTools(await where.tools()),
     },
+    memo: where.memo ?? processMemo(sessionIdOf(container)),
+    tasks: where.tasks ?? [],
     history: where.history,
     input: turnId === undefined ? "" : inputOf(turnId, where, frame.turn?.input ?? []),
     ...(where.lastStep !== undefined && { lastStep: where.lastStep }),
@@ -103,14 +104,27 @@ function callsOf(view: SessionView, turnId: string): readonly HarnessCall[] {
     }));
 }
 
-/** The notes a harness added in `turnId`, as the history still holds them. */
-function notesIn(history: readonly ModelMessage[], turnId: string): number {
-  return history.filter(
-    (message) =>
-      message.role === "user" &&
-      (message as { readonly metadata?: Record<string, unknown> }).metadata?.[HARNESS_NOTE_KEY] ===
-        turnId,
-  ).length;
+/** Memos a stage made where the step can't keep one, by session and key, in this process. */
+const processMemos = new Map<string, JsonValue>();
+const PROCESS_MEMO_CAP = 1000;
+
+/**
+ * A memo kept in this process: stages that run while the request is built (`tools`,
+ * `instructions`, `context`, `model`) and `on` handlers. It saves repeated work across calls in a
+ * process; a step's own stages keep theirs with the session instead.
+ */
+function processMemo(sessionId: string): HarnessMemo {
+  return async (key, fn) => {
+    const { digest } = keyOf(key, "harness", "ctx.memo");
+    const id = `${sessionId}:${digest}`;
+    if (processMemos.has(id)) return structuredClone(processMemos.get(id)) as never;
+    const result = toJson((await fn()) ?? null, "harness: ctx.memo returned");
+    processMemos.set(id, result);
+    if (processMemos.size > PROCESS_MEMO_CAP) {
+      processMemos.delete(processMemos.keys().next().value!);
+    }
+    return structuredClone(result) as never;
+  };
 }
 
 // --- Tools ------------------------------------------------------------------------------------

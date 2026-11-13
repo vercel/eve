@@ -58,9 +58,11 @@ export interface AgentContents {
   /** Leave out eve's runtime definitions (instructions, connections, catalog, ...). */
   readonly bare?: boolean;
   /**
-   * `agent/harness.ts` and each extension's, outermost first. Its request stages arrange the call
-   * after eve's builtins and before its catalog; a naked one (`extends: false`) leaves out eve's
-   * skills listing, builtins and catalog, so the agent's own contents are all that's below it.
+   * `agent/harness.ts` and each extension's, outermost first. Each layer becomes a definition in
+   * the agent's one ordered list, after eve's builtins and before its catalog, and the kernel reads
+   * the stages it asks at its decision points off those definitions. A naked one (`extends:
+   * false`) leaves out eve's skills listing, builtins and catalog, so the agent's own contents are
+   * all that's below it.
    */
   readonly harness?: HarnessStack;
   /**
