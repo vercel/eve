@@ -782,6 +782,7 @@ async function dispatchViewAnswer(input: {
       installationTeamId: input.installationTeamId,
       messageTs: input.metadata.messageTs,
       responseUrl: input.metadata.responseUrl,
+      threadTs,
     });
   const response = await respondOrRetireInactivePrompt(
     () =>

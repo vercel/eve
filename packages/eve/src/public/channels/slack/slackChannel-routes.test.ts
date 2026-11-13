@@ -216,7 +216,7 @@ describe("slackChannel ephemeral request press", () => {
   const route = "route:C01:1700000000.000001:";
 
   /** A press on an ephemeral card: Slack sends no `message`, only its container. */
-  function ephemeralPress(action: Record<string, unknown>): Request {
+  function ephemeralPress(action: Record<string, unknown>, { inThread = true } = {}): Request {
     const payload = {
       actions: [action],
       channel: { id: "C01" },
@@ -224,7 +224,7 @@ describe("slackChannel ephemeral request press", () => {
         channel_id: "C01",
         is_ephemeral: true,
         message_ts: "1700000000.000020",
-        thread_ts: "1700000000.000001",
+        ...(inThread && { thread_ts: "1700000000.000001" }),
         type: "message",
       },
       response_url: RESPONSE_URL,
@@ -275,8 +275,30 @@ describe("slackChannel ephemeral request press", () => {
     expect(slackCalls("chat.update")).toEqual([]);
     const [replaced, ...more] = responseUrlPosts();
     expect(more).toEqual([]);
-    expect(replaced).toMatchObject({ replace_original: true, text: "Acme" });
+    expect(replaced).toMatchObject({
+      replace_original: true,
+      text: "Acme",
+      thread_ts: "1700000000.000001",
+    });
     expect(JSON.stringify(replaced?.blocks)).toContain("Acme");
+  });
+
+  it("keeps a top-level card's replacement out of a thread", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const press = ephemeralPress(
+      {
+        action_id: `${ANSWER_ACTION_PREFIX}route:C01:1700000000.000020:q_team`,
+        selected_option: { text: { text: "Acme", type: "plain_text" }, value: "team_acme" },
+        type: "radio_buttons",
+      },
+      { inThread: false },
+    );
+
+    await firePost(slackChannel({ credentials: { botToken: "xoxb-test" } }), press, send);
+
+    const [replaced] = responseUrlPosts();
+    expect(replaced).toMatchObject({ replace_original: true, text: "Acme" });
+    expect(replaced?.thread_ts).toBeUndefined();
   });
 
   it("replaces the card with a typed answer from its modal", async () => {
@@ -322,7 +344,11 @@ describe("slackChannel ephemeral request press", () => {
     expect(send).toHaveBeenCalledOnce();
     expect(slackCalls("chat.update")).toEqual([]);
     const [replaced] = responseUrlPosts();
-    expect(replaced).toMatchObject({ replace_original: true, text: "The billing migration" });
+    expect(replaced).toMatchObject({
+      replace_original: true,
+      text: "The billing migration",
+      thread_ts: "1700000000.000001",
+    });
   });
 });
 
