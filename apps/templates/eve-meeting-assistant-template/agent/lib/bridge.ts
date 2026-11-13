@@ -1,4 +1,4 @@
-import { BRIDGE_PORT, BROWSER_SESSION, STATE_FILE, STREAM_PORT } from "./browser.js";
+import { BRIDGE_PORT, BROWSER_SESSION, FIND_STATE, STATE_FILE, STREAM_PORT } from "./browser.js";
 import { BRIDGE_SERVER, SCREEN_HTML, SIGN_IN_HTML } from "./stage-assets.js";
 
 /** Runs a shell command in a sandbox. Meeting sandboxes and the sign-in sandbox each provide one. */
@@ -19,7 +19,7 @@ export async function sh(shell: Shell, command: string): Promise<string> {
 }
 
 /** agent-browser loads the saved sign-ins when its browser starts, once someone saved them. */
-export const LOAD_SIGN_INS = `test -f ${STATE_FILE} && mkdir -p ~/.agent-browser && printf '{"state":"${STATE_FILE}"}' > ~/.agent-browser/config.json || true`;
+export const LOAD_SIGN_INS = `${FIND_STATE}; if [ -n "$state" ]; then mkdir -p ~/.agent-browser && printf '{"state":"%s"}' "$state" > ~/.agent-browser/config.json; fi`;
 
 /**
  * Starts the bridge and the browser, or updates the bridge's files and key
