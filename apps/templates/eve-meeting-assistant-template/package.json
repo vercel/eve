@@ -1,0 +1,24 @@
+{
+  "name": "eve-meeting-assistant-template",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@eve/recall": "^0.1.0-rc.0",
+    "@vercel/connect": "^2.5.0",
+    "ai": "7.0.139",
+    "eve": "^1.0.0-rc.14",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "microsandbox": "^0.5.10",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
