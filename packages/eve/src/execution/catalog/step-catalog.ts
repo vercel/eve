@@ -7,9 +7,12 @@
  */
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { ApprovalPolicy, ApprovalPresentation } from "#approval/definition.js";
 import { withAgentApprovalOnEntries } from "#approval/agent.js";
-import { resolveAgentApproval } from "#execution/effective-agent-config.js";
+import {
+  resolveAgentApproval,
+  resolveAgentApprovalPresentation,
+} from "#execution/effective-agent-config.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { dynamicConnectionVersions } from "#definitions/connections.js";
 import type { Route, ToolTable } from "#definitions/definition.js";
@@ -95,6 +98,7 @@ export function callableOf(input: CatalogInput): Callable {
   const { connections, skills } = input.table;
   const bundle = compiledBundleOf(input.ctx);
   const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
+  const presentation = bundle === undefined ? undefined : resolveAgentApprovalPresentation(bundle);
   // Only what this session sees, so a delegated session of the same agent doesn't reach or search
   // for root-only entries. Every entry runs under the agent-wide approval policy.
   const entries = withAgentApprovalOnEntries(
@@ -106,6 +110,7 @@ export function callableOf(input: CatalogInput): Callable {
         .map(([name, entry]) => [name, entry.definition]),
     ),
     agentApproval,
+    presentation,
   );
   const registry = input.ctx.get(ConnectionRegistryKey);
   const versions = dynamicConnectionVersions(input.ctx);
@@ -118,7 +123,7 @@ export function callableOf(input: CatalogInput): Callable {
       entries.get(name) ??
       (registry === undefined
         ? undefined
-        : connectionEntryNamed(name, registry, connections, versions, agentApproval)),
+        : connectionEntryNamed(name, registry, connections, versions, agentApproval, presentation)),
     registry,
     skills,
   };
@@ -267,6 +272,7 @@ function connectionEntryNamed(
   connections: readonly ResolvedConnectionDefinition[],
   versions: ReadonlyMap<string, string>,
   agentApproval: ApprovalPolicy | undefined,
+  presentation: ApprovalPresentation | undefined,
 ): HarnessToolDefinition | undefined {
   for (const connection of connections) {
     const version = versions.get(connection.connectionName);
@@ -279,7 +285,13 @@ function connectionEntryNamed(
     const prefix = connectionToolName(connection.connectionName, "");
     if (name.length > prefix.length && name.startsWith(prefix)) {
       return versioned(
-        connectionEntry(registry, connection, name.slice(prefix.length), agentApproval),
+        connectionEntry(
+          registry,
+          connection,
+          name.slice(prefix.length),
+          agentApproval,
+          presentation,
+        ),
       );
     }
   }

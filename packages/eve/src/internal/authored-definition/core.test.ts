@@ -19,6 +19,31 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("accepts an object-form approval that words every approval", () => {
+    const prompt = () => "¿Aprobar?";
+    const request = () => undefined;
+    expect(
+      normalizeAgentDefinition(
+        {
+          approval: { labels: { approve: "Aprobar", deny: "Cancelar" }, prompt, request },
+          model: "openai/gpt-5.5",
+        },
+        FAILURE_MESSAGE,
+      ).approval,
+    ).toEqual({ labels: { approve: "Aprobar", deny: "Cancelar" }, prompt, request });
+  });
+
+  it.each([
+    [{ response: () => ({ status: "allowed" }) }, 'Unknown key "response"'],
+    [{ labels: { approve: "" } }, 'Expected "labels.approve" to be a non-empty string.'],
+    [{ labels: { cancel: "Cancelar" } }, 'Unknown key "cancel"'],
+    [{ prompt: "¿Aprobar?" }, FAILURE_MESSAGE],
+  ])("rejects an invalid object-form approval %j", (approval, error) => {
+    expect(() =>
+      normalizeAgentDefinition({ approval, model: "openai/gpt-5.5" }, FAILURE_MESSAGE),
+    ).toThrow(error);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

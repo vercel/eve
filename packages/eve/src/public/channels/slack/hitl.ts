@@ -505,8 +505,8 @@ function cardButtonOptions(request: Interaction): CardButtonOption[] {
   if (!allow || !deny) return options.map(toCardButtonOption);
 
   return [
-    { id: deny.id, label: "Deny" },
-    { id: allow.id, label: "Approve", style: "primary" },
+    { id: deny.id, label: deny.label },
+    { id: allow.id, label: allow.label, style: "primary" },
   ];
 }
 

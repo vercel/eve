@@ -421,6 +421,15 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.approval).toEqual(approval);
     });
 
+    it("accepts approval option labels", () => {
+      const approval = {
+        labels: { approve: "Aprobar", deny: "Cancelar" },
+        request: () => "user-approval" as const,
+      };
+      const result = normalizeMcpClientConnectionDefinition(validInput({ approval }), MSG);
+      expect(result.approval).toEqual(approval);
+    });
+
     it("rejects a non-function approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: "never" }), MSG),

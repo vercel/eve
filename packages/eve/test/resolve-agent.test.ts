@@ -67,6 +67,21 @@ describe("resolveAgent", () => {
     ).toEqual({ city: "Brooklyn" });
   });
 
+  it("separates an object-form agent approval's gate from its wording", async () => {
+    const request = () => undefined;
+    const prompt = () => "¿Aprobar?";
+    const labels = { approve: "Aprobar", deny: "Cancelar" };
+    const { manifest, moduleMap } = await compileFromMemory({
+      agent: { approval: { labels, prompt, request }, model: "openai/gpt-5.4" },
+      model: "openai/gpt-5.4",
+    });
+
+    const { config } = await resolveAgent({ manifest, moduleMap });
+
+    expect(config?.approval).toBe(request);
+    expect(config?.approvalPresentation).toEqual({ labels, prompt });
+  });
+
   it("retains live standard-schema validators from programmatic sources", async () => {
     const schema = z.object({
       maxRows: z.number().int().positive().default(200),

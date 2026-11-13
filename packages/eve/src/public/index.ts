@@ -49,8 +49,13 @@ export type {
 export type { TokenUsage } from "#shared/token-usage.js";
 // Named in `approval` callbacks, so declaration emit for `agent.ts` must reach them.
 export type {
+  AgentApproval,
+  AgentApprovalConfiguration,
   ApprovalContext,
+  ApprovalLabels,
   ApprovalPolicy,
+  ApprovalPrompt,
+  ApprovalPromptContext,
   ApprovalStatus,
   ConnectionToolAnnotations,
 } from "#public/definitions/approval.js";

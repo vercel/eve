@@ -14,12 +14,25 @@ export interface ApprovalPromptContext<TInput = Record<string, unknown>> {
   readonly input: TInput;
   /** Final runtime name of the tool. */
   readonly toolName: string;
+  /** Human-readable label eve shows for the call, as in the default `Approve <toolLabel>?`. */
+  readonly toolLabel: string;
 }
 
 /** Builds the human-readable prompt shown when a tool call requires approval. */
 export type ApprovalPrompt<TInput = Record<string, unknown>> = (
   context: ApprovalPromptContext<TInput>,
 ) => string;
+
+/**
+ * Button labels for an approval. Only the text changes: answers still carry the `approve` and
+ * `deny` option ids, so clients and response policies read them the same way.
+ */
+export interface ApprovalLabels {
+  /** Label of the option that approves the call. Defaults to `Approve`. */
+  readonly approve?: string;
+  /** Label of the option that cancels the call. Defaults to `Deny`. */
+  readonly deny?: string;
+}
 
 /**
  * Context passed to an {@link ApprovalPolicy} function.
@@ -142,8 +155,30 @@ export type ApprovalResponsePolicy<TInput = Record<string, unknown>> = (
 export interface ApprovalConfiguration<TInput = Record<string, unknown>> {
   /** Optional human-readable prompt shown when this call requires approval. */
   readonly prompt?: ApprovalPrompt<TInput>;
+  /** Optional option labels shown when this call requires approval. */
+  readonly labels?: ApprovalLabels;
   readonly request: ApprovalPolicy<TInput>;
   readonly response?: ApprovalResponsePolicy<TInput>;
+}
+
+/**
+ * Object form of `defineAgent`'s `approval`. `request` adds a gate to every call, like the function
+ * form. `prompt` and `labels` word every approval the agent asks for, so it can be localized once;
+ * a tool's own `prompt` and `labels` still win.
+ */
+export interface AgentApprovalConfiguration {
+  readonly request?: ApprovalPolicy;
+  readonly prompt?: ApprovalPrompt;
+  readonly labels?: ApprovalLabels;
+}
+
+/** `defineAgent`'s `approval`: a request policy, or the object form that can also word approvals. */
+export type AgentApproval = ApprovalPolicy | AgentApprovalConfiguration;
+
+/** How an agent words the approvals it asks for. */
+export interface ApprovalPresentation {
+  readonly prompt?: ApprovalPrompt;
+  readonly labels?: ApprovalLabels;
 }
 
 /** Shared approval definition used by authored tools and connections. */

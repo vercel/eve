@@ -505,8 +505,12 @@ export class EveAcpAdapter {
           sessionId,
           toolCall,
           options: [
-            { kind: "allow_once", name: "Approve", optionId: approveId },
-            { kind: "reject_once", name: "Deny", optionId: denyId },
+            {
+              kind: "allow_once",
+              name: optionLabel(request, "approve", "Approve"),
+              optionId: approveId,
+            },
+            { kind: "reject_once", name: optionLabel(request, "deny", "Deny"), optionId: denyId },
           ],
         },
         { cancellationSignal },
@@ -708,4 +712,9 @@ function callOutput(event: SessionStreamEvent, callId: string, view: SessionView
     ],
     rawOutput: output,
   };
+}
+
+/** The label a confirmation gives one of its options, so a localized approval reads the same here. */
+function optionLabel(request: Interaction, id: string, fallback: string): string {
+  return request.request.options?.find((option) => option.id === id)?.label ?? fallback;
 }

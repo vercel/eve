@@ -22,7 +22,7 @@ import type {
   ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 import type { AgentToolExposure, SessionUsageLimit } from "#shared/agent-definition.js";
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { AgentApproval, ApprovalPolicy, ApprovalPresentation } from "#approval/definition.js";
 
 /**
  * Input for resolving one compiled authored agent into a runtime-owned model.
@@ -117,6 +117,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
 
 interface AgentConfigFunctions {
   readonly approval?: ApprovalPolicy;
+  readonly approvalPresentation?: ApprovalPresentation;
   readonly sessionUsage?: SessionUsageLimit | false;
 }
 
@@ -154,8 +155,25 @@ async function loadAgentConfigFunctions(
     );
   }
   return {
-    ...(approval && { approval: authored.approval }),
+    ...(approval && splitAgentApproval(authored.approval!)),
     sessionUsage: sessionUsage === false ? false : authored.limits?.sessionUsage,
+  };
+}
+
+/** Separates the gate the agent's `approval` adds from how it words the approvals it asks for. */
+function splitAgentApproval(
+  approval: AgentApproval,
+): Pick<AgentConfigFunctions, "approval" | "approvalPresentation"> {
+  if (typeof approval === "function") return { approval };
+  const { request, prompt, labels } = approval;
+  return {
+    ...(request !== undefined && { approval: request }),
+    ...((prompt !== undefined || labels !== undefined) && {
+      approvalPresentation: {
+        ...(prompt !== undefined && { prompt }),
+        ...(labels !== undefined && { labels }),
+      },
+    }),
   };
 }
 
@@ -199,10 +217,11 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  { approval, sessionUsage }: AgentConfigFunctions,
+  { approval, approvalPresentation, sessionUsage }: AgentConfigFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     approval?: ApprovalPolicy;
+    approvalPresentation?: ApprovalPresentation;
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
@@ -221,6 +240,9 @@ function createResolvedAgentConfig(
   }
   if (approval !== undefined) {
     config.approval = approval;
+  }
+  if (approvalPresentation !== undefined) {
+    config.approvalPresentation = approvalPresentation;
   }
   if (manifest.config.description !== undefined) {
     config.description = manifest.config.description;

@@ -81,7 +81,7 @@ approval: auto({
 
 ### Customize the approval prompt
 
-Use the object form of `approval` to replace the default `Approve <tool label>?` text. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
+Use the object form of `approval` to replace the default `Approve <tool label>?` text. The `prompt` callback receives the validated `input`, final `toolName`, `toolLabel` (the label in the default text), and `callId`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -102,6 +102,18 @@ export default defineTool({
 ```
 
 Channels show this prompt in their approval UI. Slack shows it as the title of one approval card that also lists the tool input, one field per line and shortened to a fixed size, above the **Approve** and **Deny** buttons.
+
+Set `labels` to rename those buttons. Only the text changes: answers still carry the `approve` and `deny` option ids, so clients and response policies read them the same way.
+
+```ts
+approval: {
+  request: always(),
+  prompt: ({ input }) => `¿Reembolsar $${input.amount.toFixed(2)}?`,
+  labels: { approve: "Reembolsar", deny: "Cancelar" },
+},
+```
+
+To word every approval at once, such as to localize them, set `prompt` and `labels` on the [agent's `approval`](#localize-every-approval) instead.
 
 ### Write your own policy
 
@@ -146,7 +158,7 @@ The `call.started` event records what let the call run in `clearedBy`:
 | A person                                     | `{ interactionId }`      |
 | Nothing, because the call needed no approval | omitted                  |
 
-The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
+The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalLabels`, `ApprovalPolicy`, `ApprovalPrompt`, `ApprovalStatus`, and `AgentApproval` types are exported from `eve/tools/approval`.
 
 ### Gate every call from one policy
 
@@ -185,6 +197,27 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 - Not gated: `eve__search`, `eve__skill`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
 - A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
 - With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
+
+### Localize every approval
+
+Use the object form of the agent's `approval` to word every approval the agent asks for. Pass the agent-wide policy, if any, as `request`; `prompt` and `labels` work as they do on a tool:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: {
+    prompt: ({ toolLabel }) => `¿Aprobar ${toolLabel}?`,
+    labels: { approve: "Aprobar", deny: "Cancelar" },
+  },
+});
+```
+
+- A tool's own `prompt` wins over the agent's, and its `labels` win one button at a time.
+- The option ids stay `approve` and `deny`.
+- Without `request`, the wording adds no gate: only calls that already ask show it.
+- A subagent's own `prompt` and `labels` win over the root agent's in its sessions. Its `request` still only adds to the root's policy.
 
 ### Remember approval for a tool
 

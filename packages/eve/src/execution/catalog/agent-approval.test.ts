@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { ApprovalPolicy, ApprovalPresentation } from "#approval/definition.js";
 import { SessionKey } from "#context/keys.js";
-import { resolveAgentApproval } from "#execution/effective-agent-config.js";
+import {
+  resolveAgentApproval,
+  resolveAgentApprovalPresentation,
+} from "#execution/effective-agent-config.js";
+import { executeInlineCalls } from "#harness/call-executor.js";
 import { decideApproval } from "#harness/tools.js";
 import {
   catalogContext,
@@ -125,6 +129,64 @@ describe("agent approval in the step catalog", () => {
     expect(catalog.get("ask_question")?.approval).toBeDefined();
   });
 
+  it("words every approval from the agent's prompt and labels, and a tool's own still win", async () => {
+    const crm = fakeConnection({
+      approval: always(),
+      name: "crm",
+      tools: [connectionTool("delete_account")],
+    });
+    const { catalog, run } = await session({
+      approvalPresentation: {
+        labels: { approve: "Aprobar", deny: "Cancelar" },
+        prompt: ({ toolLabel }) => `¿Aprobar ${toolLabel}?`,
+      },
+      connections: [crm],
+      tools: [
+        inlineTool("deploy", { approval: always(), label: { start: () => "Despliegue" } }),
+        inlineTool("refund", {
+          approval: {
+            labels: { deny: "Rechazar" },
+            prompt: () => "¿Reembolsar?",
+            request: always(),
+          },
+        }),
+        inlineTool("bash"),
+      ],
+    });
+    const names = ["deploy", "refund", "bash", "crm__delete_account"];
+    const results = await run(() =>
+      executeInlineCalls({
+        abortSignal: undefined,
+        approvalMemory: { pending: [], remembered: {} },
+        beforeExecute: () => {},
+        excludedCallIds: new Set(),
+        messages: [],
+        publish: async () => {},
+        toolCalls: names.map((toolName) => ({
+          input: {},
+          toolCallId: `call-${toolName}`,
+          toolName,
+          type: "tool-call" as const,
+        })),
+        tools: catalog,
+      }),
+    );
+
+    // Wording alone adds no gate: `bash` still runs without asking.
+    expect(
+      Object.fromEntries(
+        results.approvals.map((ask) => [
+          ask.call.toolName,
+          [ask.request.prompt, ...(ask.request.options ?? []).map((o) => `${o.id}=${o.label}`)],
+        ]),
+      ),
+    ).toEqual({
+      crm__delete_account: ["¿Aprobar Crm: Delete account?", "approve=Aprobar", "deny=Cancelar"],
+      deploy: ["¿Aprobar Despliegue?", "approve=Aprobar", "deny=Cancelar"],
+      refund: ["¿Reembolsar?", "approve=Aprobar", "deny=Rechazar"],
+    });
+  });
+
   it("changes nothing for an agent without a policy", async () => {
     const tool = inlineTool("bash");
     const { catalog } = await catalogContext({ tools: [tool] });
@@ -166,5 +228,40 @@ describe("resolveAgentApproval", () => {
     expect(
       await status(resolveAgentApproval(bundle(root, () => ({ type: "denied" }), CHILD_NODE))),
     ).toEqual({ type: "denied" });
+  });
+});
+
+describe("resolveAgentApprovalPresentation", () => {
+  const bundle = (root?: ApprovalPresentation, own?: ApprovalPresentation, nodeId?: string) =>
+    ({
+      graph: {
+        nodesByNodeId: new Map([
+          [ROOT_RUNTIME_AGENT_NODE_ID, { agent: { config: { approvalPresentation: root } } }],
+        ]),
+      },
+      nodeId,
+      resolvedAgent: { config: { approvalPresentation: own } },
+    }) as never;
+  const rootPrompt = () => "¿Aprobar?";
+
+  it("applies the root's wording in a subagent session without its own", () => {
+    const root = { prompt: rootPrompt };
+    expect(resolveAgentApprovalPresentation(bundle(root, undefined, "subagents/reviewer"))).toBe(
+      root,
+    );
+  });
+
+  it("lets a subagent's own wording win over the root's, one field at a time", () => {
+    const presentation = resolveAgentApprovalPresentation(
+      bundle(
+        { labels: { approve: "Aprobar", deny: "Cancelar" }, prompt: rootPrompt },
+        { labels: { deny: "Rechazar" } },
+        "subagents/reviewer",
+      ),
+    );
+    expect(presentation).toEqual({
+      labels: { approve: "Aprobar", deny: "Rechazar" },
+      prompt: rootPrompt,
+    });
   });
 });

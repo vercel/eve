@@ -10,7 +10,7 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { ApprovalPolicy, Approval } from "#approval/definition.js";
+import type { ApprovalPolicy, Approval, ApprovalPresentation } from "#approval/definition.js";
 import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
@@ -340,6 +340,8 @@ type ResolvedAgentDefinitionBase = Omit<
   "approval" | "build" | "limits" | "model" | "source"
 > & {
   approval?: ApprovalPolicy;
+  /** How `agent.ts`'s object-form `approval` words the approvals this agent asks for. */
+  approvalPresentation?: ApprovalPresentation;
   limits?: AgentLimitsDefinition;
   source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
 };
