@@ -11,6 +11,7 @@ import {
   resumeRoutedHook,
   resumeRoutedSessionInbox,
   type DurableHost,
+  type SignInCallbacks,
 } from "#execution/hosts.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import {
@@ -28,9 +29,14 @@ import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
 import { applyRunMessagesOn } from "#execution/tools/workflow/apply-run-messages.js";
 import { isHookNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
-import { createMemoryInboxRegistry, type MemoryInboxRegistry } from "./inbox-transport.js";
+import {
+  createMemoryInboxRegistry,
+  type DeliveryTiming,
+  type MemoryInboxRegistry,
+} from "./inbox-transport.js";
 import { createMemoryLineStore, type MemoryLineStore } from "./line-store.js";
 import { createInProcessRuns, type InProcessRuns } from "./runs.js";
+import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
@@ -88,6 +94,16 @@ export interface InProcessHostOptions {
    * sign-in back, as a Workflow session outside a run can't.
    */
   readonly callbackBaseUrl?: string;
+  /**
+   * @internal Turn steps that lose their completion, or fail, and run again, as on Workflow.
+   * Only the test hosts in `internal/testing` pass it; production hosts have no faults.
+   */
+  readonly stepFaults?: StepFaults;
+  /**
+   * When sessions and runs read what's delivered, and a session the end of its turn step
+   * (`DeliveryTiming`); at once by default.
+   */
+  readonly deliveries?: DeliveryTiming;
 }
 
 export interface InProcessHost {
@@ -119,12 +135,15 @@ export function createInProcessHost(
 ): InProcessHost {
   const lines = createMemoryLineStore();
   const stepBoundary = options.stepBoundary ?? structuredCloneBoundary;
-  const inboxes = createMemoryInboxRegistry(stepBoundary);
+  const inboxes = createMemoryInboxRegistry(stepBoundary, {
+    ...(options.deliveries !== undefined && { deliveries: options.deliveries }),
+  });
   const timers: InProcessTimers = createInProcessTimers();
   const running = new Map<string, Promise<void>>();
   const steps = new Map<string, number>();
   const releases: (() => void)[] = [];
   const toolStubs = createInProcessToolStubs();
+  const attempts = createStepAttempts(options.stepFaults);
 
   const deliverCommand: InProcessHost["deliverCommand"] = async (token, command) => {
     const identified = identifyCommand(command);
@@ -163,15 +182,16 @@ export function createInProcessHost(
     remote: undefined,
   });
 
+  const signInCallbacks: SignInCallbacks | undefined =
+    options.callbackBaseUrl === undefined
+      ? undefined
+      : { callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""), deliver: deliverRouted };
   const stepHost: SessionStepHost = {
     createRuntime: () => NO_STEP_RUNTIME,
     // Attributes belong to a Workflow run; an in-process session has none.
     setAttributes: async () => {},
     toolStubs,
-    ...(options.callbackBaseUrl !== undefined && {
-      callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""),
-      deliver: deliverRouted,
-    }),
+    ...signInCallbacks,
   };
   const runTurnStep = turnStepOn(stepHost);
 
@@ -192,15 +212,30 @@ export function createInProcessHost(
       const { sessionId } = input.sessionState;
       steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
       try {
-        const crossed = await acrossStepBoundary(stepBoundary, data);
-        return await acrossStepBoundary(
-          stepBoundary,
-          await runTurnStep({ ...crossed, abortSignal, sessionWritable, steeringSignal }),
+        // Each attempt receives its own copy of the input and its own writable, as each of a
+        // Workflow step's does.
+        const result = await attempts.run(
+          {
+            name: "turnStep",
+            sessionId,
+            ...(abortSignal !== undefined && { signal: abortSignal }),
+          },
+          async (attempt) => ({
+            ...(await acrossStepBoundary(stepBoundary, data)),
+            abortSignal,
+            sessionWritable: attempts.writable(attempt, sessionWritable),
+            steeringSignal,
+          }),
+          runTurnStep,
         );
+        return await acrossStepBoundary(stepBoundary, result);
       } finally {
         const left = (steps.get(sessionId) ?? 1) - 1;
         if (left === 0) steps.delete(sessionId);
         else steps.set(sessionId, left);
+        // On Workflow, a session reads a step's end when its run next replays, with every hook
+        // payload that arrived by then. With batched deliveries, so does this one.
+        await inboxes.heard();
       }
     },
     until: (at) => timers.until(at),
@@ -216,6 +251,9 @@ export function createInProcessHost(
       },
       runEnded: (runId) => runs.runEnded(runId),
       cancelRun: (runId, reason) => runs.cancelRun(runId, reason),
+      stepAttempt: () => attempts.current(),
+      // A session's steps outside its turn steps, such as relaying a child's sign-in, call back.
+      signInCallbacks: (sessionId) => (running.has(sessionId) ? signInCallbacks : undefined),
     }),
   );
 

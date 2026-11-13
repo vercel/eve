@@ -1,22 +1,98 @@
-import type { AnyEventRequest } from "@workflow/world";
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished } from "vitest";
+import { registerHost, registerSessionLineStore } from "#execution/hosts.js";
+import { createMemoryLineStore } from "#execution/in-process/line-store.js";
+import { createStepAttempts } from "#execution/in-process/step-attempts.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
+import { applySessionStateDelta } from "#execution/session/state-delta.js";
+import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import {
-  nonturnRetryWorkflow,
-  beforePublicationRetryWorkflow,
-  terminalAfterStaleCheckpointWorkflow,
-  commitTwiceWorkflow,
-  progressWindowRetryWorkflow,
-  lessOnRetryWorkflow,
-} from "#internal/testing/nonturn-retry-workflow.js";
-import { getWorld, start } from "#internal/workflow/runtime.js";
+  commitTwice,
+  initialValues,
+  publishLessOnRetry,
+  publishNext,
+  publishProgress,
+  publishRunning,
+  publishStart,
+  settleTurn,
+  type TestStepAttempt,
+} from "#internal/testing/nonturn-retry-steps.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#public/definitions/connections/dynamic.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { loadContext } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection.js";
+
+// Non-turn session steps that lose their completion, or throw, and run again. Each test runs
+// the attempts a durable host would, in process: what an attempt wrote stays on the session's
+// stream, and the next attempt gets its own writable onto it and enters as a retry. The
+// in-process host runs a session's non-turn steps inline, without attempts, so these drive the
+// steps themselves.
+
+let nextSession = 0;
+
+/** A session's stream in memory, and a runner for the attempts of its steps. */
+function sessionSteps() {
+  const sessionId = `session-nonturn-${++nextSession}`;
+  const lines = createMemoryLineStore();
+  const stream = lines.open(sessionId);
+  const attempts = createStepAttempts(undefined);
+  const releases = [
+    registerSessionLineStore(sessionId, lines),
+    registerHost({
+      deliver: async () => undefined,
+      runEnded: () => undefined,
+      cancelRun: () => undefined,
+      stepAttempt: () => attempts.current(),
+    }),
+  ];
+  onTestFinished(() => {
+    for (const release of releases) release();
+  });
+  let closes = 0;
+  /** A writable of the attempt's own onto the session's stream, as each Workflow step gets. */
+  const writable = () => {
+    const withWriter = async (
+      use: (writer: WritableStreamDefaultWriter<Uint8Array>) => Promise<void>,
+    ) => {
+      const writer = stream.getWriter();
+      try {
+        await use(writer);
+      } finally {
+        writer.releaseLock();
+      }
+    };
+    return new WritableStream<Uint8Array>({
+      write: (chunk) => withWriter((writer) => writer.write(chunk)),
+      close: () => {
+        closes += 1;
+        return withWriter((writer) => writer.close());
+      },
+    });
+  };
+  return {
+    sessionId,
+    closes: () => closes,
+    /** Runs attempt `attempt` of a step; what it returns crosses as a copy. */
+    async run<T>(attempt: number, body: (step: TestStepAttempt) => Promise<T>): Promise<T> {
+      const result = await attempts.enter(attempt, () =>
+        body({ attempt, sessionId, sessionWritable: writable() }),
+      );
+      return structuredClone(result);
+    },
+    /** Each event on the stream, as type and line. */
+    async lines() {
+      const events = [];
+      for await (const event of streamSessionEvents(sessionId, { follow: false })) {
+        events.push(event);
+      }
+      return events;
+    },
+  };
+}
+
+const context = () => buildSerializedContext({ channelKind: "http" });
 
 it("does not run dynamic connection resolvers for ordinary non-turn publications", async () => {
   let resolutions = 0;
@@ -38,88 +114,44 @@ it("does not run dynamic connection resolvers for ordinary non-turn publications
     ],
   });
   await runtime.run(async () => {
-    const run = await start(nonturnRetryWorkflow, [
-      buildSerializedContext({ channelKind: "http" }),
+    const session = sessionSteps();
+    const started = await session.run(1, (step) => publishStart(step, context()));
+    await session.run(1, (step) => publishNext(step, started));
+    expect((await session.lines()).map((event) => event.type)).toEqual([
+      "session.started",
+      "turn.started",
     ]);
-    expect(await run.returnValue).toBe(run.runId);
-    const events = [];
-    for await (const event of streamSessionEvents(run.runId, { follow: false })) events.push(event);
-    expect(events.map((event) => event.type)).toEqual(["session.started", "turn.started"]);
     expect(resolutions).toBe(0);
   });
-}, 60_000);
+});
 
 it("adopts both commits of a step that commits twice and loses its checkpoint", async () => {
   const runtime = await createTestRuntime({ agent: { name: "commit-twice-retry" } });
   await runtime.run(async () => {
-    const world = await getWorld();
-    const createBatch = world.events.createBatch;
-    world.events.createBatch = undefined;
-    const createEvent = world.events.create.bind(world.events);
-    let sessionId: string | undefined;
-    let interrupted = false;
-    const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-      const [runId, event] = args as [string, AnyEventRequest];
-      if (!interrupted && runId === sessionId && event.eventType === "step_completed") {
-        interrupted = true;
-        throw new Error("Lost the two-commit step checkpoint");
-      }
-      return await createEvent(...args);
-    });
-    try {
-      const run = await start(commitTwiceWorkflow, [
-        buildSerializedContext({ channelKind: "http" }),
-      ]);
-      sessionId = run.runId;
-      expect(await run.returnValue).toBe(run.runId);
-      expect(interrupted).toBe(true);
-      const events = [];
-      for await (const event of streamSessionEvents(run.runId, { follow: false }))
-        events.push(event);
-      expect(events.map((event) => [event.type, event.meta.position.line])).toEqual([
-        ["session.started", 0],
-        ["turn.started", 1],
-      ]);
-    } finally {
-      spy.mockRestore();
-      world.events.createBatch = createBatch;
-    }
+    const session = sessionSteps();
+    await session.run(1, (step) => commitTwice(step, context()));
+    await session.run(2, (step) => commitTwice(step, context()));
+    expect((await session.lines()).map((event) => [event.type, event.meta.position.line])).toEqual([
+      ["session.started", 0],
+      ["turn.started", 1],
+    ]);
   });
-}, 60_000);
+});
 
 it("adopts an interrupted progress step even when its checkpoint is far from the last commit", async () => {
   const runtime = await createTestRuntime({ agent: { name: "bounded-progress" } });
   await runtime.run(async () => {
-    const world = await getWorld();
-    const createBatch = world.events.createBatch;
-    world.events.createBatch = undefined;
-    const createEvent = world.events.create.bind(world.events);
-    let sessionId: string | undefined;
-    let completed = 0;
-    const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-      const [runId, event] = args as [string, AnyEventRequest];
-      if (runId === sessionId && event.eventType === "step_completed" && ++completed === 4)
-        throw new Error("Lost progress checkpoint");
-      return await createEvent(...args);
-    });
-    try {
-      const run = await start(progressWindowRetryWorkflow, [
-        buildSerializedContext({ channelKind: "http" }),
-      ]);
-      sessionId = run.runId;
-      expect(await run.returnValue).toBe(run.runId);
-      expect(completed).toBeGreaterThanOrEqual(4);
-      const events = [];
-      for await (const event of streamSessionEvents(run.runId, { follow: false }))
-        events.push(event);
-      expect(events.filter((event) => event.type === "session.ended")).toHaveLength(0);
-      expect(events.filter((event) => event.type === "call.progress")).toHaveLength(258);
-    } finally {
-      spy.mockRestore();
-      world.events.createBatch = createBatch;
-    }
+    const session = sessionSteps();
+    const start = await session.run(1, (step) => publishStart(step, context()));
+    const running = await session.run(1, (step) => publishRunning(step, start));
+    const progressed = await session.run(1, (step) => publishProgress(step, running, 257));
+    await session.run(1, (step) => publishProgress(step, progressed, 1));
+    await session.run(2, (step) => publishProgress(step, progressed, 1));
+    const events = await session.lines();
+    expect(events.filter((event) => event.type === "session.ended")).toHaveLength(0);
+    expect(events.filter((event) => event.type === "call.progress")).toHaveLength(258);
   });
-}, 90_000);
+});
 
 it("adopts a non-turn publication without running its hooks again after its checkpoint is lost", async () => {
   const positions: number[] = [];
@@ -141,69 +173,63 @@ it("adopts a non-turn publication without running its hooks again after its chec
     ],
   });
   await runtime.run(async () => {
-    const world = await getWorld();
-    const createBatch = world.events.createBatch;
-    world.events.createBatch = undefined;
-    const createEvent = world.events.create.bind(world.events);
-    let sessionId: string | undefined;
-    let interrupted = false;
-    const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-      const [runId, event] = args as [string, AnyEventRequest];
-      if (!interrupted && runId === sessionId && event.eventType === "step_completed") {
-        interrupted = true;
-        throw new Error("Process exited after non-turn publication");
-      }
-      return await createEvent(...args);
-    });
-    try {
-      const run = await start(nonturnRetryWorkflow, [
-        buildSerializedContext({ channelKind: "http" }),
-      ]);
-      sessionId = run.runId;
-      expect(await run.returnValue).toBe(sessionId);
-      expect(interrupted).toBe(true);
-      expect(positions).toEqual([0]);
-      const events = [];
-      for await (const event of streamSessionEvents(sessionId, { follow: false }))
-        events.push(event);
-      expect(events.map((event) => [event.type, event.meta.position.line])).toEqual([
-        ["session.started", 0],
-        ["turn.started", 1],
-      ]);
-    } finally {
-      spy.mockRestore();
-      world.events.createBatch = createBatch;
-    }
+    const session = sessionSteps();
+    await session.run(1, (step) => publishStart(step, context()));
+    const started = await session.run(2, (step) => publishStart(step, context()));
+    await session.run(1, (step) => publishNext(step, started));
+    expect(positions).toEqual([0]);
+    expect((await session.lines()).map((event) => [event.type, event.meta.position.line])).toEqual([
+      ["session.started", 0],
+      ["turn.started", 1],
+    ]);
   });
-}, 60_000);
+});
 
-it("retries a transient step failure when nothing was published", async () => {
+it("runs a step again after a transient failure when nothing was published", async () => {
   const runtime = await createTestRuntime({ agent: { name: "before-publication-retry" } });
   await runtime.run(async () => {
-    const run = await start(beforePublicationRetryWorkflow, [
-      buildSerializedContext({ channelKind: "http" }),
-    ]);
-    expect(await run.returnValue).toBe(run.runId);
-    const events = [];
-    for await (const event of streamSessionEvents(run.runId, { follow: false })) events.push(event);
-    expect(events.map(({ type }) => type)).toEqual(["session.started"]);
+    const session = sessionSteps();
+    await expect(session.run(1, (step) => publishStart(step, context(), true))).rejects.toThrow(
+      "Transient failure before publication",
+    );
+    await session.run(2, (step) => publishStart(step, context(), true));
+    expect((await session.lines()).map(({ type }) => type)).toEqual(["session.started"]);
   });
-}, 60_000);
+});
+
+/** Starts a turn, then ends the session from the checkpoint before it: a stale one. */
+async function endFromStaleCheckpoint(
+  session: ReturnType<typeof sessionSteps>,
+  options: { readonly providers?: true | "unreadable"; readonly loseTerminal?: true } = {},
+) {
+  const started = await session.run(1, (step) => publishStart(step, context()));
+  await session.run(1, (step) => publishNext(step, started));
+  const terminal = (step: TestStepAttempt) =>
+    emitTerminalSessionCompletionStep({
+      ...started,
+      ...(options.providers !== undefined && {
+        serializedContext: {
+          "eve.sessionId": session.sessionId,
+          ...(options.providers === "unreadable" && { "eve.stateLayout": 0 }),
+        },
+      }),
+      sessionWritable: step.sessionWritable,
+      usage: undefined,
+    });
+  await session.run(1, terminal);
+  if (options.loseTerminal) await session.run(2, terminal);
+}
 
 it.each([true, "unreadable"] as const)(
   "writes a terminal closure at the physical tail when providers cannot restore (%s)",
   async (providers) => {
     const runtime = await createTestRuntime({ agent: { name: "terminal-fallback" } });
     await runtime.run(async () => {
-      const run = await start(terminalAfterStaleCheckpointWorkflow, [
-        buildSerializedContext({ channelKind: "http" }),
-        providers,
-      ]);
-      expect(await run.returnValue).toBe(run.runId);
-      const events = [];
-      for await (const event of streamSessionEvents(run.runId, { follow: false }))
-        events.push(event);
-      expect(events.map((event) => [event.type, event.meta.position.line])).toEqual([
+      const session = sessionSteps();
+      await endFromStaleCheckpoint(session, { providers });
+      expect(
+        (await session.lines()).map((event) => [event.type, event.meta.position.line]),
+      ).toEqual([
         ["session.started", 0],
         ["turn.started", 1],
         ["turn.settled", 2],
@@ -211,7 +237,6 @@ it.each([true, "unreadable"] as const)(
       ]);
     });
   },
-  60_000,
 );
 
 it("adopts a terminal after its step checkpoint is lost", async () => {
@@ -234,53 +259,15 @@ it("adopts a terminal after its step checkpoint is lost", async () => {
     ],
   });
   await runtime.run(async () => {
-    const world = await getWorld();
-    const createBatch = world.events.createBatch;
-    world.events.createBatch = undefined;
-    const createEvent = world.events.create.bind(world.events);
-    let completed = 0;
-    let interrupted = false;
-    let closes = 0;
-    const getWriter = WritableStream.prototype.getWriter;
-    const closeSpy = vi.spyOn(WritableStream.prototype, "getWriter").mockImplementation(function (
-      this: WritableStream<Uint8Array>,
-    ) {
-      const writer = getWriter.call(this);
-      const close = writer.close.bind(writer);
-      writer.close = async () => {
-        closes++;
-        if (interrupted) throw new Error("Previously closed writer rejects duplicate closure");
-        return await close();
-      };
-      return writer;
-    });
-    const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-      const [, event] = args as [string, AnyEventRequest];
-      if (event.eventType === "step_completed" && ++completed === 3) {
-        interrupted = true;
-        throw new Error("Process exited after terminal publication");
-      }
-      return await createEvent(...args);
-    });
-    try {
-      const run = await start(terminalAfterStaleCheckpointWorkflow, [
-        buildSerializedContext({ channelKind: "http" }),
-      ]);
-      expect(await run.returnValue).toBe(run.runId);
-      expect(interrupted).toBe(true);
-      expect(closes).toBeGreaterThanOrEqual(2);
-      const events = [];
-      for await (const event of streamSessionEvents(run.runId, { follow: false }))
-        events.push(event);
-      expect(events.filter((event) => event.type === "session.ended")).toHaveLength(1);
-      expect(terminalHooks).toBe(0);
-    } finally {
-      spy.mockRestore();
-      closeSpy.mockRestore();
-      world.events.createBatch = createBatch;
-    }
+    const session = sessionSteps();
+    // The retry closes the stream again, which the closed stream refuses.
+    await endFromStaleCheckpoint(session, { loseTerminal: true });
+    expect(session.closes()).toBeGreaterThanOrEqual(2);
+    const events = await session.lines();
+    expect(events.filter((event) => event.type === "session.ended")).toHaveLength(1);
+    expect(terminalHooks).toBe(0);
   });
-}, 60_000);
+});
 
 it("folds orphan writes without redispatching hooks with uncheckpointed connections", async () => {
   const positions: number[] = [];
@@ -317,13 +304,9 @@ it("folds orphan writes without redispatching hooks with uncheckpointed connecti
     ],
   });
   await runtime.run(async () => {
-    const run = await start(terminalAfterStaleCheckpointWorkflow, [
-      buildSerializedContext({ channelKind: "http" }),
-    ]);
-    expect(await run.returnValue).toBe(run.runId);
-    const events = [];
-    for await (const event of streamSessionEvents(run.runId, { follow: false })) events.push(event);
-    expect(events.map((event) => [event.type, event.meta.position.line])).toEqual([
+    const session = sessionSteps();
+    await endFromStaleCheckpoint(session);
+    expect((await session.lines()).map((event) => [event.type, event.meta.position.line])).toEqual([
       ["session.started", 0],
       ["turn.started", 1],
       ["turn.settled", 2],
@@ -332,27 +315,29 @@ it("folds orphan writes without redispatching hooks with uncheckpointed connecti
     expect(positions).toEqual([1]);
     expect(connections).toEqual([[]]);
   });
-}, 60_000);
+});
 
 it.each(["prefix", "none"] as const)(
   "follows the orphan tail when a retry writes %s, so the next step writes after it",
   async (replay) => {
     const runtime = await createTestRuntime({ agent: { name: "less-on-retry" } });
     await runtime.run(async () => {
-      const run = await start(lessOnRetryWorkflow, [
-        buildSerializedContext({ channelKind: "http" }),
-        replay,
-      ]);
-      expect(await run.returnValue).toBe(run.runId);
-      const events = [];
-      for await (const event of streamSessionEvents(run.runId, { follow: false }))
-        events.push(event);
-      expect(events.map((event) => [event.type, event.meta.position.line])).toEqual([
+      const session = sessionSteps();
+      const values = initialValues(session.sessionId, context());
+      await expect(
+        session.run(1, (step) => publishLessOnRetry(step, values, replay)),
+      ).rejects.toThrow("Interrupted after publishing");
+      const { stateDelta } = await session.run(2, (step) =>
+        publishLessOnRetry(step, values, replay),
+      );
+      await session.run(1, (step) => settleTurn(step, applySessionStateDelta(values, stateDelta)));
+      expect(
+        (await session.lines()).map((event) => [event.type, event.meta.position.line]),
+      ).toEqual([
         ["session.started", 0],
         ["turn.started", 1],
         ["turn.settled", 2],
       ]);
     });
   },
-  60_000,
 );

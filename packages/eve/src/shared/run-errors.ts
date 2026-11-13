@@ -23,7 +23,8 @@ export class HookNotFoundError extends Error {
 /**
  * A step error no durable host retries. Workflow's `FatalError.is(error)` accepts it by its
  * name and its `fatal` marker, so a step that throws it fails without retries on Workflow, as one
- * that threw Workflow's `FatalError` does. An in-process host never retries a step.
+ * that threw Workflow's `FatalError` does. An in-process host retries a step that threw only
+ * under a test's step faults, and never one that threw this.
  */
 export class NonRetryableError extends Error {
   override readonly name = "FatalError";

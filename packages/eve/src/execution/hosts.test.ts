@@ -12,6 +12,7 @@ import {
   routedRunEnded,
   routedRunLive,
   sessionLineStore,
+  sessionSignInCallbacks,
   type DurableHost,
   type HostedRoute,
 } from "#execution/hosts.js";
@@ -52,8 +53,15 @@ async function readAll(stream: ReadableStream<unknown>): Promise<unknown[]> {
 
 const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "Hi" }] };
 
-/** What reaches the durable host below, and the attempt of the step it says is running. */
-const durable = { reached: [] as string[], attempt: undefined as number | undefined };
+/**
+ * What reaches the durable host below, and the attempt and callback base URL of the step it says
+ * is running.
+ */
+const durable = {
+  reached: [] as string[],
+  attempt: undefined as number | undefined,
+  callbackBaseUrl: undefined as string | undefined,
+};
 
 function durableHost(name: string): DurableHost {
   return {
@@ -75,7 +83,7 @@ function durableHost(name: string): DurableHost {
     },
     lineStore: fixedStore([{ line: "kept by the durable host" }]),
     stepAttempt: () => durable.attempt,
-    callbackBaseUrl: () => undefined,
+    callbackBaseUrl: () => durable.callbackBaseUrl,
     createRuntime: () => {
       throw new Error("no runtime in this test");
     },
@@ -122,6 +130,32 @@ describe("the hosts in a realm", () => {
     expect(isRetriedStep()).toBe(true);
     durable.attempt = undefined;
     expect(isRetriedStep()).toBe(false);
+  });
+
+  it("asks the route running a session how it's called back, and the durable host for others", () => {
+    const deliver: DurableHost["deliver"] = async () => {};
+    const release = registerHost({
+      deliver: async () => undefined,
+      runEnded: () => undefined,
+      cancelRun: () => undefined,
+      signInCallbacks: (sessionId) =>
+        sessionId === "session-alice"
+          ? { callbackBaseUrl: "http://alice.example", deliver }
+          : undefined,
+    });
+    try {
+      expect(sessionSignInCallbacks("session-alice")).toEqual({
+        callbackBaseUrl: "http://alice.example",
+        deliver,
+      });
+      // Outside one of its steps, the durable host calls nobody back.
+      expect(sessionSignInCallbacks("session-bob")).toBeUndefined();
+      durable.callbackBaseUrl = "https://bob.example";
+      expect(sessionSignInCallbacks("session-bob")?.callbackBaseUrl).toBe("https://bob.example");
+    } finally {
+      durable.callbackBaseUrl = undefined;
+      release();
+    }
   });
 
   it("asks the routes first, and the durable host for what no route holds", async () => {

@@ -9,13 +9,15 @@ import {
 } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import {
+  startTestSession,
+  type TestSessionHostKind,
+} from "#internal/testing/test-session-hosts.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
@@ -23,7 +25,8 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
-import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 
 // A parent runs three children at once, and each child's tool needs a Weather sign-in for the
 // same person, and with `parentAsks` the parent's own tool needs it too. Each sign-in relays to the parent as its own card, and the person's answer on one
@@ -112,7 +115,8 @@ describe("one sign-in answer for parallel children", () => {
     const app = await createApp("sign-in-fan-in-retry", { grant: "oauth/weather" });
 
     await app.runtime.run(async () => {
-      const run = await startParent(app.name);
+      // It fails a lookup in Workflow's hook store, and Workflow's retry of the step delivers again.
+      const run = await startParent(app.name, "workflow");
       const stream = captureEvents(run);
       try {
         const before = await signInCards(stream, CHILDREN);
@@ -388,8 +392,7 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const before = await parentCardFirst(app, stream);
         const inbox = sessionInboxHookToken(`http:${app.name}`);
-        await waitForHook({ runId: run.runId }, { token: inbox });
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -884,22 +887,20 @@ async function createApp(
   };
 }
 
-async function startParent(name: string) {
-  return await startSessionOwner(workflowEntry, [
-    {
-      kind: "initial",
-      ownerDeploymentId: "dpl_inline",
-      input: { message: "Ask three helpers for the weather in Lisbon." },
-      serializedContext: {
-        ...buildSerializedContext({
-          auth: ALICE,
-          channelKind: "http",
-          continuationToken: `http:${name}`,
-        }),
-        "eve.capabilities": { requestInput: true },
-      },
+async function startParent(name: string, host: TestSessionHostKind = "in-process") {
+  return await startTestSession(host, {
+    kind: "initial",
+    ownerDeploymentId: "dpl_inline",
+    input: { message: "Ask three helpers for the weather in Lisbon." },
+    serializedContext: {
+      ...buildSerializedContext({
+        auth: ALICE,
+        channelKind: "http",
+        continuationToken: `http:${name}`,
+      }),
+      "eve.capabilities": { requestInput: true },
     },
-  ]);
+  });
 }
 
 /** Calls the callback URL a sign-in card names, as the provider redirects back to it. */
