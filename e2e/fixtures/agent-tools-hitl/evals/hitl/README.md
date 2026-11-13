@@ -35,6 +35,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | Steering ignores unanswered approvals and keeps given answers                      | [steer-ignores-unanswered](./approvals/steer-ignores-unanswered.eval.ts)                                                |
 | Someone else's message waits for the held turn                                     | [other-person-message-waits](./approvals/other-person-message-waits.eval.ts)                                            |
 | Another person's message joins the running turn, which keeps its caller            | [another-person-joins](./steering/another-person-joins.eval.ts)                                                         |
+| Another person's handover message makes the turn adopt its sender                  | [another-person-adopts](./steering/another-person-adopts.eval.ts)                                                       |
 | An answer to a request that is not open authorizes nothing                         | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |
 | A `once()` grant is reused                                                         | [once-grant-is-reused](./approvals/once-grant-is-reused.eval.ts)                                                        |
 | An approved call runs with the asking step's tools                                 | [approved-call-uses-asking-step-tools](./approvals/approved-call-uses-asking-step-tools.eval.ts)                        |

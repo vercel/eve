@@ -1,4 +1,3 @@
-import type { SessionAuthContext } from "#channel/types.js";
 import {
   type AlsContext,
   contextScopeValue,
@@ -18,26 +17,18 @@ export function withModelCall<T>(fn: () => T): T {
 }
 
 /**
- * The people steering the turn when a call the model made asks for its caller's identity, or
- * `undefined` when the identity is free to use: the caller spoke last, or eve is doing its own
- * work for the caller, such as listing a connection's tools.
+ * Whether a call the model made runs while other people steer the turn, so it may not use the
+ * caller's identity. False when the caller spoke last, and for eve's own work for the caller,
+ * such as listing a connection's tools.
  */
-export function steeringModelCall(
-  ctx: AlsContext | undefined = contextStorage.getStore(),
-): readonly SessionAuthContext[] | undefined {
-  if (contextScopeValue(MODEL_CALL) !== true) return undefined;
-  const steeredBy = ctx?.get(SteeredByKey) ?? [];
-  return steeredBy.length === 0 ? undefined : steeredBy;
+export function steeredModelCall(ctx: AlsContext | undefined = contextStorage.getStore()): boolean {
+  return contextScopeValue(MODEL_CALL) === true && (ctx?.get(SteeredByKey) ?? []).length > 0;
 }
 
-/** Tells the model why the call was refused and what unblocks it. */
-export function turnSteeredMessage(
-  steeredBy: readonly SessionAuthContext[],
-  subject: string,
-): string {
-  const people = steeredBy.map((person) => person.principalId).join(", ");
+/** Tells the model why the call was refused and what unblocks it, without naming anyone. */
+export function turnSteeredMessage(subject: string): string {
   return (
-    `A message from ${people} joined this turn after its caller last spoke, so ${subject} ` +
+    `Another person's message joined this turn after its caller last spoke, so ${subject} ` +
     `can't use the caller's identity. Ask the caller to confirm in this conversation, then try again.`
   );
 }
@@ -48,10 +39,9 @@ export function holdCallerIdentity(
   ctx?: AlsContext,
   subject = `connection "${connectionName}"`,
 ): void {
-  const steeredBy = steeringModelCall(ctx);
-  if (steeredBy === undefined) return;
+  if (!steeredModelCall(ctx)) return;
   throw new ConnectionAuthorizationFailedError(connectionName, {
-    message: turnSteeredMessage(steeredBy, subject),
+    message: turnSteeredMessage(subject),
     reason: "turn_steered",
     retryable: false,
   });

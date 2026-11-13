@@ -791,8 +791,8 @@ export type SlackMentionResult = {
    */
   readonly guidance?: string;
   /**
-   * What this message does to a running turn that runs as someone else. Overrides the channel's
-   * `principalPolicy` for this one message.
+   * What this message does to a running turn that runs as someone else: `"match-caller"` by
+   * default. Overrides the channel's `principalPolicy` for this one message.
    */
   readonly principalPolicy?: PrincipalPolicy;
 } | null;
@@ -852,7 +852,7 @@ export interface SlackChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match-caller". */
   readonly principalPolicy?: PrincipalPolicy;
 
   /**

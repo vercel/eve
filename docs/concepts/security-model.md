@@ -77,28 +77,39 @@ A [channel](/docs/channels) authenticates its own inbound traffic. The built-in 
 
 ## A turn runs as one principal
 
-A turn's principal (its authenticator, issuer, principal type, and id) never changes while the turn runs; only its claims may update. By default, only the caller's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn. Another person can still settle a pending request with a button or structured answer, recorded as its responder, while the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
+By default, a turn's principal (its authenticator, issuer, principal type, and id) never changes while the turn runs; only its claims may update. `principalPolicy` is the one setting that changes this. Without `"retain-caller"` or `"adopt-sender"`, only the caller's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn. Another person can still settle a pending request with a button or structured answer, recorded as its responder, while the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
 ### Let another person's message join
 
 `principalPolicy` decides what happens when a message arrives during a turn that runs as someone else:
 
-| Value               | Behavior                                                                                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"match"` (default) | A message joins only a turn running as its sender. Another person's message waits for the turn to end, then starts a turn as its sender.                      |
-| `"keep"`            | Another signed-in person's message also joins the running turn as input. The turn keeps its caller: `ctx.session.auth.current` and the turn ID stay the same. |
+| Value                      | Behavior                                                                                                                                                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"match-caller"` (default) | A message joins only a turn whose caller is its sender. Another person's message waits for the turn to end, then starts a turn as its sender.                                                            |
+| `"retain-caller"`          | Another signed-in person's message joins the running turn as input. The turn retains its caller: `ctx.session.auth.current` and the turn ID stay the same.                                               |
+| `"adopt-sender"`           | Another signed-in person's message joins the running turn. The turn adopts the sender as its caller from the next model call. `ctx.session.auth.current` becomes the sender; the turn ID stays the same. |
 
 With no turn running, a message starts a turn as its sender, whatever its `principalPolicy`.
 
-A `"keep"` message from another person joins only when three conditions hold. Its `turnPolicy` is `"steer"`, it has a signed-in sender, and no approval, question, or sign-in is open in the session. A message sent with `auth: null`, or as an anonymous caller, follows `"match"`. While a request is open, the message waits. It joins when the turn continues, or starts its own turn if the turn ends first.
+A `"retain-caller"` or `"adopt-sender"` message from another person joins only when three conditions hold. Its `turnPolicy` is `"steer"`, it has a signed-in sender, and no approval, question, or sign-in is open in the session. A message sent with `auth: null`, or as an anonymous caller, follows `"match-caller"`. While a request is open, the message waits. It joins when the turn continues, or starts its own turn if the turn ends first. If any other condition fails, it waits like a `"match-caller"` message.
 
-Set `principalPolicy` on a channel definition, such as `defineChannel({ principalPolicy: "keep" })`, or in a built-in channel's config. Set it for one server-side send with `send(message, { auth, principalPolicy })`, or return it from a Slack message hook as `{ auth, principalPolicy: "keep" }`. A message's value wins over its channel's. It cannot be set from an HTTP request body or the client SDK, because it decides whose access a message can reach.
+Set `principalPolicy` on a channel definition, such as `defineChannel({ principalPolicy: "retain-caller" })`, or in a built-in channel's config. Set it for one server-side send with `send(message, { auth, principalPolicy })`, or return it from a Slack message hook as `{ auth, principalPolicy: "adopt-sender" }`. A message's value wins over its channel's. It cannot be set from an HTTP request body or the client SDK, because it decides whose access a message can reach.
+
+### Adopt the sender as the caller
+
+With `"adopt-sender"`, the sender becomes the turn's caller from the next model call. `ctx.session.auth.current` is the sender, and `auth.initiator` does not change. `steeredBy` is absent, so the caller identity hold does not apply.
+
+From that point, the turn can do only what the sender can do. Tools, approval policies, dynamic functions, and user-scoped credentials all see the sender as `ctx.session.auth.current`. Calls already running finish under the caller who started them. Work already in the conversation stays there.
+
+The previous caller's later messages are another person's messages, and follow their own `principalPolicy`.
+
+Use `"adopt-sender"` when the last person to speak should own the turn and that person has their own access. Use `"retain-caller"` when teammates may add input but only the caller's access should act.
 
 ### Who else steered the turn
 
-`ctx.session.auth.steeredBy` lists the people, other than the caller, whose messages joined the running turn. The list covers messages since the caller last sent a message or approved a call. eve sets it only while at least one such person exists. Otherwise it is absent, including in every session with one person. `if (ctx.session.auth.steeredBy)` therefore means someone else is steering this turn.
+`ctx.session.auth.steeredBy` lists the people, other than the caller, whose messages joined the running turn. The list covers messages since the caller last sent a message or approved a call. eve sets it only while at least one such person exists. Otherwise it is absent, including when a turn starts and in every session with one person. `if (ctx.session.auth.steeredBy)` therefore means someone else is steering this turn.
 
-It is cleared when the caller sends a message, the caller approves a call, or a turn starts. A denial does not clear it, and an approval from anyone else does not clear it.
+It is cleared when the caller sends a message, the caller approves a call, or a turn starts. A message that adopts its sender clears it. A denial does not clear it, and an approval from anyone else does not clear it.
 
 Read it anywhere `ctx.session` is available: tools, approval policies, dynamic functions, and hooks. A workflow tool call or local subagent started while it is set sees the same list.
 
@@ -110,15 +121,18 @@ While `steeredBy` is set, a call the model makes cannot get the caller's identit
 | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | The caller's token for a user-scoped connection's tools, `ctx.getToken()`, or `ctx.requireAuth()` | Fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. |
 | A tool call on an MCP connection with `forwardPrincipal`                                          | Fails with the same error and reason.                                         |
-| A call to a remote agent with `forwardPrincipal`                                                  | Fails before the call.                                                        |
-| Connection event subscriptions or dynamic schedule tools                                          | Fail before they use the caller's identity.                                   |
+| Connection event subscriptions                                                                    | Fails with the same error and reason.                                         |
+| A call to a remote agent with `forwardPrincipal`                                                  | Fails with an error that carries the same message.                            |
+| Dynamic schedule tools                                                                            | Fails with an error that carries the same message.                            |
 | App-scoped credentials, listing a connection's tools, or `ctx.approval.responder.getToken()`      | Available.                                                                    |
 
 The model reads a message like:
 
 ```text
-A message from slack:T012AB3CD:U045EF6GH joined this turn after its caller last spoke, so connection "github" can't use the caller's identity. Ask the caller to confirm in this conversation, then try again.
+Another person's message joined this turn after its caller last spoke, so connection "github" can't use the caller's identity. Ask the caller to confirm in this conversation, then try again.
 ```
+
+For a tool's own `ctx.getToken()` or `ctx.requireAuth()`, the subject is `tool "<tool name>"` instead of `connection "<name>"`.
 
 The caller's next message, or the caller approving a call, releases the hold.
 
@@ -143,15 +157,15 @@ export default defineTool({
 
 Use `steered()` on a tool that authorizes from `ctx.session.auth.current` while using a shared credential, because eve cannot detect that check. Use it as the agent's `approval` in `agent.ts` to ask before every call made while steered. The caller gets an approval prompt instead of a failed call.
 
-Only the caller's own approval clears `steeredBy`. One approval covers later calls until someone else's message joins again. When the turn has no signed-in caller (`principalType` is not `"user"`), `steered()` denies the call instead of asking. An approval pauses the turn on the caller, so other people's messages wait until the caller answers. The identity hold alone never pauses a turn.
+Among approvals, only the caller's own clears `steeredBy`. One approval covers later calls until someone else's message joins again. When the turn has no signed-in caller (`principalType` is not `"user"`), `steered()` denies the call instead of asking. An approval pauses the turn on the caller, so other people's messages wait until the caller answers. The identity hold alone never pauses a turn.
 
-### Before you set `"keep"`
+### Before you set a joining policy
 
-- Tools that authorize from `ctx.session.auth.current` in their own code need `approval: steered()`.
-- Dynamic functions run before every model call as the caller and are not calls, so neither the hold nor `steered()` covers them. Read `steeredBy` there.
+- With `"retain-caller"`, tools that authorize from `ctx.session.auth.current` in their own code need `approval: steered()`.
+- Dynamic functions run before every model call as the caller and are not calls. With `"retain-caller"`, read `steeredBy` there.
 - The channel must show the model who sent each message. Slack does. eve adds no attribution.
 - A steering message can ask the model to repeat anything already in the conversation.
-- Memory is unchanged: a turn is saved under its caller's scope, including messages other people sent into it.
+- Memory: a turn is saved under the caller it has when it is saved. `"retain-caller"` saves it under the original caller; `"adopt-sender"` saves it under the sender. Messages other people sent are included.
 
 ## Authored markdown is data
 
@@ -171,9 +185,9 @@ Before exposing an agent to real traffic:
 - [ ] Verify channel signatures. Each platform channel needs its signing
       secret set; custom channels must verify signatures in constant time and never
       trust body-supplied identity.
-- [ ] If a channel sets `principalPolicy: "keep"`, add `approval: steered()` to every
+- [ ] If a channel sets `principalPolicy: "retain-caller"`, add `approval: steered()` to every
       tool that authorizes from `ctx.session.auth.current` in its own code. Read
-      `steeredBy` in dynamic functions. See [Before you set keep](#before-you-set-keep).
+      `steeredBy` in dynamic functions. See [Before you set a joining policy](#before-you-set-a-joining-policy).
 - [ ] Keep secrets in `process.env`, never in compiled artifacts, never
       passed into the sandbox. Route privileged calls through tools or connections.
 - [ ] Limit connection tokens to the least privilege the agent needs; they

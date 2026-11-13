@@ -216,7 +216,7 @@ export interface TeamsChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match-caller". */
   readonly principalPolicy?: PrincipalPolicy;
 
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */

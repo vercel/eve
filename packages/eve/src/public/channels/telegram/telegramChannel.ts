@@ -193,7 +193,7 @@ export interface TelegramChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match-caller". */
   readonly principalPolicy?: PrincipalPolicy;
   /** Inbound upload policy for Telegram photos and documents. */
   readonly uploadPolicy?: UploadPolicyInput;

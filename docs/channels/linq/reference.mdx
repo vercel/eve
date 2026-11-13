@@ -78,17 +78,17 @@ Set `route` to change the webhook path, or `webhookVerifier` (typed `LinqWebhook
 
 `linqChannel(config)` takes these options. All are optional.
 
-| Option            | Default                               | Description                                                                                                                                            |
-| ----------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `credentials`     | Same-project Vercel OIDC verification | From `connectLinqCredentials(...)`, or `{ apiKey, signingSecret, webhookVerifier }`. Each secret also takes a lazy resolver.                           |
-| `route`           | `/eve/v1/linq`                        | Webhook path.                                                                                                                                          |
-| `baseURL`         | Linq's API                            | Linq API endpoint, such as a sandbox.                                                                                                                  |
-| `userName`        | `"eve"`                               | Bot display name.                                                                                                                                      |
-| `turnPolicy`      | `"steer"`                             | `"steer"` or `"queue"` for messages that arrive during a turn.                                                                                         |
-| `principalPolicy` | `"match"`                             | `"match"` or `"keep"` for messages from someone other than the running turn's caller. See [Overlapping messages](/docs/channels#overlapping-messages). |
-| `onMessage`       | Dispatch with the author's auth       | `(ctx, message)` hook. See [Message hook](#message-hook).                                                                                              |
-| `onTapback`       | None, so tapbacks are ignored         | `(ctx, tapback)` hook. See [Tapbacks](#tapbacks).                                                                                                      |
-| `events`          | eve's default handlers                | Per-event handler overrides.                                                                                                                           |
+| Option            | Default                               | Description                                                                                                                                                                               |
+| ----------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `credentials`     | Same-project Vercel OIDC verification | From `connectLinqCredentials(...)`, or `{ apiKey, signingSecret, webhookVerifier }`. Each secret also takes a lazy resolver.                                                              |
+| `route`           | `/eve/v1/linq`                        | Webhook path.                                                                                                                                                                             |
+| `baseURL`         | Linq's API                            | Linq API endpoint, such as a sandbox.                                                                                                                                                     |
+| `userName`        | `"eve"`                               | Bot display name.                                                                                                                                                                         |
+| `turnPolicy`      | `"steer"`                             | `"steer"` or `"queue"` for messages that arrive during a turn.                                                                                                                            |
+| `principalPolicy` | `"match-caller"`                      | `"match-caller"`, `"retain-caller"`, or `"adopt-sender"` for messages from someone other than the running turn's caller. See [Overlapping messages](/docs/channels#overlapping-messages). |
+| `onMessage`       | Dispatch with the author's auth       | `(ctx, message)` hook. See [Message hook](#message-hook).                                                                                                                                 |
+| `onTapback`       | None, so tapbacks are ignored         | `(ctx, tapback)` hook. See [Tapbacks](#tapbacks).                                                                                                                                         |
+| `events`          | eve's default handlers                | Per-event handler overrides.                                                                                                                                                              |
 
 The channel mounts `GET` and `POST` on `/eve/v1/linq`.
 

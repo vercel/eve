@@ -97,7 +97,7 @@ export interface LinqChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match-caller". */
   readonly principalPolicy?: PrincipalPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;

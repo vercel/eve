@@ -72,7 +72,7 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /** What a message does to a running turn that runs as another principal. Defaults to "match". */
+  /** What a message does to a running turn that runs as another principal. Defaults to "match-caller". */
   readonly principalPolicy?: PrincipalPolicy;
   /**
    * Return a replacement delivery, or void to deliver the original payload unchanged. A

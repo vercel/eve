@@ -192,13 +192,15 @@ export class SessionInputQueue {
           paused: options?.paused,
         }),
     );
-    // One step reads one sender's messages, so the turn step knows whose input it is. Another
-    // sender's messages stay admitted for the next boundary.
-    const senderOf = ({ delivery }: QueuedDelivery) =>
-      delivery.auth === undefined ? turn.principal : principalOf(delivery.auth);
+    // One step reads one sender's messages under one policy, so the turn step knows whose input
+    // it is. Another sender's, or another policy's, messages stay admitted for the next boundary.
+    const groupOf = ({ delivery }: QueuedDelivery) => {
+      const sender = delivery.auth === undefined ? turn.principal : principalOf(delivery.auth);
+      return sender === turn.principal ? sender : `${sender}\n${delivery.principalPolicy ?? ""}`;
+    };
     const first = eligible[0];
     if (first === undefined) return undefined;
-    const end = eligible.findIndex((entry) => senderOf(entry) !== senderOf(first));
+    const end = eligible.findIndex((entry) => groupOf(entry) !== groupOf(first));
     const steering = end === -1 ? eligible : eligible.slice(0, end);
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
     return {
@@ -290,15 +292,16 @@ export interface SteeringOptions {
    * they stay queued and never answer it.
    */
   readonly heldSince?: number;
-  /** A request is open in the session, so the turn waits on a person. */
+  /** The turn waits on a person: a request or sign-in is open. */
   readonly paused?: boolean;
 }
 
 /**
  * Whether a delivery steers the running turn. The turn's own principal's
  * messages do when `turnPolicy` is `"steer"`; another principal's do only with
- * `principalPolicy: "keep"`, an identified sender, and no open request. A held
- * turn counts as paused, so another person's message waits for its caller.
+ * `"retain-caller"` or `"adopt-sender"`, an identified sender, and nothing the
+ * turn waits on. A held turn counts as paused, so another person's message
+ * waits for its caller.
  */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
@@ -312,14 +315,14 @@ export function isSteeringDelivery(
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined ||
       principalOf(delivery.auth) === turn.principal ||
-      (!paused && keepsPrincipal(delivery)))
+      (!paused && joinsAnotherTurn(delivery)))
   );
 }
 
-/** Another person's message that may join a turn, which then keeps its caller. */
-function keepsPrincipal(delivery: DeliverHookPayload): boolean {
+/** Another person's message that may join a turn under its `principalPolicy`. */
+function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
   return (
-    delivery.principalPolicy === "keep" &&
+    (delivery.principalPolicy === "retain-caller" || delivery.principalPolicy === "adopt-sender") &&
     delivery.auth != null &&
     principalOf(delivery.auth) !== ANONYMOUS_PRINCIPAL
   );

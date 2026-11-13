@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext } from "#channel/types.js";
 import { AuthKey } from "#context/keys.js";
 import type { TurnStepPayload } from "#execution/session/turn-step-types.js";
 
@@ -38,17 +38,19 @@ export function resolveTurnPrincipal(
  * The identity a running turn continues under once a message sent as `auth`
  * joins it. Within a turn the principal is fixed and only its claims may
  * update; input without auth acts as the turn's identity. Another principal
- * joins only with `keep`, which leaves the turn under its caller. Anyone
- * else's answers settle requests as their responder without joining the turn.
+ * joins only with a join policy: `"retain-caller"` leaves the turn under its
+ * caller, `"adopt-sender"` hands the turn to the sender. Anyone else's answers
+ * settle requests as their responder without joining the turn.
  */
 export function continueTurnAuth<T extends SessionAuthContext | null | undefined>(
   turnAuth: T,
   auth: SessionAuthContext | null | undefined,
-  options?: { readonly keep?: boolean },
+  policy?: PrincipalPolicy,
 ): T | SessionAuthContext | null {
   if (auth === undefined) return turnAuth;
   if (principalOf(auth) !== principalOf(turnAuth)) {
-    if (options?.keep === true) return turnAuth;
+    if (policy === "retain-caller") return turnAuth;
+    if (policy === "adopt-sender") return auth;
     throw new Error(
       "A message from another principal cannot join a running turn. Gate it with isSteeringDelivery so it waits for the turn to end.",
     );

@@ -435,27 +435,23 @@ async function runSessionStepBody(
       turnAuth =
         resolved?.message === undefined
           ? previousAuth
-          : continueTurnAuth(previousAuth, turnAuth, {
-              keep: delivery.principalPolicy === "keep",
-            });
+          : continueTurnAuth(previousAuth, turnAuth, delivery.principalPolicy);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
-    // `steeredBy` follows the messages the turn reads. A parent's message to its child carries
-    // the parent's list; the caller's message or approval clears it; anyone else's adds them.
+    // A turn that starts between turns begins with no steers; a child's first turn keeps the list
+    // its parent started it with. A parent's message carries the parent's list, and a mid-turn
+    // message is judged against the caller the turn has after it.
+    if (startedBetweenTurns && initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
     if (
       delivery !== undefined &&
       answers === undefined &&
       !ignoredActiveDelivery &&
       resolved?.message !== undefined
     ) {
-      if (delivery.steeredBy !== undefined) {
-        setSteeredBy(ctx, delivery.steeredBy);
-      } else if (startedBetweenTurns) {
-        // A child's first turn keeps the list its parent started it with.
-        if (initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
-      } else {
-        setSteeredBy(ctx, steeredByAfter(ctx.get(SteeredByKey) ?? [], previousAuth, delivery.auth));
+      if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
+      else if (!startedBetweenTurns) {
+        setSteeredBy(ctx, steeredByAfter(ctx.get(SteeredByKey) ?? [], turnAuth, delivery.auth));
       }
     } else if (callerApproved(answers, previousAuth, delivery?.auth)) {
       setSteeredBy(ctx, []);

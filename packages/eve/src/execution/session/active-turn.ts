@@ -27,7 +27,7 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
-import { openRequests } from "#protocol/session-projection/reader.js";
+import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -67,8 +67,8 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** The turn's principal and delegated caller; another principal joins only with `keep`. */
-  private readonly identity: SteeringTurn;
+  /** The turn's principal and delegated caller; `adopt-sender` can move the principal. */
+  private identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
@@ -118,10 +118,11 @@ export class ActiveTurn {
       this.steeringController.abort();
   };
 
-  /** A request is open in the session, so another person's message waits for its caller. */
+  /** A request or sign-in is open, so another person's message waits for its caller. */
   private get awaitsPerson(): boolean {
     const { state } = readDurableSession(this.input.cursor.sessionState);
-    return openRequests(storedProjection(state).view).length > 0;
+    const view = storedProjection(state).view;
+    return openRequests(view).length > 0 || openSignIns(view).length > 0;
   }
 
   get signal(): AbortSignal {
@@ -131,6 +132,11 @@ export class ActiveTurn {
   dispose(): void {
     this.unsubscribe();
     this.unsubscribeDelivery();
+  }
+
+  /** The turn runs as `principal` from here on: a message made its sender the turn's caller. */
+  adopt(principal: string): void {
+    this.identity = { ...this.identity, principal };
   }
 
   get steeringSignal(): AbortSignal {

@@ -178,11 +178,12 @@ export type TurnPolicy = "steer" | "queue";
 export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 
 /**
- * Controls whether a message may join a running turn that runs as another principal.
- * `"match"` (the default) joins only a turn running as the sender. `"keep"` also joins another
- * principal's turn as input, and that turn keeps its caller.
+ * Controls what a message does to a running turn that runs as another principal.
+ * - `"match-caller"` (the default): it joins only a turn whose caller is its sender.
+ * - `"retain-caller"`: it also joins another principal's turn as input, and the turn retains its caller.
+ * - `"adopt-sender"`: it also joins another principal's turn, and the turn adopts the sender as its caller.
  */
-export type PrincipalPolicy = "match" | "keep";
+export type PrincipalPolicy = "match-caller" | "retain-caller" | "adopt-sender";
 
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =

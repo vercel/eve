@@ -178,7 +178,7 @@ describe("createCrossChannelToFn", () => {
       outputSchema: { type: "object" },
       title: "Rollout plan",
       turnPolicy: "queue" as const,
-      principalPolicy: "keep",
+      principalPolicy: "retain-caller",
     } satisfies Required<SessionSendOptions>;
 
     const internal = { callback: { url: "https://example.com/hook" }, initiatorAuth: null };

@@ -43,9 +43,9 @@ Public fields include:
 - `id`: the session ID.
 - `turn.id`: the current turn ID.
 - `turn.sequence`: the turn's position in the session.
-- `auth.current`: the caller for the active inbound turn.
+- `auth.current`: the caller for the active inbound turn. A message with `principalPolicy: "adopt-sender"` can replace it during the turn.
 - `auth.initiator`: the caller that started the session.
-- `auth.steeredBy`: the people other than the caller whose messages joined the running turn; present only while at least one exists.
+- `auth.steeredBy`: the people other than the caller whose messages joined the running turn; absent when a turn starts and present only while at least one exists. An `"adopt-sender"` message clears it.
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
 - `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) to read its earlier conversation.
 

@@ -306,7 +306,7 @@ export async function sendAgentSessionMessageStep(
     const remote = await resolveSessionRemote(context, address);
     const steeredBy = input.auth.steeredBy ?? [];
     if (remote.forwardPrincipal === true && steeredBy.length > 0) {
-      throw new FatalError(turnSteeredMessage(steeredBy, `remote agent "${address.name}"`));
+      throw new FatalError(turnSteeredMessage(`remote agent "${address.name}"`));
     }
     return await continueRemoteAgentSession({
       auth: input.auth.current,
@@ -563,7 +563,7 @@ async function startRemoteSession(
   });
   const steeredBy = auth.steeredBy ?? [];
   if (remote.forwardPrincipal === true && steeredBy.length > 0) {
-    throw new FatalError(turnSteeredMessage(steeredBy, `remote agent "${action.remoteAgentName}"`));
+    throw new FatalError(turnSteeredMessage(`remote agent "${action.remoteAgentName}"`));
   }
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
