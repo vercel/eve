@@ -62,7 +62,10 @@ export async function startDesktopStage(ctx: Pick<ToolContext, "getSandbox">): P
   await sandbox.writeTextFile({ path: `${STAGE_ROOT}/server.mjs`, content: STAGE_SERVER });
   await sandbox.writeTextFile({ path: `${dir}/index.html`, content: STAGE_HTML });
   const ready = await sandbox.run({ command: `xdpyinfo -display ${DISPLAY} >/dev/null 2>&1` });
-  if (ready.exitCode !== 0) await startComputerUse(sandbox);
+  if (ready.exitCode !== 0) {
+    // A new sandbox can be slow to bring its display up; one retry covers it.
+    await startComputerUse(sandbox).catch(() => startComputerUse(sandbox));
+  }
   // A resumed sandbox keeps files but not processes, so check every time.
   // The share is 1280x720, so a desktop that size keeps text readable. It can
   // only shrink before any window opens; after that, frames are scaled down.
