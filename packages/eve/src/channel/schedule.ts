@@ -4,6 +4,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { Delivery } from "#shared/delivery.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { commandDelivery } from "#channel/delivery.js";
 import type {
@@ -150,14 +151,16 @@ export class ScheduleDispatcher {
             .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
             .digest("hex")}`;
     // A send without a key takes one from the occurrence and its message, so a retried callback
-    // reaches the sessions its first attempt started. Repeats of one message are counted apart.
-    const repeats = new Map<string, number>();
-    const occurrenceKey = (message: unknown): string => {
-      const digest = createHash("sha256")
-        .update(JSON.stringify(message) ?? "")
-        .digest("hex");
-      const repeat = repeats.get(digest) ?? 0;
-      repeats.set(digest, repeat + 1);
+    // reaches the sessions its first attempt started. Repeats of one message to one target are
+    // counted apart, so a fan-out keeps its keys whatever order it reaches its targets in.
+    const repeats = new Map<unknown, Map<string, number>>();
+    const occurrenceKey = (channel: unknown, target: unknown, message: MessageContent): string => {
+      const digest = messageDigest(message);
+      const sent = repeats.get(channel) ?? new Map<string, number>();
+      repeats.set(channel, sent);
+      const slot = JSON.stringify([target, digest]);
+      const repeat = sent.get(slot) ?? 0;
+      sent.set(slot, repeat + 1);
       return `eve-occurrence:${createHash("sha256")
         .update(JSON.stringify([occurrence.executionId, digest, repeat]))
         .digest("hex")}`;
@@ -197,7 +200,7 @@ export class ScheduleDispatcher {
           send: (message, options) =>
             args.to(channel, target).send(message, {
               ...options,
-              idempotencyKey: options?.idempotencyKey ?? occurrenceKey(message),
+              idempotencyKey: options?.idempotencyKey ?? occurrenceKey(channel, target, message),
               auth,
             }),
         }),
@@ -270,6 +273,32 @@ export class ScheduleDispatcher {
       delivery.deliveryId,
     );
   }
+}
+
+/** Fingerprints what a send carries. File bytes are hashed as they are, not serialized first. */
+function messageDigest(message: MessageContent): string {
+  const hash = createHash("sha256");
+  // Length-prefixed, so two fields can't read as one.
+  const field = (value: string | Uint8Array) => {
+    hash.update(`${typeof value === "string" ? Buffer.byteLength(value) : value.byteLength}:`);
+    hash.update(value);
+  };
+  for (const part of typeof message === "string"
+    ? [{ type: "text", text: message } as const]
+    : message) {
+    field(part.type);
+    if (part.type === "text") {
+      field(part.text);
+      continue;
+    }
+    field(part.mediaType);
+    field(part.filename ?? "");
+    const { data } = part;
+    if (typeof data === "string") field(data);
+    else if (data instanceof URL) field(data.href);
+    else field(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+  }
+  return hash.digest("hex");
 }
 
 /**
