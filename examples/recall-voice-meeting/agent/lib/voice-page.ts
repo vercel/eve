@@ -1,6 +1,7 @@
 /**
  * The page a Recall bot streams as its camera and microphone. It plays the
- * agent's speech from `voice/stream`, shows what it's saying, and stops
+ * agent's speech from `voice/stream`, draws a dot-matrix waveform that follows
+ * the meeting while people talk and eve's own voice while it speaks, and stops
  * talking when someone in the meeting talks over it.
  */
 export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
@@ -9,34 +10,27 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
 <meta charset="utf-8">
 <title>eve</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0a0a0a; color: #ededed;
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0a0a; color: #ededed;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { height: 100%; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 48px; }
-  #orb { width: 220px; height: 220px; border-radius: 50%; display: grid; place-items: center;
-    background: radial-gradient(circle at 35% 30%, #3b3b3b, #161616 70%);
-    box-shadow: 0 0 0 0 rgba(255,255,255,0.0); transition: box-shadow 120ms linear; }
-  #orb span { font-size: 64px; font-weight: 600; letter-spacing: -0.04em; }
-  #caption { max-width: 1040px; min-height: 2.6em; padding: 0 64px; text-align: center;
-    font-size: 34px; line-height: 1.3; color: #a1a1a1; }
-  #status { position: fixed; bottom: 24px; font-size: 18px; color: #555; }
+  #wave { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #name { position: fixed; top: 28px; left: 32px; font-size: 22px; font-weight: 600;
+    letter-spacing: -0.04em; color: #a1a1a1; }
+  #status { position: fixed; bottom: 24px; width: 100%; text-align: center; font-size: 18px; color: #555; }
 </style>
 </head>
 <body>
-<main>
-  <div id="orb"><span>eve</span></div>
-  <div id="caption"></div>
-</main>
+<canvas id="wave"></canvas>
+<div id="name">eve</div>
 <div id="status">connecting</div>
 <script>
 (() => {
-  const orb = document.getElementById("orb");
-  const caption = document.getElementById("caption");
+  const canvas = document.getElementById("wave");
   const status = document.getElementById("status");
   const audio = new AudioContext();
   const output = audio.createAnalyser();
   output.fftSize = 512;
   output.connect(audio.destination);
+  let meeting = null;
 
   // Sentences waiting to play, decoded in arrival order.
   const queue = [];
@@ -55,7 +49,6 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     const next = queue.shift();
     if (next === undefined) {
       playing = null;
-      caption.textContent = "";
       return;
     }
     playing = next;
@@ -75,7 +68,6 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     source.onended = () => {
       if (playing === next) playNext();
     };
-    caption.textContent = next.text;
     source.start();
   }
 
@@ -88,13 +80,12 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     const current = playing;
     playing = null;
     current.source?.stop();
-    caption.textContent = "";
   }
 
   async function listen() {
     // Recall grants the page the meeting's mixed audio, without the bot's own voice.
     const media = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const meeting = audio.createAnalyser();
+    meeting = audio.createAnalyser();
     meeting.fftSize = 1024;
     audio.createMediaStreamSource(media).connect(meeting);
     const samples = new Float32Array(meeting.fftSize);
@@ -117,12 +108,114 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     return Math.sqrt(sum / samples.length);
   }
 
-  function animate() {
-    const samples = new Float32Array(output.fftSize);
-    output.getFloatTimeDomainData(samples);
-    const glow = Math.min(1, rms(samples) * 6);
-    orb.style.boxShadow = "0 0 " + (20 + glow * 80) + "px " + glow * 24 + "px rgba(255,255,255," + glow * 0.35 + ")";
-    requestAnimationFrame(animate);
+  // Dot-matrix waveform. Each column is the loudness from a moment ago, so speech
+  // scrolls out from the right edge. Gray while the meeting talks, white with blue
+  // tips while eve speaks, a dim breathing center line when it's quiet.
+  const GAP = 14;
+  const HISTORY_RATE = 40;
+  const WHITE = [237, 237, 237];
+  const BLUE = [0, 112, 243];
+  const GRAY_400 = [143, 143, 143];
+  const GRAY_900 = [31, 31, 31];
+  const ctx = canvas.getContext("2d");
+  const outputSamples = new Float32Array(output.fftSize);
+  const meetingSamples = new Float32Array(1024);
+  const history = new Float32Array(256);
+  const weights = { idle: 1, listening: 0, speaking: 0 };
+  let head = 0;
+  let historyClock = 0;
+  let levels = new Float32Array(0);
+  let meetingLevel = 0;
+  let outputLevel = 0;
+  let heardAt = -Infinity;
+  let width = 0;
+  let height = 0;
+  let last = performance.now();
+
+  function resize() {
+    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+
+  const clamp01 = (value) => (value < 0 ? 0 : value > 1 ? 1 : value);
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const rgba = (c, alpha) => "rgba(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + "," + alpha + ")";
+
+  // Fast attack, slower release, so syllables read as distinct peaks.
+  function smooth(current, target, dt) {
+    const rate = target > current ? 28 : 9;
+    return current + (target - current) * (1 - Math.exp(-dt * rate));
+  }
+
+  function tick(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    output.getFloatTimeDomainData(outputSamples);
+    outputLevel = smooth(outputLevel, clamp01((rms(outputSamples) - 0.005) * 6), dt);
+    if (meeting !== null) {
+      meeting.getFloatTimeDomainData(meetingSamples);
+      meetingLevel = smooth(meetingLevel, clamp01((rms(meetingSamples) - 0.01) * 6), dt);
+    }
+    if (meetingLevel > 0.08) heardAt = now;
+
+    const state = playing !== null ? "speaking" : now - heardAt < 600 ? "listening" : "idle";
+    const ease = 1 - Math.exp(-dt * 4.5);
+    for (const key in weights) weights[key] += ((key === state ? 1 : 0) - weights[key]) * ease;
+
+    historyClock += dt;
+    while (historyClock >= 1 / HISTORY_RATE) {
+      historyClock -= 1 / HISTORY_RATE;
+      history[head] = weights.listening * meetingLevel + weights.speaking * outputLevel;
+      head = (head + 1) % history.length;
+    }
+
+    draw(now / 1000);
+    requestAnimationFrame(tick);
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, width, height);
+    const cols = Math.floor((width - GAP * 2) / GAP);
+    const rows = Math.floor((height - GAP * 2) / GAP) | 1;
+    const left = (width - (cols - 1) * GAP) / 2;
+    const top = (height - (rows - 1) * GAP) / 2;
+    const mid = (rows - 1) / 2;
+    if (levels.length !== cols) levels = new Float32Array(cols);
+    const active = weights.listening + weights.speaking;
+    const lit = mix(GRAY_400, WHITE, weights.speaking);
+    const tip = mix(lit, BLUE, weights.speaking * 0.9);
+    const dot = GAP / 9;
+
+    for (let c = 0; c < cols; c++) {
+      const x = c / (cols - 1);
+      const envelope = Math.pow(Math.sin(Math.PI * x), 0.7);
+      const ago = Math.floor((cols - 1 - c) * 0.55);
+      const sample = history[(head - 1 - ago + history.length * 4) % history.length];
+      levels[c] += (clamp01(sample * envelope * 1.25) * active - levels[c]) * 0.35;
+      const reach = levels[c] * mid;
+      const idleGlow = weights.idle * (0.25 + 0.12 * Math.sin(t * 1.4 + (1 - Math.abs(x - 0.5) * 2) * 3));
+
+      for (let r = 0; r < rows; r++) {
+        const dy = Math.abs(r - mid);
+        let color = GRAY_900;
+        let alpha = 0.55;
+        let size = 1.2 * dot;
+        const on = clamp01(reach + 0.6 - dy);
+        if (on > 0) {
+          color = mix(GRAY_900, dy > reach - 1.2 ? tip : lit, on);
+          alpha = 0.55 + on * 0.45;
+          size = (1.2 + on * 0.5) * dot;
+        }
+        if (dy < 0.5) color = mix(color, GRAY_400, idleGlow);
+        ctx.fillStyle = rgba(color, alpha);
+        ctx.fillRect(left + c * GAP - size / 2, top + r * GAP - size / 2, size, size);
+      }
+    }
   }
 
   async function follow() {
@@ -172,7 +265,9 @@ export const VOICE_PAGE_HTML = /* html */ `<!doctype html>
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  animate();
+  resize();
+  window.addEventListener("resize", resize);
+  requestAnimationFrame(tick);
   listen().catch((error) => console.error("could not hear the meeting", error));
   follow();
 })();
