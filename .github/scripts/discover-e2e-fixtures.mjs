@@ -45,7 +45,10 @@ export function discoverE2eFixtures({ registry, fixtures }) {
   const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
   for (const world of worlds) {
     const legs = normalizedFixtures
-      .filter(({ selectedWorlds }) => selectedWorlds.includes(world.name))
+      .filter(
+        ({ selectedWorlds, modelSuiteEvals }) =>
+          selectedWorlds.includes(world.name) && runsInWorldSuites(modelSuiteEvals),
+      )
       .map(({ name, packageName, dir }) => {
         const fixture = { name, package: packageName, dir };
         return world.package === undefined ? fixture : { ...fixture, world_package: world.package };
@@ -131,6 +134,14 @@ function modelSuiteLegs(fixture, models) {
       fixtureModels.findIndex((model) => model.name === a.model_name) -
       fixtureModels.findIndex((model) => model.name === b.model_name),
   );
+}
+
+/**
+ * Whether a fixture has an eval the world suites run. They use the mock model and skip
+ * `real-model` evals, so a fixture whose evals all carry the tag would only build and boot.
+ */
+function runsInWorldSuites(modelSuiteEvals) {
+  return modelSuiteEvals.ids.some((evalId) => !modelSuiteEvals.tagged.includes(evalId));
 }
 
 function normalizeFixture({ name, dir, packageJson, evals = [], realModelEvals = evals }, worlds) {
