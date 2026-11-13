@@ -306,6 +306,12 @@ function trackDeliveries(initial: Handler): Deliveries {
     if (timeoutSeconds === 0) adjust(messageId, 1);
   };
 
+  /** world-local redelivers a message whose handler answers `timeoutSeconds: 0` at once. */
+  const redeliverAtOnce = () => {
+    redeliver -= 1;
+    return Response.json({ timeoutSeconds: 0 });
+  };
+
   const handler: Handler = async (request) => {
     // world-local drops a delivery whose handler throws an AbortError.
     if (closing) throw new DOMException("The test workflow world is closing.", "AbortError");
@@ -315,29 +321,21 @@ function trackDeliveries(initial: Handler): Deliveries {
     adjust(messageId, -1);
     running += 1;
     try {
-      // Only a restart's recovery, or a delivery a test may fail on purpose, reads the body.
-      if (recovering.size === 0 && redeliver === 0) {
-        const response = await handle(request);
-        if (ours === generation) await afterResponse(messageId, response);
-        return response;
+      let delivery = request;
+      // Only a restart's recovery reads the body, to see which run came back.
+      if (recovering.size > 0) {
+        const body = await request.text();
+        const runId = runIdOf(body);
+        if (runId !== undefined) recovering.delete(runId);
+        delivery = new Request(request.url, { body, headers: request.headers, method: "POST" });
       }
-      const body = await request.text();
-      const runId = runIdOf(body);
-      if (runId !== undefined) recovering.delete(runId);
-      let attempt = Number(request.headers.get("x-vqs-message-attempt") ?? "1");
-      for (;;) {
-        const headers = new Headers(request.headers);
-        headers.set("x-vqs-message-attempt", String(attempt));
-        const response = await handle(new Request(request.url, { body, headers, method: "POST" }));
-        if (ours !== generation) return response;
-        if (!response.ok && redeliver > 0) {
-          redeliver -= 1;
-          attempt += 1;
-          continue;
-        }
-        await afterResponse(messageId, response);
-        return response;
-      }
+      const response = await handle(delivery);
+      if (ours !== generation) return response;
+      // A test that fails a delivery on purpose arms its redelivery. The queue redelivers, at
+      // once instead of after its 5s backoff, a message whose handler answers `timeoutSeconds: 0`.
+      const answer = !response.ok && redeliver > 0 ? redeliverAtOnce() : response;
+      await afterResponse(messageId, answer);
+      return answer;
     } finally {
       if (ours === generation) {
         running -= 1;
