@@ -9,10 +9,10 @@ export default defineEval({
     );
     turn.awaitingInput();
     turn.session.requireInteraction({
-      optionIds: ["approve", "cancel"],
+      optionIds: ["approve", "deny"],
       toolName: "run_sql",
     });
-    const cancelled = await turn.session.respondAll("cancel");
+    const cancelled = await turn.session.respondAll("deny");
     cancelled.succeeded();
     t.judge(
       "The reply says the query was not run and offers a cheaper alternative, such as a narrower time range, an aggregate, or a sample.",
