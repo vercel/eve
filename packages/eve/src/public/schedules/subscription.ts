@@ -166,6 +166,11 @@ export interface ScheduleProvider {
   disable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
   invoke(context: ScheduleProviderContext, name: string): Promise<void>;
   delete(context: ScheduleProviderContext, name: string): Promise<boolean>;
+  /**
+   * Throws, or rejects, when the backend can't run `expression`. eve awaits it while it prepares
+   * a create or a timing update, so a model's call fails before a person is asked to approve it.
+   */
+  validateExpression?(expression: ScheduleExpression): void | Promise<void>;
 }
 
 export interface ScheduleClientCreate<TPayload> {
