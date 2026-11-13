@@ -1,10 +1,8 @@
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
-import type { AnyEventRequest } from "@workflow/world";
 import { MockLanguageModelV4 } from "ai/test";
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { z } from "zod";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { forgetSessionLive } from "#definitions/state.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import {
@@ -16,15 +14,11 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import type { StepAttempt, StepFaults } from "#execution/in-process/step-attempts.js";
-import {
-  startTestSession,
-  type TestSessionHostKind,
-} from "#internal/testing/test-session-hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import {
   deployServiceBody,
   deployServiceWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
-import { getWorld } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -33,9 +27,9 @@ import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
 // A session whose turn steps lose their completion after they ran, as a process that exits
-// before its checkpoint saves does, or fail their session writes, so the step runs again. On
-// Workflow the harness drops the step's `step_completed` event and fails the writes; in process,
-// the host's step faults do.
+// before its checkpoint saves does, or fail their session writes, so the step runs again. The
+// in-process host's step faults inject them; the host battery (`session-host/`) checks that
+// Workflow retries the same way.
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 
@@ -60,7 +54,6 @@ export interface InterruptedSession {
 }
 
 export interface InterruptedSessionOptions {
-  readonly host: TestSessionHostKind;
   readonly tools: readonly {
     readonly name: string;
     readonly approval?: boolean;
@@ -75,14 +68,11 @@ export interface InterruptedSessionOptions {
   readonly loseTurnStep?: (completion: number) => boolean;
   /** How many turn-step attempts, from the first, fail their first session write. */
   readonly failTurnStepWrites?: number;
-  /**
-   * The first session write containing this fails, and so does every later write of its attempt.
-   * In process only.
-   */
+  /** The first session write containing this fails, and so does every later write of its attempt. */
   readonly failWriteOf?: string;
   /**
    * A turn step that threw runs again only once its turn is stopped, as a cancel during
-   * Workflow's retry delay finds it. In process only.
+   * Workflow's retry delay finds it.
    */
   readonly holdRetryUntilStopped?: true;
 }
@@ -97,13 +87,6 @@ export async function withInterruptedSession(
   options: InterruptedSessionOptions,
   body: (session: InterruptedSession) => Promise<void>,
 ): Promise<{ prompts: string[]; ran: string[]; observed: number }> {
-  if (
-    options.host === "workflow" &&
-    (options.failWriteOf !== undefined || options.holdRetryUntilStopped !== undefined)
-  )
-    throw new Error(
-      "Only the in-process host's step faults fail a write by its content or hold a retry.",
-    );
   const prompts: string[] = [];
   const ran: string[] = [];
   const model = markMockModel(
@@ -181,10 +164,8 @@ export async function withInterruptedSession(
   const continuationToken = `http:${name}`;
   const events: SessionStreamEvent[] = [];
   await runtime.run(async () => {
-    const faults =
-      options.host === "workflow" ? await loseOnWorkflow(options, loses, failed) : undefined;
     const run = await startTestSession(
-      options.host,
+      "in-process",
       {
         input: { message: "Help Alice with her account." },
         kind: "initial",
@@ -194,11 +175,8 @@ export async function withInterruptedSession(
           "eve.capabilities": { requestInput: true },
         },
       },
-      options.host === "in-process"
-        ? { stepFaults: inProcessFaults(options, loses, failed), workflows: [deployServiceBody()] }
-        : {},
+      { stepFaults: inProcessFaults(options, loses, failed), workflows: [deployServiceBody()] },
     );
-    faults?.watch(run.runId);
     const commandInbox = sessionInboxHookToken(sessionCommandHookToken(run.runId));
     const stream = captureTurnEvents(run);
     try {
@@ -251,7 +229,6 @@ export async function withInterruptedSession(
       });
     } finally {
       stream.dispose();
-      faults?.restore();
       await run.cancel().catch(() => {});
     }
   });
@@ -271,71 +248,6 @@ export async function withInterruptedSession(
     expect(new Set(written).size, type).toBe(written.length);
   }
   return { prompts, ran, observed: seen };
-}
-
-/**
- * Drops the session's turn-step `step_completed` events `loses` picks, and fails the first write of the
- * turn-step attempts `options.failTurnStepWrites` counts. With batching off, every event goes
- * through `create`, so none can skip the fault.
- */
-async function loseOnWorkflow(
-  options: InterruptedSessionOptions,
-  loses: () => boolean,
-  failed: { writes: number },
-) {
-  const world = await getWorld();
-  const createBatch = world.events.createBatch;
-  world.events.createBatch = undefined;
-  const create = world.events.create.bind(world.events);
-  let sessionId: string | undefined;
-  let failingWrites = options.failTurnStepWrites ?? 0;
-  let failNextWrite = false;
-  const getWriter = WritableStream.prototype.getWriter;
-  const writerSpy = vi.spyOn(WritableStream.prototype, "getWriter").mockImplementation(function (
-    this: WritableStream<Uint8Array>,
-  ) {
-    const writer = getWriter.call(this);
-    const write = writer.write.bind(writer);
-    writer.write = async (chunk) => {
-      if (failNextWrite) {
-        failNextWrite = false;
-        failed.writes += 1;
-        throw new Error("The session stream is unavailable");
-      }
-      return await write(chunk);
-    };
-    return writer;
-  });
-  const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-    const [runId, event] = args as [string, AnyEventRequest];
-    const turnStep =
-      (event.eventType === "step_started" || event.eventType === "step_completed") &&
-      String((event.eventData as { stepName?: string }).stepName).includes("turnStep");
-    if (
-      runId === sessionId &&
-      event.eventType === "step_started" &&
-      turnStep &&
-      failingWrites > 0
-    ) {
-      failingWrites -= 1;
-      failNextWrite = true;
-    }
-    if (runId === sessionId && event.eventType === "step_completed" && turnStep && loses()) {
-      forgetSessionLive(runId);
-      throw new Error("Process exited after publication, before checkpoint");
-    }
-    return await create(...args);
-  });
-  return {
-    watch(runId: string) {
-      sessionId = runId;
-    },
-    restore() {
-      spy.mockRestore();
-      writerSpy.mockRestore();
-      world.events.createBatch = createBatch;
-    },
-  };
 }
 
 /** The in-process host's step faults for `options`. */

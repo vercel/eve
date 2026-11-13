@@ -1,3 +1,4 @@
+// @linux-only: kernel reactions/memos; in-process
 import { calls, deliveries } from "#protocol/session-projection/public-view.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";

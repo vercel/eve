@@ -1,3 +1,4 @@
+// @linux-only: invocation status mapping
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";

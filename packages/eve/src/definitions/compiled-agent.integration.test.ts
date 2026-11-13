@@ -1,3 +1,4 @@
+// @linux-only: definition ordering; compiled from memory
 import { describe, expect, it } from "vitest";
 
 import { defineDynamic } from "#dynamic/definition.js";

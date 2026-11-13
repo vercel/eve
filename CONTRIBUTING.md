@@ -65,8 +65,9 @@ This runs the `eve` package build in watch mode alongside the [`apps/fixtures/we
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests
 pnpm test:integration   # integration tests
-pnpm test:scenario      # scenario tests (Turbo builds prerequisites)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
+pnpm test:scenario      # scenarios that run eve: eve dev, eve start, real files and shells (Turbo builds prerequisites)
+pnpm test:build         # building and packaging apps with eve (Turbo builds prerequisites)
+pnpm test:public-types  # type checks of the published declarations (Turbo builds prerequisites)
 pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```

@@ -1,3 +1,4 @@
+// @linux-only: workflow-tool hook cancellation; in-process
 import { describe, expect, it, vi } from "vitest";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { resumeRoutedHook } from "#execution/hosts.js";

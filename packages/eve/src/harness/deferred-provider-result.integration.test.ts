@@ -1,3 +1,4 @@
+// @linux-only: late provider results
 import { APICallError, jsonSchema, type LanguageModel } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";

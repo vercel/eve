@@ -1,3 +1,4 @@
+// @linux-only: MCP trace context
 import {
   context as apiContext,
   trace as apiTrace,

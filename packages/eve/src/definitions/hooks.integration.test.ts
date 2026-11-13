@@ -1,3 +1,4 @@
+// @linux-only: hook ctx.continue(); in-process
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";

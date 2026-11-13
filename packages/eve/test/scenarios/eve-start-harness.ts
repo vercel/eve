@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { expect } from "vitest";
+
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 
 export interface RunningEveStart {
@@ -60,7 +62,7 @@ export async function startPackagedEveStart(appRoot: string): Promise<RunningEve
     stderr: () => stderr,
     stdout: () => stdout,
     async stop() {
-      await stopChildProcess(child);
+      await stopChildProcess(child, () => stderr);
     },
     url,
   };
@@ -113,22 +115,34 @@ function parseStartUrl(output: string): string | undefined {
   return match?.[1];
 }
 
-async function stopChildProcess(child: ChildProcess): Promise<void> {
+/** Well under `eve start`'s 25s SIGKILL grace, which a server that hangs on exit would reach. */
+const STOP_TIMEOUT_MS = 10_000;
+
+/**
+ * Sends SIGTERM and waits for `eve start` to exit on its own, as it does once its server has
+ * closed. A process that outlives the timeout fails the test, after its group is killed. In a
+ * test that fails as a soft assertion, so a `finally` that stops the server keeps the test's own
+ * error; outside one, in a hook, it throws.
+ */
+async function stopChildProcess(child: ChildProcess, readStderr?: () => string): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      // The whole group, so a server child that outlives `eve start` dies too.
-      process.kill(-child.pid!, "SIGKILL");
-      resolve();
-    }, 10_000);
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  let timer: NodeJS.Timeout | undefined;
+  child.kill("SIGTERM");
+  const stopped = await Promise.race([
+    exited.then(() => true),
+    new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), STOP_TIMEOUT_MS))),
+  ]);
+  clearTimeout(timer);
+  if (stopped) return;
 
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
+  // The whole group, so a server child that outlives `eve start` dies too.
+  process.kill(-child.pid!, "SIGKILL");
+  await exited;
+  const message = `eve start did not exit within ${STOP_TIMEOUT_MS / 1000}s of SIGTERM.\n\nstderr:\n${readStderr?.() ?? ""}`;
+  if (expect.getState().currentTestName === undefined) throw new Error(message);
+  expect.soft(stopped, message).toBe(true);
 }

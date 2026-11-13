@@ -1,3 +1,4 @@
+// @linux-only: forwarded principal baggage
 import { describe, expect, it, vi } from "vitest";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 

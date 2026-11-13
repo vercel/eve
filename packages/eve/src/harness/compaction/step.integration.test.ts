@@ -1,3 +1,4 @@
+// @linux-only: compaction model calls
 import { APICallError, jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";

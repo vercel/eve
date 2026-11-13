@@ -1,3 +1,4 @@
+// @linux-only: step retry semantics; in-process
 import { expect, it, onTestFinished, vi } from "vitest";
 import {
   finalizeInstrumentationProviders,
@@ -11,8 +12,8 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 // A turn step that published and then lost its checkpoint, or whose stream died, runs again from
 // the checkpoint. The in-process host loses the step's completion after it ran, as a process that
 // exits before its checkpoint saves does, or fails its writes, and runs it again as its next
-// attempt. What Workflow itself does with a lost completion or a step that fails every attempt is
-// in `in-process/step-retry.integration.test.ts`.
+// attempt. That Workflow retries a lost completion or a step that fails every attempt the same way
+// is the host battery's (`internal/testing/session-host/`).
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -55,7 +56,6 @@ async function converse(lost: number | undefined) {
   const { prompts, ran } = await withInterruptedSession(
     `replay-sweep-${lost ?? "none"}`,
     {
-      host: "in-process",
       loseTurnStep: (completion) => {
         completions = completion;
         return completion === lost;
@@ -117,7 +117,6 @@ it("does not run an approved call again when the step that ran it is interrupted
   const { prompts, ran } = await withInterruptedSession(
     "retry-approved",
     {
-      host: "in-process",
       // The step that runs the approved deploy asks for a notify approval, then loses its
       // checkpoint.
       interruptAfter: { nth: 2, type: "interaction.opened" },
@@ -169,7 +168,6 @@ it("fails the turn, not the session, when its steps are interrupted too many tim
   const { ran, prompts } = await withInterruptedSession(
     "retry-too-often",
     {
-      host: "in-process",
       // Each of the first turn's steps loses its first completion; its retry completes.
       loseTurnStep: (completion) => completion % 2 === 1 && completion <= 7,
       respond: (prompt, call) =>
@@ -203,7 +201,6 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
   const { prompts, ran } = await withInterruptedSession(
     "retry-approved-exhausted",
     {
-      host: "in-process",
       loseTurnStep: (completion) => completion >= 2 && completion <= 5,
       respond: (prompt, call) =>
         prompt.includes("Check what happened")
@@ -264,7 +261,6 @@ it("retries a step whose stream write failed, and each model attempt settles onc
   const { prompts } = await withInterruptedSession(
     name,
     {
-      host: "in-process",
       // The answer's first content write fails; the host retries the step with a fresh stream.
       failWriteOf: '"content.',
       respond: () => textStreamResult("Alice's account is ready."),
@@ -288,7 +284,6 @@ it("cancels a turn stopped while its step kept failing, and the session goes on"
   const { prompts } = await withInterruptedSession(
     "retry-exhausted-stopped",
     {
-      host: "in-process",
       failTurnStepWrites: 4,
       holdRetryUntilStopped: true,
       respond: () => textStreamResult("Done."),

@@ -1,3 +1,4 @@
+// @linux-only: tool stubs through eve__tool
 import { mintClearance } from "#harness/clearance.js";
 import { describe, expect, it } from "vitest";
 

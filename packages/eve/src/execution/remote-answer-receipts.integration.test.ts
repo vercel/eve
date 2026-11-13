@@ -1,3 +1,4 @@
+// @linux-only: remote answer receipts
 import { afterEach, expect, it, vi } from "vitest";
 
 import { SessionIdKey } from "#context/keys.js";

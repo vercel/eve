@@ -1,3 +1,4 @@
+// @linux-only: failed sign-in
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";

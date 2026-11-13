@@ -1,3 +1,4 @@
+// @linux-only: test harness artifact isolation (memory)
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
 

@@ -1,3 +1,4 @@
+// @linux-only: descendant stream auth proxies
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import { StreamExpiredError } from "#compiled/@workflow/errors/index.js";

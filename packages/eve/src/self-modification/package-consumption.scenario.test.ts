@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { ensureScenarioEveTarballPath } from "#internal/testing/scenario-app.js";
 
 import { DEPLOYED_SELF_MODIFICATION_CONFIG_PATH, renderSelfModificationConfig } from "./setup.js";
 
@@ -36,26 +38,6 @@ async function run(
       { cause: error },
     );
   }
-}
-
-async function pack(
-  packageDirectory: string,
-  destination: string,
-  prefix: string,
-): Promise<string> {
-  await run(
-    "pnpm",
-    ["pack", "--config.ignore-scripts=true", "--pack-destination", destination],
-    packageDirectory,
-  );
-  const tarball = (await readdir(destination)).find(
-    (entry) => entry.startsWith(`${prefix}-`) && entry.endsWith(".tgz"),
-  );
-
-  if (tarball === undefined) {
-    throw new Error(`Expected a ${prefix}-*.tgz tarball in ${destination}.`);
-  }
-  return join(destination, tarball);
 }
 
 async function writeAppFile(
@@ -124,12 +106,11 @@ describe("packed package consumption", () => {
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
-    const tarballsRoot = join(root, "tarballs");
     const appRoot = join(root, "app");
-    await mkdir(tarballsRoot, { recursive: true });
     await mkdir(appRoot, { recursive: true });
 
-    const eveTarball = await pack(packageRoot, tarballsRoot, "eve");
+    // The scenario setup packs eve the same way: lifecycle scripts off.
+    const eveTarball = await ensureScenarioEveTarballPath();
     await writeAppFile(
       appRoot,
       "package.json",

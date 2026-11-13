@@ -1,3 +1,4 @@
+// @linux-only: connection event route logic
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleConnectionEventRequest } from "#internal/nitro/routes/connection-events.js";

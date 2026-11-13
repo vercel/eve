@@ -1,3 +1,4 @@
+// @linux-only: delivery dedup on Workflow; in-memory schedules
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";

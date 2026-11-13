@@ -1,3 +1,4 @@
+// @linux-only: non-turn step retry adoption
 import { expect, it, onTestFinished } from "vitest";
 import { registerHost, registerSessionLineStore } from "#execution/hosts.js";
 import { createMemoryLineStore } from "#execution/in-process/line-store.js";

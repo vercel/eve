@@ -1,3 +1,4 @@
+// @linux-only: OAuth token sharing
 import { afterEach, expect, it, vi } from "vitest";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 const stored = vi.hoisted(() => new Map<string, string>());
