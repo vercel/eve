@@ -1,5 +1,21 @@
 # eve
 
+## 1.0.0-rc.15
+
+Released 2026-11-13 · [Compare with 1.0.0-rc.14](https://github.com/vercel/eve/compare/eve%401.0.0-rc.14...eve%401.0.0-rc.15)
+
+### Features
+
+- Agents can now be published as Agent2Agent (A2A) v1.0 servers with `a2aChannel` from `eve/channels/a2a`, so other agents can discover them from an Agent Card and delegate durable, streaming tasks over JSON-RPC. ([#5693](https://github.com/vercel/eve/pull/5693))
+- `mcpChannel` accepts a `plainHttp` option for plain HTTP requests from a TLS-terminating proxy or a private network, which were otherwise refused off loopback. ([#5700](https://github.com/vercel/eve/pull/5700))
+- Custom channels can answer pending approvals and questions from typed text, as eve's own channels do.
+  Pass `answerText` to `send()` when the model reads a wrapped message, such as one with a speaker prefix, and show the request a reply answers with `nextPrompt(view)` from `eve/events`. ([#5861](https://github.com/vercel/eve/pull/5861))
+
+### Bug Fixes
+
+- A successful `endsTurn` call now ends the turn even when the model calls other tools in the same step.
+  Those calls still run, including ones that wait for an approval, a sign-in, or a workflow, and the turn ends once they all settle, whatever their outcome. Before, the turn ended only when every call in the step could end it, so `no_reply` called beside another tool started another model call whose text was posted as the reply. ([#6371](https://github.com/vercel/eve/pull/6371))
+
 ## 1.0.0-rc.14
 
 Released 2026-11-13 · [Compare with 1.0.0-rc.13](https://github.com/vercel/eve/compare/eve%401.0.0-rc.13...eve%401.0.0-rc.14)

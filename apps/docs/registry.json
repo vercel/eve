@@ -444,9 +444,17 @@
       "type": "registry:item",
       "title": "memco",
       "description": "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
-      "dependencies": ["@memco/eve"],
-      "envVars": { "MEMCO_API_TOKEN": "" },
-      "meta": { "eve": { "requires": ">=1.0.0-rc.10 <2.0.0" } },
+      "dependencies": [
+        "@memco/eve"
+      ],
+      "envVars": {
+        "MEMCO_API_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=1.0.0-rc.10 <2.0.0"
+        }
+      },
       "files": [
         {
           "path": "registry/memory/memco.ts",
@@ -460,9 +468,17 @@
       "type": "registry:item",
       "title": "claude-mem",
       "description": "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
-      "dependencies": ["claude-mem"],
-      "envVars": { "CLAUDE_MEM_API_KEY": "" },
-      "meta": { "eve": { "requires": ">=0.84.0" } },
+      "dependencies": [
+        "claude-mem"
+      ],
+      "envVars": {
+        "CLAUDE_MEM_API_KEY": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.84.0"
+        }
+      },
       "files": [
         {
           "path": "registry/memory/claude-mem.ts",
@@ -2909,7 +2925,9 @@
       "type": "registry:item",
       "title": "Recall.ai",
       "description": "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
-      "dependencies": ["@eve/recall@^0.1.0-rc.0"],
+      "dependencies": [
+        "@eve/recall@^0.1.0-rc.0"
+      ],
       "envVars": {
         "RECALL_API_KEY": "",
         "RECALL_WORKSPACE_VERIFICATION_SECRET": ""
@@ -2924,7 +2942,8 @@
       "meta": {
         "eve": {
           "docs": "/docs/channels/recall",
-          "implementation": "native"
+          "implementation": "native",
+          "requires": ">=1.0.0-rc.15"
         }
       }
     },
