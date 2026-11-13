@@ -224,13 +224,11 @@ export class A2aTaskExecution {
     if (run === undefined) return empty;
 
     const view = await readSessionView(request.contextId);
-    const options = this.#projection({
-      historyLength: request.historyLength,
-      includeArtifacts: request.includeArtifacts ?? false,
-    });
     const after =
       request.statusTimestampAfter === undefined ? 0 : Date.parse(request.statusTimestampAfter);
-    const matching = contextTasks(view, request.contextId, options).filter(
+    // Filter and page on status alone; only the page's tasks carry history and artifacts.
+    const statusOnly = this.#projection({ historyLength: 0, includeArtifacts: false });
+    const matching = contextTasks(view, request.contextId, statusOnly).filter(
       (entry) =>
         (request.status === undefined ||
           request.status === "TASK_STATE_UNSPECIFIED" ||
@@ -248,7 +246,16 @@ export class A2aTaskExecution {
       nextPageToken:
         more && last !== undefined ? encodePageToken(request.contextId, last.at, last.seq) : "",
       pageSize,
-      tasks: page.map((entry) => entry.task),
+      tasks: page.map((entry) =>
+        projectTask(
+          view,
+          entry.ref,
+          this.#projection({
+            historyLength: request.historyLength,
+            includeArtifacts: request.includeArtifacts ?? false,
+          }),
+        ),
+      ),
       totalSize: matching.length,
     };
   }

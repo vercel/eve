@@ -21,6 +21,7 @@ import {
 import type {
   DeliveryRow,
   InteractionRow,
+  ResponseRow,
   SessionView,
   TurnRow,
 } from "#protocol/session-projection/tables.js";
@@ -262,11 +263,7 @@ function agentMessage(address: TaskAddress, messageId: string, parts: readonly P
 
 /** When the turn last went back to work: its start, or the latest prompt it was answered on. */
 function resumedAt(view: SessionView, turn: TurnRow): string {
-  const answered = Object.values(view.interactions).flatMap((row) =>
-    row.endedAt !== undefined && interaction(view, row.interactionId)?.turnId === turn.turnId
-      ? [row.endedAt]
-      : [],
-  );
+  const answered = indexOf(view).endedPromptsByTurn.get(turn.turnId) ?? [];
   return latest([turn.startedAt, ...answered]) ?? turn.startedAt;
 }
 
@@ -279,13 +276,62 @@ function latest(times: readonly string[]): string | undefined {
 
 /** The turn's open prompts no admitted answer covers yet, oldest first. */
 export function openPromptsForTurn(view: SessionView, turnId: string): readonly InteractionRow[] {
+  return indexOf(view).openPromptsByTurn.get(turnId) ?? [];
+}
+
+/**
+ * A view's rows grouped by the turn they belong to, built once per view and position. Projecting
+ * a task looks its turn up here instead of scanning the session, so projecting every task in a
+ * context, as `ListTasks` does, costs time linear in the session rather than quadratic.
+ */
+interface ViewIndex {
+  readonly position: number;
+  readonly deliveriesByTurn: ReadonlyMap<string, readonly DeliveryRow[]>;
+  readonly responsesByTurn: ReadonlyMap<string, readonly ResponseRow[]>;
+  readonly openPromptsByTurn: ReadonlyMap<string, readonly InteractionRow[]>;
+  readonly endedPromptsByTurn: ReadonlyMap<string, readonly string[]>;
+}
+
+const viewIndexes = new WeakMap<SessionView, ViewIndex>();
+
+function indexOf(view: SessionView): ViewIndex {
+  const known = viewIndexes.get(view);
+  // A followed view folds more lines into the same object: rebuild once it has moved on.
+  if (known !== undefined && known.position === view.position) return known;
+  const push = <T>(map: Map<string, T[]>, key: string | undefined, value: T) => {
+    if (key === undefined) return;
+    const list = map.get(key);
+    if (list === undefined) map.set(key, [value]);
+    else list.push(value);
+  };
+  const deliveriesByTurn = new Map<string, DeliveryRow[]>();
+  for (const row of Object.values(view.deliveries)) push(deliveriesByTurn, row.turnId, row);
+  const responsesByTurn = new Map<string, ResponseRow[]>();
+  for (const row of Object.values(view.responses)) {
+    push(responsesByTurn, interaction(view, row.interactionId)?.turnId, row);
+  }
   const answered = answeredInteractionIds(view);
-  return [...openRequests(view), ...openSignIns(view)]
-    .filter(
-      (row) =>
-        !answered.has(row.interactionId) && interaction(view, row.interactionId)?.turnId === turnId,
-    )
-    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const openPromptsByTurn = new Map<string, InteractionRow[]>();
+  for (const row of [...openRequests(view), ...openSignIns(view)]) {
+    if (answered.has(row.interactionId)) continue;
+    push(openPromptsByTurn, interaction(view, row.interactionId)?.turnId, row);
+  }
+  for (const rows of openPromptsByTurn.values())
+    rows.sort((a, b) => a.introducedAt - b.introducedAt);
+  const endedPromptsByTurn = new Map<string, string[]>();
+  for (const row of Object.values(view.interactions)) {
+    if (row.endedAt === undefined) continue;
+    push(endedPromptsByTurn, interaction(view, row.interactionId)?.turnId, row.endedAt);
+  }
+  const index = {
+    deliveriesByTurn,
+    endedPromptsByTurn,
+    openPromptsByTurn,
+    position: view.position,
+    responsesByTurn,
+  };
+  viewIndexes.set(view, index);
+  return index;
 }
 
 /**
@@ -402,8 +448,12 @@ function taskHistory(
   });
   const entries: { readonly at: number; readonly message: Message }[] = [];
   const listed = new Set<string>();
-  for (const row of Object.values(view.deliveries)) {
-    if (turnId === undefined ? row.deliveryId !== ref.deliveryId : row.turnId !== turnId) continue;
+  const index = indexOf(view);
+  const rows =
+    turnId === undefined
+      ? [view.deliveries[ref.deliveryId]].filter((row) => row !== undefined)
+      : (index.deliveriesByTurn.get(turnId) ?? []);
+  for (const row of rows) {
     const parts = (row.parts ?? []).flatMap((part): Part[] =>
       part.kind === "text"
         ? [{ mediaType: "text/plain", text: part.text }]
@@ -416,10 +466,9 @@ function taskHistory(
     entries.push({ at: row.introducedAt, message: userMessage(row.deliveryId, parts) });
   }
   if (turnId !== undefined) {
-    for (const response of Object.values(view.responses)) {
+    for (const response of index.responsesByTurn.get(turnId) ?? []) {
       // A typed answer that arrived as a message is listed already, with what was typed.
       if (listed.has(response.deliveryId)) continue;
-      if (interaction(view, response.interactionId)?.turnId !== turnId) continue;
       const text = answerText(view, response.interactionId, response.value);
       if (text === undefined) continue;
       entries.push({
@@ -448,6 +497,8 @@ function answerText(
 
 /** One task of a context with its `ListTasks` sort key. */
 export interface ContextTask {
+  readonly ref: TaskRef;
+  /** The task as `options` projected it; `ListTasks` re-projects the page it returns. */
   readonly task: Task;
   /** Status time in epoch milliseconds; 0 when unknown. */
   readonly at: number;
@@ -491,9 +542,10 @@ export function contextTasks(
     ) {
       continue;
     }
-    const task = projectTask(view, { deliveryId: row.deliveryId, sessionId }, options);
+    const ref = { deliveryId: row.deliveryId, sessionId };
+    const task = projectTask(view, ref, options);
     const at = task.status.timestamp === undefined ? 0 : Date.parse(task.status.timestamp);
-    tasks.push({ at, seq: row.introducedAt, task });
+    tasks.push({ at, ref, seq: row.introducedAt, task });
   }
   return tasks.sort(compareContextTasks);
 }
