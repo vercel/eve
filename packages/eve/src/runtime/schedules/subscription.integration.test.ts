@@ -236,6 +236,10 @@ describe("schedule creation and invocation", () => {
             list: () => "user-approval",
             // A request-only policy object gates no responses, as for one collection.
             enable: { request: () => "user-approval" },
+            delete: {
+              request: () => "user-approval",
+              response: () => ({ status: "allowed" }),
+            },
             create: {
               request: () => "user-approval",
               response: ({ payload }) =>
@@ -341,17 +345,51 @@ describe("schedule creation and invocation", () => {
       ]);
       expect(new Set(created.mock.calls.map(([context]) => context.namespace)).size).toBe(2);
 
-      // The channel's response policy gates the shared tool; the personal scope allows.
+      // The channel's response policy gates the shared tool. The personal scope sets none, so
+      // it keeps the default: only the requester answers, whoever else is in the conversation.
+      const bob = { ...alice, principalId: "bob" };
+      const answer = (
+        toolInput: unknown,
+        requester: typeof alice | null,
+        responder: typeof alice,
+        callId = "any",
+      ) =>
+        ({
+          request: { callId, toolInput, principal: requester },
+          response: { decision: "approve", principal: responder },
+        }) as never;
+      const requesterOnly = {
+        status: "rejected",
+        reason: "Only the person who requested this action can respond to this approval.",
+      };
       const response = (create.approval as ApprovalConfiguration).response!;
       await expect(request(policyContext("gated", input("channel")))).resolves.toBe(
         "user-approval",
       );
-      await expect(
-        response({ request: { callId: "gated", toolInput: input("channel") } } as never),
-      ).resolves.toEqual({ status: "allowed" });
-      await expect(
-        response({ request: { callId: "any", toolInput: input("personal") } } as never),
-      ).resolves.toEqual({ status: "allowed" });
+      await expect(response(answer(input("channel"), alice, bob, "gated"))).resolves.toEqual({
+        status: "allowed",
+      });
+      await expect(response(answer(input("personal"), alice, bob))).resolves.toEqual(requesterOnly);
+      await expect(response(answer(input("personal"), alice, alice))).resolves.toEqual({
+        status: "allowed",
+      });
+      // An anonymous request has no requester to match, as without a response policy.
+      await expect(response(answer(input("personal"), null, bob))).resolves.toEqual({
+        status: "allowed",
+      });
+      // The same holds for an operation without a prepared write.
+      const deleteResponse = (tools.schedule__workflows__delete!.approval as ApprovalConfiguration)
+        .response!;
+      const named = (scope: string) => ({ scope, name: records[scope]!.name });
+      await expect(deleteResponse(answer(named("channel"), alice, bob))).resolves.toEqual({
+        status: "allowed",
+      });
+      await expect(deleteResponse(answer(named("personal"), alice, bob))).resolves.toEqual(
+        requesterOnly,
+      );
+      await expect(deleteResponse(answer(named("personal"), alice, alice))).resolves.toEqual({
+        status: "allowed",
+      });
 
       expect(
         (tools.schedule__workflows__enable!.approval as ApprovalConfiguration).response,

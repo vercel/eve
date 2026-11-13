@@ -8,6 +8,7 @@ import {
   type ApprovalPolicy,
   type ApprovalResponsePolicy,
 } from "#approval/definition.js";
+import { requesterOnlyResponse } from "#approval/requester-only.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -204,13 +205,14 @@ function scheduleTools(
     if (members.some(gates))
       approval.response = async (context) => {
         const policy = policyOf(memberOf(context.request.toolInput));
+        // A scope without a response policy keeps the default: only the requester answers.
         return typeof policy === "object" && policy.response !== undefined
           ? await policy.response(context)
-          : { status: "allowed" };
+          : requesterOnlyResponse(context);
       };
     return approval;
   };
-  // A response policy on any scope gates the shared tool; scopes without one allow the response.
+  // A response policy on any scope gates the shared tool; the other scopes stay requester-only.
   const gatesResponses = (operation: "create" | "update") =>
     members.some((member) => {
       const policy = member.definition.approval?.[operation];
@@ -417,8 +419,9 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
   if (gatesResponses)
     approval.response = async (context) => {
       const policy = policyOf(context.request.toolInput);
+      // A scope without a response policy keeps the default: only the requester answers.
       if (typeof policy === "function" || policy.response === undefined)
-        return { status: "allowed" };
+        return requesterOnlyResponse(context);
       // Each key family is written by one typed preparer; restore that type after durable suspension.
       const prepared = loadContext().get(PreparedWritesKey)?.[keyFor(context.request.callId)] as
         | TWrite
