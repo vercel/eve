@@ -163,6 +163,8 @@ jobs:
       # This job builds agents whose sandboxes pull eve's default image.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
+        with:
+          pull: "true"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
