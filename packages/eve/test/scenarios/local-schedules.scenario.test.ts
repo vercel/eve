@@ -12,7 +12,7 @@ import {
   startEveDev,
   waitForCondition,
   type RunningEveDev,
-} from "./dev-server-harness.js";
+} from "#internal/testing/dev-server-harness.js";
 import { DEV_SERVER_SCENARIO_TIMEOUT_MS } from "./dev-server-descriptors.js";
 
 const scenarioApp = useScenarioApp();

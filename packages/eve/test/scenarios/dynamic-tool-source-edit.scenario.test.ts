@@ -12,7 +12,7 @@ import {
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
   TRANSACTIONAL_REBUILD_DESCRIPTOR,
 } from "./dev-server-descriptors.js";
-import { startEveDev, waitForCondition } from "./dev-server-harness.js";
+import { startEveDev, waitForCondition } from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
