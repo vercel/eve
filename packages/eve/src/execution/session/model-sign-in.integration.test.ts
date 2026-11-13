@@ -1,7 +1,9 @@
 // @linux-only: sign-in flow
+import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineDynamic, type DynamicModelContext } from "#dynamic/definition.js";
 import {
@@ -10,7 +12,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
-import { textStreamResult } from "#internal/testing/approval-resume.js";
+import { textStreamResult, usage } from "#internal/testing/approval-resume.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
@@ -134,11 +136,94 @@ describe("a dynamic model that needs a sign-in", () => {
       }
     });
   });
+
+  it("asks again when a compaction summary calls requireAuth, and answers after sign-in", async () => {
+    const billing = billingProvider({ token: "revoked-token" });
+    const runtime = await billingRuntime("model-sign-in-compaction", billing, {
+      bigFirstAnswer: true,
+    });
+
+    await runtime.run(async () => {
+      const continuationToken = "http:model-sign-in-compaction";
+      const run = await startBillingRun(continuationToken);
+      const stream = captureEvents(run);
+      try {
+        await stream.nextUntil("first answer", isTurnSettled);
+        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          auth: alice,
+          kind: "send",
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          payload: { message: "And yesterday's?" },
+        });
+        const asked = await stream.nextUntil("sign-in", isSignInOpened);
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+        expect(filterEventsByType(asked, "turn.settled")).toHaveLength(0);
+
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [billingCallback(signInId(asked))],
+        });
+        const answered = await stream.nextUntil("answer", isTurnSettled);
+        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
+          { data: { outcome: "completed" } },
+        ]);
+        expect(billing.summaryTokens).toEqual(["revoked-token", "billing-token-1"]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+});
+
+describe("dynamic values with plain providers", () => {
+  it("gives each value its own provider's token", async () => {
+    const seen: Record<string, string> = {};
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(async (ctx: DynamicModelContext) => {
+            seen.model = (
+              await ctx.getToken({ getToken: async () => ({ token: "model-key" }) })
+            ).token;
+            return { model: plainModel(), modelContextWindowTokens: 200_000 };
+          }),
+        }),
+        name: "plain-providers",
+      },
+      modules: [
+        {
+          logicalPath: "instructions/docs.ts",
+          loadNamespace: async () => ({
+            default: defineDynamic(async (ctx: DynamicModelContext) => {
+              seen.docs = (
+                await ctx.getToken({ getToken: async () => ({ token: "docs-key" }) })
+              ).token;
+              return "Answer from the docs.";
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await startBillingRun("http:plain-providers");
+      const stream = captureEvents(run);
+      try {
+        await stream.nextUntil("answer", isTurnSettled);
+        expect(seen).toEqual({ docs: "docs-key", model: "model-key" });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
 });
 
 interface BillingProvider {
   readonly auth: AuthorizationDefinition<{ nonce: string }>;
   readonly starts: () => number;
+  readonly summaryTokens: string[];
   readonly tokensSeen: string[];
 }
 
@@ -175,18 +260,26 @@ function billingProvider(initial: { readonly token?: string } = {}): BillingProv
       },
     },
     starts: () => starts,
+    summaryTokens: [],
     tokensSeen: [],
   };
 }
 
 /** This agent's model reads the caller's token before every call. */
-async function billingRuntime(name: string, billing: BillingProvider) {
+async function billingRuntime(
+  name: string,
+  billing: BillingProvider,
+  options: { readonly bigFirstAnswer?: boolean } = {},
+) {
   return await createTestRuntime({
     agent: {
       definition: defineAgent({
         model: defineDynamic(async (ctx: DynamicModelContext) => {
           const { token } = await ctx.getToken(billing.auth);
-          return { model: billedModel(ctx, billing, token), modelContextWindowTokens: 200_000 };
+          return {
+            model: billedModel(ctx, billing, token, options),
+            modelContextWindowTokens: 200_000,
+          };
         }),
       }),
       name,
@@ -194,12 +287,27 @@ async function billingRuntime(name: string, billing: BillingProvider) {
   });
 }
 
-function billedModel(ctx: DynamicModelContext, billing: BillingProvider, token: string) {
+function billedModel(
+  ctx: DynamicModelContext,
+  billing: BillingProvider,
+  token: string,
+  options: { readonly bigFirstAnswer?: boolean },
+) {
   return markMockModel(
     new MockLanguageModelV4({
-      doStream: async () => {
+      doStream: async ({ prompt }) => {
+        if (JSON.stringify(prompt).includes("previous checkpoint")) {
+          billing.summaryTokens.push(token);
+          if (token === "revoked-token") ctx.requireAuth(billing.auth);
+          return textStreamResult("Checkpoint: Alice asked for today's issues.");
+        }
         billing.tokensSeen.push(token);
-        if (token === "revoked-token") ctx.requireAuth(billing.auth);
+        if (options.bigFirstAnswer === true && billing.tokensSeen.length === 1) {
+          return bigStreamResult("Here is the summary.");
+        }
+        if (token === "revoked-token" && options.bigFirstAnswer !== true) {
+          ctx.requireAuth(billing.auth);
+        }
         return textStreamResult("Here is the summary.");
       },
       modelId: "billed-model",
@@ -245,4 +353,41 @@ function signInId(events: readonly SessionStreamEvent[]): string {
   );
   if (opened === undefined) throw new Error("Expected a sign-in interaction.");
   return opened.data.interactionId;
+}
+
+/** A reply whose usage fills the context window, so the next step compacts first. */
+function bigStreamResult(text: string): ReturnType<typeof textStreamResult> {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start", warnings: [] },
+        { id: "answer", type: "text-start" },
+        { delta: text, id: "answer", type: "text-delta" },
+        { id: "answer", type: "text-end" },
+        {
+          finishReason: { raw: undefined, unified: "stop" },
+          type: "finish",
+          usage: {
+            ...usage,
+            inputTokens: {
+              cacheRead: undefined,
+              cacheWrite: undefined,
+              noCache: 200_000,
+              total: 200_000,
+            },
+          },
+        },
+      ],
+    }),
+  };
+}
+
+function plainModel() {
+  return markMockModel(
+    new MockLanguageModelV4({
+      doStream: async () => textStreamResult("Here is the answer."),
+      modelId: "plain-model",
+      provider: "eve-test",
+    }),
+  );
 }

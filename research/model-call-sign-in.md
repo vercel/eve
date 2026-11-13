@@ -23,6 +23,7 @@ each model call, and eve runs the same sign-in flow as for a tool.
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { defineAgent, defineDynamic } from "eve";
 import {
+  ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
   defineInteractiveAuthorization,
 } from "eve/connections";
@@ -35,13 +36,15 @@ const anthropicKey = defineInteractiveAuthorization({
     if (!key) throw new ConnectionAuthorizationRequiredError("anthropic");
     return { token: key };
   },
-  // The page saves the key, then redirects to `callbackUrl`.
-  startAuthorization: async ({ callbackUrl }) => ({
-    challenge: { url: anthropicKeyPageUrl(callbackUrl) },
+  // The page signs the person in, saves the key for `principal`, then redirects to `callbackUrl`.
+  startAuthorization: async ({ principal, callbackUrl }) => ({
+    challenge: { url: anthropicKeyPageUrl(principal, callbackUrl) },
   }),
-  completeAuthorization: async ({ principal }) => ({
-    token: (await loadAnthropicKey(principal))!,
-  }),
+  completeAuthorization: async ({ principal }) => {
+    const key = await loadAnthropicKey(principal);
+    if (!key) throw new ConnectionAuthorizationFailedError("anthropic", { reason: "no_key_saved" });
+    return { token: key };
+  },
 });
 
 export default defineAgent({
@@ -58,8 +61,9 @@ export default defineAgent({
 | `ctx.requireAuth(provider, options?)` | Drops the cached token and starts a sign-in. Never returns. |
 
 Both accept the same providers and options as their tool counterparts, and share eve's token
-cache and callback route. eve keys these sign-ins under the agent, not under a tool:
-`connect("x/y")` becomes `agent__x_y`.
+cache and callback route. eve keys these sign-ins under the agent: `connect("x/y")` becomes
+`agent__x_y`. eve keys a provider without Connect metadata under its dynamic value, so two
+values never share its token.
 
 eve doesn't read provider errors. When a provider rejects a token, the app calls
 `ctx.requireAuth(provider)`, for example from AI SDK middleware around the model.

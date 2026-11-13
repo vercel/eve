@@ -500,6 +500,7 @@ When the model call itself needs the caller's credential, get it in the agent's 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { defineAgent, defineDynamic } from "eve";
 import {
+  ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
   defineInteractiveAuthorization,
 } from "eve/connections";
@@ -512,13 +513,15 @@ const anthropicKey = defineInteractiveAuthorization({
     if (!key) throw new ConnectionAuthorizationRequiredError("anthropic");
     return { token: key };
   },
-  // The page saves the key, then redirects to `callbackUrl`.
-  startAuthorization: async ({ callbackUrl }) => ({
-    challenge: { url: anthropicKeyPageUrl(callbackUrl) },
+  // The page signs the person in, saves the key for `principal`, then redirects to `callbackUrl`.
+  startAuthorization: async ({ principal, callbackUrl }) => ({
+    challenge: { url: anthropicKeyPageUrl(principal, callbackUrl) },
   }),
-  completeAuthorization: async ({ principal }) => ({
-    token: (await loadAnthropicKey(principal))!,
-  }),
+  completeAuthorization: async ({ principal }) => {
+    const key = await loadAnthropicKey(principal);
+    if (!key) throw new ConnectionAuthorizationFailedError("anthropic", { reason: "no_key_saved" });
+    return { token: key };
+  },
 });
 
 export default defineAgent({

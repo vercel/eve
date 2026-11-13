@@ -445,7 +445,10 @@ async function withMemos<T>(
   return { result, used };
 }
 
-/** Dynamic values sign in under this scope: `connect("x/y")` keys as `agent__x_y`. */
+/**
+ * Dynamic values sign in under this scope: `connect("x/y")` keys as `agent__x_y`. A provider
+ * without Connect metadata keys under its definition, so two values never share its token.
+ */
 const DYNAMIC_AUTH_SCOPE = "agent";
 
 function internalContext(
@@ -455,7 +458,7 @@ function internalContext(
 ): InternalContext {
   const frame = sessionFrameOf(ctx);
   const { history } = run;
-  const auth = createAuthorizationContext({ scope: DYNAMIC_AUTH_SCOPE });
+  const auth = createAuthorizationContext({ owner: definition.id, scope: DYNAMIC_AUTH_SCOPE });
   return Object.defineProperties(
     {
       ...frame,

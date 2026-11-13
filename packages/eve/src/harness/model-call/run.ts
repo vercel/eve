@@ -109,14 +109,16 @@ export async function runModelStep(
   } catch (error) {
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
-    const compactionFailed = await caller.failIfCompactionFailed();
-    if (compactionFailed !== undefined) return compactionFailed;
-    if (generation.interrupted) return caller.steered();
-    if (isScopedAuthorizationRequiredError(error)) {
-      const signIn = await signInForModelCall(step, error);
+    // A compaction summary runs on the turn's model, so its sign-in pauses the turn too.
+    const authorizationRequired = authorizationRequiredIn(error);
+    if (authorizationRequired !== undefined) {
+      const signIn = await signInForModelCall(step, authorizationRequired);
       if ("failed" in signIn) return signIn.failed;
       return await stopForModelSignIn(step, signIn.signIn, await caller.abandonForSignIn());
     }
+    const compactionFailed = await caller.failIfCompactionFailed();
+    if (compactionFailed !== undefined) return compactionFailed;
+    if (generation.interrupted) return caller.steered();
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
@@ -179,4 +181,10 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   if (runId === undefined) return;
   const modelId = stepReference(step).id;
   await step.apply(startRunFact({ attempt, modelId, runId }));
+}
+
+function authorizationRequiredIn(error: unknown) {
+  if (isScopedAuthorizationRequiredError(error)) return error;
+  if (error instanceof Error && isScopedAuthorizationRequiredError(error.cause)) return error.cause;
+  return undefined;
 }
