@@ -72,7 +72,7 @@ The default terminal UI displays only error logs. Use `pnpm dev --logs all` when
 
 Writing preferences are stored separately for each authenticated person through `byHumanPrincipal`, which matches `byPrincipal` for people and disables memory for service principals. Renaming the slot or changing the scope value orphans saved preferences. The Memory section of `agent/instructions.md` must keep treating recalled memory as untrusted and must keep telling the model never to save sensitive information. Hosted storage uses private Vercel Blob; local storage is temporary. Prefer Vercel OIDC for supported services rather than introducing additional API tokens.
 
-The Slack channel requires `SLACK_CONNECTOR`, so `pnpm exec eve info` and `pnpm build` fail when it is unset. Pull the project's variables with `vercel env pull .env.local`, or set a placeholder such as `slack/placeholder` when only checking compilation.
+The Slack channel uses `SLACK_CONNECTOR`, falling back to `slack/placeholder` so compilation works before Slack is configured. Slack delivery still needs a real connector. Pull the project's variables with `vercel env pull .env.local`.
 
 Use the Vercel CLI for project configuration and deployment instructions. Confirm unfamiliar flags with `--help`. Keep adding and updating environment variables in the CLI instead of sending users to the dashboard unnecessarily. Provisioning services or deploying the agent is separate from checking code and documentation.
 
@@ -93,6 +93,8 @@ Write for a person using the template:
 Verify behavior against code and current CLI help. When reviewing a passage, read its surrounding section for contradictions and repeated explanations. For a full-file review, cover the entire file rather than fixing only the quoted examples. Formatting and link checks do not replace an editorial review.
 
 ## Validation
+
+`pnpm check` and `pnpm fix` use `lint.config.ts` explicitly to keep its Ultracite rules separate from monorepo linting. `.oxfmtrc.json` contains the resolved Ultracite formatting preset so root tooling needs no template dependencies. Keep it in sync when upgrading Ultracite. Git hooks are opt-in: run `pnpm exec lefthook install` only from a standalone checkout, never from the eve monorepo.
 
 Choose checks that establish the changed behavior. Existing tests live beside their implementations under `agent/`; shared test helpers are under `agent/lib/testing/` and `agent/lib/contentful/testing/`.
 

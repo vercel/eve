@@ -13,9 +13,8 @@
     "dev": "eve dev",
     "eval": "eve eval",
     "typecheck": "tsc",
-    "check": "ultracite check",
-    "fix": "ultracite fix",
-    "prepare": "lefthook install",
+    "check": "oxlint --config lint.config.ts && oxfmt --check",
+    "fix": "oxlint --config lint.config.ts --fix && oxfmt --write",
     "test": "vitest run",
     "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run knip",
     "knip": "knip"

@@ -1,5 +1,5 @@
 allowBuilds:
-  lefthook: true
+  lefthook: false
 ignoredOptionalDependencies:
   - "@mongodb-js/zstd"
   - node-liblzma
