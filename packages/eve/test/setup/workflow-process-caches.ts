@@ -12,18 +12,26 @@ function singleton(name: string, version: number): Record<string, unknown> | und
     | undefined;
 }
 
+/** Empties a `Map` or `Set`, or the ones a state object holds one level down. */
 function clearCollections(value: unknown): void {
-  if (value instanceof Map || value instanceof Set) value.clear();
+  if (value instanceof Map || value instanceof Set) {
+    value.clear();
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const nested of Object.values(value)) {
+    if (nested instanceof Map || nested instanceof Set) nested.clear();
+  }
 }
 
 // Warnings Workflow logs once per process, which a later file asserting on one would not see.
+// `queueAuthRefusalLog` and `queueAuthSettingLogs` are not here: they hold log limiters that keep
+// their state in closures, so they cannot be reset from outside.
 const WARNED_ONCE = [
   "@workflow/core//crossDeploymentProbeMissWarning",
   "@workflow/core//envWarnings",
   "@workflow/core//eventLimitWarnings",
   "@workflow/core//latestNoOpWarning",
-  "@workflow/core//queueAuthRefusalLog",
-  "@workflow/core//queueAuthSettingLogs",
   "@workflow/core//traceModeWarnings",
   "@workflow/core//undeclaredQueueAuthModeWarning",
   "@workflow/world-local//buildTargetWarnings",
@@ -37,13 +45,13 @@ export function resetWorkflowProcessCaches(): void {
   clearCollections(fs?.createdDirectoriesCache);
   // A finished hook-index backfill, remembered per data directory, which the file clears.
   clearCollections(singleton("@workflow/world-local//hookIndexEnsureCache", 1)?.ensuredBasedirs);
-  // The port Workflow found this process listening on, and a probe of the deployment it answers.
+  // The port Workflow found this process listening on. The cross-deployment probe cache is a
+  // `WeakMap` keyed by World, so a file's new World never sees another file's answers.
   const port = singleton("@workflow/core//devServerPort", 1);
   if (port !== undefined) {
     port.cachedPort = undefined;
     port.inFlight = undefined;
   }
-  clearCollections(singleton("@workflow/core//crossDeploymentProbeCache", 1));
   // A step still in flight when the previous file's World closed.
   clearCollections(singleton("@workflow/core//stepSingleFlight", 1));
   for (const name of WARNED_ONCE) {
