@@ -149,6 +149,19 @@ export class ScheduleDispatcher {
         : `eve-scheduled-send:${createHash("sha256")
             .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
             .digest("hex")}`;
+    // A send without a key takes one from the occurrence and its message, so a retried callback
+    // reaches the sessions its first attempt started. Repeats of one message are counted apart.
+    const repeats = new Map<string, number>();
+    const occurrenceKey = (message: unknown): string => {
+      const digest = createHash("sha256")
+        .update(JSON.stringify(message) ?? "")
+        .digest("hex");
+      const repeat = repeats.get(digest) ?? 0;
+      repeats.set(digest, repeat + 1);
+      return `eve-occurrence:${createHash("sha256")
+        .update(JSON.stringify([occurrence.executionId, digest, repeat]))
+        .digest("hex")}`;
+    };
     const freshRun = (run: RunInput): RunInput => ({
       ...run,
       auth,
@@ -181,7 +194,12 @@ export class ScheduleDispatcher {
         auth,
         schedule: input.schedule,
         to: (channel, target) => ({
-          send: (message, options) => args.to(channel, target).send(message, { ...options, auth }),
+          send: (message, options) =>
+            args.to(channel, target).send(message, {
+              ...options,
+              idempotencyKey: options?.idempotencyKey ?? occurrenceKey(message),
+              auth,
+            }),
         }),
         waitUntil: args.waitUntil,
       });

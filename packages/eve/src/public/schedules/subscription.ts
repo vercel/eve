@@ -201,10 +201,10 @@ export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   /**
    * Accepts the `to().send()` options that apply to a fresh session. `auth` is
    * the schedule's creator. A send never reaches a session the schedule didn't
-   * start, so `turnPolicy` has nothing to act on. A send with an
-   * `idempotencyKey` reaches the session an earlier send from this schedule
-   * with the same key and target started, so a retried callback whose key
-   * includes `occurrence.executionId` doesn't start a second session.
+   * start, so `turnPolicy` has nothing to act on. A send reaches the session
+   * an earlier send from this schedule with the same `idempotencyKey` and
+   * target started. Without a key, eve derives one from the occurrence and the
+   * message, so a retried callback doesn't start a second session.
    */
   send(
     message: MessageContent,

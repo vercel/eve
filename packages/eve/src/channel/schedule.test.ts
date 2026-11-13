@@ -97,6 +97,7 @@ describe("ScheduleDispatcher", () => {
         authenticator: "test",
         principalId: "alice",
       },
+      sends = 1,
     ) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
@@ -118,9 +119,10 @@ describe("ScheduleDispatcher", () => {
         }) => {
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
-          args.waitUntil(
-            args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
-          );
+          for (let sent = 0; sent < sends; sent += 1)
+            args.waitUntil(
+              args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
+            );
         },
       );
       const definition = defineDynamicSchedules({
@@ -180,9 +182,26 @@ describe("ScheduleDispatcher", () => {
         capabilities: { requestInput: false },
         input: { message: "Summarize the week." },
       });
-      expect(started[0]!.continuationToken).not.toBe(started[1]!.continuationToken);
-      expect(started[0]!.continuationConflictCommand).toBeUndefined();
+      // A send without a key takes one from the occurrence, so the retry reaches the first session.
+      expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
+      expect(started[1]).toMatchObject({
+        idempotencyKey: expect.stringMatching(/^eve-occurrence:[0-9a-f]{64}$/u),
+        continuationConflictCommand: { idempotencyKey: started[0]!.idempotencyKey, kind: "send" },
+      });
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    });
+
+    it("keys unkeyed sends apart for another occurrence and for a repeated message", async () => {
+      const { dispatcher, input, runtime } = setup(creator, undefined, undefined, 2);
+      await dispatcher.triggerCollection(input);
+      await dispatcher.triggerCollection({
+        ...input,
+        occurrence: { ...input.occurrence, executionId: "exec-2" },
+      });
+      const tokens = vi
+        .mocked(runtime.createSession)
+        .mock.calls.map(([value]) => value.continuationToken);
+      expect(new Set(tokens).size).toBe(4);
     });
 
     it("starts a keyed send without looking up an earlier session", async () => {
