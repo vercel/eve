@@ -38,10 +38,11 @@ const checkCommittedLockfile = (destination) => {
 /**
  * Builds each authored `vercel.ts` service the way Vercel does: from the service root, where a
  * root-only pnpm install puts no framework binary on PATH. The template's own `pnpm build` runs
- * from the project root and cannot catch a service that only builds there.
+ * from the project root and cannot catch a service that only builds there. Returns how many
+ * services it built.
  */
 const checkVercelServices = (template, destination) => {
-  if (!existsSync(join(destination, "vercel.ts"))) return;
+  if (!existsSync(join(destination, "vercel.ts"))) return 0;
   const services = JSON.parse(
     execFileSync(
       process.execPath,
@@ -57,6 +58,7 @@ const checkVercelServices = (template, destination) => {
     .filter((entry) => !entry.includes("node_modules"))
     .join(delimiter);
 
+  let built = 0;
   for (const [name, service] of Object.entries(services)) {
     // withEve generates and owns the agent services.
     if (service.framework === "eve") continue;
@@ -79,7 +81,9 @@ const checkVercelServices = (template, destination) => {
       env: { ...process.env, PATH: path },
       stdio: "inherit",
     });
+    built++;
   }
+  return built;
 };
 
 try {
@@ -139,17 +143,21 @@ try {
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
     run("pnpm", ["typecheck"], { cwd: destination });
     // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
-    // check does not have. Such templates build with `eve build` alone.
+    // check does not have. Such templates skip the prewarm.
     const sandboxPath = join(destination, "agent", "sandbox.ts");
     const vercelSandbox =
       existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
-    if (vercelSandbox) {
-      run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], { cwd: destination });
-    } else {
-      run("pnpm", ["exec", "eve", "build"], { cwd: destination });
+    run("pnpm", ["exec", "eve", "build", ...(vercelSandbox ? ["--skip-sandbox-prewarm"] : [])], {
+      cwd: destination,
+    });
+    // A template's `pnpm build` is `eve build` plus, at most, its web app, which
+    // the service builds just produced the way Vercel does. Run it only when
+    // neither covers it, so no template builds its agent or web app twice.
+    const builtServices = checkVercelServices(template, destination);
+    const build = manifest.scripts?.build;
+    if (!vercelSandbox && build && build !== "eve build" && builtServices === 0) {
       run("pnpm", ["build"], { cwd: destination });
     }
-    checkVercelServices(template, destination);
     if (manifest.scripts?.["test:smoke"]) {
       run("pnpm", ["test:smoke"], { cwd: destination });
     }
