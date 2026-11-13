@@ -91,6 +91,40 @@ describe("createSession#cancel", () => {
   });
 });
 
+describe("createSession#stream", () => {
+  it("cancels the session's event stream when a consumer stops while waiting for an event", async () => {
+    const runtime = createRuntime();
+    const cancelled = vi.fn();
+    vi.mocked(runtime.getEventStream).mockResolvedValue(
+      new ReadableStream({ cancel: cancelled }, { highWaterMark: 0 }),
+    );
+    const iterator = createSession("sess_1", runtime).stream()[Symbol.asyncIterator]();
+
+    const waiting = iterator.next();
+    await vi.waitFor(() => expect(runtime.getEventStream).toHaveBeenCalled());
+
+    await expect(iterator.return!()).resolves.toEqual({ done: true, value: undefined });
+    expect(cancelled).toHaveBeenCalledOnce();
+    await expect(waiting).resolves.toEqual({ done: true, value: undefined });
+  });
+
+  it("yields the session's events in order", async () => {
+    const runtime = createRuntime();
+    const events = [{ type: "turn.started" }, { type: "turn.settled" }];
+    vi.mocked(runtime.getEventStream).mockResolvedValue(
+      ReadableStream.from(events) as ReadableStream<never>,
+    );
+
+    const received: unknown[] = [];
+    for await (const event of createSession("sess_1", runtime).stream({ startIndex: 2 })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual(events);
+    expect(runtime.getEventStream).toHaveBeenCalledWith("sess_1", { startIndex: 2 });
+  });
+});
+
 describe("fixed session operations", () => {
   it("dispatches ephemeral context separately from durable channel context", async () => {
     const runtime = createRuntime();

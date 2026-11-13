@@ -502,6 +502,36 @@ describe("createDevelopmentServer", () => {
     await server.close();
   });
 
+  it("publishes the first generation before the first worker serves requests", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.devServer.swapTo.mockImplementationOnce(async () => {
+      expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledWith({
+        appRoot: "/tmp/eve-test",
+        generation: expect.objectContaining({
+          snapshotRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test",
+        }),
+      });
+    });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.devServer.swapTo).toHaveBeenCalledOnce();
+    await server.close();
+  });
+
+  it("keeps the published first generation when the first worker fails readiness", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.devServer.swapTo.mockRejectedValueOnce(new Error("worker failed"));
+
+    await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("worker failed");
+
+    // The pointer references it; discarding it would leave the pointer dangling.
+    expect(mocks.discardDevelopmentGeneration).not.toHaveBeenCalled();
+    // The supervisor disposes a candidate host that never served.
+    expect(mocks.removeDevelopmentHostWorkspace).not.toHaveBeenCalled();
+    expect(mocks.devServer.close).toHaveBeenCalledOnce();
+  });
+
   it("forwards persisted workflow deliveries while the file watcher starts", async () => {
     let deliveryResponse: Response | undefined;
     mocks.worldInstance.start.mockImplementationOnce(async () => {

@@ -38,6 +38,7 @@ export interface HostDirectories {
 
 /** Nitro runtime plugins eve installs after its own runtime plugin, in load order. */
 export type HostRuntimePlugin =
+  | "connection-drain"
   | "instrumentation"
   | "local-schedules"
   | "timezone-schedules"
@@ -117,6 +118,8 @@ export function createHostSpec(
       ? (["timezone-schedules"] as const)
       : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
+    // A Vercel function has no server of its own to close.
+    ...(!development && preset !== "vercel" ? (["connection-drain"] as const) : []),
   ];
 
   return {

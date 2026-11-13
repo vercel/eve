@@ -73,6 +73,26 @@ describe("createChannelRouteArgs", () => {
     });
   });
 
+  it("leaves the created session's event stream unopened", async () => {
+    const events = new ReadableStream();
+    const readEvents = vi.fn(() => events);
+    const args = createChannelRouteArgs(
+      ports(async () => ({
+        get events() {
+          return readEvents();
+        },
+        claimedContinuation: true,
+        sessionId: "s_1",
+      })),
+    );
+
+    const created = await readRouteSessionCreator(args)?.({ auth: null, input: { message: "hi" } });
+
+    expect(readEvents).not.toHaveBeenCalled();
+    expect(created).toMatchObject({ claimedContinuation: true, sessionId: "s_1" });
+    expect(created?.events).toBe(events);
+  });
+
   it("attaches what eve's own channels read, and only the optional fields the host has", async () => {
     const args = createChannelRouteArgs(ports(vi.fn()));
 

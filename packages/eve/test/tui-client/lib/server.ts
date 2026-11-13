@@ -346,7 +346,8 @@ async function waitForTermination(
   graceMs: number,
 ): Promise<void> {
   const deadline = Date.now() + graceMs;
-  await Promise.race([exited, sleep(graceMs)]);
+  // Unref'd, so a server that exits at once doesn't hold the smoke process for the whole grace.
+  await Promise.race([exited, sleep(graceMs, undefined, { ref: false })]);
   while (!hasTerminated(child) && Date.now() < deadline) {
     await sleep(50);
   }
