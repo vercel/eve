@@ -41,6 +41,9 @@ export default defineConfig({
       "test/scenarios/**",
     ],
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    // Worker threads start in a fraction of the time a forked process needs, and this tier
+    // spawns a fresh worker for every test file.
+    pool: "threads",
     setupFiles: ["./src/internal/testing/unit-guard.ts", "./test/setup/mock-ai-gateway.ts"],
     testTimeout: 5_000,
   },
