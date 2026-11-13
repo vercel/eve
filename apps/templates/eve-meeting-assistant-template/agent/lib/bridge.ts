@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { BRIDGE_PORT, BROWSER_SESSION, FIND_STATE, STATE_FILE, STREAM_PORT } from "./browser.js";
 import { BRIDGE_SERVER, SCREEN_HTML, SIGN_IN_HTML } from "./stage-assets.js";
 
@@ -7,6 +9,9 @@ export type Shell = (
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 const ROOT = "/tmp/eve-bridge";
+
+/** Changes with the bridge's code, so a sandbox running an older bridge restarts it. */
+const VERSION = createHash("sha256").update(BRIDGE_SERVER).digest("hex").slice(0, 12);
 
 export async function sh(shell: Shell, command: string): Promise<string> {
   const result = await shell(command);
@@ -43,7 +48,9 @@ export async function startBridge(
     `BRIDGE_STATE_FILE=${STATE_FILE}`,
     `BRIDGE_INTERACTIVE=${options.interactive ? 1 : 0}`,
     `AGENT_BROWSER_STREAM_PORT=${STREAM_PORT}`,
+    `BRIDGE_VERSION=${VERSION}`,
   ].join(" ");
+  const healthy = `[ "$(curl -fs http://127.0.0.1:${BRIDGE_PORT}/healthz)" = ${VERSION} ]`;
   await sh(
     shell,
     [
@@ -57,11 +64,12 @@ export async function startBridge(
       `agent-browser --session ${BROWSER_SESSION} get url >/dev/null 2>&1 || agent-browser --session ${BROWSER_SESSION} open about:blank >/dev/null`,
       // Match the 1280x720 screen share.
       `agent-browser --session ${BROWSER_SESSION} set viewport 1280 720 >/dev/null`,
-      `if ! curl -fs http://127.0.0.1:${BRIDGE_PORT}/healthz >/dev/null; then`,
+      `if ! ${healthy}; then`,
+      `  kill "$(cat ${ROOT}/bridge.pid 2>/dev/null)" 2>/dev/null && sleep 0.5`,
       `  ${env} setsid -f node ${ROOT}/bridge.mjs > ${ROOT}/bridge.log 2>&1 < /dev/null`,
       "fi",
       "for _ in $(seq 1 50); do",
-      `  curl -fs http://127.0.0.1:${BRIDGE_PORT}/healthz >/dev/null && exit 0`,
+      `  ${healthy} && exit 0`,
       "  sleep 0.1",
       "done",
       `cat ${ROOT}/bridge.log >&2; exit 1`,

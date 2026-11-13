@@ -7,7 +7,7 @@
 
 /** A dependency-free bridge. Node 22 and later ship the WebSocket client. */
 export const BRIDGE_SERVER = `import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 
 const root = process.env.BRIDGE_ROOT;
@@ -16,17 +16,35 @@ const stateFile = process.env.BRIDGE_STATE_FILE;
 const interactive = process.env.BRIDGE_INTERACTIVE === "1";
 const pages = { "": "screen.html", "sign-in": "sign-in.html" };
 const inputTypes = new Set(["input_mouse", "input_keyboard"]);
+writeFileSync(root + "/bridge.pid", String(process.pid));
 
 let frame = null;
 let socket = null;
+// Clients of the MJPEG stream. One busy with an earlier frame skips newer
+// ones until it drains, so a slow viewer never builds a backlog.
+const viewers = new Set();
+
+function send(viewer) {
+  if (frame === null || viewer.busy) return;
+  const ready = viewer.response.write(
+    "--frame\\r\\nContent-Type: image/jpeg\\r\\nContent-Length: " + frame.length + "\\r\\n\\r\\n",
+  ) && viewer.response.write(frame) && viewer.response.write("\\r\\n");
+  if (!ready) {
+    viewer.busy = true;
+    viewer.response.once("drain", () => { viewer.busy = false; send(viewer); });
+  }
+}
 
 function connect() {
-  const ws = new WebSocket("ws://127.0.0.1:" + process.env.AGENT_BROWSER_STREAM_PORT + "/?maxFps=8");
+  // Recall shares pages at 15 frames a second at most.
+  const ws = new WebSocket("ws://127.0.0.1:" + process.env.AGENT_BROWSER_STREAM_PORT + "/?maxFps=15");
   ws.onopen = () => { socket = ws; };
   ws.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
-      if (message.type === "frame") frame = Buffer.from(message.data, "base64");
+      if (message.type !== "frame") return;
+      frame = Buffer.from(message.data, "base64");
+      for (const viewer of viewers) send(viewer);
     } catch {}
   };
   ws.onerror = () => ws.close();
@@ -62,7 +80,7 @@ const headers = { "cache-control": "no-store" };
 
 createServer(async (request, response) => {
   const path = new URL(request.url ?? "/", "http://bridge").pathname;
-  if (path === "/healthz") return response.end("ok");
+  if (path === "/healthz") return response.end(process.env.BRIDGE_VERSION ?? "");
   const current = key();
   const match = /^\\/([0-9a-f]{36})\\/(.*)$/.exec(path);
   if (!current || !match || match[1] !== current) return response.writeHead(404).end();
@@ -71,6 +89,17 @@ createServer(async (request, response) => {
     if (request.method === "GET" && name in pages && (name === "" || interactive)) {
       const html = readFileSync(root + "/" + pages[name]);
       return response.writeHead(200, { ...headers, "content-type": "text/html; charset=utf-8" }).end(html);
+    }
+    if (request.method === "GET" && name === "stream.mjpg") {
+      response.writeHead(200, {
+        ...headers,
+        "content-type": "multipart/x-mixed-replace; boundary=frame",
+        "x-accel-buffering": "no",
+      });
+      const viewer = { response, busy: false };
+      viewers.add(viewer);
+      request.on("close", () => viewers.delete(viewer));
+      return send(viewer);
     }
     if (request.method === "GET" && name === "frame.jpg") {
       if (frame === null) return response.writeHead(503, headers).end();
@@ -110,17 +139,11 @@ export const SCREEN_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<img id="screen" alt="">
+<img id="screen" alt="" src="stream.mjpg">
 <script>
-  let screen = document.getElementById("screen");
-  let frame = 0;
-  function next() {
-    const image = new Image();
-    image.onload = () => { screen.replaceWith(image); screen = image; setTimeout(next, 125); };
-    image.onerror = () => setTimeout(next, 500);
-    image.src = "frame.jpg?n=" + frame++;
-  }
-  next();
+  // The stream ends when the sandbox restarts the bridge; reconnect.
+  const screen = document.getElementById("screen");
+  screen.onerror = () => setTimeout(() => { screen.src = "stream.mjpg?t=" + Date.now(); }, 1000);
 </script>
 </body>
 </html>
@@ -163,19 +186,10 @@ export const SIGN_IN_HTML = `<!doctype html>
   <p>Sign in with the service accounts eve should use in meetings, then save. Click the browser view before typing. Saved sign-ins apply to meetings that start afterward.</p>
 </main>
 <script>
-  let screen = document.getElementById("screen");
+  const screen = document.getElementById("screen");
   const status = document.getElementById("status");
-  let frame = 0;
-  function next() {
-    const image = new Image();
-    image.onload = () => {
-      screen.src = image.src;
-      setTimeout(next, 125);
-    };
-    image.onerror = () => setTimeout(next, 500);
-    image.src = "frame.jpg?n=" + frame++;
-  }
-  next();
+  screen.src = "stream.mjpg";
+  screen.onerror = () => setTimeout(() => { screen.src = "stream.mjpg?t=" + Date.now(); }, 1000);
 
   function post(name, value) {
     return fetch(name, { method: "POST", body: JSON.stringify(value) }).then((response) => {

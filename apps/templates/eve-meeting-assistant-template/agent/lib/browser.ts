@@ -30,7 +30,11 @@ export const FIND_STATE = `state=; for f in ${STATE_FILE}.enc ${STATE_FILE}; do 
 
 /** Environment for every sandbox that runs the browser. */
 export function browserEnv(): Record<string, string> {
-  const env: Record<string, string> = { AGENT_BROWSER_STREAM_PORT: String(STREAM_PORT) };
+  const env: Record<string, string> = {
+    AGENT_BROWSER_STREAM_PORT: String(STREAM_PORT),
+    // Sharp enough to read at 720p, small enough for 15 frames a second.
+    AGENT_BROWSER_STREAM_QUALITY: "70",
+  };
   // Encrypts the saved sign-ins at rest. Both kinds of sandbox need the same key.
   const key = process.env.MEETING_BROWSER_ENCRYPTION_KEY?.trim();
   if (key) env.AGENT_BROWSER_ENCRYPTION_KEY = key;
