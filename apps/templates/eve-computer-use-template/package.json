@@ -21,7 +21,7 @@
     "@vercel/functions": "3.10.5",
     "@vercel/sandbox": "3.9.0",
     "ai": "7.0.137",
-    "eve": "^0.91.0",
+    "eve": "^1.0.0-rc.10",
     "geist": "1.7.2",
     "next": "16.3.8",
     "react": "19.2.8",

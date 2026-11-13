@@ -3,6 +3,8 @@ import { installComputerUse } from "eve/extensions/computer-use/sandbox";
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
+import { BROWSER_STREAM_PORT, RELAY_PORT } from "./lib/live-config";
+
 // Every chat gets its own Vercel Sandbox, during development too, in the project `eve link`
 // connected. The headless Chrome and the Linux desktop run in it side by side. eve installs both
 // once into the snapshot every sandbox starts from; the tools start each on first use, so a chat
@@ -18,9 +20,12 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() =>
   environment.open({
     // The live view's relay; see agent/lib/live.ts. Ports apply when the sandbox is created.
-    ports: [3600],
-    // agent-browser caps stream frames at 1280×720 by default, which blurs the live view.
+    ports: [RELAY_PORT],
     env: {
+      // Every agent-browser daemon streams where the relay forwards, including one that starts
+      // after the last exited, instead of on a port of its own.
+      AGENT_BROWSER_STREAM_PORT: String(BROWSER_STREAM_PORT),
+      // agent-browser caps stream frames at 1280×720 by default, which blurs the live view.
       AGENT_BROWSER_STREAM_MAX_WIDTH: "2560",
       AGENT_BROWSER_STREAM_MAX_HEIGHT: "2560",
       AGENT_BROWSER_STREAM_QUALITY: "70",

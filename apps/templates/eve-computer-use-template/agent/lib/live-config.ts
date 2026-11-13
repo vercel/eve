@@ -6,6 +6,9 @@
 /** The sandbox's one public port, opened in agent/sandbox.ts. Only the relay listens on it. */
 export const RELAY_PORT = 3600;
 
+/** agent-browser's stream, which the relay forwards to. agent/sandbox.ts pins every session to it. */
+export const BROWSER_STREAM_PORT = 3602;
+
 /** The relay writes its token here; only code holding Vercel project credentials can read it. */
 export const RELAY_TOKEN_FILE = "/tmp/live-relay.json";
 
@@ -13,6 +16,15 @@ export const RELAY_TOKEN_FILE = "/tmp/live-relay.json";
 export const RELAY_VERSION = "4";
 
 export type LiveDevice = "browser" | "desktop";
+
+/**
+ * The prefix of each device's tools, from the extension mounts in agent/extensions/. The /api/live
+ * route trusts a screen only from these tools, so no other tool's output can name a sandbox.
+ */
+export const DEVICE_TOOL_PREFIX: Record<LiveDevice, string> = {
+  browser: "browser__",
+  desktop: "computer__",
+};
 
 export const HISTORY_ACTIONS = ["back", "forward", "reload"] as const;
 export type HistoryAction = (typeof HISTORY_ACTIONS)[number];

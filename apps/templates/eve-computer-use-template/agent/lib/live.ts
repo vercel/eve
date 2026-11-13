@@ -3,11 +3,16 @@ import type { ToolContext } from "eve/tools";
 
 import { environment } from "../sandbox";
 import { BROWSER_SESSION } from "./devices";
-import { RELAY_PORT, RELAY_TOKEN_FILE, RELAY_VERSION, type LiveDevice } from "./live-config";
+import {
+  BROWSER_STREAM_PORT,
+  RELAY_PORT,
+  RELAY_TOKEN_FILE,
+  RELAY_VERSION,
+  type LiveDevice,
+} from "./live-config";
 import { DESKTOP_STREAM_SOURCE, RELAY_SOURCE } from "./live-sources";
 
 const DESKTOP_STREAM_PORT = 3601;
-const BROWSER_STREAM_PORT = 3602;
 const DESKTOP_DISPLAY = ":99";
 
 const RELAY_PATH = "/tmp/live-relay.cjs";
@@ -81,7 +86,10 @@ async function ensureRelay(sandbox: LiveSandbox): Promise<void> {
   throw new Error("The live view relay did not start.");
 }
 
-/** agent-browser streams each session on its own port; pin it where the relay forwards. */
+/**
+ * The sandbox's env pins agent-browser's stream where the relay forwards, but a sandbox created
+ * before that env, or a stream moved by hand, still needs moving there.
+ */
 async function ensureBrowserStream(ctx: ToolContext): Promise<void> {
   const status = await runAgentBrowser<{ data?: { enabled?: boolean; port?: number } }>(
     ctx,
