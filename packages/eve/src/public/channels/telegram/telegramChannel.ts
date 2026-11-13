@@ -11,7 +11,12 @@ import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type {
+  DeliverPayload,
+  PrincipalPolicy,
+  SessionAuthContext,
+  TurnPolicy,
+} from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -188,6 +193,8 @@ export interface TelegramChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
   /** Inbound upload policy for Telegram photos and documents. */
   readonly uploadPolicy?: UploadPolicyInput;
 }
@@ -246,6 +253,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     TelegramInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     uploadPolicy: config.uploadPolicy,
     state: initialTelegramState(config.botUsername),
     ...telegramInstrumentation,

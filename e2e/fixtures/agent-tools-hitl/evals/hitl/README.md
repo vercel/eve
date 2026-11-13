@@ -34,6 +34,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | A typed reply answers only what it matches                                         | [typed-reply-answers-only-what-matches](./approvals/typed-reply-answers-only-what-matches.eval.ts)                      |
 | Steering ignores unanswered approvals and keeps given answers                      | [steer-ignores-unanswered](./approvals/steer-ignores-unanswered.eval.ts)                                                |
 | Someone else's message waits for the held turn                                     | [other-person-message-waits](./approvals/other-person-message-waits.eval.ts)                                            |
+| Another person's message joins the running turn, which keeps its caller            | [another-person-joins](./steering/another-person-joins.eval.ts)                                                         |
 | An answer to a request that is not open authorizes nothing                         | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |
 | A `once()` grant is reused                                                         | [once-grant-is-reused](./approvals/once-grant-is-reused.eval.ts)                                                        |
 | An approved call runs with the asking step's tools                                 | [approved-call-uses-asking-step-tools](./approvals/approved-call-uses-asking-step-tools.eval.ts)                        |

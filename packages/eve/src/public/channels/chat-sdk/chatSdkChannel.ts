@@ -16,7 +16,7 @@ import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -233,6 +233,8 @@ export interface ChatSdkChannelConfig<
   readonly routes?: Partial<Record<Extract<keyof TAdapters, string>, string>>;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
   /** Extra Chat SDK webhook options. eve owns `waitUntil`. */
   readonly webhook?: Omit<WebhookOptions, "waitUntil">;
   /** Optional eve event handlers. Supplied handlers replace built-in defaults. */
@@ -369,6 +371,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     ChatSdkInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     fetchFile: (url) => fetchAttachment(bot, url),
     state: initialState(),
     ...chatSdkInstrumentation,

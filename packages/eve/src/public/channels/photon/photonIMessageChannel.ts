@@ -1,4 +1,4 @@
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
@@ -92,6 +92,8 @@ export interface PhotonIMessageChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;
   /** Photon webhook signing secret. Falls back to `IMESSAGE_WEBHOOK_SECRET`. */
@@ -141,6 +143,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
     state: createMemoryState(),
     streaming: false,
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     userName: config.userName ?? "eve",
   });
   const onMessage = config.onMessage ?? defaultOnMessage;

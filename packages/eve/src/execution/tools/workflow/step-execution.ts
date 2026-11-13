@@ -1,11 +1,19 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SandboxKey,
+  SessionIdKey,
+  SessionKey,
+  SteeredByKey,
+} from "#context/keys.js";
 import { runInWorkflowStep } from "#context/workflow-step.js";
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
+import { withModelCall } from "#runtime/connections/identity-hold.js";
 import {
   type CompiledRuntimeAgentBundle,
   getCompiledRuntimeAgentBundle,
@@ -41,8 +49,10 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     const { args, context: input } = invocation;
     getStepMetadata();
     const context = new ContextContainer();
+    const { steeredBy } = input.session.auth;
     context.set(AuthKey, input.session.auth.current);
     context.set(InitiatorAuthKey, input.session.auth.initiator);
+    if (steeredBy !== undefined && steeredBy.length > 0) context.set(SteeredByKey, steeredBy);
     context.set(SessionIdKey, input.session.id);
     context.setVirtualContext(SessionKey, { ...input.session, sessionId: input.session.id });
     context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
@@ -51,7 +61,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
 
     const loadAgent = stepAgentLoader(input);
     const sandbox = openStepSandbox(input, loadAgent);
-    return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
+    const run = async (): Promise<WorkflowStepResult> => {
       const auth = createAuthorizationContext({
         scope: input.toolName,
         completeAuthorization: completeWorkflowStepAuthorization,
@@ -123,7 +133,8 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
       return isAuthorizationSignal(output)
         ? { kind: "authorization-required", challenges: output.challenges, authorized }
         : { kind: "result", output, authorized };
-    });
+    };
+    return contextStorage.run(context, () => withModelCall(run));
   };
   // The SDK reads retry policy from the registered function at execution time.
   Object.defineProperty(wrapped, "maxRetries", { get: () => Reflect.get(execute, "maxRetries") });

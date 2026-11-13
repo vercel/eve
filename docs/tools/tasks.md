@@ -194,7 +194,7 @@ An `eve__reply` call made while tasks are working returns an error that names th
 ## Turns wait for their tasks
 
 No turn ends while any task is working. When the model ends a turn early, eve waits as
-`eve__task_wait` does. The turn waits until a task finishes or the turn's own caller steers it. eve
+`eve__task_wait` does. The turn waits until a task finishes or a steering message ends the wait. eve
 then adds the results and calls the model again in the same turn. No result ever starts a turn on
 its own. An idle resumable task doesn't hold the turn.
 
@@ -217,12 +217,12 @@ with `status: "awaiting-input"`. Answer through `respond()`; see
 [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
 [Slack](/docs/channels/slack/reference#task-card) also shows task activity.
 
-A steering message from the turn's own caller, sent with `turnPolicy: "steer"` (the default),
-ends an `eve__task_wait`. It also aborts the `abortSignal` of any `execute` call the turn waits on,
+A steering message sent with `turnPolicy: "steer"` (the default) ends an `eve__task_wait`. It also
+aborts the `abortSignal` of any `execute` call the turn waits on,
 but it never interrupts a task. The model reads the message and decides what to do with each task.
 It can keep the task, correct an agent by calling it again with its `taskId`, or stop the task with
-`eve__task_cancel`. A `"queue"` message, or a message from another caller, waits for the turn to
-end.
+`eve__task_cancel`. A `"queue"` message, or a message from another caller under the default
+`principalPolicy: "match"`, waits for the turn to end.
 
 ## Cancel a task
 
@@ -275,8 +275,10 @@ each task's start and end instead. See
 - **Ownership.** Tasks belong to the session's open turn, not to the caller that started them. A
   session has at most one open turn, so `eve__task_wait`, `eve__task_cancel`, task results, and the
   `[Tasks]` note cover every task in the session. Any later turn can continue an idle resumable task
-  by its `taskId`, and that call runs with its own caller's auth. Only the turn's own caller steers
-  it; anonymous callers share one identity. eve doesn't check which caller started a task. In a session with several people, such as a
+  by its `taskId`, and that call runs with its own caller's auth. By default, only the turn's own
+  caller steers it; a channel can set `principalPolicy: "keep"` to let another signed-in person's
+  message steer. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal).
+  Anonymous callers share one identity. eve doesn't check which caller started a task. In a session with several people, such as a
   shared Slack thread, the model working for one person can continue or `eve__task_cancel` another
   person's task. A continued `serve` task keeps the state its body built for earlier calls.
   [Key per-caller data on the caller's identity](/docs/tools/workflows#resumable-tasks-serve) and enforce

@@ -13,6 +13,7 @@
 import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
 import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
@@ -75,12 +76,18 @@ export function principalKey(principal: ConnectionPrincipal): string {
  * The caller is responsible for passing a matching
  * {@link AuthorizationDefinition}. This helper does not validate
  * the definition shape beyond reading `principalType`.
+ *
+ * A user-scoped connection is held when another person's message joined
+ * the turn after the caller last spoke and the model made the call.
  */
 export function resolveConnectionPrincipal(
   connectionName: string,
   authorization: AuthorizationDefinition,
   ctx: AlsContext | undefined = contextStorage.getStore(),
 ): ConnectionPrincipal {
+  if (authorization.principalType === "user") {
+    holdCallerIdentity(connectionName, ctx);
+  }
   return resolveConnectionPrincipalFromAuth(connectionName, authorization, ctx?.get(AuthKey), ctx);
 }
 

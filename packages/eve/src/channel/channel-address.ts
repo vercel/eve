@@ -19,6 +19,7 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionCommand,
+  PrincipalPolicy,
   TurnPolicy,
 } from "#channel/types.js";
 import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
@@ -46,6 +47,7 @@ interface BaseChannelAddressDeliveryOptions {
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
+  readonly principalPolicy?: PrincipalPolicy;
 }
 
 /**
@@ -96,6 +98,7 @@ export function createChannelAddress<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
+  readonly principalPolicy?: PrincipalPolicy;
 }): ChannelAddress<TState> {
   const metadata: Partial<ChannelDeliverySource> = input.metadata ?? {};
   const namespacedToken = `${input.channelName}:${input.continuationToken}`;
@@ -118,6 +121,10 @@ export function createChannelAddress<TState = undefined>(input: {
       // asked for it.
       const store = contextStorage.getStore();
       const schedule = store === undefined ? undefined : readSessionSchedule(store);
+      const principalPolicy =
+        payload.message === undefined
+          ? undefined
+          : (options.principalPolicy ?? input.principalPolicy);
       const commandWithoutCaller = {
         ...(schedule !== undefined && { schedule }),
         idempotencyKey: options.idempotencyKey,
@@ -133,6 +140,7 @@ export function createChannelAddress<TState = undefined>(input: {
           payload.message === undefined
             ? undefined
             : (options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY),
+        ...(principalPolicy !== undefined && { principalPolicy }),
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
@@ -182,7 +190,11 @@ export function createChannelAddress<TState = undefined>(input: {
     async create(options) {
       const history = validateSessionHistory(options.history);
       const toSession = (sessionId: string) =>
-        createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
+        createSession(sessionId, input.runtime, {
+          ...metadata,
+          turnPolicy: input.turnPolicy,
+          principalPolicy: input.principalPolicy,
+        });
       let owner: { readonly sessionId: string } | undefined;
       try {
         owner = await input.runtime.resolveContinuation(namespacedToken, { runnable: true });
@@ -271,6 +283,7 @@ export function createChannelAddress<TState = undefined>(input: {
         : createSession(owner.sessionId, input.runtime, {
             ...metadata,
             turnPolicy: input.turnPolicy,
+            principalPolicy: input.principalPolicy,
           });
     },
   };
@@ -283,6 +296,7 @@ export function createChannelAddressFn<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
+  readonly principalPolicy?: PrincipalPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
 }

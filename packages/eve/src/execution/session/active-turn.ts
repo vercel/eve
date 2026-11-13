@@ -27,6 +27,7 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
+import { openRequests } from "#protocol/session-projection/reader.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -66,7 +67,7 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** Who alone steers the turn: its principal, or its delegated caller. */
+  /** The turn's principal and delegated caller; another principal joins only with `keep`. */
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
@@ -111,11 +112,17 @@ export class ActiveTurn {
     if (
       delivery.kind === "deliver" &&
       !this.input.queue.isDuplicate(delivery) &&
-      isSteeringMessage(delivery, this.identity) &&
+      isSteeringMessage(delivery, this.identity, { paused: this.awaitsPerson }) &&
       !this.input.cursor.sessionState.hasProxyInputRequests
     )
       this.steeringController.abort();
   };
+
+  /** A request is open in the session, so another person's message waits for its caller. */
+  private get awaitsPerson(): boolean {
+    const { state } = readDurableSession(this.input.cursor.sessionState);
+    return openRequests(storedProjection(state).view).length > 0;
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -153,7 +160,10 @@ export class ActiveTurn {
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, {
+        ...options,
+        paused: this.awaitsPerson,
+      });
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
@@ -161,7 +171,10 @@ export class ActiveTurn {
         this.abort();
         break;
       }
-      if (routed.kind === "turn") steering.push(routed.delivery);
+      if (routed.kind === "turn") {
+        steering.push(routed.delivery);
+        break;
+      }
     }
     this.resetSteering();
     if (steering.length === 0) return undefined;
@@ -360,7 +373,8 @@ export class ActiveTurn {
         this.admitted.delete(sequence);
         continue;
       }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
+      if (isSteeringMessage(routed.remainder, this.identity, { paused: this.awaitsPerson }))
+        steered = true;
     }
     return steered;
   }

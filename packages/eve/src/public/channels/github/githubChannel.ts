@@ -2,7 +2,7 @@ import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/ch
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContext } from "#shared/channel-context.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
@@ -162,6 +162,8 @@ export interface GitHubChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
 
   /**
    * Invoked for every `@mention` of the bot in an issue/PR timeline comment or
@@ -245,6 +247,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     state: initialGitHubState(),
 
     context(state, session) {

@@ -4,7 +4,7 @@ import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/ch
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { ChannelContext } from "#shared/channel-context.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -199,6 +199,8 @@ export interface TwilioChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
   /**
    * Public URL Twilio used for signing. Set this when proxies or local
    * tunnels make `request.url` differ from the configured webhook URL.
@@ -291,6 +293,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     TwilioInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     state: {
       from: null as string | null,
       to: null as string | null,

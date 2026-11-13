@@ -45,6 +45,7 @@ Public fields include:
 - `turn.sequence`: the turn's position in the session.
 - `auth.current`: the caller for the active inbound turn.
 - `auth.initiator`: the caller that started the session.
+- `auth.steeredBy`: the people other than the caller whose messages joined the running turn; present only while at least one exists.
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
 - `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) to read its earlier conversation.
 

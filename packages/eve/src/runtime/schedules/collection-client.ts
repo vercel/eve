@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
 import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { steeringModelCall, turnSteeredMessage } from "#runtime/connections/identity-hold.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
@@ -91,6 +92,10 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
   ): Promise<{ scope: ScheduleScopeValue; provider: ScheduleProviderContext }> => {
+    // A schedule binds its creator to work that outlives the turn.
+    const steeredBy = steeringModelCall();
+    if (steeredBy !== undefined)
+      throw new Error(turnSteeredMessage(steeredBy, "dynamic schedules"));
     const context = contextFor(operation, name);
     const scope =
       definition.scope === undefined

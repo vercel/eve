@@ -57,10 +57,17 @@ export type { SessionPredecessor } from "#protocol/session-events/families/sessi
  *
  * `current` is the caller of the most recent request.
  * `initiator` is the caller who originally created the session.
+ * `steeredBy` holds the people whose messages joined the running turn.
  */
 export interface SessionAuth {
   readonly current: SessionAuthContext | null;
   readonly initiator: SessionAuthContext | null;
+  /**
+   * The people other than `current` whose messages joined the running turn since `current` last
+   * sent a message or approved a call. Set only while there is at least one; absent otherwise,
+   * including in a session with one person.
+   */
+  readonly steeredBy?: readonly SessionAuthContext[];
 }
 
 /**
@@ -86,6 +93,11 @@ export interface Session {
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
+/**
+ * The people other than the turn's caller whose messages joined the running turn since the
+ * caller last acted. Absent reads as empty.
+ */
+export const SteeredByKey = new ContextKey<readonly SessionAuthContext[]>("eve.steeredBy");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);

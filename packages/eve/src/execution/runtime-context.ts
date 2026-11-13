@@ -22,6 +22,7 @@ import {
   EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionTitleKey,
+  SteeredByKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -76,6 +77,7 @@ export function buildRunContext(input: {
     run.schedule?.occurrenceId ?? contextStorage.getStore()?.get(OccurrenceIdKey);
   if (occurrenceId !== undefined) ctx.set(OccurrenceIdKey, occurrenceId);
   ctx.set(AuthKey, auth);
+  if (run.steeredBy !== undefined && run.steeredBy.length > 0) ctx.set(SteeredByKey, run.steeredBy);
   if (run.toolStubs !== undefined) ctx.set(ToolStubsKey, run.toolStubs);
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);

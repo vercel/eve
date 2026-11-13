@@ -58,6 +58,7 @@
   "PATCH",
   "POST",
   "PUT",
+  "PrincipalPolicy",
   "RouteDefinition",
   "RouteHandlerArgs",
   "SessionHistoryMessage",

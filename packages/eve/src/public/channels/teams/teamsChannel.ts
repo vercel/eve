@@ -11,7 +11,7 @@ import {
   respondOrRetireInactivePrompt,
   type PromptResponse,
 } from "#channel/inactive-prompt.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
@@ -216,6 +216,8 @@ export interface TeamsChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
 
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
   onMessage?(
@@ -306,6 +308,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     TeamsInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     uploadPolicy: config.files?.uploadPolicy,
     state: initialTeamsState(),
     fetchFile: createTeamsFetchFile(filesPolicy, {

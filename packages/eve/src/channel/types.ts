@@ -177,11 +177,23 @@ export type TurnPolicy = "steer" | "queue";
 /** Default policy for message sends produced by current channel surfaces. */
 export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 
+/**
+ * Controls whether a message may join a running turn that runs as another principal.
+ * `"match"` (the default) joins only a turn running as the sender. `"keep"` also joins another
+ * principal's turn as input, and that turn keeps its caller.
+ */
+export type PrincipalPolicy = "match" | "keep";
+
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
       readonly idempotencyKey?: string;
       readonly auth?: SessionAuthContext | null;
+      /**
+       * @internal Set only when a parent session messages its child: the parent turn's `steeredBy`
+       * as it sent the message.
+       */
+      readonly steeredBy?: readonly SessionAuthContext[];
       readonly caller?: TurnCaller;
       /** Initial workflow title when delivering to a prewarmed session. */
       readonly title?: string;
@@ -191,6 +203,7 @@ export type SessionCommand =
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
+      readonly principalPolicy?: PrincipalPolicy;
     }
   | ({
       readonly kind: "cancel";
@@ -286,6 +299,11 @@ export interface DeliverHookPayload {
   /** Initial workflow title; ignored once session initialization has run. */
   readonly title?: string;
   readonly auth?: SessionAuthContext | null;
+  /**
+   * @internal Set only when a parent session messages its child: the parent turn's `steeredBy`
+   * as it sent the message.
+   */
+  readonly steeredBy?: readonly SessionAuthContext[];
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
   /** Additive durable metadata. Absent on envelopes written by older deployments. */
@@ -295,6 +313,7 @@ export interface DeliverHookPayload {
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;
+  readonly principalPolicy?: PrincipalPolicy;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */
@@ -493,6 +512,11 @@ export interface RunInput {
    * request was accepted with no credentials.
    */
   readonly auth: SessionAuthContext | null;
+  /**
+   * @internal The parent turn's `steeredBy` when it started this child session, so the child
+   * holds the caller's identity as its parent does.
+   */
+  readonly steeredBy?: readonly SessionAuthContext[];
   /**
    * Route-authenticated principal used to classify the conversation. This
    * stays separate from `auth` because a channel may project a different

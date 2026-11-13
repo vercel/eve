@@ -245,6 +245,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
   readonly turnPolicy?: CompiledChannel["turnPolicy"];
+  readonly principalPolicy?: CompiledChannel["principalPolicy"];
   readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;

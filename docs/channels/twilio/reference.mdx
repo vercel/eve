@@ -36,21 +36,22 @@ Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at
 
 `twilioChannel(config)` requires `allowFrom`. Every other option is optional.
 
-| Option                 | Default                                         | Description                                                                                                                |
-| ---------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `allowFrom`            | Required                                        | A number, a list, an async resolver, or `"*"`. Gates every inbound hook.                                                   |
-| `credentials`          | `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`    | `{ accountSid, authToken }`. Each field also takes a lazy resolver.                                                        |
-| `messaging`            | Reply from the inbound `To` number              | `{ from, messagingServiceSid, statusCallbackUrl }` for outbound SMS. Proactive sends need `from` or `messagingServiceSid`. |
-| `voice`                | See below                                       | `{ prompt, acknowledgement, voice, language, speechModel, speechTimeout, timeoutSeconds, hints, profanityFilter }`.        |
-| `route`                | `/eve/v1/twilio`                                | Base path for the three webhook routes.                                                                                    |
-| `webhookUrl`           | None                                            | Public URL, or a function of the request, that signature verification uses behind a proxy.                                 |
-| `publicBaseUrl`        | The request's origin                            | Base used to build absolute voice callback URLs.                                                                           |
-| `api`                  | `https://api.twilio.com` and the global `fetch` | `{ apiBaseUrl, fetch }` for Twilio REST calls and media downloads.                                                         |
-| `turnPolicy`           | `"steer"`                                       | `"steer"` or `"queue"` for messages that arrive during a turn.                                                             |
-| `onText`               | Dispatch with phone-number auth                 | `(ctx, message)` hook for inbound SMS.                                                                                     |
-| `onVoice`              | Answer with the configured `voice` options      | `(ctx, call)` hook when a call comes in. Return `null` to reject it, or an object to override `voice` options.             |
-| `onVoiceTranscription` | Dispatch with phone-number auth                 | `(ctx, transcription)` hook for speech transcripts.                                                                        |
-| `events`               | eve's default handlers                          | Per-event handler overrides.                                                                                               |
+| Option                 | Default                                         | Description                                                                                                                                            |
+| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `allowFrom`            | Required                                        | A number, a list, an async resolver, or `"*"`. Gates every inbound hook.                                                                               |
+| `credentials`          | `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`    | `{ accountSid, authToken }`. Each field also takes a lazy resolver.                                                                                    |
+| `messaging`            | Reply from the inbound `To` number              | `{ from, messagingServiceSid, statusCallbackUrl }` for outbound SMS. Proactive sends need `from` or `messagingServiceSid`.                             |
+| `voice`                | See below                                       | `{ prompt, acknowledgement, voice, language, speechModel, speechTimeout, timeoutSeconds, hints, profanityFilter }`.                                    |
+| `route`                | `/eve/v1/twilio`                                | Base path for the three webhook routes.                                                                                                                |
+| `webhookUrl`           | None                                            | Public URL, or a function of the request, that signature verification uses behind a proxy.                                                             |
+| `publicBaseUrl`        | The request's origin                            | Base used to build absolute voice callback URLs.                                                                                                       |
+| `api`                  | `https://api.twilio.com` and the global `fetch` | `{ apiBaseUrl, fetch }` for Twilio REST calls and media downloads.                                                                                     |
+| `turnPolicy`           | `"steer"`                                       | `"steer"` or `"queue"` for messages that arrive during a turn.                                                                                         |
+| `principalPolicy`      | `"match"`                                       | `"match"` or `"keep"` for messages from someone other than the running turn's caller. See [Overlapping messages](/docs/channels#overlapping-messages). |
+| `onText`               | Dispatch with phone-number auth                 | `(ctx, message)` hook for inbound SMS.                                                                                                                 |
+| `onVoice`              | Answer with the configured `voice` options      | `(ctx, call)` hook when a call comes in. Return `null` to reject it, or an object to override `voice` options.                                         |
+| `onVoiceTranscription` | Dispatch with phone-number auth                 | `(ctx, transcription)` hook for speech transcripts.                                                                                                    |
+| `events`               | eve's default handlers                          | Per-event handler overrides.                                                                                                                           |
 
 `voice.prompt` defaults to `"Please say your message after the tone."`, `voice.acknowledgement`, spoken after a transcript arrives, defaults to `"Thanks. I'll follow up by text."`, and `voice.speechTimeout` defaults to `"auto"`.
 

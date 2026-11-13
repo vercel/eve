@@ -262,10 +262,12 @@ async function buildRouteArgs(input: {
     metadata: deliverySource,
     runtime: bundle.runtime,
     turnPolicy: channel.turnPolicy,
+    principalPolicy: channel.principalPolicy,
   });
   const attachSession = createAttachSessionFn(bundle.runtime, {
     ...deliverySource,
     turnPolicy: channel.turnPolicy,
+    principalPolicy: channel.principalPolicy,
   });
   const to = createCrossChannelToFn(
     bundle.runtime,

@@ -7,7 +7,7 @@ import type {
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { ChannelContext } from "#shared/channel-context.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { createLogger } from "#internal/logging.js";
 import {
@@ -179,6 +179,8 @@ export interface LinearChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
 
   /** Inbound Agent Session hook. Defaults to dispatching `created` and `prompted` events. */
   onAgentSession?(
@@ -212,6 +214,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
     LinearInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     state: initialLinearState(),
     metadata(state): LinearInstrumentationMetadata {
       return {

@@ -21,7 +21,7 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackHitlRoute } from "#public/channels/slack/hitl.js";
@@ -790,6 +790,11 @@ export type SlackMentionResult = {
    * content. Never put user-controlled text in it.
    */
   readonly guidance?: string;
+  /**
+   * What this message does to a running turn that runs as someone else. Overrides the channel's
+   * `principalPolicy` for this one message.
+   */
+  readonly principalPolicy?: PrincipalPolicy;
 } | null;
 
 /**
@@ -847,6 +852,8 @@ export interface SlackChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match". */
+  readonly principalPolicy?: PrincipalPolicy;
 
   /**
    * Serves each Slack code channel as one session and answers every message in
@@ -1193,6 +1200,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     SlackInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
+    principalPolicy: config.principalPolicy,
     uploadPolicy: config.uploadPolicy,
     state: {
       channelId: null as string | null,
@@ -2275,6 +2283,9 @@ async function deliverSlackMessage(input: {
     const sendOptions: SlackSendOptions = attachInputText(
       {
         auth: input.result.auth,
+        ...(input.result.principalPolicy !== undefined && {
+          principalPolicy: input.result.principalPolicy,
+        }),
         ...(channelContext.length > 0 && { context: channelContext }),
         // An edit follows the channel's `turnPolicy`: steered, it joins the running turn; queued,
         // it stays behind the message it edits instead of overtaking it into an earlier turn.

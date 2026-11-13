@@ -17,6 +17,7 @@ import type {
   Runtime,
   SessionAuthContext,
   SessionCallback,
+  PrincipalPolicy,
   TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
@@ -30,6 +31,7 @@ import {
   ContinuationTokenKey,
   InitiatorAuthKey,
   SessionIdKey,
+  SteeredByKey,
 } from "#context/keys.js";
 import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -104,6 +106,8 @@ export interface SessionSendOptions {
   readonly title?: string;
   /** How the message treats a running turn. */
   readonly turnPolicy?: TurnPolicy;
+  /** What the message does to a running turn that runs as someone else. */
+  readonly principalPolicy?: PrincipalPolicy;
 }
 
 // A record, so adding a field to SessionSendOptions fails to compile until it's listed here.
@@ -115,6 +119,7 @@ const SESSION_SEND_OPTION_FIELDS: Record<keyof SessionSendOptions, true> = {
   outputSchema: true,
   title: true,
   turnPolicy: true,
+  principalPolicy: true,
 };
 
 const SESSION_SEND_OPTION_KEYS = Object.keys(
@@ -147,7 +152,10 @@ interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly turnPolicy?: TurnPolicy;
+    readonly principalPolicy?: PrincipalPolicy;
+  } = {},
 ): InternalSession {
   return {
     id,
@@ -170,6 +178,7 @@ export function createSession(
       if (options.context !== undefined) payload.context = options.context;
       if (history !== undefined) payload.history = history;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
+      const principalPolicy = options.principalPolicy ?? metadata.principalPolicy;
       const commandWithoutCaller = {
         idempotencyKey: options.idempotencyKey,
         auth: options.auth,
@@ -178,6 +187,7 @@ export function createSession(
         payload,
         requestId: metadata.requestId,
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
+        ...(principalPolicy !== undefined && { principalPolicy }),
         title: options.title,
       };
       const result = await runtime.dispatchSession({
@@ -269,7 +279,10 @@ export function createSession(
 /** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly turnPolicy?: TurnPolicy;
+    readonly principalPolicy?: PrincipalPolicy;
+  } = {},
 ): (sessionId: string) => Session {
   return (sessionId) => createSession(sessionId, runtime, metadata);
 }
@@ -291,9 +304,11 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
         return accessor.get(SessionIdKey) ?? "";
       },
       get auth(): SessionAuth {
+        const steeredBy = accessor.get(SteeredByKey);
         return {
           current: accessor.get(AuthKey) ?? null,
           initiator: accessor.get(InitiatorAuthKey) ?? null,
+          ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
         };
       },
     },

@@ -27,6 +27,7 @@ const options = {
   outputSchema: { type: "object" },
   title: "Rollout plan",
   turnPolicy: "queue",
+  principalPolicy: "keep",
 } satisfies Required<SessionSendOptions>;
 
 const chatSdk = chatSdkChannel({

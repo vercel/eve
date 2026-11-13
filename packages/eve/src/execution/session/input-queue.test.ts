@@ -108,6 +108,56 @@ describe("SessionInputQueue", () => {
     });
   });
 
+  it("lets another person's keep message join a turn that isn't waiting on its caller", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "BOB" };
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const send = (
+      queue: SessionInputQueue,
+      message: string,
+      auth: typeof alice | null | undefined,
+      keep = false,
+    ) =>
+      queue.enqueueDelivery({
+        ...(auth !== undefined && { auth }),
+        ...(keep && { principalPolicy: "keep" as const }),
+        kind: "deliver",
+        payloads: [{ message }],
+      })!.sequence;
+
+    const keeping = new SessionInputQueue([]);
+    const keepByBob = send(keeping, "Actually include everyone.", bob, true);
+    const matchingByBob = send(keeping, "And book a room.", bob);
+    const admitted = new Set([keepByBob, matchingByBob]);
+    expect(keeping.takeSteering(admitted, turn)?.sequences).toEqual([keepByBob]);
+    // Without `keep` his message still waits for the turn to end.
+    expect(keeping.takeSteering(admitted, turn)).toBeUndefined();
+
+    const paused = new SessionInputQueue([]);
+    const whilePaused = send(paused, "Actually include everyone.", bob, true);
+    const pausedAdmitted = new Set([whilePaused]);
+    expect(paused.takeSteering(pausedAdmitted, turn, { paused: true })).toBeUndefined();
+    // It joins when the turn resumes.
+    expect(paused.takeSteering(pausedAdmitted, turn)?.sequences).toEqual([whilePaused]);
+
+    const anonymous = new SessionInputQueue([]);
+    const noSender = send(anonymous, "Include the press notes.", null, true);
+    expect(anonymous.takeSteering(new Set([noSender]), turn)).toBeUndefined();
+
+    const both = new SessionInputQueue([]);
+    const fromAlice = send(both, "Also cover the launch date.", alice);
+    const afterAlice = send(both, "Actually include everyone.", bob, true);
+    const bothAdmitted = new Set([fromAlice, afterAlice]);
+    // One step reads one sender, so the other's message waits for the next boundary.
+    expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([fromAlice]);
+    expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([afterAlice]);
+  });
+
   it("lets a queued message steer a held turn only when it arrived after the hold", () => {
     const queue = new SessionInputQueue([]);
     const turn = { callerCallId: undefined, principal: "user:test:alice" };

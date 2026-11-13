@@ -98,6 +98,7 @@ async function dispatchCoordination(
       auth: {
         current: prepared.auth,
         initiator: prepared.initiatorAuth,
+        ...(prepared.steeredBy.length > 0 && { steeredBy: prepared.steeredBy }),
       },
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,

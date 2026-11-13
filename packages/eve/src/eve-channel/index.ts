@@ -163,6 +163,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
   return defineChannel<undefined, EveEventContext>({
     cors: input.cors,
     turnPolicy: input.turnPolicy,
+    principalPolicy: input.principalPolicy,
     audience: (classifierInput) => {
       const audience = input.audience ?? defaultEveAudience;
       return typeof audience === "function" ? audience(classifierInput) : audience;

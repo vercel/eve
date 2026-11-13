@@ -1,7 +1,7 @@
 import type { ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn, AuthResult } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
@@ -189,6 +189,8 @@ export interface EveChannelConfig {
   readonly cors?: ChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** What an accepted message does to a running turn that runs as someone else. */
+  readonly principalPolicy?: PrincipalPolicy;
   /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch. Message-free creation skips this hook and

@@ -11,6 +11,7 @@ import {
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
+  SteeredByKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -31,7 +32,7 @@ import {
   turnPosition,
 } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
+import type { SessionAuthContext, SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
@@ -87,6 +88,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
   readonly sessionState: DurableSessionState;
+  readonly steeredBy: readonly SessionAuthContext[];
   /** Trace root that this session's local children inherit, when it isn't the lineage root. */
   readonly traceRoot?: SessionTraceRoot;
   readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
@@ -177,6 +179,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     sandboxState,
     serializedContext: input.serializedContext,
     session,
+    steeredBy: ctx.get(SteeredByKey) ?? [],
     traceRoot: childTraceRoot(ctx, session.sessionId),
     workflowAgents: resolveWorkflowAgentMetadata(ctx),
   };

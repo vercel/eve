@@ -33,6 +33,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { callProgress } from "#harness/call-facts.js";
 import { settleCall, startCall } from "#harness/session-machine/calls.js";
 import { withUsageCall } from "#harness/usage-sink.js";
+import { withModelCall } from "#runtime/connections/identity-hold.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -195,8 +196,7 @@ export async function executeToolCall(
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
           await input.publish(startCall(clearance));
-          // Usage the tool records belongs to its call, including while a streaming tool iterates.
-          await withUsageCall(callId, async () => {
+          const run = async () => {
             const executed = invokeTool(
               definition,
               args,
@@ -226,7 +226,9 @@ export async function executeToolCall(
             } else {
               output = await raceAbort(Promise.resolve(executed), abandon);
             }
-          });
+          };
+          // Usage the tool records belongs to its call, including while a streaming tool iterates.
+          await withUsageCall(callId, () => withModelCall(run));
         } finally {
           executionMs = performance.now() - startedAt;
         }

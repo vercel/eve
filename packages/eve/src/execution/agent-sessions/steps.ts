@@ -34,6 +34,7 @@ import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
+import { turnSteeredMessage } from "#runtime/connections/identity-hold.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
@@ -303,6 +304,10 @@ export async function sendAgentSessionMessageStep(
   const { address, context } = input;
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
+    const steeredBy = input.auth.steeredBy ?? [];
+    if (remote.forwardPrincipal === true && steeredBy.length > 0) {
+      throw new FatalError(turnSteeredMessage(steeredBy, `remote agent "${address.name}"`));
+    }
     return await continueRemoteAgentSession({
       auth: input.auth.current,
       callback: {
@@ -337,6 +342,11 @@ export async function sendAgentSessionMessageStep(
       kind: "send",
       delivery: { channelKind: "subagent", channelName: "subagent", deliveryId },
       payload: { message: input.message, outputSchema: input.outputSchema },
+      // `input.auth` may come from a run started by an older deployment.
+      ...(input.auth.steeredBy !== undefined &&
+        input.auth.steeredBy.length > 0 && {
+          steeredBy: input.auth.steeredBy,
+        }),
     },
   ).catch((error: unknown) => {
     if (!SessionStrandedError.is(error)) throw error;
@@ -493,6 +503,7 @@ async function startLocalSession(
       sessionId: context.parent.sessionId,
     },
     source: target.source,
+    steeredBy: auth.steeredBy,
   });
   const childRuntime = createWorkflowRuntime({
     agentSessionRuntimeOverrides: input.runtimeOverrides,
@@ -550,6 +561,10 @@ async function startRemoteSession(
     registry: bundle.subagentRegistry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
+  const steeredBy = auth.steeredBy ?? [];
+  if (remote.forwardPrincipal === true && steeredBy.length > 0) {
+    throw new FatalError(turnSteeredMessage(steeredBy, `remote agent "${action.remoteAgentName}"`));
+  }
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
     action,
