@@ -1,0 +1,44 @@
+{
+  "name": "eve-memory-agent",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "eve build",
+    "deploy": "eve deploy",
+    "dev": "eve dev",
+    "eval": "eve eval",
+    "typecheck": "tsc",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "prepare": "lefthook install",
+    "test": "vitest run",
+    "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run knip",
+    "knip": "knip"
+  },
+  "dependencies": {
+    "@vercel/connect": "2.2.0",
+    "ai": "^7.0.128",
+    "eve": "^0.75.0",
+    "just-bash": "3.1.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "eslint-plugin-jsdoc": "^65.2.2",
+    "eslint-plugin-tsdoc": "^0.5.4",
+    "knip": "^6.41.0",
+    "lefthook": "^2.2.1",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "typescript": "7.0.2",
+    "ultracite": "7.12.4",
+    "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

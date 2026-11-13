@@ -1,0 +1,16 @@
+# Formats and lint-fixes staged files before each commit.
+# Refer for explanation to the following link:
+# https://lefthook.dev/configuration/
+pre-commit:
+  jobs:
+    - run: pnpm exec ultracite fix
+      glob:
+        - "*.js"
+        - "*.jsx"
+        - "*.ts"
+        - "*.tsx"
+        - "*.json"
+        - "*.jsonc"
+        - "*.css"
+        - "*.md"
+      stage_fixed: true
