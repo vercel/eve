@@ -15,16 +15,15 @@ import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
 import { failTurnForEffect, type Step, stepReference } from "#harness/step/context.js";
-import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
+import { complete, fail } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import { collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
-import { hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { hasQueuedTurnInput } from "#harness/step/park.js";
+import { parkCalls } from "#harness/step/park-calls.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -35,6 +34,16 @@ import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
+import type { HarnessAction } from "#public/definitions/harness.js";
+import {
+  continueWithNote,
+  decideNext,
+  failHarness,
+  harnessed,
+  settleWithReply,
+  waitOnTasks,
+} from "#harness/stack/kernel.js";
+import { runHarnessCalls } from "#harness/stack/calls.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -122,32 +131,18 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   // --- Park on approvals or runtime calls ----------------------------------
 
-  if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
-    const { sequence, stepIndex, turnId } = step.position();
-    const dispatched = collectWorkflowCalls({
-      clearances: result.policyApprovals ?? {},
-      session: step.session,
-      toolCalls: workflowToolCalls,
-      tools: input.catalog,
-      turnId,
-    });
-    step.session = changeHistory(dispatched.session, { extend: promptMessages });
-    const parked = {
-      event: { sequence, stepIndex, turnId },
-      // A suspended response commits once every call it made has a result, so a call that will
-      // never get one is answered now.
-      messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests,
-    };
-    if (approvalRequests.length > 0) {
-      await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
-    } else {
-      await step.apply(suspendStep(step.view(), parked));
-    }
-    // Approval only precedes sign-in for the same call, not an executing sibling.
-    if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
-    return park(step);
-  }
+  const parked = await parkCalls(step, {
+    approvalRequests,
+    authorizationInterrupt,
+    catalog: input.catalog,
+    // A suspended response commits once every call it made has a result, so a call that will
+    // never get one is answered now.
+    messages: () => answerCallsThatWontRun(responseMessages, result),
+    policyApprovals: result.policyApprovals,
+    promptMessages,
+    workflowToolCalls,
+  });
+  if (parked !== undefined) return parked;
 
   // --- Continue or terminate ------------------------------------------------
 
@@ -183,14 +178,72 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
-  if (continueLoop) return { next: step.runStep, session: step.session };
-  // No turn ends while its tasks work: the session waits for one to settle, then calls the model
-  // again in the same turn.
-  if (workingTasks.length > 0) {
-    return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
+  const held: StepResult = {
+    held: { kind: "tasks", taskIds: workingTasks },
+    next: null,
+    session: step.session,
+  };
+  // The harness decides, with eve's own answer below it: for an agent with none, eve's answer is
+  // what happens. The kernel still holds a turn whose tasks work, and refuses a model call with
+  // nothing new to read.
+  const native = nativeNext(step, {
+    continueLoop,
+    output: delivered ? finalOutput : undefined,
+    stepOutput: endsTurn ? null : stepOutput,
+    workingTasks,
+  });
+  const decided = await harnessed(step, () =>
+    decideNext(step, {
+      lastStep: {
+        endsTurn,
+        text: endsTurn ? null : stepOutput,
+        ...(delivered && finalOutput !== undefined && { output: finalOutput }),
+      },
+      native,
+    }),
+  );
+  if ("failed" in decided) return decided.failed;
+  const action = decided.value;
+  if ("model" in action) return continueWithNote(step, action.model.note, { unread: continueLoop });
+  // The harness's calls run beside unread results only once the model has read those.
+  if ("call" in action) {
+    if (continueLoop) {
+      return failHarness(
+        step,
+        "HARNESS_INVALID",
+        "The harness made calls before the model read its own calls' results.",
+      );
+    }
+    return runHarnessCalls(step, action.call);
   }
-  // Text written before an `endsTurn` call was narration, not the reply.
-  return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
+  if ("wait" in action) return action === native ? held : waitOnTasks(step, action.wait.tasks);
+  // No turn ends while its tasks work: the session waits for one to settle, then decides again.
+  if (workingTasks.length > 0) return held;
+  // eve's own answer, passed through, settles the way it always does: its reply, or the schema's
+  // failure.
+  if (action === native) {
+    return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
+  }
+  if ("fail" in action) return failHarness(step, "HARNESS_FAILED_TURN", action.fail);
+  return settleWithReply(step, action.settle);
+}
+
+/** What eve itself would do after a model step, as a harness action. */
+function nativeNext(
+  step: Step,
+  input: {
+    readonly continueLoop: boolean;
+    readonly output: JsonValue | undefined;
+    readonly stepOutput: string | null;
+    readonly workingTasks: readonly string[];
+  },
+): HarnessAction {
+  if (input.continueLoop) return { model: {} };
+  if (input.workingTasks.length > 0) return { wait: { tasks: input.workingTasks } };
+  if (step.session.outputSchema === undefined) return { settle: input.stepOutput ?? "" };
+  return input.output === undefined
+    ? { fail: OUTPUT_SCHEMA_NOT_FULFILLED.message }
+    : { settle: input.output };
 }
 
 /**

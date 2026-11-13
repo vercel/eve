@@ -127,4 +127,25 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
   });
+
+  it("starts a turn of its own for a delivery kept apart, as a harness's admit says", () => {
+    const queue = new SessionInputQueue([]);
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const send = (message: string) =>
+      queue.enqueueDelivery({ auth: alice, kind: "deliver", payloads: [{ message }] })!.sequence;
+
+    const first = send("Summarize the thread.");
+    const apart = send("/status");
+    const last = send("And the action items.");
+    queue.keepApart(apart);
+
+    expect(queue.takeNext()).toMatchObject({ sequences: [first] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [apart] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [last] });
+  });
 });

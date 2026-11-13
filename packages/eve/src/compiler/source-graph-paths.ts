@@ -37,7 +37,8 @@ export function validateProgrammaticLogicalPathInternal(
   const extensionless = stripLogicalPathExtension(logicalPath);
   const supported =
     (segments.length === 1 &&
-      ["agent", "memory", "sandbox", "instrumentation"].includes(extensionless)) ||
+      ["agent", "harness", "memory", "sandbox", "instrumentation"].includes(extensionless)) ||
+    (root === "harness" && segments.length === 2) ||
     (root === "sandbox" &&
       segments.length === 2 &&
       getSupportedModuleBaseName(fileName) === "sandbox") ||

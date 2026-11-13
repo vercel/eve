@@ -75,6 +75,7 @@ export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(
   const has = (kind: AgentSourceKind) => sourcesOf(manifest, kind).length > 0;
   const extraEntries = [
     has("connection") ? "connections/" : undefined,
+    has("harness") ? "harness" : undefined,
     has("hook") ? "hooks/" : undefined,
     has("instructions") ? "instructions" : undefined,
     manifest.lib.length > 0 ? "lib/" : undefined,

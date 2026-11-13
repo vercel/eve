@@ -39,15 +39,25 @@ export function draftOf(contributions: readonly Contribution[]): Draft {
   return draft;
 }
 
-/** The latest contribution's choice of model: one that answers `undefined` leaves it to those before. */
+/**
+ * The latest contribution's choice of model: one that answers `undefined` leaves it to those before.
+ * One that arranges the model wraps the choice of those before it. Each is asked only if needed.
+ */
 export async function decideModel(
   contributions: readonly Contribution[],
 ): Promise<ContributionValues["model"] | undefined> {
-  for (let index = contributions.length - 1; index >= 0; index -= 1) {
-    const answer = await force(contributions[index]!.model);
-    if (answer !== undefined) return answer;
+  let decided: () => Promise<ContributionValues["model"] | undefined> = async () => undefined;
+  for (const contribution of contributions) {
+    const before = decided;
+    if (contribution.arrangeModel !== undefined) {
+      const arrange = contribution.arrangeModel;
+      decided = once(() => arrange(before));
+    } else if (contribution.model !== undefined) {
+      const model = contribution.model;
+      decided = once(async () => (await force(model)) ?? (await before()));
+    }
   }
-  return undefined;
+  return await decided();
 }
 
 /** One field of every contribution that adds to it, in order: each made before the next. */

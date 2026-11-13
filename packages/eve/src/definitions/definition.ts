@@ -11,6 +11,7 @@ import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessLayer } from "./harness/stack.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -47,6 +48,11 @@ export interface Definition {
    * `slotsOf`, and runs once per step start.
    */
   readonly install?: (ctx: ContextContainer) => Promise<void>;
+  /**
+   * The harness layer it is, when it is one: the stages the kernel asks at its decision points
+   * (`next`, `request`, `admit`, `compact`) read it here, in definition order.
+   */
+  readonly layer?: HarnessLayer;
 }
 
 /** What a definition can add, by field. */
@@ -71,6 +77,10 @@ export type Contribution = {
 } & {
   /** Arranged: after collecting, in order, the parts of the call it replaces. */
   readonly arrange?: (draft: Draft) => Partial<Draft>;
+  /** Arranged: the model the definitions before it chose, or the one it chooses instead. */
+  readonly arrangeModel?: (
+    below: () => Promise<ContributionValues["model"]>,
+  ) => Promise<ContributionValues["model"]>;
 };
 
 /**

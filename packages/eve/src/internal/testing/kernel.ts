@@ -1,5 +1,6 @@
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { SessionIdKey } from "#context/keys.js";
 import type { AgentSettings } from "#execution/effective-agent-config.js";
 import { createKernel } from "#harness/kernel.js";
 import { foldPublication } from "#harness/session-machine/current.js";
@@ -9,10 +10,14 @@ import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent } from "#runtime/sessions/session-agent.js";
+import type { Harness } from "#public/definitions/harness.js";
 
 /** A kernel config for a direct harness test: the agent it runs is only a model and its settings. */
 export interface TestKernelConfig extends KernelConfig {
-  readonly agent: { readonly model: RuntimeModelReference } & AgentSettings;
+  readonly agent: {
+    readonly model: RuntimeModelReference;
+    readonly harness?: Harness;
+  } & AgentSettings;
 }
 
 /**
@@ -25,6 +30,7 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       if (!ctx.has(SessionAgentKey)) ctx.set(SessionAgentKey, testAgent(agent));
+      if (!ctx.has(SessionIdKey)) ctx.set(SessionIdKey, session.sessionId);
       if (!ctx.has(ConnectionRegistryKey)) {
         ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
       }
@@ -33,6 +39,8 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
     // A step of its own: the test's handler stands where the publish sink folds what it writes.
     const own = new ContextContainer();
     own.set(SessionAgentKey, testAgent(agent));
+    // What a session's frame names it by, as its harness reads it.
+    own.set(SessionIdKey, session.sessionId);
     own.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
     const folding = createKernel({
       ...config,
@@ -56,7 +64,20 @@ function testAgent(agent: TestKernelConfig["agent"]): SessionAgent {
     nodeId: "root",
     resolvedAgent: {
       config: { compaction: { thresholdPercent: agent.thresholdPercent } },
-      definitions: [],
+      // An `agent/harness.ts`, as the compiler resolves it.
+      definitions:
+        agent.harness === undefined
+          ? []
+          : [
+              {
+                harness: agent.harness,
+                kind: "harness",
+                logicalPath: "harness.ts",
+                slug: "harness",
+                sourceId: "harness.ts",
+                sourceKind: "module",
+              },
+            ],
       instructions: [],
       skills: [],
     },

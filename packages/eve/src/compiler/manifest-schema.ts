@@ -587,7 +587,7 @@ export const compiledDefinitionSchema: z.ZodType<CompiledDefinition> = z
     eventNames: z.array(z.string()).readonly().optional(),
     exportName: z.string().optional(),
     extensionNamespace: z.string().optional(),
-    kind: z.enum(["connection", "hook", "instructions", "memory", "skill", "tool"]),
+    kind: z.enum(["connection", "harness", "hook", "instructions", "memory", "skill", "tool"]),
     logicalPath: z.string(),
     slug: z.string(),
     sourceId: z.string(),

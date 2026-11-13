@@ -41,9 +41,25 @@ import type {
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { eventsOf } from "#harness/publication.js";
+import { commitTurnInput, previewPrompt } from "#harness/step/prompt.js";
+import {
+  continueWithNote,
+  decideNext,
+  failHarness,
+  harnessed,
+  hasUnreadTaskResults,
+  recordAdmits,
+  settleWithReply,
+  waitOnTasks,
+} from "#harness/stack/kernel.js";
+import { endsOnHarnessResults, runHarnessCalls } from "#harness/stack/calls.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
+import type { HarnessAction } from "#public/definitions/harness.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
+
+/** eve's own answer when a turn's input or its harness's calls arrive: call the model. */
+const NATIVE_OPENING: HarnessAction = { model: {} };
 const eveVersion = resolveInstalledPackageInfo().version;
 
 /**
@@ -129,6 +145,9 @@ export function createKernel(config: KernelConfig): StepFn {
   ): Promise<StepResult> {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
+    // Whether the session loop asks the harness about each message that arrives.
+    const admission = await harnessed(step, () => recordAdmits(step));
+    if ("failed" in admission) return admission.failed;
 
     // A step takes what arrived, in order: the runtime's results, then people's answers, then
     // the delivery's input. Then it acts: a hook that failed during the turn fails it, or what
@@ -151,6 +170,24 @@ export function createKernel(config: KernelConfig): StepFn {
       const prepared = answered.input && { ...answered.input, message: turn.message };
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
+    }
+    // New input, the results of calls it made, or a task's results: the harness reads them before
+    // the model, so it can answer without the model, as a slash command does.
+    if (turn.messages.length > 0 || endsOnHarnessResults(step) || hasUnreadTaskResults(step)) {
+      const decided = await harnessed(step, () =>
+        decideNext(step, { native: NATIVE_OPENING, pending: turn.messages }),
+      );
+      if ("failed" in decided) return decided.failed;
+      const action = decided.value;
+      if (!("model" in action) || action.model.note !== undefined) {
+        // The turn's input joins history first, so the conversation keeps what was asked.
+        if (turn.messages.length > 0) commitTurnInput(step, await previewPrompt(step, turn));
+        if ("model" in action) return continueWithNote(step, action.model.note, { unread: true });
+        if ("call" in action) return runHarnessCalls(step, action.call);
+        if ("settle" in action) return settleWithReply(step, action.settle);
+        if ("fail" in action) return failHarness(step, "HARNESS_FAILED_TURN", action.fail);
+        return waitOnTasks(step, action.wait.tasks);
+      }
     }
     return runModelStep(step, {
       generation,

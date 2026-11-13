@@ -61,6 +61,8 @@ export type SessionInputSelection =
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private readonly admittedKeys: Set<string>;
+  /** Deliveries the harness's `admit` said start a turn of their own. */
+  private readonly apart = new Set<number>();
   private nextSequence = 0;
   private prewarmDeploymentId: string | undefined;
 
@@ -166,12 +168,18 @@ export class SessionInputQueue {
     return entry?.delivery;
   }
 
+  /** `sequence` starts a turn of its own: no delivery before or after it shares that turn. */
+  keepApart(sequence: number): void {
+    this.apart.add(sequence);
+  }
+
   replaceDelivery(sequence: number, delivery: DeliverHookPayload | undefined): void {
     const index = this.entries.findIndex(
       (entry) => entry.kind === "delivery" && entry.sequence === sequence,
     );
     if (index < 0) return;
     if (delivery === undefined) {
+      this.apart.delete(sequence);
       this.entries.splice(index, 1);
       return;
     }
@@ -217,7 +225,9 @@ export class SessionInputQueue {
         ? { control: first.control, kind: "control" }
         : { control: first.control, kind: "control", origin: first.origin };
 
-    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first)];
+    const turnEntries = this.apart.delete(first.sequence)
+      ? [first]
+      : [first, ...this.takeFollowingDeliveriesFrom(first)];
     const sequences = turnEntries.map(({ sequence }) => sequence);
     const combined = combine(turnEntries);
     return {
@@ -245,6 +255,7 @@ export class SessionInputQueue {
       const next = this.entries[0];
       if (
         next?.kind !== "delivery" ||
+        this.apart.has(next.sequence) ||
         principal === ANONYMOUS_PRINCIPAL ||
         principalOf(next.delivery.auth) !== principal ||
         (callId !== undefined &&
@@ -272,6 +283,20 @@ export interface SteeringTurn {
   readonly callerCallId: string | undefined;
   readonly principal: string;
 }
+
+/**
+ * Where a step records that the session's harness has an `admit` stage, so the session loop asks
+ * it about each message that arrives during a turn.
+ */
+export const HARNESS_ADMITS_STATE_KEY = "eve.harness.admits";
+
+/** Whether the session's harness decides what each message that arrives does. */
+export function harnessAdmits(state: Readonly<Record<string, unknown>> | undefined): boolean {
+  return state?.[HARNESS_ADMITS_STATE_KEY] === true;
+}
+
+/** What a message that arrives during a turn does, as the harness's `admit` decided. */
+export type AdmitAction = "join" | "queue" | "turn" | "drop";
 
 export interface SteeringOptions {
   /**

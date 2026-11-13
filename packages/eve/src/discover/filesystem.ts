@@ -42,6 +42,7 @@ type AgentRootEntryKind =
   | "channels-directory"
   | "connections-directory"
   | "extensions-directory"
+  | "harness-module"
   | "hooks-directory"
   | "ignored-directory"
   | "instrumentation-directory"
@@ -67,6 +68,7 @@ type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
   | "extensions-directory"
+  | "harness-module"
   | "hooks-directory"
   | "ignored-directory"
   | "instructions-directory"
@@ -161,6 +163,8 @@ export function classifyAgentRootEntry(
 
     if (matchesSupportedModuleBaseName(name, "memory")) return "memory-module";
 
+    if (matchesSupportedModuleBaseName(name, "harness")) return "harness-module";
+
     if (name.toLowerCase() === "system.md") {
       return "system-markdown";
     }
@@ -252,6 +256,8 @@ export function classifyLocalSubagentEntry(
     }
 
     if (matchesSupportedModuleBaseName(name, "memory")) return "memory-module";
+
+    if (matchesSupportedModuleBaseName(name, "harness")) return "harness-module";
 
     if (name.toLowerCase() === "system.md") {
       return "system-markdown";
