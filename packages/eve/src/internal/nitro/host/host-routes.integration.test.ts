@@ -126,6 +126,7 @@ async function serve(input: {
         workflowsPath,
       },
       workflowWorldPluginPath,
+      timezoneRunner: true,
     },
   );
 
@@ -323,6 +324,7 @@ describe("rendered host routes", () => {
         schedule("daily", "0 0 * * *"),
         schedule("digest", "0 0 * * *"),
         schedule("weekly", "0 0 * * 0"),
+        { ...schedule("pacific", "0 0 * * *"), timezone: "America/Los_Angeles" },
       ],
     });
 
@@ -331,11 +333,12 @@ describe("rendered host routes", () => {
       "0 0 * * *": ["eve.daily", "eve.digest"],
       "0 0 * * 0": "eve.weekly",
     });
-    const task = (await host.load(host.routes.tasks["eve.daily"]!.handler)) as {
+    // The timezone runner invokes the same registered task, but Nitro must not also schedule it in UTC.
+    const task = (await host.load(host.routes.tasks["eve.pacific"]!.handler)) as {
       run(event: { name: string }): Promise<unknown>;
     };
     // The task dispatches eve's own task name, whatever Nitro calls it.
-    expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran daily" });
-    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("daily", artifactsConfig);
+    expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran pacific" });
+    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("pacific", artifactsConfig);
   });
 });

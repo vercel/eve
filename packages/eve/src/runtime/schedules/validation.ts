@@ -1,3 +1,4 @@
+import { validateScheduleTimezone as validateTimezone } from "#shared/schedule-timezone.js";
 import type { ScheduleExpression, ScheduleTiming } from "#public/schedules/subscription.js";
 
 const SCHEDULE_IDENTIFIER = /^[0-9A-Za-z][0-9A-Za-z._-]{0,255}$/u;
@@ -86,17 +87,4 @@ export function validateScheduleListLimit(limit: number | undefined): number | u
     throw new Error("Schedule list limit must be an integer from 1 through 100.");
   }
   return limit;
-}
-
-function validateTimezone(timezone: string): string {
-  const normalized = timezone.trim();
-  if (normalized.length === 0 || normalized.length > 50) {
-    throw new Error("Schedule timezone must be a valid IANA timezone.");
-  }
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: normalized }).format(0);
-  } catch {
-    throw new Error(`Invalid IANA timezone: ${normalized}`);
-  }
-  return normalized;
 }
