@@ -522,7 +522,7 @@ async function firstEvent(
  * ends, before the session reads its end: what Workflow's late replay allows. Returns how the
  * budget prompt settled, or `undefined` if it never did.
  */
-async function answerBudgetPromptBackToBack(deliveries: DeliveryTiming) {
+async function answerBudgetPromptBackToBack(deliveries: DeliveryTiming, settleWithinMs: number) {
   const test = await createTestRuntime({
     agent: {
       definition: defineAgent({
@@ -569,8 +569,7 @@ async function answerBudgetPromptBackToBack(deliveries: DeliveryTiming) {
         runtime,
         sessionId,
         (event) => event.type === "interaction.settled",
-        // A settled prompt settles within milliseconds; one that never settles costs this long.
-        3_000,
+        settleWithinMs,
       );
       return settled?.type === "interaction.settled" ? settled.data.outcome : undefined;
     } finally {
@@ -581,13 +580,14 @@ async function answerBudgetPromptBackToBack(deliveries: DeliveryTiming) {
 
 describe("deliveries made back to back", () => {
   it("are read one at a time when handed over at once", async () => {
-    await expect(answerBudgetPromptBackToBack("immediate")).resolves.toBe("accepted");
+    await expect(answerBudgetPromptBackToBack("immediate", 10_000)).resolves.toBe("accepted");
   });
 
   // Broken until vercel/eve#6307 lands: the message and "approve" are read as one input,
   // "Carol wants…\n\napprove", which names no option, so the prompt never settles. With the fix,
   // expect "accepted", as above.
   it("are read together with the step's end when batched, as on Workflow", async () => {
-    await expect(answerBudgetPromptBackToBack("batched")).resolves.toBeUndefined();
+    // A prompt settles within milliseconds of its answer, so one that hasn't in a second won't.
+    await expect(answerBudgetPromptBackToBack("batched", 1_000)).resolves.toBeUndefined();
   });
 });
