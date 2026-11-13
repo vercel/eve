@@ -55,6 +55,8 @@ export async function startBridge(
       LOAD_SIGN_INS,
       // The stream only runs while the browser does.
       `agent-browser --session ${BROWSER_SESSION} get url >/dev/null 2>&1 || agent-browser --session ${BROWSER_SESSION} open about:blank >/dev/null`,
+      // Match the 1280x720 screen share.
+      `agent-browser --session ${BROWSER_SESSION} set viewport 1280 720 >/dev/null`,
       `if ! curl -fs http://127.0.0.1:${BRIDGE_PORT}/healthz >/dev/null; then`,
       `  ${env} setsid -f node ${ROOT}/bridge.mjs > ${ROOT}/bridge.log 2>&1 < /dev/null`,
       "fi",
