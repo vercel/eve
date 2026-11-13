@@ -23,7 +23,7 @@ These instructions are for agents maintaining the repository. The agent's behavi
 | Theme colors and global styles | `apps/web/app/globals.css` |
 | `vercel dev` routing fix | `apps/web/app/start.ts` |
 | Vercel services and routes | `vercel.ts` |
-| Lint and format rules | `oxlint.config.ts` and `oxfmt.config.ts` |
+| Lint and format rules | `lint.config.ts` and `.oxfmtrc.json` |
 | Unused-code checks | `knip.json` |
 | Setup and customization guidance | `README.md` and `CUSTOMIZATION.md` |
 
@@ -52,7 +52,7 @@ Use eve for the Vercel operations you run, such as `pnpm exec eve link --non-int
 
 Write no inline code comments. Add TSDoc only where it helps with types or understanding, such as exported functions, components, constants, and props. Document parameters with `@param name - description`, meaningful return values with `@returns`, and thrown errors with `@throws`. TSDoc can't document destructured props as `@param props.name`, so write `@param props - The component props.` and add TSDoc to each field of the props type.
 
-eve names each tool after its file, so files in `agent/tools/` use snake_case. The `unicorn/filename-case` exemption for `agent/tools/**` in `oxlint.config.ts` exists for that reason.
+eve names each tool after its file, so files in `agent/tools/` use snake_case. The `unicorn/filename-case` exemption for `agent/tools/**` in `lint.config.ts` exists for that reason.
 
 Keep the strict TypeScript and Ultracite configuration, and change the code to satisfy its rules. The configuration makes these exceptions:
 

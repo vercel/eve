@@ -46,7 +46,7 @@ When you add or remove a tool, update the Tools section to match. The Response s
 
 ### Model and session limits
 
-Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and limits each conversation to `300_000` input tokens through `maxInputTokensPerSession`. See [eve's agent configuration](https://eve.dev/docs/agent-config) for output and cost limits.
+Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and limits each conversation to `300_000` input tokens through the `limits.sessionUsage` predicate. See [eve's agent configuration](https://eve.dev/docs/agent-config) for output and cost limits.
 
 ## Add or remove tools
 

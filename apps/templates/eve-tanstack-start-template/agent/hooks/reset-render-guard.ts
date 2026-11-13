@@ -8,10 +8,10 @@ import { lastRenderedTurn } from "../lib/ui-state";
  */
 export default defineHook({
   events: {
-    "input.resolved"() {
+    "interaction.settled"() {
       resetRenderGuard();
     },
-    "message.received"() {
+    "delivery.consumed"() {
       resetRenderGuard();
     },
   },
