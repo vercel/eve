@@ -711,7 +711,7 @@ async function runSessionStepBody(
               to: createToolChannelTo({
                 createRuntime: host.createRuntime,
                 delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadBundle: () => bundle,
+                loadAgent: () => agent,
               }),
             });
             const schemaSession =

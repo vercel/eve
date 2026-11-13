@@ -256,7 +256,8 @@ export function createWorkflowBodyRef(
 }
 
 export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput): TEntryPoint {
-  const entryPoint = readRegisteredWorkflow(input.workflowId);
+  const entryPoint =
+    input.host.resolveWorkflow?.(input.workflowId) ?? readRegisteredWorkflow(input.workflowId);
   if (typeof entryPoint !== "function") {
     throw new Error(
       `Tool "${input.toolName}" is not registered as a workflow in this deployment (${input.workflowId}). The tool was renamed or removed after this run started.`,

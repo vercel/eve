@@ -1,4 +1,5 @@
 import { compiledDelegates } from "#execution/agent-sessions/metadata.js";
+import { compiledAgentRoster } from "#execution/agent-sessions/roster.js";
 import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { memoryDefinition, memoryToolsDefinition } from "#memory/definition.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
@@ -7,32 +8,29 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent, SessionAgentSettings } from "#runtime/sessions/session-agent.js";
 import { declared, type ResolvedScheduleCollection } from "#runtime/types.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
-import { approvals } from "./approvals.js";
-import { builtins } from "./builtins.js";
-import { catalog } from "./catalog.js";
-import { connectionDefinition, connections } from "./connections.js";
+import { type AgentContents, settingsOf } from "./agent-definitions.js";
+import { createSessionAgent } from "./session-agent.js";
+import { connectionDefinition } from "./connections.js";
 import type { Definition } from "./definition.js";
 import { hookDefinition } from "./hooks.js";
-import { instructionsDefinition, instructions, workspace } from "./instructions.js";
-import { agentModel, loadModelDefinition, parentModel } from "./model.js";
-import { skillDefinition, skills } from "./skills.js";
+import { instructionsDefinition } from "./instructions.js";
+import { agentModel, loadModelDefinition } from "./model.js";
+import { skillDefinition } from "./skills.js";
 import { subagentDefinition } from "./subagents.js";
-import { staticTools, toolDefinition, toolsDefinition } from "./tools.js";
+import { toolDefinition, toolsDefinition } from "./tools.js";
 
-// A compiled agent, as the session-agent port: a definition for each file its node declares,
-// then eve's builtins and catalog, which see everything it declares, and the model the
-// session's parent gave it. Its sandbox and connections are its node's.
+// A compiled agent, as the session-agent port (`createSessionAgent`): its node's files, mapped to
+// an agent's contents (which `agentDefinitionsOf` places among eve's runtime definitions), and
+// `agent.ts`'s settings. Its sandbox and connections are its node's.
 
 const agents = new WeakMap<CompiledBundle, SessionAgent>();
-const built = new WeakMap<CompiledBundle, Promise<readonly Definition[]>>();
 
 /** A compiled node's agent, made once per bundle: its files' definitions, and `agent.ts`'s settings. */
 export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
   const known = agents.get(bundle);
   if (known !== undefined) return known;
-  let settings: SessionAgentSettings | undefined;
-  // Read on use: a bundle's graph and config are only reached by what asks for them.
-  const agent: SessionAgent = {
+  // Each part is read on use: a bundle's graph and config are only reached by what asks for them.
+  const agent = createSessionAgent({
     adapters: bundle.adapterRegistry,
     compiled: bundle,
     connections: () => {
@@ -41,24 +39,16 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
       const hasDynamic = node.definitions.some(({ kind }) => kind === "connection");
       return node.connections.length === 0 && !hasDynamic ? undefined : node.connections;
     },
-    definitions: () => compiledDefinitions(bundle),
+    contents: () => agentContentsOf(bundle),
     delegates: (ctx) => compiledDelegates(bundle, ctx),
-    get id() {
-      return bundle.turnAgent.id;
-    },
-    get name() {
-      return bundle.resolvedAgent.config?.name;
-    },
-    get nodeId() {
-      return bundle.nodeId;
-    },
-    get reference() {
-      return {
-        kind: "bundle" as const,
-        nodeId: bundle.nodeId,
-        source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
-      };
-    },
+    id: () => bundle.turnAgent.id,
+    name: () => bundle.resolvedAgent.config?.name,
+    nodeId: () => bundle.nodeId,
+    reference: () => ({
+      kind: "bundle",
+      nodeId: bundle.nodeId,
+      source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
+    }),
     // A deployment names its code; elsewhere the artifacts' version does.
     revision: async () => {
       const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
@@ -66,86 +56,63 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
         ? `deployment:${deploymentId}`
         : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
     },
+    roster: (dynamicSelections) => compiledAgentRoster(bundle, dynamicSelections),
     sandbox: async () => ({
       registry: bundle.graph.root.sandboxRegistry,
       template: { compiledArtifactsSource: bundle.compiledArtifactsSource },
     }),
-    get settings() {
-      return (settings ??= compiledSettings(bundle));
-    },
-  };
+    settings: () => compiledSettings(bundle),
+  });
   agents.set(bundle, agent);
   return agent;
 }
 
-/** `agent.ts`'s settings, as the port names them. */
+/** `agent.ts`'s settings, resolved by the compiler, as `settingsOf` takes them. */
 function compiledSettings(bundle: CompiledBundle): SessionAgentSettings {
   const config = bundle.resolvedAgent.config;
-  let sessionUsage: { readonly limit: ReturnType<typeof resolveSessionUsageLimit> } | undefined;
-  return {
-    compaction: {
-      model: bundle.turnAgent.compactionModel,
-      thresholdPercent: config?.compaction?.thresholdPercent,
-    },
-    limits: {
-      sessionTimeoutMs: config?.limits?.sessionTimeoutMs,
-      // Falls back to the root's, which only the graph knows: read when a turn asks for it.
-      get sessionUsage() {
-        return (sessionUsage ??= { limit: resolveSessionUsageLimit(bundle) }).limit;
-      },
-    },
+  return settingsOf({
+    compactionModel: bundle.turnAgent.compactionModel,
+    compactionThresholdPercent: config?.compaction?.thresholdPercent,
     modelCallsPerStep: config?.experimental?.workflow?.modelCallsPerStep,
     reasoning: bundle.turnAgent.reasoning,
     retention: config?.experimental?.workflow?.retention,
-  };
+    sessionTimeoutMs: config?.limits?.sessionTimeoutMs,
+    // Falls back to the root's, which only the graph knows.
+    sessionUsage: () => resolveSessionUsageLimit(bundle),
+  });
 }
 
-/** The definitions the node declares, built once per bundle. */
-function compiledDefinitions(bundle: CompiledBundle): Promise<readonly Definition[]> {
-  let definitions = built.get(bundle);
-  if (definitions === undefined) {
-    definitions = buildAgentDefinitions(bundle);
-    built.set(bundle, definitions);
-    definitions.catch(() => built.delete(bundle));
-  }
-  return definitions;
-}
-
-async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly Definition[]> {
+/**
+ * The node's files as an agent's contents: each declared file through the builder its kind goes
+ * through, an extension's under its namespace. Its static tool files (eve's defaults among them)
+ * reach a session through the step's tool table, eve's `staticTools`, which `agentDefinitionsOf`
+ * places itself.
+ */
+export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentContents> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelDefinition(bundle);
   const staticModel = agentModel(bundle);
-  // The order is the contract. Definitions contribute in it, and each arrangement wraps what the
-  // ones before it left: the first to offer a tool name keeps it, so static tools come before
-  // dynamic ones, and connections keep theirs before tools and subagents check names against them.
-  // The catalog arranges after every tool, so it indexes the final table. The last model choice wins.
-  return [
-    ...declared(agent, "hook").map(hookDefinition),
-    ...(staticModel === undefined ? [] : [staticModel]),
-    ...(model === undefined ? [] : [model]),
-    instructions,
-    ...declared(agent, "instructions").map(instructionsDefinition),
-    workspace,
-    connections,
-    ...declared(agent, "connection").map(connectionDefinition),
-    staticTools,
-    ...bundle.subagentRegistry.dynamicResolvers.map(subagentDefinition),
-    ...declared(agent, "memory").map(memoryDefinition),
-    ...declared(agent, "memory")
-      .filter((memory) => memory.offersTools === true)
-      .map(memoryToolsDefinition),
-    ...declared(agent, "tool").map(toolDefinition),
-    ...declared(agent, "schedules")
-      .filter((collection) => collection.offersTools === true)
-      .map(scheduleToolsDefinition),
-    ...declared(agent, "skill").map(skillDefinition),
-    skills,
-    approvals,
-    builtins,
-    catalog,
-    // Last, so a parent's choice is the one the session runs: nothing of the session's evaluates for it.
-    parentModel,
-  ];
+  return {
+    connections: declared(agent, "connection").map(connectionDefinition),
+    files: {
+      dynamicSubagents: bundle.subagentRegistry.dynamicResolvers.map(subagentDefinition),
+      hooks: declared(agent, "hook").map(hookDefinition),
+      // Every memory, then the tools those that offer them do.
+      memory: [
+        ...declared(agent, "memory").map(memoryDefinition),
+        ...declared(agent, "memory")
+          .filter((memory) => memory.offersTools === true)
+          .map(memoryToolsDefinition),
+      ],
+      scheduleTools: declared(agent, "schedules")
+        .filter((collection) => collection.offersTools === true)
+        .map(scheduleToolsDefinition),
+    },
+    instructions: declared(agent, "instructions").map(instructionsDefinition),
+    model: [staticModel, model].filter((definition) => definition !== undefined),
+    skills: declared(agent, "skill").map(skillDefinition),
+    tools: declared(agent, "tool").map(toolDefinition),
+  };
 }
 
 /** A schedule collection's tools, as the tool file `agent/tools/schedule__<name>.ts` would offer them. */
