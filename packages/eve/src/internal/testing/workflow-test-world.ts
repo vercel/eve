@@ -4,7 +4,8 @@ import { pathToFileURL } from "node:url";
 
 import { createWorld } from "@workflow/world-local";
 
-import { setWorld } from "#internal/workflow/runtime.js";
+import { workflowDriverCodePath } from "#internal/workflow-bundle/builder-support.js";
+import { setWorld, workflowEntrypoint } from "#internal/workflow/runtime.js";
 
 // The local World an integration test file's sessions run on, opened by the Workflow test setup
 // (`test/setup/workflow-setup.ts`). It tells a test when nothing in it is working, from the queue
@@ -21,8 +22,10 @@ export interface TestWorldOptions {
   readonly tag: string;
   /** The queue prefix the test bundle's flow route serves. */
   readonly prefix: string;
-  /** The test bundle's `workflows.mjs`, loaded on the first delivery. */
-  readonly bundlePath: string;
+  /** The test bundle's directory, whose flow route is loaded on the first delivery. */
+  readonly outDir: string;
+  /** The queue namespace the test bundle's flow route serves. */
+  readonly namespace: string;
 }
 
 export interface TestWorld {
@@ -78,8 +81,7 @@ export function currentTestWorld(): TestWorld {
 
 /** Opens the test file's World and makes it the runtime's. */
 export async function openTestWorld(options: TestWorldOptions): Promise<TestWorld> {
-  let boots = 0;
-  const deliveries = trackDeliveries(lazyHandler(options.bundlePath, boots));
+  const deliveries = trackDeliveries(lazyHandler(options));
   let world = await startWorld(options, deliveries, { recover: false });
   await world.clear();
 
@@ -104,7 +106,7 @@ export async function openTestWorld(options: TestWorldOptions): Promise<TestWorl
       newRealm();
       await beforeStart?.();
       // A new process loads the flow route again, which reads the World it boots with.
-      deliveries.reopen(recovering, lazyHandler(options.bundlePath, ++boots));
+      deliveries.reopen(recovering, lazyHandler(options));
       world = await startWorld(options, deliveries, { recover: true });
       return recovering;
     },
@@ -394,15 +396,30 @@ function runIdOf(body: string): string | undefined {
   }
 }
 
-/** The bundle's flow route, loaded on its first delivery; each `boot` loads its own copy. */
-function lazyHandler(bundlePath: string, boot: number): Handler {
-  const url = pathToFileURL(bundlePath);
-  if (boot > 0) url.searchParams.set("boot", String(boot));
+/**
+ * The bundle's flow route, built on its first delivery; each call builds its own, as each process
+ * that boots loads its own.
+ *
+ * The step registrations bundle is tens of megabytes, and Vite transforms it per worker at a cost
+ * of seconds, so the config externalizes it and Node loads it natively instead. Steps reach the
+ * driver through globals, so the two can load in different module graphs.
+ *
+ * The entrypoint itself is built here rather than imported from the generated `workflows.mjs`:
+ * that file imports the Workflow runtime by path, which Node would load a second time, and with
+ * it a World no test installs. Calling the runtime this file already imported keeps one instance.
+ */
+function lazyHandler(options: TestWorldOptions): Handler {
   let loading: Promise<Handler> | undefined;
   return async (request) => {
-    loading ??= import(/* @vite-ignore */ url.href).then((mod: { POST: Handler }) => mod.POST);
+    loading ??= loadFlowRoute(options);
     return await (
       await loading
     )(request);
   };
+}
+
+async function loadFlowRoute({ namespace, outDir }: TestWorldOptions): Promise<Handler> {
+  await import(/* @vite-ignore */ pathToFileURL(join(outDir, "steps.mjs")).href);
+  const code = await readFile(workflowDriverCodePath(join(outDir, "workflows.mjs")), "utf8");
+  return workflowEntrypoint(code, { namespace });
 }

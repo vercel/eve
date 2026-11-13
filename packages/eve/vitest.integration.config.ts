@@ -48,6 +48,7 @@ export default defineConfig({
         // Imports matrix-js-sdk paths without file extensions, which Node's ESM loader rejects
         // and bundlers resolve; registry template tests load it through Vite instead.
         inline: [/@beeper\/chat-adapter-matrix/u],
+        external: [/\.workflow-vitest[\\/]/],
       },
     },
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
