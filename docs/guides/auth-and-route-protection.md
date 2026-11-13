@@ -494,28 +494,46 @@ Inline providers derive a stable auth key from Vercel Connect metadata when avai
 
 ### Before a model call
 
-When the model call itself needs the caller's credential, get it in the agent's dynamic `model`. In this example, each person signs in with Vercel, and the model call runs on that person's AI Gateway token. A dynamic value's `ctx` has the same `getToken` and `requireAuth` methods as a tool's:
+When the model call itself needs the caller's credential, get it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` methods as a tool's. In this example, each person's model calls run on that person's own Anthropic API key:
 
 ```ts title="agent/agent.ts"
-import { createGateway } from "@ai-sdk/gateway";
-import { connect } from "@vercel/connect/eve";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { defineAgent, defineDynamic } from "eve";
+import {
+  ConnectionAuthorizationRequiredError,
+  defineInteractiveAuthorization,
+} from "eve/connections";
 
-const vercel = connect("vercel/myagent");
+// Each person enters their own Anthropic API key on a page in your app.
+const anthropicKey = defineInteractiveAuthorization({
+  displayName: "Anthropic",
+  getToken: async ({ principal }) => {
+    const key = await loadAnthropicKey(principal);
+    if (!key) throw new ConnectionAuthorizationRequiredError("anthropic");
+    return { token: key };
+  },
+  // The page saves the key, then redirects to `callbackUrl`.
+  startAuthorization: async ({ callbackUrl }) => ({
+    challenge: { url: anthropicKeyPageUrl(callbackUrl) },
+  }),
+  completeAuthorization: async ({ principal }) => ({
+    token: (await loadAnthropicKey(principal))!,
+  }),
+});
 
 export default defineAgent({
   model: defineDynamic(async (ctx) => {
-    const { token } = await ctx.getToken(vercel);
-    return createGateway({ apiKey: token })("anthropic/claude-sonnet-4.5");
+    const { token } = await ctx.getToken(anthropicKey, { authKey: "anthropic" });
+    return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
   }),
 });
 ```
 
-- When the caller has no token, eve starts no model call. It opens the sign-in and pauses the turn. Once the caller signs in, eve evaluates the model again and continues the same turn.
+- When the caller has no token, eve opens the sign-in and pauses the turn before the model call. Once the caller signs in, eve evaluates the model again and continues the same turn.
 - When the provider rejects the token during a model call, call `ctx.requireAuth(provider)` from your model code, for example from AI SDK middleware. eve ends that model call, opens the sign-in, and runs the call again once the caller signs in.
 - When a schedule started the turn, eve fails it with `reason: "sign_in_unavailable"` and opens no sign-in.
 
-Call `ctx.getToken` outside `ctx.memo`: a memo keeps its result in the session, and eve already reuses the token within a step.
+Call `ctx.getToken` outside `ctx.memo`. A memo keeps its result in the session, and eve already reuses the token within a step. See [Self-hosted interactive OAuth](../connections#self-hosted-interactive-oauth) for the provider's methods.
 
 ## What to read next
 

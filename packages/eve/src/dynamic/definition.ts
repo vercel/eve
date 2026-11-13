@@ -99,25 +99,21 @@ export interface DynamicModelContext extends SessionFrame {
   /** The conversation history as of the latest commit, assembled when something reads it. */
   messages(): Promise<readonly ModelMessage[]>;
   /**
-   * Returns the caller's token for an inline auth provider, such as `connect("vercel/myagent")`.
-   * It shares its token cache and sign-in with a tool's `ctx.getToken(provider)`. When the caller
-   * hasn't signed in, eve starts no model call. It opens the sign-in, pauses the turn, and
-   * evaluates the value again after sign-in. In a turn from a schedule, eve fails the turn with
-   * `reason: "sign_in_unavailable"`.
+   * Returns the caller's token for an inline auth provider, such as `connect("github/myagent")`
+   * or a custom interactive definition. It shares its token cache and sign-in with a tool's
+   * `ctx.getToken(provider)`. When the caller hasn't signed in, eve opens the sign-in and pauses
+   * the turn before the model call, then evaluates the value again after sign-in. In a turn from
+   * a schedule, eve fails the turn with `reason: "sign_in_unavailable"`.
    *
    * Call it outside `ctx.memo`. A memo keeps its result in the session, and eve already reuses
    * the token within a step.
    *
    * ```ts
-   * import { createGateway } from "@ai-sdk/gateway";
-   * import { connect } from "@vercel/connect/eve";
-   *
-   * const vercel = connect("vercel/myagent");
-   *
+   * // `anthropicKey` is an interactive definition for each person's Anthropic API key.
    * export default defineAgent({
    *   model: defineDynamic(async (ctx) => {
-   *     const { token } = await ctx.getToken(vercel);
-   *     return createGateway({ apiKey: token })("anthropic/claude-sonnet-4.5");
+   *     const { token } = await ctx.getToken(anthropicKey, { authKey: "anthropic" });
+   *     return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
    *   }),
    * });
    * ```

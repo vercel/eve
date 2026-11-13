@@ -20,16 +20,34 @@ each model call, and eve runs the same sign-in flow as for a tool.
 ## Authoring API
 
 ```ts title="agent/agent.ts"
-import { createGateway } from "@ai-sdk/gateway";
-import { connect } from "@vercel/connect/eve";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { defineAgent, defineDynamic } from "eve";
+import {
+  ConnectionAuthorizationRequiredError,
+  defineInteractiveAuthorization,
+} from "eve/connections";
 
-const vercel = connect("vercel/myagent");
+// Each person enters their own Anthropic API key on a page in your app.
+const anthropicKey = defineInteractiveAuthorization({
+  displayName: "Anthropic",
+  getToken: async ({ principal }) => {
+    const key = await loadAnthropicKey(principal);
+    if (!key) throw new ConnectionAuthorizationRequiredError("anthropic");
+    return { token: key };
+  },
+  // The page saves the key, then redirects to `callbackUrl`.
+  startAuthorization: async ({ callbackUrl }) => ({
+    challenge: { url: anthropicKeyPageUrl(callbackUrl) },
+  }),
+  completeAuthorization: async ({ principal }) => ({
+    token: (await loadAnthropicKey(principal))!,
+  }),
+});
 
 export default defineAgent({
   model: defineDynamic(async (ctx) => {
-    const { token } = await ctx.getToken(vercel);
-    return createGateway({ apiKey: token })("anthropic/claude-sonnet-4.5");
+    const { token } = await ctx.getToken(anthropicKey, { authKey: "anthropic" });
+    return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
   }),
 });
 ```
@@ -51,7 +69,7 @@ eve doesn't read provider errors. When a provider rejects a token, the app calls
 | Situation                                       | What eve does                                                                    |
 | ----------------------------------------------- | -------------------------------------------------------------------------------- |
 | The caller has a token                          | eve runs the model call with it.                                                 |
-| The caller has no token                         | eve starts no model call. It opens the sign-in for the turn and pauses the turn. |
+| The caller has no token                         | eve opens the sign-in and pauses the turn before the model call.                 |
 | The caller signs in                             | eve evaluates the model again and runs the model call in the same turn.          |
 | The app calls `requireAuth` during a model call | eve ends that model call as `abandoned`, opens the sign-in, and pauses the turn. |
 | The provider rejects the token from sign-in     | eve fails the turn with `token_rejected_after_authorization`.                    |
