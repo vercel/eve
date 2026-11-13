@@ -75,7 +75,8 @@ describe("dynamic schedules client", () => {
     const prepare = vi.fn(
       (value: { task: string; destination: "my-dm" | "team-channel" }) => value,
     );
-    const validateExpression = vi.fn((expression: { type: string; cron?: string }) => {
+    // A provider may check against its backend, so the hook can be async.
+    const validateExpression = vi.fn(async (expression: { type: string; cron?: string }) => {
       if (expression.cron === "0 9 * * MON") throw new Error("Provider can't run MON.");
     });
     const client = createScheduleCollectionClient(
@@ -94,6 +95,12 @@ describe("dynamic schedules client", () => {
     await expect(
       client.prepareUpdate(created.name, { expression: cron("0 9 * * MON") }),
     ).rejects.toThrow("Provider can't run MON.");
+    // eve's own timing rules still apply, with the hook and without it.
+    for (const bound of [client, setup().client]) {
+      await expect(bound.prepareCreate({ ...input, expression: cron("0 9 * *") })).rejects.toThrow(
+        "exactly five fields",
+      );
+    }
     // A relative delay reaches the provider as the one-time expression it resolves to.
     await client.prepareCreate(input);
     expect(validateExpression).toHaveBeenLastCalledWith(

@@ -185,8 +185,12 @@ describe("vercelScheduleProvider", () => {
     const validate = (cron: string) =>
       vercelScheduleProvider().validateExpression?.({ type: "cron", cron });
 
-    for (const cron of ["0 9 * * 1-5", "*/15 0-6,22 1 1,7 *", "5/10 * * * 0,7"])
+    for (const cron of ["0 9 * * 1-5", "*/15 0-6,22 1 1,7 *", "5/10 * * * 0,6"])
       expect(() => validate(cron)).not.toThrow();
+    expect(() => validate("0 9 * * 7")).toThrow('the day-of-week field "7" is outside 0-6');
+    expect(() => validate("0 9 1 * 1")).toThrow(
+      "can't set both a day of the month and a day of the week",
+    );
     expect(() => validate("0 9 * * MON")).toThrow(/accepts no names.*0 is Sunday/u);
     expect(() => validate("0 9 * JAN *")).toThrow(/accepts no names/u);
     expect(() => validate("0 24 * * *")).toThrow('the hour field "24" is outside 0-23');

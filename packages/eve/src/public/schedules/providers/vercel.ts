@@ -154,12 +154,13 @@ const VERCEL_CRON_FIELDS = [
   { name: "hour", min: 0, max: 23 },
   { name: "day-of-month", min: 1, max: 31 },
   { name: "month", min: 1, max: 12 },
-  { name: "day-of-week", min: 0, max: 7 },
+  { name: "day-of-week", min: 0, max: 6 },
 ] as const;
 
 /**
- * Vercel Schedules takes numeric cron fields only. Checking here turns a rejected write, which
- * a person may already have approved, into an error the caller can correct first.
+ * The cron rules Vercel Schedules documents: numeric fields in range, and not both a day of the
+ * month and a day of the week. Checking here turns a rejected write, which a person may already
+ * have approved, into an error the caller can correct first.
  */
 function validateVercelExpression(expression: ScheduleExpression): void {
   if (expression.type !== "cron") return;
@@ -169,7 +170,8 @@ function validateVercelExpression(expression: ScheduleExpression): void {
     );
   if (!/^[0-9*,/ -]+$/u.test(expression.cron))
     throw invalid("it accepts no names or special characters such as MON, JAN, ?, or L.");
-  for (const [index, field] of expression.cron.split(" ").entries()) {
+  const fields = expression.cron.split(" ");
+  for (const [index, field] of fields.entries()) {
     const { name, min, max } = VERCEL_CRON_FIELDS[index]!;
     for (const part of field.split(",")) {
       const match = /^(?:\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/u.exec(part);
@@ -181,6 +183,8 @@ function validateVercelExpression(expression: ScheduleExpression): void {
         throw invalid(`the ${name} field "${field}" is outside ${min}-${max}.`);
     }
   }
+  if (fields[2] !== "*" && fields[4] !== "*")
+    throw invalid("it can't set both a day of the month and a day of the week.");
 }
 
 function toVercelExpression(expression: ScheduleExpression) {

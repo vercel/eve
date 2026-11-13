@@ -18,6 +18,7 @@ import type {
   ScheduleScopeContext,
   ScheduleScopeResolverContext,
   ScheduleScopeValue,
+  ScheduleTiming,
 } from "#public/schedules/subscription.js";
 import { projectScheduleRecord } from "#runtime/schedules/record.js";
 import { byPrincipal } from "#public/schedules/scope.js";
@@ -160,6 +161,12 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     }).envelope;
   };
 
+  // eve's own rules first, whatever the provider checks; then what only the provider knows.
+  const validateTiming = async (timing: ScheduleTiming): Promise<void> => {
+    const expression = resolveScheduleTiming(timing);
+    await definition.provider.validateExpression?.(expression);
+  };
+
   const prepareUpdate = async (name: string, patch: ScheduleClientUpdate<unknown>) => {
     const unsupported = Object.keys(patch).filter(
       (key) => key !== "expression" && key !== "payload",
@@ -169,8 +176,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     if (patch.expression === undefined && patch.payload === undefined)
       throw new Error("Schedule update requires an expression or replacement payload.");
     const normalized = validateScheduleName(name);
-    if (patch.expression !== undefined)
-      definition.provider.validateExpression?.(resolveScheduleTiming(patch.expression));
+    if (patch.expression !== undefined) await validateTiming(patch.expression);
     const { scope, provider } = await resolveNamespace("update", normalized);
     if ((await definition.provider.get(provider, normalized)) === null)
       throw new Error("Schedule was not found in the authorized scope.");
@@ -189,7 +195,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
     // Validate timing before preparation; relative delays are resolved again at the write boundary.
-    definition.provider.validateExpression?.(resolveScheduleTiming(input.expression));
+    await validateTiming(input.expression);
     const { scope, provider } = await resolveNamespace("create", displayName);
     const prepared = snapshotPreparedWrite({
       displayName,
