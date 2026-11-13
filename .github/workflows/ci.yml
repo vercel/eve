@@ -72,6 +72,10 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
+    # The CLI spawns git and a detached flush process for every command when
+    # telemetry is on. CI runs collect none of it.
+    env:
+      EVE_TELEMETRY_DISABLED: "1"
 
     steps:
       - name: Checkout code
@@ -367,6 +371,10 @@ jobs:
 
   test-templates:
     runs-on: ubuntu-latest
+    # The CLI spawns git and a detached flush process for every command when
+    # telemetry is on. CI runs collect none of it.
+    env:
+      EVE_TELEMETRY_DISABLED: "1"
 
     steps:
       - name: Checkout code
