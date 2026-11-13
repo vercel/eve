@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import {
+  VERCEL_EVE_GIT_SANDBOX_IMAGE,
+  VERCEL_EVE_SANDBOX_IMAGE,
+} from "#execution/sandbox/bindings/eve-image.js";
 import {
   createVercelSandbox as createVercelImplementation,
   type VercelSandboxPreparedArtifact,
@@ -357,6 +360,28 @@ describe("createVercelSandbox", () => {
         source: { snapshotId: "prepared-snapshot", type: "snapshot" },
       }),
     );
+    expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("runs no base setup for a prepared snapshot of the eve-git image", async () => {
+    const sessionSandbox = createMockSandbox({ name: "session-key" });
+    const provider = createTestVercelSandbox({
+      createOptions: { image: VERCEL_EVE_GIT_SANDBOX_IMAGE },
+      loadSandboxModule: async () =>
+        ({
+          Sandbox: {
+            create: vi.fn().mockResolvedValue(sessionSandbox),
+            get: vi.fn().mockResolvedValue(null),
+          },
+        }) as never,
+    });
+
+    await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      prepared: { snapshotId: "prepared-snapshot" },
+      sandboxName: "session-key",
+    });
+
     expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
   });
 

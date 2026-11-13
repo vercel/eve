@@ -9,6 +9,7 @@ on:
       - synchronize
     paths:
       - packages/eve/Dockerfile
+      - packages/eve/Dockerfile.git
       - packages/eve/.dockerignore
       - .github/workflows/docker-image-size-analysis.yml
       - scripts/docker-image-size-budget.mjs
@@ -116,6 +117,34 @@ jobs:
             bash -lc "set -euo pipefail; exit 0"
             bash -lc "exit 3" || test "$?" = 3
           '
+
+      # The eve-git image builds on the default image above. `--builder default`
+      # is the Docker daemon's builder, which can use the image loaded there.
+      - name: Build and verify the eve-git image
+        run: |
+          docker buildx build \
+            --builder default \
+            --build-arg EVE_IMAGE=eve-docker-size:current \
+            --file packages/eve/Dockerfile.git \
+            --load \
+            --tag eve-docker-size:git \
+            packages/eve
+
+          docker run --rm eve-docker-size:git bash -lc '
+            set -euo pipefail
+            test "$(id -un)" = vercel-sandbox
+            gh --version | head -1
+            git --version
+            node --version
+          '
+
+          default_bytes="$(docker image inspect eve-docker-size:current --format '{{.Size}}')"
+          git_bytes="$(docker image inspect eve-docker-size:git --format '{{.Size}}')"
+          {
+            echo "### eve-git image"
+            echo
+            echo "Default image: $default_bytes bytes. eve-git image: $git_bytes bytes (+$((git_bytes - default_bytes)))."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate Docker image size report
         env:
