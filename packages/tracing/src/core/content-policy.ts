@@ -39,6 +39,8 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
  */
 const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.approval.response",
+  "agent.decision.answers",
+  "agent.decision.outcome",
   "ai.embedding",
   "ai.embeddings",
   "ai.ranking",

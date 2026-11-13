@@ -28,6 +28,7 @@ import {
   type ExecutionInstrumentation,
 } from "#instrumentation/runtime.js";
 import { decide } from "#public/ai/index.js";
+import { decideFor } from "#ai/decide.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
@@ -202,6 +203,8 @@ describe("decide tracing", () => {
       "gen_ai.usage.output_tokens": 3,
       "gen_ai.generation.id": "gen_alice",
       "gen_ai.usage.cost": 0.0004,
+      "agent.turn.id": "turn-1",
+      "agent.decision.purpose": "custom",
     });
     const request = exporter.getFinishedSpans().find((span) => span.name === "decision request")!;
     expect(request.parentSpanContext?.spanId).toBe(decision.spanContext().spanId);
@@ -350,6 +353,28 @@ describe("decide tracing", () => {
       expect(
         JSON.stringify({ attributes: span.attributes, events: span.events, status: span.status }),
       ).not.toContain(marker);
+    },
+  );
+
+  it.each([true, false])(
+    "records a decision's outcome and answers only when outputs are recorded (%s)",
+    async (recordOutputs) => {
+      runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs }));
+      const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
+      await inSession(async () => {
+        await decideFor("model-selection", { model, questions, state });
+      });
+      const span = decisions()[0]!;
+      expect(span.attributes).toMatchObject({
+        "agent.decision.purpose": "model-selection",
+        "agent.turn.id": "turn-1",
+      });
+      expect(span.attributes["agent.decision.outcome"]).toBe(
+        recordOutputs ? "completed" : undefined,
+      );
+      expect(span.attributes["agent.decision.answers"]).toBe(
+        recordOutputs ? JSON.stringify(answer.answers) : undefined,
+      );
     },
   );
 

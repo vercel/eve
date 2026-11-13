@@ -29,7 +29,7 @@ import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 /** Decision calls can run before a model attempt or outside an eve session. */
 export async function decideWithTracing<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
->(options: DecisionOptions<Questions>) {
+>(options: DecisionOptions<Questions>, purpose: string) {
   const runtime = getInstrumentationRuntime();
   if (runtime === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
@@ -84,6 +84,7 @@ export async function decideWithTracing<
   const operation = await traceDecision({
     modelId: typeof model === "string" ? model : model.modelId,
     provider: typeof model === "string" ? undefined : model.provider,
+    purpose,
     identity:
       sessionId === undefined || turnId === undefined
         ? undefined
@@ -108,6 +109,7 @@ export async function decideWithTracing<
       ...gatewayCostAttributes(readGatewayCostData(result.providerMetadata) ?? {}),
     });
     await operation.complete({
+      output: result.answers,
       usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
     });
     return result;

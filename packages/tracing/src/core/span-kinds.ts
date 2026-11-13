@@ -20,6 +20,8 @@ const CONTENT_FIELDS = {
   approvalRequest: "agent.approval.request",
   approvalResponse: "agent.approval.response",
   memoryRecords: "gen_ai.memory.records",
+  decisionAnswers: "agent.decision.answers",
+  decisionOutcome: "agent.decision.outcome",
 } as const;
 export function applyAttributes(
   span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
@@ -282,19 +284,33 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   decision: {
     parents: ["activation", "step", "tool"],
     prepare({ options }, context) {
+      // A decision made outside any run has no run identity to record.
+      const inRun = context.identity.runId !== "";
       return {
         name: decisionName(options.modelId),
         kind: "CLIENT",
         attributes: {
-          // A decision made outside any run has no run identity to record.
-          ...(context.identity.runId === "" ? undefined : context.attributes),
+          ...(inRun ? context.attributes : undefined),
           ...namingAttributes(decisionName(options.modelId), "decision"),
+          // The turn's own span is written when the turn ends; the turn ID lets a running turn
+          // claim a decision made before its first step.
+          "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
+          "agent.decision.purpose": options.purpose,
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "decision",
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
         },
       };
+    },
+    complete(span, _data, result, context) {
+      // What the model answered, including whether it refused, is output content.
+      if (!context.capture.recordOutputs) return;
+      applyAttributes(span, {
+        [CONTENT_FIELDS.decisionOutcome]: context.outcome,
+        [CONTENT_FIELDS.decisionAnswers]:
+          result.output === undefined ? undefined : context.serializer.json(result.output),
+      });
     },
   },
   memory: {

@@ -151,6 +151,11 @@ await decision.complete({ usage: { inputTokens: 42, outputTokens: 3 } });
 Omit `identity` for a decision made outside any run. Decision usage isn't added
 to the turn's totals.
 
+`purpose` is recorded as `agent.decision.purpose`, and a decision in a run
+records `agent.turn.id`. When the capture records outputs, completion records
+the outcome as `agent.decision.outcome` and `output` as `agent.decision.answers`;
+both are output content.
+
 ## AI SDK
 
 `aiSdkTelemetry` is an AI SDK telemetry integration. It records each

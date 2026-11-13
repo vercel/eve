@@ -92,6 +92,50 @@ describe("decision tracing", () => {
     );
   });
 
+  it.each([
+    { recordOutputs: false, outcome: undefined, answers: undefined },
+    { recordOutputs: true, outcome: "completed", answers: '{"team":{"type":"choice","choice":"billing"}}' },
+  ])(
+    "names the turn and purpose, and records the outcome only as output content (outputs: $recordOutputs)",
+    async ({ recordOutputs, outcome, answers }) => {
+      const turn = await tracing.turn({ agentName: "support", identity, sequence: 0, capture });
+      await tracing.decision(
+        {
+          modelId: "jev",
+          identity,
+          purpose: "model-selection",
+          parent: turn.reference,
+          capture: { emit: true, recordInputs: false, recordOutputs },
+        },
+        async (operation) => {
+          await operation.complete({
+            output: { team: { type: "choice", choice: "billing" } },
+          });
+        },
+      );
+      await turn.complete();
+
+      const decision = span("decision jev");
+      expect(decision.attributes).toMatchObject({
+        "agent.turn.id": "turn-1",
+        "agent.decision.purpose": "model-selection",
+      });
+      expect(decision.attributes["agent.decision.outcome"]).toBe(outcome);
+      expect(decision.attributes["agent.decision.answers"]).toBe(answers);
+    },
+  );
+
+  it("records a refusal as the outcome when outputs are recorded", async () => {
+    await tracing.decision(
+      { modelId: "jev", identity, capture: { emit: true, recordInputs: false, recordOutputs: true } },
+      async (operation) => {
+        await operation.complete({ outcome: "refused" });
+      },
+    );
+    expect(span("decision jev").attributes["agent.decision.outcome"]).toBe("refused");
+    expect(span("decision jev").attributes["agent.decision.answers"]).toBeUndefined();
+  });
+
   it("records nothing beneath an unsampled parent", async () => {
     let inner: boolean | undefined;
     await tracing.decision(

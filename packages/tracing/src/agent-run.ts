@@ -97,6 +97,8 @@ interface MemoryInput<T> {
 export interface DecisionInput {
   readonly modelId: string;
   readonly provider?: string;
+  /** What the decision is for, such as `model-selection` or `tool-approval`. */
+  readonly purpose?: string;
   /** Omit for a decision made outside any run. */
   readonly identity?: RunIdentity;
   readonly agentName?: string;
@@ -399,7 +401,10 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
       capture: sampled ? (data.capture ?? active?.capture ?? METADATA_ONLY) : NOT_SAMPLED,
       parent,
       context: data.context,
-      data: { type: "decision", options: { modelId: data.modelId, provider: data.provider } },
+      data: {
+        type: "decision",
+        options: { modelId: data.modelId, provider: data.provider, purpose: data.purpose },
+      },
     });
     return operationHandle(live, live.record().data, input.onError);
   }
