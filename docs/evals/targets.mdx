@@ -46,7 +46,7 @@ After verification, eve sends the available Vercel credentials:
 - The resolved OIDC token as both the bearer and Vercel trusted-IDP header.
 - `VERCEL_AUTOMATION_BYPASS_SECRET`, when set, as the Protection Bypass for Automation header.
 
-Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that don't use Vercel OIDC. Set `EVE_EVAL_OIDC_TOKEN` to send a token from another issuer, such as GitHub Actions, as both the bearer and the trusted-IDP header for [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources). Set at most one override; both skip the Vercel lookup. Requests that carry credentials don't follow redirects, so the credentials never reach another origin.
+Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that don't use Vercel OIDC. For tokens that expire during a run, use [`targetAuth`](#short-lived-tokens). Set `EVE_EVAL_OIDC_TOKEN` to send a token from another issuer, such as GitHub Actions, as both the bearer and the trusted-IDP header for [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources). Set at most one override; both skip the Vercel lookup. Requests that carry credentials don't follow redirects, so the credentials never reach another origin.
 
 ```yaml
 # GitHub Actions; the job needs `permissions: id-token: write`
