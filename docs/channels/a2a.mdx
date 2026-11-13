@@ -58,8 +58,8 @@ By default, the Agent Card takes its name and description from the agent, lists 
 How the agent handles a `SendMessage` depends on the IDs the message carries:
 
 - **Neither `contextId` nor `taskId`**: eve starts a new context and its first task.
-- **`contextId` only**: eve starts a new task in that context. It waits for any running task to finish first, including one waiting on input, and never merges into it or into another queued task.
-- **`taskId` of a submitted task**: eve refuses the message with `UnsupportedOperationError`: the task is queued behind another and has no turn to join yet.
+- **`contextId` only**: eve starts a new task in that context, once the context's previous task has finished. A context runs one task at a time: while a task is working or waiting on input, a new one is refused with `UnsupportedOperationError`. Continue the unfinished task with its `taskId`, wait for it to finish, or start another context for parallel work.
+- **`taskId` of a submitted task**: eve refuses the message with `UnsupportedOperationError`: the task hasn't started a turn to join yet.
 - **`taskId` of a working task**: the message joins the task's turn, as a follow-up message does in eve. If the task finishes before the message arrives, the message starts a new task instead, and the response names that task.
 - **`taskId` of an input-required task**: the message answers the task's open question. See [Answer questions and approvals](#answer-questions-and-approvals).
 - **`taskId` of a terminal task**: eve refuses the message with `UnsupportedOperationError`. Send it with only the `contextId` to start a new task.
@@ -202,5 +202,6 @@ The Agent Card is CORS-readable and cacheable: responses carry `Cache-Control`, 
 - Push notifications aren't supported. The Agent Card says `pushNotifications: false`, and the push-notification methods return `PushNotificationNotSupportedError`.
 - There is no extended Agent Card. `GetExtendedAgentCard` returns `UnsupportedOperationError`.
 - `ListTasks` lists one context at a time; it requires `contextId`.
-- A `TASK_STATE_SUBMITTED` task queued behind another task can't be cancelled until it starts; `CancelTask` returns `TaskNotCancelableError`.
+- A context runs one task at a time, and doesn't queue new ones; see [How tasks map to eve sessions](#how-tasks-map-to-eve-sessions). Two new tasks sent to one context at the same moment, before either response, can end up in one turn.
+- A `TASK_STATE_SUBMITTED` task can't be cancelled until it starts; `CancelTask` returns `TaskNotCancelableError`.
 - A task is one eve turn. A [task](../tools/workflows#run-calls-as-tasks-task) the agent starts in the background, and any prompt it opens after the turn ends, isn't part of the A2A task.

@@ -22,18 +22,21 @@ An eve turn stays `running` while it waits on interactions, so one task survives
 prompt round trips. Nothing is stored beyond the session: reads fold the session stream. Each process keeps the folded views of its 32 most recently read sessions, so a read folds only the lines since the last read. A cold read, such as on a new function instance, still folds the whole session. A stream or subscription starts from a copy of the kept view, so that other reads folding the shared view ahead can't make it skip a status change.
 
 ```
-SendMessage{}                   -> create session (new context)            -> task = turn 1
-SendMessage{contextId}          -> send(queue, turnTarget: null)            -> task = its own turn
+SendMessage{}                   -> create session (new context)       -> task = turn 1
+SendMessage{contextId}          -> refused while a task is unfinished; else send(queue) -> next turn
 SendMessage{taskId} submitted   -> refused: no turn to join yet
-SendMessage{taskId} working     -> send(steer, turnTarget: the task's turn) -> same turn, or its own
-SendMessage{taskId} interrupted -> respond(answer matched here)             -> same turn
+SendMessage{taskId} working     -> send(steer)                        -> same turn, or its own
+SendMessage{taskId} interrupted -> respond(answer matched here)        -> same turn
 ```
 
-`turnTarget` (`DeliverHookPayload.turnTarget`) exists because eve's queue rules would otherwise
-break the mapping: one principal's consecutive queued deliveries merge into one turn, and a queued
-message steers a turn waiting on its person. `null` makes a delivery a turn of its own; a turn ID
-lets it steer only that turn, and it runs alone once that turn has ended. A follow-up that missed
-its turn is therefore a new task, named by its own delivery.
+A context runs one task at a time. eve's queue rules would otherwise break the mapping: one
+principal's consecutive queued deliveries merge into one turn, and a queued message steers a turn
+waiting on its person. Refusing a new task while one is unfinished keeps every task its own turn
+without new framework options. A new task's send waits until the session records its message, so
+a client that sends tasks one response at a time never races; only two sends at the same moment
+can share a turn. Queued tasks in a context can come back later with a framework option for a
+delivery that always takes a turn of its own. A follow-up that missed its turn is a new task,
+named by its own delivery.
 
 ## Decisions
 
@@ -72,7 +75,7 @@ its turn is therefore a new task, named by its own delivery.
   applicable MUSTs, every SHOULD, and 3 of 4 MAYs, behind a proxy that copied each `messageId` into
   the message text (the TCK scripts behavior by `messageId`) and made each one unique (the TCK
   reuses one per scenario, which eve reads as a retry). The proxy tags the last text part inline,
-  since an answer's text parts join into one answer. Re-run after `turnTarget`: unchanged. The failing MUST is a TCK bug
+  since an answer's text parts join into one answer. Re-run after the move to one task per context: unchanged. The failing MUST is a TCK bug
   ([a2a-tck#202](https://github.com/a2aproject/a2a-tck/issues/202)); the MAY is client-chosen
   `contextId`s, unsupported because a context is a session. The TCK found the snake_case field
   name and `Content-Type` bugs, and prompted typed `error.data` and the card's `ETag`.

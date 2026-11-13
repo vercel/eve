@@ -29,6 +29,7 @@ import { isV26Line } from "#protocol/v26-lines.js";
 import { encodeTaskId, messageIdOfDelivery, type TaskRef } from "./ids.js";
 import {
   A2A_JSON_RPC_ERRORS,
+  isTerminalState,
   A2aError,
   a2aTimestamp,
   type Artifact,
@@ -494,6 +495,17 @@ export interface ContextTask {
  * message the session has yet to start or refused outright. Deliveries that settled without a turn
  * otherwise (answers, controls) belong to another task. Newest status first, as `ListTasks` sorts.
  */
+/**
+ * Whether the context has work a new task would collide with: a running turn, or a task not yet
+ * terminal, such as one waiting on a question or still queued.
+ */
+export function contextBusy(view: SessionView, sessionId: string): boolean {
+  if (Object.values(view.turns).some((turn) => turn.status === "running")) return true;
+  return contextTasks(view, sessionId, { historyLength: 0, includeArtifacts: false }).some(
+    (entry) => !isTerminalState(entry.task.status.state),
+  );
+}
+
 export function contextTasks(
   view: SessionView,
   sessionId: string,

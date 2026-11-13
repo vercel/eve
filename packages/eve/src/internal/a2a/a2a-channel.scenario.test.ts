@@ -450,80 +450,45 @@ describe("A2A channel", () => {
   );
 
   it(
-    "queues a new task behind an interrupted one instead of joining it",
+    "runs one task at a time in a context, refusing a new one until the last finishes",
     async () => {
       const asked = await sendTask("alice", { message: userMessage("q-1", "A2A-ASK") });
       expect(asked.status).toMatchObject({ state: "TASK_STATE_INPUT_REQUIRED" });
       const contextId = requiredString(asked.contextId, "contextId");
-
-      // A message with only the contextId is a new task, even while the first waits on its
-      // person: it must neither answer the open question nor steer the waiting turn.
-      const queued = await sendTask("alice", {
-        configuration: { returnImmediately: true },
-        message: { ...userMessage("q-2", "A2A-ECHO queued"), contextId },
-      });
-      expect(queued.id).not.toBe(asked.id);
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      expect(await readTask("alice", queued.id)).toMatchObject({
-        status: { state: "TASK_STATE_SUBMITTED" },
-      });
-      expect(await readTask("alice", asked.id)).toMatchObject({
-        status: { state: "TASK_STATE_INPUT_REQUIRED" },
-      });
-
-      const answered = await sendTask("alice", {
-        message: { ...userMessage("q-3", "Yes"), contextId, taskId: asked.id },
-      });
-      expect(answered).toMatchObject({
-        artifacts: [{ parts: [{ text: "A2A-LIFECYCLE-COMPLETE" }] }],
-        id: asked.id,
-        status: { state: "TASK_STATE_COMPLETED" },
-      });
-      expect(await waitForTerminal("alice", queued.id)).toMatchObject({
-        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO queued" }] }],
-        status: { state: "TASK_STATE_COMPLETED" },
-      });
-      const listed = requiredRecord((await rpc("alice", "ListTasks", { contextId })).result, "p");
-      expect(listed).toMatchObject({ totalSize: 2 });
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  it(
-    "keeps new tasks queued behind a working one apart",
-    async () => {
-      const slow = await sendTask("alice", {
-        configuration: { returnImmediately: true },
-        message: userMessage("k-1", "A2A-SLOW"),
-      });
-      const contextId = requiredString(slow.contextId, "contextId");
-      await waitForState("alice", slow.id, "TASK_STATE_WORKING");
-      const queue = (messageId: string, text: string) =>
-        sendTask("alice", {
+      const newTask = (messageId: string, text: string) =>
+        rpc("alice", "SendMessage", {
           configuration: { returnImmediately: true },
           message: { ...userMessage(messageId, text), contextId },
         });
-      const second = await queue("k-2", "A2A-ECHO second");
-      const third = await queue("k-3", "A2A-ECHO third");
 
-      // A follow-up to a task that hasn't started has no turn to join.
-      expect(
-        rpcErrorCode(
-          await rpc("alice", "SendMessage", {
-            message: { ...userMessage("k-4", "more"), contextId, taskId: second.id },
-          }),
-        ),
-      ).toBe(-32004);
+      // While a task waits on its person, a new one is refused rather than answering or
+      // steering it, and the waiting task is untouched.
+      expect(rpcErrorCode(await newTask("q-2", "A2A-ECHO too soon"))).toBe(-32004);
+      expect(await readTask("alice", asked.id)).toMatchObject({
+        status: { state: "TASK_STATE_INPUT_REQUIRED" },
+      });
+      // A retry of a message that already arrived is still its task.
+      const retried = await sendTask("alice", {
+        configuration: { returnImmediately: true },
+        message: { ...userMessage("q-1", "A2A-ASK"), contextId },
+      });
+      expect(retried.id).toBe(asked.id);
 
+      await sendTask("alice", {
+        message: { ...userMessage("q-3", "Yes"), contextId, taskId: asked.id },
+      });
+
+      // A working task blocks a new one too; once it finishes, the next one runs.
+      const slow = taskOf(await newTask("q-4", "A2A-SLOW"));
+      expect(rpcErrorCode(await newTask("q-5", "A2A-ECHO still too soon"))).toBe(-32004);
       expect(await waitForTerminal("alice", slow.id)).toMatchObject({
         status: { state: "TASK_STATE_COMPLETED" },
       });
-      expect(await waitForTerminal("alice", second.id)).toMatchObject({
-        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO second" }] }],
-        status: { state: "TASK_STATE_COMPLETED" },
+      const next = await sendTask("alice", {
+        message: { ...userMessage("q-6", "A2A-ECHO next"), contextId },
       });
-      expect(await waitForTerminal("alice", third.id)).toMatchObject({
-        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO third" }] }],
+      expect(next).toMatchObject({
+        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO next" }] }],
         status: { state: "TASK_STATE_COMPLETED" },
       });
       const listed = requiredRecord((await rpc("alice", "ListTasks", { contextId })).result, "p");

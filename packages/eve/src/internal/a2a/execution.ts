@@ -3,9 +3,9 @@
  *
  * Mapping (see research/a2a-channel.md):
  * - no `contextId`, no `taskId`  -> create an owner-bound session (a new context) and its first task
- * - `contextId` only             -> a new task in that session: a turn of its own, queued behind any
- *                                  running turn and never merged into one
- * - `taskId` of a working task   -> steer the task's turn, and only that turn
+ * - `contextId` only             -> a new task in that session, once the context's last one has
+ *                                  finished: a context runs one task at a time
+ * - `taskId` of a working task   -> steer the task's turn, the context's only running one
  * - `taskId` of an input-required task -> answer the task's first open question, matched here
  *
  * Every message is delivered under an idempotency key derived from its owner and `messageId`, and
@@ -17,8 +17,9 @@ import { randomUUID } from "node:crypto";
 
 import { isAnonymousPrincipal } from "#channel/principal-identity.js";
 import { answerFromText } from "#channel/resolve-text.js";
-import type { InternalChannelAddressDeliveryOptions } from "#channel/channel-address.js";
-import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import type { ChannelResolveSession } from "#channel/channel-operations.js";
+import type { AttachSessionFn } from "#channel/routes.js";
+import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
@@ -63,6 +64,7 @@ import {
 import {
   answerTurnedDown,
   compareContextTasks,
+  contextBusy,
   contextTasks,
   followSessionView,
   hasDelivery,
@@ -78,7 +80,7 @@ import {
 
 export interface A2aExecutionOptions {
   readonly createSession: RouteSessionCreator;
-  readonly from: ChannelFrom;
+  readonly attachSession: AttachSessionFn;
   readonly resolveSession: ChannelResolveSession;
   /** Upper bound on a blocking `SendMessage` wait; then the current state returns. */
   readonly maxBlockingMs: number;
@@ -96,6 +98,8 @@ export interface A2aCallContext {
   readonly signal: AbortSignal;
 }
 
+/** How long a new task's send waits for the session to record its message. */
+const ADMISSION_WAIT_MS = 5_000;
 /** How long `CancelTask` waits for the cancelled turn to settle before answering. */
 const CANCEL_SETTLE_MS = 5_000;
 const DEFAULT_PAGE_SIZE = 50;
@@ -171,21 +175,21 @@ export class A2aTaskExecution {
    * the answer usually reads `CANCELED`.
    */
   async cancelTask(request: CancelTaskRequest, call: A2aCallContext): Promise<Task> {
-    const { ref, token, view } = await this.#readTask(request.id, call.auth);
+    const { ref, view } = await this.#readTask(request.id, call.auth);
     const task = projectTask(view, ref, this.#projection());
     if (isTerminalState(task.status.state)) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.taskNotCancelable, "Task is already terminal.");
     }
     const turnId = view.deliveries[ref.deliveryId]?.turnId;
-    // A SUBMITTED task's message may be queued behind another task's turn. Cancelling the running
-    // turn would stop that other task, and eve can't withdraw a queued message.
+    // A SUBMITTED task's message hasn't started a turn yet, and eve can't withdraw a queued
+    // message: there's no turn to cancel.
     if (turnId === undefined) {
       throw new A2aError(
         A2A_JSON_RPC_ERRORS.taskNotCancelable,
         "Task hasn't started yet; it can be cancelled once it is working.",
       );
     }
-    await this.#options.from(token).cancel({ auth: call.auth, turnId });
+    await this.#options.attachSession(ref.sessionId).cancel({ auth: call.auth, turnId });
     const signal = AbortSignal.any([call.signal, AbortSignal.timeout(CANCEL_SETTLE_MS)]);
     let latest = task;
     const follow = this.#follow({ deliveryId: ref.deliveryId, ref }, this.#projection(), signal);
@@ -324,20 +328,41 @@ export class A2aTaskExecution {
     const sent = { deliveryId: delivery.deliveryId, ref: refFor(contextId, delivery) };
     // A retry of a message that already arrived is that message's task, whatever the context's
     // state now. Otherwise an ended context takes no more tasks.
-    if (isEndedRun(run.status)) {
-      if (hasDelivery(await readSessionView(contextId), delivery.deliveryId)) return sent;
-      throw contextEnded();
+    const view = await readSessionView(contextId);
+    if (hasDelivery(view, delivery.deliveryId)) return sent;
+    if (isEndedRun(run.status)) throw contextEnded();
+    // One task at a time: eve merges one person's queued messages into one turn, and lets a
+    // message steer a turn that waits on that person, so a second task beside an unfinished one
+    // could become part of it.
+    if (contextBusy(view, contextId)) {
+      throw new A2aError(
+        A2A_JSON_RPC_ERRORS.unsupportedOperation,
+        "This context has an unfinished task. Continue it with its taskId, wait for it to " +
+          "finish, or start a new context.",
+      );
     }
-    await this.#options.from(token).send(this.#content(message), {
+    await this.#options.attachSession(contextId).send(this.#content(message), {
       ...delivery,
       auth: call.auth,
-      // A new task waits for the running one instead of steering into it, and runs as a turn of
-      // its own: eve otherwise merges one person's queued messages into one turn, and lets a
-      // message steer a turn that waits on that person.
+      // Nothing is running to steer: the message starts the context's next turn.
       turnPolicy: "queue",
-      turnTarget: null,
     } as DeliveryOptions);
+    // Answer once the session has the message, so a client that sends its next task after this
+    // response finds this one in the context instead of slipping in beside it.
+    await this.#awaitAdmission(contextId, delivery.deliveryId, call.signal);
     return sent;
+  }
+
+  /** Waits, up to {@link ADMISSION_WAIT_MS}, until the session has recorded `deliveryId`. */
+  async #awaitAdmission(sessionId: string, deliveryId: string, signal: AbortSignal) {
+    const until = AbortSignal.any([signal, AbortSignal.timeout(ADMISSION_WAIT_MS)]);
+    try {
+      for await (const view of followSessionView(sessionId, until)) {
+        if (hasDelivery(view, deliveryId)) return;
+      }
+    } catch (error) {
+      if (!until.aborted) throw error;
+    }
   }
 
   async #continueTask(
@@ -345,7 +370,7 @@ export class A2aTaskExecution {
     call: A2aCallContext,
     delivery: DeliveryKeys,
   ): Promise<SentDelivery> {
-    const { ref, run, token, view } = await this.#readTask(message.taskId!, call.auth);
+    const { ref, run, view } = await this.#readTask(message.taskId!, call.auth);
     if (message.contextId !== undefined && message.contextId !== ref.sessionId) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "contextId does not match taskId.");
     }
@@ -361,8 +386,7 @@ export class A2aTaskExecution {
     }
     if (isEndedRun(run.status)) throw contextEnded();
     const turnId = view.deliveries[ref.deliveryId]?.turnId;
-    // Queued behind another task, this one has no turn yet: steering now would reach the other
-    // task's turn instead.
+    // Not started yet, this task has no turn to steer: the message would start one of its own.
     if (turnId === undefined) {
       throw new A2aError(
         A2A_JSON_RPC_ERRORS.unsupportedOperation,
@@ -378,20 +402,19 @@ export class A2aTaskExecution {
       // against the session's first open prompt, which can belong to another turn, and would
       // pass text that matches no option through as a message the waiting turn never reads.
       const answer = this.#answerFor(view, turnId, message);
-      await this.#options.from(token).respond([parseAnswer(answer)], {
+      await this.#options.attachSession(ref.sessionId).respond([parseAnswer(answer)], {
         ...delivery,
         auth: call.auth,
       } as RespondOptions);
       return answering;
     }
 
-    // Working, or waiting on a sign-in: refine the task's turn. `turnTarget` keeps the message out
-    // of any other turn: if this one ends first, the message starts a task of its own.
-    await this.#options.from(token).send(this.#content(message), {
+    // Working, or waiting on a sign-in: refine the task's turn, the only one a context runs. If it
+    // ends before the message lands, the message starts a task of its own.
+    await this.#options.attachSession(ref.sessionId).send(this.#content(message), {
       ...delivery,
       auth: call.auth,
       turnPolicy: "steer",
-      turnTarget: turnId,
     } as DeliveryOptions);
     return answering;
   }
@@ -448,7 +471,7 @@ export class A2aTaskExecution {
     if (view.deliveries[ref.deliveryId] === undefined && view.session.status === "ended") {
       throw A2aError.taskNotFound();
     }
-    return { ref, run, token, view };
+    return { ref, run, view };
   }
 
   /** The message as eve content, held to the channel's upload policy. */
@@ -555,12 +578,18 @@ function reachedRef(view: SessionView, sent: SentDelivery): TaskRef {
   return sent.followUp === true ? reachedTask(view, sent.ref, sent.deliveryId) : sent.ref;
 }
 
-/** `from().send()` options plus the ones only framework channels pass. */
-type DeliveryOptions = Parameters<ReturnType<ChannelFrom>["send"]>[1] &
-  InternalChannelAddressDeliveryOptions;
-/** `from().respond()` options plus the delivery ID only framework channels pass. */
-type RespondOptions = Parameters<ReturnType<ChannelFrom>["respond"]>[1] &
-  InternalChannelAddressDeliveryOptions;
+/** `send()` options plus the delivery ID only framework channels pass. */
+type DeliveryOptions = Parameters<Session["send"]>[1] & NamedDelivery;
+/** `respond()` options plus the delivery ID only framework channels pass. */
+type RespondOptions = Parameters<Session["respond"]>[1] & NamedDelivery;
+
+/**
+ * The session handle's internal delivery ID, as eve-channel names its deliveries: A2A's encodes
+ * the client's `messageId`, so a retry is the same delivery and task history can echo the ID.
+ */
+interface NamedDelivery {
+  readonly deliveryId: string;
+}
 
 function refFor(sessionId: string, delivery: DeliveryKeys): TaskRef {
   return { deliveryId: delivery.deliveryId, sessionId };

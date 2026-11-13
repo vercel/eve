@@ -156,7 +156,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
     }
     const execution = new A2aTaskExecution({
       createSession,
-      from: args.from,
+      attachSession: args.attachSession,
       maxBlockingMs,
       resolveSession: args.resolveSession,
       toolActivity: input.toolActivity ?? true,
