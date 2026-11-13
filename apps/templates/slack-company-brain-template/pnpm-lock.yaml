@@ -168,10 +168,10 @@ importers:
     dependencies:
       '@vercel/connect':
         specifier: ^2.9.0
-        version: 2.9.0(ai@7.0.163(zod@4.6.7))(eve@1.0.0-rc.6)
+        version: 2.9.0(ai@7.0.163(zod@4.6.7))(eve@1.0.0-rc.14)
       eve:
-        specifier: ^1.0.0-rc.6
-        version: 1.0.0-rc.6(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7))
+        specifier: ^1.0.0-rc.14
+        version: 1.0.0-rc.14(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -495,8 +495,8 @@ packages:
     resolution: {integrity: sha512-jKG29hxqGrL9ktunIwmt9aHbP3n995DGUY1KyXS7iGYFoD/yDdpc2CjJt6remFI3x2H1JOmBBMo0KXxjEQ2G6g==}
     hasBin: true
 
-  eve@1.0.0-rc.6:
-    resolution: {integrity: sha512-4bThh+8nLvsROIpXW9n6prUnHRKha0T9fMvo30rase6XG6xGJ3IAYe5zI2PFSOxc5UooN4B5Vtj6WdOPNvkjpQ==}
+  eve@1.0.0-rc.14:
+    resolution: {integrity: sha512-jp719QsnhnbxZQFSSUuUn3QbZzziEx4+vfjKSbxh3Rk314lM7GuoAPR07tEQMPH9hkcu1YVZiAIHvk5TYt3M+w==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -508,12 +508,12 @@ packages:
       ai: ^7.0.137
       braintrust: ^3.0.0
       chat: ^4.42.0
-      dd-trace: ^6.13.0
+      dd-trace: ^6.20.1
       just-bash: ^3.6.0
       next: ^16.0.0
       react: ^19.0.0
       svelte: ^5.0.0
-      vite: ^8.3.1
+      vite: ^8.3.3
       vue: ^3.5.0
     peerDependenciesMeta:
       '@linqapp/sdk':
@@ -825,12 +825,12 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.9.0(ai@7.0.163(zod@4.6.7))(eve@1.0.0-rc.6)':
+  '@vercel/connect@2.9.0(ai@7.0.163(zod@4.6.7))(eve@1.0.0-rc.14)':
     dependencies:
       '@vercel/oidc': 4.0.7
     optionalDependencies:
       ai: 7.0.163(zod@4.6.7)
-      eve: 1.0.0-rc.6(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7))
+      eve: 1.0.0-rc.14(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7))
 
   '@vercel/oidc@3.2.0': {}
 
@@ -864,14 +864,14 @@ snapshots:
       crossws: 0.4.17(srvx@1.0.8)
       srvx: 1.0.8
 
-  eve@1.0.0-rc.6(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7)):
+  eve@1.0.0-rc.14(@vercel/connect@2.9.0)(ai@7.0.163(zod@4.6.7)):
     dependencies:
       ai: 7.0.163(zod@4.6.7)
       nitro: 3.0.261103-rc
       rolldown: 1.2.16
       undici: 8.12.3
     optionalDependencies:
-      '@vercel/connect': 2.9.0(ai@7.0.163(zod@4.6.7))(eve@1.0.0-rc.6)
+      '@vercel/connect': 2.9.0(ai@7.0.163(zod@4.6.7))(eve@1.0.0-rc.14)
 
   eventsource-parser@3.1.1: {}
 

@@ -24,6 +24,7 @@ agent/
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   extensions/git.ts              # eve's git extension: GitHub access and pull requests
+  extensions/skills.ts           # skills people teach the agent, for themselves or a channel
   memory/personal.ts             # private notes per person, in DMs and outside Slack
   memory/channel.ts              # shared notes per Slack channel
   schedules/tasks.ts             # schedules people create by asking in Slack
@@ -61,6 +62,10 @@ agent/
 - **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
   private one per person, and a shared one per Slack channel. See
   [Memory](#memory).
+- **Custom skills.** People teach the agent their own skills by asking, such
+  as a release checklist or how they like standup notes. Personal skills
+  follow their owner everywhere; channel skills apply to everyone in a Slack
+  channel. See [Custom skills](#custom-skills).
 - **Scheduled tasks.** People can ask for recurring or one-time work, such as
   "every Monday at 9, summarize last week's open questions here". Results post
   in the conversation where the schedule was created. See
@@ -162,6 +167,42 @@ and the Memory section of `agent/instructions.md`. To search many records
 instead of keeping a small document, swap `fileMemory()` for another
 [provider](https://eve.dev/docs/memory#choose-a-provider) without changing the
 scopes.
+
+## Custom skills
+
+`agent/extensions/skills.ts` mounts eve's experimental
+[custom skills extension](https://eve.dev/docs/experimental/custom-skills).
+People save skills by asking, and each applies from their next message:
+
+> @brain from now on, when I ask for standup notes, use three bullets:
+> yesterday, today, blockers
+>
+> @brain save a skill for this channel: when someone asks how to request
+> access, point them to the IT form and ask which system they need
+>
+> @brain what skills do I have?
+
+| Scope      | Applies to                                 | Goes live                                     |
+| ---------- | ------------------------------------------ | --------------------------------------------- |
+| `personal` | The person who saved it, in every thread   | First version at once; later ones on approval |
+| `channel`  | Everyone in that Slack channel or group DM | After someone other than the author approves  |
+
+Every save is a version. Later saves stay drafts until someone publishes them,
+and publishing an earlier version rolls back. Approvals appear as Slack
+buttons, and only workspace members who pass the channel gate can answer them.
+A skill can apply on every turn (`always`, such as a tone), load when relevant
+(`on-demand`), or stay hidden until the agent searches for it (`deferred`).
+
+Scopes come from the trusted Slack session, never from the model. Personal
+skills shape the agent's replies in shared threads too, so other people in the
+thread see their effects. Scheduled tasks run as their creator and get the
+creator's personal skills.
+
+Skills live in the same private Blob store as [memory](#memory), under
+`company-brain/skills`, and reset on restart under `eve dev`. To make channel
+skills admin-only, add company-wide read-only skills, or keep skills in your
+own database, see the extension's
+[docs](https://eve.dev/docs/experimental/custom-skills#scopes).
 
 ## Connect GitHub
 
@@ -310,7 +351,9 @@ description: How to answer requests for access to tools and systems.
 3. ...
 ```
 
-You can also install published skills with `eve add`. See
+Skills in `agent/skills/` apply to everyone. For skills people save themselves,
+see [Custom skills](#custom-skills). You can also install published skills with
+`eve add`. See
 [Skills](https://eve.dev/docs/skills).
 
 ### Add a specialist subagent
@@ -348,7 +391,8 @@ name. See [Tools](https://eve.dev/docs/tools).
 
 Extensions bundle tools, skills, subagents, and instructions into one package
 you mount under `agent/extensions/`. This template already mounts
-`eve/extensions/code` and `eve/extensions/git`. Delete their files under
+`eve/extensions/code`, `eve/extensions/git`, and
+`eve/experimental/extensions/custom-skills`. Delete their files under
 `agent/extensions/` (and `agent/sandbox.ts`) if your brain shouldn't run code.
 Browse more with `pnpm exec eve registry list`. See
 [Extensions](https://eve.dev/docs/extensions).
@@ -383,6 +427,10 @@ carries. The Slack docs cover common next steps:
 - **Channel memory is shared.** Anyone who can reach the agent in a channel
   benefits from, and can add to, that channel's notes. Review the channel
   memory description if your channels hold sensitive discussions.
+- **Channel skills change everyone's answers.** A channel skill joins the
+  prompt for everyone in that channel, so it needs a second person to approve
+  it. To limit channel skills to admins, set `approval.request` in
+  `agent/extensions/skills.ts`.
 - **Keep checks in sensitive tools.** The channel gate decides who can start a
   turn or answer an approval. A tool that reads or changes sensitive data should check
   `ctx.session.auth` itself.
