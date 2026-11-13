@@ -118,6 +118,37 @@ describe("createChannelAddress", () => {
     );
   });
 
+  it("stores a steering policy's principal beside the mode, and a send replaces both", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+      turnPolicy: { mode: "steer", principal: "retain" },
+    });
+
+    await address.send("channel policy", { auth: null });
+    await address.send("string", { auth: null, turnPolicy: "steer" });
+    await address.send("queue", { auth: null, turnPolicy: { mode: "queue" } });
+    await address.send("adopt", {
+      auth: null,
+      turnPolicy: { mode: "steer", principal: "adopt" },
+    });
+
+    const stored = vi
+      .mocked(runtime.dispatchContinuation)
+      .mock.calls.map(([{ command }]) =>
+        command.kind === "send" ? [command.turnPolicy, command.principalPolicy] : undefined,
+      );
+    expect(stored).toEqual([
+      ["steer", "retain"],
+      ["steer", undefined],
+      ["queue", undefined],
+      ["steer", "adopt"],
+    ]);
+  });
+
   it("mints a distinct delivery identity for each channel operation", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

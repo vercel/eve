@@ -69,7 +69,7 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** The turn's principal and delegated caller; `adopt-sender` can move the principal. */
+  /** The turn's principal and delegated caller; an `"adopt"` message can move the principal. */
   private identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;

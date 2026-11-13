@@ -12,7 +12,7 @@ import type { InferReceiveTarget } from "#channel/receive-target.js";
 import { toSessionSendOptions, type SessionSendOptions } from "#channel/session.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { PrincipalPolicy, Runtime, TurnPolicy } from "#channel/types.js";
+import type { Runtime, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /** Message delivery bound to one channel-specific proactive target. */
@@ -41,7 +41,6 @@ export interface CrossChannelTarget {
   readonly receive?: CompiledChannel["receive"];
   readonly adapter?: ChannelAdapter;
   readonly turnPolicy?: CompiledChannel["turnPolicy"];
-  readonly principalPolicy?: CompiledChannel["principalPolicy"];
 }
 
 /** What a forwarded delivery inherits from the caller; the target channel supplies its own name. */
@@ -67,7 +66,6 @@ export function toCrossChannelTargets(
             receive: channel.receive,
             adapter: channel.adapter,
             turnPolicy: channel.turnPolicy,
-            principalPolicy: channel.principalPolicy,
           },
         ],
   );
@@ -96,7 +94,6 @@ export function createCrossChannelToFn(
             target: target as Readonly<Record<string, unknown>>,
           },
           turnPolicy: sendOptions.turnPolicy,
-          principalPolicy: sendOptions.principalPolicy,
         });
       },
     };
@@ -106,13 +103,9 @@ export function createCrossChannelToFn(
 interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
   readonly source: CrossChannelDeliverySource;
-  readonly target: Pick<
-    CrossChannelTarget,
-    "name" | "receive" | "adapter" | "turnPolicy" | "principalPolicy"
-  >;
+  readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: GenericReceiveInput;
   readonly turnPolicy?: TurnPolicy;
-  readonly principalPolicy?: PrincipalPolicy;
 }
 
 /** Shared authored `receive(input, ctx)` invocation behind every `ctx.to()`. */
@@ -133,7 +126,6 @@ async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<De
     metadata: { ...args.source, channelKind: `channel:${name}`, channelName: name },
     runtime: args.runtime,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
-    principalPolicy: args.principalPolicy ?? args.target.principalPolicy,
   });
   return await args.target.receive(args.input, channelOperations);
 }

@@ -22,8 +22,8 @@ person's words spending the caller's access.
 
 ## Guarantee
 
-With `"match-caller"` and `"retain-caller"`, a turn's principal never changes. `"adopt-sender"`
-changes it deliberately. With `"retain-caller"`, after another person's message joins, eve hands the
+With `"match"` and `"retain"`, a turn's principal never changes. `"adopt"`
+changes it deliberately. With `"retain"`, after another person's message joins, eve hands the
 caller's identity to no call the model makes. That lasts until the caller sends a message or approves
 a call.
 
@@ -35,50 +35,63 @@ eve enforces this wherever it hands out the identity itself. A tool that authori
 
 Four additive changes. Nothing changes for an agent that doesn't opt in.
 
-| Change                                                     | Use case                                                         |
-| ---------------------------------------------------------- | ---------------------------------------------------------------- |
-| [`principalPolicy`](#1-principalpolicy)                    | Let a teammate's message reach or take over a running turn.      |
-| [`ctx.session.auth.steeredBy`](#2-ctxsessionauthsteeredby) | Let code see that the turn has input its caller hasn't acted on. |
-| [Caller identity hold](#3-caller-identity-hold)            | Stop that input from spending the caller's access.               |
-| [`steered()`](#4-steered)                                  | Protect a tool that authorizes in its own code.                  |
+| Change                                                        | Use case                                                         |
+| ------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`turnPolicy` with `principal`](#1-turnpolicy-with-principal) | Let a teammate's message reach or take over a running turn.      |
+| [`ctx.session.auth.steeredBy`](#2-ctxsessionauthsteeredby)    | Let code see that the turn has input its caller hasn't acted on. |
+| [Caller identity hold](#3-caller-identity-hold)               | Stop that input from spending the caller's access.               |
+| [`steered()`](#4-steered)                                     | Protect a tool that authorizes in its own code.                  |
 
-### 1. `principalPolicy`
+### 1. `turnPolicy` with `principal`
 
-`turnPolicy` decides when a message joins a running turn. `principalPolicy` decides what happens
-when that turn runs as someone else.
+`turnPolicy` decides when a message joins a running turn. Its steering form takes `principal`, which
+decides what happens when that turn runs as someone else.
 
-| `principalPolicy`          | The running turn's caller sent it | Someone else sent it                                                     |
-| -------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
-| `"match-caller"` (default) | Joins the turn                    | Waits for the turn to end, then starts a turn as its sender              |
-| `"retain-caller"`          | Joins the turn                    | Joins as input. The turn retains its caller and principal                |
-| `"adopt-sender"`           | Joins the turn                    | Joins. The turn adopts the sender as its caller from the next model call |
+```ts
+type TurnPolicy =
+  | "queue"
+  | "steer"
+  | { mode: "queue" }
+  | { mode: "steer"; principal?: "match" | "retain" | "adopt" };
+```
 
-`"match-caller"` is today's behavior.
+`"steer"` is `{ mode: "steer" }`, `"queue"` is `{ mode: "queue" }`, and `principal` defaults to
+`"match"`. Only a steering policy has `principal`, so a queued message can't carry one.
+
+| `principal`         | The running turn's caller sent it | Someone else sent it                                                     |
+| ------------------- | --------------------------------- | ------------------------------------------------------------------------ |
+| `"match"` (default) | Joins the turn                    | Waits for the turn to end, then starts a turn as its sender              |
+| `"retain"`          | Joins the turn                    | Joins as input. The turn retains its caller and principal                |
+| `"adopt"`           | Joins the turn                    | Joins. The turn adopts the sender as its caller from the next model call |
+
+`"match"` is today's behavior.
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
   credentials,
-  principalPolicy: "match-caller", // the channel's default
+  turnPolicy: "steer", // the channel's default, with principal "match"
   async onMessage(ctx, message) {
     const auth = defaultSlackAuth(message, ctx);
     // A mention may join a teammate's running turn. Other messages wait for it to end.
-    return ctx.isBotMentioned() ? { auth, principalPolicy: "retain-caller" } : { auth };
+    return ctx.isBotMentioned()
+      ? { auth, turnPolicy: { mode: "steer", principal: "retain" } }
+      : { auth };
   },
 });
 ```
 
 - **Where it is set.** On a channel definition, in server-side `send()` options, and in the result
-  of a Slack message hook. A message's value wins over its channel's.
-- **Never from a client.** Request bodies and the client SDK can set `turnPolicy`. They can't set
-  `principalPolicy`, because it decides whose access a message can reach.
-- **Only for steering.** With `turnPolicy: "queue"`, or with no turn running, the message behaves as
-  it does today and runs as its sender.
+  of a Slack message hook. A message's `turnPolicy` replaces its channel's as a whole.
+- **Never from a client.** Request bodies and the client SDK take only `"steer"` or `"queue"`. They
+  choose the mode. `principal` comes from the channel's policy, because it decides whose access a
+  message can reach.
+- **No turn running.** The message behaves as it does today and runs as its sender.
 - **Needs a sender.** A message sent with `auth: null`, or as an anonymous principal, follows
-  `"match-caller"`.
+  `"match"`.
 - **Waits behind the caller.** While any approval, question, or sign-in is open in the session,
   another person's message waits. It joins when the turn continues, or starts its own turn if the
   turn ends first.
-- **`"adopt-sender"` admission.** It joins under the same conditions as `"retain-caller"`.
+- **`"adopt"` admission.** It joins under the same conditions as `"retain"`.
 - **Adopt from the next model call.** `ctx.session.auth.current` becomes the sender. The turn ID and
   `auth.initiator` do not change. `steeredBy` is absent, so the caller identity hold does not apply.
 - **Earlier work.** Calls that already started finish under the caller who started them. The
@@ -109,7 +122,7 @@ stateDiagram-v2
 - It is stored with the turn, so a replayed step reads the same value.
 - A session's own turn starts without it.
 - A local subagent's turn starts with the list its parent turn had when it made the call or sent the message. A workflow tool call reads the same list.
-- An `"adopt-sender"` message clears it.
+- An `"adopt"` message clears it.
 - A denial doesn't clear it. Neither does an approval from anyone but the caller.
 
 Clearing on the caller's message matches how turns work today: a caller's message already runs
@@ -179,17 +192,17 @@ identity hold alone never pauses a turn.
 
 Bob writes "actually include everyone" during Alice's turn.
 
-| Configuration                                                            | Result                                                                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `"match-caller"`                                                         | Bob waits. His turn runs as Bob, and the warehouse refuses the wider query.                 |
-| `"adopt-sender"`                                                         | Bob's message joins, the next query runs as Bob, and the warehouse refuses the wider query. |
-| `"retain-caller"`, and the SQL tool uses Alice's token                   | The query fails with `turn_steered`. The agent asks Alice, and her reply decides.           |
-| `"retain-caller"`, a service-account SQL tool, and `approval: steered()` | Alice gets one approval showing the wider query.                                            |
-| `"retain-caller"`, a service-account SQL tool, and no `steered()`        | The wider query runs under Alice's role. This is the gap the author must close.             |
+| Configuration                                                     | Result                                                                                      |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `"match"`                                                         | Bob waits. His turn runs as Bob, and the warehouse refuses the wider query.                 |
+| `"adopt"`                                                         | Bob's message joins, the next query runs as Bob, and the warehouse refuses the wider query. |
+| `"retain"`, and the SQL tool uses Alice's token                   | The query fails with `turn_steered`. The agent asks Alice, and her reply decides.           |
+| `"retain"`, a service-account SQL tool, and `approval: steered()` | Alice gets one approval showing the wider query.                                            |
+| `"retain"`, a service-account SQL tool, and no `steered()`        | The wider query runs under Alice's role. This is the gap the author must close.             |
 
 ## What the author owns
 
-Opting in to `"retain-caller"` comes with a short audit. The `principalPolicy` documentation must list it.
+Opting in to `"retain"` comes with a short audit. The `turnPolicy` documentation must list it.
 
 - **Tools that authorize in their own code.** Add `approval: steered()` to every tool that decides
   from `auth.current` without taking the caller's token from eve.
@@ -199,8 +212,8 @@ Opting in to `"retain-caller"` comes with a short audit. The `principalPolicy` d
   adds none.
 - **Shared context.** A steering message can ask the model to repeat anything already in the
   conversation, as a later turn can today.
-- **Memory.** A turn is saved under the caller it has when it is saved. `"retain-caller"` uses the
-  original caller; `"adopt-sender"` uses the sender. Messages other people sent are included.
+- **Memory.** A turn is saved under the caller it has when it is saved. `"retain"` uses the
+  original caller; `"adopt"` uses the sender. Messages other people sent are included.
 
 ## Where a model fits
 
@@ -208,21 +221,21 @@ Everything above is deterministic: who sent a message, which policy it carries, 
 call can use, and who can release it.
 
 A model belongs where either answer is safe. A channel hook can call a decision model to choose a
-`principalPolicy` value for each message, as the ambient listening pattern already filters
+`principal` value for each message, as the ambient listening pattern already filters
 messages. A wrong choice makes a message wait or join; it never widens access.
 
 ## Boundaries
 
 - **Admission.** One check decides whether a message steers, and one function refuses a message
-  from another principal. `"retain-caller"` and `"adopt-sender"` pass both. `"retain-caller"` leaves
-  the turn's auth untouched; `"adopt-sender"` changes it after the step.
+  from another principal. `"retain"` and `"adopt"` pass both. `"retain"` leaves
+  the turn's auth untouched; `"adopt"` changes it after the step.
 - **`steeredBy`.** It travels beside the turn's auth, so it crosses step boundaries and reaches
   child sessions the same way.
 - **One sender per step.** One model step reads one sender's messages, so a step always knows whose
   input it is. When several people's messages wait, the earliest sender's are read first. The others
   wait for the next step, and start their own turn if the turn ends first.
 - **Caller handover.** The running turn re-reads its caller after a step that read an
-  `"adopt-sender"` message.
+  `"adopt"` message.
 - **Unchanged.** How turns pause, how tasks run, and what history holds.
 
 ## Out of scope
@@ -234,12 +247,16 @@ messages. A wrong choice makes a message wait or join; it never widens access.
 
 ## Compatibility
 
-Additive. `principalPolicy` defaults to `"match-caller"`, and stored deliveries without the field
-read as `"match-caller"`. `steeredBy` is absent when a session's own turn starts. The changeset is `minor`.
+Additive. `"steer"` and `"queue"` keep their meaning, and `principal` defaults to `"match"`. A
+stored message keeps `turnPolicy` as `"steer"` or `"queue"` with `principal` beside it, so a
+deployment that predates `principal` reads the mode correctly, and a stored message without
+`principal` reads as `"match"`. `steeredBy` is absent when a session's own turn starts. The
+changeset is `minor`.
 
 ## Testing
 
-- Unit: the input queue's admission rule, grouping, and merged `steeredBy`.
+- Unit: the input queue's admission rule, grouping, and merged `steeredBy`; the stored form of a
+  policy; and that a request chooses only the mode.
 - Integration: `principal-policy.integration.test.ts` proves the join, the hold and its release mid-turn,
-  `steered()`, `adopt-sender`, the sign-in wait, and the default wait.
+  `steered()`, `"adopt"`, the sign-in wait, and the default wait.
 - Two deterministic e2e evals in the `agent-tools-hitl` fixture.

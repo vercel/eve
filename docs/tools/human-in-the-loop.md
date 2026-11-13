@@ -201,7 +201,7 @@ A remembered approval is consent, not authorization. Authorize the current calle
 
 ### Ask the caller when someone else steers the turn
 
-`steered()` asks the turn's caller before a call starts while `ctx.session.auth.steeredBy` is set. Otherwise it returns `undefined`, which leaves the decision to the tool's and agent's other policies. `"adopt-sender"` clears `steeredBy`, so `steered()` does not ask.
+`steered()` asks the turn's caller before a call starts while `ctx.session.auth.steeredBy` is set. Otherwise it returns `undefined`, which leaves the decision to the tool's and agent's other policies. A message that joins with `principal: "adopt"` clears `steeredBy`, so `steered()` does not ask.
 
 Use it on a tool that authorizes from `ctx.session.auth.current` while using a shared credential, because eve cannot detect that check. Use it as the agent's `approval` in `agent.ts` to ask before every call made while steered. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal) for the identity hold.
 

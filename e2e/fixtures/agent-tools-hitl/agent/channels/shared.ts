@@ -31,7 +31,7 @@ async function messageOf(request: Request): Promise<string> {
  * request body.
  */
 export default defineChannel({
-  principalPolicy: "retain-caller",
+  turnPolicy: { mode: "steer", principal: "retain" },
   routes: [
     POST("/shared/:threadId/messages", async (request, { from, params }) => {
       const session = await from(params.threadId ?? "").send(await messageOf(request), {
@@ -42,7 +42,7 @@ export default defineChannel({
     POST("/shared/:threadId/handover", async (request, { from, params }) => {
       const session = await from(params.threadId ?? "").send(await messageOf(request), {
         auth: authFor(request),
-        principalPolicy: "adopt-sender",
+        turnPolicy: { mode: "steer", principal: "adopt" },
       });
       return Response.json({ ok: true, sessionId: session.sessionId });
     }),

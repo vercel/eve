@@ -10,7 +10,6 @@ import type { SessionSendOptions, Session } from "#channel/session.js";
 import type {
   Runtime,
   SessionAuthContext,
-  PrincipalPolicy,
   TurnPolicy,
   SessionControlOptions,
 } from "#channel/types.js";
@@ -97,7 +96,6 @@ export function createChannelOperations<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
-  readonly principalPolicy?: PrincipalPolicy;
 }): ChannelReceiveContext<TState> {
   const channelAddress = createChannelAddressFn<TState>(input);
 

@@ -38,8 +38,8 @@ export function resolveTurnPrincipal(
  * The identity a running turn continues under once a message sent as `auth`
  * joins it. Within a turn the principal is fixed and only its claims may
  * update; input without auth acts as the turn's identity. Another principal
- * joins only with a join policy: `"retain-caller"` leaves the turn under its
- * caller, `"adopt-sender"` hands the turn to the sender. Anyone else's answers
+ * joins only with a join policy: `"retain"` leaves the turn under its
+ * caller, `"adopt"` hands the turn to the sender. Anyone else's answers
  * settle requests as their responder without joining the turn.
  */
 export function continueTurnAuth<T extends SessionAuthContext | null | undefined>(
@@ -49,8 +49,8 @@ export function continueTurnAuth<T extends SessionAuthContext | null | undefined
 ): T | SessionAuthContext | null {
   if (auth === undefined) return turnAuth;
   if (principalOf(auth) !== principalOf(turnAuth)) {
-    if (policy === "retain-caller") return turnAuth;
-    if (policy === "adopt-sender") return auth;
+    if (policy === "retain") return turnAuth;
+    if (policy === "adopt") return auth;
     throw new Error(
       "A message from another principal cannot join a running turn. Gate it with isSteeringDelivery so it waits for the turn to end.",
     );

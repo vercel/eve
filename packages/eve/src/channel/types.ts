@@ -171,19 +171,50 @@ export interface DeliverPayload extends Omit<ChannelDelivery, "state"> {
   readonly [key: string]: unknown;
 }
 
-/** Controls how a channel message interacts with an active turn. */
-export type TurnPolicy = "steer" | "queue";
-
-/** Default policy for message sends produced by current channel surfaces. */
-export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
+/** Whether a message joins a running turn (`"steer"`) or waits for it to end (`"queue"`). */
+export type TurnMode = "steer" | "queue";
 
 /**
- * Controls what a message does to a running turn that runs as another principal.
- * - `"match-caller"` (the default): it joins only a turn whose caller is its sender.
- * - `"retain-caller"`: it also joins another principal's turn as input, and the turn retains its caller.
- * - `"adopt-sender"`: it also joins another principal's turn, and the turn adopts the sender as its caller.
+ * What a steering message does when the running turn runs as another principal.
+ * - `"match"` (the default): it joins only a turn whose caller is its sender.
+ * - `"retain"`: it also joins another principal's turn as input, and the turn retains its caller.
+ * - `"adopt"`: it also joins another principal's turn, and the turn adopts the sender as its caller.
  */
-export type PrincipalPolicy = "match-caller" | "retain-caller" | "adopt-sender";
+export type PrincipalPolicy = "match" | "retain" | "adopt";
+
+/**
+ * Controls how a channel message interacts with an active turn: `"steer"` joins it, and
+ * `"queue"` waits for it to end. `"steer"` is `{ mode: "steer" }`, and `"queue"` is
+ * `{ mode: "queue" }`.
+ *
+ * A steering policy's `principal` decides what the message does when the turn runs as someone
+ * else:
+ * - `"match"` (the default): the message waits for the turn to end, then starts a turn as its sender.
+ * - `"retain"`: the message joins as input, and the turn retains its caller.
+ * - `"adopt"`: the message joins, and the turn adopts the sender as its caller.
+ */
+export type TurnPolicy =
+  | TurnMode
+  | { readonly mode: "queue" }
+  | { readonly mode: "steer"; readonly principal?: PrincipalPolicy };
+
+/** Default policy for message sends produced by current channel surfaces. */
+export const DEFAULT_TURN_POLICY: TurnMode = "steer";
+
+/**
+ * A {@link TurnPolicy} as a session command stores it. The stored form stays two flat fields, so
+ * a deployment that predates `principal` still reads `turnPolicy` as a string.
+ */
+export function storedTurnPolicy(policy: TurnPolicy): {
+  readonly turnPolicy: TurnMode;
+  readonly principalPolicy?: PrincipalPolicy;
+} {
+  if (typeof policy === "string") return { turnPolicy: policy };
+  if (policy.mode !== "steer" || policy.principal === undefined || policy.principal === "match") {
+    return { turnPolicy: policy.mode };
+  }
+  return { turnPolicy: "steer", principalPolicy: policy.principal };
+}
 
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
@@ -203,7 +234,8 @@ export type SessionCommand =
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
-      readonly turnPolicy?: TurnPolicy;
+      readonly turnPolicy?: TurnMode;
+      /** The `principal` of a steering {@link TurnPolicy}; absent means `"match"`. */
       readonly principalPolicy?: PrincipalPolicy;
     }
   | ({
@@ -313,7 +345,8 @@ export interface DeliverHookPayload {
   readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
-  readonly turnPolicy?: TurnPolicy;
+  readonly turnPolicy?: TurnMode;
+  /** The `principal` of a steering {@link TurnPolicy}; absent means `"match"`. */
   readonly principalPolicy?: PrincipalPolicy;
 }
 

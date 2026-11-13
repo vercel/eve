@@ -5,7 +5,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
-import type { TurnPolicy } from "#channel/types.js";
+import type { TurnMode } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
@@ -125,7 +125,7 @@ export interface CreateSessionOptions {
 /** Options shared by message sends and HITL responses on a client session. */
 export interface SendTurnOptions<TOutput = unknown> {
   /** Policy for a message sent while the fixed session has an active turn. */
-  readonly turnPolicy?: TurnPolicy;
+  readonly turnPolicy?: TurnMode;
 
   /**
    * Ephemeral client/page context for the current turn.

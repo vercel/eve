@@ -8,7 +8,7 @@ import {
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { SkillFileSource } from "#channel/skill-files.js";
-import type { PrincipalPolicy, Runtime, TurnPolicy } from "#channel/types.js";
+import type { Runtime, TurnPolicy } from "#channel/types.js";
 import {
   attachAgentInfoRouteResponse,
   attachHomeRouteMetadata,
@@ -28,7 +28,6 @@ export interface ChannelRoutePorts {
   /** Where the request came from; its `channelName` namespaces continuation tokens. */
   readonly deliverySource: ChannelDeliverySource;
   readonly turnPolicy?: TurnPolicy;
-  readonly principalPolicy?: PrincipalPolicy;
   readonly agentName: string;
   readonly params: Readonly<Record<string, string>>;
   readonly requestIp: string | null;
@@ -52,25 +51,20 @@ export interface ChannelRoutePorts {
  * session creator, `/info`, the channel and agent names, skill files, remote stream headers).
  */
 export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerArgs {
-  const { adapter, deliverySource, runtime, turnPolicy, principalPolicy } = ports;
+  const { adapter, deliverySource, runtime, turnPolicy } = ports;
   const { channelName } = deliverySource;
   const args = attachRouteSessionCreator(
     attachHomeRouteMetadata(
       attachRouteChannelName(
         attachAgentInfoRouteResponse(
           {
-            attachSession: createAttachSessionFn(runtime, {
-              ...deliverySource,
-              turnPolicy,
-              principalPolicy,
-            }),
+            attachSession: createAttachSessionFn(runtime, { ...deliverySource, turnPolicy }),
             ...createChannelOperations({
               adapter,
               channelName,
               metadata: deliverySource,
               runtime,
               turnPolicy,
-              principalPolicy,
             }),
             ...ports.agent,
             params: ports.params,

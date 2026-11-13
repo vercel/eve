@@ -626,10 +626,10 @@ describe("principal policy", () => {
     );
     const holdOpenCalls = new Set<string>();
     await withSteeringRun(
-      "principal-policy-retain-caller",
+      "principal-policy-retain",
       async (run) => {
         const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-        await run.send(BOB, "Actually include everyone.", "retain-caller");
+        await run.send(BOB, "Actually include everyone.", "retain");
         run.release();
         // The second hold_open starts only after the held report_access settled.
         const held = await run.nextUntil("hold_open started again", holdOpenStarted(holdOpenCalls));
@@ -663,11 +663,11 @@ describe("principal policy", () => {
     );
   }, 60_000);
 
-  it("an adopt-sender message makes its sender the turn's caller", async () => {
+  it("an adopt message makes its sender the turn's caller", async () => {
     const holdOpenCalls = new Set<string>();
-    await withSteeringRun("principal-policy-adopt-sender", async (run) => {
+    await withSteeringRun("principal-policy-adopt", async (run) => {
       const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-      await run.send(BOB, "Actually include everyone.", "adopt-sender");
+      await run.send(BOB, "Actually include everyone.", "adopt");
       await run.send(BOB, "And add a summary.");
       run.release();
       const turn = await run.next("turn after both messages");
@@ -709,7 +709,7 @@ describe("principal policy", () => {
       "principal-policy-uncaught",
       async (run) => {
         const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-        await run.send(BOB, "Actually include everyone.", "retain-caller");
+        await run.send(BOB, "Actually include everyone.", "retain");
         run.release();
         const turn = await run.next("turn after the failed call");
         const seen = [...started, ...turn];
@@ -748,7 +748,7 @@ describe("principal policy", () => {
       "principal-policy-steered-approval",
       async (run) => {
         await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-        await run.send(BOB, "Actually include everyone.", "retain-caller");
+        await run.send(BOB, "Actually include everyone.", "retain");
         run.release();
         const paused = await run.nextUntil(
           "report_access approval",
@@ -815,7 +815,7 @@ describe("principal policy", () => {
       const signIn = filterEventsByType(paused, "interaction.opened").find(
         (event) => event.data.request.kind === "sign-in",
       )!;
-      await run.send(BOB, "Actually include everyone.", "retain-caller");
+      await run.send(BOB, "Actually include everyone.", "retain");
       await resumeHook(run.commandInbox, {
         kind: "authorization-callback",
         payloads: [
@@ -874,7 +874,7 @@ describe("principal policy", () => {
     const holdOpenCalls = new Set<string>();
     await withSubagentRun(async (run) => {
       const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-      await run.send(BOB, "Actually include everyone.", "retain-caller");
+      await run.send(BOB, "Actually include everyone.", "retain");
       run.release();
       const turn = await run.nextUntil("parent turn end", (event) => event.type === "turn.settled");
       const seen = [...started, ...turn];
@@ -919,7 +919,7 @@ describe("principal policy", () => {
       "principal-policy-caller-after-joiner",
       async (run) => {
         const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-        await run.send(BOB, "Bob joins.", "retain-caller");
+        await run.send(BOB, "Bob joins.", "retain");
         await run.send(ALICE, "Alice steers.");
         run.release();
         const turn = await run.next("turn after both messages");
@@ -947,7 +947,7 @@ describe("principal policy", () => {
       )!;
       const turnId = filterEventsByType(paused, "turn.started")[0]!.data.turnId;
 
-      await run.send(BOB, "Bob joins.", "retain-caller");
+      await run.send(BOB, "Bob joins.", "retain");
       await run.answer(ALICE, approval.data.interactionId);
       // The child is still held, so only the turn's own wait can read Bob's message here.
       const read = await run.nextUntil(

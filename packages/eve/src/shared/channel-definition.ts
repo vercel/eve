@@ -5,7 +5,7 @@ import type { RouteDefinition } from "#channel/routes.js";
 import type { SessionSendOptions } from "#channel/session.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { PrincipalPolicy, TurnPolicy } from "#channel/types.js";
+import type { TurnPolicy } from "#channel/types.js";
 import type { ChannelDelivery, ChannelDeliveryReplacement } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type {
@@ -72,8 +72,6 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /** What a message does to a running turn that runs as another principal. Defaults to "match-caller". */
-  readonly principalPolicy?: PrincipalPolicy;
   /**
    * Return a replacement delivery, or void to deliver the original payload unchanged. A
    * replacement carries no `state`; change durable channel state through `ctx.state`.

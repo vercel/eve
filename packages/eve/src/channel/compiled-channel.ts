@@ -4,7 +4,7 @@ import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Delivery } from "#shared/delivery.js";
-import type { PrincipalPolicy, TurnPolicy } from "#channel/types.js";
+import type { TurnPolicy } from "#channel/types.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -51,7 +51,6 @@ export interface CompiledChannel<
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;
-  readonly principalPolicy?: PrincipalPolicy;
 }
 
 export function isCompiledChannel(value: unknown): value is CompiledChannel {

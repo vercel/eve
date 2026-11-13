@@ -277,7 +277,6 @@ async function buildRouteArgs(input: {
     skillFiles: agent.skillFiles,
     to,
     turnPolicy: channel.turnPolicy,
-    principalPolicy: channel.principalPolicy,
     waitUntil,
   });
 }

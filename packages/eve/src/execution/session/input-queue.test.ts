@@ -108,7 +108,7 @@ describe("SessionInputQueue", () => {
     });
   });
 
-  it("lets another person's retain-caller message join a turn that isn't waiting on its caller", () => {
+  it("lets another person's retain message join a turn that isn't waiting on its caller", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -125,7 +125,7 @@ describe("SessionInputQueue", () => {
     ) =>
       queue.enqueueDelivery({
         ...(auth !== undefined && { auth }),
-        ...(retain && { principalPolicy: "retain-caller" as const }),
+        ...(retain && { principalPolicy: "retain" as const }),
         kind: "deliver",
         payloads: [{ message }],
       })!.sequence;
@@ -135,7 +135,7 @@ describe("SessionInputQueue", () => {
     const matchingByBob = send(retaining, "And book a room.", bob);
     const admitted = new Set([retainedByBob, matchingByBob]);
     expect(retaining.takeSteering(admitted, turn)?.sequences).toEqual([retainedByBob]);
-    // Without `retain-caller` his message still waits for the turn to end.
+    // Without `retain` his message still waits for the turn to end.
     expect(retaining.takeSteering(admitted, turn)).toBeUndefined();
 
     const paused = new SessionInputQueue([]);
@@ -158,7 +158,7 @@ describe("SessionInputQueue", () => {
     expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([afterAlice]);
   });
 
-  it("lets another person's adopt-sender message join, one policy per step", () => {
+  it("lets another person's adopt message join, one policy per step", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -172,7 +172,7 @@ describe("SessionInputQueue", () => {
       message: string,
       auth: typeof alice | null | undefined,
       options: {
-        readonly principalPolicy?: "retain-caller" | "adopt-sender";
+        readonly principalPolicy?: "retain" | "adopt";
         readonly steeredBy?: readonly (typeof bob)[];
       } = {},
     ) =>
@@ -188,13 +188,13 @@ describe("SessionInputQueue", () => {
 
     const adopting = new SessionInputQueue([]);
     const adoptByBob = send(adopting, "Actually include everyone.", bob, {
-      principalPolicy: "adopt-sender",
+      principalPolicy: "adopt",
     });
     expect(adopting.takeSteering(new Set([adoptByBob]), turn)?.sequences).toEqual([adoptByBob]);
 
     const paused = new SessionInputQueue([]);
     const whilePaused = send(paused, "Actually include everyone.", bob, {
-      principalPolicy: "adopt-sender",
+      principalPolicy: "adopt",
     });
     const pausedAdmitted = new Set([whilePaused]);
     expect(paused.takeSteering(pausedAdmitted, turn, { paused: true })).toBeUndefined();
@@ -202,10 +202,10 @@ describe("SessionInputQueue", () => {
 
     const policies = new SessionInputQueue([]);
     const retainedByBob = send(policies, "Look at the launch numbers.", bob, {
-      principalPolicy: "retain-caller",
+      principalPolicy: "retain",
     });
     const adoptedByBob = send(policies, "Actually include everyone.", bob, {
-      principalPolicy: "adopt-sender",
+      principalPolicy: "adopt",
     });
     const policyAdmitted = new Set([retainedByBob, adoptedByBob]);
     // One person's two policies never share a step: the second leaves its own turn.

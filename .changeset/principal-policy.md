@@ -2,10 +2,12 @@
 "eve": minor
 ---
 
-Set `principalPolicy` on a channel or a message to let another person's message join a running turn in a shared session.
+Set `principal` on a steering `turnPolicy` to let another person's message join a running turn in a shared session.
 
-`"retain-caller"` keeps the turn's caller. While someone else's message steers it, `ctx.session.auth.steeredBy` lists them. eve then holds the caller's identity until the caller sends a message or approves a call. The caller's token for a user-scoped connection or provider fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. So do MCP tool calls with `forwardPrincipal` and connection event subscriptions. Dynamic schedule tools and remote agent calls with `forwardPrincipal` fail with an error that carries the same message.
+`turnPolicy` takes `{ mode: "queue" }` and `{ mode: "steer", principal }` beside `"queue"` and `"steer"`. Set it on a channel, on a server-side send, or in a Slack message hook's result. An HTTP request body and the client SDK take only `"queue"` or `"steer"`.
 
-`"adopt-sender"` also joins the message and makes the sender the turn's caller from the next model call. `steeredBy` is absent, so the identity hold does not apply.
+`principal: "retain"` keeps the turn's caller. While someone else's message steers it, `ctx.session.auth.steeredBy` lists them. eve then holds the caller's identity until the caller sends a message or approves a call. The caller's token for a user-scoped connection or provider fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. So do MCP tool calls with `forwardPrincipal` and connection event subscriptions. Dynamic schedule tools and remote agent calls with `forwardPrincipal` fail with an error that carries the same message.
 
-The `steered()` policy from `eve/tools/approval` asks the caller before a call made while steered. Use it for tools that authorize from `ctx.session.auth.current` in their own code. The git extension's `gh` tool asks the same way in app-installation mode. The default, `"match-caller"`, keeps current behavior.
+`principal: "adopt"` also joins the message and makes the sender the turn's caller from the next model call. `steeredBy` is absent, so the identity hold does not apply.
+
+The `steered()` policy from `eve/tools/approval` asks the caller before a call made while steered. Use it for tools that authorize from `ctx.session.auth.current` in their own code. The git extension's `gh` tool asks the same way in app-installation mode. The default, `principal: "match"`, keeps current behavior.

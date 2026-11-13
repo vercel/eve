@@ -202,7 +202,7 @@ const answers = parseAnswers(decodedResponses);
 await source.respond(answers, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). Message sends also use the channel's `principalPolicy`, which defaults to `"match-caller"`. It controls whether another signed-in person's message can join a running turn, and whether its sender becomes the caller. A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A steering policy's `principal`, which defaults to `"match"`, controls whether another signed-in person's message can join a running turn, and whether its sender becomes the caller. A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
@@ -444,7 +444,7 @@ The supplied `auth` identifies who started the session, and tools and event hand
 
 The destination's `receive` hook defines the target fields and how they map to a session; see [Slack proactive sessions](./slack/reference#proactive-sessions) for Slack's. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
 
-`send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, `turnPolicy`, and `principalPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them on to the session.
+`send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, and `turnPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them on to the session.
 
 The destination session dedupes keys from every sender. Prefix each key with its source, such as `pagerduty:${event.id}`, so keys stay unique across senders. Two senders that pick the same key reach the same session, and the second message is `ignored`. A Slack target with only a `channelId` uses the key to choose the session, so a retry reaches the same session.
 

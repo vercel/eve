@@ -40,7 +40,6 @@ export {
   type ChannelEvents,
   type InferChannelMetadata,
   type TurnPolicy,
-  type PrincipalPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
   type AgentDescription,

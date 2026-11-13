@@ -299,7 +299,7 @@ export interface SteeringOptions {
 /**
  * Whether a delivery steers the running turn. The turn's own principal's
  * messages do when `turnPolicy` is `"steer"`; another principal's do only with
- * `"retain-caller"` or `"adopt-sender"`, an identified sender, and nothing the
+ * a `principalPolicy` of `"retain"` or `"adopt"`, an identified sender, and nothing the
  * turn waits on. A held turn counts as paused, so another person's message
  * waits for its caller.
  */
@@ -322,7 +322,7 @@ export function isSteeringDelivery(
 /** Another person's message that may join a turn under its `principalPolicy`. */
 function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
   return (
-    (delivery.principalPolicy === "retain-caller" || delivery.principalPolicy === "adopt-sender") &&
+    (delivery.principalPolicy === "retain" || delivery.principalPolicy === "adopt") &&
     delivery.auth != null &&
     principalOf(delivery.auth) !== ANONYMOUS_PRINCIPAL
   );

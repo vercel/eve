@@ -261,7 +261,7 @@ export class SessionExecution {
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
       // The step may have read a message that made its sender the turn's caller.
-      if (nextStepInput?.delivery?.principalPolicy === "adopt-sender") {
+      if (nextStepInput?.delivery?.principalPolicy === "adopt") {
         turn.adopt(resolveTurnPrincipal(undefined, this.input.cursor.serializedContext));
       }
 

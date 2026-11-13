@@ -10,7 +10,7 @@ import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { PrincipalPolicy, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -209,8 +209,6 @@ export interface DiscordChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** What an accepted message does to a running turn that runs as someone else. Defaults to "match-caller". */
-  readonly principalPolicy?: PrincipalPolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -304,7 +302,6 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     DiscordInstrumentationMetadata
   >({
     turnPolicy: config.turnPolicy,
-    principalPolicy: config.principalPolicy,
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
     audience: ({ state }) => state.audience ?? "unknown",

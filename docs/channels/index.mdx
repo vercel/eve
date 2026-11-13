@@ -101,17 +101,26 @@ export default defineChannel({
 
 Adjacent queued messages combine into one turn only when their full auth contexts match, including identity, issuer, authenticator, and authorization attributes. Their attachments and context stay in payload order. A different auth context ends the batch, and eve doesn't regroup messages across intervening senders. Anonymous messages stay separate. Turns still share the session's conversation history.
 
-`turnPolicy` decides when a message joins. `principalPolicy` decides what happens when the running turn belongs to someone else:
+By default, a steering message joins only a turn whose caller is its sender. Set `principal` on a steering `turnPolicy` to decide what a message does when the running turn belongs to someone else:
 
-| Value                      | Behavior                                                                                                                                      |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"match-caller"` (default) | A message joins only a turn whose caller is its sender. Another person's message waits for the turn to end, then starts a turn as its sender. |
-| `"retain-caller"`          | Another signed-in person's message joins the running turn as input. The turn retains its caller.                                              |
-| `"adopt-sender"`           | Another signed-in person's message joins the running turn, and the sender becomes its caller from the next model call.                        |
+```ts
+export default defineChannel({
+  turnPolicy: { mode: "steer", principal: "retain" },
+  routes: [
+    // ...
+  ],
+});
+```
 
-`principalPolicy` is server-side only: set it on a channel definition or a server-side send, never in an HTTP request body or the client SDK. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal).
+| `principal`         | Behavior                                                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `"match"` (default) | Another person's message waits for the turn to end, then starts a turn as its sender.                                  |
+| `"retain"`          | Another signed-in person's message joins the running turn as input. The turn retains its caller.                       |
+| `"adopt"`           | Another signed-in person's message joins the running turn, and the sender becomes its caller from the next model call. |
 
-`from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends accept a per-send `turnPolicy` override. They also accept a per-send `principalPolicy` override. A send with only `answers` answers its pending request without joining the turn. Use `cancel()` to stop without a replacement.
+`"steer"` is short for `{ mode: "steer" }`, and `"queue"` for `{ mode: "queue" }`. `principal` is server-side only: set it on a channel definition or a server-side send. An HTTP request body and the client SDK accept only `"steer"` or `"queue"`. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal).
+
+`from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends accept a per-send `turnPolicy` override, which replaces the channel's `turnPolicy`. A send with only `answers` answers its pending request without joining the turn. Use `cancel()` to stop without a replacement.
 
 Events rejected before `send(...)`, such as invalid signatures or filtered mentions, never reach the active turn. A message already sent to the session can interrupt the model before the channel's `deliver` hook runs. If that hook ignores the message, eve resumes the original request with its original auth, source, and channel state.
 

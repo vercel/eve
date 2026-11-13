@@ -697,6 +697,50 @@ describe("eve ID-addressed session routes", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    [{ mode: "steer", principal: "retain" }, "steer", { mode: "steer", principal: "retain" }],
+    [{ mode: "steer", principal: "retain" }, "queue", "queue"],
+    [{ mode: "steer", principal: "retain" }, undefined, undefined],
+    ["queue", "steer", "steer"],
+  ] as const)(
+    "lets a request choose only whether its message steers or queues (channel %j, request %j)",
+    async (channelPolicy, requestPolicy, sent) => {
+      const session = createFixedSession();
+      const response = await route("POST", "/eve/v1/session/:sessionId", {
+        auth: none(),
+        turnPolicy: channelPolicy,
+      })(
+        new Request("https://eve.test/eve/v1/session/wrun_A", {
+          body: JSON.stringify({ message: "follow-up", turnPolicy: requestPolicy }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+        createArgs(session),
+      );
+
+      expect(response.status).toBe(202);
+      expect(vi.mocked(session.send).mock.calls[0]?.[1].turnPolicy).toEqual(sent);
+    },
+  );
+
+  it("rejects a request that sets a steering policy's principal", async () => {
+    const session = createFixedSession();
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        body: JSON.stringify({
+          message: "follow-up",
+          turnPolicy: { mode: "steer", principal: "adopt" },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+
+    expect(response.status).toBe(400);
+    expect(session.send).not.toHaveBeenCalled();
+  });
+
   it("names a keyed message's delivery by its key, so a repeat is the same delivery", async () => {
     const session = createFixedSession();
     const handler = route("POST", "/eve/v1/session/:sessionId");

@@ -40,7 +40,7 @@ export type { ChannelContext, ChannelContinuationOps } from "#shared/channel-con
 import type { Delivery } from "#shared/delivery.js";
 export type { Delivery, DeliveryResult } from "#shared/delivery.js";
 export { SessionNotActiveError } from "#channel/session-not-active-error.js";
-import type { DeliverPayload, PrincipalPolicy, TurnPolicy } from "#channel/types.js";
+import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { FactPosition } from "#protocol/session-events/envelope.js";
@@ -57,7 +57,6 @@ export type {
   CompactSessionResult,
   EndSessionResult,
   SessionCallback,
-  PrincipalPolicy,
   TurnPolicy,
 } from "#channel/types.js";
 export { SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -285,7 +284,6 @@ export interface Channel<
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;
-  readonly principalPolicy?: PrincipalPolicy;
 }
 
 /**
@@ -319,7 +317,6 @@ export function defineChannel<
     cors,
     receive: definition.receive,
     turnPolicy: definition.turnPolicy,
-    principalPolicy: definition.principalPolicy,
   };
 
   return compiled;

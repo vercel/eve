@@ -311,10 +311,10 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 - `auth.initiator`: the caller that started the session. It never changes.
 - `auth.steeredBy`: the people other than the caller whose messages joined the running turn; present only while at least one exists. A session's own turn starts without it. A local subagent's turn starts with the list its parent turn had when it made the call or sent the message.
 
-The caller stays the same for the whole turn unless a message joins with `principalPolicy: "adopt-sender"`. Otherwise, only its claims can change:
+The caller stays the same for the whole turn unless a message joins with `principal: "adopt"` in its `turnPolicy`. Otherwise, only its claims can change:
 
 - A message from the turn's own caller joins the turn and updates `auth.current` with its claims. This includes a typed answer to a pending `ctx.ask()` or `ask_question`.
-- By default, a message from anyone else waits for the turn to end and runs as its own turn. A channel can set [`principalPolicy`](../concepts/security-model#let-another-persons-message-join) so a signed-in person's message joins. `"retain-caller"` retains the turn's caller; `"adopt-sender"` makes the sender the caller.
+- By default, a message from anyone else waits for the turn to end and runs as its own turn. A channel can set `principal` in its [`turnPolicy`](../concepts/security-model#let-another-persons-message-join) so a signed-in person's message joins. `"retain"` retains the turn's caller; `"adopt"` makes the sender the caller.
 - Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current`.
 
 `auth.current` is whatever `auth` the channel sent the message with. A route handler or channel hook can send with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`; on a continuation, only `auth.current` is. Internal runtime paths, such as subagents, can also have no caller auth.
