@@ -1,3 +1,4 @@
+// @linux-only: dispatch credential binding
 import { expect, it } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";

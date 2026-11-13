@@ -1,3 +1,4 @@
+// @linux-only: hook state reaches model calls
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";

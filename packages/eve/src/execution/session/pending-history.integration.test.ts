@@ -1,3 +1,4 @@
+// @linux-only: pending history
 import { describe, expect, it } from "vitest";
 import { defineChannel, POST } from "#public/definitions/channel.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";

@@ -1,3 +1,4 @@
+// @linux-only: trace ownership
 import { context as apiContext, trace as apiTrace, TraceFlags } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {

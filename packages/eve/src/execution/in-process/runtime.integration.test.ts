@@ -1,3 +1,4 @@
+// @linux-only: in-process host semantics
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 

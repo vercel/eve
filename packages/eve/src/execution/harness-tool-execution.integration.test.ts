@@ -1,3 +1,4 @@
+// @linux-only: authored tool pipeline; compiled from memory, mock sandbox
 import { describe, expect, it } from "vitest";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";

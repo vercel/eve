@@ -1,3 +1,4 @@
+// @linux-only: AI SDK retry telemetry
 import { instrumentationScope } from "#instrumentation/scope.js";
 import { APICallError, generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";

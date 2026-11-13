@@ -122,6 +122,10 @@ jobs:
       - name: Run typecheck
         run: pnpm typecheck
 
+      # Packs eve from the dist the typecheck build left in Turbo's cache.
+      - name: Type-check the published declarations
+        run: pnpm test:public-types
+
   test-unit:
     runs-on: ubuntu-latest
 
@@ -357,17 +361,20 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # The smoke builds build the framework apps against the workspace eve.
+      # The tests that build and package apps with eve. The smoke builds build
+      # the framework apps against the workspace eve; the scenarios install the
+      # same frameworks and the packed eve into temp apps from this store,
+      # which this job's own key keeps once they have run.
       - name: Install dependencies
         uses: ./.github/actions/pnpm-install
         with:
-          cache-key: framework-fixtures
+          cache-key: build
           filters: |
             eve...
             ./apps/frameworks/*
 
-      - name: Build framework fixtures against the workspace eve dist
-        run: pnpm test:framework-fixtures
+      - name: Build and package apps with the workspace eve
+        run: pnpm test:build
 
   test-webchat:
     runs-on: ubuntu-latest

@@ -1,3 +1,4 @@
+// @linux-only: auto() model choice per turn
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { Experimental_DecisionMockModelV4, MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";

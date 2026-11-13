@@ -1,3 +1,4 @@
+// @linux-only: child sign-in fan-in; both hosts; compiled from memory
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";

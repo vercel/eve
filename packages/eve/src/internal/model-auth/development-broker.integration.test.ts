@@ -1,3 +1,4 @@
+// @linux-only: credential broker protocol (store mocked)
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
