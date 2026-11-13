@@ -288,3 +288,65 @@ it("closes a streaming tool when progress publication fails", async () => {
   expect(result.parts[0]?.output).toMatchObject({ type: "error-text" });
   expect(closed).toBe(true);
 });
+
+// eve runs local tools itself, so an AI SDK integration sees only what eve hands it.
+it.each([
+  [true, true, "returns"],
+  [false, false, "returns"],
+  [true, false, "returns"],
+  [false, true, "returns"],
+  [false, true, "throws"],
+] as const)(
+  "gives AI SDK integrations tool content per recordInputs %s and recordOutputs %s when the tool %s",
+  async (recordInputs, recordOutputs, behavior) => {
+    const secret = "alice-invoice-4213";
+    const started: Record<string, unknown>[] = [];
+    const ended: Record<string, unknown>[] = [];
+    await executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      excludedCallIds: new Set(),
+      messages: [{ role: "user", content: `Find ${secret}` }],
+      publish: async () => {},
+      telemetry: {
+        integrations: [
+          {
+            onToolExecutionStart: (event) => void started.push(event as never),
+            onToolExecutionEnd: (event) => void ended.push(event as never),
+          },
+        ],
+        recordInputs,
+        recordOutputs,
+      },
+      toolCalls: [
+        { input: { invoice: secret }, toolCallId: "call-1", toolName: "lookup", type: "tool-call" },
+      ],
+      tools: new Map([
+        [
+          "lookup",
+          {
+            name: "lookup",
+            description: "Look up an invoice",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute: async (args: { invoice: string }) => {
+              if (behavior === "throws") throw new Error(`no record for ${args.invoice}`);
+              return `found ${args.invoice}`;
+            },
+          },
+        ],
+      ]),
+    });
+
+    const start = started[0] as { messages: unknown[]; toolCall: { input?: unknown } };
+    const output = (ended[0] as { toolOutput: Record<string, unknown> }).toolOutput;
+    expect(start.toolCall.input).toEqual(recordInputs ? { invoice: secret } : undefined);
+    expect(start.messages).toHaveLength(recordInputs ? 1 : 0);
+    expect(output.input).toEqual(recordInputs ? { invoice: secret } : undefined);
+    if (behavior === "returns") {
+      expect(output.output).toEqual(recordOutputs ? `found ${secret}` : undefined);
+    } else {
+      expect(String(output.error)).not.toContain(secret);
+    }
+  },
+);

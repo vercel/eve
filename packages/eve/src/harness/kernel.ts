@@ -28,9 +28,15 @@ import {
   controlled,
   join,
 } from "#harness/session-machine/transitions.js";
-import { turnPosition } from "#harness/session-machine/view.js";
+import {
+  committedEndingStep,
+  endingStepKeys,
+  turnPosition,
+} from "#harness/session-machine/view.js";
 import { createStep, failTurnForEffect, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
+import { settleTurn } from "#harness/step/after-model.js";
+import { workingTaskIds } from "#execution/tasks/model-step.js";
 import type {
   HarnessSession,
   StepFn,
@@ -129,6 +135,7 @@ export function createKernel(config: KernelConfig): StepFn {
   ): Promise<StepResult> {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
+    const ending = endingStepKeys(step.view());
 
     // A step takes what arrived, in order: the runtime's results, then people's answers, then
     // the delivery's input. Then it acts: a hook that failed during the turn fails it, or what
@@ -151,6 +158,21 @@ export function createKernel(config: KernelConfig): StepFn {
       const prepared = answered.input && { ...answered.input, message: turn.message };
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
+    }
+    // Results that end the turn settle it in their place, without a reply, unless input joined the
+    // turn with them or waits behind a provider tool's deferred result: the model reads it. A
+    // working task holds the turn open until it settles.
+    const endsTurn = runtime.endsTurn || committedEndingStep(step.view(), ending);
+    if (endsTurn && turn.messages.length === 0 && !hasQueuedTurnInput(step.view())) {
+      const workingTasks = workingTaskIds(step.session);
+      if (workingTasks.length > 0) {
+        return {
+          held: { kind: "tasks", taskIds: workingTasks },
+          next: null,
+          session: step.session,
+        };
+      }
+      return settleTurn(step, { stepOutput: null });
     }
     return runModelStep(step, {
       generation,

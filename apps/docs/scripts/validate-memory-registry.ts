@@ -105,12 +105,30 @@ for (const item of items) {
     if (!item.dependencies?.includes("@memco/eve")) {
       throw new Error('Registry item "memory/memco" must depend on @memco/eve.');
     }
-    if (item.meta?.eve?.requires !== ">=0.84.1 <1.0.0-0") {
-      throw new Error('Registry item "memory/memco" must require eve >=0.84.1 <1.0.0-0.');
+    if (item.meta?.eve?.requires !== ">=1.0.0-rc.10 <2.0.0") {
+      throw new Error('Registry item "memory/memco" must require eve >=1.0.0-rc.10 <2.0.0.');
     }
     if (!("MEMCO_API_TOKEN" in (item.envVars ?? {}))) {
       throw new Error(
         'Registry item "memory/memco" must declare MEMCO_API_TOKEN as an environment variable.',
+      );
+    }
+  } else if (slug === "claude-mem") {
+    if (!item.dependencies?.includes("claude-mem")) {
+      throw new Error('Registry item "memory/claude-mem" must depend on claude-mem.');
+    }
+    if (item.meta?.eve?.requires !== ">=0.84.0") {
+      throw new Error('Registry item "memory/claude-mem" must require eve >=0.84.0.');
+    }
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (!/get_observations:\s*_unscoped/.test(source)) {
+      throw new Error(
+        'Registry item "memory/claude-mem" must omit the unscoped get_observations tool.',
+      );
+    }
+    if (!("CLAUDE_MEM_API_KEY" in (item.envVars ?? {}))) {
+      throw new Error(
+        'Registry item "memory/claude-mem" must declare CLAUDE_MEM_API_KEY as an environment variable.',
       );
     }
   } else if (slug === "memanto") {

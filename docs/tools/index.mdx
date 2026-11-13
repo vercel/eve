@@ -53,6 +53,7 @@ export default defineTool({
 - `ctx.messages`: the model input for the step that requested this call, as a [dynamic tool's](/docs/guides/dynamic-capabilities) `ctx.messages()` sees it.
 - `ctx.abortSignal`: aborts when the turn is cancelled. Pass it to work that supports cancellation. Sandbox sessions from `ctx.getSandbox()` already use it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
+- `ctx.conversation`: where the conversation happens: its `audience`, the channel that created it, and its [`space`](/docs/channels#spaces), such as the Slack channel a thread is in.
 - `ctx.channel`: the channel serving the session, as [hooks](/docs/guides/hooks) and [dynamic resolvers](/docs/guides/dynamic-capabilities) see it: `kind`, `continuationToken`, and `metadata`. `metadata` is what the channel's `metadata(state)` hook returns, such as a Slack thread's `channelId` and `threadTs`.
 - `ctx.to(channel, target)`: starts or continues a session on one of the agent's channels. See [Start channel sessions](#start-channel-sessions-ctxto).
 
@@ -278,7 +279,7 @@ export default defineTool({
 eve adds this sentence, after a blank line, to the description the model sees:
 
 ```text
-Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.
+Calling this tool ends your turn once it succeeds, after any other tool calls in the same step finish: do not write a reply, and you will not see those calls' results. If it fails, you will see the error and can continue.
 ```
 
 Leave the turn-ending rule out of `description`. `eve info` shows the description as you wrote it, without the added sentence.
@@ -300,11 +301,11 @@ export default defineTool({
 
 If the function throws or rejects, eve logs a warning and treats the result as `false`. With an `outputSchema`, `output` takes that schema's type wherever `endsTurn` appears. eve doesn't add the sentence for a function, so say in `description` when the call ends the turn.
 
-The turn ends only when every tool call in the step can end the turn, succeeds, and passes any `endsTurn` function. Otherwise, the model gets the results and continues. Channels don't post text the model wrote before the call as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+The turn ends when any tool call in the step can end the turn, succeeds, and passes any `endsTurn` function. Other calls in the same step still run, including ones that wait for an approval, a sign-in, or a workflow, and the turn ends once they all settle, whatever their outcome; the model doesn't see their results. eve runs every successful call's `endsTurn` function. A provider-executed tool whose result would only arrive in the model's next response is closed without that result. When no call ends the turn, the model gets the results and continues. Channels don't post text the model wrote before the call as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
 
 eve ignores `endsTurn` in delegated sessions, which must reply to their caller, and on turns that request structured output. There, the model doesn't see the sentence, and eve doesn't call the function.
 
-Dynamic tool entries accept both forms of `endsTurn`. `defineWorkflowTool` doesn't accept it. To end a turn without any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+Dynamic tool entries and `defineWorkflowTool` tools with an [`execute` entry point](/docs/tools/workflows#end-the-turn-after-the-call) accept both forms. `task` and `serve` entry points don't accept it. To end a turn without any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Keep a tool out of the tool list
 

@@ -52,7 +52,7 @@ See [Subagents](../subagents) for the distinction between root-agent copies and 
 
 ## Dynamic context with `defineDynamic`
 
-Use `defineDynamic` when instructions, skills, tools, subagents, or the model depend on the caller, tenant, channel, conversation, or feature state. The function reads the recorded session and returns the value or `null`. eve evaluates it before each ordinary model call, and `ctx.memo(key, fn)` keeps JSON observations across evaluations.
+Use `defineDynamic` when instructions, skills, tools, subagents, or the model depend on the caller, tenant, channel, conversation, or feature state. The function reads the recorded session and returns the value or `null`. eve evaluates it before each ordinary model call, not once per turn, so wrap fetches, database queries, and API calls in `ctx.memo(key, fn)`, which keeps their JSON results across evaluations.
 
 See [Dynamic capabilities](../guides/dynamic-capabilities) for the context, memo rules, supported folders, and evaluation timing.
 

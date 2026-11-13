@@ -27,6 +27,7 @@ import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { callProgress } from "#harness/call-facts.js";
@@ -235,6 +236,8 @@ export async function executeToolCall(
         { error, input: args, toolCallId: callId, toolName, type: "tool-error" },
         executionMs,
       );
+      // `call.started` or a progress write failed: the call can't settle on that stream.
+      throwIfSessionStreamDead(error);
       throwIfTurnAborted(input.abortSignal);
       logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;
@@ -297,6 +300,8 @@ export async function executeToolCall(
     );
     return { settled, toolResults };
   } catch (error) {
+    // A settlement that couldn't reach the stream can't be settled again there.
+    throwIfSessionStreamDead(error);
     if (input.abortSignal?.aborted === true) {
       if (!started) throwIfTurnAborted(input.abortSignal);
       if (completed !== undefined) return { settled: [completed], toolResults };
@@ -403,8 +408,27 @@ function toolTelemetry(
     telemetry === undefined || telemetry.isEnabled === false
       ? []
       : [telemetry.integrations ?? []].flat();
+  // eve runs these calls itself, so the AI SDK never filters their events. Apply its rules here:
+  // an integration can ignore the flags and record whatever the event carries.
+  const hideInputs = telemetry?.recordInputs === false;
+  const hideOutputs = telemetry?.recordOutputs === false;
+  const recorded = (toolOutput: ToolExecutionEnd["toolOutput"]): ToolExecutionEnd["toolOutput"] => {
+    if (!hideInputs && !hideOutputs) return toolOutput;
+    const kept: Record<string, unknown> = { ...toolOutput };
+    if (hideInputs) kept.input = undefined;
+    if (hideOutputs) {
+      kept.output = undefined;
+      kept.error = undefined;
+    } else if (kept.error != null) {
+      // A raw error can carry the call's input.
+      kept.error = new Error("AI SDK operation failed");
+    }
+    return kept as ToolExecutionEnd["toolOutput"];
+  };
   const event = {
     ...execution,
+    messages: hideInputs ? [] : execution.messages,
+    toolCall: hideInputs ? { ...execution.toolCall, input: undefined } : execution.toolCall,
     functionId: telemetry?.functionId,
     recordInputs: telemetry?.recordInputs,
     recordOutputs: telemetry?.recordOutputs,
@@ -434,7 +458,7 @@ function toolTelemetry(
         integration.onToolExecutionEnd?.({
           ...event,
           toolExecutionMs,
-          toolOutput,
+          toolOutput: recorded(toolOutput),
         } as ToolExecutionEnd),
       ),
   };
@@ -511,6 +535,7 @@ export async function executeInlineCalls(input: {
               : undefined;
           return { call, executed, approval };
         } catch (error) {
+          throwIfSessionStreamDead(error);
           throwIfTurnAborted(input.abortSignal);
           const failed = failedCall({ ...action, message: toError(error) });
           await input.publish(settleCall(failed.result));
@@ -547,7 +572,6 @@ async function decideDeferredCall(
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
-  if (definition.approval === undefined) return { settled: [], toolResults: [] };
   const decision = await decideApproval(definition, {
     abortSignal: input.abortSignal,
     approvalMemory: input.approvalMemory,

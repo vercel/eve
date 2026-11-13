@@ -5,7 +5,7 @@ import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-sessi
 
 import { executeBashOnSandbox } from "./bash.js";
 import { bufferToStream } from "./stream-utils.js";
-import { MAX_OUTPUT_BYTES } from "./truncate-output.js";
+import { MAX_OUTPUT_BYTES, truncateTail } from "./truncate-output.js";
 
 describe("executeBashOnSandbox", () => {
   const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
@@ -39,6 +39,47 @@ describe("executeBashOnSandbox", () => {
     });
     expect(log).toHaveBeenCalledWith("eve: starting sandbox command: ls -la /workspace");
     expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): ls -la /workspace");
+  });
+
+  it.each([
+    [
+      "short lines before one long line",
+      'EXACT-ID-74\nfunction recover() {\n  return "window-1";\n}\n' + "x".repeat(96_000),
+    ],
+    ["more lines than are kept", Array.from({ length: 20_000 }, (_, i) => `line ${i}\n`).join("")],
+    [
+      "multibyte long lines past the byte budget",
+      `${"é".repeat(2500)}\n${"日本".repeat(1500)}\n`.repeat(20),
+    ],
+    ["a few lines", "one\ntwo\nthree"],
+    ["no output", ""],
+  ])("returns what truncateTail keeps from the whole output: %s", async (_name, output) => {
+    const bytes = new TextEncoder().encode(output);
+    let offset = 0;
+    const sandbox: SandboxSession = {
+      ...createTestSandboxSession({ exitCode: 0, stderr: "", stdout: "" }),
+      spawn: async () => ({
+        kill: async () => {},
+        stderr: bufferToStream(new Uint8Array()),
+        stdout: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (offset >= bytes.byteLength) return controller.close();
+            controller.enqueue(bytes.subarray(offset, (offset += 7)));
+          },
+        }),
+        wait: async () => ({ exitCode: 0 }),
+      }),
+    };
+
+    const result = await executeBashOnSandbox(sandbox, { command: "build" });
+
+    const expected = truncateTail(output);
+    expect(result).toMatchObject({ stderr: "", truncated: expected.truncated });
+    expect(result.stdout).toBe(
+      expected.truncated
+        ? `[stdout truncated: showing last ${expected.outputLines} of ${expected.totalLines} lines]\n${expected.output}`
+        : expected.output,
+    );
   });
 
   it(

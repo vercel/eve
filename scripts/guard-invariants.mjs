@@ -211,6 +211,22 @@
  *             never reach a Node builtin through their value imports. One
  *             import of a server module from a shared one breaks every client
  *             bundle that loads the entry.
+ *   rule 66 — The host-neutral core doesn't import Workflow: the session
+ *             loop (`execution/session/{program,turn,active-turn,state-cursor,
+ *             input-queue,next-input}.ts`), the turn step, owner boot,
+ *             checkpoint and step entry (`execution/session/{turn-step,
+ *             owner-boot,checkpoint,step-state-delta}.ts`), the inbox
+ *             (`execution/session-inbox/inbox.ts`), the host registry and tool
+ *             stub port (`execution/{hosts,tool-stub-host}.ts`), and the in-process
+ *             test host (`execution/in-process/`) import none of
+ *             rule 61's specifiers, nor `#execution/workflow-runtime.js`, nor
+ *             Workflow's side of a port (`#execution/workflow-host/*`,
+ *             `#execution/session/workflow-host.js`,
+ *             `#execution/session-inbox/workflow-transport.js`). Relative
+ *             specifiers are resolved to their `#` alias first, and lazy
+ *             `import()`s count, including ones split across lines. Workflow
+ *             reaches these modules through their host ports and the host
+ *             registry. Only direct imports are checked.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -218,7 +234,7 @@
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { parseSummary } from "./changeset-format.mjs";
@@ -342,6 +358,7 @@ function isTsLike(relPath) {
  *   rule62: Violation[];
  *   rule63: Violation[];
  *   rule64: Violation[];
+ *   rule66: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -432,6 +449,7 @@ async function scanRepo(state) {
     checkRule62(posix, lines, state.rule62);
     checkRule63(posix, lines, state.rule63);
     checkRule64(posix, lines, state.rule64);
+    checkRule66(posix, lines, state.rule66);
   }
 }
 
@@ -1193,6 +1211,71 @@ function checkRule63(posix, lines, violations) {
       message: `imports ${specifier}, which the kernel doesn't offer definitions. Use a module rule 63 lists, or add one there deliberately.`,
     });
   }
+}
+
+// ---------- Rule 66: the host-neutral core doesn't import Workflow ----------
+
+const HOST_NEUTRAL_FILES = new Set([
+  "packages/eve/src/execution/hosts.ts",
+  "packages/eve/src/execution/tool-stub-host.ts",
+  "packages/eve/src/execution/session/program.ts",
+  "packages/eve/src/execution/session/turn.ts",
+  "packages/eve/src/execution/session/active-turn.ts",
+  "packages/eve/src/execution/session/state-cursor.ts",
+  "packages/eve/src/execution/session/input-queue.ts",
+  "packages/eve/src/execution/session/next-input.ts",
+  "packages/eve/src/execution/session/turn-step.ts",
+  "packages/eve/src/execution/session/owner-boot.ts",
+  "packages/eve/src/execution/session/checkpoint.ts",
+  "packages/eve/src/execution/session/step-state-delta.ts",
+  "packages/eve/src/execution/session-inbox/inbox.ts",
+]);
+/** Workflow's side of a port that lives outside `execution/workflow-host/`. */
+const WORKFLOW_PORT_MODULES = new Set([
+  "#execution/session/workflow-host.js",
+  "#execution/session-inbox/workflow-transport.js",
+]);
+const EVE_SRC = "packages/eve/src/";
+/** Directories whose every file is host-neutral: the in-process test host runs sessions without Workflow. */
+const HOST_NEUTRAL_DIRS = ["packages/eve/src/execution/in-process/"];
+/** Each import's specifier and line, static or lazy, wherever its quotes fall. */
+const RULE66_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule66(posix, lines, violations) {
+  if (posix.endsWith(".test.ts")) return;
+  if (!HOST_NEUTRAL_FILES.has(posix) && !HOST_NEUTRAL_DIRS.some((dir) => posix.startsWith(dir))) {
+    return;
+  }
+  const text = lines.join("\n");
+  for (const match of text.matchAll(RULE66_IMPORT_RE)) {
+    const specifier = aliasOfSpecifier(posix, match[1]);
+    if (
+      !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier) &&
+      specifier !== "#execution/workflow-runtime.js" &&
+      !specifier.startsWith("#execution/workflow-host/") &&
+      !WORKFLOW_PORT_MODULES.has(specifier)
+    )
+      continue;
+    violations.push({
+      rule: 66,
+      file: posix,
+      line: text.slice(0, match.index).split("\n").length,
+      message:
+        "imports Workflow into the host-neutral core. Reach Workflow through a host port or the host registry (`execution/hosts.ts`), and implement Workflow's side under `execution/workflow-host/`.",
+    });
+  }
+}
+
+/**
+ * A relative specifier as the `#` alias that names the same module under `packages/eve/src/`
+ * (`../workflow-runtime.js` from `execution/session/` is `#execution/workflow-runtime.js`), so
+ * rule 66 checks both spellings alike. Other specifiers pass through unchanged.
+ */
+function aliasOfSpecifier(file, specifier) {
+  if (!specifier.startsWith(".")) return specifier;
+  const resolved = posix.normalize(posix.join(posix.dirname(file), specifier));
+  return resolved.startsWith(EVE_SRC) ? `#${resolved.slice(EVE_SRC.length)}` : resolved;
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -2269,6 +2352,7 @@ async function main() {
     rule62: /** @type {Violation[]} */ ([]),
     rule63: /** @type {Violation[]} */ ([]),
     rule64: /** @type {Violation[]} */ ([]),
+    rule66: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2402,6 +2486,7 @@ async function main() {
   violations.push(...state.rule63);
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
+  violations.push(...state.rule66);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

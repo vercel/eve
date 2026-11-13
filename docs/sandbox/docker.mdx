@@ -31,7 +31,7 @@ Use `DockerSandbox.dockerfile()`, which takes no `image` option, to make the san
 
 ## eve's default image
 
-eve's default image runs Ubuntu with Node.js 24, npm, Python 3, git, ripgrep, jq, and curl. Commands run as the `vercel-sandbox` user in `/workspace`, with passwordless `sudo`. Docker pulls it from `ghcr.io/vercel/eve`, and [Vercel Sandbox](/docs/sandbox/vercel) uses the same image from `vcr.vercel.com/vercel/eve/base`.
+eve's default image runs Ubuntu with Node.js 26, npm, Python 3, git, ripgrep, jq, and curl. Commands run as the `vercel-sandbox` user in `/workspace`, with passwordless `sudo`. Docker pulls it from `ghcr.io/vercel/eve`, and [Vercel Sandbox](/docs/sandbox/vercel) uses the same image from `vcr.vercel.com/vercel/eve/base`.
 
 The default image doesn't include pnpm or pip, so install them in `prepare` when your agent needs them:
 

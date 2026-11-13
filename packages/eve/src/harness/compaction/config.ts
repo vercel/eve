@@ -37,9 +37,15 @@ export function compactionConfig(
       : Math.max(1, Math.floor(window * thresholdPercent));
   return {
     ...withModelPromptMeasurement(step.session.compaction, reference.id, prompt),
+    ...(window !== undefined && { contextWindowTokens: window }),
     recentWindowSize: RECENT_WINDOW_SIZE,
     target: Math.min(threshold, Math.floor((window ?? UNKNOWN_WINDOW_THRESHOLD) * TARGET_SHARE)),
     threshold,
     thresholdPercent,
   };
+}
+
+/** `config` measured against the model's whole window instead of the threshold. */
+export function againstWindow(config: CompactionConfig, window: number): CompactionConfig {
+  return { ...config, target: Math.floor(window * TARGET_SHARE), threshold: window };
 }

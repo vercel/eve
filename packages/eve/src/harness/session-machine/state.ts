@@ -74,6 +74,11 @@ export interface SuspendedStep {
   readonly approved?: readonly ApprovedCall[];
   /** Workflow and agent calls the runtime runs for the step. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+  /**
+   * A call the response ran before it parked ended the turn: once the step commits, the turn ends
+   * without another model call, whatever its other calls returned.
+   */
+  readonly endsTurn?: true;
   readonly responseAuthRequiredRequestIds?: readonly string[];
   /** The caller whose turn parked the step; `null` when unauthenticated. */
   readonly requester?: SessionAuthContext | null;

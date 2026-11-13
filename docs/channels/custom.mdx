@@ -115,6 +115,8 @@ Event handlers receive `(event, ctx)`. The event has `type`, `data`, and `scope`
 - `ctx.position` locates the event on the stream, and `ctx.view` is a read-only snapshot of the session at that point.
 - `ctx.channel` is the channel's own context. `ctx.channel.continuation.token` is the address that `from()`, `resolveSession()`, and `alias()` accept, without eve's prefixes. `alias()` adds another address.
 
+For session state in channel event handlers, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
+
 One stream line can hold several events. Use `committed(line, ctx)` to update a status or card once per line instead of once per event. It runs after the line's event handlers, with `line.facts`, `line.position`, and the line's snapshot at `ctx.view`.
 
 Handle `interaction.settled` to remove a question or approval you posted once it ends, whether it was answered, withdrawn, or interrupted. Match by `interactionId` and check its `outcome`.
@@ -204,10 +206,10 @@ Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
+The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
 
 - Return nothing to keep it unchanged.
-- Return a replacement with `message`, `answers`, `context`, or `outputSchema` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`.
+- Return a replacement with `message`, `answers`, `context`, `outputSchema`, or `answerText` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`. A replacement without `answerText` keeps the delivery's.
 - Return `{}` to ignore it.
 
 The `state` you pass to `defineChannel(...)` is the starting value of every session's `channel.state`, and must be plain JSON-like data. eve restores any top-level field from it that a session's state is missing, so a field you add in a later deploy also appears in existing sessions, including in `context(state)` and event handlers. A field you `delete` comes back the same way; to clear one, set it to `null` or `undefined`. eve doesn't merge nested objects: a saved object replaces the starting object whole.
@@ -246,6 +248,43 @@ export default defineChannel({
 ```
 
 The same override works on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never joins a running turn; it sends only the answers it names. Use `cancel()` to stop work without a replacement message.
+
+### Typed answers
+
+When a turn waits on an approval or a question, a message whose text matches an option answers it; see [Human-in-the-loop](/docs/human-in-the-loop#follow-up-messages). If your channel wraps what the person wrote before the model reads it, such as with their name, pass the bare text as `answerText`. The pending request resolves against `answerText`, and the model still reads the wrapped `message`:
+
+```ts
+await from(body.threadId).send(`${body.author}: ${body.text}`, {
+  answerText: body.text,
+  auth: null,
+});
+```
+
+A channel that can only show text should show one request at a time, the one a typed reply answers. Read it from the session with `nextPrompt(view)` from `eve/events`, for example in a `committed` handler, and show it again whenever it changes:
+
+```ts
+import { defineChannel } from "eve/channels";
+import { nextPrompt } from "eve/events";
+
+export default defineChannel({
+  state: { shown: null as string | null },
+  events: {
+    async committed(_line, { channel, view }) {
+      const prompt = nextPrompt(view);
+      if (prompt === undefined || prompt.interactionId === channel.state.shown) return;
+      channel.state.shown = prompt.interactionId;
+      const options = (prompt.request.options ?? []).map(
+        (option, index) => `${index + 1}. ${option.label}`,
+      );
+      // postToThread stands in for your platform's send call.
+      await postToThread([prompt.request.prompt, ...options].join("\n"));
+    },
+  },
+  routes: [/* your routes */],
+});
+```
+
+A reply of `1`, an option's label, or its ID answers the request. Showing a different request than `nextPrompt(view)` returns makes a reply answer one the person didn't see.
 
 ## Operation semantics
 
@@ -547,6 +586,30 @@ The input, typed `AudienceContext<TState>`, contains the channel's `state`, `cal
 Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel can't tell; traces treat it as non-public. A missing, throwing, asynchronous, or malformed `audience` function also falls back to `"unknown"`. An `audience` field returned from `metadata()` sets nothing.
 
 The audience is fixed when the session is created, so turns from a different caller don't change it. A local subagent inherits its parent's audience, and eve forwards the parent's custom channel metadata separately.
+
+### Conversation space
+
+`space(input)` reports where the conversation happens on the platform, such as the channel a thread is in. Tools, dynamic values, and memory scopes read it as `ctx.conversation.space` to share data per place. See [Spaces](/docs/channels#spaces).
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: { workspaceId: null as string | null, roomId: null as string | null, dm: false },
+  space({ state }) {
+    if (state.workspaceId === null || state.roomId === null) return undefined;
+    return {
+      id: `acme:${state.workspaceId}:${state.roomId}`,
+      type: state.dm ? "direct" : "shared",
+      visibility: state.dm ? "private" : undefined,
+      workspaceId: `acme:${state.workspaceId}`,
+    };
+  },
+  routes: [POST("/webhook", async () => new Response("ok"))],
+});
+```
+
+Return an `id` that is the same for every session in the place and unique across platforms and workspaces, usually by prefixing the platform and workspace. Return `undefined` when the channel can't tell. A throwing, asynchronous, or malformed `space` function reports no space. Like the audience, the space is fixed when the session is created.
 
 ## Continuation tokens
 

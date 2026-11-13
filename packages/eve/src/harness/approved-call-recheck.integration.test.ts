@@ -309,13 +309,47 @@ describe("approved call recheck (real AI SDK)", () => {
     ).toMatchObject([{ output: { type: "text", value: "deployed" } }]);
   });
 
-  it("preserves explicit policy clearance when a workflow call leaves the harness", async () => {
-    const fixture = setup(
-      workflow("deploy", () => ({ type: "approved", reason: "Release window checked." })),
-    );
+  it.each([
+    [undefined, undefined],
+    [() => ({ type: "approved" as const }), { policy: "approval" as const }],
+  ])("admits a workflow call after evaluating its policy (%s)", async (policy, clearedBy) => {
+    const fixture = setup(workflow("deploy", policy));
     const result = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
     expect(runtimeWait(result.session.state)).toMatchObject({
-      tasks: [{ callId: "call-0", clearedBy: { policy: "approval" } }],
+      tasks: [
+        {
+          admission: { callId: "call-0", fingerprint: expect.any(String) },
+          callId: "call-0",
+        },
+      ],
+    });
+    expect(runtimeWait(result.session.state)?.tasks[0]?.clearedBy).toEqual(clearedBy);
+  });
+
+  it("admits a human-approved workflow call only after rechecking it", async () => {
+    const fixture = setup(workflow("deploy", always()));
+    const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+    expect(runtimeWait(initial.session.state)).toBeUndefined();
+    const request = fixture.events.find((event) => event.type === "interaction.opened");
+    if (request?.type !== "interaction.opened") throw new Error("Expected approval request");
+
+    const approved = await fixture.step(initial.session, {
+      answers: [
+        {
+          deliveryId: "approve-deploy",
+          interactionId: request.data.interactionId,
+          optionId: "approve",
+          responseId: "answer-deploy",
+        },
+      ],
+    });
+    expect(runtimeWait(approved.session.state)).toMatchObject({
+      tasks: [
+        {
+          admission: { callId: "call-0", fingerprint: expect.any(String) },
+          clearedBy: { interactionId: request.data.interactionId },
+        },
+      ],
     });
   });
   it.each([

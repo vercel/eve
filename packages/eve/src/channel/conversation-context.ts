@@ -1,5 +1,6 @@
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { resolveAudience } from "#channel/audience.js";
+import { resolveSpace } from "#channel/space.js";
 import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import {
@@ -49,6 +50,8 @@ export function buildConversationContext(
       environment,
     });
 
+  const space = inherited === undefined ? resolveSpace(run.adapter) : inherited.space;
+
   return {
     ...resolveConversationContext(undefined, {
       channelKind: projection.kind,
@@ -58,6 +61,7 @@ export function buildConversationContext(
     }),
     audience,
     channel,
+    ...(space !== undefined && { space }),
   };
 }
 

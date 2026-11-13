@@ -8,7 +8,7 @@ import { endSessionSandboxStep } from "#execution/session/end-sandbox-step.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 // Exercise the failed scope and terminal step with the last successful checkpoint,
 // not the failed access's uncommitted captureState().
@@ -23,7 +23,7 @@ describe("sandbox terminal cleanup after a failed scope", () => {
           "eve.sessionId": `sandbox-initialization-${reason}`,
         };
         const ctx = await deserializeContext(serializedContext);
-        const registered = ctx.require(BundleKey).graph.root.sandboxRegistry.sandbox;
+        const registered = requireCompiledBundle(ctx).graph.root.sandboxRegistry.sandbox;
         if (registered?.definition.kind !== "independent") throw new Error("Missing sandbox.");
         const initialize = registered.definition.selector;
         Object.assign(registered.definition, {

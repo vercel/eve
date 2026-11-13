@@ -10,6 +10,10 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import {
+  finalizeInstrumentationProviders,
+  registerInstrumentationProvider,
+} from "#instrumentation/providers.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
@@ -20,6 +24,7 @@ import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { forgetSessionLive } from "#definitions/state.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
@@ -46,8 +51,11 @@ interface Session {
   readonly next: (label: string) => Promise<SessionStreamEvent[]>;
   readonly answer: (interactionId: string, optionId: string) => Promise<void>;
   readonly send: (message: string) => Promise<void>;
+  readonly cancel: () => Promise<void>;
   readonly events: () => readonly SessionStreamEvent[];
   readonly interrupted: () => number;
+  /** How many session writes `failTurnStepWrites` failed so far. */
+  readonly failedWrites: () => number;
 }
 
 async function withInterruptedSession(
@@ -67,6 +75,8 @@ async function withInterruptedSession(
     readonly loseTurnStep?: (completion: number) => boolean;
     /** How many turn-step attempts, from the first, fail their first session write. */
     readonly failTurnStepWrites?: number;
+    /** The first session write containing this fails, and so does every later write it makes. */
+    readonly failWriteOf?: string;
   },
   body: (session: Session) => Promise<void>,
 ) {
@@ -144,17 +154,31 @@ async function withInterruptedSession(
     let turnSteps = 0;
     let failingWrites = options.failTurnStepWrites ?? 0;
     let failNextWrite = false;
+    let failedWrites = 0;
+    let failWriteOf = options.failWriteOf;
     const getWriter = WritableStream.prototype.getWriter;
     const writerSpy = vi.spyOn(WritableStream.prototype, "getWriter").mockImplementation(function (
       this: WritableStream<Uint8Array>,
     ) {
       const writer = getWriter.call(this);
       const write = writer.write.bind(writer);
+      let dead = false;
       writer.write = async (chunk) => {
         if (failNextWrite) {
           failNextWrite = false;
+          failedWrites += 1;
           throw new Error("The session stream is unavailable");
         }
+        if (
+          !dead &&
+          failWriteOf !== undefined &&
+          chunk instanceof Uint8Array &&
+          new TextDecoder().decode(chunk).includes(failWriteOf)
+        ) {
+          failWriteOf = undefined;
+          dead = true;
+        }
+        if (dead) throw new Error("The session stream is unavailable");
         return await write(chunk);
       };
       return writer;
@@ -206,7 +230,15 @@ async function withInterruptedSession(
             payload: { answers: [{ interactionId, optionId }] },
           });
         },
+        async cancel() {
+          await resumeHook(sessionInboxHookToken(continuationToken), {
+            auth: ALICE,
+            deliveryId: "alice-stop",
+            kind: "cancel",
+          });
+        },
         events: () => events,
+        failedWrites: () => failedWrites,
         interrupted: () => interrupted,
         async next(label) {
           let timer: ReturnType<typeof setTimeout> | undefined;
@@ -461,9 +493,8 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
         const events = await session.next("approval retry or failed turn");
         if (ofType(events, "turn.settled").length > 0) break;
       }
-      // No attempt threw; the workflow's own exhaustion error is the failure.
       expect(ofType(session.events(), "turn.settled")).toMatchObject([
-        { data: { error: { code: "FatalError", id: expect.any(String) }, outcome: "failed" } },
+        { data: { error: { code: "TURN_FAILED", id: expect.any(String) }, outcome: "failed" } },
       ]);
       await session.send("Check what happened before continuing.");
       const next = await session.next("next turn");
@@ -472,6 +503,52 @@ it("keeps an approved call's recorded outcome in history after retry exhaustion"
   );
   expect(ran).toEqual(["deploy"]);
   expect(prompts.at(-1)).toContain("This call completed, but its result was lost");
+});
+
+it("retries a step whose stream write failed, and each model attempt settles once", async () => {
+  vi.stubEnv("WORKFLOW_STEP_STREAM_DRAIN_TIMEOUT_MS", "500");
+  const name = "retry-dead-stream";
+  const started: string[] = [];
+  const settled: { readonly key: string; readonly outcome: string }[] = [];
+  await registerInstrumentationProvider({
+    agentName: name,
+    slot: "capture",
+    value: defineInstrumentation({
+      events: {
+        "model.started": (event) => void started.push(event.idempotencyKey),
+        "model.settled": (event) =>
+          void settled.push({ key: event.idempotencyKey, outcome: event.outcome }),
+      },
+    }),
+  });
+  finalizeInstrumentationProviders({ serviceName: name });
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+    delete (globalThis as Record<symbol, unknown>)[
+      Symbol.for("eve.harness-instrumentation-providers")
+    ];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  });
+
+  const { prompts } = await withInterruptedSession(
+    name,
+    {
+      // The answer's first content write fails; Workflow retries the step with a fresh stream.
+      failWriteOf: '"content.',
+      respond: () => textStreamResult("Alice's account is ready."),
+      tools: [],
+    },
+    async (session) => {
+      const turn = await session.next("turn");
+      expect(ofType(turn, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
+    },
+  );
+  // The failed step called the model once, without retrying the call itself.
+  expect(prompts).toHaveLength(2);
+  // The retry closes the cut attempt as abandoned; nothing else settles it.
+  expect(started).toHaveLength(2);
+  expect(settled.map(({ key }) => key)).toEqual(started);
+  expect(settled.map(({ outcome }) => outcome)).toEqual(["abandoned", "completed"]);
 });
 
 it("fails the turn, not the session, when a step fails every attempt", async () => {
@@ -493,23 +570,55 @@ it("fails the turn, not the session, when a step fails every attempt", async () 
     },
     async (session) => {
       const turn = await session.next("failed turn");
-      // The turn reports what the last attempt threw, under an id its log line carries.
+      // The turn reports a fixed failure, under an id its log line carries, not what the last
+      // attempt threw.
       expect(ofType(turn, "turn.settled")).toMatchObject([
         {
           data: {
             error: {
-              code: "STEP_FAILED",
+              code: "TURN_FAILED",
               id: expect.any(String),
-              message: "The session stream is unavailable",
+              message: "This turn failed before it finished. Send another message to continue.",
             },
             outcome: "failed",
           },
         },
       ]);
+      expect(JSON.stringify(turn)).not.toContain("The session stream is unavailable");
       await session.send("Try again, please.");
       const next = await session.next("next turn");
       expect(ofType(next, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
     },
   );
   expect(observed).toBe(1);
+});
+
+it("cancels a turn stopped while its step kept failing, and the session goes on", async () => {
+  vi.stubEnv("WORKFLOW_STEP_STREAM_DRAIN_TIMEOUT_MS", "500");
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  const { prompts } = await withInterruptedSession(
+    "retry-exhausted-stopped",
+    {
+      failTurnStepWrites: 4,
+      respond: () => textStreamResult("Done."),
+      tools: [],
+    },
+    async (session) => {
+      // Alice stops the turn while its first attempt is failing.
+      await vi.waitFor(() => expect(session.failedWrites()).toBeGreaterThan(0), {
+        timeout: 30_000,
+      });
+      await session.cancel();
+      const turn = await session.next("cancelled turn");
+      expect(ofType(turn, "turn.settled")).toMatchObject([{ data: { outcome: "cancelled" } }]);
+      expect(ofType(turn, "turn.settled")[0]?.data).not.toHaveProperty("error");
+      await session.send("Try again, please.");
+      const next = await session.next("next turn");
+      expect(ofType(next, "turn.settled")).toMatchObject([{ data: { outcome: "completed" } }]);
+    },
+  );
+  // The stopped turn's input stays in history, as a cancel before the model read it keeps it.
+  expect(prompts.at(-1)).toContain("Help Alice with her account.");
 });

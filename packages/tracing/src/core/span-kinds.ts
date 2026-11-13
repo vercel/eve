@@ -152,7 +152,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   model: {
-    parents: ["step"],
+    // A turn makes model calls outside its steps, such as a context compaction's summary request.
+    parents: ["step", "activation"],
     prepare({ options }, context) {
       const inputMessages =
         context.capture.recordInputs && options.messages !== undefined
@@ -166,6 +167,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           ...namingAttributes(modelName(options.modelId), "chat"),
           "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "chat",
+          "agent.turn.id": context.identity.turnId,
           "gen_ai.provider.name": options.provider,
           "gen_ai.request.model": options.modelId,
           ...runtimeContextAttributes(options.runtimeContext),

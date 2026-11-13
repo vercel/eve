@@ -1,4 +1,7 @@
-import type { CompiledAgentDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledAgentDefinition,
+  CompiledScheduleCollectionDefinition,
+} from "#compiler/manifest.js";
 import type {
   FinalizedNodeSourceState,
   PhaseOneNodeSourceState,
@@ -36,24 +39,24 @@ export function applyAgentToolPolicy(
 export function canDisableToolWithoutSelectedSource(
   state: FinalizedNodeSourceState,
   toolName: string,
+  scheduleCollections: readonly CompiledScheduleCollectionDefinition[],
 ): boolean {
   return (
     state.projected.subagents.some((entry) => entry.source.subagentId === toolName) ||
+    scheduleCollections.some(
+      (collection) => scheduleCollectionToolPrefix(collection.name) === toolName,
+    ) ||
     state.orderedCandidates.some(
       (candidate) =>
-        candidate.backing.kind !== "resource" &&
-        featureToolName(candidate.logicalPath) === toolName,
+        candidate.backing.kind !== "resource" && memoryToolName(candidate.logicalPath) === toolName,
     )
   );
 }
 
-/** The tool file name a memory slot's or schedule collection's tools take. */
-function featureToolName(logicalPath: string): string | undefined {
+/** The tool file name a memory slot's tools take. */
+function memoryToolName(logicalPath: string): string | undefined {
   const slot = canonicalSourceSlot(logicalPath);
   if (slot === "memory" || slot.startsWith("memory/")) return deriveMemorySlot(logicalPath);
-  if (slot.startsWith("schedules/")) {
-    return scheduleCollectionToolPrefix(slot.slice("schedules/".length));
-  }
   return undefined;
 }
 

@@ -1980,9 +1980,7 @@ Install the memco provider:
 eve add memory/memco
 \`\`\`
 
-This installs the independently maintained \`@memco/eve\` package and writes a memory slot. You need Node.js 24 or later and a [memco](https://memco.ai) account. memco hosts the memory service.
-
-\`@memco/eve@0.1.2\` declares support for \`eve >=0.84.1 <1\`. That peer range does not include eve 1.0 prereleases; check the [provider README](https://github.com/memcoai/eve-memco#readme) for supported versions before installing.`,
+This installs the independently maintained \`@memco/eve\` package and writes a memory slot. You need Node.js 24 or later and a [memco](https://memco.ai) account. memco hosts the memory service.`,
     quickStart: `### Shared identity
 
 Use one API token for a personal agent or one trusted team. Every caller shares the token's memco identity and accessible memory. For separate customers, use the multi-tenant setup below.
@@ -2073,6 +2071,72 @@ Keep credentials server-side and use one credential set: API client credentials 
 
 See the [provider README](https://github.com/memcoai/eve-memco#readme) for save-and-search verification, options, and service calls. The adapter does not provide exactly-once guarantees for remote operations or immediate key revocation after interrupted turns.`,
   },
+  "claude-mem": {
+    logo: "claude-mem",
+    docsHref: "https://docs.claude-mem.ai/eve-integration",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "coding agents",
+      "Claude Code",
+      "Codex",
+      "automatic recall",
+      "session context",
+      "cmem.ai",
+      "claude-mem",
+    ],
+    install: `Give your eve agent long-term memory on hosted claude-mem. By default, each eve scope gets its own claude-mem project, and the provider records every completed turn into it. Single-owner agents can opt in to recall the memory you build in Claude Code, Codex, and your other claude-mem clients.
+
+Install the claude-mem provider:
+
+\`\`\`bash
+eve add memory/claude-mem
+\`\`\`
+
+This installs \`claude-mem\` and writes a memory slot. The provider requires Node.js 24 or later, zod 4, and eve 0.84.0 or later.`,
+    quickStart: `Create a key at [cmem.ai/pro/key](https://cmem.ai/pro/key) and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+CLAUDE_MEM_API_KEY=...
+\`\`\`
+
+The registry writes the slot:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+import { claudeMem } from "claude-mem/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY });
+
+export default defineMemory({
+  description: "Recall and save durable context for the current user.",
+  provider: {
+    ...provider,
+    // get_observations fetches by ID across every project the key can see, so it
+    // would let one principal read another's memory through the shared key.
+    async tools(context) {
+      const { get_observations: _unscoped, ...tools } = (await provider.tools?.(context)) ?? {};
+      return tools;
+    },
+  },
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`claude-mem\` slot. Before every turn, the provider adds the newest memory in this scope's project as session context and recalls records from that project that match the user's message. The model also gets \`claude-mem__search\` and \`claude-mem__timeline\` to look further back, and \`claude-mem__remember\` to save a note. The registry omits the provider's \`get_observations\` tool: it fetches observations by ID across every project the key can see, with no project filter, so a caller with another principal's observation ID could read that memory through the shared key. Saving and recording need a Pro key with write access. With a read-only key, pass \`capture: false\` to \`claudeMem(...)\`.`,
+    configure: `By default, each eve scope reads and writes its own claude-mem project, derived from eve's scope key, and recording is on. After each completed turn, the provider sends the prompt, each tool call, and a turn summary to cmem.ai. Each recorded tool call and summary spends the key owner's cmem.ai observer allowance, for every caller the scope admits. To keep recall, search, and \`remember\` without recording, pass \`capture: false\` where the slot creates \`provider\`. Keep the \`tools\` wrapper that omits \`get_observations\`:
+
+\`\`\`ts title="agent/memory/claude-mem.ts"
+const provider = claudeMem({ apiKey: process.env.CLAUDE_MEM_API_KEY, capture: false });
+\`\`\`
+
+Before a turn is recorded or recalled, the provider removes \`<private>\` regions and redacts secret-shaped text. Notes saved with \`remember\` and model-written \`search\` queries are sent as written. Recorded requests are sent once with no retry, and replays of the same turn are deduplicated.
+
+To recall work from Claude Code, Codex, and your other claude-mem clients, set \`searchAllProjects: true\`. Session context, recall, \`search\`, and \`timeline\` then read every project the key can see. Anyone the slot's scope admits can then read the key owner's whole memory, so use it only for a single-owner agent whose \`scope\` returns \`null\` for everyone else. A single-owner agent can also keep \`get_observations\` by using \`claudeMem(...)\` directly as the provider; follow the owner-only \`scope\` in the [claude-mem agent template](https://github.com/thedotmack/claude-mem/tree/main/integrations/eve/template). Do not restore it while the scope admits more than one principal. Other options are \`project\` and \`baseUrl\`.
+
+Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source control. See the [claude-mem eve guide](https://docs.claude-mem.ai/eve-integration) for the one-click personal agent template, owner-only scoping, and the full option and tool reference.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
@@ -2135,14 +2199,23 @@ The extension also supports inline screenshots, session naming, proxies, and pro
   link: {
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",
-    keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
+    keywords: [
+      "stripe",
+      "wallet",
+      "payments",
+      "checkout",
+      "spend requests",
+      "approval",
+      "oauth",
+      "financial insights",
+    ],
     install: `Install the Link extension for eve:
 
 \`\`\`bash
 eve add extension/link
 \`\`\`
 
-The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
+The extension requires Node.js 24 or later and eve 1.0.0-rc.5 or later. Configure a static Link access token or an application-owned authorization provider. With a static token, every caller uses the same wallet, so restrict access to the agent.`,
     quickStart: `Add a Link access token to the agent's server environment:
 
 \`\`\`bash title=".env.local"
@@ -2159,10 +2232,27 @@ export default link({
 });
 \`\`\`
 
-The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
-    configure: `Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, financial insights, and purchase reports. It also includes payment-credential and financial-insights skills. Financial-data tools require the corresponding permissions on the token.`,
+    configure: `### Per-user authorization
 
-Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. The skill tells the agent not to repeat credentials in chat, but applications remain responsible for transcript access and retention. Keep the token out of prompts and source control; a 401 requires the operator to configure a replacement token. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+For per-user wallets, pass an application-owned authorization provider instead of \`accessToken\`:
+
+\`\`\`ts title="agent/extensions/link.ts"
+import link from "@stripe/link-integrations-eve";
+import { linkAuth } from "../lib/link-auth";
+
+export default link({ auth: linkAuth });
+\`\`\`
+
+Implement \`linkAuth\` with [\`defineInteractiveAuthorization\`](/docs/connections#self-hosted-interactive-oauth). Your application owns Link's OAuth consent, callback routing, state and PKCE validation, token storage, refresh, and revocation. Interactive authorization requires an authenticated user on the agent's inbound channel. Configure exactly one of \`accessToken\` or \`auth\`. See the [Link extension's OAuth guide](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve#interactive-oauth) for the provider contract.
+
+Static-token mode does not start OAuth or refresh tokens. A 401 requires the operator to configure a replacement token.
+
+### Purchase approval and sensitive data
+
+Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` creates a draft for a later \`request_spend_approval\` call; it does not authorize a purchase.
+
+Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. Financial-data and insight results can also contain private information. The skills tell the agent not to repeat credentials and to summarize financial data. Applications remain responsible for transcript access and retention. Keep tokens out of prompts and source control. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
   },
 };
 
@@ -2499,6 +2589,44 @@ Connect owns the OAuth flow, and each end-user authorizes in their own browser b
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "docs", "tables", "pages", "oauth", "connect"],
     authModes: ["user"],
+  },
+  context7: {
+    logo: "context7",
+    docsHref: "https://context7.com/docs/integrations/eve",
+    keywords: [
+      "mcp",
+      "documentation",
+      "library docs",
+      "code examples",
+      "api reference",
+      "coding agent",
+      "Upstash",
+      "api key",
+    ],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "CONTEXT7_API_KEY",
+      header: "authorization",
+    },
+    quickStart: `Create \`agent/connections/context7.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/context7.ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const apiKey = process.env.CONTEXT7_API_KEY;
+
+export default defineMcpClientConnection({
+  url: "https://mcp.context7.com/mcp",
+  description: "Context7: up-to-date, version-specific library documentation and code examples.",
+  auth: apiKey ? { getToken: async () => ({ token: apiKey }) } : undefined,
+  tools: { allow: ["resolve-library-id", "query-docs"] },
+});
+\`\`\`
+
+The allowlist limits the connection to Context7's two read-only documentation tools, \`context7__resolve-library-id\` and \`context7__query-docs\`, even if the server adds more tools later. For a named library, the agent resolves its Context7 library ID first, then queries the docs with that ID. A prompt that already includes an ID such as \`/vercel/next.js\` can skip straight to \`query-docs\`.`,
+    configureNote:
+      "Create a free API key in the [Context7 dashboard](https://context7.com/dashboard?tab=settings). eve sends it as an Authorization Bearer token, and Context7 uses it to apply your plan's limits. The connection still works without a key, at Context7's anonymous limits. Vercel Connect is not required.",
   },
   context: {
     logo: "context",

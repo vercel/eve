@@ -10,7 +10,7 @@
     "typecheck": "svelte-kit sync && tsc --noEmit --project ./tsconfig.json"
   },
   "dependencies": {
-    "@sveltejs/adapter-vercel": "^6.3.0",
+    "@sveltejs/adapter-vercel": "^6.3.5",
     "@sveltejs/kit": "^2.63.0",
     "@tailwindcss/vite": "^4.0.0",
     "eve": "workspace:*",

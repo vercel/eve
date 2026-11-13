@@ -10,18 +10,15 @@ import { deserializeContext, IncompatibleStateLayoutError } from "#context/seria
 import type { SessionCheckpointMigration } from "#execution/session/checkpoint-migrations.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
+import { type SessionOwnerActivation } from "#execution/session/handoff.js";
 import {
   SESSION_CHECKPOINT_VERSION,
   type SessionCheckpoint,
-  type SessionOwnerActivation,
-} from "#execution/session/handoff.js";
+} from "#execution/session/checkpoint.js";
 import { createLogger } from "#internal/logging.js";
 import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
-import {
-  hasRunEnded,
-  startWorkflowOnDeployment,
-  workflowEntryReference,
-} from "#execution/workflow-runtime.js";
+import { hasRunEnded, startWorkflowOnDeployment } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   SESSION_HANDOFF_VERSION,
   type HandoffWorkflowEntryInput,
@@ -33,16 +30,17 @@ import {
   EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
-import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import {
   isRetiredSandboxSessionState,
   resolvePersistedSandboxSessionState,
 } from "#sandbox/state.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
+import { stopRuns } from "#execution/stop-runs.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 
 const log = createLogger("execution.handoff");
 
@@ -127,8 +125,8 @@ export type SessionCheckpointValidation =
   | { readonly kind: "source-gone" };
 
 /**
- * Validates an upgraded checkpoint, resolves the target deployment's compiled
- * bundle, and records this owner's identity before it claims any hook.
+ * Validates an upgraded checkpoint, resolves the session's agent on the target
+ * deployment, and records this owner's identity before it claims any hook.
  *
  * A checkpoint this deployment cannot read is a settled answer, not a fault,
  * so it returns rather than throws: retrying the step can never change it.
@@ -171,7 +169,8 @@ export async function prepareSuccessorStep(input: {
     if (error instanceof IncompatibleStateLayoutError) return unreadable(error.message);
     throw error;
   }
-  const bundle = context.require(BundleKey);
+  // The target must have the session's agent: loading it from its reference proves it does.
+  const agent = sessionAgent(context);
   const session = readDurableSession(checkpoint.sessionState);
   const sandboxState = session.sandboxState?.session;
   // The runtime ignores a retired record, so it must not block the handoff.
@@ -180,9 +179,11 @@ export async function prepareSuccessorStep(input: {
     sandboxState !== undefined &&
     !isRetiredSandboxSessionState(sandboxState)
   ) {
-    const definition = owningSandboxDefinition(
-      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox,
-    );
+    const registered = (await agent.sandbox())?.registry.sandbox;
+    if (registered === undefined) {
+      return refuse("Session checkpoint sandbox has no agent sandbox to resolve its provider.");
+    }
+    const definition = owningSandboxDefinition(registered);
     if (definition.kind !== "independent") {
       return refuse("Session checkpoint sandbox has no resolved provider.");
     }
@@ -352,4 +353,24 @@ export async function readSessionStreamTailStep(input: {
 }): Promise<number> {
   "use step";
   return await readSessionStreamTailIndex(input.sessionId);
+}
+
+/**
+ * Ends the runs of tasks a successor retired, so a subagent the model calls again runs this
+ * build. Doesn't wait for them to end; a run that can't be told is cancelled outright.
+ */
+export async function endRetiredTaskRunsStep(input: {
+  readonly runs: readonly TaskRunAddress[];
+  readonly sessionId: string;
+}): Promise<void> {
+  "use step";
+  log.info("ending task runs retired by a session handoff", {
+    runIds: input.runs.map((run) => run.runId),
+    sessionId: input.sessionId,
+  });
+  await stopRuns(
+    input.runs.map((run) => ({ ends: true, run })),
+    { kind: "end", reason: "The session moved to a new deployment." },
+    { waitForEnd: false },
+  );
 }

@@ -11,6 +11,7 @@ const EVE_SCHEDULE_TASK_NAME_PREFIX = "eve.schedule.";
  */
 export interface ScheduleRegistration {
   readonly cron: string;
+  readonly timezone?: string;
   readonly description: string;
   readonly logicalPath: string;
   readonly scheduleId: string;
@@ -62,6 +63,7 @@ export function createScheduleRegistrations(
   const registrations = schedules
     .map((schedule) => ({
       cron: schedule.cron,
+      ...(schedule.timezone !== undefined && { timezone: schedule.timezone }),
       description: `Run eve schedule "${schedule.name}" from "${schedule.logicalPath}".`,
       logicalPath: schedule.logicalPath,
       scheduleId: schedule.name,

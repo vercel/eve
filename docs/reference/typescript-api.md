@@ -143,7 +143,7 @@ Tool definitions accept these options:
 - `availableInSubagents: false` restricts the tool to top-level root sessions.
 - `deferred: true` keeps the tool out of the model's tool list. The model finds it with `eve__search` and calls it with `eve__tool`; see [Tools](../tools#keep-a-tool-out-of-the-tool-list).
 
-`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call).
+`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call). `defineWorkflowTool` definitions accept the same option on an `execute` entry point, not on `task` or `serve`; see [Workflows as tools](../tools/workflows#end-the-turn-after-the-call).
 
 Authored workflow bodies also receive `ctx.agents`, a map that describes the agents the workflow can call. It stays the same across workflow replays. `ctx.agent(name)` returns an `AgentSession` whose `send(message, options?)` resolves to a response with `result()`. The `agent` entry is a copy of the root agent, and its description is empty when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
 
@@ -198,7 +198,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
 | [`eve/client`](/docs/guides/client)                                               | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
 | [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
-| [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
+| [`eve/events`](/docs/concepts/session-views-and-selectors)                        | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |
 
 Exported types ship from the entry point that owns them, such as `ToolDefinition` and `ToolContext` from `eve/tools`. Import event and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return.

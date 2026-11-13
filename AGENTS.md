@@ -22,6 +22,7 @@ docs, prompts, comments, and headings.
 - `apps/fixtures` — shared agent fixtures used by e2e, TUI smoke tests, and local dev
 - `apps/frameworks`, `apps/templates`, `apps/docs` — framework integrations, templates, docs site
 - `docs` — published documentation content
+- `examples` — self-contained example agents built against the workspace `eve`
 - `e2e/` — fixture-owned `eve eval` end-to-end tests
 - `research` — issue-backed implementation plans for proposed changes
 
@@ -34,9 +35,11 @@ before pushing.
 
 PR descriptions are reviewer-oriented explanations of the problem or decision
 behind the change, the solution, and meaningful behavior changes—not file lists
-or commit logs. Keep the Summary short and lead with that justification before
-implementation details. Link a prior issue or discussion when one exists, and
-call out important scope boundaries or preserved behavior. Never include a
+or commit logs. Keep the Summary short and lead with that justification. Follow
+it with a Changes section: a flat list of the important changes, public API
+first, each with a short reason only when it is not obvious. Link a prior issue
+or discussion when one exists, and call out important scope boundaries or
+preserved behavior. Never include a
 Validation, Test plan, or Checklist section. Never create an issue solely to
 accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
@@ -170,7 +173,7 @@ CI.
 11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
     spec, one ordered plugin list, and one route table. Follow the foundation
     invariants in
-    [`research/nitro-3-rc-migration.md`](./research/nitro-3-rc-migration.md#foundation-invariants)
+    [`packages/eve/src/internal/nitro/AGENTS.md`](./packages/eve/src/internal/nitro/AGENTS.md)
     when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which

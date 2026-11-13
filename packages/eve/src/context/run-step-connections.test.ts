@@ -8,14 +8,12 @@ import {
   createStatefulMcpServer,
   type StatefulMcpServer,
 } from "#internal/testing/stateful-mcp-server.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 vi.mock("#context/providers/session.js", () => ({
   sessionProvider: { create: () => undefined, key: { name: "test.session" } },
-}));
-vi.mock("#context/providers/tool-stubs.js", () => ({
-  toolStubProvider: { create: () => undefined, key: { name: "test.toolStubs" } },
 }));
 vi.mock("#context/providers/sandbox.js", () => ({
   sandboxProvider: { create: () => undefined, key: { name: "test.sandbox" } },
@@ -34,9 +32,12 @@ const connection: ResolvedConnectionDefinition = {
 /** A fresh step context whose agent has the one connection. */
 function stepContext(): ContextContainer {
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, {
-    graph: { root: { agent: { connections: [connection], definitions: [] } } },
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: { root: { agent: { connections: [connection], definitions: [] } } },
+    } as never),
+  );
   return ctx;
 }
 

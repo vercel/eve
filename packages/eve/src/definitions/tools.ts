@@ -4,7 +4,7 @@ import type { ContextReader } from "#context/key.js";
 import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -23,7 +23,7 @@ import {
   readWorkflowToolEntryPoints,
 } from "#tools/workflow-definition.js";
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { createWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import { assertNoOwnTaskIdInput } from "#internal/authored-definition/schema-backed.js";
 import { namedEntries, type EntryKind } from "./named.js";
@@ -173,9 +173,9 @@ function compiledWorkflow(source: ToolSource, name: string, entry: object): Comp
       `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" whose entry point isn't a compiled workflow. Declare it as a top-level async function that starts with "use workflow", and pass that function to defineWorkflowTool() as execute, task, or serve.`,
     );
   }
-  if (Reflect.get(entry, "endsTurn") !== undefined) {
+  if (Reflect.get(entry, "endsTurn") !== undefined && entryPoint !== "execute") {
     throw new Error(
-      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" with "endsTurn", which defineWorkflowTool() doesn't support.`,
+      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" with "endsTurn", which applies only to execute().`,
     );
   }
   if (entryPoint === "serve") {
@@ -198,7 +198,7 @@ function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, na
     remedy: "Rename the map key.",
     subject: "Dynamic tool",
   });
-  const bundle = ctx.get(BundleKey);
+  const bundle = compiledBundleOf(ctx);
   if (bundle === undefined) return;
   const { subagentRegistry, toolRegistry } = bundle;
   const workflowNames = new Set([
@@ -227,6 +227,7 @@ function liveTool(
     availableInSubagents: entry.availableInSubagents,
     deferred: entry.deferred,
     description: entry.description,
+    endsTurn: entry.endsTurn,
     frameworkTool: isFrameworkTool(entry) || undefined,
     inputSchema: toInputSchema(entry.inputSchema as ToolSchemaSource),
     label: definition.label as HarnessToolDefinition["label"],
@@ -256,7 +257,6 @@ function liveTool(
   }
   return {
     ...common,
-    endsTurn: entry.endsTurn,
     execute: createToolExecuteWithAuth({
       execute: (input, context) => entry.execute(input as never, context),
       scope: name,

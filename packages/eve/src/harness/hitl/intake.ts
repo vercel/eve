@@ -1,4 +1,4 @@
-import { approvedClearance } from "#harness/clearance.js";
+import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { stepCatalog } from "#definitions/step.js";
@@ -19,7 +19,6 @@ import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-can
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import {
   admitAnswers,
@@ -227,7 +226,7 @@ async function runApproved(
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
     const tools = await toolsOf(step);
-    const workflows = new Map<string, { approval: ApprovedCall; clearedBy?: ClearedBy }>();
+    const workflows = new Map<string, { approval: ApprovedCall; clearance: Clearance }>();
     for (const approval of approvals) {
       const tool = tools.get(approval.call.toolName);
       if (tool?.workflowId === undefined) continue;
@@ -258,7 +257,9 @@ async function runApproved(
         // A person's acceptance clears the call; the recheck only confirms it still may run.
         const clearance =
           approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
-        workflows.set(approval.call.callId, { approval, clearedBy: clearance?.clearedBy });
+        if (clearance === undefined)
+          throw new Error(`Approved call "${approval.call.callId}" has no clearance to dispatch.`);
+        workflows.set(approval.call.callId, { approval, clearance });
       }
     }
     local.push({
@@ -269,6 +270,9 @@ async function runApproved(
     });
     if (workflows.size === 0) continue;
     const dispatched = collectWorkflowCalls({
+      clearances: Object.fromEntries(
+        [...workflows.entries()].map(([callId, { clearance }]) => [callId, clearance]),
+      ),
       session: step.session,
       toolCalls: [...workflows.values()].map(({ approval: { call } }) => ({
         input: call.input,
@@ -279,12 +283,7 @@ async function runApproved(
       turnId: parked.event.turnId,
     });
     step.session = dispatched.session;
-    tasks.push(
-      ...dispatched.workflowRequests.map((task) => ({
-        ...task,
-        clearedBy: workflows.get(task.callId)?.clearedBy,
-      })),
-    );
+    tasks.push(...dispatched.workflowRequests);
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length > 0) await step.apply(dispatch(step.view(), { tasks }));

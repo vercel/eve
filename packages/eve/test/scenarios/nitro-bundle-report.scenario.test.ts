@@ -244,7 +244,7 @@ async function createReportFixture(
       {
         handler: "index.mjs",
         launcherType: "Nodejs",
-        runtime: "nodejs24.x",
+        runtime: "nodejs26.x",
         shouldAddHelpers: false,
       },
       null,
@@ -310,7 +310,7 @@ async function createReportFixture(
         {
           handler: "index.mjs",
           launcherType: "Nodejs",
-          runtime: "nodejs24.x",
+          runtime: "nodejs26.x",
           shouldAddHelpers: false,
         },
         null,
@@ -425,7 +425,7 @@ describe("nitro bundle report", () => {
     expect(report.functions[0]?.vcConfig).toEqual({
       handler: "index.mjs",
       launcherType: "Nodejs",
-      runtime: "nodejs24.x",
+      runtime: "nodejs26.x",
       shouldAddHelpers: false,
     });
     expect(report.functions[0]?.topTracedPackages).toEqual([

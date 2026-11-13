@@ -39,7 +39,11 @@ eve needs a Vercel token, team ID, and project ID. `eve build` uses them to capt
 | Team ID    | `teamId` environment option, `VERCEL_TEAM_ID`, `VERCEL_ORG_ID`  |
 | Project ID | `projectId` environment option, `VERCEL_PROJECT_ID`             |
 
-When any of the three is unset, eve uses a Vercel OIDC token and reads the team and project from it. Outside a Vercel deployment, eve reads `VERCEL_OIDC_TOKEN`. It refreshes a missing or expired token with your Vercel CLI login and the project linked in `.vercel/project.json`. If that fails, the Vercel Sandbox SDK's own credential lookup runs, and it reports an authentication error when it finds none.
+eve checks OIDC token expiry before use, with a five-minute refresh buffer. Refresh uses your Vercel CLI login and targets the configured team and project IDs. The linked project's `.vercel/project.json` supplies only missing IDs. If OIDC resolution fails, eve uses `VERCEL_TOKEN` when both IDs are configured. Configured IDs keep their precedence after OIDC resolution; when either ID is unset, eve reads both IDs from the token.
+
+A `VERCEL_OIDC_TOKEN` from `vercel env pull` expires. In CI or other environments without a Vercel CLI login, set `VERCEL_TOKEN` alongside `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`. Locally, rerun `vercel env pull` to get a fresh token.
+
+If eve cannot resolve credentials, the Vercel Sandbox SDK's own credential lookup runs. The SDK reports an authentication error when it finds none.
 
 For local development, link the app to a Vercel project and pull its environment into `.env.local`:
 

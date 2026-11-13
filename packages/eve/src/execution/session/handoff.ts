@@ -5,10 +5,7 @@ import {
   type Hook,
 } from "#compiled/@workflow/core/index.js";
 
-import type { SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { HarnessModelMessage } from "#harness/messages.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type {
   SessionHandoverPayload,
@@ -31,31 +28,12 @@ import {
   type RunWatch,
 } from "#execution/session/run-watch.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
-import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  type SessionCheckpoint,
+  type SessionTransferState,
+} from "#execution/session/checkpoint.js";
 import { isObject } from "#shared/guards.js";
-
-/**
- * Cross-deployment checkpoint contract. The successor may run a different eve
- * build than the owner that produced it; bump when any field changes shape so
- * an older successor rejects the handoff instead of misreading state.
- *
- * A successor accepts checkpoints back to `MIN_SESSION_CHECKPOINT_VERSION` and
- * refuses older ones; a bump that keeps its predecessor readable adds the upgrade
- * in `checkpoint-migrations.ts`.
- */
-export const SESSION_CHECKPOINT_VERSION = 19;
-
-/** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
-export interface SessionCheckpoint {
-  readonly admittedDeliveryKeys: readonly string[];
-  readonly version: typeof SESSION_CHECKPOINT_VERSION;
-  readonly capabilities?: SessionCapabilities;
-  readonly history: HarnessModelMessage[];
-  readonly retention?: AgentWorkflowRetentionDefinition;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-  readonly sessionTimeoutMs: number | false;
-}
 
 export type SessionOwnerActivation =
   | {
@@ -120,11 +98,6 @@ type SessionRetainedReason =
   | "checkpoint-incompatible"
   | "known-incompatible"
   | "unsupported-world";
-
-type SessionTransferState = Pick<
-  SessionCheckpoint,
-  "admittedDeliveryKeys" | "history" | "serializedContext" | "sessionState"
->;
 
 type AttemptSettlement =
   | { readonly kind: "taken-over" }

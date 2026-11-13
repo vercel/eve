@@ -59,11 +59,14 @@ export async function askStepApprovals(
     readonly messages: readonly ModelMessage[];
     readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+    /** A call the step ran already ended the turn. */
+    readonly endsTurn?: true;
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
   },
 ): Promise<void> {
   const transition = askApprovals(step.view(), {
+    endsTurn: input.endsTurn,
     event: input.event,
     messages: input.messages,
     requests: input.requests,
@@ -188,10 +191,12 @@ export {
   ownCallbacks,
   ResumeSignInKey,
   settleSignIns,
+  signInsAnswered,
   signInsEnded,
   type AnsweredSignIn,
   type OwnCallbacks,
   type ResumeSignIn,
+  type SignInAnswer,
   type SignInCallback,
   type SignInEnding,
 } from "./sign-in-callbacks.js";

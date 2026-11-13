@@ -35,8 +35,8 @@ export default defineDynamicSchedules({
     );
   },
   events: {
-    "occurrence.dispatched": ({ name, sessionIds }) => {
-      if (sessionIds?.[0]) recordCollectionOccurrence(name, sessionIds[0]);
+    "occurrence.dispatched": ({ occurrence, sessionIds }) => {
+      if (sessionIds?.[0]) recordCollectionOccurrence(occurrence.name, sessionIds[0]);
     },
   },
 });

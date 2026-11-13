@@ -23,6 +23,7 @@ import {
   VERCEL_SCHEDULES_CLIENT_HEADERS,
 } from "#public/schedules/providers/vercel.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import {
   loadScheduleCollectionDefinition,
@@ -93,10 +94,14 @@ export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): 
         }
         await dispatchScheduledOccurrence({
           bundle,
+          runtime: createWorkflowRuntime({
+            compiledArtifactsSource: bundle.compiledArtifactsSource,
+          }),
           collection,
           definition,
           occurrence,
           payload,
+          namespace: queue.namespace,
           verifyDelivery: async () =>
             verifyScheduleDelivery(
               queue,

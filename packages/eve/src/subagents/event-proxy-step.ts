@@ -4,33 +4,29 @@ import {
   restoreSessionStep,
   type PublishedSessionEvents,
   type RestoredSessionStep,
-  type SessionStepState,
+  type SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
-import { SIGN_IN_DECLINED, sameRelayedSignIn } from "#harness/hitl/sign-ins.js";
 import {
   callsBackFor,
-  localSignInCallback,
   ownCallbacks,
   settleSignIns,
+  signInsAnswered,
   signInsEnded,
-  type AnsweredSignIn,
-  type OwnCallbacks,
+  type SignInAnswer,
   type SignInEnding,
 } from "#harness/hitl/index.js";
-import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 import { relay, relayedMirror } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
+import { installedDurableHost, signInDelivery } from "#execution/hosts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
-  input: SessionStepState & {
+  input: SessionStepInput & {
     readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentInteractionHookPayload;
@@ -62,12 +58,13 @@ export async function emitProxiedSubagentEvent(
   const { hookPayload, runId, workflowAsk } = input;
   // The other askers hear a sign-in's answer before the relay commits: a delivery that fails
   // fails this step, and its retry delivers them again from the same state.
-  const baseUrl = await workflowCallbackBaseUrl();
+  const host = installedDurableHost();
+  const baseUrl = host?.callbackBaseUrl();
   const own =
     baseUrl === undefined ? undefined : ownCallbacks(input.durableSession.sessionId, baseUrl);
-  if (own !== undefined) {
+  if (host !== undefined && own !== undefined) {
     const tables = storedProjection(input.durableSession.state).view;
-    await settleSignIns(resumeSignInCallback, [
+    await settleSignIns(signInDelivery(host.deliver), [
       ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
         signInsAnswered(tables, answer, own),
       ),
@@ -98,20 +95,6 @@ export async function emitProxiedSubagentEvent(
   );
 }
 
-/** A sign-in the person answered, and how. */
-export interface SignInAnswer {
-  readonly interactionId: string;
-  readonly signIn: SignInChallenge;
-  readonly outcome: "accepted" | "declined";
-}
-
-/** This workflow's callback base URL, or `undefined` outside a workflow. */
-async function workflowCallbackBaseUrl(): Promise<string | undefined> {
-  const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-  const url = getWorkflowMetadata().url;
-  return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
-}
-
 /** The answers in a child's relayed events to sign-ins this session mirrors for that child. */
 export function relayedAnswers(
   tables: SessionView,
@@ -140,34 +123,5 @@ function relayedEndings(
     const ended = relayedMirror(tables, payload, interactionId);
     if (ended?.status !== "open" || ended.request.signIn === undefined) return [];
     return [{ interactionId, reason: event.data.reason ?? outcome }];
-  });
-}
-
-/**
- * The other open sign-ins an acceptance or a decline in `answer` settles: for the same Connect
- * grant and principal (`sameRelayedSignIn`), asked on this deployment by this session or one of
- * its children (`localSignInCallback`). A failure is its asker's to retry, so it settles only its
- * own row, and a responder's sign-in settles only through its own approval. Any other row keeps its
- * own card.
- */
-export function signInsAnswered(
-  tables: SessionView,
-  answer: SignInAnswer,
-  own: OwnCallbacks,
-): readonly AnsweredSignIn[] {
-  // The provider's answer, as its redirect carries it: a decline is RFC 6749 `access_denied`.
-  const params: AnsweredSignIn["params"] =
-    answer.outcome === "declined" ? { error: SIGN_IN_DECLINED } : {};
-  return Object.values(tables.interactions).flatMap((row) => {
-    if (
-      row.interactionId === answer.interactionId ||
-      row.status !== "open" ||
-      "responseId" in row.subject ||
-      row.request.signIn === undefined ||
-      !sameRelayedSignIn(row.request.signIn, answer.signIn)
-    )
-      return [];
-    const callback = localSignInCallback(row, own);
-    return callback === undefined ? [] : [{ callback, params }];
   });
 }

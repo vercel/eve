@@ -13,6 +13,7 @@
       ],
       "meta": {
         "eve": {
+          "hidden": true,
           "requires": ">=0.62.0",
           "install": {
             "pnpm": {
@@ -95,6 +96,27 @@
           "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
           "target": "agent/extensions/self-modification/extension.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/code",
+      "type": "registry:item",
+      "title": "Code",
+      "description": "Add coding instructions, project AGENTS.md or CLAUDE.md, and investigation and review skills to an eve agent.",
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=0.76.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/code.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/code.ts"
         }
       ]
     },
@@ -196,7 +218,7 @@
       "name": "extension/link",
       "type": "registry:item",
       "title": "Link",
-      "description": "Give an eve agent guarded access to a Link wallet for payment methods, purchase requests, and checkout credentials.",
+      "description": "Give an eve agent guarded access to a Link wallet for payments, purchase requests, and financial insights.",
       "dependencies": [
         "@stripe/link-integrations-eve"
       ],
@@ -205,7 +227,7 @@
       },
       "meta": {
         "eve": {
-          "requires": ">=0.54.4"
+          "requires": ">=1.0.0-rc.5"
         }
       },
       "files": [
@@ -424,12 +446,28 @@
       "description": "Give agents shared memory to learn from work and each other, with separate networks for each customer.",
       "dependencies": ["@memco/eve"],
       "envVars": { "MEMCO_API_TOKEN": "" },
-      "meta": { "eve": { "requires": ">=0.84.1 <1.0.0-0" } },
+      "meta": { "eve": { "requires": ">=1.0.0-rc.10 <2.0.0" } },
       "files": [
         {
           "path": "registry/memory/memco.ts",
           "type": "registry:file",
           "target": "agent/memory/memco.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/claude-mem",
+      "type": "registry:item",
+      "title": "claude-mem",
+      "description": "Long-term memory on hosted claude-mem that records each turn, with opt-in recall of your Claude Code and Codex work for single-owner agents.",
+      "dependencies": ["claude-mem"],
+      "envVars": { "CLAUDE_MEM_API_KEY": "" },
+      "meta": { "eve": { "requires": ">=0.84.0" } },
+      "files": [
+        {
+          "path": "registry/memory/claude-mem.ts",
+          "type": "registry:file",
+          "target": "agent/memory/claude-mem.ts"
         }
       ]
     },
@@ -1139,6 +1177,22 @@
           "path": "registry/connections/context.ts",
           "type": "registry:file",
           "target": "agent/connections/context.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/context7",
+      "type": "registry:item",
+      "title": "Context7",
+      "description": "Look up up-to-date, version-specific library docs and code examples.",
+      "envVars": {
+        "CONTEXT7_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/context7.ts",
+          "type": "registry:file",
+          "target": "agent/connections/context7.ts"
         }
       ]
     },
@@ -2846,6 +2900,30 @@
       "meta": {
         "eve": {
           "docs": "/docs/channels/twilio",
+          "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/recall",
+      "type": "registry:item",
+      "title": "Recall.ai",
+      "description": "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+      "dependencies": ["@eve/recall@^0.1.0-rc.0"],
+      "envVars": {
+        "RECALL_API_KEY": "",
+        "RECALL_WORKSPACE_VERIFICATION_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/recall.ts",
+          "type": "registry:file",
+          "target": "agent/channels/recall.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/recall",
           "implementation": "native"
         }
       }

@@ -1,5 +1,6 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
 
@@ -15,10 +16,8 @@ import { type DevHost, DevHostSupervisor } from "#internal/nitro/host/dev-host-s
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 import { createParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
-import {
-  DEVELOPMENT_WORKER_APP_ROOT_ENV,
-  DEVELOPMENT_WORKFLOW_SECRET_ENV,
-} from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
+import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 
 const ADDRESS = DEVELOPMENT_CLIENT_ADDRESS_HEADER;
 const SIGNATURE = DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER;
@@ -61,6 +60,11 @@ export default {
         return new Response("crashing");
       case "/fail-stream":
         return new Response(heldStream(gate, true));
+      case "/event-stream":
+        // The MCP SDK sends this header on its SSE responses.
+        return new Response("data: ok\\n\\n", {
+          headers: { connection: "keep-alive", "content-type": "text/event-stream" },
+        });
       case "/headers":
         return Response.json({
           address: request.headers.get(${JSON.stringify(ADDRESS)}),
@@ -144,6 +148,22 @@ async function readToEnd(reader: ReadableStreamDefaultReader<Uint8Array>): Promi
   for (;;) {
     if ((await reader.read()).done) return;
   }
+}
+
+/** POSTs on a fresh connection whose client asks to close it, as `vercel dev` does. */
+async function postClosingConnection(target: URL): Promise<number> {
+  const { promise, reject, resolve } = Promise.withResolvers<number>();
+  const request = httpRequest(
+    target,
+    { agent: false, headers: { connection: "close" }, method: "POST" },
+    (response) => {
+      response.resume();
+      response.once("end", () => resolve(response.statusCode ?? 0));
+    },
+  );
+  request.once("error", reject);
+  request.end("{}");
+  return await promise;
 }
 
 describe("dev host supervisor", () => {
@@ -409,6 +429,18 @@ describe("dev host supervisor", () => {
     // A truncated stream must reach the client as a failure, never as a
     // cleanly terminated response.
     await expect(readToEnd(reader)).rejects.toThrow();
+  });
+
+  it("serves every request from a client that closes its connection, even when the worker answers keep-alive", async () => {
+    const { host, supervisor, url } = await startSupervisor();
+    await supervisor.swapTo(host());
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      statuses.push(await postClosingConnection(url("/event-stream")));
+    }
+
+    expect(statuses).toEqual([200, 200, 200, 200]);
   });
 
   it("stamps a signed client address on requests and strips forged copies", async () => {

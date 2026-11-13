@@ -17,12 +17,13 @@ import { isSteeringDelivery } from "#execution/session/input-queue.js";
 import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
   type PublishedSessionEvents,
+  type SessionStepInput,
   type SessionStepState,
 } from "#execution/publish-session-events.js";
 import { type WithSessionStateDelta } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
@@ -30,7 +31,7 @@ import {
 import { routeDeliverPayload, type RoutedDeliverPayload } from "#subagents/hitl-proxy.js";
 import { V26_INPUT_REMOTE_AGENT_PROTOCOL } from "#protocol/remote-agent-protocol.js";
 import { protocolTwoAnswersSettledOnForward } from "#subagents/protocol-two-callback.js";
-import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { resumeRoutedSessionInbox } from "#execution/hosts.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
 import { forwardedShareId, type Relay, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { readHitlState } from "#harness/hitl/index.js";
@@ -69,7 +70,7 @@ interface ChildBucket {
  * also relays their `interaction.settled` once the answers are on their way down.
  */
 export async function routeProxiedDeliverStep(
-  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+  input: SessionStepInput & { readonly delivery: DeliverHookPayload },
 ): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   "use step";
   return await withSessionStateDelta(input, routeProxiedDeliver);
@@ -243,7 +244,7 @@ async function routeProxiedDeliver(
     consumed.length === 0
       ? published
       : await commitSessionStep(
-          { ...published, sessionWritable: input.sessionWritable },
+          { ...published, rerun: input.rerun, sessionWritable: input.sessionWritable },
           (view) => [routeAnswer(view, { deliveries: consumed, forwarded: [], decided: [] })],
           {
             origin: "own",
@@ -262,7 +263,7 @@ async function routeProxiedDeliver(
     );
     if (ignored.length === 0) return { ...admitted, kind: "cancel-turn" };
     const settled = await publishSessionEvents(
-      { ...admitted, sessionWritable: input.sessionWritable },
+      { ...admitted, rerun: input.rerun, sessionWritable: input.sessionWritable },
       [
         admitDeliveries(
           ignored.map(({ channelKind, deliveryId }) => ({
@@ -300,7 +301,7 @@ async function routeProxiedDeliver(
       if (remote !== undefined) {
         const ctx = await deserializeContext(serializedContext);
         const headers = await resolveRemoteAgentStreamHeaders({
-          bundle: ctx.require(BundleKey),
+          bundle: requireCompiledBundle(ctx),
           name: remote.name,
           dynamicBinding: remote.dynamicBinding,
           resolverId: remote.resolverId,
@@ -339,7 +340,7 @@ async function routeProxiedDeliver(
             decided.push({ answer, outcome: "accepted" });
         }
       } else {
-        await resumeSessionInbox(
+        await resumeRoutedSessionInbox(
           child.childSessionInbox ?? child.childContinuationToken,
           childDelivery,
         );
@@ -348,7 +349,7 @@ async function routeProxiedDeliver(
   }
 
   const context = await commitSessionStep(
-    { ...admitted, sessionWritable: input.sessionWritable },
+    { ...admitted, rerun: input.rerun, sessionWritable: input.sessionWritable },
     (view) => [
       routeAnswer(view, {
         decided:
@@ -426,19 +427,19 @@ function joinAnswerToTurn(
  * `undefined` when the channel maps none of them to one of `requestIds`.
  */
 export async function mapHeldAnswersStep(
-  input: SessionStepState & {
+  input: SessionStepInput & {
     readonly delivery: DeliverHookPayload;
     readonly requestIds: readonly string[];
   },
 ): Promise<WithSessionStateDelta<{ readonly delivery: DeliverHookPayload | undefined }>> {
   "use step";
-  return await withSessionStateDelta(input, async () => {
-    const requestIds = new Set(input.requestIds);
+  return await withSessionStateDelta(input, async (step) => {
+    const requestIds = new Set(step.requestIds);
     const mapped = await deliverChannelAnswers({
-      ...input,
+      ...step,
       routable: (response) => requestIds.has(response.interactionId),
     });
-    return mapped.delivery === input.delivery
+    return mapped.delivery === step.delivery
       ? { delivery: undefined }
       : { delivery: mapped.delivery, serializedContext: mapped.serializedContext };
   });

@@ -34,9 +34,9 @@ export const templateManifest: TemplateManifestEntry[] = [
     integrations: ["Voice", "Web chat"],
   },
   {
-    slug: "eve-company-brain-template",
-    title: "Company Brain",
-    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-company-brain-template",
+    slug: "eve-data-agent-template",
+    title: "Data Agent",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-data-agent-template",
     integrations: ["Slack", "dbt", "MotherDuck"],
   },
   {

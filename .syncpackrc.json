@@ -19,6 +19,7 @@
       "label": "Extensions declare a broad eve peer range",
       "dependencies": ["eve"],
       "packages": [
+        "@eve/recall",
         "eve-code",
         "@eve/agent-desktop",
         "@eve/agent-browser",

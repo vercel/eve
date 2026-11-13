@@ -229,7 +229,7 @@ describe("eve init smoke", () => {
     };
     expect(agentSource).toContain('model: "openai/gpt-6-luna-fast"');
     expect(agentSource).toContain('reasoning: "high"');
-    expect(packageJson.engines?.node).toBe("24.x");
+    expect(packageJson.engines?.node).toBe("26.x");
     await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
       "minimumReleaseAgeStrict: true",
     );

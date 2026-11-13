@@ -293,18 +293,9 @@ const currentActivity = activity(agent.view);
 const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
 ```
 
-See [Use eve's answers](/docs/guides/frontend/use-eve-agent#use-eves-answers) for which query answers each common question, from a request's result to call timing and usage.
+See [Session views & selectors](/docs/concepts/session-views-and-selectors) for which selector answers each common session-state question, including call counts, timing, and usage. For one request's result, see [Use eve's answers](/docs/guides/frontend/use-eve-agent#use-eves-answers).
 
-For something `view` doesn't cover, read the raw `events`:
-
-```tsx
-import { useMemo } from "react";
-
-const toolCalls = useMemo(
-  () => agent.events.filter((event) => event.type === "call.requested").length,
-  [agent.events],
-);
-```
+Read raw `events` when you need event-level information that `view` doesn't cover, such as individual progress deltas or exact event ordering.
 
 ## Custom hosts and headers
 

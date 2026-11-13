@@ -21,7 +21,8 @@ import {
   type MemoryScope,
   type MemoryTurnContext,
 } from "#public/memory/index.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import {
   createMemoryScope,
@@ -208,6 +209,7 @@ function commitScopeContext(ctx: DefinitionContext): ScopeContext {
   return {
     abortSignal: ctx.signal,
     channel: channelOf(ctx.container),
+    ...(frame.conversation !== undefined && { conversation: frame.conversation }),
     ctx: ctx.container as ContextContainer,
     session: { auth: frame.session.auth, id: frame.session.id },
   };
@@ -253,7 +255,7 @@ async function captureBeforeCompaction(
           abortSignal: ctx.signal,
           compaction: {
             modelId:
-              container.get(BundleKey)?.turnAgent.compactionModel?.id ??
+              container.get(SessionAgentKey)?.settings.compaction?.model?.id ??
               effectiveModelId(container) ??
               "unknown",
             usageInputTokens: started.data.trigger?.inputTokens ?? null,
@@ -345,6 +347,7 @@ export function accumulate(
 export interface ScopeContext {
   readonly abortSignal: AbortSignal;
   readonly channel: SessionFrame["channel"];
+  readonly conversation?: SessionFrame["conversation"];
   readonly ctx: InternalContext["ctx"];
   readonly session: Pick<SessionFrame["session"], "auth" | "id">;
 }
@@ -359,14 +362,14 @@ export async function resolveMemoryScope(
       ? await memory.scope({
           abortSignal: ctx.abortSignal,
           channel: ctx.channel,
+          ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
           session: { auth: ctx.session.auth, id: ctx.session.id },
         })
       : memory.scope;
   if (scope === null) return disabled(memory.slot, "scope");
-  const bundle = ctx.ctx.get(BundleKey);
   const namespaceContext = {
-    appRoot: bundle?.resolvedAgent.metadata.appRoot ?? "",
-    node: bundle?.nodeId ?? "__root__",
+    appRoot: compiledBundleOf(ctx.ctx)?.resolvedAgent.metadata.appRoot ?? "",
+    node: runtimeNodeId(ctx.ctx.get(SessionAgentKey) ?? {}),
     slot: memory.slot,
   };
   const namespace =

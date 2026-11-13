@@ -81,7 +81,7 @@ describe("Docker provider prewarm", () => {
       return undefined;
     });
     await mkdir(join(appRoot, "sandbox"), { recursive: true });
-    await writeFile(join(appRoot, "sandbox", "Dockerfile"), "FROM node:24\n");
+    await writeFile(join(appRoot, "sandbox", "Dockerfile"), "FROM node:26\n");
 
     await createEngine({ cli }).prepare({
       appRoot,
@@ -167,7 +167,7 @@ describe("Docker provider prewarm", () => {
     expect(baseSetup?.args[6]).toContain("mkdir -p /workspace");
     expect(baseSetup?.args[6]).toContain("command -v bash");
     expect(baseSetup?.args[6]).not.toContain("apt-get");
-    expect(baseSetup?.args[6]).not.toContain("deb.nodesource.com/node_24.x");
+    expect(baseSetup?.args[6]).not.toContain("deb.nodesource.com");
     expect(baseSetup?.args[6]).not.toContain("python3");
     expect(baseSetup?.args[6]).not.toContain("ripgrep");
 
@@ -735,7 +735,7 @@ describe("Docker template prune", () => {
     const appRoot = await createScratchDirectory("eve-docker-prune-");
     const { calls, cli, images } = createImageStoreDockerCli();
     await mkdir(join(appRoot, "sandbox"), { recursive: true });
-    await writeFile(join(appRoot, "sandbox", "Dockerfile"), "FROM node:24\n");
+    await writeFile(join(appRoot, "sandbox", "Dockerfile"), "FROM node:26\n");
 
     await prepareLikeDevelopment(appRoot, cli);
     await pruneEverything(appRoot, cli);

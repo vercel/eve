@@ -174,8 +174,11 @@ invoke_agent <agent>
   │     ├── chat <model>
   │     └── execute_tool <tool>
   │           └── agent.approval
+  ├── chat <model>
   └── agent.approval
 ```
+
+A `chat` span directly under `invoke_agent` is a [compaction](../concepts/execution-model-and-durability#compaction-handoff) summary request made during the turn. It carries `ai.settings.context.eve.compaction.request=summary`, so you can sum or exclude compaction usage and cost. A compaction between turns, such as one `session.compact()` starts, has no turn and exports no span.
 
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.
 
@@ -200,7 +203,7 @@ eve adds `gen_ai.conversation.id` to spans created during model, tool, and memor
 
 Gateway-routed model calls pass the configured OpenTelemetry context on each provider request. eve removes its own baggage first. AI Gateway decides whether its spans are sampled and which destinations receive them.
 
-When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity) for a model call, the `agent.step` span records it, even when the trace content policy omits outputs.
+When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity) for a model call, the `agent.step` span records it, or the `chat` span for a compaction's summary request, even when the trace content policy omits outputs.
 
 `vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for affinity. It isn't the eve session ID, which `vercel.session_id` records. Unless you set `gateway.sessionId` yourself, it equals `gen_ai.conversation.id`. AI Gateway hashes a conversation ID longer than 256 characters. eve records an authored `gateway.sessionId` exactly as written, so don't put personal data in it.
 

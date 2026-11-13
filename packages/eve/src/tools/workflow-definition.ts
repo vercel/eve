@@ -14,6 +14,7 @@ import {
   stampToolDefinition,
   type PublicToolDefinition,
   type ToolContext,
+  type ToolDefinition,
   type ToolQuestion,
   type ToolAskOptions,
   type ToolAnswer,
@@ -225,6 +226,11 @@ export interface WorkflowExecuteToolDefinition<
   TOutput = unknown,
 > extends WorkflowToolDefinitionBase<TInput, TOutput> {
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  /**
+   * Ends the turn after this call succeeds, without another model call or a reply, as
+   * `defineTool()`'s `endsTurn` does.
+   */
+  endsTurn?: ToolDefinition<unknown, TOutput>["endsTurn"];
   task?: never;
   serve?: never;
 }
@@ -285,6 +291,7 @@ type DefinitionFields<TInput, TOutput> = Omit<
   typeof WORKFLOW_TOOL_BRAND
 >;
 type ExecuteDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
+  endsTurn?: ToolDefinition<unknown, WorkflowReturn<TReturn>>["endsTurn"];
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
   task?: never;
   serve?: never;

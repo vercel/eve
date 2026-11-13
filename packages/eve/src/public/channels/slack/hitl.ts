@@ -15,6 +15,7 @@
 import {
   truncateCardBodyText,
   SLACK_SECTION_TEXT_MAX_LENGTH,
+  truncateContainerTitle,
   truncateModalTitle,
   truncatePlainText,
   truncateSectionText,
@@ -60,6 +61,27 @@ export const HITL_FREEFORM_MODAL_BLOCK_ID = "eve_freeform_block";
  */
 export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
 
+/** `block_id` of a select's actions block whose **Use** button submits the preselected option. */
+const USE_BLOCK_PREFIX = "eve_use:";
+const USE_LABEL_PREFIX = "Use ";
+
+/**
+ * The answer a click gave, as the person saw it: the picked option, or for the **Use** button,
+ * the preselected option it submits rather than the button's own text.
+ */
+export function answerLabelOf(action: {
+  readonly blockId?: string;
+  readonly label?: string;
+  readonly selectedOptionValue?: string;
+}): string | undefined {
+  const { blockId, label, selectedOptionValue } = action;
+  const isUseButton =
+    selectedOptionValue === undefined && blockId?.startsWith(USE_BLOCK_PREFIX) === true;
+  return isUseButton && label?.startsWith(USE_LABEL_PREFIX)
+    ? label.slice(USE_LABEL_PREFIX.length)
+    : label;
+}
+
 const HITL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}route:`;
 const HITL_CODE_CHANNEL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}code:`;
 
@@ -74,8 +96,15 @@ export type SlackHitlRoute = SlackSessionTarget;
 const RADIO_SELECT_OPTION_LIMIT = 6;
 const BUTTON_ACTION_ID_RE = /^(?:(?<kind>tool-approval):)?(?<requestId>.+):button:\d+$/u;
 const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
-const TOOL_INPUT_CODE_PREFIX = "```\n";
 const TOOL_INPUT_SUFFIX = "\n```";
+/**
+ * Slack echoes the whole message back on every click, so the approval's input preview has a
+ * fixed budget: callbacks stay bounded however large the tool input is.
+ */
+const TOOL_INPUT_PREVIEW_MAX_LENGTH = 1500;
+const TOOL_INPUT_VALUE_MAX_LENGTH = 500;
+const TOOL_INPUT_PREVIEW_MAX_FIELDS = 10;
+const APPROVAL_PAUSED_TEXT = "I've paused until someone approves or denies.";
 const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
 const ANSWERED_TEXT_SUFFIX = "*";
 
@@ -212,6 +241,9 @@ function encodeHitlActionId(request: Interaction, route?: SlackHitlRoute): strin
  *   dropdown so the picker stays scrollable.
  * - Either select with an `initialOptionId` starts on that option and adds
  *   a "Use <label>" button that submits it.
+ * - A tool approval whose call has input → one `container` holding the
+ *   prompt, a bounded preview of the input, and the buttons, so what is
+ *   being approved and the controls read as a single card.
  * - Anything else with options → Slack `card` blocks with action
  *   buttons. Best for visually distinct choices (allow / cancel /
  *   cancel).
@@ -252,17 +284,26 @@ export function renderInteractionBlocks(
     widget.initial_option = buildOption(initial);
     // Slack sends no action when the person keeps the preselected option, so a button submits it.
     const use = buildCardButton(
-      { id: initial.id, label: `Use ${initial.label}`, style: "primary" },
+      { id: initial.id, label: `${USE_LABEL_PREFIX}${initial.label}`, style: "primary" },
       actionId,
       0,
     );
-    return [prompt, ...details, { type: "actions", elements: [widget, use] }];
+    return [
+      prompt,
+      ...details,
+      {
+        type: "actions",
+        block_id: `${USE_BLOCK_PREFIX}${request.interactionId}`,
+        elements: [widget, use],
+      },
+    ];
   }
 
   if (options && options.length > 0) {
-    const card = renderInteractionCardBlock(request, actionId);
-    const details = renderToolInputContainerBlock(request);
-    return details === undefined ? [card] : [card, details];
+    const input = renderToolInputPreviewBlock(request);
+    return input === undefined
+      ? [renderInteractionCardBlock(request, actionId)]
+      : [renderApprovalContainerBlock(request, actionId, input)];
   }
 
   if (acceptsFreeform) {
@@ -289,42 +330,16 @@ export function renderInteractionBlocks(
 }
 
 /**
- * Splits approval details from their interactive controls. Slack includes the
- * originating message in `block_actions`, so putting large tool input beside
- * the buttons makes the callback body grow with model-authored input.
+ * eve's default messages for one request: a single controls message. Its notification text is
+ * only the prompt, since an approval card already carries the bounded input preview and Slack
+ * echoes both on every click.
  */
 export function renderInteractionPostParts(
   request: Interaction,
   route?: SlackHitlRoute,
 ): SlackInteractionCardParts {
   const blocks = renderInteractionBlocks(request, route);
-  const [firstBlock, ...details] = blocks;
-  if (
-    !isApprovalRequest(request) ||
-    firstBlock === undefined ||
-    !isBlockType(firstBlock, "card") ||
-    details.length === 0
-  ) {
-    return {
-      controls: { blocks, text: formatInteractionFallbackText(request) },
-    };
-  }
-
-  return {
-    controls: { blocks: [firstBlock], text: escapeSlackText(request.request.prompt) },
-    details: { blocks: details, text: formatInteractionFallbackText(request) },
-  };
-}
-
-/**
- * Creates the fallback text for one HITL request. Slack clients use this
- * outside the rich Block Kit surface, so include the same approval details
- * that appear in the blocks.
- */
-export function formatInteractionFallbackText(request: Interaction): string {
-  const prompt = escapeSlackText(request.request.prompt);
-  const details = formatToolInputDetails(request);
-  return details === undefined ? prompt : `${prompt}\n${details}`;
+  return { controls: { blocks, text: escapeSlackText(request.request.prompt) } };
 }
 
 /**
@@ -341,6 +356,8 @@ export type HitlFreeformModalMetadata = SlackSessionTarget & {
   readonly messageChannelId?: string;
   readonly messageTs: string;
   readonly requestId: string;
+  /** The click's `response_url`, when the card is ephemeral and only it can replace the card. */
+  readonly responseUrl?: string;
 };
 
 /**
@@ -443,9 +460,40 @@ function renderInteractionCardBlock(
   };
   // A tool approval holds the turn until someone acts, so say so on the card.
   if (isApprovalRequest(request)) {
-    card.subtext = { type: "mrkdwn", text: "I've paused until someone approves or denies." };
+    card.subtext = { type: "mrkdwn", text: APPROVAL_PAUSED_TEXT };
   }
   return card;
+}
+
+/**
+ * One approval card: the prompt as its title, the tool input it would run with, then the buttons.
+ * The primary choice leads because an `actions` row is left-aligned.
+ */
+function renderApprovalContainerBlock(
+  request: Interaction,
+  actionId: string,
+  input: BlockKitBlock,
+): BlockKitBlock {
+  const buttons = cardButtonOptions(request).map((opt, index) =>
+    buildCardButton(opt, actionId, index),
+  );
+  const primaryFirst = [
+    ...buttons.filter((button) => button.style === "primary"),
+    ...buttons.filter((button) => button.style !== "primary"),
+  ];
+  const prompt = request.request.prompt.replace(/\s+/gu, " ").trim();
+  return {
+    type: "container",
+    // `plain_text` renders literally, so the prompt needs no Slack escaping here. Slack refuses an
+    // empty title, so a blank prompt shows the tool's name.
+    title: {
+      type: "plain_text",
+      text: truncateContainerTitle(prompt || (request.call?.name ?? "Approve?")),
+    },
+    subtitle: { type: "mrkdwn", text: APPROVAL_PAUSED_TEXT },
+    has_header_divider: true,
+    child_blocks: [input, { type: "actions", elements: primaryFirst }],
+  };
 }
 
 function cardButtonOptions(request: Interaction): CardButtonOption[] {
@@ -517,30 +565,62 @@ function renderInteractionDetailBlocks(request: Interaction): BlockKitBlock[] {
     : [{ type: "section", text: { type: "mrkdwn", text: details } }];
 }
 
-function renderToolInputContainerBlock(request: Interaction): Record<string, unknown> | undefined {
-  const details = formatToolInputContainerText(request);
-  if (details === undefined) return undefined;
+type RichTextElement = Record<string, unknown>;
 
-  return {
-    type: "container",
-    title: { type: "plain_text", text: "Tool input" },
-    is_collapsible: true,
-    default_collapsed: true,
-    child_blocks: [{ type: "section", text: { type: "mrkdwn", text: details } }],
-  };
+/**
+ * The approval's tool input as `rich_text`: one bold name and value per line for an object, or
+ * the preformatted JSON for anything else. Rich text renders literally, so model-authored input
+ * can't format, link, or mention. Values beyond the preview budget are cut and counted.
+ */
+function renderToolInputPreviewBlock(request: Interaction): BlockKitBlock | undefined {
+  if (!isApprovalRequest(request)) return undefined;
+  const input = request.call?.input;
+  if (input === undefined || input === null) return undefined;
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    const json = JSON.stringify(input, null, 2);
+    const text = truncateWithEllipsis(json, TOOL_INPUT_PREVIEW_MAX_LENGTH);
+    return richText([{ type: "rich_text_preformatted", elements: [plainText(text)] }]);
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>).filter(
+    ([, value]) => value !== undefined,
+  );
+  if (entries.length === 0) return undefined;
+
+  const lines: RichTextElement[] = [];
+  let budget = TOOL_INPUT_PREVIEW_MAX_LENGTH;
+  let shown = 0;
+  for (const [name, value] of entries) {
+    // Each field also adds a few rich text elements, so the field count is capped too.
+    if (shown === TOOL_INPUT_PREVIEW_MAX_FIELDS || budget <= name.length + "...".length) break;
+    budget -= name.length;
+    // Slack refuses an empty rich text element, so an empty name or string shows as `""`.
+    const isText = typeof value === "string" && value.length > 0;
+    const raw = isText ? value : JSON.stringify(value);
+    const text = truncateWithEllipsis(raw, Math.min(TOOL_INPUT_VALUE_MAX_LENGTH, budget));
+    budget -= text.length;
+    if (shown > 0) lines.push(plainText("\n"));
+    lines.push({ ...plainText(name || '""'), style: { bold: true } }, plainText("  "));
+    lines.push(isText ? plainText(text) : { ...plainText(text), style: { code: true } });
+    shown += 1;
+  }
+  const hidden = entries.length - shown;
+  if (hidden > 0) {
+    lines.push({
+      ...plainText(`\n+${hidden} more field${hidden === 1 ? "" : "s"}`),
+      style: { italic: true },
+    });
+  }
+  return richText([{ type: "rich_text_section", elements: lines }]);
 }
 
-function formatToolInputContainerText(request: Interaction): string | undefined {
-  if (!isApprovalRequest(request)) return undefined;
+function richText(elements: RichTextElement[]): BlockKitBlock {
+  return { type: "rich_text", elements };
+}
 
-  const json = JSON.stringify(request.call?.input ?? {}, null, 2);
-  if (json === "{}") return undefined;
-  const escaped = escapeSlackText(json);
-
-  const bodyBudget =
-    SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_CODE_PREFIX.length - TOOL_INPUT_SUFFIX.length;
-  const body = truncateWithEllipsis(escaped, bodyBudget);
-  return `${TOOL_INPUT_CODE_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
+function plainText(text: string): RichTextElement {
+  return { type: "text", text };
 }
 
 function formatToolInputDetails(request: Interaction): string | undefined {
@@ -554,10 +634,6 @@ function formatToolInputDetails(request: Interaction): string | undefined {
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
   const body = truncateWithEllipsis(escaped, bodyBudget);
   return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
-}
-
-function isBlockType(value: unknown, type: string): boolean {
-  return typeof value === "object" && value !== null && (value as { type?: unknown }).type === type;
 }
 
 function isApprovalRequest(request: Interaction): boolean {

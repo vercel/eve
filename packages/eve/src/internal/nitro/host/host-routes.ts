@@ -247,6 +247,7 @@ export async function renderHostRoutes(
     readonly artifactsConfigPath: string;
     readonly workflowArtifacts: WorkflowArtifacts;
     readonly workflowWorldPluginPath?: string;
+    readonly timezoneRunner?: boolean;
   },
 ): Promise<HostNitroRoutes> {
   await mkdir(dirname(input.artifactsConfigPath), { recursive: true });
@@ -376,6 +377,7 @@ export async function renderHostRoutes(
     const digest = createHash("sha256").update(task.taskName).digest("hex").slice(0, 16);
     const handler = addVirtualModule(`schedule-task/${digest}`, renderScheduleTaskModule(task));
     tasks[task.nitroTaskName] = { description: task.description, handler };
+    if (input.timezoneRunner && task.timezone !== undefined) continue;
     const cronTasks = (scheduledTasks[task.cron] ??= []);
     if (!cronTasks.includes(task.nitroTaskName)) cronTasks.push(task.nitroTaskName);
   }

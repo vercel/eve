@@ -7,14 +7,65 @@ import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js"
 
 export type ConversationEnvironment = "development" | "preview" | "production";
 
+/**
+ * What kind of place a {@link ConversationSpace} is. `direct` is a one-to-one
+ * conversation between one person and the agent. `shared` is any place with
+ * more people, such as a Slack channel or a group chat.
+ */
+export type ConversationSpaceType = "direct" | "shared";
+
+export const CONVERSATION_SPACE_TYPES = ["direct", "shared"] as const;
+
+/**
+ * Who can find and join a {@link ConversationSpace}. `public` is open to anyone
+ * in its workspace, such as a public Slack channel. `private` is limited to its
+ * members, such as a DM, a group DM, or a private channel.
+ */
+export type ConversationSpaceVisibility = "public" | "private";
+
+/**
+ * The place on a chat platform where a conversation happens, such as a Slack
+ * channel, a Discord channel, or a Teams chat. Every session in that place
+ * reports the same space, so code can share data per place instead of per
+ * session or per caller.
+ */
+export interface ConversationSpace {
+  /**
+   * Stable ID of the place, namespaced by platform and workspace so it is
+   * unique across channels, such as `slack:T0123:C0456`.
+   */
+  readonly id: string;
+  readonly type: ConversationSpaceType;
+  /**
+   * Who can find and join the space. Absent when the channel can't tell, so
+   * code that needs it must treat a missing value as unknown, not as public.
+   * Unlike `audience`, which classifies the conversation for trace capture and
+   * reads `private` when unsure, this reports only what the platform says.
+   */
+  readonly visibility?: ConversationSpaceVisibility;
+  /**
+   * Stable ID of the workspace, server, or tenant that contains the space,
+   * such as `slack:T0123`. Absent when the platform has none.
+   */
+  readonly workspaceId?: string;
+}
+
+/**
+ * What eve knows about where a conversation happens, fixed when the session
+ * is created. A local subagent inherits its parent's.
+ */
 export interface ConversationContext {
+  /** The eve channel that created the session. */
   readonly channel: {
     readonly kind: InstrumentationChannelKind;
     readonly name?: string;
   };
+  /** Who can observe the conversation, for trace capture. Not an access control. */
   readonly audience: ChannelAudience;
   readonly environment: ConversationEnvironment;
   readonly principalType: string;
+  /** Where the conversation happens. Absent when the channel doesn't report one. */
+  readonly space?: ConversationSpace;
 }
 
 export type AudienceCaller =
@@ -34,6 +85,54 @@ export interface AudienceContext<TState> {
   readonly caller: AudienceCaller;
   readonly channel: ConversationContext["channel"];
   readonly environment: ConversationEnvironment;
+}
+
+/** Input for a channel's conversation space projection. */
+export interface ConversationSpaceContext<TState> {
+  readonly state: TState;
+}
+
+const MAX_SPACE_ID_LENGTH = 512;
+
+function readSpaceId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const id = value.trim();
+  // oxlint-disable-next-line no-control-regex -- Space IDs key storage and must not contain controls.
+  if (id.length === 0 || id.length > MAX_SPACE_ID_LENGTH || /[\u0000-\u001f\u007f]/u.test(id)) {
+    return undefined;
+  }
+  return id;
+}
+
+/** Validates a space a channel or a stored context reports; anything malformed reads as none. */
+export function normalizeConversationSpace(value: unknown): ConversationSpace | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as {
+    id?: unknown;
+    type?: unknown;
+    visibility?: unknown;
+    workspaceId?: unknown;
+  };
+  const id = readSpaceId(candidate.id);
+  const type = candidate.type;
+  if (
+    id === undefined ||
+    typeof type !== "string" ||
+    !CONVERSATION_SPACE_TYPES.includes(type as ConversationSpaceType)
+  ) {
+    return undefined;
+  }
+  const workspaceId = readSpaceId(candidate.workspaceId);
+  const visibility =
+    candidate.visibility === "public" || candidate.visibility === "private"
+      ? candidate.visibility
+      : undefined;
+  return {
+    id,
+    type: type as ConversationSpaceType,
+    ...(visibility !== undefined && { visibility }),
+    ...(workspaceId !== undefined && { workspaceId }),
+  };
 }
 
 /** Safe projection for durable sessions created before `eve.conversation` existed. */
@@ -82,6 +181,7 @@ interface SerializedConversationContext {
   readonly channel?: unknown;
   readonly environment?: unknown;
   readonly principalType?: unknown;
+  readonly space?: unknown;
 }
 
 export const ConversationContextKey = new ContextKey<ConversationContext>("eve.conversation", {
@@ -113,11 +213,13 @@ export function normalizeConversationContext(value: unknown): ConversationContex
   ) {
     return undefined;
   }
+  const space = normalizeConversationSpace(candidate.space);
   return {
     audience: normalizeChannelAudience(candidate.audience),
     channel,
     environment,
     principalType,
+    ...(space !== undefined && { space }),
   };
 }
 

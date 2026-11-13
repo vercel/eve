@@ -89,7 +89,7 @@ comes from the deployment URL returned by `vercel deploy --prebuilt`.
 
 One-time project setup:
 
-- Configure the shared Vercel project for Node.js 24.
+- Configure the shared Vercel project for Node.js 26.
 - Provide the model-provider credentials needed by `EVE_E2E_MODEL` in the
   project's Preview environment.
 - Provide `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` in CI.

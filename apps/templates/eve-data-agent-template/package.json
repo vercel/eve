@@ -1,0 +1,28 @@
+{
+  "name": "eve-data-agent-template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev --no-ui",
+    "start": "eve start",
+    "data:build": "node scripts/build-data.mjs",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.4.4-r.3",
+    "@vercel/connect": "^2.5.2",
+    "eve": "^0.84.0",
+    "just-bash": "3.6.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.x",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": "26.x"
+  },
+  "packageManager": "pnpm@12.17.0"
+}

@@ -16,6 +16,7 @@ import {
   chatSdkDriver,
   chatSdkTextDriver,
 } from "#internal/testing/channel-conformance/chat-sdk-driver.js";
+import type { ConformanceHostKind } from "#internal/testing/channel-conformance/hosts.js";
 import { discordDriver } from "#internal/testing/channel-conformance/discord-driver.js";
 import { githubDriver } from "#internal/testing/channel-conformance/github-driver.js";
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
@@ -34,7 +35,7 @@ export interface BrokenCell {
   readonly symptom: RegExp;
 }
 
-interface ConformanceChannel {
+export interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
    * A DM column beside the channel's shared-thread column. It runs only rules
@@ -371,37 +372,85 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
 }
 
 /**
+ * Why `rule` doesn't run on the in-process host yet: what it needs that an in-process session
+ * doesn't have. `undefined` for a rule that runs on both hosts.
+ */
+function inProcessGap(rule: string): string | undefined {
+  if (rule.includes("run ended"))
+    return "it cancels the session's Workflow run, which an in-process session doesn't have";
+  return undefined;
+}
+
+/**
+ * The channel whose whole contract also runs on Workflow. Every channel's runs in process; on
+ * Workflow, the others run only the rules the in-process host can't (`inProcessGap`), so each
+ * rule still runs somewhere, and Workflow keeps one channel end to end.
+ *
+ * Web chat's budget-prompt rules can still time out on Workflow: a typed answer and the message
+ * behind it can be joined into one input while the prompt is open (vercel/eve#6307). In process
+ * the two rarely queue together, which hides the bug rather than fixing it.
+ */
+const WORKFLOW_CHANNEL = "web-chat";
+
+/** Whether `rule` of `channel` runs on `host`. */
+function runsOn(host: ConformanceHostKind, channel: string | undefined, rule: string): boolean {
+  if (host === "in-process") return true;
+  return channel === WORKFLOW_CHANNEL || inProcessGap(rule) !== undefined;
+}
+
+/** The hosts each channel's contract runs on. */
+const HOSTS: readonly ConformanceHostKind[] = ["in-process", "workflow"];
+
+/**
  * Declares the channel contract cells for one channel directory. Each channel gets
  * its own test file because conversations can't overlap within a process, and
  * separate files let vitest run channels in parallel workers.
  */
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
-  const entries: readonly ConformanceChannel[] = channelConformance[channel];
-  describe.each(entries.map((entry) => ({ entry, name: entry.driver().name })))(
-    "$name channel contract",
-    ({ entry }) => {
-      for (const rule of channelContract) {
-        const cell = cellOf(entry, rule);
-        const { agent } = rule as ContractRule;
-        const run = (options?: { readonly waitTimeoutMs: number }) =>
-          withChannelConversation(entry.driver(), (c) => rule.run(c), { ...agent, ...options });
-        if (cell.kind === "unsupported") {
-          it.skip(`${rule.rule} (not supported: ${cell.reason})`, () => {});
-        } else if (cell.kind === "pass") {
-          it(rule.rule, () => run(), 60_000);
-        } else {
-          it(
-            `${rule.rule} (broken: ${cell.broken.reason})`,
-            () =>
-              expect(run({ waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS })).rejects.toThrow(
-                cell.broken.symptom,
-              ),
-            60_000,
-          );
-        }
-      }
-    },
+  describeConformance(channelConformance[channel], channel);
+}
+
+/**
+ * Holds each driver to the contract, for a channel outside eve's own table such
+ * as a workspace package's. `channel` names a table entry, which decides the
+ * hosts its rules run on; other channels run in process.
+ */
+export function describeConformance(
+  entries: readonly ConformanceChannel[],
+  channel?: string,
+): void {
+  const cases = entries.flatMap((entry) =>
+    HOSTS.map((host) => ({ entry, host, name: entry.driver().name })),
   );
+  describe.each(cases)("$name channel contract ($host)", ({ entry, host }) => {
+    for (const rule of channelContract) {
+      if (!runsOn(host, channel, rule.rule)) continue;
+      const gap = host === "in-process" ? inProcessGap(rule.rule) : undefined;
+      const cell: Cell =
+        gap === undefined ? cellOf(entry, rule) : { kind: "unsupported", reason: gap };
+      const { agent } = rule as ContractRule;
+      const run = (options?: { readonly waitTimeoutMs: number }) =>
+        withChannelConversation(entry.driver(), (c) => rule.run(c), {
+          ...agent,
+          ...options,
+          host,
+        });
+      if (cell.kind === "unsupported") {
+        it.skip(`${rule.rule} (not supported: ${cell.reason})`, () => {});
+      } else if (cell.kind === "pass") {
+        it(rule.rule, () => run(), 60_000);
+      } else {
+        it(
+          `${rule.rule} (broken: ${cell.broken.reason})`,
+          () =>
+            expect(run({ waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS })).rejects.toThrow(
+              cell.broken.symptom,
+            ),
+          60_000,
+        );
+      }
+    }
+  });
 }
 
 const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as const;

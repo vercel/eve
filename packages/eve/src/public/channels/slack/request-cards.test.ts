@@ -65,7 +65,7 @@ function harness(
   const state: SlackChannelState = {
     audience: "public",
     channelId: "C1",
-    slackUsersByPrincipal: { p_bob: "U_BOB" },
+    slackUsersByPrincipal: { p_alice: "U_ALICE", p_bob: "U_BOB" },
     teamId: null,
     threadTs: options.codeChannel === true ? null : "1.0",
     triggeringUserId: "U_ALICE",
@@ -91,11 +91,12 @@ function harness(
         }
         return { id: response.ts };
       },
-      async postEphemeral(user: string, text: string) {
-        const response = respond("chat.postEphemeral", { text, user });
+      async postEphemeral(user: string, message: string | Record<string, unknown>) {
+        const body = typeof message === "string" ? { text: message } : message;
+        const response = respond("chat.postEphemeral", { ...body, user });
         if (!response.ok)
           throw Object.assign(new Error("Slack refused the ephemeral"), { response });
-        return { id: "" };
+        return { id: response.ts };
       },
       async startTyping(status: string) {
         respond("thread.startTyping", { status });
@@ -337,7 +338,7 @@ const refusesStyled = ({ body }: Sent) =>
   JSON.stringify(body).includes("Styled") ? "invalid_blocks" : undefined;
 
 describe("Slack input request cards", () => {
-  it("posts a two-approval batch as one details message and one controls message", async () => {
+  it("posts a renderer's details before one controls message that carries each approval's input", async () => {
     const plan = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
@@ -353,10 +354,27 @@ describe("Slack input request cards", () => {
     const [details, controls, ...rest] = calls("thread.post");
     expect(rest).toEqual([]);
     expect(JSON.stringify(details?.body)).toContain("1. Draft the plan");
-    expect(JSON.stringify(details?.body)).toContain("prod");
+    expect(JSON.stringify(details?.body)).not.toContain("prod");
+    expect(JSON.stringify(controls?.body)).toContain("prod");
     expect(eveActionIds(details?.body)).toEqual([]);
     expect(blocksOf(controls)).toHaveLength(2);
     expect(eveActionIds(controls?.body)).toHaveLength(4);
+  });
+
+  it("splits a batch of large-input approvals so no echoed controls message grows with the batch", async () => {
+    const { ask, blocksOf, calls } = harness();
+    const large = { plan: "y".repeat(5000), script: "y".repeat(5000), notes: "y".repeat(5000) };
+
+    await ask(
+      approval("a_one", "deploy", large),
+      approval("a_two", "deploy", large),
+      approval("a_three", "deploy", large),
+    );
+
+    const posts = calls("thread.post");
+    expect(posts).toHaveLength(3);
+    for (const post of posts) expect(JSON.stringify(blocksOf(post)).length).toBeLessThan(4000);
+    expect(eveActionIds(posts.map((post) => post.body))).toHaveLength(6);
   });
 
   it("posts relabeled controls nested in a renderer's blocks, and they decode to the request", async () => {
@@ -403,6 +421,26 @@ describe("Slack input request cards", () => {
     expect(neighbor).toEqual(blocksOf(posted)[1]);
   });
 
+  it("retires an approval container in place, keeping what was approved", async () => {
+    const { answer, ask, blocksOf, calls } = harness();
+    await ask(approval("a_deploy", "deploy", { env: "prod" }));
+
+    await answer("a_deploy", { optionId: "approve" });
+
+    const [answered, ...rest] = blocksOf(calls("chat.update")[0]) as [
+      { child_blocks: Array<{ type: string }>; subtitle?: unknown; type: string },
+    ];
+    expect(rest).toEqual([]);
+    expect(answered.type).toBe("container");
+    expect(answered.subtitle).toBeUndefined();
+    expect(answered.child_blocks.map((child) => child.type)).toEqual(["rich_text", "context"]);
+    expect(JSON.stringify(answered)).toContain("prod");
+    expect(JSON.stringify(answered.child_blocks[1])).toContain(
+      ":white_check_mark: *Approve* by <@U_BOB>",
+    );
+    expect(eveActionIds(answered)).toEqual([]);
+  });
+
   it.each([
     { name: "an answered approval", outcome: "accepted" as const, shows: "Done: approve U_BOB" },
     { name: "an approval no longer needed", outcome: "withdrawn" as const, shows: "Done: none" },
@@ -421,8 +459,7 @@ describe("Slack input request cards", () => {
 
     // The settlement renders what the admitted answer already showed, so it updates nothing.
     expect(calls("chat.update").map((update) => blocksOf(update))).toEqual([[section(shows)]]);
-    // The details message posted first, as `ts_1`.
-    expect(calls("chat.delete").map((call) => call.body.ts)).toEqual(["ts_1"]);
+    expect(calls("chat.delete")).toEqual([]);
     expect(channel.state.interactionCards).toEqual([]);
   });
 
@@ -455,6 +492,63 @@ describe("Slack input request cards", () => {
       ["D_ALICE", "Answered: Approve"],
       ["C1", "Answered: Approve by <@U_BOB>."],
     ]);
+  });
+
+  it("shows an ephemeral question only to Alice and keeps her answer out of the thread", async () => {
+    const { answer, ask, calls, channel, sent, settle } = harness({
+      approvalChannel: () => "ephemeral",
+    });
+    await ask(dayQuestion());
+
+    // The note goes first: Slack hides an ephemeral in a thread that has no replies yet.
+    expect(sent.map((call) => call.method)).toEqual(["thread.post", "chat.postEphemeral"]);
+    expect(calls("thread.post")[0]?.body.text).toBe("Waiting on a response from <@U_ALICE>…");
+    const [card] = calls("chat.postEphemeral");
+    expect(card?.body.user).toBe("U_ALICE");
+    expect(eveActionIds(card?.body)[0]).toMatch(/^eve_input:route:C1:1\.0:q_day/u);
+
+    await answer("q_day", { optionId: "Saturday" }, "p_alice");
+    await settle("q_day", "accepted", { optionId: "Saturday" });
+
+    // Slack can't edit an ephemeral, so only the thread note changes, without the answer.
+    expect(calls("chat.update").map((update) => [update.body.ts, update.body.text])).toEqual([
+      ["ts_1", "Answered by <@U_ALICE>."],
+    ]);
+    expect(calls("chat.delete")).toEqual([]);
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("removes an ephemeral request's thread note when its card can't be posted", async () => {
+    const { ask, calls, channel } = harness({
+      approvalChannel: () => "ephemeral",
+      fails: ({ method }) => (method === "chat.postEphemeral" ? "ratelimited" : undefined),
+    });
+
+    await expect(ask(dayQuestion())).rejects.toThrow("Slack refused the ephemeral");
+
+    expect(calls("chat.delete").map((call) => [call.body.channel, call.body.ts])).toEqual([
+      ["C1", "ts_1"],
+    ]);
+    expect(channel.state.interactionCards ?? []).toEqual([]);
+  });
+
+  it("posts an ephemeral approval's controls again when its answer is refused", async () => {
+    const { answer, ask, calls, commit } = harness({ approvalChannel: () => "ephemeral" });
+    await ask(approval("a_deploy", "deploy", { target: "production" }));
+    const [first] = calls("chat.postEphemeral");
+    // An ephemeral can't drop a details message later, so the details ride with the controls.
+    expect(JSON.stringify(first?.body)).toContain("production");
+    await answer("a_deploy", { optionId: "approve" }, "p_alice");
+
+    await commit({
+      data: { outcome: "refused", reason: "Sign in to approve.", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    const [, again, notice] = calls("chat.postEphemeral");
+    expect(again?.body.blocks).toEqual(first?.body.blocks);
+    expect(notice?.body.text).toBe("Sign in to approve.");
+    expect(calls("chat.update")).toEqual([]);
   });
 
   const invalid: {
@@ -801,7 +895,10 @@ describe("Slack input request cards", () => {
       interactionCard(card, next) {
         const parts = next(card);
         if (card.interaction.status !== "open") return parts;
-        return controls(parts, [...parts.controls.blocks, section("Needs an owner")]);
+        return {
+          ...controls(parts, [...parts.controls.blocks, section("Needs an owner")]),
+          details: { blocks: [section("Deploy plan")], text: "Deploy plan" },
+        };
       },
     });
     const { ask, calls, channel, commit, settle } = harness({ renderers: [tall] });
