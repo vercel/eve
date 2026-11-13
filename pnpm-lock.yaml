@@ -523,8 +523,8 @@ importers:
         specifier: 0.2.2
         version: 0.2.2(@chat-adapter/shared@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(@react-email/render@2.1.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(bufferutil@4.1.0)(chat@4.42.0(ai@7.0.137(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
       '@stripe/link-integrations-eve':
-        specifier: ^0.2.0
-        version: 0.2.0(eve@packages+eve)
+        specifier: ^0.5.0
+        version: 0.5.0(eve@packages+eve)
       '@supermemory/eve':
         specifier: 0.1.1
         version: 0.1.1(eve@packages+eve)
@@ -2053,6 +2053,9 @@ importers:
       commander:
         specifier: 14.0.3
         version: 14.0.3
+      croner:
+        specifier: 11.0.0
+        version: 11.0.0
       dd-trace:
         specifier: 6.20.1
         version: 6.20.1
@@ -6905,14 +6908,14 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
-  '@stripe/link-integrations-eve@0.2.0':
-    resolution: {integrity: sha512-ODNAfSodbtg9HKAjS//BZ/qWTLAcuRJ7Dsp9CL+I+DcDn65YQiVq/MSbDN6D4fIJpLGUmtzfYA+H+KqzhFlKUA==}
+  '@stripe/link-integrations-eve@0.5.0':
+    resolution: {integrity: sha512-bjJvM5/3Tun9I1PhY+UAckCxWSLK/B4K4FFYMKIZtqMBBXbL5kLHwW2m6VaNl0/NHt/FcQwd1lyrGDvVXwnbDw==}
     engines: {node: '>=24'}
     peerDependencies:
-      eve: '*'
+      eve: ^1.0.0-rc.5
 
-  '@stripe/link-sdk@0.9.0':
-    resolution: {integrity: sha512-z3qvCYMkPl2JcA2rE3qSy+/uPthI+k3gSGdJIvkf8GHMcy/vG4O70OsWjC71yxyQD/BlyjkpwDvfkdU/Rq4a/g==}
+  '@stripe/link-sdk@3.1.0':
+    resolution: {integrity: sha512-QozzUrsTiLs22g+khOUFrJyRshbCTf15ISKkia++3CM/CWYeIXg0TiHwt6Homxhl8MyMj1oeR2GdPyssNBvuOg==}
     engines: {node: '>=20'}
 
   '@supermemory/eve@0.1.1':
@@ -9501,6 +9504,10 @@ packages:
 
   croner@10.0.1:
     resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
+    engines: {node: '>=18.0'}
+
+  croner@11.0.0:
+    resolution: {integrity: sha512-T17ADjdttrVToyzLpLq9Xb9xzcMwpQ/M3Qs9szhh0MVNTbv6NWQ9OFYa2qlzPYXFMn+uoDlnW1IpIv6cAvFtyA==}
     engines: {node: '>=18.0'}
 
   cross-spawn@7.0.6:
@@ -20737,13 +20744,13 @@ snapshots:
       react: 19.2.6
       shiki: 3.23.0
 
-  '@stripe/link-integrations-eve@0.2.0(eve@packages+eve)':
+  '@stripe/link-integrations-eve@0.5.0(eve@packages+eve)':
     dependencies:
-      '@stripe/link-sdk': 0.9.0
+      '@stripe/link-sdk': 3.1.0
       eve: link:packages/eve
       zod: 4.6.7
 
-  '@stripe/link-sdk@0.9.0':
+  '@stripe/link-sdk@3.1.0':
     dependencies:
       zod: 4.6.7
 
@@ -23804,6 +23811,8 @@ snapshots:
       readable-stream: 4.7.0
 
   croner@10.0.1: {}
+
+  croner@11.0.0: {}
 
   cross-spawn@7.0.6:
     dependencies:

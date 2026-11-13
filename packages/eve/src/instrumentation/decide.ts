@@ -17,7 +17,7 @@ import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-con
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
@@ -34,7 +34,7 @@ export async function decideWithTracing<
   if (runtime === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
   const session = readInstrumentationSessionContext(ctx);
-  const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
+  const agentName = ctx.get(SessionAgentKey)?.name ?? "eve";
   const hooks = runtime.hooks.forTrace?.({ agentName, ...session.conversation }) ?? runtime.hooks;
   const settings = runtime.otelSettings;
   const traceDecision = runtime.decision;

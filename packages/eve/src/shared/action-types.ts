@@ -151,6 +151,8 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
+    /** Bound to the authorized call; optional only to read older persisted requests, which fail closed. */
+    admission: z.object({ callId: z.string(), fingerprint: z.string() }).strict().optional(),
     clearedBy: clearedBySchema.optional(),
     entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),

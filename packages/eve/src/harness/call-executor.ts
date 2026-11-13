@@ -574,7 +574,6 @@ async function decideDeferredCall(
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
-  if (definition.approval === undefined) return { settled: [], toolResults: [] };
   const decision = await decideApproval(definition, {
     abortSignal: input.abortSignal,
     approvalMemory: input.approvalMemory,

@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 
-import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
+import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifact-contract.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";

@@ -20,10 +20,7 @@ import { isV26Line } from "#protocol/v26-lines.js";
 import { v26LineStream } from "#execution/v26-history.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
-import {
-  isExpiredWorkflowRunError,
-  isMissingWorkflowRunError,
-} from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { isRunExpired, isRunMissing } from "#shared/run-errors.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -416,13 +413,13 @@ export async function createSessionStreamResponse(
   } catch (error) {
     const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;
-    if (isExpiredWorkflowRunError(error)) {
+    if (isRunExpired(error)) {
       return Response.json(
         { code: "session_expired", error: "Session history is no longer available.", ok: false },
         { headers: { "cache-control": "no-store" }, status: 410 },
       );
     }
-    const notFound = isMissingWorkflowRunError(error);
+    const notFound = isRunMissing(error);
     return Response.json(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
       { status: notFound ? 404 : 503 },

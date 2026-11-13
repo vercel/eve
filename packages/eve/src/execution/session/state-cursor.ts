@@ -1,7 +1,7 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type {
-  SessionHistoryStepState,
-  SessionStepState,
+  SessionHistoryStepInput,
+  SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import {
@@ -62,7 +62,7 @@ export class SessionStateCursor {
    * small; it cannot change the history either.
    */
   async advance<T extends SessionStateTransition>(
-    step: (state: SessionStepState) => Promise<T>,
+    step: (state: SessionStepInput) => Promise<T>,
   ): Promise<T> {
     const { serializedContext, sessionState } = this.values;
     return await this.adopt(
@@ -73,7 +73,7 @@ export class SessionStateCursor {
 
   /** {@link advance} for a step that reads or changes the history, such as a turn. */
   async advanceWithHistory<T extends SessionStateTransition>(
-    step: (state: SessionHistoryStepState) => Promise<T>,
+    step: (state: SessionHistoryStepInput) => Promise<T>,
   ): Promise<T> {
     return await this.adopt(() => step({ ...this.values, sessionWritable: this.sessionWritable }), {
       withHistory: true,
@@ -88,7 +88,7 @@ export class SessionStateCursor {
    * that dropping its delta would lose for good.
    */
   async advanceBeside<T extends SessionStateTransition>(
-    step: (state: SessionStepState) => Promise<T>,
+    step: (state: SessionStepInput) => Promise<T>,
     wanted: () => boolean,
   ): Promise<boolean> {
     const base = this.values;

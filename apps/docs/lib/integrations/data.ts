@@ -2201,14 +2201,23 @@ The extension also supports inline screenshots, session naming, proxies, and pro
   link: {
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",
-    keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
+    keywords: [
+      "stripe",
+      "wallet",
+      "payments",
+      "checkout",
+      "spend requests",
+      "approval",
+      "oauth",
+      "financial insights",
+    ],
     install: `Install the Link extension for eve:
 
 \`\`\`bash
 eve add extension/link
 \`\`\`
 
-The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
+The extension requires Node.js 24 or later and eve 1.0.0-rc.5 or later. Configure a static Link access token or an application-owned authorization provider. With a static token, every caller uses the same wallet, so restrict access to the agent.`,
     quickStart: `Add a Link access token to the agent's server environment:
 
 \`\`\`bash title=".env.local"
@@ -2225,10 +2234,27 @@ export default link({
 });
 \`\`\`
 
-The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
-    configure: `Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, financial insights, and purchase reports. It also includes payment-credential and financial-insights skills. Financial-data tools require the corresponding permissions on the token.`,
+    configure: `### Per-user authorization
 
-Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. The skill tells the agent not to repeat credentials in chat, but applications remain responsible for transcript access and retention. Keep the token out of prompts and source control; a 401 requires the operator to configure a replacement token. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+For per-user wallets, pass an application-owned authorization provider instead of \`accessToken\`:
+
+\`\`\`ts title="agent/extensions/link.ts"
+import link from "@stripe/link-integrations-eve";
+import { linkAuth } from "../lib/link-auth";
+
+export default link({ auth: linkAuth });
+\`\`\`
+
+Implement \`linkAuth\` with [\`defineInteractiveAuthorization\`](/docs/connections#self-hosted-interactive-oauth). Your application owns Link's OAuth consent, callback routing, state and PKCE validation, token storage, refresh, and revocation. Interactive authorization requires an authenticated user on the agent's inbound channel. Configure exactly one of \`accessToken\` or \`auth\`. See the [Link extension's OAuth guide](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve#interactive-oauth) for the provider contract.
+
+Static-token mode does not start OAuth or refresh tokens. A 401 requires the operator to configure a replacement token.
+
+### Purchase approval and sensitive data
+
+Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` creates a draft for a later \`request_spend_approval\` call; it does not authorize a purchase.
+
+Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. Financial-data and insight results can also contain private information. The skills tell the agent not to repeat credentials and to summarize financial data. Applications remain responsible for transcript access and retention. Keep tokens out of prompts and source control. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
   },
 };
 

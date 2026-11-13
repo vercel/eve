@@ -6,7 +6,7 @@ import {
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
+import { commitSessionStep, type SessionStepInput } from "#execution/publish-session-events.js";
 import {
   type SessionStateTransition,
   type WithSessionStateDelta,
@@ -16,6 +16,7 @@ import {
   startWorkflowTask,
   startWorkflowToolCallRun,
   type StartWorkflowTaskInput,
+  type StartWorkflowToolRun,
 } from "#execution/tools/workflow/start.js";
 import {
   runEntryToStart,
@@ -23,7 +24,14 @@ import {
   startsEveryRun,
   startTaskRun,
 } from "#execution/tasks/start.js";
-import { readTaskTable, type TaskTable } from "#execution/tasks/table.js";
+import {
+  readTaskTable,
+  removeTask,
+  writeTaskTable,
+  type TaskTable,
+} from "#execution/tasks/table.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { hasWorkflowAdmission } from "#harness/workflow-admission.js";
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import {
@@ -33,31 +41,32 @@ import {
   type TaskCallStart,
 } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
- * Starts the runs of the pending calls and records them on the session. A
- * retry starts its runs again, since a Workflow start has no idempotency key,
- * so this step publishes nothing and commits as soon as the runs are
- * recorded. See {@link publishDispatchedCallsStep}.
+ * The dispatch Workflow's `dispatchCoordinationStep` runs (`workflow-host/dispatch-step.ts`),
+ * starting each run with `startRun`: Workflow starts its runs on the current deployment, and
+ * another host starts them its own way.
  */
-export async function dispatchCoordinationStep(
+export function dispatchCoordinationOn(
+  startRun: StartWorkflowToolRun,
+): (
   input: CoordinationDispatchInput,
-): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
-  "use step";
-  return await withSessionStateDelta(input, dispatchCoordination);
+) => Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) => dispatchCoordination(state, startRun));
 }
 
 /**
- * Publishes, as one commit, what {@link dispatchCoordinationStep} recorded: the calls the turn
+ * Publishes, as one commit, what the dispatch recorded: the calls the turn
  * waits on started, the tasks it started or reached, and the calls it refused. Run ownership is
  * checkpointed first, so retrying the publication cannot start those runs again.
  */
 export async function publishDispatchedCallsStep(
-  input: SessionStepState & { readonly pending: PendingDispatch },
+  input: SessionStepInput & { readonly pending: PendingDispatch },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, ({ pending, ...target }) =>
@@ -67,6 +76,7 @@ export async function publishDispatchedCallsStep(
 
 async function dispatchCoordination(
   input: CoordinationDispatchInput,
+  startRun: StartWorkflowToolRun,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
@@ -91,9 +101,37 @@ async function dispatchCoordination(
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
   const admissionView = copyView(storedProjection(session.state).view);
+  const admitted: RuntimeWorkflowTaskRequest[] = [];
+  for (const task of prepared.plan) {
+    if (hasWorkflowAdmission(task)) {
+      admitted.push(task);
+      continue;
+    }
+    const result = createRuntimeToolResultFromValue({
+      callId: task.callId,
+      toolName: task.toolName,
+      output: {
+        code: "TOOL_EXECUTION_DENIED",
+        message:
+          "The call was not started: it was not admitted to run, for example because it was " +
+          "made before an upgrade. Make the call again to run it.",
+        tool: { result: "not_run" },
+      },
+      isError: true,
+    });
+    results.push(result);
+    // No approval policy refused it, so it isn't labelled as one.
+    refused.push({ policy: "admission", result });
+    if (task.entry.entryPoint === "task" || task.entry.entryPoint === "serve") {
+      nextSession = writeTaskTable(
+        nextSession,
+        removeTask(readTaskTable(nextSession.state), task.entry.taskId),
+      );
+    }
+  }
 
   const starts = withPrestartedRuns(
-    prepared.plan.map((task) => ({
+    admitted.map((task) => ({
       agentContext: captureAgentSessionContext(prepared, task.callId),
       auth: {
         current: prepared.auth,
@@ -103,10 +141,11 @@ async function dispatchCoordination(
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
-      session,
+      session: nextSession,
+      startRun,
       task,
     })),
-    readTaskTable(session.state),
+    readTaskTable(nextSession.state),
     admissionView,
   );
 

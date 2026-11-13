@@ -25,7 +25,7 @@ import {
   isAppliedRunMessage,
   takeLeadingAppliedRunMessages,
 } from "#execution/session-workflow-tool-run.js";
-import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";

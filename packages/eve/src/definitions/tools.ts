@@ -4,7 +4,7 @@ import type { ContextReader } from "#context/key.js";
 import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -23,7 +23,7 @@ import {
   readWorkflowToolEntryPoints,
 } from "#tools/workflow-definition.js";
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { createWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import { assertNoOwnTaskIdInput } from "#internal/authored-definition/schema-backed.js";
 import { namedEntries, type EntryKind } from "./named.js";
@@ -198,7 +198,7 @@ function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, na
     remedy: "Rename the map key.",
     subject: "Dynamic tool",
   });
-  const bundle = ctx.get(BundleKey);
+  const bundle = compiledBundleOf(ctx);
   if (bundle === undefined) return;
   const { subagentRegistry, toolRegistry } = bundle;
   const workflowNames = new Set([

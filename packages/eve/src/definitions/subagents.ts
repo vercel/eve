@@ -5,7 +5,7 @@ import type { DurableDynamicSubagentSelection } from "#context/keys.js";
 import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import {
   normalizeDynamicRemoteAgent,
@@ -130,7 +130,7 @@ async function selectionOf(
     return credentials === undefined ? { selection } : { credentials, selection };
   }
   const configured = await normalizeDynamicSubagentAgentConfig({
-    modelMetadata: ctx.require(BundleKey).modelMetadata,
+    modelMetadata: requireCompiledBundle(ctx).modelMetadata,
     name: resolver.name,
     state: ctx,
     value: result,
@@ -163,7 +163,7 @@ function assertToolNameAvailable(
     );
   }
   if (tool === false) return;
-  if (ctx.get(BundleKey)?.toolRegistry.toolsByName.has(resolver.name) !== true) return;
+  if (compiledBundleOf(ctx)?.toolRegistry.toolsByName.has(resolver.name) !== true) return;
   throw new Error(
     `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" collides with the tool "${resolver.name}". Set the subagent's tool to false when that tool wraps it.`,
   );
