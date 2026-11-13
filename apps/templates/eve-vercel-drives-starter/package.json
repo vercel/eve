@@ -1,0 +1,47 @@
+{
+  "name": "eve-vercel-drives-starter",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "eve build",
+    "deploy": "eve deploy",
+    "dev": "eve dev",
+    "eval": "eve eval",
+    "typecheck": "tsc",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "prepare": "lefthook install",
+    "test": "vitest run",
+    "validate": "pnpm run check && pnpm run typecheck && pnpm run test && pnpm run knip",
+    "knip": "knip",
+    "drive:upload": "node --env-file-if-exists=.env.local scripts/upload-to-drive.ts"
+  },
+  "dependencies": {
+    "@vercel/connect": "2.2.0",
+    "@vercel/sandbox": "3.5.1",
+    "ai": "^7.0.128",
+    "eve": "^0.76.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "eslint-plugin-jsdoc": "^65.2.4",
+    "eslint-plugin-tsdoc": "^0.5.4",
+    "just-bash": "^3.6.0",
+    "knip": "^6.41.0",
+    "lefthook": "^2.2.1",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.87.0",
+    "oxlint-tsgolint": "^7.0.2004",
+    "typescript": "7.0.2",
+    "ultracite": "8.0.0",
+    "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
