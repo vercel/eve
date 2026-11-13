@@ -48,7 +48,7 @@ export default defineTool({
       await openInBrowser(ctx, url);
       setShownPage({ pageId, url, follow });
     }
-    await shareScreen(botId, stage);
+    await shareScreen(botId, stage.url, stage.restarted);
     return { sharing: true, showing: screen, ...(url && { url }), page: await describePage(ctx) };
   },
 });

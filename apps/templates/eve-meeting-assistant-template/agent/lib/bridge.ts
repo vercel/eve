@@ -29,12 +29,13 @@ export const LOAD_SIGN_INS = `${FIND_STATE}; if [ -n "$state" ]; then mkdir -p ~
 /**
  * Starts the bridge and the browser, or updates the bridge's files and key
  * when they already run. A resumed sandbox keeps files but not processes, so
- * this checks every time.
+ * this checks every time. Returns whether it started a new bridge, whose
+ * page a viewer has to reload.
  */
 export async function startBridge(
   shell: Shell,
   options: { readonly key: string; readonly interactive: boolean },
-): Promise<void> {
+): Promise<boolean> {
   const files: Record<string, string> = {
     "bridge.mjs": BRIDGE_SERVER,
     "screen.html": SCREEN_HTML,
@@ -51,7 +52,7 @@ export async function startBridge(
     `BRIDGE_VERSION=${VERSION}`,
   ].join(" ");
   const healthy = `[ "$(curl -fs http://127.0.0.1:${BRIDGE_PORT}/healthz)" = ${VERSION} ]`;
-  await sh(
+  const output = await sh(
     shell,
     [
       `mkdir -p ${ROOT}`,
@@ -72,6 +73,7 @@ export async function startBridge(
         BRIDGE_PORT +
         "/healthz >/dev/null || break; sleep 0.1; done",
       `  ${env} setsid -f node ${ROOT}/bridge.mjs > ${ROOT}/bridge.log 2>&1 < /dev/null`,
+      "  echo started",
       "fi",
       "for _ in $(seq 1 50); do",
       `  ${healthy} && exit 0`,
@@ -80,4 +82,5 @@ export async function startBridge(
       `cat ${ROOT}/bridge.log >&2; exit 1`,
     ].join("\n"),
   );
+  return output.includes("started");
 }
