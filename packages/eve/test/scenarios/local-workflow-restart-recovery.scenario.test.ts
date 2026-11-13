@@ -82,17 +82,42 @@ afterAll(async () => {
 
 afterEach(() => vi.unstubAllEnvs());
 
-function readStoredWaits(appRoot: string): { readonly status: string }[] {
+function readStoredWaits(appRoot: string): { readonly status: string; readonly waitId: string }[] {
   const waits = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "waits");
   if (!existsSync(waits)) return [];
   return readdirSync(waits)
     .filter((file) => file.endsWith(".json"))
-    .map((file) => JSON.parse(readFileSync(join(waits, file), "utf8")) as { status: string });
+    .map(
+      (file) =>
+        JSON.parse(readFileSync(join(waits, file), "utf8")) as { status: string; waitId: string },
+    );
+}
+
+/**
+ * Counts stored waits whose `wait_created` event is in their run's log. The
+ * World writes a wait before its event, and a crash between the two leaves a
+ * run that cannot replay, so the test crashes only once both are written.
+ */
+function countJournaledWaits(appRoot: string): number {
+  const events = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "events");
+  if (!existsSync(events)) return 0;
+  const journaled = new Set<string>();
+  for (const runId of readdirSync(events)) {
+    for (const file of readdirSync(join(events, runId))) {
+      if (!file.endsWith(".json")) continue;
+      const event = JSON.parse(readFileSync(join(events, runId, file), "utf8")) as {
+        correlationId?: string;
+        eventType?: string;
+      };
+      if (event.eventType === "wait_created") journaled.add(`${runId}-${event.correlationId}`);
+    }
+  }
+  return readStoredWaits(appRoot).filter((wait) => journaled.has(wait.waitId)).length;
 }
 
 /**
  * Starts a turn, SIGKILLs `eve start` once the agent writes `crashMarker` and
- * the local World stores at least `storedWaits` waits, restarts on the same
+ * the local World journals at least `storedWaits` waits, restarts on the same
  * data directory, and returns the turn's outcome, or undefined if it does not
  * settle within 60s.
  */
@@ -116,7 +141,7 @@ async function crashMidTurnAndRecover(input: {
       .poll(() => existsSync(join(appRoot, input.crashMarker)), { timeout: 30_000 })
       .toBe(true);
     await expect
-      .poll(() => readStoredWaits(appRoot).length)
+      .poll(() => countJournaledWaits(appRoot), { timeout: 30_000 })
       .toBeGreaterThanOrEqual(input.storedWaits ?? 0);
   } finally {
     await server.crash();
