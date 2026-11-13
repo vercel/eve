@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 
 import { createWorld } from "@workflow/world-local";
 
-import { guardStrandedSessionReplay } from "#execution/session-inbox/stranded-replay-guard.js";
 import { setWorld } from "#internal/workflow/runtime.js";
 
 // The local World an integration test file's sessions run on, opened by the Workflow test setup
@@ -191,8 +190,13 @@ async function startWorld(
     recoverActiveRuns: recover,
     tag: options.tag,
   });
-  // A file's own runs are never stranded; a restart boots as an app does.
-  const world = recover ? guardStrandedSessionReplay(created) : created;
+  // A file's own runs are never stranded; a restart boots as an app does. Loaded only then, so
+  // every other file's setup doesn't import it.
+  const world = recover
+    ? (
+        await import("#execution/session-inbox/stranded-replay-guard.js")
+      ).guardStrandedSessionReplay(created)
+    : created;
   world.registerHandler(options.prefix as never, deliveries.handler);
   const queue = world.queue.bind(world);
   world.queue = async (name, message, opts) => {
@@ -291,16 +295,12 @@ function trackDeliveries(initial: Handler): Deliveries {
       adjust(messageId, 1);
       return;
     }
-    const timeoutSeconds = Number(
-      await response
-        .clone()
-        .json()
-        .then(
-          (body) => (body as { timeoutSeconds?: unknown }).timeoutSeconds,
-          () => undefined,
-        ),
-    );
     // `timeoutSeconds: 0` redelivers at once; more waits out a timer.
+    const text = await response.clone().text();
+    if (!text.includes("timeoutSeconds")) return;
+    const timeoutSeconds = Number(
+      (JSON.parse(text) as { timeoutSeconds?: unknown }).timeoutSeconds,
+    );
     if (timeoutSeconds === 0) adjust(messageId, 1);
   };
 
@@ -308,14 +308,20 @@ function trackDeliveries(initial: Handler): Deliveries {
     // world-local drops a delivery whose handler throws an AbortError.
     if (closing) throw new DOMException("The test workflow world is closing.", "AbortError");
     const messageId = request.headers.get("x-vqs-message-id") ?? "";
-    const body = await request.text();
-    const runId = runIdOf(body);
     const ours = generation;
     seen.add(messageId);
     adjust(messageId, -1);
     running += 1;
-    if (runId !== undefined) recovering.delete(runId);
     try {
+      // Only a restart's recovery, or a delivery a test may fail on purpose, reads the body.
+      if (recovering.size === 0 && redeliver === 0) {
+        const response = await handle(request);
+        if (ours === generation) await afterResponse(messageId, response);
+        return response;
+      }
+      const body = await request.text();
+      const runId = runIdOf(body);
+      if (runId !== undefined) recovering.delete(runId);
       let attempt = Number(request.headers.get("x-vqs-message-attempt") ?? "1");
       for (;;) {
         const headers = new Headers(request.headers);
