@@ -756,6 +756,11 @@ describe("compileAgentManifest source graph", () => {
         '"scopes.my scope" must be named with',
       ],
       [
+        "a scope named for the object prototype",
+        { scopes: Object.fromEntries([["__proto__", () => "x"]]) },
+        '"scopes.__proto__" must be named with',
+      ],
+      [
         "a scope approval and no tools",
         { tool: false, scopes: { personal: { resolve: () => "x", approval: {} } } },
         '"scopes.personal.approval" cannot be configured when tool is false',

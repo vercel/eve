@@ -22,7 +22,11 @@ export function namedScopeCollectionName(
  * same object and `schedules(definition, { scope })` binds what the runtime stamped.
  */
 export function namedScopeDefinition(definition: AnyDefinition, scopeName: string): AnyDefinition {
-  const entry = definition.scopes?.[scopeName];
+  // Own names only: an inherited property such as `toString` is not a scope the author declared.
+  const entry =
+    definition.scopes !== undefined && Object.hasOwn(definition.scopes, scopeName)
+      ? definition.scopes[scopeName]
+      : undefined;
   if (entry === undefined)
     throw new Error(
       `Dynamic schedules definition has no scope "${scopeName}". Its scopes are: ${Object.keys(definition.scopes ?? {}).join(", ") || "none"}.`,

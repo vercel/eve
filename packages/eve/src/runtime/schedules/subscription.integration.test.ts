@@ -413,6 +413,9 @@ describe("schedule creation and invocation", () => {
         "pass one as { scope }: personal, channel",
       );
       await expect(schedules(workflows, { scope: "team" })).rejects.toThrow('no scope "team"');
+      await expect(schedules(workflows, { scope: "toString" })).rejects.toThrow(
+        'no scope "toString"',
+      );
     });
   });
 

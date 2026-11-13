@@ -120,7 +120,7 @@ export function normalizeScheduleCollectionDefinition(
       throw new Error(`${message} "scopes" must declare at least one scope.`);
     for (const [name, entry] of Object.entries(scopes)) {
       const at = `${message} "scopes.${name}"`;
-      if (!SCHEDULE_SCOPE_NAME_PATTERN.test(name))
+      if (!SCHEDULE_SCOPE_NAME_PATTERN.test(name) || name === "__proto__")
         throw new Error(
           `${at} must be named with 1 to 64 ASCII letters, digits, underscores, and dashes.`,
         );
