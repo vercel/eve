@@ -26,4 +26,13 @@ describe("eve sandbox image", () => {
     expect(images.DEFAULT_EVE_SANDBOX_IMAGE).toBe("ghcr.io/vercel/eve:latest");
     expect(images.VERCEL_EVE_SANDBOX_IMAGE).toBe("vcr.vercel.com/vercel/eve/base:latest");
   });
+
+  it("pins the eve-git image to a content tag on both registries", async () => {
+    vi.stubEnv("EVE_SANDBOX_IMAGE_TAG", "latest");
+    const images = await importImages();
+    const tag = images.DEFAULT_EVE_GIT_SANDBOX_IMAGE.replace("ghcr.io/vercel/eve-git:", "");
+
+    expect(tag).toMatch(/^git-[0-9a-f]{12}$/);
+    expect(images.VERCEL_EVE_GIT_SANDBOX_IMAGE).toBe(`vcr.vercel.com/vercel/eve/git:${tag}`);
+  });
 });

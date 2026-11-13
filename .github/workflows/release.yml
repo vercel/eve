@@ -17,6 +17,8 @@ permissions:
 env:
   GHCR_IMAGE: ghcr.io/vercel/eve
   VCR_IMAGE: vcr.vercel.com/vercel/eve/base
+  GHCR_GIT_IMAGE: ghcr.io/vercel/eve-git
+  VCR_GIT_IMAGE: vcr.vercel.com/vercel/eve/git
 
 jobs:
   release:
@@ -61,6 +63,10 @@ jobs:
           echo "tag=${tag}" >>"$GITHUB_OUTPUT"
           echo "ghcr-tag=${GHCR_IMAGE}:${tag}" >>"$GITHUB_OUTPUT"
           echo "vcr-tag=${VCR_IMAGE}:${tag}" >>"$GITHUB_OUTPUT"
+          git_tag="$(node scripts/sandbox-image-tag.mjs --git)"
+          echo "git-tag=${git_tag}" >>"$GITHUB_OUTPUT"
+          echo "ghcr-git-tag=${GHCR_GIT_IMAGE}:${git_tag}" >>"$GITHUB_OUTPUT"
+          echo "vcr-git-tag=${VCR_GIT_IMAGE}:${git_tag}" >>"$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         if: github.ref == 'refs/heads/main'
@@ -87,12 +93,14 @@ jobs:
 
       # Content tags are immutable: an existing tag is never rebuilt, so every
       # registry serves the bytes the first build produced.
-      - name: Check which registries already have the sandbox image
+      - name: Check which registries already have the sandbox images
         if: github.ref == 'refs/heads/main'
         id: image-state
         env:
           GHCR_TAG: ${{ steps.image-tags.outputs.ghcr-tag }}
           VCR_TAG: ${{ steps.image-tags.outputs.vcr-tag }}
+          GHCR_GIT_TAG: ${{ steps.image-tags.outputs.ghcr-git-tag }}
+          VCR_GIT_TAG: ${{ steps.image-tags.outputs.vcr-git-tag }}
         run: |
           set -euo pipefail
 
@@ -117,6 +125,15 @@ jobs:
           echo "build=$([[ "$ghcr" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
           echo "copy-to-vcr=$([[ "$vcr" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
 
+          ghcr_git="$(published "$GHCR_GIT_TAG")"
+          vcr_git="$(published "$VCR_GIT_TAG")"
+          if [[ "$ghcr_git" == false && "$vcr_git" == true ]]; then
+            echo "::error::$VCR_GIT_TAG exists but $GHCR_GIT_TAG does not. GHCR is published first and holds the arm64 variant, so it cannot be restored from VCR; delete $VCR_GIT_TAG and rerun." >&2
+            exit 1
+          fi
+          echo "build-git=$([[ "$ghcr_git" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+          echo "copy-git-to-vcr=$([[ "$vcr_git" == false ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+
       # These build settings are not part of the content tag. Changing them
       # republishes nothing until the Dockerfile also changes.
       - name: Build and publish the sandbox image to GitHub Container Registry
@@ -138,6 +155,29 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # eve-git layers `gh` on the default image published above, so it builds
+      # from the GHCR tag, which holds both platforms.
+      - name: Build and publish the eve-git sandbox image to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' && steps.image-state.outputs.build-git == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./packages/eve
+          file: ./packages/eve/Dockerfile.git
+          build-args: |
+            EVE_IMAGE=${{ steps.image-tags.outputs.ghcr-tag }}
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          tags: ${{ steps.image-tags.outputs.ghcr-git-tag }}
+          labels: |
+            org.opencontainers.image.title=eve-git Sandbox
+            org.opencontainers.image.description=eve sandbox base image with the GitHub CLI.
+            org.opencontainers.image.source=https://github.com/vercel/eve
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.image-tags.outputs.git-tag }}
+          outputs: type=image,push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
+          cache-from: type=gha,scope=eve-git
+          cache-to: type=gha,mode=max,scope=eve-git
+
       # Vercel Sandbox runs amd64 and VCR has always received a single-platform
       # manifest. Copying the GHCR amd64 manifest by digest keeps that shape
       # and guarantees both registries serve identical bytes. skopeo reads the
@@ -155,6 +195,20 @@ jobs:
           skopeo copy --preserve-digests \
             "docker://${GHCR_IMAGE}@${amd64_digest}" \
             "docker://${VCR_TAG}"
+
+      - name: Copy the amd64 eve-git sandbox image to Vercel Container Registry
+        if: github.ref == 'refs/heads/main' && steps.image-state.outputs.copy-git-to-vcr == 'true'
+        env:
+          GHCR_GIT_TAG: ${{ steps.image-tags.outputs.ghcr-git-tag }}
+          VCR_GIT_TAG: ${{ steps.image-tags.outputs.vcr-git-tag }}
+        run: |
+          set -euo pipefail
+
+          amd64_digest="$(docker buildx imagetools inspect --raw "$GHCR_GIT_TAG" \
+            | jq -er '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')"
+          skopeo copy --preserve-digests \
+            "docker://${GHCR_GIT_IMAGE}@${amd64_digest}" \
+            "docker://${VCR_GIT_TAG}"
 
       # `commitMode: github-api` commits through @changesets/ghcommit, which
       # reads the repo with isomorphic-git. Unlike git itself, isomorphic-git
@@ -187,11 +241,11 @@ jobs:
             gh release edit "eve@$version" --latest
           fi
 
-      # `latest` serves authors who reference the image directly; eve pins its
-      # own tag. The tag comes from the published eve package, not this commit,
-      # so `latest` never points at an unreleased image. Every main run
+      # `latest` serves authors who reference an image directly; eve pins its
+      # own tags. The tags come from the published eve package, not this
+      # commit, so `latest` never points at an unreleased image. Every main run
       # converges, so a failed move heals on the next push.
-      - name: Point latest sandbox image tags at the released eve image
+      - name: Point latest sandbox image tags at the released eve images
         if: github.ref == 'refs/heads/main'
         timeout-minutes: 20
         env:
@@ -217,33 +271,57 @@ jobs:
             sleep 10
           done
 
-          tag="$(curl -fsSL "$tarball" | tar -xzO --wildcards 'package/dist/*.js' | { grep -aoE 'dockerfile-[0-9a-f]{12}' || true; } | sort -u)"
-          if [[ -z "$tag" ]]; then
-            echo "eve@${version} predates content-tagged sandbox images; leaving latest unchanged."
-            exit 0
-          fi
-          if [[ "$tag" == *$'\n'* ]]; then
-            echo "::error::eve@${version} contains more than one sandbox image tag: ${tag//$'\n'/, }" >&2
-            exit 1
-          fi
+          dist="$(mktemp)"
+          curl -fsSL "$tarball" | tar -xzO --wildcards 'package/dist/*.js' >"$dist"
+
+          # Prints the one tag matching a pattern in the released package, or
+          # nothing when the package predates that image.
+          pinned_tag() {
+            local found
+            found="$({ grep -aowE "$1" "$dist" || true; } | sort -u)"
+            if [[ "$found" == *$'\n'* ]]; then
+              echo "::error::eve@${version} contains more than one sandbox image tag: ${found//$'\n'/, }" >&2
+              return 1
+            fi
+            printf '%s' "$found"
+          }
 
           # Retag with buildx rather than skopeo: skopeo annotates indexes of
           # zstd layers, which `--preserve-digests` rejects
           # (containers/skopeo#2627). With one source, buildx pushes the source
           # manifest bytes unchanged; `--prefer-index=false` keeps VCR's
           # single-platform manifest from being wrapped in an index.
-          for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
+          point_latest() {
+            local image="$1" tag="$2" wanted current moved
             wanted="$(docker buildx imagetools inspect --raw "${image}:${tag}" | sha256sum)"
             current="$(docker buildx imagetools inspect --raw "${image}:latest" 2>/dev/null | sha256sum || true)"
             if [[ "$wanted" == "$current" ]]; then
               echo "${image}:latest already serves ${tag}."
-            else
-              docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${tag}"
-              moved="$(docker buildx imagetools inspect --raw "${image}:latest" | sha256sum)"
-              if [[ "$moved" != "$wanted" ]]; then
-                echo "::error::${image}:latest does not match ${image}:${tag} byte for byte after retagging." >&2
-                exit 1
-              fi
-              echo "Moved ${image}:latest to ${tag} (eve@${version})."
+              return
             fi
+            docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}:${tag}"
+            moved="$(docker buildx imagetools inspect --raw "${image}:latest" | sha256sum)"
+            if [[ "$moved" != "$wanted" ]]; then
+              echo "::error::${image}:latest does not match ${image}:${tag} byte for byte after retagging." >&2
+              exit 1
+            fi
+            echo "Moved ${image}:latest to ${tag} (eve@${version})."
+          }
+
+          tag="$(pinned_tag 'dockerfile-[0-9a-f]{12}')"
+          if [[ -z "$tag" ]]; then
+            echo "eve@${version} predates content-tagged sandbox images; leaving latest unchanged."
+            exit 0
+          fi
+          for image in "$GHCR_IMAGE" "$VCR_IMAGE"; do
+            point_latest "$image" "$tag"
+          done
+
+          git_tag="$(pinned_tag 'git-[0-9a-f]{12}')"
+          if [[ -z "$git_tag" ]]; then
+            echo "eve@${version} predates the eve-git image; leaving its latest unchanged."
+            exit 0
+          fi
+          for image in "$GHCR_GIT_IMAGE" "$VCR_GIT_IMAGE"; do
+            point_latest "$image" "$git_tag"
           done

@@ -166,6 +166,11 @@ export interface ScheduleProvider {
   disable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
   invoke(context: ScheduleProviderContext, name: string): Promise<void>;
   delete(context: ScheduleProviderContext, name: string): Promise<boolean>;
+  /**
+   * Throws, or rejects, when the backend can't run `expression`. eve awaits it while it prepares
+   * a create or a timing update, so a model's call fails before a person is asked to approve it.
+   */
+  validateExpression?(expression: ScheduleExpression): void | Promise<void>;
 }
 
 export interface ScheduleClientCreate<TPayload> {
@@ -201,10 +206,10 @@ export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   /**
    * Accepts the `to().send()` options that apply to a fresh session. `auth` is
    * the schedule's creator. A send never reaches a session the schedule didn't
-   * start, so `turnPolicy` has nothing to act on. A send with an
-   * `idempotencyKey` reaches the session an earlier send from this schedule
-   * with the same key and target started, so a retried callback whose key
-   * includes `occurrence.executionId` doesn't start a second session.
+   * start, so `turnPolicy` has nothing to act on. A send reaches the session
+   * an earlier send from this schedule with the same `idempotencyKey` and
+   * target started. Without a key, eve derives one from the occurrence and the
+   * message, so a retried callback doesn't start a second session.
    */
   send(
     message: MessageContent,
@@ -266,11 +271,19 @@ export type ScheduleScopeResolverContext = ScheduleScopeContext & {
 
 /**
  * Trusted caller context passed to `preparePayload`. `name` is the display label on create
- * and the unique management name on update.
+ * and the unique management name on update. `expression` tells a recurring schedule from a
+ * one-time one, so the payload needn't repeat it.
  */
 export type SchedulePreparePayloadContext = ScheduleScopeContext & {
   readonly operation: "create" | "update";
   readonly name: string;
+  /**
+   * The timing the schedule has after this write: what the caller passed, or the stored timing
+   * when an update replaces only the payload. A relative delay is as written, not yet resolved.
+   * A timing-only update doesn't prepare again, so a value derived from this keeps the timing it
+   * was prepared with.
+   */
+  readonly expression: ScheduleTiming;
 };
 
 /** A dynamic schedules definition, as authored with `defineDynamicSchedules`. */

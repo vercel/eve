@@ -152,6 +152,8 @@ Your tools, hooks, and channel events can read `ctx.session.schedule`. It is `un
 | `single`          | `at`, a `YYYY-MM-DDTHH:mm` local datetime, IANA `timezone` | One absolute time                                |
 | `cron`            | `cron`, a five-field expression, IANA `timezone`           | Recurring work                                   |
 
+Vercel Schedules takes numeric cron fields with `*`, `,`, `-`, and `/`: months are `1-12` and weekdays are `0-6`, where `0` is Sunday. An expression can't set both a day of the month and a day of the week. An expression that breaks these rules, such as one with `MON` or `JAN`, fails before the write is prepared, so a model's call is corrected before a person is asked to approve it. `eve dev` applies the same rules.
+
 Omit `timezone` to use UTC. A delay starts when the approved write runs, not when approval is requested. It rounds up to the next minute, which adds up to 59 seconds before provider and execution latency. A separate client retry computes a new time, so a delay isn't idempotent across retries.
 
 ```ts
@@ -203,13 +205,14 @@ Create a provider when your application needs a different scheduling backend, st
 
 Your provider owns schedule storage, timing, and occurrence delivery. eve handles payload validation, management authorization, approvals, and creator revalidation.
 
-| Part of the contract | What your provider implements                                                                                                                        |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                       |
-| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                            |
-| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`. |
-| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                 |
-| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.    |
+| Part of the contract | What your provider implements                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                         |
+| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                              |
+| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`.   |
+| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                   |
+| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.      |
+| Timing checks        | Optional `validateExpression`, sync or async. Throw for a cron or one-time expression your backend can't run. eve calls it before it prepares a write. |
 
 `ScheduleProviderContext` is also exported from `eve/experimental/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
 
@@ -236,7 +239,9 @@ async run({ payload, schedule, to }) {
 
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
-Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.
+
+A retried callback doesn't start its sessions again. eve keys each send by the occurrence, the target, and the message, so a repeat of the same send reaches the session the first attempt started. A message that differs between attempts, such as one that includes the current time, starts another session; pass your own `idempotencyKey`, such as `` `${occurrence.executionId}:digest` ``, to keep it to one. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
 
 `occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 
@@ -280,6 +285,10 @@ Without `preparePayload`, eve validates payloads before saving and again before 
 | Authenticated client code | Once, before writing, with no approval.                                                                                                                                                           |
 
 Preparation can repeat when a write is retried, so avoid irreversible effects. Reads, timing-only updates, state changes, and runs never call it.
+
+`context.expression` is the timing the schedule has after the write: the one the caller passed, or the stored one when an update replaces only the payload. Read `context.expression.type` to tell a recurring schedule (`"cron"`) from a one-time one, so the payload doesn't need a field for it. A relative delay arrives as written, not resolved to a time.
+
+A timing-only update doesn't call `preparePayload`, so a value you derive from `context.expression` keeps the timing it was prepared with. Vercel Schedules rejects an update that changes a schedule between recurring and one-time. With another provider, send the payload again when you change a schedule's kind.
 
 `auth`, `run`, and occurrence events infer the prepared return type. Declare `preparePayload` before them, or give it an explicit return type. Without preparation, the payload type comes from the schema.
 

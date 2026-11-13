@@ -69,6 +69,25 @@ Each eve release pins one tag of the default image, and the tag is not the eve v
 
 To run a different published tag, set `EVE_SANDBOX_IMAGE_TAG` in both the build and runtime environments. eve applies the tag to both registries.
 
+## The eve-git image
+
+`ghcr.io/vercel/eve-git` is eve's default image plus the GitHub CLI (`gh`), for agents that clone repositories, push branches, or open pull requests. [Vercel Sandbox](/docs/sandbox/vercel) pulls the same image from `vcr.vercel.com/vercel/eve/git`. eve doesn't use it unless you select it.
+
+Each eve release pins one tag of the image, like the default image. `DEFAULT_EVE_GIT_SANDBOX_IMAGE`, exported from `eve/sandbox/docker` and from `eve/extensions/git/sandbox`, is the reference with that tag. Pass it as `image`:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { DEFAULT_EVE_GIT_SANDBOX_IMAGE, DockerSandbox } from "eve/sandbox/docker";
+
+const environment = DockerSandbox.environment({ image: DEFAULT_EVE_GIT_SANDBOX_IMAGE });
+
+export default defineSandbox(() => environment.open());
+```
+
+To add your own layers, start your `agent/sandbox/Dockerfile` from the image with `FROM ghcr.io/vercel/eve-git:latest`. Docker caches prepared templates by the Dockerfile text, so a template built from `latest` is reused after `latest` moves and never picks up the new image. Pin a tag in `FROM` to choose when the image changes.
+
+The default image doesn't include `gh`, so `installCodeTooling` from `eve/extensions/code/sandbox` installs it with `apt-get` during the first build unless you use this image. For Vercel Sandbox, see [the eve-git image on Vercel Sandbox](/docs/sandbox/vercel#the-eve-git-image).
+
 ## Environment options
 
 Pass `image`, `pullPolicy`, `env`, and `prepare` to the environment. During preparation, eve copies workspace and skill files into a temporary container and runs your `prepare`. It saves the result as the template image.

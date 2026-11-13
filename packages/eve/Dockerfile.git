@@ -1,0 +1,15 @@
+# eve-git: eve's default sandbox image plus the GitHub CLI, for agents that
+# clone, push, or open pull requests. Use it as `FROM ghcr.io/vercel/eve-git`.
+# The release workflow builds it on top of the pinned default image (passed as
+# EVE_IMAGE) and tags it with `node scripts/sandbox-image-tag.mjs --git`.
+# A published tag is never rebuilt, so any change here becomes a new image.
+ARG EVE_IMAGE
+FROM ${EVE_IMAGE}
+
+USER root
+RUN set -eux; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends gh; \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*; \
+  gh --version | head -1
+USER vercel-sandbox

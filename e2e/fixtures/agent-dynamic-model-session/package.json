@@ -21,6 +21,7 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "modelMatrix": "full"
+    "modelMatrix": "full",
+    "modelSuiteEvals": "all"
   }
 }
