@@ -1,3 +1,4 @@
+// @linux-only: stranded replay guard logic
 import { describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";

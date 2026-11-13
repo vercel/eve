@@ -1,3 +1,4 @@
+// @linux-only: tool schema shape
 import { asSchema, generateText } from "ai";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

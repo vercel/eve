@@ -1,15 +1,15 @@
 import type { Runtime } from "#channel/types.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import { currentTestWorld } from "#internal/testing/workflow-test-world.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { questionWorkflowBodies } from "./question-workflows.js";
 
 // The hosts a conversation's sessions run on, and what the harness asks each about them: whether
-// an address is claimed, which steps still run, and how long a stream must stay unchanged before a
-// person answers. Workflow is read through its World; the in-process host answers from its loop.
+// an address is claimed, which steps still run, and when nothing in the host is working. Workflow
+// is read through its World and the test World's queue; the in-process host answers from its loop.
 
 /** Which host a conversation's sessions run on. */
 export type ConformanceHostKind = "workflow" | "in-process";
@@ -22,10 +22,10 @@ export interface ConformanceHost {
   /** The names of `sessionId`'s steps that haven't finished. */
   runningSteps(sessionId: string): Promise<string[]>;
   /**
-   * How long a resting stream must stay unchanged to count as resting. Workflow commits a step's
-   * writes after it reports them; the in-process host reports a step once it's done.
+   * Resolves once nothing in the host is working: no step, delivery or session start in flight,
+   * as the host battery reads it (`session-host/host-under-test.ts`).
    */
-  readonly quietMs: number;
+  settled(): Promise<void>;
   /** Cancels `sessionId`'s run outside eve, as an operator would. Workflow only. */
   cancelRunOutsideEve(sessionId: string): Promise<void>;
   dispose(): Promise<void>;
@@ -63,7 +63,7 @@ function workflowHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): 
         .filter((step) => !TERMINAL_STEP_STATUSES.has(step.status))
         .map((step) => `${step.stepName} (${step.status})`);
     },
-    quietMs: 250,
+    settled: () => currentTestWorld().idle(),
     async cancelRunOutsideEve(sessionId) {
       await getRun(sessionId).cancel();
     },
@@ -73,10 +73,15 @@ function workflowHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): 
 }
 
 function inProcessHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource): ConformanceHost {
-  const runtime = createInProcessRuntime(
+  const runtime = createTestInProcessRuntime(
     { compiledArtifactsSource },
-    // Workflow's own step serializer, so a payload a deployment couldn't carry fails here too.
-    { callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL, stepBoundary: workflowStepBoundary },
+    {
+      callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL,
+      // Batched, a budget prompt's answer typed back to back with another message is sometimes
+      // read joined to it (vercel/eve#6307), so those cells fail at random rather than every
+      // time, and can't be recorded as broken. Batch here once #6307 lands.
+      deliveries: "immediate",
+    },
   );
   // The test agent's workflow tools, as the plain bodies their `"use workflow"` twins wrap.
   for (const { body, workflowId } of questionWorkflowBodies())
@@ -87,11 +92,10 @@ function inProcessHost(compiledArtifactsSource: RuntimeCompiledArtifactsSource):
     // Its inboxes hold an address by its continuation token itself.
     addressClaimed: async (continuationToken) => runtime.holds(continuationToken),
     // Only turn steps cross the step boundary and are counted here; the short steps that settle a
-    // control delivery or a cancelled turn, or prewarm a session, run inline. None of those
-    // writes a reply a person could answer, so no quiet window is needed.
+    // control delivery or a cancelled turn, or prewarm a session, run inline.
     runningSteps: async (sessionId) =>
       runtime.stepsRunning(sessionId) > 0 ? ["turn step (running)"] : [],
-    quietMs: 0,
+    settled: () => runtime.idle(),
     cancelRunOutsideEve: async () => {
       throw new Error("An in-process session has no run to cancel outside eve.");
     },

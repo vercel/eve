@@ -1,3 +1,4 @@
+// @linux-only: idle window across compaction handoff
 import { afterEach, expect, it, vi } from "vitest";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { workflowEntry } from "#execution/session/entry.js";

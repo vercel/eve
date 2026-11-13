@@ -1,4 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { theme } from "./theme.ts";
@@ -8,6 +11,15 @@ const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
 const FORCE_KILL_GRACE_MS = 2_000;
 const TERMINATE_GRACE_MS = 5_000;
+const PROC_ROOT = "/proc";
+
+/**
+ * Where the runner records the apps it already built. `run-all.mjs` points this
+ * at a fresh directory per run, so one run builds each app once and every later
+ * smoke test starts the same `.output`. Unset when a single test runs alone,
+ * which then builds as it always did.
+ */
+const BUILD_STATE_DIR = process.env.EVE_TUI_BUILD_STATE_DIR;
 
 export type AgentServerMode = "built" | "dev";
 
@@ -49,11 +61,15 @@ export async function startAgentServer(input: {
   const baseUrl = `http://localhost:${port}`;
 
   if (plan.build !== undefined) {
-    console.log(theme.muted(`[tui] building "${input.appName}" before smoke run ...`));
-    await runPnpmCommand({
-      ...plan.build,
-      env: input.startEnv ?? process.env,
-    });
+    if (await builtInThisRun(input.appName)) {
+      console.log(theme.muted(`[tui] reusing the "${input.appName}" build from this run ...`));
+    } else {
+      console.log(theme.muted(`[tui] building "${input.appName}" before smoke run ...`));
+      // Built without the caller's start env: later tests reuse the build, whatever env they start
+      // it with.
+      await runPnpmCommand({ ...plan.build, env: process.env });
+      await recordBuild(input.appName);
+    }
   }
 
   console.log(theme.muted(`[tui] starting "${input.appName}" ${mode} server on ${baseUrl} ...`));
@@ -168,6 +184,28 @@ function spawnServerProcess(input: {
     // the smoke process after the test logic completes.
     detached: true,
   });
+}
+
+/**
+ * True when this run already built `appName`. A single smoke test run on its
+ * own leaves the variable unset and always builds.
+ */
+async function builtInThisRun(appName: string): Promise<boolean> {
+  if (BUILD_STATE_DIR === undefined) return false;
+
+  try {
+    await access(join(BUILD_STATE_DIR, appName));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function recordBuild(appName: string): Promise<void> {
+  if (BUILD_STATE_DIR === undefined) return;
+
+  await mkdir(BUILD_STATE_DIR, { recursive: true });
+  await writeFile(join(BUILD_STATE_DIR, appName), "");
 }
 
 async function runPnpmCommand(input: {
@@ -319,16 +357,64 @@ function isProcessGroupAlive(child: ChildProcess): boolean {
   if (child.pid === undefined) return false;
   try {
     process.kill(-child.pid, 0);
-    return true;
   } catch {
     return false;
   }
+
+  const live = groupHasLiveMember(child.pid);
+  return live ?? true;
+}
+
+/**
+ * True when `pgid` still holds a process that is not a zombie, or `undefined`
+ * where the process table is unreadable (no `/proc`, or a platform this doesn't
+ * cover).
+ *
+ * A zombie has already released its file descriptors, sockets, and ports, and
+ * only waits for its parent to reap it. Signalling the group cannot retire one,
+ * so counting zombies as alive makes every teardown wait out both graces — the
+ * smoke servers leave a re-parented `pnpm` zombie behind on Linux CI.
+ */
+function groupHasLiveMember(pgid: number): boolean | undefined {
+  let entries: string[];
+  try {
+    entries = readdirSync(PROC_ROOT);
+  } catch {
+    return undefined;
+  }
+
+  for (const entry of entries) {
+    if (!/^\d+$/u.test(entry)) continue;
+
+    const stat = readProcStat(entry);
+    if (stat === undefined || stat.pgid !== pgid) continue;
+    if (stat.state !== "Z") return true;
+  }
+  return false;
+}
+
+function readProcStat(pid: string): { state: string; pgid: number } | undefined {
+  let stat: string;
+  try {
+    stat = readFileSync(join(PROC_ROOT, pid, "stat"), "utf8");
+  } catch {
+    // The process exited while we scanned; it is not alive either way.
+    return undefined;
+  }
+
+  // `comm` may hold spaces and parentheses, so fields are read after it.
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  const state = fields[0];
+  const pgid = Number(fields[2]);
+  if (state === undefined || !Number.isInteger(pgid)) return undefined;
+
+  return { state, pgid };
 }
 
 /**
  * True once the direct child has exited (by code or by signal — a
  * signal-killed process reports `exitCode === null` with `signalCode`
- * set) and no descendant in its process group survives.
+ * set) and no live descendant in its process group remains.
  */
 function hasTerminated(child: ChildProcess): boolean {
   const childExited = child.exitCode !== null || child.signalCode !== null;
@@ -346,7 +432,8 @@ async function waitForTermination(
   graceMs: number,
 ): Promise<void> {
   const deadline = Date.now() + graceMs;
-  await Promise.race([exited, sleep(graceMs)]);
+  // Unref'd, so a server that exits at once doesn't hold the smoke process for the whole grace.
+  await Promise.race([exited, sleep(graceMs, undefined, { ref: false })]);
   while (!hasTerminated(child) && Date.now() < deadline) {
     await sleep(50);
   }

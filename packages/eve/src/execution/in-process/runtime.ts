@@ -40,6 +40,11 @@ export interface InProcessRuntime extends Runtime {
   /** How many of `sessionId`'s turn steps are running now. */
   stepsRunning(sessionId: string): number;
   /**
+   * Resolves once nothing on its host is working: no delivery, step or session start is in
+   * flight, so each session and run waits on a message, a person or a timer.
+   */
+  idle(): Promise<void>;
+  /**
    * Starts a session from the initial entry Workflow's `workflowEntry` takes, for tests written
    * against it.
    */
@@ -83,7 +88,12 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
    * Boots and runs a session from its initial entry, as Workflow's `workflowEntry` does. When
    * another session holds the continuation token, the message went to it, and that's the one.
    */
-  const startEntry = async (
+  const startEntry = (
+    entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
+    continuationToken: string | undefined,
+  ): Promise<{ readonly sessionId: string; readonly claimedContinuation: boolean }> =>
+    host.working(() => bootEntry(entry, continuationToken));
+  const bootEntry = async (
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
     continuationToken: string | undefined,
   ): Promise<{ readonly sessionId: string; readonly claimedContinuation: boolean }> => {
@@ -186,6 +196,8 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     holds: (token) => inboxes.holder(token) !== undefined,
 
     stepsRunning: (sessionId) => host.stepsRunning(sessionId),
+
+    idle: () => host.idle(),
 
     registerWorkflow: (workflowId, workflowBody) =>
       host.runs.registerWorkflow(workflowId, workflowBody),

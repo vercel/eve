@@ -3,11 +3,22 @@ description: >-
   Run against eve's pinned sandbox image. When that image is not published yet,
   fall back to :latest and say why.
 
+inputs:
+  pull:
+    description: >-
+      Pull the resolved image into the Docker daemon before the tests run.
+      Scenarios that prewarm a sandbox pull the image themselves, and parallel
+      workers would each pull it inside their own test.
+    required: false
+    default: "false"
+
 runs:
   using: "composite"
   steps:
     - name: Resolve eve sandbox image
       shell: bash
+      env:
+        PULL: ${{ inputs.pull }}
       run: |
         set -euo pipefail
 
@@ -20,7 +31,13 @@ runs:
         elif grep -Eq ': not found|manifest unknown' <<<"$inspect_output"; then
           echo "::warning title=Unpublished sandbox image::$image is not published. This happens when this change edits packages/eve/Dockerfile, because the release workflow publishes the image after the change reaches main. If main already has this Dockerfile, check the latest Release workflow run on main for a failed image publish. This run uses ghcr.io/vercel/eve:latest, so it does not test the pinned image."
           echo "EVE_SANDBOX_IMAGE_TAG=latest" >>"$GITHUB_ENV"
+          image="ghcr.io/vercel/eve:latest"
         else
           echo "$inspect_output" >&2
           exit 1
+        fi
+
+        if [[ "$PULL" == "true" ]]; then
+          echo "Pulling $image once for the job"
+          docker pull "$image"
         fi

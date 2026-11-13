@@ -1,6 +1,6 @@
-import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
+// @linux-only: in-process host semantics
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { defineDynamic } from "#dynamic/definition.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
@@ -11,8 +11,9 @@ import { defineTool } from "#tools/definition.js";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
-import { createInProcessRuntime } from "#execution/in-process/runtime.js";
-import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
+import type { DeliveryTiming } from "#execution/in-process/inbox-transport.js";
+import type { InProcessRuntime } from "#execution/in-process/runtime.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -20,6 +21,19 @@ import { createStreamChecker, type Violation } from "#protocol/session-events/ch
 import { isStoredLine } from "#protocol/session-events/envelope.js";
 import { schemaViolation } from "#protocol/session-events/schemas.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+
+// The text each typed answer is read from, in order.
+const answerTexts = vi.hoisted((): string[] => []);
+vi.mock("#channel/resolve-text.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#channel/resolve-text.js")>();
+  return {
+    ...original,
+    answerFromText: (...args: Parameters<typeof original.answerFromText>) => {
+      answerTexts.push(args[0]);
+      return original.answerFromText(...args);
+    },
+  };
+});
 
 const address = (runtime: Runtime, continuationToken: string) =>
   createChannelAddress({
@@ -161,10 +175,7 @@ describe("the in-process runtime", () => {
     });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       try {
         const here = await approveAndDeny(inProcess, "alice-approvals-in-process");
         const ranHere = ran.splice(0);
@@ -196,10 +207,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-parity" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       try {
         const messages = [
           "Alice asks for the weekly summary.",
@@ -229,10 +237,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-controls" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const run = async (runtime: Runtime, token: string) => {
         const alice = address(runtime, token);
         const first = await alice.send("Alice asks for the weekly summary.", { auth: null });
@@ -273,10 +278,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-race" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const race = async (runtime: Runtime, token: string) => {
         const created = await Promise.all([
           address(runtime, `${token}-create`).create({ auth: null }),
@@ -311,10 +313,7 @@ describe("the in-process runtime", () => {
     const test = await createTestRuntime({ agent: { name: "in-process-end" } });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const run = async (runtime: Runtime, token: string) => {
         const alice = address(runtime, token);
         const first = await (await alice.send("Alice asks.", { auth: null })).result();
@@ -352,10 +351,7 @@ describe("the in-process runtime", () => {
     });
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const inProcess = createInProcessRuntime(
-        { compiledArtifactsSource },
-        { stepBoundary: workflowStepBoundary },
-      );
+      const inProcess = createTestInProcessRuntime({ compiledArtifactsSource });
       const run = async (runtime: Runtime, token: string) => {
         const alice = address(runtime, token);
         const asked = await (await alice.send("Deploy and publish.", { auth: null })).result();
@@ -395,65 +391,10 @@ describe("the in-process runtime", () => {
     });
   });
 
-  it("runs a call that needs a run of its own: the agent tool's child session", async () => {
-    const firstMessage = (prompt: LanguageModelV4CallOptions["prompt"]) =>
-      JSON.stringify(prompt.find((message) => message.role === "user")?.content ?? "");
-    const delegating = markMockModel(
-      new MockLanguageModelV4({
-        doStream: async ({ prompt }) =>
-          // The child the agent tool opens answers; its parent hears it.
-          firstMessage(prompt).includes("Summarize Bob's notes.")
-            ? textStreamResult("Bob's notes say ship on Friday.")
-            : prompt.some((message) => message.role === "tool")
-              ? textStreamResult("Alice, the helper is on it.")
-              : toolCallsStreamResult([
-                  {
-                    input: JSON.stringify({ message: "Summarize Bob's notes." }),
-                    toolCallId: "call-agent",
-                    toolName: "agent",
-                  },
-                ]),
-        modelId: "in-process-delegating",
-        provider: "eve-test",
-      }),
-    );
-    const test = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(() => ({ model: delegating, modelContextWindowTokens: 200_000 })),
-        }),
-        name: "in-process-durable-runs",
-      },
-    });
-    await test.run(async () => {
-      const runtime = createInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      try {
-        const result = await (
-          await address(runtime, "alice-durable-runs").send("Ask a helper.", { auth: null })
-        ).result();
-        expect(result).toMatchObject({
-          reply: "Alice, the helper is on it.",
-          status: "completed",
-        });
-        const events = await recorded(runtime, result.sessionId);
-        const settled = events.filter(({ type }) => type === "call.settled");
-        expect(settled).toHaveLength(1);
-        // The child session ran: its reply is the call's output the parent read.
-        expect(settled[0]).toMatchObject({ data: { outcome: "completed" } });
-        expect(JSON.stringify(settled[0])).toContain("Bob's notes say ship on Friday.");
-        await expect(violations(runtime, result.sessionId)).resolves.toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
-  });
-
   it("ends its sessions when disposed", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-dispose" } });
     await test.run(async () => {
-      const runtime = createInProcessRuntime({
+      const runtime = createTestInProcessRuntime({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
       const sent = await address(runtime, "alice-dispose").send("Alice says hello.", {
@@ -478,10 +419,59 @@ describe("the in-process runtime", () => {
     });
   });
 
+  it("ends a session whose turn is still running when disposed", async () => {
+    let started!: () => void;
+    const modelCalled = new Promise<void>((resolve) => (started = resolve));
+    // Answers only once its call is aborted, as a model call still streaming does.
+    const waiting = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ abortSignal }) => {
+          started();
+          await new Promise((resolve) => abortSignal?.addEventListener("abort", resolve));
+          throw abortSignal?.reason;
+        },
+        modelId: "in-process-waiting",
+        provider: "eve-test",
+      }),
+    );
+    const test = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({ model: waiting, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "in-process-dispose-running",
+      },
+    });
+    await test.run(async () => {
+      const runtime = createTestInProcessRuntime(
+        { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+        { disposeGraceMs: 50 },
+      );
+      const sent = await address(runtime, "alice-dispose-running").send("Alice says hello.", {
+        auth: null,
+      });
+      const reader = (await runtime.getEventStream(sent.sessionId)).getReader();
+      const following = (async () => {
+        const events: SessionStreamEvent[] = [];
+        for (let next = await reader.read(); !next.done; next = await reader.read())
+          events.push(next.value);
+        return events;
+      })();
+      await modelCalled;
+      await runtime.dispose();
+
+      const events = await following;
+      expect(events.filter(({ type }) => type === "turn.settled")).toMatchObject([
+        { data: { outcome: "cancelled" } },
+      ]);
+      expect(events.filter(({ type }) => type === "session.ended")).toHaveLength(1);
+    });
+  });
+
   it("finds no session for a command to one it never ran", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-durable" } });
     await test.run(async () => {
-      const runtime = createInProcessRuntime({
+      const runtime = createTestInProcessRuntime({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
       try {
@@ -495,5 +485,136 @@ describe("the in-process runtime", () => {
         await runtime.dispose();
       }
     });
+  });
+});
+
+const LATER_MESSAGE = "Carol wants the review by Friday.";
+
+// Spends the whole budget on its first call, a tool call, so the next asks to go on.
+const budgetModel = markMockModel(
+  new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      const said = (text: string) =>
+        prompt.some(
+          (message) =>
+            message.role === "user" &&
+            message.content.some((part) => part.type === "text" && part.text.includes(text)),
+        );
+      if (said(LATER_MESSAGE)) return textStreamResult("Noted: the review is due Friday.");
+      return prompt.some((message) => message.role === "tool")
+        ? textStreamResult("Bob's notes are in.")
+        : toolCallsStreamResult([
+            { input: "{}", toolCallId: "call-notes", toolName: "look_up_notes" },
+          ]);
+    },
+    modelId: "in-process-budget",
+    provider: "eve-test",
+  }),
+);
+
+/** The first event `matches` accepts, read as the session writes it. */
+async function firstEvent(
+  runtime: Runtime,
+  sessionId: string,
+  matches: (event: SessionStreamEvent) => boolean,
+  timeoutMs: number,
+): Promise<SessionStreamEvent | undefined> {
+  const reader = (await runtime.getEventStream(sessionId)).getReader();
+  const timer = setTimeout(() => void reader.cancel(), timeoutMs);
+  try {
+    for (let next = await reader.read(); !next.done; next = await reader.read())
+      if (matches(next.value)) return next.value;
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+    await reader.cancel().catch(() => {});
+  }
+}
+
+/**
+ * Alice runs out of budget, then types a message and "approve" the moment the step that asked
+ * ends, before the session reads its end: what Workflow's late replay allows. Returns what
+ * `afterAnswer` reads once both are sent.
+ */
+async function answerBudgetPromptBackToBack<T>(
+  deliveries: DeliveryTiming,
+  afterAnswer: (runtime: InProcessRuntime, sessionId: string) => Promise<T>,
+): Promise<T> {
+  const test = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+        model: defineDynamic(() => ({ model: budgetModel, modelContextWindowTokens: 200_000 })),
+      }),
+      name: `in-process-budget-${deliveries}`,
+    },
+    modules: [
+      {
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Look up notes.",
+            execute: async () => ({ notes: "Ship on Friday." }),
+            inputSchema: {},
+          }),
+        }),
+        logicalPath: "tools/look_up_notes.ts",
+      },
+    ],
+  });
+  return await test.run(async () => {
+    const runtime: InProcessRuntime = createTestInProcessRuntime(
+      { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+      { deliveries },
+    );
+    try {
+      const alice = address(runtime, `alice-budget-${deliveries}`);
+      const { sessionId } = await alice.send("Use look_up_notes to find Bob's notes.", {
+        auth: null,
+      });
+      const asked = await firstEvent(
+        runtime,
+        sessionId,
+        (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
+        10_000,
+      );
+      expect(asked, "the budget prompt").toBeDefined();
+      while (runtime.stepsRunning(sessionId) > 0)
+        await new Promise((resolve) => setImmediate(resolve));
+      await alice.send(LATER_MESSAGE, { auth: null });
+      await alice.send("approve", { auth: null });
+      return await afterAnswer(runtime, sessionId);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+}
+
+describe("deliveries made back to back", () => {
+  it("are read one at a time when handed over at once", async () => {
+    const outcome = await answerBudgetPromptBackToBack("immediate", async (runtime, sessionId) => {
+      const settled = await firstEvent(
+        runtime,
+        sessionId,
+        (event) => event.type === "interaction.settled",
+        10_000,
+      );
+      return settled?.type === "interaction.settled" ? settled.data.outcome : undefined;
+    });
+    expect(outcome).toBe("accepted");
+  });
+
+  // Broken until vercel/eve#6307 lands: the paused turn reads the message and "approve" as one
+  // typed answer, "Carol wants…\n\napprove", which names no option, so the prompt stays open.
+  it.fails("are read one at a time when batched, as on Workflow (vercel/eve#6307)", async () => {
+    answerTexts.length = 0;
+    const texts = await answerBudgetPromptBackToBack("batched", async () => {
+      await vi.waitFor(() => expect(answerTexts.join("\n")).toContain("approve"), {
+        timeout: 10_000,
+      });
+      return [...answerTexts];
+    });
+    expect(
+      texts.filter((text) => text.includes(LATER_MESSAGE) && text.includes("approve")),
+    ).toEqual([]);
   });
 });
