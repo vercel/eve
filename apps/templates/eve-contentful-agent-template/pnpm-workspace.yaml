@@ -1,0 +1,11 @@
+allowBuilds:
+  lefthook: true
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - node-liblzma
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - ai
+  - eve
+  - "@eve/*"
+  - "@vercel/*"
