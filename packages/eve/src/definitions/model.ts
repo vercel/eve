@@ -24,8 +24,10 @@ import {
   type Definition,
   type InternalContext,
   type Kept,
+  publicContext,
 } from "./definition.js";
-import type { ModelMetadata } from "#internal/model-catalog.js";
+import type { DynamicContext } from "#dynamic/definition.js";
+import { createModelMetadata, type ModelMetadata } from "#internal/model-catalog.js";
 
 const MODEL_REACTION_ID = "model:agent";
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
@@ -76,6 +78,26 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
     label: `${dynamicModel.logicalPath}#model`,
   });
 }
+
+/**
+ * An agent's model, as code chooses it: what a dynamic `model` returns, from a function or as a
+ * value. A provider object or a model ID with no `modelContextWindowTokens` needs `modelMetadata`
+ * to know its context window.
+ */
+export function codeModelDefinition(input: {
+  readonly choose: (ctx: DynamicContext) => unknown;
+  readonly label: string;
+  readonly modelMetadata?: () => Promise<ModelMetadata>;
+}): Definition {
+  return modelDefinition(input.modelMetadata ?? noModelMetadata, {
+    choose: (ctx) => input.choose(publicContext(ctx)),
+    id: MODEL_REACTION_ID,
+    label: input.label,
+  });
+}
+
+/** No catalog: a selection names its own context window. */
+const noModelMetadata = async (): Promise<ModelMetadata> => createModelMetadata(null);
 
 /** A definition that chooses the model. */
 function modelDefinition(

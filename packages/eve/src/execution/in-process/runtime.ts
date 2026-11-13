@@ -20,6 +20,7 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { bootInitialOwner } from "#execution/session/owner-boot.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { runPreparedSession } from "#execution/session/program.js";
+import { holdSessionAgent } from "#runtime/sessions/session-agent.js";
 import { createUlid } from "#shared/ulid.js";
 import { createInProcessHost, type InProcessHost, type InProcessHostOptions } from "./host.js";
 import type { WorkflowFunction } from "./runs.js";
@@ -66,7 +67,8 @@ export function createInProcessRuntime(
 ): InProcessRuntime {
   const runtimes = new Map<string, InProcessRuntime>();
   const runtimeFor = (child: SessionRuntimeConfig): InProcessRuntime => {
-    const key = JSON.stringify(child);
+    // An agent defined in code is a held record of functions, which its id names.
+    const key = child.agent === undefined ? JSON.stringify(child) : `agent:${child.agent.id}`;
     let runtime = runtimes.get(key);
     if (runtime === undefined) runtimes.set(key, (runtime = runtimeOn(host, child)));
     return runtime;
@@ -78,6 +80,8 @@ export function createInProcessRuntime(
 /** The runtime for sessions of `config`'s agent on `host`. */
 function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcessRuntime {
   const { inboxes, lines, running } = host;
+  // Its steps find an agent defined in code by its id, while the host serves.
+  if (config.agent !== undefined) host.onDispose(holdSessionAgent(config.agent));
 
   /**
    * Boots and runs a session from its initial entry, as Workflow's `workflowEntry` does. When

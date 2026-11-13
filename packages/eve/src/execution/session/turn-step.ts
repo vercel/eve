@@ -31,7 +31,7 @@ import {
   ToolStubsKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
-import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -216,8 +216,8 @@ async function runSessionStepBody(
   }
   const adapter = ctx.require(ChannelKey);
   const agent = sessionAgent(ctx);
-  // The compiled node whose `agent/tools/` and module scope the step runs.
-  const bundle = requireCompiledBundle(ctx);
+  // Only an agent compiled from files has a node: its `agent/tools/` and module scope.
+  const { compiled } = agent;
 
   // Populate the callback base URL so getHookUrl() works during tool execution.
   if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
@@ -347,7 +347,7 @@ async function runSessionStepBody(
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
-    const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
+    const effectiveNode = compiled && { ...compiled.graph.root, turnAgent: compiled.turnAgent };
     const sessionUsageLimit = agent.settings.limits?.sessionUsage;
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
@@ -670,9 +670,9 @@ async function runSessionStepBody(
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
         instrumentation,
-        modelResolutionScope: {
-          moduleMap: bundle.moduleMap,
-          nodeId: bundle.nodeId,
+        modelResolutionScope: compiled && {
+          moduleMap: compiled.moduleMap,
+          nodeId: compiled.nodeId,
         },
         agent,
         node: effectiveNode,

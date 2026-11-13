@@ -18,10 +18,16 @@ describe("a workflow tool call's owner in its step inputs", () => {
     );
   });
 
-  it("reads a recorded input as its compiled agent", () => {
-    // What a run in flight carries: `bundle` only.
+  it("reads an input recorded before held agents as its compiled agent", () => {
+    // What a run in flight carries: `bundle` only, with no `agent` field.
     const recorded = JSON.parse('{"bundle":{"source":{"kind":"bundled"}}}') as never;
     expect(ownerReference(recorded)).toEqual({ kind: "bundle", nodeId: undefined, source });
+  });
+
+  it("stores a held agent under agent, by its id", () => {
+    const owner = agentSessionOwner({ id: "release", kind: "runtime" });
+    expect(owner).toEqual({ agent: { id: "release", kind: "runtime" } });
+    expect(ownerReference(owner)).toEqual({ id: "release", kind: "runtime" });
   });
 
   it("passes the recorded owner fields on as they are", () => {

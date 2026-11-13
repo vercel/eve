@@ -94,6 +94,7 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
   const staticModel = agentModel(bundle);
   return {
     connections: declared(agent, "connection").map(connectionDefinition),
+    definitions: [],
     files: {
       dynamicSubagents: bundle.subagentRegistry.dynamicResolvers.map(subagentDefinition),
       hooks: declared(agent, "hook").map(hookDefinition),
@@ -111,6 +112,8 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
     instructions: declared(agent, "instructions").map(instructionsDefinition),
     model: [staticModel, model].filter((definition) => definition !== undefined),
     skills: declared(agent, "skill").map(skillDefinition),
+    // Its declared subagents are tools in its tool table, eve's `staticTools`.
+    subagents: [],
     tools: declared(agent, "tool").map(toolDefinition),
   };
 }
