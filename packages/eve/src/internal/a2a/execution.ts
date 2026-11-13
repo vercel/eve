@@ -310,6 +310,9 @@ export class A2aTaskExecution {
       idempotencyKey: delivery.idempotencyKey,
       input: { message: content },
     });
+    // As for any new task: answer once the session has the message, so the context's next task
+    // finds this one unfinished.
+    await this.#awaitAdmission(handle.sessionId, delivery.deliveryId, call.signal);
     return { deliveryId: delivery.deliveryId, ref: refFor(handle.sessionId, delivery) };
   }
 

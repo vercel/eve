@@ -478,6 +478,17 @@ describe("A2A channel", () => {
         message: { ...userMessage("q-3", "Yes"), contextId, taskId: asked.id },
       });
 
+      // A context's first task, returned at once, already blocks the next.
+      const fresh = await sendTask("alice", {
+        configuration: { returnImmediately: true },
+        message: userMessage("q-7", "A2A-SLOW fresh"),
+      });
+      const early = await rpc("alice", "SendMessage", {
+        configuration: { returnImmediately: true },
+        message: { ...userMessage("q-8", "A2A-ECHO early"), contextId: fresh.contextId },
+      });
+      expect(rpcErrorCode(early)).toBe(-32004);
+
       // A working task blocks a new one too; once it finishes, the next one runs.
       const slow = taskOf(await newTask("q-4", "A2A-SLOW"));
       expect(rpcErrorCode(await newTask("q-5", "A2A-ECHO still too soon"))).toBe(-32004);
