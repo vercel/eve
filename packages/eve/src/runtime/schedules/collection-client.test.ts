@@ -199,4 +199,28 @@ describe("dynamic schedules client", () => {
     expect(update).not.toHaveBeenCalled();
     await expect(client.get(created.name)).resolves.toEqual(created);
   });
+
+  it("tells preparePayload the timing a write leaves the schedule with", async () => {
+    const { definition } = setup();
+    const timings: unknown[] = [];
+    const client = createScheduleCollectionClient(
+      {
+        ...definition,
+        preparePayload: (
+          value: { task: string; destination: "my-dm" | "team-channel" },
+          context,
+        ) => {
+          timings.push(context.expression);
+          return value;
+        },
+      },
+      callContext,
+    );
+    const cron = { type: "cron" as const, cron: "0 9 * * 1" };
+    const created = await client.create({ ...input, expression: cron });
+    // A payload-only update reads the stored timing; a relative delay arrives as written.
+    await client.update(created.name, { payload });
+    await client.update(created.name, { payload, expression: input.expression });
+    expect(timings).toEqual([cron, cron, input.expression]);
+  });
 });

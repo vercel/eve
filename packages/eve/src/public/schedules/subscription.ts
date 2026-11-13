@@ -271,11 +271,19 @@ export type ScheduleScopeResolverContext = ScheduleScopeContext & {
 
 /**
  * Trusted caller context passed to `preparePayload`. `name` is the display label on create
- * and the unique management name on update.
+ * and the unique management name on update. `expression` tells a recurring schedule from a
+ * one-time one, so the payload needn't repeat it.
  */
 export type SchedulePreparePayloadContext = ScheduleScopeContext & {
   readonly operation: "create" | "update";
   readonly name: string;
+  /**
+   * The timing the schedule has after this write: what the caller passed, or the stored timing
+   * when an update replaces only the payload. A relative delay is as written, not yet resolved.
+   * A timing-only update doesn't prepare again, so a value derived from this keeps the timing it
+   * was prepared with.
+   */
+  readonly expression: ScheduleTiming;
 };
 
 /** A dynamic schedules definition, as authored with `defineDynamicSchedules`. */
