@@ -10,7 +10,7 @@ import { defineAgent } from "eve";
  */
 export default defineAgent({
   compaction: {
-    thresholdPercent: 0.7,
+    threshold: 0.7,
   },
   model: "openai/gpt-5.6-terra",
   modelContextWindowTokens: 1_000_000,

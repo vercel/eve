@@ -20,12 +20,12 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.8",
-    "@github-tools/eve-extension": "^0.3.2",
+    "@github-tools/eve-extension": "^0.13.0",
     "@vercel/blob": "2.4.0",
-    "@vercel/connect": "0.4.2",
+    "@vercel/connect": "2.9.2",
     "ai": "^7.0.137",
-    "eve": "0.83.0",
-    "zod": "4.3.6"
+    "eve": "1.0.0-rc.17",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.9",

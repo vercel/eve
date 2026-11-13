@@ -40,7 +40,7 @@ test("loads global skills for service-triggered investigations", async () => {
     resolved?.["custom-deploy"]?.description,
     globalSkill.description
   );
-  assert.equal(resolved?.["custom-deploy"]?.markdown, "# Global");
+  assert.equal(resolved?.["custom-deploy"]?.content, "# Global");
 });
 
 test("personal skills shadow global skills for a human Slack user", async () => {
@@ -61,7 +61,7 @@ test("personal skills shadow global skills for a human Slack user", async () => 
     }
   );
 
-  assert.equal(resolved?.["custom-deploy"]?.markdown, "# Personal");
+  assert.equal(resolved?.["custom-deploy"]?.content, "# Personal");
 });
 
 test("keeps available skills when one scope fails to load", async () => {
@@ -83,7 +83,7 @@ test("keeps available skills when one scope fails to load", async () => {
     }
   );
 
-  assert.equal(resolved?.["custom-deploy"]?.markdown, "# Personal");
+  assert.equal(resolved?.["custom-deploy"]?.content, "# Personal");
 });
 
 test("long stored names remain loadable and preserve personal overrides", async () => {
@@ -109,9 +109,9 @@ test("long stored names remain loadable and preserve personal overrides", async 
   for (const [name] of entries) {
     assert.match(name, SKILL_LOAD_NAME_PATTERN);
   }
-  assert.equal(resolved?.[`custom-${names[0]}`]?.markdown, names[0]);
+  assert.equal(resolved?.[`custom-${names[0]}`]?.content, names[0]);
   assert.deepEqual(
-    entries.map(([, skill]) => skill.markdown),
+    entries.map(([, skill]) => skill.content),
     [names[0], names[1], "# Personal", names[3], names[4]]
   );
 });

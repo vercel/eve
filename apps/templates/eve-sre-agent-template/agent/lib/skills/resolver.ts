@@ -9,8 +9,8 @@ import {
 
 function loadableSkill(skill: StoredSkill) {
   return defineSkill({
+    content: skill.markdown,
     description: skill.description,
-    markdown: skill.markdown,
     metadata: {
       scope: skill.scope,
       source: "sre-custom-skills",
