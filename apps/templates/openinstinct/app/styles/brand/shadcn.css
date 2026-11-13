@@ -1,0 +1,54 @@
+/*
+ * Compatibility typography defaults for upstream shadcn components.
+ *
+ * Import typography.css before this file. The selectors intentionally have
+ * zero specificity so component variants and deliberate callsite utilities
+ * can still override a default.
+ */
+@layer components {
+  :where([data-slot="code-card"][data-highlight="command"]) {
+    --code-card-command: oklch(0.5015 0.1883 294.9882);
+    --code-card-argument: oklch(0.3108 0.1012 255.87);
+  }
+
+  :where(.dark [data-slot="code-card"][data-highlight="command"]) {
+    --code-card-command: oklch(0.7267 0.1367 299.1494);
+    --code-card-argument: oklch(0.8289 0.0877 252.4582);
+  }
+
+  :where(
+    [data-slot="code-card"][data-highlight="command"]
+      [data-slot="code-card-command"]
+  ) {
+    color: var(--code-card-command);
+  }
+
+  :where(
+    [data-slot="code-card"][data-highlight="command"]
+      [data-slot="code-card-argument"]
+  ) {
+    color: var(--code-card-argument);
+  }
+
+  :where(
+    [data-slot="button"],
+    [data-slot="badge"],
+    [data-slot="label"],
+    [data-slot$="-trigger"],
+    [data-slot$="-title"]
+  ) {
+    font-family: var(--merit-family-text);
+    font-weight: var(--merit-weight-ui);
+    letter-spacing: var(--merit-tracking-text);
+  }
+
+  :where(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot$="-description"]
+  ) {
+    font-family: var(--merit-family-text);
+    font-weight: var(--merit-weight-body);
+    letter-spacing: var(--merit-tracking-text);
+  }
+}

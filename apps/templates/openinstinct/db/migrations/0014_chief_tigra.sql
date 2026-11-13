@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "account_link_userId_uidx" ON "account" USING btree ("userId") WHERE "account"."providerId" = 'link';

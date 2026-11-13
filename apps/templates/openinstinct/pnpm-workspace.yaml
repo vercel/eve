@@ -1,0 +1,28 @@
+minimumReleaseAgeStrict: true
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  # Explicitly requested Link SDK upgrade; remove once this release clears the
+  # 24-hour gate (2026-10-03 15:14 UTC). Future versions remain age-gated.
+  - "@stripe/link-sdk@0.11.0"
+  # Eve 0.44.4's current official scaffold resolves the matching AI SDK release cohort.
+  - "@ai-sdk/*"
+  - ai
+  - "@vercel/*"
+  - "@onkernel/*"
+  - eve
+  # These browser and rendering transitive releases are locked by the current Eve UI scaffold.
+  - baseline-browser-mapping
+  - caniuse-lite
+  - electron-to-chromium
+  - mermaid
+  - picomatch
+  - systeminformation
+allowBuilds:
+  "@google/genai": false
+  cbor-extract: false
+  esbuild: true
+  protobufjs: false
+  sharp: true
+patchedDependencies:
+  "@linqapp/chat-sdk-adapter@0.5.1": patches/@linqapp__chat-sdk-adapter@0.5.1.patch
+  eve@1.0.0-rc.1: patches/eve@1.0.0-rc.1.patch
