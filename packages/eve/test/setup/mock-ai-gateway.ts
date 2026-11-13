@@ -27,17 +27,36 @@ const repoModelIds = collectGatewayModelIds([
   resolvePathFromSetup(".."),
   resolvePathFromSetup("../../src/internal/testing/scenario-apps"),
 ]);
-const originalFetch = globalThis.fetch.bind(globalThis);
 
-globalThis.fetch = (async (input, init) => {
+// A worker that runs several test files runs this setup file for each one, so it replaces the
+// wrapper it installed before instead of wrapping it: a second wrapper would answer the catalog
+// from the first file's model ids, and each file would add a layer. It wraps the fetch under that
+// wrapper, which `unit-guard.ts` replaces for every file.
+const GATEWAY_FETCH = Symbol.for("eve.testing.gateway-fetch");
+const FETCH_UNDER_GATEWAY = Symbol.for("eve.testing.fetch-under-gateway");
+const fetchHolder = globalThis as {
+  [GATEWAY_FETCH]?: typeof globalThis.fetch;
+  [FETCH_UNDER_GATEWAY]?: typeof globalThis.fetch;
+};
+
+if (fetchHolder[GATEWAY_FETCH] !== globalThis.fetch) {
+  fetchHolder[FETCH_UNDER_GATEWAY] = globalThis.fetch.bind(globalThis);
+}
+
+const fetchUnderGateway = fetchHolder[FETCH_UNDER_GATEWAY] as typeof globalThis.fetch;
+
+const gatewayFetch = (async (input, init) => {
   const url = getRequestUrl(input);
 
   if (url === AI_GATEWAY_MODELS_CATALOG_URL) {
     return createGatewayModelCatalogResponse(repoModelIds);
   }
 
-  return await originalFetch(input, init);
+  return await fetchUnderGateway(input, init);
 }) as typeof globalThis.fetch;
+
+globalThis.fetch = gatewayFetch;
+fetchHolder[GATEWAY_FETCH] = gatewayFetch;
 
 function createGatewayModelCatalogResponse(modelIds: ReadonlySet<string>): Response {
   return new Response(

@@ -452,6 +452,10 @@ function lazyHandler(options: TestWorldOptions): Handler {
 
 async function loadFlowRoute({ namespace, outDir }: TestWorldOptions): Promise<Handler> {
   await import(/* @vite-ignore */ pathToFileURL(join(outDir, "steps.mjs")).href);
+  // Loading the bundle installs Workflow's host (`#internal/workflow/builtins.js`), but Node runs
+  // that once per process, and a file that shares its worker starts with an empty host registry.
+  const { installWorkflowHost } = await import("#execution/workflow-host/host.js");
+  installWorkflowHost();
   const code = await readFile(workflowDriverCodePath(join(outDir, "workflows.mjs")), "utf8");
   return workflowEntrypoint(code, { namespace });
 }

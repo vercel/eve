@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 import { workspaceChannelPackages } from "./test/setup/workspace-channel-packages.js";
+import { SHARED_STATE_USE } from "./test/setup/shared-state-use.js";
 
 /**
  * Tier 0 — Unit tests.
@@ -59,10 +60,6 @@ function isolatedFiles(): string[] {
   );
 }
 
-/** `vi.mock`-style calls, module graph resets, and process-wide writes that outlive a test file. */
-const SHARED_STATE_USE =
-  /\bvi\.(?:mock|doMock|resetModules|stubGlobal|stubEnv|useFakeTimers|setSystemTime)\(|process\.env(?:\.\w+|\[[^\]]+\])\s*(?:=|\+=)|process\.chdir\(/;
-
 /** This package's directory. */
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
@@ -109,7 +106,7 @@ const shared = {
   // Worker threads start in a fraction of the time a forked process needs.
   pool: "threads" as const,
   setupFiles: [
-    "./src/internal/testing/reset-unit-realm.ts",
+    "./src/internal/testing/reset-test-realm.ts",
     "./src/internal/testing/unit-guard.ts",
     "./test/setup/mock-ai-gateway.ts",
   ],
