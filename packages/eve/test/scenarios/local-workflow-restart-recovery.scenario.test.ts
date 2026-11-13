@@ -15,7 +15,11 @@ const AUTH = { basic: { username: "alice", password: "fixture" } };
 // the restarted server does not idle until it fires.
 const SLEEP_SECONDS = 5;
 
-// One build serves both tests; each starts on its own empty local World.
+// The one test that kills a real `eve start`: what a restart does with a session's runs and waits
+// on the local World is the host battery's (`internal/testing/session-host/`), which restarts the
+// World in process. Only a real process boots the built server, applies its spec version, runs the
+// World's start-time recovery and the stranded-run guard itself, mounts the flow route with its
+// queue key, and leaves a SIGKILLed process group's files behind.
 let app: Awaited<ReturnType<typeof materializeScenarioApp>>;
 
 function stubProductionEnv(): void {
@@ -30,26 +34,16 @@ beforeAll(async () => {
       name: "local-workflow-restart",
       installDependencies: true,
       files: {
-        // The model reads which test sent the message: one hangs its first
-        // call, the other sleeps in a workflow tool.
-        "agent/agent.ts": `import { existsSync, writeFileSync } from "node:fs";
+        // The model sleeps in a workflow tool, then answers.
+        "agent/agent.ts": `import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
-const started = join(process.cwd(), ".model-call-started");
 export default defineAgent({
   model: mockModel(async (request) => {
-    if (request.lastUserMessage?.includes("sleep")) {
-      if (request.toolResults.length > 0) return "Noted, Alice.";
-      writeFileSync(join(process.cwd(), ".sleep-requested"), "");
-      return { toolCalls: [{ name: "sleep", input: { seconds: ${SLEEP_SECONDS} } }] };
-    }
-    // The first call never returns, so the process dies while it runs.
-    if (!existsSync(started)) {
-      writeFileSync(started, "");
-      await new Promise(() => {});
-    }
-    return "Noted, Alice.";
+    if (request.toolResults.length > 0) return "Noted, Alice.";
+    writeFileSync(join(process.cwd(), ".sleep-requested"), "");
+    return { toolCalls: [{ name: "sleep", input: { seconds: ${SLEEP_SECONDS} } }] };
   }),
   modelContextWindowTokens: 32_000,
 });`,
@@ -115,34 +109,37 @@ function countJournaledWaits(appRoot: string): number {
   return readStoredWaits(appRoot).filter((wait) => journaled.has(wait.waitId)).length;
 }
 
-/**
- * Starts a turn, SIGKILLs `eve start` once the agent writes `crashMarker` and
- * the local World journals at least `storedWaits` waits, restarts on the same
- * data directory, and returns the turn's outcome, or undefined if it does not
- * settle within 60s.
- */
-async function crashMidTurnAndRecover(input: {
-  readonly message: string;
-  readonly crashMarker: string;
-  readonly storedWaits?: number;
-}): Promise<{ readonly outcome: string | undefined; readonly stderr: string }> {
+/** Posts an empty delivery to the flow route, with `proof` as its delivery header when given. */
+async function postDelivery(url: string, proof?: string): Promise<Response> {
+  return await fetch(new URL("/.well-known/workflow/v1/flow", url), {
+    body: "{}",
+    headers: proof === undefined ? {} : { "x-eve-workflow-delivery": proof },
+    method: "POST",
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+// The local queue is in memory, so the wait's timer died with the process.
+// Only a recovery message tells a spec 9 run to arm it again.
+it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async () => {
   stubProductionEnv();
   const { appRoot } = app;
   await rm(resolveLocalWorkflowWorldDataDirectory(appRoot), { force: true, recursive: true });
-  await rm(join(appRoot, input.crashMarker), { force: true });
+  await rm(join(appRoot, ".sleep-requested"), { force: true });
 
   let server = await startPackagedEveStart(appRoot);
   let sessionId: string;
   try {
     const { session } = await new Client({ baseUrl: server.url, auth: AUTH }).sessions.create();
-    await session.send(input.message);
+    await session.send("Alice asks you to sleep, then acknowledge receipt.");
     sessionId = session.id;
     await expect
-      .poll(() => existsSync(join(appRoot, input.crashMarker)), { timeout: 30_000 })
+      .poll(() => existsSync(join(appRoot, ".sleep-requested")), { timeout: 30_000 })
       .toBe(true);
+    // The session's idle timeout and the sleep: the crash must lose a stored wait's timer.
     await expect
       .poll(() => countJournaledWaits(appRoot), { timeout: 30_000 })
-      .toBeGreaterThanOrEqual(input.storedWaits ?? 0);
+      .toBeGreaterThanOrEqual(2);
   } finally {
     await server.crash();
   }
@@ -152,6 +149,18 @@ async function crashMidTurnAndRecover(input: {
 
   server = await startPackagedEveStart(appRoot);
   try {
+    // The built server refuses a delivery without its queue key, before eve checks its own
+    // proof, which still guards anything that gets past it.
+    for (const proof of [undefined, "incorrect-delivery-proof"]) {
+      const refused = await postDelivery(server.url, proof);
+      expect(refused.status, server.stderr()).toBe(401);
+      expect(await refused.json()).toEqual({
+        code: "QUEUE_AUTH_REFUSED",
+        error: "Unauthorized queue delivery",
+      });
+    }
+    expect((await fetch(new URL("/", server.url), { method: "HEAD" })).status).toBe(200);
+
     const session = new Client({ baseUrl: server.url, auth: AUTH }).sessions.attach(sessionId);
     let outcome: string | undefined;
     try {
@@ -163,33 +172,10 @@ async function crashMidTurnAndRecover(input: {
     } catch (error) {
       if (!(error instanceof Error && error.name === "TimeoutError")) throw error;
     }
-    return { outcome, stderr: server.stderr() };
+    // Its own deliveries carry the key, and its guard replays the run this build owns.
+    expect(outcome, `The turn did not settle within 60s.\n${server.stderr()}`).toBe("completed");
+    expect(server.stdout() + server.stderr()).not.toContain("Skipping replay of stranded session");
   } finally {
     await server.stop();
   }
-}
-
-// Without releasing the dead process's steps, the restarted server defers to
-// its inline-ownership lease (860s) before it runs the turn again.
-it("finishes a spec 8 turn whose model call was running when `eve start` was killed", async () => {
-  // Spec 8 runs stamp inline steps with their owner; sessions created before
-  // eve moved to spec 9 keep that version for their whole life.
-  vi.stubEnv("WORKFLOW_SPEC_VERSION", "8");
-  const { outcome, stderr } = await crashMidTurnAndRecover({
-    message: "Alice asks you to acknowledge receipt.",
-    crashMarker: ".model-call-started",
-  });
-  expect(outcome, `The turn did not settle within 60s.\n${stderr}`).toBe("completed");
-}, 180_000);
-
-// The local queue is in memory, so the wait's timer died with the process.
-// Only a recovery message tells a spec 9 run to arm it again.
-it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async () => {
-  const { outcome, stderr } = await crashMidTurnAndRecover({
-    message: "Alice asks you to sleep, then acknowledge receipt.",
-    crashMarker: ".sleep-requested",
-    // The session's idle timeout and the sleep: the crash must lose a stored wait's timer.
-    storedWaits: 2,
-  });
-  expect(outcome, `The turn did not settle within 60s.\n${stderr}`).toBe("completed");
 }, 180_000);
