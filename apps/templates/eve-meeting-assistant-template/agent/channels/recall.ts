@@ -3,6 +3,7 @@ import { decide } from "eve/ai";
 
 import { replyModeOf } from "../lib/reply-mode.js";
 import { VOICE_ENABLED } from "../lib/voice-mode.js";
+import { recordLine } from "../lib/transcript.js";
 import { voiceRoutes } from "../lib/voice.js";
 
 const DECISION_MODEL = process.env.MEETING_DECISION_MODEL?.trim();
@@ -43,6 +44,11 @@ export default recallChannel({
     return { auth: recallParticipantAuth(event) };
   },
   async shouldRespond({ event, line, transcript, botName }) {
+    // Every line passes through here in order, so a live transcript records it
+    // first. A failed write mustn't change whether eve answers.
+    await recordLine(event).catch((error: unknown) => {
+      console.warn("Couldn't write the meeting transcript to Notion", error);
+    });
     if (event.type === "chat" || event.type === "status") return true;
     if (event.type !== "speech") return false;
     if (transcript.length >= NOTES_EVERY_LINES) return true;
