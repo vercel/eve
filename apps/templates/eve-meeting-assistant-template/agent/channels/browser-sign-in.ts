@@ -1,10 +1,18 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { resolveAgentBrowserInstallSpec } from "@agent-browser/eve/sandbox";
 import { defineChannel, GET } from "eve/channels";
 
 import { sh, startBridge, type Shell } from "../lib/bridge.js";
-import { BRIDGE_PORT, browserEnv, REGION, SIGN_INS_DIR, SIGN_INS_DRIVE } from "../lib/browser.js";
+import {
+  BRIDGE_PORT,
+  browserEnv,
+  REGION,
+  SIGN_IN_SANDBOX,
+  SIGN_INS_DIR,
+  SIGN_INS_DRIVE,
+} from "../lib/browser.js";
+import { adminToken, mayOpenSignIn, SIGN_IN_PATH } from "../lib/sign-in-link.js";
 
 // `GET /meeting/browser-sign-in?token=...` opens a browser where an admin
 // signs in to the service accounts eve should use, such as a Notion account
@@ -12,28 +20,31 @@ import { BRIDGE_PORT, browserEnv, REGION, SIGN_INS_DIR, SIGN_INS_DRIVE } from ".
 // own long-lived sandbox, the only one that mounts the saved sign-ins
 // read-write.
 
-const SANDBOX_NAME = "meeting-browser-sign-in";
 const READY = "$HOME/.agent-browser-ready";
 const SETUP_LOG = "/tmp/agent-browser-setup.log";
 const SETUP_PID = "/tmp/agent-browser-setup.pid";
 
 export default defineChannel({
   routes: [
-    GET("/meeting/browser-sign-in", async (request) => {
-      const expected = process.env.MEETING_ADMIN_TOKEN?.trim();
+    GET(SIGN_IN_PATH, async (request) => {
+      const expected = adminToken();
       if (!expected) {
         return text(
           503,
           "Set MEETING_ADMIN_TOKEN to a long random secret, redeploy, and open this page with ?token=<secret>.",
         );
       }
-      const token = new URL(request.url).searchParams.get("token") ?? "";
-      if (!sameSecret(token, expected)) return text(401, "Wrong or missing ?token=.");
+      if (!mayOpenSignIn(new URL(request.url).searchParams, expected)) {
+        return text(
+          401,
+          "This link is wrong or expired. Ask eve for a new one, or use ?token=<MEETING_ADMIN_TOKEN>.",
+        );
+      }
 
       const { Drive, Sandbox } = await import("@vercel/sandbox");
       const drive = await Drive.getOrCreate({ name: SIGN_INS_DRIVE, region: REGION });
       const sandbox = await Sandbox.getOrCreate({
-        name: SANDBOX_NAME,
+        name: SIGN_IN_SANDBOX,
         region: REGION,
         ports: [BRIDGE_PORT],
         persistent: true,
@@ -79,12 +90,6 @@ export default defineChannel({
     }),
   ],
 });
-
-function sameSecret(given: string, expected: string): boolean {
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 function text(status: number, body: string): Response {
   return new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });

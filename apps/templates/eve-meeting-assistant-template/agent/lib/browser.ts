@@ -18,6 +18,9 @@ export const SIGN_INS_DRIVE =
 /** Drives live in one region, and sandboxes that mount them must run there too. */
 export const REGION = (process.env.MEETING_BROWSER_REGION?.trim() || "iad1") as "iad1";
 
+/** The long-lived sandbox that runs the sign-in page and writes the saved sign-ins. */
+export const SIGN_IN_SANDBOX = "meeting-browser-sign-in";
+
 export const SIGN_INS_DIR = "/sign-ins";
 export const STATE_FILE = `${SIGN_INS_DIR}/state.json`;
 

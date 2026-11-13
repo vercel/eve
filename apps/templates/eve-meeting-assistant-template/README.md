@@ -124,7 +124,7 @@ MEETING_DECISION_MODEL=...         # optional; a decision model your AI Gateway 
 
 For the end-of-meeting notes, add a workspace webhook in the Recall dashboard for bot status changes, pointed at `/eve/v1/recall`. `agent/channels/eve.ts` lets `eve remote connect` reach a production deployment with the project's Vercel OIDC token: pass `-H "authorization: Bearer $VERCEL_OIDC_TOKEN"` after `vercel env pull`.
 
-Then sign eve's browser in. Open `https://<your-project>.vercel.app/meeting/browser-sign-in?token=<MEETING_ADMIN_TOKEN>`. The first visit installs the browser in a sandbox for sign-ins, which takes a few minutes. Then click **Notion**, sign in with an account that can see the Meetings page, add any other services, and click **Save sign-ins**. Meetings that start afterward use them. Come back the same way when a sign-in expires.
+Then sign eve's browser in. Open `https://<your-project>.vercel.app/meeting/browser-sign-in?token=<MEETING_ADMIN_TOKEN>`. The first visit installs the browser in a sandbox for sign-ins, which takes a few minutes. Then click **Notion**, sign in with an account that can see the Meetings page, add any other services, and click **Save sign-ins**. Meetings that start afterward use them. Come back the same way when a sign-in expires. When eve hits a page it can't open in a meeting, it posts a sign-in link that works for 15 minutes, signed with `MEETING_ADMIN_TOKEN` so the token itself never reaches the chat, and loads the new sign-ins once someone saves them.
 
 The first build prepares a sandbox template with agent-browser and Chromium, which takes a few minutes.
 

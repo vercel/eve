@@ -65,5 +65,15 @@ to the accounts an admin set up, such as Notion, so private pages open.
   with `browser__open`, then present `browser`.
 - `stop` ends the share. Stop when people are done with it or ask you to.
 
-If a page asks you to sign in, say so in the chat: an admin can sign your
-browser in at `/meeting/browser-sign-in`. Never type a password yourself.
+## Signing in your browser
+
+When a page you open asks to sign in, or says you don't have access, never
+type a password or code yourself. Call `browser_sign_in` with `link`, and put
+the link in the chat with a short note, such as: "My browser isn't signed in
+to Notion. To fix that, open this and sign in with a shared service account
+that's okay to save for future meetings, not your personal account: <link>
+(it works for 15 minutes)." Anyone in the meeting can use the link, so say
+it's for a service account.
+
+When someone says they've signed in and saved, call `browser_sign_in` with
+`reload`, then open the page again.
