@@ -18,6 +18,7 @@ import type {
   ScheduleScopeContext,
   ScheduleScopeResolverContext,
   ScheduleScopeValue,
+  ScheduleTiming,
 } from "#public/schedules/subscription.js";
 import { projectScheduleRecord } from "#runtime/schedules/record.js";
 import { byPrincipal } from "#public/schedules/scope.js";
@@ -138,6 +139,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     scope: ScheduleScopeValue,
     operation: "create" | "update",
     name: string,
+    expression: ScheduleTiming,
   ) => {
     const creator = principalReference(callContext.session.auth.current);
     if (creator === null)
@@ -151,6 +153,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
             ...contextFor(operation, name),
             operation,
             name,
+            expression,
           })
     ) as TPrepared;
     return createScheduleCollectionPayload({
@@ -171,8 +174,8 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     const normalized = validateScheduleName(name);
     if (patch.expression !== undefined) resolveScheduleTiming(patch.expression);
     const { scope, provider } = await resolveNamespace("update", normalized);
-    if ((await definition.provider.get(provider, normalized)) === null)
-      throw new Error("Schedule was not found in the authorized scope.");
+    const stored = await definition.provider.get(provider, normalized);
+    if (stored === null) throw new Error("Schedule was not found in the authorized scope.");
     const prepared: PreparedScheduleUpdate<TPrepared> = {
       name: normalized,
       namespace: provider.namespace,
@@ -180,7 +183,13 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       envelope:
         patch.payload === undefined
           ? undefined
-          : await prepareEnvelope(patch.payload, scope, "update", normalized),
+          : await prepareEnvelope(
+              patch.payload,
+              scope,
+              "update",
+              normalized,
+              patch.expression ?? stored.expression,
+            ),
     };
     return { prepared: snapshotPreparedWrite(prepared), provider };
   };
@@ -193,7 +202,13 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     const prepared = snapshotPreparedWrite({
       displayName,
       expression: input.expression,
-      envelope: await prepareEnvelope(input.payload, scope, "create", displayName),
+      envelope: await prepareEnvelope(
+        input.payload,
+        scope,
+        "create",
+        displayName,
+        input.expression,
+      ),
     });
     return { prepared, provider };
   };
