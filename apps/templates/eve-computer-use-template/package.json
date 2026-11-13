@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@agent-browser/eve": "0.40.0",
+    "@eve/agent-desktop": "0.1.0-rc.1",
     "@vercel/functions": "3.10.5",
     "@vercel/sandbox": "3.9.0",
     "ai": "7.0.137",

@@ -1,0 +1,5 @@
+import { resize_window } from "@eve/agent-desktop/tools";
+
+import { captureDesktop, withScreen } from "../../../lib/screen";
+
+export default withScreen(resize_window, captureDesktop);

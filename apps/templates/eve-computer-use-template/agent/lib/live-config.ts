@@ -23,7 +23,7 @@ export type LiveDevice = "browser" | "desktop";
  */
 export const DEVICE_TOOL_PREFIX: Record<LiveDevice, string> = {
   browser: "browser__",
-  desktop: "computer__",
+  desktop: "desktop__",
 };
 
 export const HISTORY_ACTIONS = ["back", "forward", "reload"] as const;

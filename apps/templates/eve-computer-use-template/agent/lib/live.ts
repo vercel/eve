@@ -1,4 +1,5 @@
 import { runAgentBrowser } from "@agent-browser/eve/sandbox";
+import { DEFAULT_DISPLAY } from "@eve/agent-desktop/sandbox";
 import type { ToolContext } from "eve/tools";
 
 import { environment } from "../sandbox";
@@ -13,7 +14,8 @@ import {
 import { DESKTOP_STREAM_SOURCE, RELAY_SOURCE } from "./live-sources";
 
 const DESKTOP_STREAM_PORT = 3601;
-const DESKTOP_DISPLAY = ":99";
+/** The display agent-desktop runs its desktop on, so the live view streams the screen it drives. */
+const DESKTOP_DISPLAY = DEFAULT_DISPLAY;
 
 const RELAY_PATH = "/tmp/live-relay.cjs";
 const DESKTOP_STREAM_PATH = "/tmp/live-desktop.cjs";

@@ -1,4 +1,5 @@
 import { get, screenshot, wait_for } from "@agent-browser/eve/tools";
+import { screenshot as desktopScreenshot } from "@eve/agent-desktop/tools";
 import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
 
 import { startLiveIfAvailable } from "./live";
@@ -20,7 +21,7 @@ export interface Screen {
 }
 
 type ToolWithExecute<TInput> = ToolDefinition<TInput, unknown> & {
-  execute(input: TInput, ctx: ToolContext): Promise<unknown>;
+  execute(input: TInput, ctx: ToolContext): unknown;
 };
 
 /**
@@ -62,6 +63,14 @@ export async function captureBrowser(ctx: ToolContext): Promise<Screen | undefin
   } | null;
   const sandbox = await startLiveIfAvailable(ctx, "browser");
   return { device: "browser", imageDataUrl: shot.imageDataUrl, url: page?.url, sandbox };
+}
+
+/** The whole desktop after an action, through the extension's own screenshot tool. */
+export async function captureDesktop(ctx: ToolContext): Promise<Screen | undefined> {
+  const shot = (await desktopScreenshot.execute({}, ctx)) as { imageDataUrl?: string };
+  if (shot.imageDataUrl === undefined) return undefined;
+  const sandbox = await startLiveIfAvailable(ctx, "desktop");
+  return { device: "desktop", imageDataUrl: shot.imageDataUrl, sandbox };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

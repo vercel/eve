@@ -3,7 +3,7 @@
 An [eve](https://eve.dev) and Next.js app where you watch an agent operate a computer in its own sandbox. Pick a device, describe a task, and follow along in a floating window over the chat that you can drag anywhere or expand.
 
 - **Browser**: a headless Chrome, driven with the [agent-browser](https://agent-browser.dev) extension (`@agent-browser/eve`). The agent reads the page's accessibility tree and acts on element refs.
-- **Desktop**: a Linux desktop with Firefox and terminals, driven with eve's built-in computer-use extension (`eve/extensions/computer-use`). The agent sees screenshots and acts on screen coordinates.
+- **Desktop**: a Linux desktop with Firefox and terminals, driven with the [agent-desktop](https://github.com/vercel-labs/agent-desktop) extension (`@eve/agent-desktop`). The agent reads each app's accessibility tree and acts on element refs.
 
 ## Architecture
 
@@ -12,9 +12,9 @@ chat + device picker → eve agent → Vercel Sandbox (headless Chrome, Linux de
                                      ↘ live stream (port 3600) → live view, Take Over
 ```
 
-Both extensions run in the agent's [sandbox](https://eve.dev/docs/sandbox): each chat gets its own [Vercel Sandbox](https://vercel.com/docs/sandbox) with 4 vCPUs, during local development and when deployed. The browser and the desktop (a virtual display inside the sandbox) run side by side in it, so nothing opens on your own screen. `agent/sandbox.ts` installs agent-browser, Chrome, and the desktop into the snapshot every sandbox starts from, so sessions start warm.
+Both extensions run in the agent's [sandbox](https://eve.dev/docs/sandbox): each chat gets its own [Vercel Sandbox](https://vercel.com/docs/sandbox) with 4 vCPUs, during local development and when deployed. The browser and the desktop (a virtual display inside the sandbox) run side by side in it, so nothing opens on your own screen. `agent/sandbox.ts` installs agent-browser, Chrome, agent-desktop, its desktop, Firefox ESR, and GNOME Console into the snapshot every sandbox starts from, so sessions start warm.
 
-The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) in `agent/extensions/` wrap each browser action and `computer_use` so its result also carries a screen for the web app: a screenshot, the page URL, and the device's live stream. `toModelOutput` keeps all three out of what the model reads. The desktop tool also passes the screenshot to the model as an image, so it can see the screen without a separate `read_file` call. The browser mount also disables agent-browser's `close` tool, so the browser stays open after a task for you to watch or take over.
+The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) in `agent/extensions/` wrap each browser and desktop action so its result also carries a screen for the web app: a screenshot, the page URL, and the device's live stream. `toModelOutput` keeps all three out of what the model reads. The browser mount also disables agent-browser's `close` tool, so the browser stays open after a task for you to watch or take over.
 
 ### Live view and Take Over
 
@@ -36,7 +36,8 @@ The main pieces are:
 
 - `agent/sandbox.ts`: the sandbox and its installs
 - `agent/extensions/browser/`: the agent-browser mount, its screenshot overrides, and the disabled `close` tool
-- `agent/extensions/computer/`: the computer-use mount and its `computer_use` override
+- `agent/extensions/desktop/`: the agent-desktop mount and its screenshot overrides
+- `agent/lib/firefox.ts`: Firefox ESR from Mozilla's apt repository, without its first-run prompts
 - `agent/lib/screen.ts`: the wrapper that adds a screen to a tool's result
 - `agent/lib/live.ts` and `agent/lib/live-sources.ts`: the live streams and the relay in the sandbox
 - `apps/web/app/api/live/`: the WebSocket route that authorizes viewers and proxies the stream

@@ -7,7 +7,7 @@ export const DEVICES = {
   desktop: {
     label: "Desktop",
     description:
-      "A Linux desktop with Firefox and terminals in the sandbox, driven with computer__computer_use.",
+      "A Linux desktop with Firefox and terminals in the sandbox, driven with the desktop__* tools.",
   },
 } as const;
 
