@@ -173,9 +173,9 @@ function compiledWorkflow(source: ToolSource, name: string, entry: object): Comp
       `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" whose entry point isn't a compiled workflow. Declare it as a top-level async function that starts with "use workflow", and pass that function to defineWorkflowTool() as execute, task, or serve.`,
     );
   }
-  if (Reflect.get(entry, "endsTurn") !== undefined) {
+  if (Reflect.get(entry, "endsTurn") !== undefined && entryPoint !== "execute") {
     throw new Error(
-      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" with "endsTurn", which defineWorkflowTool() doesn't support.`,
+      `The defineDynamic() in "${source.logicalPath}" returned workflow tool "${name}" with "endsTurn", which applies only to execute().`,
     );
   }
   if (entryPoint === "serve") {
@@ -227,6 +227,7 @@ function liveTool(
     availableInSubagents: entry.availableInSubagents,
     deferred: entry.deferred,
     description: entry.description,
+    endsTurn: entry.endsTurn,
     frameworkTool: isFrameworkTool(entry) || undefined,
     inputSchema: toInputSchema(entry.inputSchema as ToolSchemaSource),
     label: definition.label as HarnessToolDefinition["label"],
@@ -256,7 +257,6 @@ function liveTool(
   }
   return {
     ...common,
-    endsTurn: entry.endsTurn,
     execute: createToolExecuteWithAuth({
       execute: (input, context) => entry.execute(input as never, context),
       scope: name,

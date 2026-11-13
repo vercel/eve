@@ -186,14 +186,43 @@ describe("defineWorkflowTool", () => {
     ).toThrow("Workflow executors require defineWorkflowTool()");
   });
 
-  it("rejects endsTurn on a workflow tool, which resumes the turn when it finishes", () => {
+  it("accepts endsTurn on execute and rejects it on task and serve", () => {
     const execute = Object.assign(async () => 1, { workflowId: "workflow//test//execute" });
-    const definition = Object.assign(
+    const accepted = Object.assign(
       defineWorkflowTool({ description: "Workflow", inputSchema: {}, execute }),
-      { endsTurn: true },
+      { endsTurn: (output: unknown) => output === 1 },
     );
-    expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
-      '"endsTurn" is not supported on defineWorkflowTool()',
-    );
+    expect(() => normalizeToolDefinition(accepted, "Invalid tool.")).not.toThrow();
+
+    for (const entryPoint of ["task", "serve"] as const) {
+      const entry = Object.assign(async () => 1, {
+        workflowId: `workflow//test//${entryPoint}`,
+      });
+      const rejected = Object.assign(
+        defineWorkflowTool({
+          description: "Workflow",
+          inputSchema: {},
+          [entryPoint]: entry,
+        } as never),
+        { endsTurn: true },
+      );
+      expect(() => normalizeToolDefinition(rejected, "Invalid tool.")).toThrow(
+        `"endsTurn" applies only to execute()`,
+      );
+    }
+  });
+
+  it("types an execute tool's endsTurn by the call's output", () => {
+    defineWorkflowTool({
+      description: "React to the message.",
+      inputSchema: z.object({ id: z.string() }),
+      async execute() {
+        return { reacted: true };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ reacted: boolean }>();
+        return output.reacted;
+      },
+    });
   });
 });

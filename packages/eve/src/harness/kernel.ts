@@ -31,6 +31,8 @@ import {
 import { turnPosition } from "#harness/session-machine/view.js";
 import { createStep, failTurnForEffect, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
+import { settleTurn } from "#harness/step/after-model.js";
+import { workingTaskIds } from "#execution/tasks/model-step.js";
 import type {
   HarnessSession,
   StepFn,
@@ -151,6 +153,11 @@ export function createKernel(config: KernelConfig): StepFn {
       const prepared = answered.input && { ...answered.input, message: turn.message };
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
+    }
+    // Results that end the turn settle it in their place, without a reply; a working task holds
+    // the turn open, and its result brings the model back.
+    if (runtime.endsTurn && workingTaskIds(step.session).length === 0) {
+      return settleTurn(step, { stepOutput: null });
     }
     return runModelStep(step, {
       generation,
