@@ -25,7 +25,6 @@ allowBuilds:
   sharp: false # Prebuilt platform packages need no install script.
   ssh2: false # Optional native acceleration; JavaScript fallback is sufficient.
   unrs-resolver: false # Prebuilt platform packages need no repair script.
-  "@vgpu/adapter-node": false # Best-effort Dawn download; the adapter fetches it at runtime when needed.
   webgpu: true # Clears macOS quarantine from its packaged native binding.
 
 ignoredOptionalDependencies:
@@ -56,7 +55,7 @@ catalog:
   better-auth: "1.7.21"
   marked: "18.2.0"
   next: "16.4.6"
-  phase: "0.7.6"
+  phase: "0.0.1"
   picocolors: "1.1.1"
   react: "19.3.1"
   react-dom: "19.3.1"

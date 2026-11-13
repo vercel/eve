@@ -62,6 +62,12 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
         const capturedQuestions = structuredClone(questions);
         const decisionQuestions: Record<string, DecisionQuestion> = Object.fromEntries(
           Object.entries(capturedQuestions).map(([id, question]) => {
+            // Scores normalize by the top level's index, so one level has no range.
+            if (question.type === "score" && question.criteria.length < 2) {
+              throw new Error(
+                `Judge question "${id}" score criteria must contain at least two ordered levels.`,
+              );
+            }
             if (question.type !== "choice") return [id, question];
             const { expected, ...decisionQuestion } = question;
             if (typeof expected !== "string" || !Object.hasOwn(question.criteria, expected)) {
