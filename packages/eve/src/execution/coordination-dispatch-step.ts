@@ -110,11 +110,18 @@ async function dispatchCoordination(
     const result = createRuntimeToolResultFromValue({
       callId: task.callId,
       toolName: task.toolName,
-      output: { code: "TOOL_EXECUTION_DENIED", message: "The call was not admitted to run." },
+      output: {
+        code: "TOOL_EXECUTION_DENIED",
+        message:
+          "The call was not started: it was not admitted to run, for example because it was " +
+          "made before an upgrade. Make the call again to run it.",
+        tool: { result: "not_run" },
+      },
       isError: true,
     });
     results.push(result);
-    refused.push({ policy: "approval", result });
+    // No approval policy refused it, so it isn't labelled as one.
+    refused.push({ policy: "admission", result });
     if (task.entry.entryPoint === "task" || task.entry.entryPoint === "serve") {
       nextSession = writeTaskTable(
         nextSession,

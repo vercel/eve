@@ -1,7 +1,10 @@
 import type { AnyEventRequest } from "@workflow/world";
 import { describe, expect, it, vi } from "vitest";
 import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { applySessionStateDelta } from "#execution/session/state-delta.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { createTask, findTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -61,8 +64,21 @@ describe("coordination dispatch", () => {
       const admitted = ["allowed-1", "allowed-2"].map((callId) =>
         admitWorkflowTask({ ...request, callId }, mintClearance(callId)),
       );
-      const calls = [request, changed, ...admitted];
-      const session = withParkedStep(base, {
+      // A refused task call drops the task its call recorded, so it never counts against the cap.
+      const created = createTask(readTaskTable(undefined), {
+        callId: "legacy-task",
+        kind: "tool",
+        name: "deploy",
+        resumable: true,
+        turnId: "turn-1",
+      });
+      const legacyTask: RuntimeWorkflowTaskRequest = {
+        ...request,
+        callId: "legacy-task",
+        entry: { entryPoint: "task", taskId: created.taskId },
+      };
+      const calls = [request, changed, legacyTask, ...admitted];
+      const session = withParkedStep(writeTaskTable(base, created.table), {
         messages: [
           {
             role: "assistant",
@@ -77,9 +93,12 @@ describe("coordination dispatch", () => {
         tasks: calls,
       });
       const before = await listWorkflowToolRunIds();
-      const dispatched = await dispatchCoordinationStep({
+      const given = {
         serializedContext: buildSerializedContext({ channelKind: "http" }),
         sessionState: createDurableSessionState({ session }),
+      };
+      const dispatched = await dispatchCoordinationStep({
+        ...given,
         workflowToolRunOwner: { inbox: "eve:test-inbox" },
       });
       expect(dispatched.pending.executing.map(({ callId }) => callId)).toEqual([
@@ -88,9 +107,24 @@ describe("coordination dispatch", () => {
       ]);
       expect(dispatched.pending.started).toEqual([]);
       expect(dispatched.pending.refused).toMatchObject([
-        { policy: "approval", result: { callId: "legacy" } },
-        { policy: "approval", result: { callId: "changed" } },
+        { policy: "admission", result: { callId: "legacy" } },
+        { policy: "admission", result: { callId: "changed" } },
+        { policy: "admission", result: { callId: "legacy-task" } },
       ]);
+      expect(dispatched.pending.refused[0]?.result).toMatchObject({
+        isError: true,
+        output: { code: "TOOL_EXECUTION_DENIED", tool: { result: "not_run" } },
+      });
+      expect(
+        findTask(
+          readTaskTable(
+            readDurableSession(
+              applySessionStateDelta({ ...given, history: [] }, dispatched.stateDelta).sessionState,
+            ).state,
+          ),
+          created.taskId,
+        ),
+      ).toBeUndefined();
       const after = await listWorkflowToolRunIds();
       expect([...after].filter((id) => !before.has(id))).toHaveLength(2);
     });
