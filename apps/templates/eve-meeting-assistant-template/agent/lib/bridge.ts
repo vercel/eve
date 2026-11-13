@@ -65,7 +65,12 @@ export async function startBridge(
       // Match the 1280x720 screen share.
       `agent-browser --session ${BROWSER_SESSION} set viewport 1280 720 >/dev/null`,
       `if ! ${healthy}; then`,
-      `  kill "$(cat ${ROOT}/bridge.pid 2>/dev/null)" 2>/dev/null && sleep 0.5`,
+      // Stop any older bridge, found by its command line in /proc: sandbox
+      // images lack ss and lsof, and older bridges wrote no pid file.
+      `  for p in /proc/[0-9]*; do case "$(tr '\\0' ' ' < $p/cmdline 2>/dev/null)" in "node ${ROOT}/bridge.mjs"*) kill \${p#/proc/};; esac; done`,
+      "  for _ in $(seq 1 20); do curl -fs http://127.0.0.1:" +
+        BRIDGE_PORT +
+        "/healthz >/dev/null || break; sleep 0.1; done",
       `  ${env} setsid -f node ${ROOT}/bridge.mjs > ${ROOT}/bridge.log 2>&1 < /dev/null`,
       "fi",
       "for _ in $(seq 1 50); do",

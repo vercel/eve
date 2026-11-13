@@ -7,7 +7,7 @@
 
 /** A dependency-free bridge. Node 22 and later ship the WebSocket client. */
 export const BRIDGE_SERVER = `import { createServer } from "node:http";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 
 const root = process.env.BRIDGE_ROOT;
@@ -16,7 +16,6 @@ const stateFile = process.env.BRIDGE_STATE_FILE;
 const interactive = process.env.BRIDGE_INTERACTIVE === "1";
 const pages = { "": "screen.html", "sign-in": "sign-in.html" };
 const inputTypes = new Set(["input_mouse", "input_keyboard"]);
-writeFileSync(root + "/bridge.pid", String(process.pid));
 
 let frame = null;
 let socket = null;
