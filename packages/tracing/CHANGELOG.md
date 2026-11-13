@@ -1,5 +1,21 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.7
+
+Released 2026-11-13 · [Compare with 1.0.0-rc.6](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.6...%40vercel%2Fagent-runs%401.0.0-rc.7)
+
+### Features
+
+- Decision spans now name their turn and purpose, and record per-question results as `gen_ai.decision.results` when the trace records outputs.
+  `decision <model>` spans carry `agent.turn.id` and `agent.decision.purpose` (`model-selection`, `tool-approval`, `agent-routing`, or `custom`), so Agent Runs can place a model-selection decision in a turn that is still running. Results follow the proposed OpenTelemetry GenAI decision conventions: choices, predicates, scores with their levels, and refusals, each keyed by the question's position. They are output content, recorded only when outputs are and dropped for any destination that declines outputs. `AgentRun.decision` accepts an optional `purpose`, and completing a decision with `output` records it as the results. ([#6389](https://github.com/vercel/eve/pull/6389))
+
+### Bug Fixes
+
+- Update eve's bundled dependencies, including the AI SDK, Vercel SDKs, Chat SDK, and MCP, to their latest releases, and OpenTelemetry to its latest 2.x releases.
+  eve now requires `ai` 7.0.172 or later.
+  YAML frontmatter, eval data files, and OpenAPI specs now parse with js-yaml 5 and YAML 1.2 values. An unquoted date such as `2024-01-02` loads as a string instead of a `Date`, and a `0b` binary literal such as `0b101` loads as a string instead of a number. The YAML 1.1 tags `!!timestamp`, `!!binary`, `!!set`, `!!omap`, and `!!pairs` are no longer recognized, and a mapping with a non-scalar key, such as `? [a]`, throws. `<<` merge keys still work.
+  MCP connections over Streamable HTTP now fail when the `server/discover` request fails before the server answers, instead of retrying with `initialize`. Set `protocolVersionDiscovery: false` for a server that can't handle that request. Servers that answer `server/discover` with a JSON-RPC error or an HTTP error status other than `401` still use `initialize`, and servers that reject the protocol version with a supported legacy version still negotiate it. ([#6378](https://github.com/vercel/eve/pull/6378))
+
 ## 1.0.0-rc.6
 
 Released 2026-11-12 · [Compare with 1.0.0-rc.5](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.5...%40vercel%2Fagent-runs%401.0.0-rc.6)
