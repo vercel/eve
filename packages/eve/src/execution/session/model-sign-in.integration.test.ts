@@ -71,7 +71,7 @@ describe("a dynamic model that needs a sign-in", () => {
     });
   });
 
-  it("stops a model call that requireAuth rejects, and runs it again after the sign-in", async () => {
+  it("ends the model call when the model code calls requireAuth, and runs it again after sign-in", async () => {
     const billing = billingProvider({ token: "revoked-token" });
     const runtime = await billingRuntime("model-sign-in-rejected", billing);
 
@@ -142,7 +142,7 @@ interface BillingProvider {
   readonly tokensSeen: string[];
 }
 
-/** A Connect-like provider: it keeps one token for the person, which a sign-in replaces. */
+/** A provider with one token per person. A sign-in replaces the token. */
 function billingProvider(initial: { readonly token?: string } = {}): BillingProvider {
   let stored = initial.token;
   let issued = 0;
@@ -179,7 +179,7 @@ function billingProvider(initial: { readonly token?: string } = {}): BillingProv
   };
 }
 
-/** An agent whose model is billed to the caller: it reads the caller's token before every call. */
+/** This agent's model reads the caller's token before every call. */
 async function billingRuntime(name: string, billing: BillingProvider) {
   return await createTestRuntime({
     agent: {

@@ -118,7 +118,7 @@ async function keepOne(
     result = await evaluate(ctx, definition, fn, run);
   } catch (error) {
     if (run.mode === "evaluate") {
-      // A sign-in the value needs pauses the turn; the turn doesn't fail.
+      // eve pauses the turn for a sign-in, so a sign-in isn't a failure.
       if (!isScopedAuthorizationRequiredError(error))
         log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
           error: toErrorMessage(error),
@@ -445,7 +445,7 @@ async function withMemos<T>(
   return { result, used };
 }
 
-/** The scope a dynamic value's inline auth providers sign in under, before their provider key. */
+/** Dynamic values sign in under this scope: `connect("x/y")` keys as `agent__x_y`. */
 const DYNAMIC_AUTH_SCOPE = "agent";
 
 function internalContext(

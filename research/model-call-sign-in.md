@@ -20,16 +20,16 @@ each model call, and eve runs the same sign-in flow as for a tool.
 ## Authoring API
 
 ```ts title="agent/agent.ts"
-import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGateway } from "@ai-sdk/gateway";
 import { connect } from "@vercel/connect/eve";
 import { defineAgent, defineDynamic } from "eve";
 
-const anthropic = connect("anthropic/myagent");
+const vercel = connect("vercel/myagent");
 
 export default defineAgent({
   model: defineDynamic(async (ctx) => {
-    const { token } = await ctx.getToken(anthropic);
-    return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
+    const { token } = await ctx.getToken(vercel);
+    return createGateway({ apiKey: token })("anthropic/claude-sonnet-4.5");
   }),
 });
 ```

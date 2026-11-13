@@ -239,8 +239,8 @@ export class ModelCaller {
   }
 
   /**
-   * The model call asked for a sign-in: its attempt is abandoned, and the step parks with the
-   * messages the call read, to run again once the sign-in completes.
+   * Ends the model call as abandoned and returns its messages, so the step can run again after
+   * sign-in.
    */
   async abandonForSignIn(): Promise<readonly ModelMessage[]> {
     const { step } = this;

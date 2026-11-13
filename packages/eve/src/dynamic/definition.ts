@@ -99,34 +99,34 @@ export interface DynamicModelContext extends SessionFrame {
   /** The conversation history as of the latest commit, assembled when something reads it. */
   messages(): Promise<readonly ModelMessage[]>;
   /**
-   * Resolves a token for an inline auth provider, such as `connect("github/myagent")`, with the
-   * same cache and sign-in as a tool's `ctx.getToken(provider)`. When the caller must sign in
-   * first, the model call doesn't run: eve opens the sign-in, pauses the turn, and evaluates the
-   * value again once the caller signs in. A scheduled turn fails with
+   * Returns the caller's token for an inline auth provider, such as `connect("vercel/myagent")`.
+   * It shares its token cache and sign-in with a tool's `ctx.getToken(provider)`. When the caller
+   * hasn't signed in, eve starts no model call. It opens the sign-in, pauses the turn, and
+   * evaluates the value again after sign-in. In a turn from a schedule, eve fails the turn with
    * `reason: "sign_in_unavailable"`.
    *
-   * Call it outside `ctx.memo`: a memo keeps its result in the session, and eve already reuses
+   * Call it outside `ctx.memo`. A memo keeps its result in the session, and eve already reuses
    * the token within a step.
    *
    * ```ts
-   * import { createAnthropic } from "@ai-sdk/anthropic";
+   * import { createGateway } from "@ai-sdk/gateway";
    * import { connect } from "@vercel/connect/eve";
    *
-   * const anthropic = connect("anthropic/myagent");
+   * const vercel = connect("vercel/myagent");
    *
    * export default defineAgent({
    *   model: defineDynamic(async (ctx) => {
-   *     const { token } = await ctx.getToken(anthropic);
-   *     return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
+   *     const { token } = await ctx.getToken(vercel);
+   *     return createGateway({ apiKey: token })("anthropic/claude-sonnet-4.5");
    *   }),
    * });
    * ```
    */
   getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
   /**
-   * Evicts the provider's cached token and starts a fresh sign-in. Call it when a service
-   * rejects a token from {@link getToken}, including from inside the model call: the model call
-   * stops, and the turn resumes with a new model call once the caller signs in.
+   * Drops the provider's cached token and starts a sign-in. Call it when the provider rejects a
+   * token from {@link getToken}, also during a model call. eve then ends that model call and runs
+   * it again after sign-in.
    */
   requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
 }

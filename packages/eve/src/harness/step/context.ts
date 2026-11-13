@@ -189,14 +189,14 @@ export async function prepareModelCall(
   return undefined;
 }
 
-/** A model call that needs a sign-in: the sign-in it waits on, or the turn it failed. */
+/** Either the sign-in to wait on, or the result of the failed turn. */
 export type ModelCallSignIn =
   | { readonly signIn: AuthorizationSignal }
   | { readonly failed: StepResult };
 
 /**
- * A dynamic value or the model call asked for a sign-in. The turn fails when eve can't ask for
- * one, such as in a scheduled turn or after the provider rejected a token it just issued.
+ * Opens the sign-in for a dynamic value or a model call. eve fails the turn when it can't ask,
+ * such as in a turn from a schedule or after the provider rejects a token from a sign-in.
  */
 export async function signInForModelCall(step: Step, error: unknown): Promise<ModelCallSignIn> {
   try {

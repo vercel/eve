@@ -74,7 +74,7 @@ export async function runModelStep(
   const preparation = await prepareModelCall(step, prepared);
   if (preparation !== undefined && "failed" in preparation) return preparation.failed;
   const prompt = commitTurnInput(step, prepared);
-  // A value the call needs waits on a sign-in: the step's messages park with it.
+  // A dynamic value asked for a sign-in: pause the turn with the step's messages.
   if (preparation !== undefined)
     return await stopForModelSignIn(step, preparation.signIn, prompt.messages);
   // Over budget, the model doesn't run: the step's messages park with the prompt.

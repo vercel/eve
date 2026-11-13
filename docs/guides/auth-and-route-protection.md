@@ -494,19 +494,19 @@ Inline providers derive a stable auth key from Vercel Connect metadata when avai
 
 ### Before a model call
 
-When the model call itself needs the caller's credential, such as each person's own provider API key, get it in the agent's dynamic `model`. A dynamic value's `ctx` has the same `getToken` and `requireAuth` methods as a tool's:
+When the model call itself needs the caller's credential, get it in the agent's dynamic `model`. In this example, each person signs in with Vercel, and the model call runs on that person's AI Gateway token. A dynamic value's `ctx` has the same `getToken` and `requireAuth` methods as a tool's:
 
 ```ts title="agent/agent.ts"
-import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGateway } from "@ai-sdk/gateway";
 import { connect } from "@vercel/connect/eve";
 import { defineAgent, defineDynamic } from "eve";
 
-const anthropic = connect("anthropic/myagent");
+const vercel = connect("vercel/myagent");
 
 export default defineAgent({
   model: defineDynamic(async (ctx) => {
-    const { token } = await ctx.getToken(anthropic);
-    return createAnthropic({ apiKey: token })("claude-sonnet-4-5");
+    const { token } = await ctx.getToken(vercel);
+    return createGateway({ apiKey: token })("anthropic/claude-sonnet-4.5");
   }),
 });
 ```

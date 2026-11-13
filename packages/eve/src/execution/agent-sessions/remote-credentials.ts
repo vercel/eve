@@ -104,6 +104,6 @@ async function foldSessionViewTo(sessionId: string, position: number): Promise<S
 
 function unavailableAuth(label: string, method: "getToken" | "requireAuth"): Error {
   return new Error(
-    `"${label}" called ctx.${method}() while eve rebuilt a remote agent's credentials for its child, where tokens aren't available. Read credentials for a remote agent from the session or the environment.`,
+    `"${label}" called ctx.${method}() while eve rebuilt credentials for a remote agent. No sign-in can run there, so read the remote agent's credentials from the session or the environment.`,
   );
 }

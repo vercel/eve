@@ -99,9 +99,8 @@ export async function stopForToolSignIn(
 }
 
 /**
- * A dynamic value or the model call needs a sign-in: the turn waits on it, and the step runs
- * again once it completes. `messages` are the step's: they park with the sign-in, as they do at
- * the budget gate.
+ * Pauses the turn on a sign-in for a dynamic value or a model call. eve saves the step's
+ * `messages` with the sign-in, as the budget gate does, and runs the step again after sign-in.
  */
 export async function stopForModelSignIn(
   step: Step,
