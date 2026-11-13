@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+# Jobs install only the workspace packages their commands read, each under its
+# own pnpm store cache key. See .github/actions/pnpm-install.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -30,19 +33,11 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
-
-      # pnpm verifies the lockfile against the supply-chain policies on every
-      # install (13 s on Linux, 44 s on Windows). Its verdict log is keyed by the
-      # lockfile hash, so caching it keeps the check and skips the re-check.
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: full
 
       - name: Run lint
         run: pnpm lint
@@ -81,16 +76,12 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # Typecheck covers every package, so it reads the whole workspace.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: full
 
       - name: Run typecheck
         run: pnpm typecheck
@@ -111,16 +102,13 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # `pnpm test:unit` runs the unit tier of every package that has one,
+      # including the docs site's, so this job reads the whole workspace.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: full
 
       - name: Run unit tests
         run: pnpm test:unit
@@ -152,16 +140,26 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # The integration tier of every package with one, plus the fixtures and
+      # registry sources their tests read. `apps/docs/registry` installs the
+      # adapter packages the registry templates import.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: integration
+          filters: |
+            eve...
+            @eve/code...
+            @eve/git...
+            @eve/custom-skills...
+            @eve/agent-browser...
+            @eve/agent-desktop...
+            @vercel/agent-runs...
+            @eve-e2e/config...
+            ./apps/fixtures/*
+            ./e2e/fixtures/*
+            ./apps/docs/registry
 
       - name: Run integration tests
         run: pnpm test:integration
@@ -182,7 +180,6 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -195,14 +192,20 @@ jobs:
         with:
           pull: "true"
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # The scenario tier of every package with one. Its public-types scenario
+      # typechecks against the framework apps' installed dependencies.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: scenario
+          filters: |
+            eve...
+            @eve/code...
+            @eve/git...
+            @eve/computer-use...
+            @eve/agent-desktop...
+            ./e2e/fixtures/agent-self-modification
+            ./apps/frameworks/*
 
       - name: Run scenario tests
         run: pnpm test:scenario
@@ -260,16 +263,13 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
-
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: agent-desktop
+          filters: |
+            @eve/agent-desktop...
 
       - name: Build the desktop extension and its workspace dependencies
         run: pnpm exec turbo run build --filter=@eve/agent-desktop
@@ -306,16 +306,15 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # The smoke builds build the framework apps against the workspace eve.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: framework-fixtures
+          filters: |
+            eve...
+            ./apps/frameworks/*
 
       - name: Build framework fixtures against the workspace eve dist
         run: pnpm test:framework-fixtures
@@ -341,16 +340,15 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # The browser tests install the web chat template's own dependencies in a
+      # temp directory, so the workspace install is eve's.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: webchat
+          filters: |
+            eve...
 
       - name: Run web chat tests
         run: pnpm test:webchat
@@ -371,20 +369,19 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
       # This job builds agents whose sandboxes pull eve's default image.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # Each template installs its own dependencies from its own lockfile; the
+      # only workspace package this check reads is the packed eve.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: templates
+          filters: |
+            eve...
 
       - name: Check templates with their lockfiles and the packed eve package
         run: pnpm check:templates
@@ -408,20 +405,20 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: "pnpm"
 
       # This job builds agents whose sandboxes pull eve's default image.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
 
-      - name: Restore the lockfile verification verdict
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
-          key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
-
+      # The smoke tests start their agent apps from the shared fixtures.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache"
+        uses: ./.github/actions/pnpm-install
+        with:
+          cache-key: tui
+          filters: |
+            eve...
+            ./apps/fixtures/*
+            ./e2e/fixtures/*
 
       - name: Run TUI smoke tests
         env:

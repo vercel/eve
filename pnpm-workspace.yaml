@@ -6,6 +6,7 @@ lockfile:
 
 packages:
   - apps/*
+  - apps/docs/registry
   - apps/fixtures/*
   - apps/frameworks/*
   - e2e/fixtures/*
