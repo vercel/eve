@@ -179,7 +179,18 @@ export async function acquireRecoveryLease(
 ): Promise<RecoveryLease | undefined> {
   const leasePath = join(recoveryPath, "lease");
   const leaseJournal: RecoveryLeaseJournal = { pid: process.pid, token };
-  await mkdir(recoveryPath, { recursive: true });
+  try {
+    await mkdir(recoveryPath, { recursive: true });
+  } catch (error) {
+    // Recursive mkdir reports EEXIST by stat-ing the path; when a concurrent
+    // holder completes and renames the directory away in between, it rejects
+    // with ENOENT. That holder is done, so report contention and let the caller
+    // retry, as for the same race on the lease below.
+    if (isErrnoCode(error, "ENOENT")) {
+      return undefined;
+    }
+    throw error;
+  }
 
   for (;;) {
     try {
