@@ -1,4 +1,9 @@
-import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
+import {
+  holdsMessages,
+  ownOpenRequestIds,
+  runtimeWait,
+  type SessionView,
+} from "#harness/session-machine/view.js";
 import type { HarnessStepInput, StepResult } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { Step } from "./context.js";
@@ -8,25 +13,11 @@ import type { Step } from "./context.js";
 // to answer or sign in, or calls the runtime runs. A turn waiting on a person says so.
 
 /**
- * Interaction kinds a message can't steer past: it waits, unreceived, until the person answers.
- * Every other kind gives way to the person's message.
- */
-const ANSWER_FIRST_KINDS: ReadonlySet<string> = new Set(["budget"]);
-
-/**
  * Whether the session resumes the turn on a person itself: a request it asked, or its own sign-in.
  * A child's relayed sign-in resumes the turn on its call instead, though readers see a person.
  */
 export function resumesOnPerson(view: SessionView): boolean {
   return ownOpenRequestIds(view).size > 0 || view.signIns.length > 0;
-}
-
-/** Whether an open request takes its answer before any message: the message waits behind it. */
-export function holdsMessages(view: SessionView): boolean {
-  const tables = view.projection.view;
-  return [...ownOpenRequestIds(view)].some((interactionId) =>
-    ANSWER_FIRST_KINDS.has(tables.interactions[interactionId]?.request.kind ?? ""),
-  );
 }
 
 /** Whether the turn holds input it hasn't taken. */

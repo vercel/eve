@@ -162,6 +162,9 @@ export class ActiveTurn {
         break;
       }
       if (routed.kind === "turn") steering.push(routed.delivery);
+      // A request that holds messages takes only its answer: anything behind it waits for the
+      // turn's next step, so the answer above is never read with a message joined to it.
+      if (options?.holdsMessages === true) break;
     }
     this.resetSteering();
     if (steering.length === 0) return undefined;

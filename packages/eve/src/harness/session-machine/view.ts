@@ -181,3 +181,20 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
       .map((row) => row.interactionId),
   );
 }
+
+/**
+ * Interaction kinds a message can't steer past: it waits, unreceived, until the person answers.
+ * Every other kind gives way to the person's message.
+ */
+const ANSWER_FIRST_KINDS: ReadonlySet<string> = new Set(["budget"]);
+
+/**
+ * Whether an open request takes its answer before any message: the message waits behind it, so
+ * only that request's own answer may reach the turn.
+ */
+export function holdsMessages(view: SessionView): boolean {
+  const tables = view.projection.view;
+  return [...ownOpenRequestIds(view)].some((interactionId) =>
+    ANSWER_FIRST_KINDS.has(tables.interactions[interactionId]?.request.kind ?? ""),
+  );
+}

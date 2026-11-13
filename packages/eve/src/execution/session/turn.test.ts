@@ -941,6 +941,7 @@ describe("SessionExecution checkpoints", () => {
             action: "paused",
             ...({
               attemptIds: [],
+              holdsMessages: false,
               on: "interaction",
               requestIds: ["request_1"],
             } satisfies TurnPause),
@@ -969,8 +970,8 @@ describe("SessionExecution checkpoints", () => {
   );
 
   it.each([
-    { attemptIds: [], requestIds: ["request_1"] },
-    { attemptIds: ["attempt_1"], requestIds: [] },
+    { attemptIds: [], holdsMessages: false, requestIds: ["request_1"] },
+    { attemptIds: ["attempt_1"], holdsMessages: false, requestIds: [] },
   ])(
     "fails a turn that needs a person when its caller speaks an earlier protocol: %o",
     async (pause) => {
