@@ -354,6 +354,8 @@ export type HitlFreeformModalMetadata = SlackSessionTarget & {
   readonly installationTeamId?: string;
   /** Slack conversation containing the interactive card. */
   readonly messageChannelId?: string;
+  /** Thread containing the interactive card, or the card's own `ts` when it is top-level. */
+  readonly messageThreadTs?: string;
   readonly messageTs: string;
   readonly requestId: string;
   /** The click's `response_url`, when the card is ephemeral and only it can replace the card. */
