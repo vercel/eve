@@ -402,11 +402,12 @@ describe("stateless MCP Streamable HTTP server", () => {
     "http://json-schema.org/draft-07/schema#",
     "http://json-schema.org/draft-06/schema#",
   ])("short-circuits published JSON Schema validation for dialect %s", async ($schema) => {
-    const schema = fromJsonSchema({
-      ...($schema === undefined ? {} : { $schema }),
+    const jsonSchema: Record<string, unknown> = {
       type: "object",
       properties: { values: { type: "array", items: { type: "string", format: "email" } } },
-    });
+    };
+    if ($schema !== undefined) jsonSchema.$schema = $schema;
+    const schema = fromJsonSchema(jsonSchema);
     const valid = { values: ["user@example.com"] };
     expect(await schema["~standard"].validate(valid)).toEqual({ value: valid });
     const invalid = await schema["~standard"].validate({ values: ["invalid", "invalid"] });
