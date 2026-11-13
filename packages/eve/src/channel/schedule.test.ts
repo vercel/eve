@@ -26,6 +26,7 @@ import {
 } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { z } from "#compiled/zod/index.js";
 import { defineChannel } from "#public/definitions/channel.js";
@@ -97,6 +98,11 @@ describe("ScheduleDispatcher", () => {
         authenticator: "test",
         principalId: "alice",
       },
+      sends = 1,
+      // Replaces the default send with the sends a test scripts.
+      script?: (
+        send: (channelId: string, message: MessageContent) => Promise<unknown>,
+      ) => Promise<void>,
     ) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
@@ -116,11 +122,16 @@ describe("ScheduleDispatcher", () => {
           auth: SessionAuthContext;
           waitUntil: (task: Promise<unknown>) => void;
         }) => {
+          if (script !== undefined) {
+            await script((channelId, message) => args.to(channel, { channelId }).send(message));
+            return;
+          }
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
-          args.waitUntil(
-            args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
-          );
+          for (let sent = 0; sent < sends; sent += 1)
+            args.waitUntil(
+              args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
+            );
         },
       );
       const definition = defineDynamicSchedules({
@@ -180,9 +191,26 @@ describe("ScheduleDispatcher", () => {
         capabilities: { requestInput: false },
         input: { message: "Summarize the week." },
       });
-      expect(started[0]!.continuationToken).not.toBe(started[1]!.continuationToken);
-      expect(started[0]!.continuationConflictCommand).toBeUndefined();
+      // A send without a key takes one from the occurrence, so the retry reaches the first session.
+      expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
+      expect(started[1]).toMatchObject({
+        idempotencyKey: expect.stringMatching(/^eve-occurrence:[0-9a-f]{64}$/u),
+        continuationConflictCommand: { idempotencyKey: started[0]!.idempotencyKey, kind: "send" },
+      });
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    });
+
+    it("keys unkeyed sends apart for another occurrence and for a repeated message", async () => {
+      const { dispatcher, input, runtime } = setup(creator, undefined, undefined, 2);
+      await dispatcher.triggerCollection(input);
+      await dispatcher.triggerCollection({
+        ...input,
+        occurrence: { ...input.occurrence, executionId: "exec-2" },
+      });
+      const tokens = vi
+        .mocked(runtime.createSession)
+        .mock.calls.map(([value]) => value.continuationToken);
+      expect(new Set(tokens).size).toBe(4);
     });
 
     it("starts a keyed send without looking up an earlier session", async () => {
@@ -198,6 +226,86 @@ describe("ScheduleDispatcher", () => {
         idempotencyKey: "exec-1:digest",
         continuationConflictCommand: { idempotencyKey: "exec-1:digest", kind: "send" },
       });
+    });
+
+    it("keeps a fan-out's keys when a retry reaches its targets in another order", async () => {
+      let order = ["A", "B"];
+      const { dispatcher, input, runtime } = setup(
+        creator,
+        undefined,
+        undefined,
+        1,
+        async (send) => {
+          for (const channelId of order) await send(channelId, "The digest.");
+        },
+      );
+      await dispatcher.triggerCollection(input);
+      order = ["B", "A"];
+      await dispatcher.triggerCollection(input);
+      const tokens = vi
+        .mocked(runtime.createSession)
+        .mock.calls.map(([value]) => value.continuationToken);
+      expect(tokens).toHaveLength(4);
+      // The retry's sends reach the two sessions the first attempt started.
+      expect(tokens[2]).toBe(tokens[1]);
+      expect(tokens[3]).toBe(tokens[0]);
+      expect(new Set(tokens).size).toBe(2);
+    });
+
+    it("keys an unkeyed send by its file's bytes", async () => {
+      const file = (
+        bytes: number[],
+        data: (value: Uint8Array) => Uint8Array | ArrayBuffer = (value) => value,
+      ): MessageContent => [
+        { type: "text", text: "The report." },
+        {
+          type: "file",
+          mediaType: "application/pdf",
+          filename: "report.pdf",
+          data: data(Uint8Array.from(bytes)),
+        },
+      ];
+      const messages: MessageContent[] = [
+        file([1, 2, 3]),
+        file([1, 2, 4]),
+        // The same bytes key the same, whichever way the file holds them.
+        file([1, 2, 3], (value) => value.buffer.slice(0) as ArrayBuffer),
+      ];
+      const { dispatcher, input, runtime } = setup(
+        creator,
+        undefined,
+        undefined,
+        1,
+        async (send) => {
+          await send("A", messages.shift()!);
+        },
+      );
+      for (let attempt = 0; attempt < 3; attempt += 1) await dispatcher.triggerCollection(input);
+      const tokens = vi
+        .mocked(runtime.createSession)
+        .mock.calls.map(([value]) => value.continuationToken);
+      expect(tokens[1]).not.toBe(tokens[0]);
+      expect(tokens[2]).toBe(tokens[0]);
+    });
+
+    it("distinguishes encoded file data from raw bytes with the same text", async () => {
+      const encoded = "AQID";
+      const data = [encoded, new TextEncoder().encode(encoded)];
+      const { dispatcher, input, runtime } = setup(
+        creator,
+        undefined,
+        undefined,
+        1,
+        async (send) => {
+          await send("A", [{ type: "file", mediaType: "application/pdf", data: data.shift()! }]);
+        },
+      );
+      await dispatcher.triggerCollection(input);
+      await dispatcher.triggerCollection(input);
+      const tokens = vi
+        .mocked(runtime.createSession)
+        .mock.calls.map(([value]) => value.continuationToken);
+      expect(tokens[1]).not.toBe(tokens[0]);
     });
 
     it.each([

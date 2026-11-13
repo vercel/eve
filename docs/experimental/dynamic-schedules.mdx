@@ -239,7 +239,9 @@ async run({ payload, schedule, to }) {
 
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
-Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback and start new sessions. Deduplicate side effects with `occurrence.executionId` plus the schedule or resource identity. For sessions, put it in the send's key, as in `` idempotencyKey: `${occurrence.executionId}:digest` ``. A retried send with the same key and target then reaches the session the first attempt started. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
+Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.
+
+A retried callback doesn't start its sessions again. eve keys each send by the occurrence, the target, and the message, so a repeat of the same send reaches the session the first attempt started. A message that differs between attempts, such as one that includes the current time, starts another session; pass your own `idempotencyKey`, such as `` `${occurrence.executionId}:digest` ``, to keep it to one. Keys are scoped to the schedule, and the [usual limits](../channels/custom#retried-deliveries) apply.
 
 `occurrence.failed` reports an occurrence that won't run: a permanent failure, such as `auth` returning `null`, or a provider that ran out of retries. Its `reason` says why.
 
