@@ -71,7 +71,7 @@ export default defineSchedule({
 });
 ```
 
-This schedule runs at 13:00 Pacific: 20:00 UTC in summer and 21:00 UTC in winter. Markdown schedules accept the same `timezone` field in frontmatter. Invalid timezone values fail the build.
+This schedule runs at 13:00 Pacific: 20:00 UTC in summer and 21:00 UTC in winter. Markdown schedules accept the same `timezone` field in frontmatter. eve stores the canonical timezone name, so `"utc"` builds as `"UTC"`. Invalid timezone values fail the build.
 
 Omit `timezone` to use UTC on Vercel or the process timezone on self-hosted apps. Set `timezone: "UTC"` for UTC on either host. Explicit timezones are supported on Vercel and the Node server used by `eve start`; other Nitro presets fail the build.
 
