@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Bell synthetic Autofill test fixture","short_name":"1Password","version":"8.12.46.6","background":{"service_worker":"worker.js"},"permissions":["tabs","scripting"],"host_permissions":["https://login.bell-test.example/*"]}

@@ -1,0 +1,63 @@
+{
+  "name": "bell-stack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port 4320",
+    "build:agent": "eve build --skip-sandbox-prewarm && node scripts/package-browser-assets.mjs",
+    "build": "pnpm build:agent && next build",
+    "start": "next start --hostname 127.0.0.1 --port 4320",
+    "test": "vitest run",
+    "test:parallel:live": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/test-parallel-research.mjs",
+    "test:parallel:production": "pnpm build && node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/test-parallel-production.mjs",
+    "repro:stagehand-extensions": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/repro-stagehand-extensions.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "check": "pnpm test && pnpm typecheck && pnpm lint && pnpm build",
+    "baselayer:mint": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/mint-baselayer-credential.mjs",
+    "test:retirement:live": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/test-session-retirement.mjs"
+  },
+  "dependencies": {
+    "@1password/sdk": "0.5.0",
+    "@ai-sdk/openai": "4.0.46",
+    "@browserbasehq/sdk": "2.18.0",
+    "@browserbasehq/stagehand": "4.3.0",
+    "@stripe/link-integrations-eve": "0.3.4",
+    "ai": "7.0.137",
+    "eve": "0.79.1",
+    "next": "16.4.3",
+    "pg": "8.23.1",
+    "playwright-core": "1.62.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "standardwebhooks": "1.1.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/browserbase/bell-stack.git"
+  },
+  "license": "MIT",
+  "pnpm": {
+    "overrides": {
+      "undici@>=7 <7.30.1": "7.30.1",
+      "undici@>=8 <8.12.2": "8.12.2",
+      "zod@>=4 <4.6.6": "4.6.7"
+    }
+  }
+}

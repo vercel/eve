@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "version": 1,
+      "id": "fixture-login",
+      "label": "Demo",
+      "allowedHosts": [
+        "authenticationtest.com"
+      ],
+      "hasTotp": true,
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z",
+      "keyId": "local-v1",
+      "wrappedKey": {
+        "iv": "AQEBAQEBAQEBAQEB",
+        "tag": "7+Uut0O52qulLE1/CuWboQ==",
+        "ciphertext": "fumBv5i35AbZ3NQpeD94OaDzHPwQnzMbUDlLam68PrM="
+      },
+      "payload": {
+        "iv": "AgICAgICAgICAgIC",
+        "tag": "rnAFBkhXNDmYmt11PahOpQ==",
+        "ciphertext": "SpriOEcD3MAk2Amgi4+Nwut8fkiC/9gHqf+M6hPX47nFsWF9TPyWYwCNrt1OnMA4wQ8Kpx3Kpips7CSeDje5NmOBNGvJSJKHKr/s1+XTzdfHOL/KehahsBGGreXsMeBQu1l/IKaguSm1zR3M7A=="
+      }
+    }
+  ]
+}
