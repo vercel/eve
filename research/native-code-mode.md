@@ -386,8 +386,8 @@ never resolves again.
 - **Size.** What reaches the model is capped at 10,000 estimated tokens,
   keeping the head and tail with a truncation note, as pi does. Programs
   should return only what the model needs.
-- **Raw values in programs.** Programs receive each call's raw output, never
-  its `toModelOutput` projection. MCP media results arrive as content blocks.
+- **Raw values in programs.** Programs receive each call's own output, as
+  JSON, never its `toModelOutput` projection. MCP media results arrive as content blocks.
   Forwarding media from a program to the model is out of scope at ship.
 
 ### Execution and parking
@@ -461,25 +461,40 @@ A crash, timeout, or redeploy during a program step retries that step. It
 never re-runs the model step, so the same code runs under the same call id.
 For each nested call the retried step reaches:
 
-| What eve recorded for the call                           | What the program gets                                                                     |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Its outcome, in the continuation or the recovered stream | The recorded output or error, without running the call                                    |
-| Its start, but no outcome                                | A rejection that says the call was interrupted and may have taken effect; it isn't re-run |
-| Nothing                                                  | The call runs                                                                             |
+| What eve recorded for the call                                     | What the program gets                                                                     |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Its outcome and value, in the continuation or the recovered stream | The recorded output or error, without running the call                                    |
+| A `completed` outcome whose output the stream withheld             | A rejection that says the call completed and its result was lost; it isn't re-run         |
+| Its start, but no outcome                                          | A rejection that says the call was interrupted and may have taken effect; it isn't re-run |
+| Its request, but no start                                          | The call runs, under the same id and the same request record                              |
+| Nothing                                                            | The call runs                                                                             |
 
-- **This is the existing rule, applied per nested call.** A call whose start
+- **Part of this is today's rule, and part is new.** Today a call whose start
   is in the recovered stream doesn't run again, and what the interrupted
-  attempt left open ends `abandoned`. The difference is the reader: the
-  program gets a catchable error at the call, instead of the model reading a
-  note.
+  attempt left running ends `abandoned`. Replaying a recorded output is new.
+  A retried step keeps only a call's name, input, start, and outcome, and
+  tells the model that a completed call's result was lost
+  (`readInterruptedAttempt`, `interruptedCallResult`). Program steps add the
+  first reader of `call.settled` outputs.
+- **A replayed value must be the value the program first got.** The stream
+  holds a JSON copy of each output and can withhold a large one. A program
+  gets every output as JSON, so recovery replays a value only when the stream
+  holds it in full. Otherwise the call rejects as completed with its result
+  lost, which is what the model reads for such a call today.
+- **A requested call that hadn't started stays open.** This is a call queued
+  behind the inline limit, or one whose approval policy was still deciding.
+  Recovery today closes every call the interrupted attempt introduced. A
+  program step keeps these open, so the id doesn't change and no second
+  `call.requested` is published. An approval the attempt opened for such a
+  call is closed and asked again.
 - **An uncaught interruption fails the program.** The model then reads
   `{ error, calls, notCompleted }`, which names the interrupted call's input,
   and decides whether to check on it before continuing.
-- **Stable ids.** A nested call's `ctx.callId` is `<callId>/<n>`, the same on
-  every resume and retry. A tool passes it to its upstream API as an
-  idempotency key, as `ctx.callId` is documented today, for example
-  `` `${ctx.session.id}:${ctx.callId}` ``. Connection `headers` and provided
-  argument callbacks receive the same id.
+- **Stable ids.** A nested call's `ctx.callId` is `<callId>/<n>`, numbered in
+  the order the program issues calls, and the same on every resume and retry.
+  A tool passes it to its upstream API as an idempotency key, as `ctx.callId`
+  is documented today, for example `` `${ctx.session.id}:${ctx.callId}` ``.
+  Connection `headers` and provided argument callbacks receive the same id.
 - **Not exactly once.** The limits of step recovery still apply: a call that
   began before its start reached the stream can run again. Tools with
   irreversible effects keep their idempotency keys.
@@ -547,8 +562,11 @@ Errors over a limit name the limit, such as
   `owner: { callId }` naming its `eve__execute` call. Stream version 27 already
   defines that owner, so this adds no field and no event type. `eve__execute` is
   itself a call.
-- **Child call ids** are `<callId>/<n>`, in the order calls start. Child
-  sessions record the nested call as their parent.
+- **Child call ids** are `<callId>/<n>`, in the order the program issues
+  calls, not the order they start. A call has its id from `call.requested`,
+  so the approval policy and prompt receive it before the call runs, and
+  queueing behind the inline limit can't change it. Child sessions record the
+  nested call as their parent.
 - **Everything keyed by name keeps working:** approval policies, recorded
   `once()` approvals, labels, `label: false`, hooks, audience policy, tool
   stubs, and `t.calledTool(...)`.
@@ -637,12 +655,15 @@ tools. How the removal is released is decided separately.
 
 One spike settles what the recovery design assumes, before [1/3]:
 
-- A retried program step can read the nested calls its interrupted attempt
-  published, with their outputs, the way `readInterruptedAttempt` reads a
-  model step's.
-- Nested call ids stay the same on a retry when calls ran concurrently. If
-  `run` doesn't replay resolution order, ids need another source than start
-  order.
+- **Outputs.** For each nested call an interrupted attempt settled, the
+  stream holds the exact JSON value the program first received. No code reads
+  outputs from an interrupted attempt today, so there is nothing to copy. The
+  spike covers values that aren't plain JSON and outputs the stream withholds.
+- **Issue order.** The order a program issues calls is the same on a crash
+  retry. A resume replays resolution order from `run`'s ledger. A crash retry
+  has no continuation for the calls since the last park, so the spike checks
+  whether feeding recorded outcomes back in the stream's order reproduces the
+  same issue order when calls ran concurrently.
 
 ### Pull requests
 
@@ -677,8 +698,10 @@ Docs and the changeset for the new tool go with [1/3]. [2/3] carries a
 - **Replay.** After a resume, completed calls aren't re-invoked, events
   aren't re-emitted, and child ids are stable.
 - **Crash recovery.** A program step interrupted after some nested calls
-  settled and one started: the retry replays the settled calls, rejects the
-  started one, runs the rest, and keeps every id.
+  settled, one started, and one was only requested: the retry replays the
+  settled calls, rejects the started one, runs the requested one under its
+  first id, runs the rest, and keeps every id. A settled call whose output
+  the stream withheld rejects as completed with its result lost.
 - **E2E.**
   - Extend `agent-deferred-tools` with a code-mode agent. Its world suites run
     on the mock model, which must call `eve__execute`. They cover approval keyed
@@ -790,10 +813,10 @@ Migration steps go in the changeset, not in `docs/`.
   were read, not run. Neither publishes cache-hit measurements.
 - **Nothing is measured yet.** Cache, cost, and success numbers come from the
   measurement arms above.
-- **Recovery from the stream is unproven.** The crash table assumes a retried
-  program step can read its interrupted attempt's nested calls and outputs,
-  and that nested ids survive a retry under concurrency. The spike tests
-  both.
+- **Recovery from the stream is unproven.** Replaying outputs from the stream
+  is new behavior. The crash table assumes the stream holds the value the
+  program first received, and that issue order survives a crash retry under
+  concurrency. The spike tests both.
 - **The program step's cost is unmeasured.** One extra durable step per
   program is assumed small next to a model call.
 - **Parking cost.** Programs that park on every call get one program step per
