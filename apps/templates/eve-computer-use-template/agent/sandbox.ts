@@ -8,10 +8,17 @@ import { BROWSER_STREAM_PORT, RELAY_PORT } from "./lib/live-config";
 
 /**
  * The desktop's apps, which agent-desktop reads through their accessibility trees, and ffmpeg for
- * the desktop's live view. Firefox comes from `installFirefox`. The terminal is GNOME Console:
- * GTK3 terminals such as xfce4-terminal crash when agent-desktop sends them keys.
+ * the desktop's live view. Firefox comes from `installFirefox`. Test an app before adding it:
+ * xfce4-terminal crashes when agent-desktop sends it keys, and GTK3 apps that load SVG icons,
+ * such as Thunar, abort because the image loaders' bubblewrap sandbox can't start here.
  */
-const DESKTOP_PACKAGES = ["gnome-console", "fonts-dejavu-core", "ffmpeg"];
+const DESKTOP_PACKAGES = [
+  "gnome-console",
+  "gnome-calculator",
+  "mousepad",
+  "fonts-dejavu-core",
+  "ffmpeg",
+];
 
 // Every chat gets its own Vercel Sandbox, during development too, in the project `eve link`
 // connected. The headless Chrome and the Linux desktop run in it side by side. eve installs both

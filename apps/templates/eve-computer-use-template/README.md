@@ -12,7 +12,7 @@ chat + device picker → eve agent → Vercel Sandbox (headless Chrome, Linux de
                                      ↘ live stream (port 3600) → live view, Take Over
 ```
 
-Both extensions run in the agent's [sandbox](https://eve.dev/docs/sandbox): each chat gets its own [Vercel Sandbox](https://vercel.com/docs/sandbox) with 4 vCPUs, during local development and when deployed. The browser and the desktop (a virtual display inside the sandbox) run side by side in it, so nothing opens on your own screen. `agent/sandbox.ts` installs agent-browser, Chrome, agent-desktop, its desktop, Firefox ESR, and GNOME Console into the snapshot every sandbox starts from, so sessions start warm.
+Both extensions run in the agent's [sandbox](https://eve.dev/docs/sandbox): each chat gets its own [Vercel Sandbox](https://vercel.com/docs/sandbox) with 4 vCPUs, during local development and when deployed. The browser and the desktop (a virtual display inside the sandbox) run side by side in it, so nothing opens on your own screen. `agent/sandbox.ts` installs agent-browser, Chrome, agent-desktop, its desktop, Firefox ESR, GNOME Console, GNOME Calculator, and Mousepad into the snapshot every sandbox starts from, so sessions start warm.
 
 The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) in `agent/extensions/` wrap each browser and desktop action so its result also carries a screen for the web app: a screenshot, the page URL, and the device's live stream. `toModelOutput` keeps all three out of what the model reads. The browser mount also disables agent-browser's `close` tool, so the browser stays open after a task for you to watch or take over.
 
