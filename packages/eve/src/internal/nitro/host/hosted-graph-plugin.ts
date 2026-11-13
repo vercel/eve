@@ -46,7 +46,8 @@ const LOCAL_SANDBOX_SOURCE_FILTER = new RegExp(
 );
 
 const PRUNED_DEVELOPMENT_LAZY_PREWARM_SOURCE =
-  "export async function ensureDevelopmentSandboxesPrepared() {}\n";
+  "export async function ensureDevelopmentSandboxesPrepared() {}\n" +
+  "export function startDevelopmentSandboxesPrewarm() {}\n";
 
 const PRUNED_OPTIONAL_ENGINE_INSTALL_SOURCE = [
   "function pruned() {",
