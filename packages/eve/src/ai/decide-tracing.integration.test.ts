@@ -1,3 +1,4 @@
+// @linux-only: decide spans
 import { context, trace, SpanStatusCode } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {

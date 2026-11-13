@@ -6,6 +6,7 @@ import { resolvePackageRoot } from "#internal/application/package.js";
 import { openTestWorld } from "#internal/testing/workflow-test-world.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
 import {
+  deriveEveWorkflowQueueNamespace,
   deriveEveWorkflowQueuePrefix,
   installEveWorkflowQueueNamespace,
 } from "#internal/workflow/queue-namespace.js";
@@ -19,7 +20,8 @@ installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
 // Every test file in this worker shares the data directory, and the file's state is cleared as
 // the World opens, so it doesn't recover the previous file's unfinished runs.
 const world = await openTestWorld({
-  bundlePath: join(resolveWorkflowTestOutputDirectory(packageRoot), "workflows.mjs"),
+  outDir: resolveWorkflowTestOutputDirectory(packageRoot),
+  namespace: deriveEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME),
   dataDir: join(resolveLocalWorkflowWorldDataDirectory(packageRoot), `vitest-${poolId}`),
   prefix: deriveEveWorkflowQueuePrefix(WORKFLOW_TEST_AGENT_NAME),
   tag: `vitest-${poolId}`,

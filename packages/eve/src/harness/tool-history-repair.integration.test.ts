@@ -1,3 +1,4 @@
+// @linux-only: tool history repair
 import { jsonSchema, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";

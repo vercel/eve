@@ -1,3 +1,4 @@
+// @linux-only: step retry semantics; in-process
 import { expect, it, onTestFinished, vi } from "vitest";
 import {
   finalizeInstrumentationProviders,

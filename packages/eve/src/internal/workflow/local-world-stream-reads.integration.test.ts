@@ -1,8 +1,8 @@
-import fs, { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import fs, { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
 
@@ -28,6 +28,11 @@ describe("local world stream reads", () => {
     await writeFile(join(chunkDir, `${name}.bin`), Buffer.from(eof ? [1] : [0, 120]));
   }
 
+  /** The chunks every test starts from, by file name. */
+  const baseChunkFiles = new Set(
+    Array.from({ length: CHUNKS }, (_unused, index) => `${chunkName(index)}.bin`),
+  );
+
   // Back-date the directory past the listing cache's mtime margin, as for a stream
   // that has not been written to for a few seconds.
   async function settle(): Promise<void> {
@@ -40,19 +45,36 @@ describe("local world stream reads", () => {
     readdirs.mockClear();
   }
 
-  beforeEach(async () => {
+  // The base stream is large, and every test starts from it unchanged, so it is written once
+  // rather than per test. A test that appends chunks leaves them for the next test's cleanup.
+  beforeAll(async () => {
     dataDir = await mkdtemp(join(tmpdir(), "eve-stream-reads-"));
     chunkDir = join(dataDir, "streams", "chunks", STREAM);
     await mkdir(chunkDir, { recursive: true });
-    for (let index = 0; index < CHUNKS; index++) await writeChunk(chunkName(index), false);
+    const names = [...baseChunkFiles];
+    for (let start = 0; start < names.length; start += 64) {
+      await Promise.all(
+        names
+          .slice(start, start + 64)
+          .map((name) => writeChunk(name.slice(0, -".bin".length), false)),
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    const appended = (await readdir(chunkDir)).filter((name) => !baseChunkFiles.has(name));
+    await Promise.all(appended.map((name) => rm(join(chunkDir, name), { force: true })));
     await settle();
     opens = vi.spyOn(fs, "open");
     readdirs = vi.spyOn(fs, "readdir");
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     vi.restoreAllMocks();
-    await rm(dataDir, { recursive: true, force: true });
   });
 
   it("answers a repeated tail lookup on an unchanged stream without reopening chunks", async () => {

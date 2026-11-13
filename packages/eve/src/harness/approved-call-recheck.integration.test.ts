@@ -1,3 +1,4 @@
+// @linux-only: approval recheck (AI SDK)
 import { jsonSchema } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";

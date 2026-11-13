@@ -1,3 +1,4 @@
+// @linux-only: coordination admission on Workflow
 import { describe, expect, it } from "vitest";
 import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   cancelRoutedRun,
@@ -20,6 +20,7 @@ import {
   readSessionRecordHistory,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
+import { resetUnitRealm } from "#internal/testing/reset-unit-realm.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import {
   sessionCommandHookToken,
@@ -98,9 +99,16 @@ function durableHost(name: string): DurableHost {
   };
 }
 
-// The registry is process-wide and each test file has its own realm, so these run in order:
-// first a realm with no durable host, then the same realm once one is installed.
+// The registry is process-wide, so each test starts from an empty realm and installs the
+// durable host it needs. What it installs stays until the next test clears the realm.
 describe("the hosts in a realm", () => {
+  beforeEach(() => {
+    resetUnitRealm();
+    durable.reached = [];
+    durable.attempt = undefined;
+    durable.callbackBaseUrl = undefined;
+  });
+
   it("without a durable host, an id no route holds is gone and no step is a retry", async () => {
     await expect(resumeRoutedHook("hook-alice", {})).rejects.toThrow(HookNotFoundError);
     await expect(routedRunLive("run-bob")).resolves.toBe(false);
@@ -124,6 +132,7 @@ describe("the hosts in a realm", () => {
   });
 
   it("reads whether the step running now is a retry from the durable host", () => {
+    installDurableHost(durableHost("durable"));
     durable.attempt = 1;
     expect(isRetriedStep()).toBe(false);
     durable.attempt = 2;
@@ -133,6 +142,7 @@ describe("the hosts in a realm", () => {
   });
 
   it("asks the route running a session how it's called back, and the durable host for others", () => {
+    installDurableHost(durableHost("durable"));
     const deliver: DurableHost["deliver"] = async () => {};
     const release = registerHost({
       deliver: async () => undefined,
@@ -159,6 +169,7 @@ describe("the hosts in a realm", () => {
   });
 
   it("asks the routes first, and the durable host for what no route holds", async () => {
+    installDurableHost(durableHost("durable"));
     const delivered: string[] = [];
     const route: HostedRoute = {
       deliver: async (token) => {
@@ -203,6 +214,7 @@ describe("the hosts in a realm", () => {
   });
 
   it("reads a durable run's end and liveness from its status", async () => {
+    installDurableHost(durableHost("durable"));
     await expect(routedRunEnded("run-done")).resolves.toBe(true);
     await expect(routedRunEnded("run-open")).resolves.toBe(false);
     // A target that's gone has ended; one whose status can't be read is still live.
@@ -214,6 +226,7 @@ describe("the hosts in a realm", () => {
   });
 
   it("reads a registered session from its store, and the durable host's once released", async () => {
+    installDurableHost(durableHost("durable"));
     const store = fixedStore([{ line: "Alice" }, { line: "Bob" }]);
     const release = registerSessionLineStore("session-alice", store);
     try {

@@ -1,3 +1,4 @@
+// @linux-only: sign-in signal forgery guard
 import { describe, expect, it } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";

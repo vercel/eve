@@ -1,3 +1,4 @@
+// @linux-only: delegated approval guard
 import { describe, expect, it } from "vitest";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";

@@ -217,6 +217,9 @@ describe("packed public declarations", () => {
           compilerOptions: {
             strict: true,
             skipLibCheck: false,
+            // TypeScript's own lib files are the same in every group, and a
+            // conflict with them is still reported at the conflicting declaration.
+            skipDefaultLibCheck: true,
             noEmit: true,
             types: group.name === "core" ? ["node", "eve/workflow-modules"] : ["node"],
             target: "ES2024",

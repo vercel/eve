@@ -1,3 +1,4 @@
+// @linux-only: prewarm handoff semantics on Workflow; compiled from memory
 import { describe, expect, it, vi } from "vitest";
 import type { AnyEventRequest } from "@workflow/world";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";

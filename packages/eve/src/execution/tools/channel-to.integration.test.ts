@@ -1,3 +1,4 @@
+// @linux-only: ctx.to() fork/dedup on Workflow; in-memory Slack mocks
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

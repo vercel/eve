@@ -1,3 +1,4 @@
+// @linux-only: tool stub replay on Workflow
 import { jsonSchema } from "ai";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";

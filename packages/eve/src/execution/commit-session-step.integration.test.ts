@@ -1,3 +1,4 @@
+// @linux-only: session step commit
 import { transition } from "#harness/session-machine/commit.js";
 import { expect, it, vi } from "vitest";
 

@@ -1,3 +1,4 @@
+// @linux-only: gateway credential routing (fetch mocked)
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), session: vi.fn() }));
 vi.mock("./store.js", () => ({
