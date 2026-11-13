@@ -820,6 +820,59 @@ export default slackChannel({
 
 `ctx.openCodeChannel()` copies no conversation by default. Pass `history` to `send` to include earlier messages. It throws without `codeChannels: true`, inside a code channel, and when Slack refuses to create the channel.
 
+#### Show the work in the context bar and diff view
+
+A code channel has a context bar, a row of links under the channel header, and view tabs such as a diff of the agent's changes. Call `setCodeChannelContextBar()` and `setCodeChannelDiffView()` from a [renderer](#customize-rendering) or channel event handler to fill them in:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import {
+  defineSlackRenderer,
+  setCodeChannelContextBar,
+  setCodeChannelDiffView,
+  slackChannel,
+} from "eve/channels/slack";
+
+import { readBranch } from "../lib/branch";
+
+const surfaces = defineSlackRenderer({
+  events: {
+    async "turn.settled"(event, ctx, next) {
+      await next();
+      // Your own helper that reads the branch and its diff from the sandbox.
+      const { branch, diff } = await readBranch(await ctx.getSandbox());
+      await setCodeChannelContextBar(ctx.channel, [
+        {
+          key: "repo",
+          label: "acme/billing",
+          icon: "folder",
+          url: "https://github.com/acme/billing",
+        },
+        { key: "branch", label: branch, icon: "branch" },
+      ]);
+      await setCodeChannelDiffView(ctx.channel, {
+        content: diff,
+        baseBranch: "main",
+        headBranch: branch,
+      });
+    },
+  },
+});
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  codeChannels: true,
+  renderers: [surfaces],
+});
+```
+
+- **Context bar.** Each call replaces every item. Slack identifies items by `key`; `icon` takes a Slack icon name such as `folder`, `branch`, `code`, `hierarchy`, or `terminal`.
+- **Diff view.** `content` is a unified diff, as `git diff` prints it. Slack keeps one diff view per channel, up to `SLACK_DIFF_VIEW_MAX_BYTES`. A longer diff is cut after the last whole file that fits; if the first file alone is over the limit, the previous view stays up. `null` or an empty diff takes the view down.
+- **Repeated calls.** eve keeps what the channel shows in the session's channel state and calls Slack only when it changes, so calling after every tool is cheap.
+- **Results.** Both return whether the channel shows what you passed. Outside a code channel they do nothing and return `false`. When Slack refuses, eve logs the error, returns `false`, and calls Slack again next time.
+
+For coding agents, the code extension's [`codeChannelSurfaces()` renderer](/docs/code-extension#show-the-work-in-slack-code-channels) fills both in from the agent's git checkout.
+
 #### How eve serves code channels
 
 - **Replies.** The agent replies top-level, or in a thread when someone writes in one. Any member can message it.
