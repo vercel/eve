@@ -12,8 +12,9 @@ import { normalizeHookHandlers } from "#internal/authored-definition/hook.js";
 import { memoryMismatch, normalizeMemoryDefinition } from "#internal/authored-definition/memory.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import type { DynamicSchedulesDefinition } from "#public/schedules/subscription.js";
-import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
+import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 import { stampScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
+import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type {
   ResolvedDefinition,
@@ -77,24 +78,28 @@ export async function resolveScheduleCollection(
       definition: collection,
       kindLabel: "schedule collection",
     });
-    const definition = normalizeScheduleCollectionDefinition(
+    const authored = normalizeScheduleCollectionDefinition(
       value,
       `Expected the schedule collection export from "${collection.logicalPath}" to be created with defineDynamicSchedules().`,
     ) as DynamicSchedulesDefinition<unknown>;
-    stampScheduleCollectionSource(value as object, {
+    const definition =
+      collection.namedScope === undefined
+        ? authored
+        : namedScopeDefinition(authored, collection.namedScope.name);
+    stampScheduleCollectionSource(definition, {
       application: collection.application,
       collection: collection.name,
       logicalPath: collection.logicalPath,
       sourceId: collection.sourceId,
     });
     const offersTools =
-      definition.tool !== false &&
-      !scope.toolFiles.has(scheduleCollectionToolPrefix(collection.name));
+      definition.tool !== false && !scope.toolFiles.has(scheduleCollectionToolSlot(collection));
     return {
       definition,
       kind: "schedules",
       logicalPath: collection.logicalPath,
       name: collection.name,
+      ...(collection.namedScope !== undefined && { namedScope: collection.namedScope }),
       ...(offersTools && { offersTools: true as const }),
       sourceId: collection.sourceId,
       sourceKind: "module",

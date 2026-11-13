@@ -1,7 +1,11 @@
 // @linux-only: schedule operation schemas
 import { describe, expect, it, vi } from "vitest";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
-import { scheduleCollectionTools } from "#context/schedule-collection-tools.js";
+import {
+  scheduleCollectionTools,
+  scheduleScopesTools,
+} from "#context/schedule-collection-tools.js";
+import { agentContentsOf } from "#definitions/compiled-agent.js";
 import { z } from "#compiled/zod/index.js";
 import {
   resolveApprovalPolicy,
@@ -13,8 +17,11 @@ import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { schedules } from "#public/experimental/schedules/client.js";
+import { byPrincipal } from "#public/schedules/scope.js";
+import { declared } from "#runtime/types.js";
+import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
@@ -206,6 +213,200 @@ describe("schedule creation and invocation", () => {
       await expect(
         tools.schedule__requests__get!.execute(invoked, {} as never),
       ).resolves.toBeNull();
+    });
+  });
+
+  it("offers one set of tools for a definition's named scopes and keeps each scope's storage, payload, approvals, and run", async () => {
+    const provider = inMemoryScheduleProvider();
+    const created = vi.spyOn(provider, "create");
+    const ran: string[] = [];
+    const workflows = defineDynamicSchedules({
+      description: "Your own workflows.",
+      inputSchema: z.object({ task: z.string() }).strict(),
+      provider,
+      // One preparation for every scope, told which scope it acts for.
+      preparePayload: (input, context) => ({ task: input.task, target: context.scopeName }),
+      scopes: {
+        personal: byPrincipal,
+        channel: {
+          description: "Channel workflows.",
+          id: "team-workflows",
+          resolve: () => ["channel", "C1"],
+          approval: {
+            list: () => "user-approval",
+            create: {
+              request: () => "user-approval",
+              response: ({ payload }) =>
+                payload.target === "channel"
+                  ? { status: "allowed" }
+                  : { status: "rejected", reason: "wrong scope" },
+            },
+          },
+          run: ({ payload }) => {
+            ran.push(`channel run: ${payload.task}`);
+          },
+        },
+      },
+      approval: { invoke: once() },
+      auth: () => alice,
+      run: ({ payload }) => {
+        ran.push(`shared run: ${payload.task}`);
+      },
+    });
+    const app = await createTestRuntime({
+      modules: [
+        {
+          logicalPath: "schedules/workflows.ts",
+          loadNamespace: async () => ({ default: workflows }),
+        },
+      ],
+    });
+    await app.runAsSession(undefined, async () => {
+      await bindCaller();
+      const bundle = requireCompiledBundle(loadContext());
+      // The agent offers the definition's one slot, built from the scopes it resolved.
+      const slots = (await agentContentsOf(bundle)).files.scheduleTools.map(
+        (definition) => definition.id,
+      );
+      expect(slots).toEqual(["tool::schedule__workflows"]);
+      const resolved = declared(bundle.resolvedAgent, "schedules");
+      expect(resolved.map((collection) => collection.name)).toEqual([
+        "workflows/personal",
+        "team-workflows",
+      ]);
+
+      const tools = scheduleScopesTools(
+        resolved.map((collection) => ({
+          collection: collection.name,
+          definition: collection.definition,
+          scope: collection.namedScope!.name,
+        })),
+        "schedule__workflows",
+      ) as Record<
+        string,
+        ToolDefinition<never, unknown> & { execute(input: unknown, ctx: never): Promise<unknown> }
+      >;
+      expect(Object.keys(tools).sort()).toEqual(
+        ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
+          (operation) => `schedule__workflows__${operation}`,
+        ),
+      );
+      const create = tools.schedule__workflows__create!;
+      expect(serializeInputSchema(create.inputSchema)).toMatchObject({
+        type: "object",
+        required: ["scope", "name", "expression", "payload"],
+        properties: {
+          scope: {
+            enum: ["personal", "channel"],
+            description: expect.stringMatching(
+              /"personal": Your own workflows\..*"channel": Channel workflows\./u,
+            ),
+          },
+        },
+      });
+      expect(create.description).not.toContain("Your own workflows.");
+
+      const input = (scope: string) => ({
+        scope,
+        name: "digest",
+        expression: { type: "delay" as const, minutes: 1 },
+        payload: { task: `Send the ${scope} digest` },
+      });
+      const request = resolveApprovalPolicy(create.approval!);
+      const policyContext = (callId: string, toolInput: unknown) =>
+        ({ callId, toolInput, toolName: "schedule__workflows__create" }) as never;
+      await expect(request(policyContext("unknown", input("team")))).resolves.toMatchObject({
+        type: "denied",
+        reason: expect.stringContaining("personal"),
+      });
+      const records: Record<string, ScheduleRecord> = {};
+      for (const scope of ["personal", "channel"]) {
+        await expect(request(policyContext(scope, input(scope)))).resolves.toBe("user-approval");
+        records[scope] = (await create.execute(input(scope), {
+          callId: scope,
+        } as never)) as ScheduleRecord;
+      }
+      // Each call reached its own scope: its stored collection, namespace, and prepared payload.
+      expect(
+        created.mock.calls.map(([context, schedule]) => [
+          context.collection,
+          (schedule.payload as { envelope: { payload: { target: string } } }).envelope.payload
+            .target,
+        ]),
+      ).toEqual([
+        ["workflows/personal", "personal"],
+        ["team-workflows", "channel"],
+      ]);
+      expect(new Set(created.mock.calls.map(([context]) => context.namespace)).size).toBe(2);
+
+      // The channel's response policy gates the shared tool; the personal scope allows.
+      const response = (create.approval as ApprovalConfiguration).response!;
+      await expect(request(policyContext("gated", input("channel")))).resolves.toBe(
+        "user-approval",
+      );
+      await expect(
+        response({ request: { callId: "gated", toolInput: input("channel") } } as never),
+      ).resolves.toEqual({ status: "allowed" });
+      await expect(
+        response({ request: { callId: "any", toolInput: input("personal") } } as never),
+      ).resolves.toEqual({ status: "allowed" });
+
+      const list = tools.schedule__workflows__list!;
+      for (const scope of ["personal", "channel"])
+        await expect(list.execute({ scope }, {} as never)).resolves.toMatchObject({
+          data: [{ name: records[scope]!.name }],
+        });
+      const listPolicy = resolveApprovalPolicy(list.approval!) as ApprovalPolicy;
+      const listContext = (scope: string) =>
+        ({ toolName: "schedule__workflows__list", toolInput: { scope } }) as never;
+      expect(await evaluateApproval(listPolicy, listContext("personal"))).toEqual({
+        denied: false,
+      });
+      expect(await evaluateApproval(listPolicy, listContext("channel"))).toEqual({
+        denied: false,
+        awaitsPerson: true,
+      });
+
+      // A remembered approval stays with the scope it was given for.
+      const invoke = tools.schedule__workflows__invoke!;
+      const invokePolicy = resolveApprovalPolicy(invoke.approval!) as ApprovalPolicy;
+      const invoked = (scope: string) => ({ scope, name: records[scope]!.name });
+      const invokeContext = (scope: string) =>
+        ({ toolName: "schedule__workflows__invoke", toolInput: invoked(scope) }) as never;
+      const asked = await evaluateApproval(invokePolicy, invokeContext("personal"));
+      const memory = {
+        pending: [],
+        remembered: { [asked.remember!.key]: { interactionId: "approval-1", outcome: "accepted" } },
+      } as const;
+      expect(await evaluateApproval(invokePolicy, invokeContext("personal"), { memory })).toEqual({
+        denied: false,
+        clearedBy: { policy: "approval" },
+      });
+      expect(
+        await evaluateApproval(invokePolicy, invokeContext("channel"), { memory }),
+      ).toMatchObject({ denied: false, awaitsPerson: true });
+
+      // An occurrence runs its scope's `run`, or the definition's when the scope has none.
+      await invoke.execute(invoked("personal"), {} as never);
+      await invoke.execute(invoked("channel"), {} as never);
+      expect(ran).toEqual([
+        "shared run: Send the personal digest",
+        "channel run: Send the channel digest",
+      ]);
+
+      // A queue delivery names the stored collection and gets that scope's definition.
+      await expect(loadScheduleCollectionDefinition(bundle, "team-workflows")).resolves.toBe(
+        resolved[1]!.definition,
+      );
+
+      // Code reaches a scope through the client by naming it.
+      await expect(
+        (await schedules(workflows, { scope: "channel" })).list(),
+      ).resolves.toMatchObject({ data: [{ name: records.channel!.name }] });
+      await expect(schedules(workflows)).rejects.toThrow(
+        "pass one as { scope }: personal, channel",
+      );
+      await expect(schedules(workflows, { scope: "team" })).rejects.toThrow('no scope "team"');
     });
   });
 

@@ -380,7 +380,12 @@ export type ResolvedMemoryDefinition = Readonly<
 export interface ResolvedScheduleCollection extends Readonly<ModuleSourceRef> {
   readonly name: string;
   readonly definition: DynamicSchedulesDefinition<unknown>;
-  /** It offers the model its tools: `tool` isn't `false`, and no tool file replaces them. */
+  /** Set when it is one named scope of a definition: the definition's name, and the scope's. */
+  readonly namedScope?: { readonly definition: string; readonly name: string };
+  /**
+   * It offers the model its tools: `tool` isn't `false`, and no tool file replaces them. A
+   * named scope offers them through its definition's one set.
+   */
   readonly offersTools?: true;
 }
 
