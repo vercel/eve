@@ -1,5 +1,7 @@
 import { defineConfig } from "vitest/config";
 
+import { workspaceChannelPackages } from "./test/setup/workspace-channel-packages.js";
+
 import { workflow } from "./src/internal/testing/workflow-vitest-plugin.js";
 
 /**
@@ -20,6 +22,7 @@ export default defineConfig({
   plugins: [workflow()],
   resolve: {
     alias: [
+      ...workspaceChannelPackages,
       {
         find: /^#compiled\/(.+)\.js$/,
         replacement: new URL("./.generated/compiled/$1.js", import.meta.url).pathname,

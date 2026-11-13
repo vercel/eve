@@ -17,7 +17,7 @@ import {
 } from "#harness/messages.js";
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
 import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine/runs.js";
-import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
+import { activeTurnId, parkedCallsAnswered, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -78,20 +78,13 @@ export async function settleRuntimeWork(
       })),
     }),
   );
-  // The turn ends here only when these results settle every call of a parked response and each
-  // ends the turn; a call something else answered, a provider's included, keeps the model in the
-  // loop.
+  // The turn ends here only when these results leave every call of a parked response answered and
+  // one of them ends the turn. A provider-run call's outcome keeps the model in the loop. A call
+  // that ran before the step parked ends the turn through the step's `endsTurn` once it commits.
   const settledIds = new Set(results.map(({ part }) => part.toolCallId));
   const endsTurn =
     suspended.length > 0 &&
-    suspended.every(({ messages }) =>
-      messages.every(
-        ({ content, role }) =>
-          role !== "assistant" ||
-          typeof content === "string" ||
-          content.every((part) => part.type !== "tool-call" || settledIds.has(part.toolCallId)),
-      ),
-    ) &&
+    parkedCallsAnswered(suspended, settledIds) &&
     (await callsEndTurn(
       results.map(({ part, result }) => ({
         failed: result.isError === true,

@@ -548,6 +548,12 @@
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
     },
+    "./internal/channels": {
+      "eve-source": "./src/internal/channels.ts",
+      "types": "./dist/src/internal/channels.d.ts",
+      "import": "./dist/src/internal/channels.js",
+      "default": "./dist/src/internal/channels.js"
+    },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",
       "types": "./dist/src/internal/git.d.ts",
@@ -616,7 +622,7 @@
     "test:scenario": "vitest run --config vitest.scenario.config.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest --config vitest.unit.config.ts",
-    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.channel-packages.json",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"

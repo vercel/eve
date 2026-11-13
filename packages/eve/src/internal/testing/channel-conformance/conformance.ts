@@ -35,7 +35,7 @@ export interface BrokenCell {
   readonly symptom: RegExp;
 }
 
-interface ConformanceChannel {
+export interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
    * A DM column beside the channel's shared-thread column. It runs only rules
@@ -393,11 +393,7 @@ function inProcessGap(rule: string): string | undefined {
 const WORKFLOW_CHANNEL = "web-chat";
 
 /** Whether `rule` of `channel` runs on `host`. */
-function runsOn(
-  host: ConformanceHostKind,
-  channel: keyof typeof channelConformance,
-  rule: string,
-): boolean {
+function runsOn(host: ConformanceHostKind, channel: string | undefined, rule: string): boolean {
   if (host === "in-process") return true;
   return channel === WORKFLOW_CHANNEL || inProcessGap(rule) !== undefined;
 }
@@ -411,7 +407,18 @@ const HOSTS: readonly ConformanceHostKind[] = ["in-process", "workflow"];
  * separate files let vitest run channels in parallel workers.
  */
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
-  const entries: readonly ConformanceChannel[] = channelConformance[channel];
+  describeConformance(channelConformance[channel], channel);
+}
+
+/**
+ * Holds each driver to the contract, for a channel outside eve's own table such
+ * as a workspace package's. `channel` names a table entry, which decides the
+ * hosts its rules run on; other channels run in process.
+ */
+export function describeConformance(
+  entries: readonly ConformanceChannel[],
+  channel?: string,
+): void {
   const cases = entries.flatMap((entry) =>
     HOSTS.map((host) => ({ entry, host, name: entry.driver().name })),
   );

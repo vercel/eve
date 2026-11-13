@@ -328,7 +328,7 @@ export function discardAttempt(
  */
 export function suspendStep(
   view: SessionView,
-  step: Pick<SuspendedStep, "event" | "messages" | "tasks">,
+  step: Pick<SuspendedStep, "endsTurn" | "event" | "messages" | "tasks">,
 ): Transition {
   return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }

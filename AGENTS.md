@@ -35,9 +35,11 @@ before pushing.
 
 PR descriptions are reviewer-oriented explanations of the problem or decision
 behind the change, the solution, and meaningful behavior changes—not file lists
-or commit logs. Keep the Summary short and lead with that justification before
-implementation details. Link a prior issue or discussion when one exists, and
-call out important scope boundaries or preserved behavior. Never include a
+or commit logs. Keep the Summary short and lead with that justification. Follow
+it with a Changes section: a flat list of the important changes, public API
+first, each with a short reason only when it is not obvious. Link a prior issue
+or discussion when one exists, and call out important scope boundaries or
+preserved behavior. Never include a
 Validation, Test plan, or Checklist section. Never create an issue solely to
 accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)

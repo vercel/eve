@@ -160,6 +160,7 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 | Microsoft Teams messages + Adaptive Cards   | [Teams](/docs/channels/teams)                                    |
 | Telegram bot messages                       | [Telegram](/docs/channels/telegram)                              |
 | SMS or speech-transcribed phone calls       | [Twilio](/docs/channels/twilio)                                  |
+| Zoom, Google Meet, or Teams meetings        | [Recall.ai](/docs/channels/recall) (experimental)                |
 | GitHub @mentions, PR review with checkout   | [GitHub](/docs/channels/github)                                  |
 | Linear issue delegation and Agent Sessions  | [Linear](/docs/channels/linear)                                  |
 | Another Chat SDK-supported service          | [Chat SDK adapters](/docs/channels/chat-sdk)                     |
@@ -176,7 +177,7 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [eve HTTP channel](/docs/channels/eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](/docs/channels/slack): the most common platform channel, end to end
 - [MCP](/docs/channels/mcp): let MCP clients hand long-running work to the agent
-- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other first-class platform channels
+- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [Recall.ai](/docs/channels/recall), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other first-class platform channels
 - [Chat SDK adapters](/docs/channels/chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](/docs/channels/custom): build a channel for any surface with `defineChannel`
 - [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn

@@ -1,5 +1,7 @@
 import { defineConfig } from "vitest/config";
 
+import { workspaceChannelPackages } from "./test/setup/workspace-channel-packages.js";
+
 /**
  * Tier 0 — Unit tests.
  *
@@ -17,6 +19,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: [
+      ...workspaceChannelPackages,
       {
         find: /^#compiled\/(.+)\.js$/,
         replacement: new URL("./.generated/compiled/$1.js", import.meta.url).pathname,

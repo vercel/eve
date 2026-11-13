@@ -17,10 +17,16 @@ import type {
 import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-import { attachInputText, readInputText } from "#internal/input-text.js";
+import { attachInputText } from "#internal/input-text.js";
 
 /** Options for sending a message from a channel-local continuation address. */
 export type ChannelSendOptions<TState = undefined> = SessionSendOptions & {
+  /**
+   * What the person typed or said, when `message` wraps it for the model, such as with a speaker
+   * prefix. A pending question or approval resolves against this text instead of `message`. The
+   * model still reads `message`.
+   */
+  readonly answerText?: string;
   readonly state?: Partial<TState>;
 };
 
@@ -111,7 +117,7 @@ export function createChannelOperations<TState = undefined>(input: {
                 outputSchema: options.outputSchema,
                 state: (options as { readonly state?: TState }).state,
               },
-              readInputText(options),
+              options.answerText,
             ),
             options,
           );
