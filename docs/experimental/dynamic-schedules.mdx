@@ -291,6 +291,17 @@ async run({ payload, schedule, to }) {
 },
 ```
 
+A session from an occurrence can stop its schedule too, for example when the agent finds the task no longer applies. `currentSchedule()` from `eve/experimental/schedules` returns the same handle for the schedule that started the session, or `undefined` when no dynamic schedule started it:
+
+```ts
+import { currentSchedule } from "eve/experimental/schedules";
+
+const schedule = await currentSchedule();
+await schedule?.disable();
+```
+
+A later message from a person clears the session's schedule provenance, so `currentSchedule()` returns `undefined` from then on. A subagent of that session also gets `undefined`: call `currentSchedule()` in the session the occurrence started.
+
 After the callback and its `waitUntil` promises finish, eve calls `occurrence.dispatched` with `sessionIds`. That event means the callback succeeded, not that the agent finished its task. Channels send the output and report session failures.
 
 Callbacks run at least once. Provider retries, including after an `events` handler fails, can repeat the callback. Deduplicate your own side effects with `occurrence.executionId` plus the schedule or resource identity.

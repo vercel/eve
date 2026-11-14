@@ -2,8 +2,14 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
-import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
-import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  createScheduleProviderContext,
+  deriveScheduleNamespace,
+} from "#runtime/schedules/dispatch-occurrence.js";
+import {
+  type CompiledBundle,
+  requireCompiledBundle,
+} from "#runtime/sessions/runtime-context-keys.js";
 import type { Runtime } from "#channel/types.js";
 import { installedDurableHost } from "#execution/hosts.js";
 import type {
@@ -79,6 +85,17 @@ function noScheduledRuns(): never {
   );
 }
 
+/** The durable host's runtime for an occurrence's sessions. */
+export function scheduledRunsRuntime(
+  bundle: Pick<CompiledBundle, "compiledArtifactsSource">,
+): Runtime {
+  return (
+    installedDurableHost()?.createRuntime({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+    }) ?? NO_SCHEDULED_RUNS
+  );
+}
+
 /** Without a durable host, an occurrence that starts a session is refused, saying why. */
 const NO_SCHEDULED_RUNS: Runtime = {
   createSession: async () => noScheduledRuns(),
@@ -123,13 +140,10 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       application: callContext.application,
       bundle: () => requireCompiledBundle(loadContext()),
       collection: callContext.collection,
-      runtime: () =>
-        installedDurableHost()?.createRuntime({
-          compiledArtifactsSource: requireCompiledBundle(loadContext()).compiledArtifactsSource,
-        }) ?? NO_SCHEDULED_RUNS,
+      runtime: () => scheduledRunsRuntime(requireCompiledBundle(loadContext())),
       definition,
+      namespace: deriveScheduleNamespace(callContext.application, callContext.collection, scope),
       operationId: nextOperationId(),
-      scope,
     });
     return { scope, provider };
   };

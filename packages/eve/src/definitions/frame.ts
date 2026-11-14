@@ -8,7 +8,7 @@ import {
   ParentSessionKey,
   SessionPredecessorKey,
 } from "#context/keys.js";
-import { readSessionSchedule } from "#context/session-schedule.js";
+import { publicSchedule, readScheduleProvenance } from "#context/session-schedule.js";
 import type { SessionFrame } from "#dynamic/definition.js";
 import { currentView } from "#harness/session-machine/current.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
@@ -55,7 +55,7 @@ export function sessionFrameOf(
       // A root session has no parent; none is made up for it.
       ...(parent !== undefined && { parent }),
       predecessor: ctx.get(SessionPredecessorKey),
-      schedule: readSessionSchedule(ctx),
+      schedule: publicSchedule(readScheduleProvenance(ctx)),
     },
     turn: latestTurn(view),
     view: snapshotOf(view),

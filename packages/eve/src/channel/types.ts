@@ -186,7 +186,7 @@ export type SessionCommand =
       /** Initial workflow title when delivering to a prewarmed session. */
       readonly title?: string;
       readonly kind: "send";
-      readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
+      readonly schedule?: import("#context/session-schedule.js").ScheduleProvenance;
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
@@ -282,7 +282,7 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
  */
 export interface DeliverHookPayload {
   readonly idempotencyKey?: string;
-  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
+  readonly schedule?: import("#context/session-schedule.js").ScheduleProvenance;
   /** Initial workflow title; ignored once session initialization has run. */
   readonly title?: string;
   readonly auth?: SessionAuthContext | null;
@@ -475,7 +475,7 @@ export interface RunInput {
    */
   readonly toolStubs?: StubScope;
   /** Server-supplied provenance inherited by locally delegated scheduled work. */
-  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
+  readonly schedule?: import("#context/session-schedule.js").ScheduleProvenance;
   readonly adapter: ChannelAdapter<any>;
   /**
    * Registered channel name for root sessions started from an authored

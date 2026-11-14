@@ -5,7 +5,7 @@ import type {
   SessionCapabilities,
   SessionCommand,
 } from "#channel/types.js";
-import { readSerializedSessionSchedule } from "#context/session-schedule.js";
+import { readSerializedScheduleProvenance } from "#context/session-schedule.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { createSessionStep } from "#execution/create-session-step.js";
@@ -249,7 +249,7 @@ function createInitialDelivery(
   return {
     auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
     idempotencyKey: input.idempotencyKey,
-    schedule: readSerializedSessionSchedule(serializedContext),
+    schedule: readSerializedScheduleProvenance(serializedContext),
     deliveryMetadata:
       serializedContext["eve.channelDelivery"] === undefined
         ? undefined

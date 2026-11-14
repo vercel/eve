@@ -7,7 +7,11 @@ import type {
 } from "#channel/types.js";
 import { ContinuationTokenKey, type LocalDevRequestProvenance } from "#context/keys.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
-import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
+import {
+  publicSchedule,
+  readSerializedScheduleProvenance,
+  type SessionSchedule,
+} from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { PreparedCoordinationDispatch } from "#execution/coordination-dispatch-shared.js";
 import { agentSessionOwner, type AgentSessionOwner } from "#execution/agent-sessions/owner.js";
@@ -38,6 +42,7 @@ export interface AgentSessionLineage {
   readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   /** Forwarded unchanged, so a session asks a person only when its caller can. */
   readonly capabilities?: SessionCapabilities;
+  /** The caller's schedule without its namespace: a subagent's bundle may not deploy the collection. */
   readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   /** The calling session's address on its channel, which `ctx.channel.continuationToken` reads. */
@@ -90,7 +95,7 @@ export function captureAgentSessionContext(
     toolStubs: caller.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined,
     ...agentSessionOwner(caller.owner.reference),
     capabilities: caller.capabilities,
-    schedule: readSerializedSessionSchedule(caller.serializedContext),
+    schedule: publicSchedule(readSerializedScheduleProvenance(caller.serializedContext)),
     channelMetadata: caller.channelMetadata,
     continuationToken: caller.serializedContext[ContinuationTokenKey.name] as string | undefined,
     conversation: caller.inheritedConversation,

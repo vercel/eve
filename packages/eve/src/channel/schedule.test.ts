@@ -170,6 +170,7 @@ describe("ScheduleDispatcher", () => {
       const input = {
         collectionId: "requests",
         definition,
+        namespace: "eve-requests",
         occurrence,
         payload,
         schedule: { disable: async () => {}, delete: async () => {} },

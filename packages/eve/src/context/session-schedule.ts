@@ -1,5 +1,10 @@
 import type { ContextReader } from "#context/key.js";
-import { ScheduleIdKey, ScheduleInstanceKey, OccurrenceIdKey } from "#context/keys.js";
+import {
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  ScheduleNamespaceKey,
+  OccurrenceIdKey,
+} from "#context/keys.js";
 
 /** Framework-owned provenance for the scheduled work that started the current turn. */
 export interface SessionSchedule {
@@ -8,28 +13,50 @@ export interface SessionSchedule {
   readonly occurrenceId?: string;
 }
 
-export function readSerializedSessionSchedule(
+/**
+ * The provenance eve carries between its own hops: the public {@link SessionSchedule} plus the
+ * provider namespace, which `currentSchedule()` uses to address the schedule. Public surfaces
+ * read it through {@link publicSchedule}.
+ */
+export interface ScheduleProvenance extends SessionSchedule {
+  readonly namespace?: string;
+}
+
+export function readSerializedScheduleProvenance(
   values: Readonly<Record<string, unknown>>,
-): SessionSchedule | undefined {
+): ScheduleProvenance | undefined {
   const definition = values[ScheduleIdKey.name];
   if (typeof definition !== "string") return undefined;
-  const instance = values[ScheduleInstanceKey.name];
-  const occurrenceId = values[OccurrenceIdKey.name];
   return {
     definition,
-    instance: typeof instance === "string" ? instance : undefined,
-    occurrenceId: typeof occurrenceId === "string" ? occurrenceId : undefined,
+    instance: stringOrUndefined(values[ScheduleInstanceKey.name]),
+    occurrenceId: stringOrUndefined(values[OccurrenceIdKey.name]),
+    namespace: stringOrUndefined(values[ScheduleNamespaceKey.name]),
   };
 }
 
-export function readSessionSchedule(
+export function readScheduleProvenance(
   context: Pick<ContextReader, "get">,
-): SessionSchedule | undefined {
+): ScheduleProvenance | undefined {
   const definition = context.get(ScheduleIdKey);
   if (definition === undefined) return undefined;
   return {
     definition,
     instance: context.get(ScheduleInstanceKey),
     occurrenceId: context.get(OccurrenceIdKey),
+    namespace: context.get(ScheduleNamespaceKey),
   };
+}
+
+/** The provenance without its namespace, for sessions, frames, and remote agents. */
+export function publicSchedule(
+  provenance: ScheduleProvenance | undefined,
+): SessionSchedule | undefined {
+  if (provenance === undefined) return undefined;
+  const { namespace: _namespace, ...schedule } = provenance;
+  return schedule;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }

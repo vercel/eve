@@ -34,6 +34,7 @@
   "ScheduleState",
   "ScheduleTiming",
   "byPrincipal",
+  "currentSchedule",
   "defineDynamicSchedules",
   "schedules"
 ]
