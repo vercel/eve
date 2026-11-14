@@ -131,6 +131,7 @@ function createMockSandbox(input: {
         tags = params.tags;
       }
     }),
+    updateNetworkPolicy: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn(
       async (nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>) => {
         for (const file of nextFiles) {
@@ -1534,7 +1535,7 @@ describe("createVercelSandbox", () => {
     >;
     expect(name).toBe(build.name);
     expect(name).toMatch(/^eve-sbx-tpl-vercel-[0-9a-f]{32}-[0-9a-f]{8}$/u);
-    expect(build.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
+    expect(build.updateNetworkPolicy).toHaveBeenCalledWith("deny-all");
   });
 
   it("reports an unavailable prepared snapshot without mutating the build template", async () => {
@@ -1771,7 +1772,7 @@ describe("createVercelSandbox", () => {
     expect(sessionSandbox.delete).not.toHaveBeenCalled();
   });
 
-  it("brokers credentials through the session's setNetworkPolicy to sandbox.update", async () => {
+  it("brokers credential transforms through the session's live network policy", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const sandboxModule = {
@@ -1803,13 +1804,11 @@ describe("createVercelSandbox", () => {
       },
     });
 
-    expect(sessionSandbox.update).toHaveBeenCalledTimes(1);
-    expect(sessionSandbox.update).toHaveBeenCalledWith({
-      networkPolicy: {
-        allow: {
-          "github.com": [{ transform: [{ headers: { authorization: "Basic eC1hY2Nlc3M=" } }] }],
-          "*": [],
-        },
+    expect(sessionSandbox.updateNetworkPolicy).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.updateNetworkPolicy).toHaveBeenCalledWith({
+      allow: {
+        "github.com": [{ transform: [{ headers: { authorization: "Basic eC1hY2Nlc3M=" } }] }],
+        "*": [],
       },
     });
   });
