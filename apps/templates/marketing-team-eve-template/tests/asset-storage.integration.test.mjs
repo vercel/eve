@@ -19,10 +19,9 @@ const list = mock.fn();
 mock.module("@vercel/blob", {
   namedExports: { del: mock.fn(), get, head: mock.fn(), list, put: mock.fn() },
 });
-const { downloadAssetTool, listAssetsTool } =
-  await import("../agent/lib/vercel-blob/tools.ts");
-const download = downloadAssetTool();
-const listAssets = listAssetsTool();
+const tools = await import("../agent/lib/vercel-blob/tools.ts");
+const download = tools.downloadAssetTool();
+const listAssets = tools.listAssetsTool();
 hooks.deregister();
 
 const assetUrl =
