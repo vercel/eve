@@ -37,14 +37,14 @@ export function holdsMessages(view: SessionView): boolean {
   );
 }
 
-/** Whether the turn waits on a sign-in for its model call: some open sign-in belongs to no stopped call. */
+/** Whether the turn waits on an open sign-in for its model call: one no stopped call or answer owns. */
 export function holdsModelCall(view: SessionView): boolean {
-  const held = new Set(callSignIns(view.turn).map(signInAttemptKey));
+  const byCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   const { interactions } = view.projection.view;
   return view.signIns.some(
     (challenge) =>
       challenge.candidateId === undefined &&
-      !held.has(signInAttemptKey(challenge)) &&
+      !byCalls.has(signInAttemptKey(challenge)) &&
       interactions[signInInteractionId(challenge)]?.status === "open",
   );
 }

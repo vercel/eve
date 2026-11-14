@@ -148,7 +148,7 @@ export function createAuthorizationExecution(
   };
 }
 
-export class ScopedAuthorizationRequiredError extends Error {
+class ScopedAuthorizationRequiredError extends Error {
   readonly scoped: ScopedAuthorization;
   readonly justAuthorized: boolean;
 

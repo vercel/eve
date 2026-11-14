@@ -6,47 +6,14 @@ last_updated: "2026-11-13"
 
 # Sign in before a model call
 
-## Summary
-
-Some agents need the caller's own credential for the model call itself. For example, an agent
-that bills each person's model usage to that person's provider account needs their API key
-before the first model call. eve starts a sign-in only when a tool asks for a token, and the
-model call runs before any tool.
-
-Tools already call `ctx.getToken(provider)` and `ctx.requireAuth(provider)`. This proposal adds
-both to the context of `defineDynamic`. A dynamic `model` then gets the caller's token before
-each model call, and eve runs the same sign-in flow as for a tool.
+Some agents need the caller's own credential for the model call itself, such as each person's own
+provider API key. eve starts a sign-in only when a tool asks for a token, and the model call runs
+before any tool. This proposal gives dynamic values the `ctx.getToken` and `ctx.requireAuth`
+methods of tools, so a dynamic `model` can require a sign-in.
 
 ## Authoring API
 
-```ts title="agent/agent.ts"
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { defineAgent, defineDynamic } from "eve";
-import {
-  ConnectionAuthorizationFailedError,
-  ConnectionAuthorizationRequiredError,
-  defineInteractiveAuthorization,
-} from "eve/connections";
-
-// Each person enters their own Anthropic API key on a page in your app.
-const anthropicKey = defineInteractiveAuthorization({
-  displayName: "Anthropic",
-  getToken: async ({ principal }) => {
-    const key = await loadAnthropicKey(principal);
-    if (!key) throw new ConnectionAuthorizationRequiredError("anthropic");
-    return { token: key };
-  },
-  // The page signs the person in, saves the key for `principal`, then redirects to `callbackUrl`.
-  startAuthorization: async ({ principal, callbackUrl }) => ({
-    challenge: { url: anthropicKeyPageUrl(principal, callbackUrl) },
-  }),
-  completeAuthorization: async ({ principal }) => {
-    const key = await loadAnthropicKey(principal);
-    if (!key) throw new ConnectionAuthorizationFailedError("anthropic", { reason: "no_key_saved" });
-    return { token: key };
-  },
-});
-
+```ts
 export default defineAgent({
   model: defineDynamic(async (ctx) => {
     const { token } = await ctx.getToken(anthropicKey, { authKey: "anthropic" });
@@ -60,52 +27,28 @@ export default defineAgent({
 | `ctx.getToken(provider, options?)`    | Returns the caller's token, or starts a sign-in.            |
 | `ctx.requireAuth(provider, options?)` | Drops the cached token and starts a sign-in. Never returns. |
 
-Both accept the same providers and options as their tool counterparts, and share eve's callback
-route. eve keys these sign-ins under `eve:dynamic`: `connect("x/y")` becomes `eve:dynamic__x_y`.
-A tool name can't contain `:`, so no tool shares the scope. A `connect()` provider shares its sign-in with tools that use the
-same connector. eve keys a provider without Connect metadata under its dynamic value, so two
-values never share its token.
-
-eve doesn't read provider errors. When a provider rejects a token, the app calls
-`ctx.requireAuth(provider)`, for example from AI SDK middleware around the model.
+Both accept the same providers and options as their tool counterparts. eve doesn't read provider
+errors: the app calls `ctx.requireAuth` when its provider rejects a token.
 
 ## Semantics
 
-| Situation                                       | What eve does                                                                    |
-| ----------------------------------------------- | -------------------------------------------------------------------------------- |
-| The caller has a token                          | eve runs the model call with it.                                                 |
-| The caller has no token                         | eve opens the sign-in and pauses the turn before the model call.                 |
-| The caller signs in                             | eve evaluates the model again and runs the model call in the same turn.          |
-| The app calls `requireAuth` during a model call | eve ends that model call as `abandoned`, opens the sign-in, and pauses the turn. |
-| The provider rejects the token from sign-in     | eve fails the turn with `SIGN_IN_FAILED`.                                        |
-| A schedule started the turn                     | eve fails the turn with `SIGN_IN_FAILED` and opens no sign-in.                   |
-| A new message arrives during the sign-in        | The message waits behind the sign-in, as behind the session usage prompt.        |
-| The caller declines at the provider             | eve fails the turn with `SIGN_IN_FAILED`.                                        |
-| The caller cancels the turn                     | The turn ends `cancelled`.                                                       |
-| A subagent needs the sign-in                    | eve passes it to the parent, as for a subagent tool's sign-in.                   |
-
-eve saves the turn's input with the sign-in, the same way the session usage limit pauses a turn,
-so the resumed turn reads the same prompt.
-
-A failed turn's error carries `code: "SIGN_IN_FAILED"`, a `message` for the caller with the
-provider's display name, and a `hint` with what to do. eve keeps the internal scope out of both.
-
-```text
-turn.started ─▶ evaluate dynamic values ─┬─ token ────▶ model.requested ─▶ …
-                                         └─ no token ─▶ interaction.opened (sign-in)
-                                                         turn.paused
-sign-in callback ─▶ interaction.settled (accepted) ─▶ evaluate again ─▶ model.requested ─▶ …
-```
+| Situation                                       | What eve does                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| The caller has no token                         | eve opens the sign-in and pauses the turn before the model call.              |
+| The caller signs in                             | eve evaluates the model again and runs the model call in the same turn.       |
+| The app calls `requireAuth` during a model call | eve ends that model call as `abandoned`, then asks for the sign-in.           |
+| A new message arrives during the sign-in        | The message waits for the sign-in, and history keeps it if the sign-in fails. |
+| A schedule started the turn                     | eve fails the turn with `SIGN_IN_FAILED` and opens no sign-in.                |
+| The caller declines, or the sign-in fails       | The card settles `declined` or `failed`, and the turn fails `SIGN_IN_FAILED`. |
+| The provider rejects the token from sign-in     | eve fails the turn with `SIGN_IN_FAILED` and doesn't ask again.               |
 
 ## Boundaries
 
-- Dynamic values and model calls hand authorization errors to the same handler as tools. The
-  sign-in, its channel cards and its callback stay the same.
-- The protocol stays the same. Sign-ins already accept a turn as their subject.
-- When eve rebuilds a remote agent's credentials for a subagent, no sign-in can run, so
-  `getToken` throws there.
-- Call `getToken` outside `ctx.memo`. A memo keeps its result in the session; eve already reuses
-  the token within a step.
-- A step's restore can read a token, but it never completes or opens a sign-in. The evaluation
-  before the model call completes it, so a provider's rejection of a fresh token fails the turn
-  in a fresh process too.
+- Model calls hand sign-in errors to the same handler as tools. The cards, the callback route and
+  the protocol stay the same: sign-ins already accept a turn as their subject.
+- Without an `authKey`, eve keys a dynamic value's sign-in under `eve:dynamic`, and a provider
+  without Connect metadata under its dynamic value. An `authKey` replaces that key, so every tool,
+  connection and dynamic value with the same `authKey` shares one token.
+- A step's restore reads tokens but never completes or opens a sign-in, so the guard against a
+  rejected fresh token holds in a fresh process.
+- Rebuilding a remote agent's credentials runs no sign-in, so `getToken` throws there.

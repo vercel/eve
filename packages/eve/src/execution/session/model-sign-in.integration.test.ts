@@ -4,7 +4,10 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import {
+  ConnectionAuthorizationFailedError,
+  ConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
 import { defineDynamic, type DynamicModelContext } from "#dynamic/definition.js";
 import {
   sessionCommandHookToken,
@@ -29,435 +32,334 @@ const alice = {
   principalId: "user-1",
   principalType: "user" as const,
 };
+const FIRST = "Summarize today's issues.";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("a dynamic model that needs a sign-in", () => {
-  it("asks before the first model call and answers in the same turn once the person signs in", async () => {
+  it("asks before the first model call and answers in the same turn after sign-in", async () => {
     const billing = billingProvider();
-    const runtime = await billingRuntime("model-sign-in", billing);
+    await withSession(billing, async (session) => {
+      const asked = await session.asked();
+      expect(opened(asked)?.data.subject).toHaveProperty("turnId");
+      expect(opened(asked)?.data.request.signIn?.displayName).toBe("Billing");
+      expect(filterEventsByType(asked, "model.requested")).toHaveLength(0);
 
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:model-sign-in");
-      const stream = captureEvents(run);
-      try {
-        const asked = await stream.nextUntil("sign-in", isSignInOpened);
-        const paused = await stream.nextUntil(
-          "sign-in hold",
-          (event) => event.type === "turn.paused",
-        );
-        const opened = filterEventsByType(asked, "interaction.opened").find(
-          (event) => event.data.request.kind === "sign-in",
-        );
-        expect(opened?.data.subject).toHaveProperty("turnId");
-        expect(opened?.data.request.signIn?.displayName).toBe("Billing");
-        expect(filterEventsByType([...asked, ...paused], "model.requested")).toHaveLength(0);
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [billingCallback(signInId(asked))],
-        });
-        const answered = await stream.nextUntil("answer", isTurnSettled);
-
-        expect(
-          filterEventsByType(answered, "interaction.settled").filter(
-            (event) => event.data.interactionId === signInId(asked),
-          ),
-        ).toMatchObject([{ data: { outcome: "accepted" } }]);
-        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
-        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
-          { data: { outcome: "completed" } },
-        ]);
-        expect(billing.tokensSeen).toEqual(["billing-token-1"]);
-        expect(userMessages(billing.prompts.at(-1))).toEqual(["Summarize today's issues."]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
+      const answered = await session.callBack();
+      expect(cardOutcome(answered, asked)).toBe("accepted");
+      expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+      expect(turnSettled(answered)).toMatchObject({ outcome: "completed" });
+      expect(billing.tokensSeen).toEqual(["billing-token-1"]);
+      expect(userMessages(billing.prompts.at(-1))).toEqual([FIRST]);
     });
   });
 
-  it("ends the model call when the model code calls requireAuth, and runs it again after sign-in", async () => {
+  it("ends a model call that calls requireAuth, and runs it again after sign-in", async () => {
     const billing = billingProvider({ token: "revoked-token" });
-    const runtime = await billingRuntime("model-sign-in-rejected", billing);
-
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:model-sign-in-rejected");
-      const stream = captureEvents(run);
-      try {
-        const asked = await stream.nextUntil("sign-in", isSignInOpened);
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        expect(filterEventsByType(asked, "model.settled")).toMatchObject([
-          { data: { outcome: "abandoned" } },
-        ]);
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [billingCallback(signInId(asked))],
-        });
-        const answered = await stream.nextUntil("answer", isTurnSettled);
-        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
-          { data: { outcome: "completed" } },
-        ]);
-        expect(billing.tokensSeen).toEqual(["revoked-token", "billing-token-1"]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
+    await withSession(billing, async (session) => {
+      const asked = await session.asked();
+      expect(filterEventsByType(asked, "model.settled")).toMatchObject([
+        { data: { outcome: "abandoned" } },
+      ]);
+      expect(turnSettled(await session.callBack())).toMatchObject({ outcome: "completed" });
+      expect(billing.tokensSeen).toEqual(["revoked-token", "billing-token-1"]);
     });
+  });
+
+  it("asks when a compaction summary calls requireAuth, and answers after sign-in", async () => {
+    const billing = billingProvider({ token: "revoked-token" });
+    await withSession(
+      billing,
+      async (session) => {
+        await session.stream.nextUntil("first answer", isTurnSettled);
+        await session.send("And yesterday's?");
+        await session.asked();
+        expect(turnSettled(await session.callBack())).toMatchObject({ outcome: "completed" });
+        expect(billing.summaryTokens).toEqual(["revoked-token", "billing-token-1"]);
+      },
+      { bigFirstAnswer: true },
+    );
   });
 
   it("fails a scheduled turn without asking", async () => {
     const billing = billingProvider();
-    const runtime = await billingRuntime("model-sign-in-scheduled", billing);
-
-    await runtime.run(async () => {
-      const run = await startTestSession("in-process", {
-        kind: "initial",
-        ownerDeploymentId: "dpl_inline",
-        input: { message: "Summarize today's issues." },
-        serializedContext: {
-          ...buildSerializedContext({
-            auth: alice,
-            channelKind: "schedule",
-            continuationToken: "eve-scheduled-send:model-sign-in",
-          }),
-          "eve.scheduleId": "daily-summary",
-        },
-      });
-      const stream = captureEvents(run);
-      try {
-        const events = await stream.nextUntil("scheduled turn", isTurnSettled);
+    await withSession(
+      billing,
+      async (session) => {
+        const events = await session.stream.nextUntil("scheduled turn", isTurnSettled);
         expect(events.filter(isSignInOpened)).toEqual([]);
         expect(billing.starts()).toBe(0);
-        expect(filterEventsByType(events, "model.requested")).toHaveLength(0);
-        expect(filterEventsByType(events, "turn.settled")).toMatchObject([
-          {
-            data: {
-              error: {
-                code: "SIGN_IN_FAILED",
-                hint: "Send a message to sign in to Billing, then run it again.",
-                message: "A scheduled run can't ask you to sign in to Billing.",
-              },
-              outcome: "failed",
-            },
-          },
-        ]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
-
-  it("asks again when a compaction summary calls requireAuth, and answers after sign-in", async () => {
-    const billing = billingProvider({ token: "revoked-token" });
-    const runtime = await billingRuntime("model-sign-in-compaction", billing, {
-      bigFirstAnswer: true,
-    });
-
-    await runtime.run(async () => {
-      const continuationToken = "http:model-sign-in-compaction";
-      const run = await startBillingRun(continuationToken);
-      const stream = captureEvents(run);
-      try {
-        await stream.nextUntil("first answer", isTurnSettled);
-        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
-          auth: alice,
-          kind: "send",
-          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-          payload: { message: "And yesterday's?" },
-        });
-        const asked = await stream.nextUntil("sign-in", isSignInOpened);
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        expect(filterEventsByType(asked, "turn.settled")).toHaveLength(0);
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [billingCallback(signInId(asked))],
-        });
-        const answered = await stream.nextUntil("answer", isTurnSettled);
-        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
-          { data: { outcome: "completed" } },
-        ]);
-        expect(billing.summaryTokens).toEqual(["revoked-token", "billing-token-1"]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
-});
-
-describe("a provider that rejects the token from sign-in", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
+        expect(turnSettled(events)).toMatchObject(
+          signInFailed("The sign-in to Billing didn't finish."),
+        );
+      },
+      { scheduled: true },
+    );
   });
 
   it.each([
     ["in the process that completed the sign-in", false],
     ["in a fresh process", true],
-  ])("fails the turn without asking again, %s", async (_where, cold) => {
-    // Every step starts without built code, as a fresh process does.
-    if (cold) vi.stubEnv("EVE_DEFINITIONS_COLD", "1");
-    const billing = billingProvider({ token: "revoked-token" });
-    const runtime = await billingRuntime(`model-sign-in-refused-${cold}`, billing, {
-      rejectEveryToken: true,
-    });
-
-    await runtime.run(async () => {
-      const run = await startBillingRun(`http:model-sign-in-refused-${cold}`);
-      const stream = captureEvents(run);
-      try {
-        const asked = await stream.nextUntil("sign-in", isSignInOpened);
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [billingCallback(signInId(asked))],
-        });
-        const settled = await stream.nextUntil("refusal", isTurnSettled);
-        expect(settled.filter(isSignInOpened)).toEqual([]);
-        expect(billing.starts()).toBe(1);
-        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
-          {
-            data: {
-              error: {
-                code: "SIGN_IN_FAILED",
-                message: "The token from your sign-in to Billing didn't work.",
-              },
-              outcome: "failed",
-            },
-          },
-        ]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
+  ])(
+    "fails the turn when the provider rejects the token from sign-in, %s",
+    async (_where, cold) => {
+      if (cold) vi.stubEnv("EVE_DEFINITIONS_COLD", "1");
+      const billing = billingProvider({ token: "revoked-token" });
+      await withSession(
+        billing,
+        async (session) => {
+          await session.asked();
+          const settled = await session.callBack();
+          expect(settled.filter(isSignInOpened)).toEqual([]);
+          expect(billing.starts()).toBe(1);
+          expect(turnSettled(settled)).toMatchObject(
+            signInFailed("The sign-in to Billing didn't finish."),
+          );
+        },
+        { rejectEveryToken: true },
+      );
+    },
+  );
 });
 
 describe("a model sign-in that doesn't complete", () => {
-  it("fails the turn with the provider's name when the person declines", async () => {
-    const billing = billingProvider();
-    const runtime = await billingRuntime("model-sign-in-declined", billing);
+  it("fails the turn and settles the card declined when the person declines", async () => {
+    await withSession(billingProvider(), async (session) => {
+      const asked = await session.asked();
+      const settled = await session.callBack({ error: "access_denied" });
+      expect(cardOutcome(settled, asked)).toBe("declined");
+      expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
+      expect(turnSettled(settled)).toMatchObject(
+        signInFailed("The sign-in to Billing didn't finish."),
+      );
+    });
+  });
 
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:model-sign-in-declined");
-      const stream = captureEvents(run);
-      try {
-        const asked = await stream.nextUntil("sign-in", isSignInOpened);
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [billingCallback(signInId(asked), { error: "access_denied" })],
-        });
-        const settled = await stream.nextUntil("decline", isTurnSettled);
-        expect(settled.filter(isSignInOpened)).toEqual([]);
-        expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
-        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
-          {
-            data: {
-              error: {
-                code: "SIGN_IN_FAILED",
-                hint: "Send a new message to sign in again.",
-                message: "You declined the sign-in to Billing.",
-              },
-              outcome: "failed",
-            },
-          },
-        ]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
+  it("shows the provider's own failure message", async () => {
+    const billing = billingProvider({ failCompletion: "Save your API key first." });
+    await withSession(billing, async (session) => {
+      const asked = await session.asked();
+      const settled = await session.callBack();
+      expect(cardOutcome(settled, asked)).toBe("failed");
+      expect(turnSettled(settled)).toMatchObject(signInFailed("Billing: Save your API key first."));
     });
   });
 
   it("cancels the turn when the person cancels it during the sign-in", async () => {
-    const billing = billingProvider();
-    const runtime = await billingRuntime("model-sign-in-cancelled", billing);
-
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:model-sign-in-cancelled");
-      const stream = captureEvents(run);
-      try {
-        await stream.nextUntil("sign-in", isSignInOpened);
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          auth: alice,
-          deliveryId: "alice-cancel",
-          kind: "cancel",
-        });
-        const settled = await stream.nextUntil("cancel", isTurnSettled);
-        expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
-        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
-          { data: { outcome: "cancelled" } },
-        ]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
+    await withSession(billingProvider(), async (session) => {
+      await session.asked();
+      await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(session.run.runId)), {
+        auth: alice,
+        deliveryId: "alice-cancel",
+        kind: "cancel",
+      });
+      const settled = await session.stream.nextUntil("cancel", isTurnSettled);
+      expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
+      expect(turnSettled(settled)).toMatchObject({ outcome: "cancelled" });
     });
   });
 
-  it("keeps waiting on the same sign-in when a new message arrives, and answers both", async () => {
+  it("holds a new message behind the sign-in and keeps it when the person declines", async () => {
     const billing = billingProvider();
-    const runtime = await billingRuntime("model-sign-in-steered", billing);
+    await withSession(billing, async (session) => {
+      await session.asked();
+      await session.send("Only the open ones.");
+      const held = await session.stream.nextUntil("held", (event) => event.type === "turn.paused");
+      expect(held.filter(isSignInOpened)).toEqual([]);
+      await session.callBack({ error: "access_denied" });
 
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:model-sign-in-steered");
-      const stream = captureEvents(run);
-      try {
-        const asked = await stream.nextUntil("sign-in", isSignInOpened);
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          auth: alice,
-          kind: "send",
-          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-          payload: { message: "Only the open ones." },
-        });
-        const steered = await stream.nextUntil(
-          "steered hold",
-          (event) => event.type === "turn.paused" || isTurnSettled(event),
-        );
-        expect(steered.filter(isSignInOpened)).toEqual([]);
-        expect(filterEventsByType(steered, "turn.settled")).toHaveLength(0);
-
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [billingCallback(signInId(asked))],
-        });
-        const answered = await stream.nextUntil("answer", isTurnSettled);
-        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
-          { data: { outcome: "completed" } },
-        ]);
-        expect(billing.starts()).toBe(1);
-        expect(userMessages(billing.prompts.at(-1))).toEqual([
-          "Summarize today's issues.",
-          "Only the open ones.",
-        ]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
+      await session.send("Try again.");
+      await session.asked();
+      expect(turnSettled(await session.callBack())).toMatchObject({ outcome: "completed" });
+      expect(userMessages(billing.prompts.at(-1))).toEqual([
+        FIRST,
+        "Only the open ones.",
+        "Try again.",
+      ]);
     });
   });
 
-  it("fails the turn without a sign-in when a provider can't ask for one", async () => {
-    const runtime = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(async (ctx: DynamicModelContext) => {
-            await ctx.getToken(
-              {
-                getToken: async () => {
-                  throw new ConnectionAuthorizationRequiredError("docs");
-                },
-              },
-              { displayName: "Docs API" },
-            );
-            return { model: plainModel(), modelContextWindowTokens: 200_000 };
-          }),
-        }),
-        name: "model-sign-in-static",
+  it("fails the turn without a card when a provider has no sign-in flow", async () => {
+    const provider = {
+      getToken: async (): Promise<TokenResult> => {
+        throw new ConnectionAuthorizationRequiredError("docs");
       },
-    });
-
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:model-sign-in-static");
-      const stream = captureEvents(run);
-      try {
-        const settled = await stream.nextUntil("refusal", isTurnSettled);
+    };
+    await withAgent(
+      "model-sign-in-static",
+      async (ctx) => {
+        await ctx.getToken(provider, { displayName: "Docs API" });
+        return plainModel();
+      },
+      async (session) => {
+        const settled = await session.stream.nextUntil("refusal", isTurnSettled);
         expect(settled.filter(isSignInOpened)).toEqual([]);
-        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
-          {
-            data: {
-              error: {
-                code: "SIGN_IN_FAILED",
-                message: "This agent has no credential for Docs API.",
-              },
-              outcome: "failed",
-            },
-          },
-        ]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
-});
-
-describe("dynamic values with plain providers", () => {
-  it("gives each value its own provider's token", async () => {
-    const seen: Record<string, string> = {};
-    const runtime = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(async (ctx: DynamicModelContext) => {
-            seen.model = (
-              await ctx.getToken({ getToken: async () => ({ token: "model-key" }) })
-            ).token;
-            return { model: plainModel(), modelContextWindowTokens: 200_000 };
-          }),
-        }),
-        name: "plain-providers",
+        expect(turnSettled(settled)).toMatchObject(
+          signInFailed("The sign-in to Docs API didn't finish."),
+        );
       },
-      modules: [
-        plainInstructions("instructions/docs.ts", "docs", seen),
-        plainInstructions("instructions/foo/bar.ts", "foo/bar", seen),
-        plainInstructions("instructions/foo_bar.ts", "foo_bar", seen),
-      ],
-    });
-
-    await runtime.run(async () => {
-      const run = await startBillingRun("http:plain-providers");
-      const stream = captureEvents(run);
-      try {
-        await stream.nextUntil("answer", isTurnSettled);
-        expect(seen).toEqual({
-          docs: "docs-key",
-          "foo/bar": "foo/bar-key",
-          foo_bar: "foo_bar-key",
-          model: "model-key",
-        });
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
+    );
   });
 });
 
-/** Dynamic instructions at `logicalPath` that read a plain provider's token into `seen[name]`. */
-function plainInstructions(logicalPath: string, name: string, seen: Record<string, string>) {
-  return {
+it("gives each dynamic value its own plain provider's token", async () => {
+  const seen: Record<string, string> = {};
+  const read = async (ctx: DynamicModelContext, name: string) => {
+    seen[name] = (await ctx.getToken({ getToken: async () => ({ token: `${name}-key` }) })).token;
+  };
+  const instructions = (logicalPath: string, name: string) => ({
     logicalPath,
     loadNamespace: async () => ({
       default: defineDynamic(async (ctx: DynamicModelContext) => {
-        seen[name] = (
-          await ctx.getToken({ getToken: async () => ({ token: `${name}-key` }) })
-        ).token;
+        await read(ctx, name);
         return defineInstructions({ content: `Answer from ${name}.` });
       }),
     }),
+  });
+  await withAgent(
+    "plain-providers",
+    async (ctx) => {
+      await read(ctx, "model");
+      return plainModel();
+    },
+    async (session) => {
+      await session.stream.nextUntil("answer", isTurnSettled);
+      expect(seen).toEqual({
+        docs: "docs-key",
+        "foo/bar": "foo/bar-key",
+        foo_bar: "foo_bar-key",
+        model: "model-key",
+      });
+    },
+    [
+      instructions("instructions/docs.ts", "docs"),
+      instructions("instructions/foo/bar.ts", "foo/bar"),
+      instructions("instructions/foo_bar.ts", "foo_bar"),
+    ],
+  );
+});
+
+interface SessionOptions {
+  readonly bigFirstAnswer?: boolean;
+  readonly rejectEveryToken?: boolean;
+  readonly scheduled?: boolean;
+}
+
+let sessions = 0;
+
+/** Runs `body` against a session of an agent whose dynamic model returns `model(ctx)`. */
+async function withAgent(
+  name: string,
+  model: (ctx: DynamicModelContext) => Promise<ReturnType<typeof plainModel>>,
+  body: (session: ReturnType<typeof openSession>) => Promise<void>,
+  modules: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"] = [],
+  options: SessionOptions = {},
+) {
+  const runtime = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        model: defineDynamic(async (ctx: DynamicModelContext) => ({
+          model: await model(ctx),
+          modelContextWindowTokens: 200_000,
+        })),
+      }),
+      name,
+    },
+    modules,
+  });
+  await runtime.run(async () => {
+    const continuationToken = `http:${name}`;
+    const run = await startTestSession("in-process", {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message: FIRST },
+      serializedContext: options.scheduled
+        ? {
+            ...buildSerializedContext({
+              auth: alice,
+              channelKind: "schedule",
+              continuationToken: `eve-scheduled-send:${name}`,
+            }),
+            "eve.scheduleId": "daily-summary",
+          }
+        : buildSerializedContext({ auth: alice, channelKind: "http", continuationToken }),
+    });
+    const session = openSession(run, continuationToken);
+    try {
+      await body(session);
+    } finally {
+      session.stream.dispose();
+      await run.cancel();
+    }
+  });
+}
+
+/** A started session and its test steps: wait for the card, call it back, send a message. */
+function openSession(run: Awaited<ReturnType<typeof startTestSession>>, continuationToken: string) {
+  const stream = captureEvents(run);
+  let latest: SessionStreamEvent[] = [];
+  return {
+    run,
+    stream,
+    /** Waits for the sign-in card and the paused turn; returns the events up to the card. */
+    async asked() {
+      latest = await stream.nextUntil("sign-in", isSignInOpened);
+      await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+      return latest;
+    },
+    /** Calls the latest card back, and returns the events until the turn settles. */
+    async callBack(params: Readonly<Record<string, string>> = { code: "oauth-code" }) {
+      const attemptId = opened(latest)!.data.interactionId;
+      const callback = { method: "GET" as const, params };
+      await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        kind: "authorization-callback",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId,
+              callback,
+              connectionName: "eve:dynamic__oauth_billing",
+            },
+          },
+        ],
+      });
+      return await stream.nextUntil("settled turn", isTurnSettled);
+    },
+    async send(message: string) {
+      await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+        auth: alice,
+        kind: "send",
+        delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+        payload: { message },
+      });
+    },
   };
 }
 
-interface BillingProvider {
-  readonly auth: AuthorizationDefinition<{ nonce: string }>;
-  /** The billed model's prompts, oldest first. */
-  readonly prompts: unknown[];
-  readonly starts: () => number;
-  readonly summaryTokens: string[];
-  readonly tokensSeen: string[];
+/** Runs `body` against an agent whose dynamic model reads `billing`'s token before every call. */
+async function withSession(
+  billing: BillingProvider,
+  body: (session: ReturnType<typeof openSession>) => Promise<void>,
+  options: SessionOptions = {},
+) {
+  sessions += 1;
+  await withAgent(
+    `model-sign-in-${String(sessions)}`,
+    async (ctx) => billedModel(ctx, billing, (await ctx.getToken(billing.auth)).token, options),
+    body,
+    [],
+    options,
+  );
 }
 
+type BillingProvider = ReturnType<typeof billingProvider>;
+
 /** A provider with one token per person. A sign-in replaces the token. */
-function billingProvider(initial: { readonly token?: string } = {}): BillingProvider {
+function billingProvider(
+  initial: { readonly token?: string; readonly failCompletion?: string } = {},
+) {
   let stored = initial.token;
   let issued = 0;
   let starts = 0;
@@ -483,50 +385,30 @@ function billingProvider(initial: { readonly token?: string } = {}): BillingProv
         };
       },
       async completeAuthorization(): Promise<TokenResult> {
+        if (initial.failCompletion !== undefined)
+          throw new ConnectionAuthorizationFailedError("billing", {
+            message: initial.failCompletion,
+            reason: "no_key_saved",
+            retryable: false,
+          });
         issued += 1;
-        stored = `billing-token-${issued}`;
+        stored = `billing-token-${String(issued)}`;
         return { token: stored };
       },
-    },
-    prompts: [],
+    } satisfies AuthorizationDefinition<{ nonce: string }>,
+    /** The billed model's prompts, oldest first. */
+    prompts: [] as unknown[],
     starts: () => starts,
-    summaryTokens: [],
-    tokensSeen: [],
+    summaryTokens: [] as string[],
+    tokensSeen: [] as string[],
   };
-}
-
-/** This agent's model reads the caller's token before every call. */
-async function billingRuntime(
-  name: string,
-  billing: BillingProvider,
-  options: BilledModelOptions = {},
-) {
-  return await createTestRuntime({
-    agent: {
-      definition: defineAgent({
-        model: defineDynamic(async (ctx: DynamicModelContext) => {
-          const { token } = await ctx.getToken(billing.auth);
-          return {
-            model: billedModel(ctx, billing, token, options),
-            modelContextWindowTokens: 200_000,
-          };
-        }),
-      }),
-      name,
-    },
-  });
-}
-
-interface BilledModelOptions {
-  readonly bigFirstAnswer?: boolean;
-  readonly rejectEveryToken?: boolean;
 }
 
 function billedModel(
   ctx: DynamicModelContext,
   billing: BillingProvider,
   token: string,
-  options: BilledModelOptions,
+  options: SessionOptions,
 ) {
   return markMockModel(
     new MockLanguageModelV4({
@@ -539,12 +421,11 @@ function billedModel(
         billing.tokensSeen.push(token);
         billing.prompts.push(prompt);
         if (options.rejectEveryToken === true) ctx.requireAuth(billing.auth);
-        if (options.bigFirstAnswer === true && billing.tokensSeen.length === 1) {
-          return bigStreamResult("Here is the summary.");
-        }
-        if (token === "revoked-token" && options.bigFirstAnswer !== true) {
-          ctx.requireAuth(billing.auth);
-        }
+        if (options.bigFirstAnswer === true)
+          return billing.tokensSeen.length === 1
+            ? bigStreamResult("Here is the summary.")
+            : textStreamResult("Here is the summary.");
+        if (token === "revoked-token") ctx.requireAuth(billing.auth);
         return textStreamResult("Here is the summary.");
       },
       modelId: "billed-model",
@@ -553,30 +434,24 @@ function billedModel(
   );
 }
 
-async function startBillingRun(continuationToken: string) {
-  return await startTestSession("in-process", {
-    kind: "initial",
-    ownerDeploymentId: "dpl_inline",
-    input: { message: "Summarize today's issues." },
-    serializedContext: buildSerializedContext({
-      auth: alice,
-      channelKind: "http",
-      continuationToken,
-    }),
-  });
+function signInFailed(message: string) {
+  return { error: { code: "SIGN_IN_FAILED", message }, outcome: "failed" };
 }
 
-function billingCallback(
-  attemptId: string,
-  params: Readonly<Record<string, string>> = { code: "oauth-code" },
-) {
-  return {
-    authorizationCallback: {
-      attemptId,
-      callback: { method: "GET", params },
-      connectionName: "eve:dynamic__oauth_billing",
-    },
-  };
+function opened(events: readonly SessionStreamEvent[]) {
+  return filterEventsByType(events, "interaction.opened").find(
+    (event) => event.data.request.kind === "sign-in",
+  );
+}
+
+function cardOutcome(events: readonly SessionStreamEvent[], asked: readonly SessionStreamEvent[]) {
+  return filterEventsByType(events, "interaction.settled").find(
+    (event) => event.data.interactionId === opened(asked)?.data.interactionId,
+  )?.data.outcome;
+}
+
+function turnSettled(events: readonly SessionStreamEvent[]) {
+  return filterEventsByType(events, "turn.settled").at(-1)?.data;
 }
 
 /** The text of each user message in a model prompt, in order. */
@@ -599,16 +474,14 @@ function isTurnSettled(event: SessionStreamEvent): boolean {
   return event.type === "turn.settled";
 }
 
-function signInId(events: readonly SessionStreamEvent[]): string {
-  const opened = filterEventsByType(events, "interaction.opened").find(
-    (event) => event.data.request.kind === "sign-in",
-  );
-  if (opened === undefined) throw new Error("Expected a sign-in interaction.");
-  return opened.data.interactionId;
-}
-
 /** A reply whose usage fills the context window, so the next step compacts first. */
 function bigStreamResult(text: string): ReturnType<typeof textStreamResult> {
+  const inputTokens = {
+    cacheRead: undefined,
+    cacheWrite: undefined,
+    noCache: 200_000,
+    total: 200_000,
+  };
   return {
     stream: simulateReadableStream({
       chunks: [
@@ -619,15 +492,7 @@ function bigStreamResult(text: string): ReturnType<typeof textStreamResult> {
         {
           finishReason: { raw: undefined, unified: "stop" },
           type: "finish",
-          usage: {
-            ...usage,
-            inputTokens: {
-              cacheRead: undefined,
-              cacheWrite: undefined,
-              noCache: 200_000,
-              total: 200_000,
-            },
-          },
+          usage: { ...usage, inputTokens },
         },
       ],
     }),

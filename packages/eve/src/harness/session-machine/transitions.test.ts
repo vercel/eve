@@ -431,10 +431,10 @@ describe("controls and callbacks as deliveries", () => {
     },
   );
 
-  it("completes a sign-in from its callback without recording the provider's payload", () => {
+  it("completes a responder's sign-in from its callback without recording the provider's payload", () => {
     const session = waitingTurn();
     const { events } = completeSignIn(viewOf(session), {
-      completions: [GITHUB_CALLBACK],
+      completions: [{ ...GITHUB_CALLBACK, candidateId: "answer-1" }],
     });
 
     expect(events.map((event) => event.type)).toEqual([
@@ -453,6 +453,12 @@ describe("controls and callbacks as deliveries", () => {
       data: { cause: { responseId: "response_callback_github-1" }, outcome: "accepted" },
     });
     expect(accepted(session, events)).toEqual([]);
+  });
+
+  it("leaves a model call's sign-in to the dynamic value that completes it", () => {
+    expect(
+      completeSignIn(viewOf(waitingTurn()), { completions: [GITHUB_CALLBACK] }).events,
+    ).toEqual([]);
   });
 
   it("ignores a callback for a sign-in that already ended", () => {

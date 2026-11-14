@@ -43,6 +43,15 @@ export interface SignInReports {
   readonly completed: (calls: readonly ApprovedCall[]) => SignInCompleted;
 }
 
+/** How a failed sign-in settles its card: why it failed, and whether asking again can help. */
+export function signInFailureOf(failure: Error | string): {
+  readonly reason: string;
+  readonly retryable?: boolean;
+} {
+  if (!isConnectionAuthorizationFailedError(failure)) return { reason: toErrorMessage(failure) };
+  return { reason: failure.reason ?? failure.message, retryable: failure.retryable };
+}
+
 export function signInReports(input: {
   readonly publish: HandleEventFn;
   readonly view: () => Pick<SessionView, "projection">;
@@ -53,17 +62,10 @@ export function signInReports(input: {
     challenge: AuthorizationChallenge,
     failure: Error | string | undefined,
   ): Promise<void> => {
-    const refused = isConnectionAuthorizationFailedError(failure) ? failure : undefined;
     const events = callSignInsSettled(
       input.view(),
       { ...call, signIns: [challenge] },
-      failure === undefined
-        ? undefined
-        : {
-            reason:
-              refused === undefined ? toErrorMessage(failure) : (refused.reason ?? refused.message),
-            ...(refused !== undefined && { retryable: refused.retryable }),
-          },
+      failure === undefined ? undefined : signInFailureOf(failure),
     );
     if (events.length > 0) await input.publish(commitOf(events));
   };

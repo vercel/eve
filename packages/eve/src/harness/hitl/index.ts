@@ -5,10 +5,11 @@ import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
-import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
-import { fail } from "#harness/session-machine/transitions.js";
+import { commitOf, committedMessages, saveTransition } from "#harness/session-machine/commit.js";
+import { callSignInsSettled, fail } from "#harness/session-machine/transitions.js";
+import type { SignInCompleted } from "#harness/authorization.js";
+import { signInFailureOf } from "./approved-calls.js";
 import { readTurnState } from "#harness/session-machine/state.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
@@ -79,18 +80,18 @@ export async function askStepApprovals(
 }
 
 /**
- * A call the model step ran needs a sign-in: the calls that need it stop and wait in their
- * steps, and run once it completes.
+ * A call or a model call needs a sign-in: the turn waits on it. Calls that need it stop and wait
+ * in their steps, and run once it completes; a model call runs again after it.
  */
-export async function stopForToolSignIn(
+export async function stopForSignIn(
   step: Step,
-  interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
+  signIn: Pick<SignInInterrupt, "challenges"> & Partial<Pick<SignInInterrupt, "calls">>,
 ): Promise<StepResult> {
   await applyEndingSignIns(
     step,
     requireSignIn(step.view(), {
-      calls: interrupt.calls,
-      challenges: interrupt.challenges,
+      calls: signIn.calls,
+      challenges: signIn.challenges,
       callsBack: stepCallsBack(step),
     }),
     step.session.history,
@@ -98,25 +99,21 @@ export async function stopForToolSignIn(
   return park(step);
 }
 
+type SignInInterrupt = NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
+
 /**
- * Pauses the turn on a sign-in for a dynamic value or a model call. eve saves the step's
- * `messages` with the sign-in, as the budget gate does, and runs the step again after sign-in.
+ * Reports a model call's sign-in when its dynamic value completes it: the card settles accepted,
+ * or declined or failed with the reason.
  */
-export async function stopForModelSignIn(
-  step: Step,
-  messages: readonly ModelMessage[],
-  signal: AuthorizationSignal,
-): Promise<StepResult> {
-  step.session = changeHistory(step.session, { extend: messages });
-  await applyEndingSignIns(
-    step,
-    requireSignIn(step.view(), {
-      challenges: signal.challenges,
-      callsBack: stepCallsBack(step),
-    }),
-    step.session.history,
-  );
-  return park(step);
+export function modelSignInReporter(step: Step): SignInCompleted {
+  return async (result, failure) => {
+    const challenge = step.config.signInCompletions?.find(
+      ({ attemptId }) => attemptId === result.attemptId,
+    );
+    if (challenge === undefined) return;
+    const settled = failure === undefined ? undefined : signInFailureOf(failure);
+    await step.apply(commitOf(callSignInsSettled(step.view(), { signIns: [challenge] }, settled)));
+  };
 }
 
 /**

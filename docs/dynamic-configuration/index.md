@@ -8,7 +8,7 @@ url: /guides/dynamic-capabilities
 
 eve runs the function before every ordinary model call, including when a turn continues after steering, a sign-in, or an approval. It doesn't run for compaction's summary call or `auto()`'s routing call. Introspection reads the values it last returned.
 
-Because the function runs before every model call, not once per turn, a turn with 20 model calls runs it 20 times. Wrap every network request, database query, API call, and sandbox read in [`ctx.memo`](#context-and-memoization). Call `ctx.getToken` outside the memo: eve already reuses the token within a step. Outside a memo, each of those calls adds its latency to every model call and counts against the service's rate limits every time. Choose the memo key for how long the result should stay fixed; see [Choose a lifetime](#choose-a-lifetime).
+Because the function runs before every model call, not once per turn, a turn with 20 model calls runs it 20 times. Wrap every network request, database query, API call, and sandbox read in [`ctx.memo`](#context-and-memoization). Outside a memo, each of those calls adds its latency to every model call and counts against the service's rate limits every time. Choose the memo key for how long the result should stay fixed; see [Choose a lifetime](#choose-a-lifetime). Call `ctx.getToken` outside the memo: eve already reuses the token within a step.
 
 The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](/docs/reference/typescript-api#authored-module-lifecycle).
 
@@ -251,7 +251,7 @@ A dynamic connection or skill overrides a static one of the same kind and name. 
 
 ### Steering and sign-in
 
-Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn. While a sign-in for `ctx.getToken` is open, a new message waits behind it; see [Before a model call](/docs/guides/auth-and-route-protection#before-a-model-call).
+Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn. While a sign-in for `ctx.getToken` is open, a new message waits for it; see [Before a model call](/docs/guides/auth-and-route-protection#before-a-model-call).
 
 ### Execution order
 

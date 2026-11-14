@@ -118,14 +118,14 @@ async function keepOne(
     result = await evaluate(ctx, definition, fn, run);
   } catch (error) {
     if (run.mode === "evaluate") {
-      if (!asksForSignIn(error))
+      if (!isScopedAuthorizationRequiredError(error))
         log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
           error: toErrorMessage(error),
         });
       throw new DefinitionFailedError(definition.label, error);
     }
     // The next model call evaluates it again, and fails the turn if it still fails.
-    if (!asksForSignIn(error))
+    if (!isScopedAuthorizationRequiredError(error))
       log.warn(`Dynamic value "${definition.label}" didn't evaluate for this step.`, {
         error: toErrorMessage(error),
       });
@@ -138,11 +138,6 @@ async function keepOne(
   });
   if (result.changed) await definition.install?.(ctx);
   return result.kept;
-}
-
-/** Whether `error` asks for a sign-in: the model call opens it and pauses the turn. */
-function asksForSignIn(error: unknown): boolean {
-  return isScopedAuthorizationRequiredError(error);
 }
 
 export interface RunEffectsInput {
@@ -451,9 +446,9 @@ async function withMemos<T>(
 }
 
 /**
- * Dynamic values sign in under this scope: `connect("x/y")` keys as `eve:dynamic__x_y`. A tool
- * name can't contain `:`, so no tool shares it. A provider without Connect metadata keys under its
- * definition, so two values never share its token.
+ * Dynamic values sign in under this scope: `connect("x/y")` keys as `eve:dynamic__x_y`, and a
+ * provider without Connect metadata keys under its definition. A tool name can't contain `:`. An
+ * `authKey` replaces the scope, so every tool and connection with the same key shares the token.
  */
 const DYNAMIC_AUTH_SCOPE = "eve:dynamic";
 
