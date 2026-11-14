@@ -246,17 +246,14 @@ jobs:
           fi
 
   # Windows runs only the integration files whose behavior can differ there
-  # (see `// @linux-only`), in two halves like Linux below: eve's files split
-  # by vitest's --shard, and the second half also runs the other packages'
-  # integration tests. The `test-integration (windows-latest)` check below
-  # requires both halves.
-  test-integration-windows:
-    name: test-integration (windows-latest, ${{ matrix.shard }})
-    runs-on: windows-latest
+  # (see `// @linux-only`); Linux runs the whole tier in two shards below.
+  test-integration:
+    name: test-integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1/2, 2/2]
+        os: [windows-latest]
 
     steps:
       - name: Checkout code
@@ -300,18 +297,11 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/*/node_modules/.vite/vitest
-          key: vitest-results-${{ runner.os }}-integration-${{ strategy.job-index }}-${{ github.sha }}
-          restore-keys: vitest-results-${{ runner.os }}-integration-${{ strategy.job-index }}-
+          key: vitest-results-${{ runner.os }}-integration-${{ github.sha }}
+          restore-keys: vitest-results-${{ runner.os }}-integration-
 
       - name: Run integration tests
-        shell: bash
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          pnpm exec turbo run test:integration --filter=eve -- --shard="$SHARD"
-          if [ "$SHARD" = "2/2" ]; then
-            pnpm exec turbo run test:integration --filter='!eve'
-          fi
+        run: pnpm test:integration
 
       - name: Save test file timings
         if: always() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/speedup-stack')
@@ -319,21 +309,6 @@ jobs:
         with:
           path: packages/*/node_modules/.vite/vitest
           key: ${{ steps.vitest-results.outputs.cache-primary-key }}
-
-  test-integration-windows-required:
-    name: test-integration (windows-latest)
-    runs-on: ubuntu-latest
-    needs: [test-integration-windows]
-    if: always()
-    steps:
-      - name: Require both halves
-        env:
-          RESULT: ${{ needs.test-integration-windows.result }}
-        run: |
-          if [ "$RESULT" != "success" ]; then
-            echo "Windows integration shards: $RESULT"
-            exit 1
-          fi
 
   # The Linux integration tier in two halves. eve's vitest files split by
   # vitest's own --shard; the second half, which measured lighter, also runs
