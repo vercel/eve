@@ -100,10 +100,10 @@ export interface DynamicModelContext extends SessionFrame {
   messages(): Promise<readonly ModelMessage[]>;
   /**
    * Returns the caller's token for an inline auth provider, such as `connect("github/myagent")`
-   * or a custom interactive definition. It shares its token cache and sign-in with a tool's
-   * `ctx.getToken(provider)`. When the caller hasn't signed in, eve opens the sign-in and pauses
-   * the turn before the model call, then evaluates the value again after sign-in. In a turn from
-   * a schedule, eve fails the turn with `reason: "sign_in_unavailable"`.
+   * or a custom interactive definition. A `connect()` provider shares its sign-in with tools that
+   * use the same connector. When the caller hasn't signed in, eve opens the sign-in and pauses
+   * the turn before the model call, then evaluates the value again after sign-in. When eve can't
+   * finish the sign-in, as in a turn from a schedule, the turn fails with `SIGN_IN_FAILED`.
    *
    * Call it outside `ctx.memo`. A memo keeps its result in the session, and eve already reuses
    * the token within a step.

@@ -60,9 +60,10 @@ export default defineAgent({
 | `ctx.getToken(provider, options?)`    | Returns the caller's token, or starts a sign-in.            |
 | `ctx.requireAuth(provider, options?)` | Drops the cached token and starts a sign-in. Never returns. |
 
-Both accept the same providers and options as their tool counterparts, and share eve's token
-cache and callback route. eve keys these sign-ins under the agent: `connect("x/y")` becomes
-`agent__x_y`. eve keys a provider without Connect metadata under its dynamic value, so two
+Both accept the same providers and options as their tool counterparts, and share eve's callback
+route. eve keys these sign-ins under `eve:dynamic`: `connect("x/y")` becomes `eve:dynamic__x_y`.
+A tool name can't contain `:`, so no tool shares the scope. A `connect()` provider shares its sign-in with tools that use the
+same connector. eve keys a provider without Connect metadata under its dynamic value, so two
 values never share its token.
 
 eve doesn't read provider errors. When a provider rejects a token, the app calls
@@ -76,14 +77,18 @@ eve doesn't read provider errors. When a provider rejects a token, the app calls
 | The caller has no token                         | eve opens the sign-in and pauses the turn before the model call.                 |
 | The caller signs in                             | eve evaluates the model again and runs the model call in the same turn.          |
 | The app calls `requireAuth` during a model call | eve ends that model call as `abandoned`, opens the sign-in, and pauses the turn. |
-| The provider rejects the token from sign-in     | eve fails the turn with `token_rejected_after_authorization`.                    |
-| A schedule started the turn                     | eve fails the turn with `sign_in_unavailable` and opens no sign-in.              |
-| A new message arrives during the sign-in        | eve withdraws the sign-in, as for a tool's sign-in.                              |
-| The caller declined or cancelled this sign-in   | eve fails the turn with the sign-in's reason and doesn't ask again in this turn. |
+| The provider rejects the token from sign-in     | eve fails the turn with `SIGN_IN_FAILED`.                                        |
+| A schedule started the turn                     | eve fails the turn with `SIGN_IN_FAILED` and opens no sign-in.                   |
+| A new message arrives during the sign-in        | The message waits behind the sign-in, as behind the session usage prompt.        |
+| The caller declines at the provider             | eve fails the turn with `SIGN_IN_FAILED`.                                        |
+| The caller cancels the turn                     | The turn ends `cancelled`.                                                       |
 | A subagent needs the sign-in                    | eve passes it to the parent, as for a subagent tool's sign-in.                   |
 
 eve saves the turn's input with the sign-in, the same way the session usage limit pauses a turn,
 so the resumed turn reads the same prompt.
+
+A failed turn's error carries `code: "SIGN_IN_FAILED"`, a `message` for the caller with the
+provider's display name, and a `hint` with what to do. eve keeps the internal scope out of both.
 
 ```text
 turn.started ─▶ evaluate dynamic values ─┬─ token ────▶ model.requested ─▶ …
@@ -101,3 +106,6 @@ sign-in callback ─▶ interaction.settled (accepted) ─▶ evaluate again ─
   `getToken` throws there.
 - Call `getToken` outside `ctx.memo`. A memo keeps its result in the session; eve already reuses
   the token within a step.
+- A step's restore can read a token, but it never completes or opens a sign-in. The evaluation
+  before the model call completes it, so a provider's rejection of a fresh token fails the turn
+  in a fresh process too.

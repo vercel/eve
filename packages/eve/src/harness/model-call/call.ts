@@ -243,36 +243,35 @@ export class ModelCaller {
    * sign-in.
    */
   async abandonForSignIn(): Promise<readonly ModelMessage[]> {
-    const { step } = this;
-    step.ctx.set(HistoryStateKey, this.request.historyState);
-    const runId = step.position().runId;
-    if (runId !== undefined) {
-      await step.apply(
-        discardAttempt(step.view(), { ending: "retried", runId, usage: this.takeUnkeptUsage() }),
-      );
-    }
-    return this.request.history;
+    return await this.discard("retried");
   }
 
   /** Steering interrupted the call: the step ends with what it committed, and runs again. */
   async steered(): Promise<StepResult> {
-    const { step } = this;
-    throwIfTurnAborted(step.config.abortSignal);
+    throwIfTurnAborted(this.step.config.abortSignal);
     this.input.generation.end();
-    // The cut response never reaches history, so the calls it announced never run, even once its
-    // response ended and only their approvals were being decided.
+    return {
+      next: this.step.runStep,
+      session: changeHistory(this.step.session, { extend: await this.discard("steered") }),
+      steered: true,
+    };
+  }
+
+  /**
+   * Discards the attempt's answer and returns the request's messages. The cut response never
+   * reaches history, so none of its calls run, even once its response ended and only their
+   * approvals waited on a decision.
+   */
+  private async discard(ending: "retried" | "steered"): Promise<readonly ModelMessage[]> {
+    const { step } = this;
     step.ctx.set(HistoryStateKey, this.request.historyState);
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
-        discardAttempt(step.view(), { ending: "steered", runId, usage: this.takeUnkeptUsage() }),
+        discardAttempt(step.view(), { ending, runId, usage: this.takeUnkeptUsage() }),
       );
     }
-    return {
-      next: step.runStep,
-      session: changeHistory(step.session, { extend: this.request.history }),
-      steered: true,
-    };
+    return this.request.history;
   }
 
   /** What the latest attempt's discarded answer spent, which its run's next fact records. */

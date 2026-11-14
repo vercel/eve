@@ -118,17 +118,17 @@ async function keepOne(
     result = await evaluate(ctx, definition, fn, run);
   } catch (error) {
     if (run.mode === "evaluate") {
-      // eve pauses the turn for a sign-in, so a sign-in isn't a failure.
-      if (!isScopedAuthorizationRequiredError(error))
+      if (!asksForSignIn(error))
         log.error(`Dynamic value "${definition.label}" failed; the turn fails.`, {
           error: toErrorMessage(error),
         });
       throw new DefinitionFailedError(definition.label, error);
     }
     // The next model call evaluates it again, and fails the turn if it still fails.
-    log.warn(`Dynamic value "${definition.label}" didn't evaluate for this step.`, {
-      error: toErrorMessage(error),
-    });
+    if (!asksForSignIn(error))
+      log.warn(`Dynamic value "${definition.label}" didn't evaluate for this step.`, {
+        error: toErrorMessage(error),
+      });
     return { value: readSlot(ctx, definition.id)!.value };
   }
   log.debug("Evaluated a dynamic value", {
@@ -138,6 +138,11 @@ async function keepOne(
   });
   if (result.changed) await definition.install?.(ctx);
   return result.kept;
+}
+
+/** Whether `error` asks for a sign-in: the model call opens it and pauses the turn. */
+function asksForSignIn(error: unknown): boolean {
+  return isScopedAuthorizationRequiredError(error);
 }
 
 export interface RunEffectsInput {
@@ -218,8 +223,8 @@ export class DefinitionFailedError extends Error {
  * Prepares a step: on a move to another deployment, discards memos; drops what definitions the
  * bundle no longer has kept; and reads the call as it stands, which evaluates again each kept
  * value whose code this process doesn't hold, so a step that runs a tool call or reaches a
- * connection before its model call has them. Its memos return what they kept, so this asks
- * nothing of the outside world again.
+ * connection before its model call has them. Its memos return what they kept. A value can still
+ * read a token with `ctx.getToken`, but a restore never completes or opens a sign-in.
  */
 export async function restoreDefinitions(
   ctx: ContextContainer,
@@ -446,10 +451,11 @@ async function withMemos<T>(
 }
 
 /**
- * Dynamic values sign in under this scope: `connect("x/y")` keys as `agent__x_y`. A provider
- * without Connect metadata keys under its definition, so two values never share its token.
+ * Dynamic values sign in under this scope: `connect("x/y")` keys as `eve:dynamic__x_y`. A tool
+ * name can't contain `:`, so no tool shares it. A provider without Connect metadata keys under its
+ * definition, so two values never share its token.
  */
-const DYNAMIC_AUTH_SCOPE = "agent";
+const DYNAMIC_AUTH_SCOPE = "eve:dynamic";
 
 function internalContext(
   ctx: ContextContainer,

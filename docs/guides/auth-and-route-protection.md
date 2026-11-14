@@ -534,7 +534,22 @@ export default defineAgent({
 
 - When the caller has no token, eve opens the sign-in and pauses the turn before the model call. Once the caller signs in, eve evaluates the model again and continues the same turn.
 - When the provider rejects the token during a model call, call `ctx.requireAuth(provider)` from your model code, for example from AI SDK middleware. eve ends that model call, opens the sign-in, and runs the call again once the caller signs in.
-- When a schedule started the turn, eve fails it with `reason: "sign_in_unavailable"` and opens no sign-in.
+- When a schedule started the turn, eve fails it and opens no sign-in.
+
+A `connect()` provider shares its sign-in with tools that use the same connector: the caller signs in once for both.
+
+When eve can't finish a model call's sign-in, the turn fails with `code: "SIGN_IN_FAILED"`. The error's `message` says what happened, with the provider's display name, and its `hint`, when it has one, says what the caller can do:
+
+| What happened                                    | `message`, for the Billing provider                  |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| A schedule started the turn                      | A scheduled run can't ask you to sign in to Billing. |
+| The caller declined at the provider              | You declined the sign-in to Billing.                 |
+| The sign-in ended earlier in the turn            | The sign-in to Billing ended without finishing.      |
+| The provider rejected the token from the sign-in | The token from your sign-in to Billing didn't work.  |
+| A provider without a sign-in flow has no token   | This agent has no credential for Billing.            |
+| Any other sign-in failure                        | The sign-in to Billing failed.                       |
+
+When the caller sends a message while the sign-in is open, the message waits behind the sign-in, as it does behind the session usage prompt. The model reads it once the caller signs in. To stop, the caller cancels the turn.
 
 Call `ctx.getToken` outside `ctx.memo`. A memo keeps its result in the session, and eve already reuses the token within a step. See [Self-hosted interactive OAuth](../connections#self-hosted-interactive-oauth) for the provider's methods.
 

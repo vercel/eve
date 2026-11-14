@@ -251,7 +251,7 @@ A dynamic connection or skill overrides a static one of the same kind and name. 
 
 ### Steering and sign-in
 
-Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn.
+Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn. While a sign-in for `ctx.getToken` is open, a new message waits behind it; see [Before a model call](/docs/guides/auth-and-route-protection#before-a-model-call).
 
 ### Execution order
 

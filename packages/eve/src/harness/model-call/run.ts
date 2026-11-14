@@ -72,11 +72,11 @@ export async function runModelStep(
   const { generation } = input;
   const prepared = await previewPrompt(step, input.turn);
   const preparation = await prepareModelCall(step, prepared);
-  if (preparation !== undefined && "failed" in preparation) return preparation.failed;
+  if (preparation.kind === "failed") return preparation.result;
   const prompt = commitTurnInput(step, prepared);
-  // A dynamic value asked for a sign-in: pause the turn with the step's messages.
-  if (preparation !== undefined)
-    return await stopForModelSignIn(step, preparation.signIn, prompt.messages);
+  // A sign-in for a dynamic value holds the model call: the step's messages park with it.
+  if (preparation.kind === "sign-in")
+    return await stopForModelSignIn(step, prompt.messages, preparation.signIn);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
@@ -113,8 +113,8 @@ export async function runModelStep(
     const authorizationRequired = authorizationRequiredIn(error);
     if (authorizationRequired !== undefined) {
       const signIn = await signInForModelCall(step, authorizationRequired);
-      if ("failed" in signIn) return signIn.failed;
-      return await stopForModelSignIn(step, signIn.signIn, await caller.abandonForSignIn());
+      if (signIn.kind === "failed") return signIn.result;
+      return await stopForModelSignIn(step, await caller.abandonForSignIn(), signIn.signIn);
     }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;

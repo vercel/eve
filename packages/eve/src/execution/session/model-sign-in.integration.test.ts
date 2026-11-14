@@ -67,6 +67,7 @@ describe("a dynamic model that needs a sign-in", () => {
           { data: { outcome: "completed" } },
         ]);
         expect(billing.tokensSeen).toEqual(["billing-token-1"]);
+        expect(userMessages(billing.prompts.at(-1))).toEqual(["Summarize today's issues."]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -128,9 +129,18 @@ describe("a dynamic model that needs a sign-in", () => {
         expect(events.filter(isSignInOpened)).toEqual([]);
         expect(billing.starts()).toBe(0);
         expect(filterEventsByType(events, "model.requested")).toHaveLength(0);
-        expect(JSON.stringify(filterEventsByType(events, "turn.settled"))).toContain(
-          "isn't asked for in a scheduled run",
-        );
+        expect(filterEventsByType(events, "turn.settled")).toMatchObject([
+          {
+            data: {
+              error: {
+                code: "SIGN_IN_FAILED",
+                hint: "Send a message to sign in to Billing, then run it again.",
+                message: "A scheduled run can't ask you to sign in to Billing.",
+              },
+              outcome: "failed",
+            },
+          },
+        ]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -208,11 +218,171 @@ describe("a provider that rejects the token from sign-in", () => {
         expect(settled.filter(isSignInOpened)).toEqual([]);
         expect(billing.starts()).toBe(1);
         expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
-          { data: { outcome: "failed" } },
+          {
+            data: {
+              error: {
+                code: "SIGN_IN_FAILED",
+                message: "The token from your sign-in to Billing didn't work.",
+              },
+              outcome: "failed",
+            },
+          },
         ]);
-        expect(JSON.stringify(filterEventsByType(settled, "turn.settled"))).toContain(
-          "rejected the token immediately after authorization",
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+});
+
+describe("a model sign-in that doesn't complete", () => {
+  it("fails the turn with the provider's name when the person declines", async () => {
+    const billing = billingProvider();
+    const runtime = await billingRuntime("model-sign-in-declined", billing);
+
+    await runtime.run(async () => {
+      const run = await startBillingRun("http:model-sign-in-declined");
+      const stream = captureEvents(run);
+      try {
+        const asked = await stream.nextUntil("sign-in", isSignInOpened);
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [billingCallback(signInId(asked), { error: "access_denied" })],
+        });
+        const settled = await stream.nextUntil("decline", isTurnSettled);
+        expect(settled.filter(isSignInOpened)).toEqual([]);
+        expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
+        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
+          {
+            data: {
+              error: {
+                code: "SIGN_IN_FAILED",
+                hint: "Send a new message to sign in again.",
+                message: "You declined the sign-in to Billing.",
+              },
+              outcome: "failed",
+            },
+          },
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("cancels the turn when the person cancels it during the sign-in", async () => {
+    const billing = billingProvider();
+    const runtime = await billingRuntime("model-sign-in-cancelled", billing);
+
+    await runtime.run(async () => {
+      const run = await startBillingRun("http:model-sign-in-cancelled");
+      const stream = captureEvents(run);
+      try {
+        await stream.nextUntil("sign-in", isSignInOpened);
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          auth: alice,
+          deliveryId: "alice-cancel",
+          kind: "cancel",
+        });
+        const settled = await stream.nextUntil("cancel", isTurnSettled);
+        expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
+        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
+          { data: { outcome: "cancelled" } },
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("keeps waiting on the same sign-in when a new message arrives, and answers both", async () => {
+    const billing = billingProvider();
+    const runtime = await billingRuntime("model-sign-in-steered", billing);
+
+    await runtime.run(async () => {
+      const run = await startBillingRun("http:model-sign-in-steered");
+      const stream = captureEvents(run);
+      try {
+        const asked = await stream.nextUntil("sign-in", isSignInOpened);
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
+
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          auth: alice,
+          kind: "send",
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          payload: { message: "Only the open ones." },
+        });
+        const steered = await stream.nextUntil(
+          "steered hold",
+          (event) => event.type === "turn.paused" || isTurnSettled(event),
         );
+        expect(steered.filter(isSignInOpened)).toEqual([]);
+        expect(filterEventsByType(steered, "turn.settled")).toHaveLength(0);
+
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [billingCallback(signInId(asked))],
+        });
+        const answered = await stream.nextUntil("answer", isTurnSettled);
+        expect(filterEventsByType(answered, "turn.settled")).toMatchObject([
+          { data: { outcome: "completed" } },
+        ]);
+        expect(billing.starts()).toBe(1);
+        expect(userMessages(billing.prompts.at(-1))).toEqual([
+          "Summarize today's issues.",
+          "Only the open ones.",
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("fails the turn without a sign-in when a provider can't ask for one", async () => {
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(async (ctx: DynamicModelContext) => {
+            await ctx.getToken(
+              {
+                getToken: async () => {
+                  throw new ConnectionAuthorizationRequiredError("docs");
+                },
+              },
+              { displayName: "Docs API" },
+            );
+            return { model: plainModel(), modelContextWindowTokens: 200_000 };
+          }),
+        }),
+        name: "model-sign-in-static",
+      },
+    });
+
+    await runtime.run(async () => {
+      const run = await startBillingRun("http:model-sign-in-static");
+      const stream = captureEvents(run);
+      try {
+        const settled = await stream.nextUntil("refusal", isTurnSettled);
+        expect(settled.filter(isSignInOpened)).toEqual([]);
+        expect(filterEventsByType(settled, "turn.settled")).toMatchObject([
+          {
+            data: {
+              error: {
+                code: "SIGN_IN_FAILED",
+                message: "This agent has no credential for Docs API.",
+              },
+              outcome: "failed",
+            },
+          },
+        ]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -279,6 +449,8 @@ function plainInstructions(logicalPath: string, name: string, seen: Record<strin
 
 interface BillingProvider {
   readonly auth: AuthorizationDefinition<{ nonce: string }>;
+  /** The billed model's prompts, oldest first. */
+  readonly prompts: unknown[];
   readonly starts: () => number;
   readonly summaryTokens: string[];
   readonly tokensSeen: string[];
@@ -316,6 +488,7 @@ function billingProvider(initial: { readonly token?: string } = {}): BillingProv
         return { token: stored };
       },
     },
+    prompts: [],
     starts: () => starts,
     summaryTokens: [],
     tokensSeen: [],
@@ -364,6 +537,7 @@ function billedModel(
           return textStreamResult("Checkpoint: Alice asked for today's issues.");
         }
         billing.tokensSeen.push(token);
+        billing.prompts.push(prompt);
         if (options.rejectEveryToken === true) ctx.requireAuth(billing.auth);
         if (options.bigFirstAnswer === true && billing.tokensSeen.length === 1) {
           return bigStreamResult("Here is the summary.");
@@ -392,14 +566,29 @@ async function startBillingRun(continuationToken: string) {
   });
 }
 
-function billingCallback(attemptId: string) {
+function billingCallback(
+  attemptId: string,
+  params: Readonly<Record<string, string>> = { code: "oauth-code" },
+) {
   return {
     authorizationCallback: {
       attemptId,
-      callback: { method: "GET", params: { code: "oauth-code" } },
-      connectionName: "agent__oauth_billing",
+      callback: { method: "GET", params },
+      connectionName: "eve:dynamic__oauth_billing",
     },
   };
+}
+
+/** The text of each user message in a model prompt, in order. */
+function userMessages(prompt: unknown): string[] {
+  if (!Array.isArray(prompt)) return [];
+  return prompt.flatMap((message: { role: string; content: unknown }) =>
+    message.role !== "user" || !Array.isArray(message.content)
+      ? []
+      : message.content.flatMap((part: { type: string; text?: string }) =>
+          part.type === "text" && part.text !== undefined ? [part.text] : [],
+        ),
+  );
 }
 
 function isSignInOpened(event: SessionStreamEvent): boolean {

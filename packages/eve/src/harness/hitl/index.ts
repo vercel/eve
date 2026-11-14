@@ -104,8 +104,8 @@ export async function stopForToolSignIn(
  */
 export async function stopForModelSignIn(
   step: Step,
-  signal: AuthorizationSignal,
   messages: readonly ModelMessage[],
+  signal: AuthorizationSignal,
 ): Promise<StepResult> {
   step.session = changeHistory(step.session, { extend: messages });
   await applyEndingSignIns(

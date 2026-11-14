@@ -1,3 +1,6 @@
+import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { signInInteractionId } from "#harness/interaction-facts.js";
+import { callSignIns } from "#harness/session-machine/transitions.js";
 import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { HarnessStepInput, StepResult } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -21,11 +24,28 @@ export function resumesOnPerson(view: SessionView): boolean {
   return ownOpenRequestIds(view).size > 0 || view.signIns.length > 0;
 }
 
-/** Whether an open request takes its answer before any message: the message waits behind it. */
+/**
+ * Whether an open request takes its answer before any message: the message waits behind it. A
+ * model call's sign-in holds messages too, since no message can run the model without it.
+ */
 export function holdsMessages(view: SessionView): boolean {
   const tables = view.projection.view;
-  return [...ownOpenRequestIds(view)].some((interactionId) =>
-    ANSWER_FIRST_KINDS.has(tables.interactions[interactionId]?.request.kind ?? ""),
+  return (
+    [...ownOpenRequestIds(view)].some((interactionId) =>
+      ANSWER_FIRST_KINDS.has(tables.interactions[interactionId]?.request.kind ?? ""),
+    ) || holdsModelCall(view)
+  );
+}
+
+/** Whether the turn waits on a sign-in for its model call: some open sign-in belongs to no stopped call. */
+export function holdsModelCall(view: SessionView): boolean {
+  const held = new Set(callSignIns(view.turn).map(signInAttemptKey));
+  const { interactions } = view.projection.view;
+  return view.signIns.some(
+    (challenge) =>
+      challenge.candidateId === undefined &&
+      !held.has(signInAttemptKey(challenge)) &&
+      interactions[signInInteractionId(challenge)]?.status === "open",
   );
 }
 
