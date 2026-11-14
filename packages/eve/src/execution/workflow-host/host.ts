@@ -4,8 +4,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { installDurableHost, type DurableHost } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
-import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { resumeSessionInbox, resumeSignInCallback } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import {

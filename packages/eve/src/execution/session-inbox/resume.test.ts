@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { startHookId } from "#compiled/@workflow/world/index.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -8,7 +9,9 @@ import {
 import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import {
   AcceptedSessionIdentityError,
+  findSessionStartHookHolder,
   resumeSessionInbox,
+  resumeSignInCallback,
 } from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
@@ -262,6 +265,52 @@ describe("session inbox resume", () => {
       stranded ? StrandedSessionOwnerError : DevelopmentRunUnavailableError,
     );
     if (stranded) expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("session start Hook", () => {
+  const sessionId = "wrun_alice";
+  const signIn = {
+    kind: "authorization-callback" as const,
+    payloads: [
+      {
+        authorizationCallback: {
+          attemptId: "attempt-1",
+          callback: { method: "GET", params: { code: "granted" } },
+          connectionName: "calendar",
+        },
+      },
+    ],
+  };
+
+  it("delivers a sign-in callback through the start Hook of a session that hasn't claimed its stable inbox yet", async () => {
+    // Started on Alice's thread, the session takes everything there until its first step's state
+    // claims its stable inbox, the address its sign-in callback URLs carry.
+    const startHook = { ...sessionHook(sessionId, sessionInboxHookToken("http:alice"), {}) };
+    const get = vi.fn().mockResolvedValue(startHook);
+    getWorldMock.mockResolvedValue({ ...vercelWorld, hooks: { get } });
+    const stableInbox = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+    resumeHookMock
+      .mockRejectedValueOnce(new HookNotFoundError(stableInbox))
+      .mockResolvedValueOnce(startHook);
+
+    await resumeSignInCallback(stableInbox, signIn);
+
+    expect(get).toHaveBeenCalledWith(startHookId(sessionId), { resolveData: "none" });
+    const { metadata: _metadata, ...resumable } = startHook;
+    expect(resumeHookMock).toHaveBeenNthCalledWith(1, stableInbox, signIn);
+    expect(resumeHookMock).toHaveBeenNthCalledWith(2, resumable, signIn);
+  });
+
+  it("finds the run of a start Hook the eve dev World won't expose", async () => {
+    const get = vi
+      .fn()
+      .mockRejectedValue(
+        new DevelopmentRunUnavailableError({ availability: "dormant", runId: sessionId }),
+      );
+    getWorldMock.mockResolvedValue({ ...vercelWorld, hooks: { get } });
+
+    await expect(findSessionStartHookHolder(sessionId)).resolves.toEqual({ runId: sessionId });
   });
 });
 

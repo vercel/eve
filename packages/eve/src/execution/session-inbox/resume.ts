@@ -1,6 +1,9 @@
 import { issueInboxHandle } from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
-import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
+import type {
+  AuthorizationCallbackPayload,
+  SessionFailurePayload,
+} from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError, WorkflowWorldError } from "#compiled/@workflow/errors/index.js";
 import { startHookId } from "#compiled/@workflow/world/index.js";
 import type {
@@ -17,6 +20,7 @@ import {
   logicalSessionInboxToken,
   logicalSessionToken,
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
+  sessionIdOfCommandHookToken,
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
@@ -26,6 +30,7 @@ import {
   resumeRunnableHook,
   strandedIfDeploymentDeleted,
 } from "#execution/session-inbox/owner.js";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
@@ -193,6 +198,59 @@ export async function resumeSessionStartHook(
   } catch (error) {
     if (HookNotFoundError.is(error)) return undefined;
     throw error;
+  }
+}
+
+/** The run holding `sessionId`'s start Hook, or `undefined` when none does. */
+export async function findSessionStartHookHolder(
+  sessionId: string,
+): Promise<{ readonly runId: string } | undefined> {
+  if (!sessionId.startsWith("wrun_")) return undefined;
+  try {
+    const hook = await (
+      await getWorld()
+    ).hooks.get(startHookId(sessionId), { resolveData: "none" });
+    return hook.runId === sessionId ? { runId: hook.runId } : undefined;
+  } catch (error) {
+    if (isMissingHook(error)) return undefined;
+    // As in `findSessionHookHolder`: the `eve dev` World names only the run it won't expose.
+    if (DevelopmentRunUnavailableError.is(error))
+      return error.runId === sessionId ? { runId: error.runId } : undefined;
+    throw error;
+  }
+}
+
+/**
+ * Resumes the physical hook a sign-in callback URL names. Those URLs carry the session's stable
+ * inbox, which a session started on a continuation address with a message claims only after its
+ * first step; until then the callback reaches it through its start Hook.
+ */
+export async function resumeSignInHook(
+  token: string,
+  payload: AuthorizationCallbackPayload,
+): Promise<void> {
+  try {
+    await resumeRunnableHook(token, payload);
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+    const sessionId = sessionIdOfCommandHookToken(logicalSessionInboxToken(token) ?? "");
+    if (sessionId === undefined) throw error;
+    if ((await resumeSessionStartHook(sessionId, payload)) === undefined) throw error;
+  }
+}
+
+/**
+ * Delivers a sign-in callback to its asker's inbox. An asker whose session is gone has nothing
+ * waiting on the sign-in anymore, so its missing hook is not an error.
+ */
+export async function resumeSignInCallback(
+  token: string,
+  payload: AuthorizationCallbackPayload,
+): Promise<void> {
+  try {
+    await resumeSignInHook(token, payload);
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
   }
 }
 

@@ -8,6 +8,7 @@ import {
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
 import { sessionTimeoutWorkflowReference } from "#execution/workflow-references.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session/timeout-workflow.js";
+import { sessionIdOfCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
 import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
@@ -31,8 +32,11 @@ export async function signalSessionTimeoutStep(input: {
 }): Promise<void> {
   "use step";
 
+  // Addressed by session id, the signal reaches a session that hasn't claimed its stable inbox
+  // yet (one started on a channel address, during its first turn) through its start Hook.
+  const sessionId = sessionIdOfCommandHookToken(input.token);
   try {
-    await resumeSessionInbox(input.token, {
+    await resumeSessionInbox(sessionId === undefined ? input.token : { sessionId }, {
       kind: "session-timeout",
       ownerRunId: input.ownerRunId,
     });
