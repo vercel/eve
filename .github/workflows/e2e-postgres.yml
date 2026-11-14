@@ -83,9 +83,9 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready --username=world --dbname=world"
-          --health-interval 5s
+          --health-interval 1s
           --health-timeout 5s
-          --health-retries 12
+          --health-retries 60
 
     env:
       # Mock models never reach the gateway; the placeholder keeps any
@@ -157,12 +157,16 @@ jobs:
           pnpm exec eve build
 
           server_log="$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-server.log"
-          EVE_DEV=1 pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
+          # In its own process group, so cleanup reaches pnpm, eve, and the server child.
+          EVE_DEV=1 setsid pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
           server_pid=$!
 
+          # Nothing here checks how the server shuts down, and a graceful stop
+          # waits out srvx's close, the world's close, and sandbox shutdown
+          # (25 s on fixtures with sandboxes), so the server is killed outright.
           cleanup() {
             set +e
-            kill "$server_pid" 2>/dev/null
+            kill -KILL -- "-$server_pid" 2>/dev/null
             wait "$server_pid" 2>/dev/null
           }
           trap cleanup EXIT
