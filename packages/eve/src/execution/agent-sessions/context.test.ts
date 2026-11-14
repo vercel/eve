@@ -10,7 +10,7 @@ import { captureAgentSessionContext } from "#execution/agent-sessions/context.js
 type Caller = Parameters<typeof captureAgentSessionContext>[0];
 
 describe("captureAgentSessionContext", () => {
-  it("passes the schedule's namespace to a subagent so currentSchedule() can address it", () => {
+  it("keeps the schedule's namespace from a subagent, so currentSchedule() returns undefined there", () => {
     const caller = {
       batch: { event: { sequence: 1, stepIndex: 0, turnId: "turn-1" } } as Caller["batch"],
       capabilities: undefined,
@@ -32,7 +32,6 @@ describe("captureAgentSessionContext", () => {
     expect(captureAgentSessionContext(caller, "call-1").schedule).toEqual({
       definition: "reminders",
       instance: "daily",
-      namespace: "eve-reminders",
       occurrenceId: "exec-1",
     });
   });

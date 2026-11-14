@@ -42,5 +42,8 @@ session ─▶ currentSchedule() ─▶ provider.disable(namespace, name)
 - A later message from a person clears the schedule's provenance, the namespace included, so
   `currentSchedule()` returns `undefined` after a person writes in. The occurrence's own message
   keeps it.
+- A subagent sees `ctx.session.schedule` without the namespace, so `currentSchedule()` returns
+  `undefined` there. A subagent's bundle may not deploy the collection, so its handle couldn't
+  load the provider.
 - The protocol and `SessionSchedule` stay the same. The namespace lives in eve's internal
   context only.
