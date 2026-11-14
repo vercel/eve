@@ -19,6 +19,7 @@
     "fix": "ultracite fix",
     "start": "eve start",
     "sync:shared": "node scripts/sync-shared.mjs",
+    "test:smoke": "node --experimental-test-module-mocks --test tests/*.test.mjs",
     "typecheck": "tsc",
     "validate": "node scripts/sync-shared.mjs --check && pnpm run check && pnpm run typecheck && eve info && pnpm run eval:offline"
   },

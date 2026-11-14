@@ -43,17 +43,17 @@ Once deployed, @mention the bot in your Slack workspace to start working on your
 
 ## Tech stack
 
-| Layer | Technology |
-| --- | --- |
-| Agent framework | [eve](https://eve.dev) |
-| Language | TypeScript (strict, ESM) |
-| Chat surface | Slack, via [Vercel Connect](https://vercel.com/docs/connect) |
+| Layer              | Technology                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| Agent framework    | [eve](https://eve.dev)                                                                |
+| Language           | TypeScript (strict, ESM)                                                              |
+| Chat surface       | Slack, via [Vercel Connect](https://vercel.com/docs/connect)                          |
 | Content management | Sanity (MCP), user-scoped OAuth via [Vercel Connect](https://vercel.com/docs/connect) |
-| Drafting surface | Notion (MCP), user-scoped OAuth via [Vercel Connect](https://vercel.com/docs/connect) |
-| File storage | [Vercel Blob](https://vercel.com/docs/vercel-blob) |
-| Model access | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) |
-| Sandbox | [Vercel Sandbox](https://vercel.com/docs/sandbox) |
-| Lint & format | [Ultracite](https://www.ultracite.ai/) (Biome) |
+| Drafting surface   | Notion (MCP), user-scoped OAuth via [Vercel Connect](https://vercel.com/docs/connect) |
+| File storage       | [Vercel Blob](https://vercel.com/docs/vercel-blob)                                    |
+| Model access       | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway)                               |
+| Sandbox            | [Vercel Sandbox](https://vercel.com/docs/sandbox)                                     |
+| Lint & format      | [Ultracite](https://www.ultracite.ai/) (Biome)                                        |
 
 **Zero static keys.** Authentication runs entirely on [Vercel Connect](https://vercel.com/docs/connect) (Slack, Sanity, and Notion) and [Vercel OIDC](https://vercel.com/docs/oidc) (Vercel Blob and AI Gateway). There are no API keys or client secrets to manage in code or `.env` files: Sanity and Notion are authorized per user in the browser, and Blob and the model authenticate with the project's OIDC token. The optional [Sanity Context](#sanity-context) connection is the one exception: it uses an organization API token.
 
@@ -63,9 +63,9 @@ Once deployed, @mention the bot in your Slack workspace to start working on your
 
 The connection lives in [`agent/connections/sanity-context.ts`](agent/connections/sanity-context.ts) and is off by default. It turns on when both of these environment variables are set:
 
-| Variable | Value |
-| --- | --- |
-| `SANITY_CONTEXT_MCP_URL` | The MCP endpoint URL shown in the Context app in the Sanity Dashboard |
+| Variable                    | Value                                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| `SANITY_CONTEXT_MCP_URL`    | The MCP endpoint URL shown in the Context app in the Sanity Dashboard               |
 | `SANITY_ORGANIZATION_TOKEN` | An organization API token with the Context Viewer role (project tokens are refused) |
 
 Add them to the linked project with the [Vercel CLI](https://vercel.com/docs/cli/env), then redeploy so the deployment picks them up:
@@ -201,7 +201,10 @@ eve deploy
 
 ### Evals
 
+Asset tools check decoded paths without leading slashes before accessing storage. Reserved memory paths and malformed or ambiguous encodings are refused, including nested escapes and traversal segments.
+
 ```bash
+pnpm test:smoke     # asset-path security regressions, no network or credentials
 pnpm eval:offline   # mock models, no model calls, a few seconds
 pnpm eval           # real models through the AI Gateway
 ```
