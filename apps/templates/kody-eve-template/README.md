@@ -14,6 +14,14 @@ Kody is a personal GitHub maintainer agent built on [eve](https://eve.dev), made
 
 ## Deploy
 
+### Inbound email authorization blocker
+
+Do not connect the inbound Resend webhook to an installation with live service credentials yet. The current email handlers dispatch every incoming sender to the agent, which has shared Linear and Resend credentials. A signed Resend webhook proves delivery by Resend, not the sender's permission to use those credentials. The pinned adapter derives the author from `From`; it does not provide a verified caller-to-installation binding. An address allowlist, matching `DIGEST_EMAIL`, or a reply's thread headers alone would not establish that binding.
+
+The weekly outbound digest does not require the inbound webhook. Leave inbound delivery disconnected until an authorization design is selected and implemented. Existing installations must remove inbound webhook delivery, including queued retries. This is an operational precaution, not a code-level authorization fix; the handlers remain unrestricted.
+
+The smallest safe choices are to disable inbound turns in code and keep outbound digests, or require a separately authenticated, installation-authorized confirmation before dispatching email requests. Preserving direct email actions needs a trusted sender-verification contract and an explicit installation membership policy. The current adapter's optional raw email headers do not establish that contract. Approval prompts alone are not caller authentication.
+
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=kody-eve-template&repository-name=kody-eve-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fkody-eve-template&env=RESEND_API_KEY,RESEND_WEBHOOK_SECRET,RESEND_FROM_ADDRESS,DIGEST_REPO,DIGEST_EMAIL&envDescription=Resend%20API%20key%20%2B%20inbound%20webhook%20secret%2C%20a%20verified%20sender%20address%2C%20and%20the%20digest%20repo%2Frecipient.&connect=%5B%7B%22type%22%3A%22github%22%2C%22env%22%3A%22GITHUB_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fgithub%22%7D%2C%7B%22type%22%3A%22linear%22%2C%22env%22%3A%22LINEAR_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Flinear%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D)
 
 Deploying with the button provisions everything the agent needs and wires it up for you:
@@ -24,7 +32,7 @@ Deploying with the button provisions everything the agent needs and wires it up 
 - an **Upstash Redis** store (sets `REDIS_URL`) for the email channel's thread state,
 - prompts for the Resend API key, webhook secret, sender address, and digest repo and recipient.
 
-After it deploys, point Resend's inbound webhook at `https://<deployment>/eve/v1/resend` (see [Resend](#resend) below).
+After deployment, keep Resend's inbound webhook disconnected until the [authorization blocker](#inbound-email-authorization-blocker) is resolved.
 
 To set things up by hand instead, deploy with `eve deploy` (it wraps `vercel deploy --prod`; the raw command cannot auto-detect the eve framework) and provision the integrations first:
 
@@ -48,7 +56,7 @@ Set `GITHUB_CONNECTOR` and `LINEAR_CONNECTOR` to the printed UIDs in the project
 
 ### Resend
 
-Set `RESEND_API_KEY` (used by both the email channel and the Resend MCP connection) and `RESEND_WEBHOOK_SECRET`, then point Resend's inbound webhook at `https://<deployment>/eve/v1/resend` so replies reach the agent. Set `RESEND_FROM_ADDRESS` to a verified sender on your Resend domain, and optionally `RESEND_FROM_NAME` (defaults to "Kody"); the email channel and the system prompt both read them, so every email the agent sends carries the same identity.
+Set `RESEND_API_KEY` for outbound digests and `RESEND_FROM_ADDRESS` to a verified sender on your Resend domain. Optionally set `RESEND_FROM_NAME` (defaults to "Kody"). The email channel and system prompt use the same sender settings. `RESEND_WEBHOOK_SECRET` verifies inbound webhook transport only; do not connect inbound delivery to `/eve/v1/resend` until the [authorization blocker](#inbound-email-authorization-blocker) is resolved.
 
 ### Redis, Blob, and digest config
 
