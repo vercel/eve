@@ -338,7 +338,8 @@ export default linqChannel({
     },
   },
   async onMessage(context, message) {
-    if (message.author.isBot) return null;
+    // A shared thread would retain one person's private tool results for others.
+    if (message.author.isBot || !context.thread.isDM) return null;
 
     const auth = defaultLinqAuth(message);
     const authorUserName = z.string().safeParse(message.author.userName);

@@ -140,6 +140,11 @@ the inbound webhook automatically. Inbound forwarding and internal scheduled-run
 routes require a runtime token from the current project and deployment environment;
 preview and development credentials cannot authenticate to production.
 
+Only one-to-one direct messages are supported. Group and unclassified threads
+are ignored before account lookup or agent dispatch, even for verified users.
+Personal-account tool results stay in the direct conversation; group participants
+cannot access that conversation's retained context through the assistant.
+
 Before your first sign-in, open the connector's **Vercel Connect** settings and
 follow its one-time **Phone Numbers** verification instruction. Additional users
 verify themselves by messaging the connector's Linq number once.

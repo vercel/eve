@@ -135,6 +135,18 @@ describe("Linq inbound authentication", () => {
     ).resolves.toBeNull();
   });
 
+  it("drops a verified participant's group message before account lookup or dispatch", async () => {
+    capture.findOne.mockResolvedValue({
+      id: "user-1",
+      phoneNumberVerified: true,
+    });
+
+    await expect(
+      onMessage(threadContext(false), linqMessage("+15550100011"))
+    ).resolves.toBeNull();
+    expect(capture.findOne).not.toHaveBeenCalled();
+  });
+
   it("scopes a verified handle to that user's own workspace", async () => {
     capture.findOne.mockResolvedValue({
       id: "user-1",
@@ -164,12 +176,14 @@ type InboundContext = Parameters<
 >[0];
 
 interface ThreadIdentity {
-  readonly thread: Pick<InboundContext["thread"], "id">;
+  readonly thread: Pick<InboundContext["thread"], "id" | "isDM">;
 }
 
-function threadContext(): InboundContext {
-  const identity: ThreadIdentity = { thread: { id: "linq:dm:chat-1" } };
-  // SAFETY: The inbound policy reads only the thread id from this context.
+function threadContext(isDM = true): InboundContext {
+  const identity: ThreadIdentity = {
+    thread: { id: isDM ? "linq:dm:chat-1" : "linq:group:chat-1", isDM },
+  };
+  // SAFETY: The inbound policy reads only the thread identity from this context.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A complete Chat SDK thread mock would add unrelated methods.
   return identity as InboundContext;
 }

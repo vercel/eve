@@ -6,6 +6,27 @@ import { env, localPhoneAuthBypassEnabled } from "@shared/environment";
 import { getAuthSession } from "@db/services/auth/session";
 import { readLinqOnboardingPhoneNumber } from "@db/services/auth/linq";
 
+const CALLBACK_ORIGIN = "https://same-origin.invalid";
+
+function localCallbackUrl(value: string | undefined): string {
+  // Match browser URL parsing, but reject literal and encoded controls/backslashes.
+  if (
+    !value?.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\") ||
+    Array.from(value).some(
+      (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127
+    ) ||
+    /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/iu.test(value) ||
+    !URL.canParse(value, CALLBACK_ORIGIN)
+  )
+    return "/";
+  const url = new URL(value, CALLBACK_ORIGIN);
+  if (url.origin !== CALLBACK_ORIGIN || url.pathname.startsWith("//"))
+    return "/";
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export default async function SignInPage({
   searchParams,
 }: PageProps<"/sign-in">) {
@@ -17,10 +38,7 @@ export default async function SignInPage({
   const requestedCallback = Array.isArray(callbackValue)
     ? callbackValue[0]
     : callbackValue;
-  const callbackUrl =
-    requestedCallback?.startsWith("/") && !requestedCallback.startsWith("//")
-      ? requestedCallback
-      : "/";
+  const callbackUrl = localCallbackUrl(requestedCallback);
   const linqConfigured = env.LINQ_CONNECTOR !== undefined;
   const linqPhoneNumber =
     localPhoneAuthBypassEnabled || !env.LINQ_CONNECTOR

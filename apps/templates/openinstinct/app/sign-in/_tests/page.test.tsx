@@ -46,18 +46,47 @@ describe("phone sign-in reauthentication", () => {
     ).rejects.toThrow("Redirect: /");
   });
 
-  it("keeps the reauthentication callback on this app", async () => {
+  it.each([
+    "//attacker.example",
+    "/\\attacker.example",
+    "/\n/attacker.example",
+    "/%0a/attacker.example",
+    "/%5cattacker.example",
+    "/link/..//attacker.example",
+    "https://attacker.example",
+  ])("keeps the callback %j on this app", async (callbackUrl) => {
     const html = renderToStaticMarkup(
       await SignInPage({
         params: Promise.resolve({}),
         searchParams: Promise.resolve({
           reauthenticate: "true",
-          callbackUrl: "//attacker.example",
+          callbackUrl,
         }),
       })
     );
 
     expect(html).toContain('action="/"');
     expect(html).not.toContain("attacker.example");
+    const action = /action="([^"]*)"/u.exec(html)?.[1];
+    expect(new URL(action ?? "", "https://assistant.example").href).toBe(
+      "https://assistant.example/"
+    );
+  });
+
+  it("preserves a local callback's query and hash after URL normalization", async () => {
+    const html = renderToStaticMarkup(
+      await SignInPage({
+        params: Promise.resolve({}),
+        searchParams: Promise.resolve({
+          reauthenticate: "true",
+          callbackUrl: "/chat/../link?account=google#connect",
+        }),
+      })
+    );
+    const action = /action="([^"]*)"/u.exec(html)?.[1];
+    expect(action).toBe("/link?account=google#connect");
+    expect(new URL(action ?? "", "https://assistant.example").href).toBe(
+      "https://assistant.example/link?account=google#connect"
+    );
   });
 });
