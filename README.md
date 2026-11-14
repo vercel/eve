@@ -28,8 +28,12 @@ my-agent/
     ├── instructions.md     # Required: the always-on system prompt
     ├── tools/              # Optional: typed functions the model can call
     │   └── get_weather.ts
+    ├── connections/        # Optional: external MCP and OpenAPI services
+    │   └── linear.ts
     ├── skills/             # Optional: procedures loaded on demand
     │   └── plan_a_trip.md
+    ├── subagents/          # Optional: specialist child agents
+    │   └── researcher/
     ├── channels/           # Optional: message channels (HTTP, Slack, Discord)
     │   └── slack.ts
     └── schedules/          # Optional: recurring cron jobs
