@@ -362,6 +362,12 @@
       "import": "./dist/src/extensions/code/sandbox.js",
       "default": "./dist/src/extensions/code/sandbox.js"
     },
+    "./extensions/code/slack": {
+      "eve-source": "./dist/src/extensions/code/slack.js",
+      "types": "./dist/src/extensions/code/slack.d.ts",
+      "import": "./dist/src/extensions/code/slack.js",
+      "default": "./dist/src/extensions/code/slack.js"
+    },
     "./extensions/git": {
       "eve-source": "./dist/src/extensions/git/extension/extension.js",
       "types": "./dist/src/extensions/git/extension/extension.d.ts",

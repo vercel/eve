@@ -4,6 +4,14 @@ export {
 } from "#public/channels/slack/open-code-channel.js";
 
 export {
+  setCodeChannelContextBar,
+  setCodeChannelDiffView,
+  SLACK_DIFF_VIEW_MAX_BYTES,
+  type SlackCodeChannelContextBarItem,
+  type SlackCodeChannelDiffView,
+} from "#public/channels/slack/code-channel-surfaces.js";
+
+export {
   slackChannel,
   type SlackApiResponse,
   type SlackApprovalChannel,

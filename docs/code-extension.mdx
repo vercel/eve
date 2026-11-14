@@ -185,6 +185,30 @@ Preparation installs `gh` and wrappers for `gh`, `vc`, and `gh-signed-commit`. W
 
 eve rebuilds a prepared environment only when the sandbox file or environment options change. A change to an imported helper or to the eve version doesn't rebuild it.
 
+## Show the work in Slack code channels
+
+In a [Slack code channel](/docs/channels/slack/reference#serve-slack-code-channels), `codeChannelSurfaces()` from `eve/extensions/code/slack` shows the agent's coding work as it lands. The context bar shows the repository, branch, number of changed files, and the pull request; the diff view shows every change against the base branch. Add it to your Slack channel's renderers:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+import { codeChannelSurfaces } from "eve/extensions/code/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  codeChannels: true,
+  renderers: [codeChannelSurfaces()],
+});
+```
+
+- **When it updates.** After each completed call of `bash`, `edit_file`, `write_file`, or the [git extension's](#publish-with-the-git-extension) `gh` tool under any mount name. Pass `syncAfter: ["bash", "my_tool"]` to choose the tools yourself.
+- **Which repository.** The checkout the call worked in: a file path, a `gh` working directory or `gh repo clone`, or a `cd` or `git -C` in the command. Otherwise the last repository shown, then the most recently changed checkout under the workspace.
+- **What the diff includes.** Committed and uncommitted changes since the merge base with the remote's default branch (`origin/HEAD`, else `origin/main` or `origin/master`), plus untracked files up to 100 KB. Files that commonly hold credentials, such as `.env`, `.npmrc`, and private keys, are left out, and credentials are removed from the remote URL. Without a base branch, the last diff view stays up.
+- **Pull request.** Read from the output of `gh pr create`.
+- **Failures.** Logged without affecting the turn. Outside code channels the renderer only passes events on.
+
+It reads the sandbox with read-only `git` and never changes it. Work done in another sandbox, such as a remote agent's, doesn't reach the diff view.
+
 ## Troubleshooting
 
 | What you see                                                                                                        | What to do                                                                                                                            |

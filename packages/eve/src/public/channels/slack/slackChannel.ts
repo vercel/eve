@@ -70,6 +70,7 @@ import {
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
 import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
+import type { SlackCodeChannelSurfacesState } from "#public/channels/slack/code-channel-surfaces.js";
 import {
   composeInteractionCards,
   composeSlackRenderers,
@@ -361,6 +362,12 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * @internal
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
+  /**
+   * What a code channel's context bar and diff view show now, written by
+   * `setCodeChannelContextBar` and `setCodeChannelDiffView`.
+   * @internal
+   */
+  codeChannelSurfaces?: SlackCodeChannelSurfacesState;
   /**
    * Tasks that settled since the turn's last model step: each named agent, or
    * `null` for another task. The default `step.started` handler shows
