@@ -1,10 +1,18 @@
-# Coding Agent on Slack
+# eve Coding Agent Template
 
 A coding agent template for [eve](https://eve.dev). Mention it in Slack, or on a GitHub issue or pull request, and it investigates, reviews, or fixes code in an isolated [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox), then answers in the thread or opens a pull request. In Slack, it moves coding and triage work into a [code channel](https://docs.slack.dev/ai/slack-code) that shows the repository, branch, diff, pull request, and tests as it works.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-coding-agent-template&project-name=eve-coding-agent&repository-name=eve-coding-agent&env=GITHUB_ORG&envDescription=The%20GitHub%20organization%20or%20user%20whose%20repositories%20the%20agent%20may%20access.&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-coding-agent-template%23connect-slack-and-github&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%2C%7B%22type%22%3A%22github%22%2C%22env%22%3A%22GITHUB_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fgithub%22%7D%5D)
 
-The button provisions the Slack and GitHub connectors through Vercel Connect and asks for `GITHUB_ORG`. After it deploys, finish the steps in [Connect Slack and GitHub](#connect-slack-and-github) that it can't do for you: add the code channel scopes and events to the Slack app, install the GitHub App on your repositories, and set `GITHUB_BOT_NAME` to the app's slug.
+## Getting started
+
+Vercel's project setup flow creates a repository in your Git account and a Vercel project. You'll create and install a Slack app and a GitHub App via Vercel Connect, and enter one environment variable:
+
+| Environment variable | What to enter                                                            |
+| -------------------- | ------------------------------------------------------------------------ |
+| `GITHUB_ORG`         | The GitHub organization or user whose repositories the agent may access. |
+
+After it deploys, finish the steps in [Connect Slack and GitHub](#connect-slack-and-github) that the flow can't do for you: add the code channel scopes and events to the Slack app, install the GitHub App on your repositories, and set `GITHUB_BOT_NAME` to the app's slug.
 
 ## How it works
 
@@ -36,7 +44,7 @@ agent/
 - **Credentials.** Each `gh` command gets a token scoped to one repository, minted by [Vercel Connect](https://vercel.com/docs/connect). The sandbox only sees a placeholder. `lib/github.ts` swaps it in at the sandbox firewall for that command and removes it afterward. The GitHub channel's checkout attaches a broader token to `github.com`, so `hooks/reset-github-egress.ts` removes it before the model runs.
 - **GitHub.** The triggering repository is checked out at `/workspace` before each GitHub turn, and pull request turns include the diff. Only comments from owners, members, and collaborators start a turn, so strangers on a public repository cannot drive the agent.
 
-## Getting started
+## Local development
 
 Requires Node.js 26, pnpm, and the [Vercel CLI](https://vercel.com/docs/cli).
 
@@ -73,7 +81,7 @@ Then set these in `.env.local` and your Vercel project:
 
 Deploy with `eve deploy`, then install the GitHub App on your repositories from the Connect dashboard. Mention the app in Slack, or comment `@<bot name> <request>` on an issue or pull request. Delete `agent/channels/github.ts` if you only want Slack; the agent still needs the GitHub connector and `GITHUB_ORG` to open pull requests.
 
-## Customize
+## Customization
 
 - Change the model in `agent/agent.ts`.
 - Edit `agent/instructions.md` for tone and team conventions, and `agent/instructions/code-channels.ts` for when the agent opens a code channel. The extensions add their own coding guidance, so keep this file short.

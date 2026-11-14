@@ -1,4 +1,4 @@
-# Data Agent Template
+# eve Data Agent Template
 
 Ask an eve agent about dbt models and their data from Slack. The example uses
 Jaffle Shop customers, orders, and payments. dbt builds the tables and supplies
@@ -15,7 +15,29 @@ There is no separate semantic layer, vector database, or persistent business
 memory. The project is standalone; copy this directory out of the eve repository
 to use it.
 
-## Run locally
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-data-agent-template&project-name=eve-data-agent&repository-name=eve-data-agent&env=DUCKDB_CONNECTION%2Cmotherduck_token%2CSLACK_TEAM_ID%2CSLACK_ALLOWED_USER_IDS%2CSLACK_ALLOWED_CHANNEL_IDS&envDefaults=%7B%22DUCKDB_CONNECTION%22%3A%22md%3Ajaffle_shop%22%7D&envDescription=The%20MotherDuck%20database%20and%20Read%20Scaling%20token%2C%20plus%20the%20Slack%20workspace%20ID%20and%20the%20user%20and%20conversation%20IDs%20allowed%20to%20use%20the%20agent.&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-data-agent-template%23use-motherduck-and-deploy&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%5D)
+
+## Getting started
+
+Deploying needs a MotherDuck database with the example models. Build it first
+with steps 1 and 2 of [Use MotherDuck and deploy](#use-motherduck-and-deploy).
+Vercel's project setup flow then creates a repository in your Git account and a
+Vercel project. You'll create and install a Slack app via Vercel Connect, and
+enter these environment variables:
+
+| Environment variable        | What to enter                                               |
+| --------------------------- | ----------------------------------------------------------- |
+| `DUCKDB_CONNECTION`         | `md:jaffle_shop`, or the MotherDuck database you built      |
+| `motherduck_token`          | A MotherDuck Read Scaling token, not the writer token       |
+| `SLACK_TEAM_ID`             | The workspace ID                                            |
+| `SLACK_ALLOWED_USER_IDS`    | Comma-separated user IDs allowed to ask questions           |
+| `SLACK_ALLOWED_CHANNEL_IDS` | Comma-separated conversation IDs where the agent may answer |
+
+Once it deploys, mention the agent in an allowed channel. Read
+[Connect Slack](#connect-slack) before choosing conversations: every permitted
+conversation must be appropriate for the entire dataset.
+
+## Local development
 
 Prerequisites: Node.js 26, pnpm 12, and [uv](https://docs.astral.sh/uv/).
 The data command uses Python 3.13 through uv. No Docker daemon or warehouse
@@ -145,11 +167,7 @@ policy.
    pnpm exec eve deploy
    ```
 
-   Or deploy with the button below once the MotherDuck data from step 2 exists.
-   It provisions the Slack connector through Vercel Connect and asks for the
-   MotherDuck and Slack allowlist values above:
-
-   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-data-agent-template&project-name=eve-data-agent&repository-name=eve-data-agent&env=DUCKDB_CONNECTION%2Cmotherduck_token%2CSLACK_TEAM_ID%2CSLACK_ALLOWED_USER_IDS%2CSLACK_ALLOWED_CHANNEL_IDS&envDefaults=%7B%22DUCKDB_CONNECTION%22%3A%22md%3Ajaffle_shop%22%7D&envDescription=The%20MotherDuck%20database%20and%20Read%20Scaling%20token%2C%20plus%20the%20Slack%20workspace%20ID%20and%20the%20user%20and%20conversation%20IDs%20allowed%20to%20use%20the%20agent.&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Feve-data-agent-template%23use-motherduck-and-deploy&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%5D)
+   Or deploy with the Deploy with Vercel button at the top of this README.
 
 Run the build on the deployment platform so the native DuckDB binding matches
 its OS and architecture. `agent.ts` externalizes `@duckdb/node-api` so eve traces

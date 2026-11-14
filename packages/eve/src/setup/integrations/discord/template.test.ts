@@ -81,7 +81,7 @@ describe("eve-discord-agent-template", () => {
         // DISCORD_CONNECTOR, and falls back to the UID setup writes.
         expected = expected.replace(
           `connectDiscordCredentials(${JSON.stringify(connectorUid)})`,
-          `connectDiscordCredentials(\n    process.env.DISCORD_CONNECTOR?.trim() || ${JSON.stringify(connectorUid)},\n  )`,
+          `connectDiscordCredentials(\n    process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)},\n  )`,
         );
       }
       if (path === "daemon/package.json") {
@@ -106,7 +106,7 @@ describe("eve-discord-agent-template", () => {
     }
     // Setup doesn't rewrite the tool, so it has to name the same connector.
     expect(await readTemplateFile("agent/tools/read_recent_messages.ts")).toContain(
-      `process.env.DISCORD_CONNECTOR?.trim() || ${JSON.stringify(connectorUid)};`,
+      `process.env.DISCORD_CONNECTOR ?? ${JSON.stringify(connectorUid)};`,
     );
   });
 });

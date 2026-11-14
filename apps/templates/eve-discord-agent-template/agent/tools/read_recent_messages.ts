@@ -7,8 +7,7 @@ import { z } from "zod";
 // `eve add channel/discord` creates for this project by default. Setup rewrites
 // agent/channels/discord.ts and daemon/main.ts, but not this file, so keep the
 // fallback in sync if your connector's ID differs.
-const DISCORD_CONNECTOR =
-  process.env.DISCORD_CONNECTOR?.trim() || "discord/eve-discord-agent-template";
+const DISCORD_CONNECTOR = process.env.DISCORD_CONNECTOR ?? "discord/eve-discord-agent-template";
 
 const MAX_CONTENT_LENGTH = 1000;
 

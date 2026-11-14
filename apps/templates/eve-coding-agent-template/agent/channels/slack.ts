@@ -61,7 +61,7 @@ const codeChannelSurfaces = defineSlackRenderer({
 // UID in SLACK_CONNECTOR. Otherwise, `eve add channel/slack` creates or picks a
 // Slack app and writes its connector UID into the literal below, so keep that
 // argument a string literal.
-const slackConnector = process.env.SLACK_CONNECTOR?.trim();
+const slackConnector = process.env.SLACK_CONNECTOR;
 
 export default slackChannel({
   credentials: slackConnector
