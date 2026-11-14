@@ -101,3 +101,21 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
     return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key: "once" });
   };
 }
+
+const STEERED_WITHOUT_CALLER =
+  "Other people's messages steered this turn, and it has no signed-in caller to approve the call.";
+
+/**
+ * Returns an `approval` callback that asks the turn's caller before a call made while other
+ * people's messages steer the turn (`session.auth.steeredBy` is non-empty). It leaves every
+ * other call to the tool's and agent's other policies.
+ */
+export function steered<TInput = unknown>(): ApprovalPolicy<TInput> {
+  return ({ session }) => {
+    if ((session.auth.steeredBy ?? []).length === 0) return undefined;
+    // An approval with no signed-in requester takes anyone's answer, so there is no one to ask.
+    return session.auth.current?.principalType === "user"
+      ? "user-approval"
+      : { type: "denied", reason: STEERED_WITHOUT_CALLER };
+  };
+}

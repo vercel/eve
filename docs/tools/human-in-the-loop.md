@@ -30,12 +30,13 @@ export default defineTool({
 });
 ```
 
-| Helper     | Behavior                                                                     |
-| ---------- | ---------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                           |
-| `once()`   | Remember approval for this tool for the rest of the session.                 |
-| `always()` | Require approval before every call.                                          |
-| `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
+| Helper      | Behavior                                                                     |
+| ----------- | ---------------------------------------------------------------------------- |
+| `never()`   | Never require approval (the default when omitted).                           |
+| `once()`    | Remember approval for this tool for the rest of the session.                 |
+| `always()`  | Require approval before every call.                                          |
+| `auto()`    | Ask a decision model whether to run the exact call or require user approval. |
+| `steered()` | Ask the caller when other people's messages joined the running turn.         |
 
 Rules:
 
@@ -197,6 +198,16 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 eve remembers only prompts that `once()`'s own status asked for. It remembers nothing for an `always()` prompt, or for a wrapping policy that calls `once()` but returns a different status. When you wrap `once()`, pass the policy context through and return its status object unchanged.
 
 A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions.
+
+### Ask the caller when someone else steers the turn
+
+`steered()` asks the turn's caller before a call starts while `ctx.session.auth.steeredBy` is set. Otherwise it returns `undefined`, which leaves the decision to the tool's and agent's other policies. A message that joins with `principal: "adopt"` clears `steeredBy`, so `steered()` does not ask.
+
+Use it on a tool that authorizes from `ctx.session.auth.current` while using a shared credential, because eve cannot detect that check. Use it as the agent's `approval` in `agent.ts` to ask before every call made while steered. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal) for the identity hold.
+
+- Among approvals, only the caller's own clears `steeredBy`. One approval covers later calls until someone else's message joins again.
+- When the turn has no signed-in caller (`principalType` is not `"user"`), `steered()` denies the call instead of asking.
+- An approval pauses the turn on the caller, so other people's messages wait until the caller answers. The identity hold alone never pauses a turn.
 
 ### Authorizing approval responses
 

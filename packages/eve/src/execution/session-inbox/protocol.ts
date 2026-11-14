@@ -53,6 +53,10 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         payloads: [withoutPreV27Answers(command.payload)],
         requestId: command.requestId,
         turnPolicy: command.turnPolicy,
+        ...(command.principalPolicy !== undefined && {
+          principalPolicy: command.principalPolicy,
+        }),
+        ...(command.steeredBy !== undefined && { steeredBy: command.steeredBy }),
       };
     }
     case "deliver": {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { principalOf } from "#execution/session/principal.js";
+import { principalOf, steeredByAfter } from "#execution/session/principal.js";
 
 function signInCallback(attemptId: string) {
   return {
@@ -106,6 +106,145 @@ describe("SessionInputQueue", () => {
       delivery: { auth: bob },
       sequences: [fromBob, queuedByBob],
     });
+  });
+
+  it("lets another person's retain message join a turn that isn't waiting on its caller", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "BOB" };
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const send = (
+      queue: SessionInputQueue,
+      message: string,
+      auth: typeof alice | null | undefined,
+      retain = false,
+    ) =>
+      queue.enqueueDelivery({
+        ...(auth !== undefined && { auth }),
+        ...(retain && { principalPolicy: "retain" as const }),
+        kind: "deliver",
+        payloads: [{ message }],
+      })!.sequence;
+
+    const retaining = new SessionInputQueue([]);
+    const retainedByBob = send(retaining, "Actually include everyone.", bob, true);
+    const matchingByBob = send(retaining, "And book a room.", bob);
+    const admitted = new Set([retainedByBob, matchingByBob]);
+    expect(retaining.takeSteering(admitted, turn)?.sequences).toEqual([retainedByBob]);
+    // Without `retain` his message still waits for the turn to end.
+    expect(retaining.takeSteering(admitted, turn)).toBeUndefined();
+
+    const paused = new SessionInputQueue([]);
+    const whilePaused = send(paused, "Actually include everyone.", bob, true);
+    const pausedAdmitted = new Set([whilePaused]);
+    expect(paused.takeSteering(pausedAdmitted, turn, { paused: true })).toBeUndefined();
+    // It joins when the turn resumes.
+    expect(paused.takeSteering(pausedAdmitted, turn)?.sequences).toEqual([whilePaused]);
+
+    const anonymous = new SessionInputQueue([]);
+    const noSender = send(anonymous, "Include the press notes.", null, true);
+    expect(anonymous.takeSteering(new Set([noSender]), turn)).toBeUndefined();
+
+    const both = new SessionInputQueue([]);
+    const fromAlice = send(both, "Also cover the launch date.", alice);
+    const afterAlice = send(both, "Actually include everyone.", bob, true);
+    const bothAdmitted = new Set([fromAlice, afterAlice]);
+    // One step reads one sender, so the other's message waits for the next boundary.
+    expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([fromAlice]);
+    expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([afterAlice]);
+  });
+
+  it("lets another person's adopt message join, one policy per step", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "BOB" };
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const send = (
+      queue: SessionInputQueue,
+      message: string,
+      auth: typeof alice | null | undefined,
+      options: {
+        readonly principalPolicy?: "retain" | "adopt";
+        readonly steeredBy?: readonly (typeof bob)[];
+      } = {},
+    ) =>
+      queue.enqueueDelivery({
+        ...(auth !== undefined && { auth }),
+        ...(options.principalPolicy !== undefined && {
+          principalPolicy: options.principalPolicy,
+        }),
+        ...(options.steeredBy !== undefined && { steeredBy: options.steeredBy }),
+        kind: "deliver",
+        payloads: [{ message }],
+      })!.sequence;
+
+    const adopting = new SessionInputQueue([]);
+    const adoptByBob = send(adopting, "Actually include everyone.", bob, {
+      principalPolicy: "adopt",
+    });
+    expect(adopting.takeSteering(new Set([adoptByBob]), turn)?.sequences).toEqual([adoptByBob]);
+
+    const paused = new SessionInputQueue([]);
+    const whilePaused = send(paused, "Actually include everyone.", bob, {
+      principalPolicy: "adopt",
+    });
+    const pausedAdmitted = new Set([whilePaused]);
+    expect(paused.takeSteering(pausedAdmitted, turn, { paused: true })).toBeUndefined();
+    expect(paused.takeSteering(pausedAdmitted, turn)?.sequences).toEqual([whilePaused]);
+
+    const policies = new SessionInputQueue([]);
+    const retainedByBob = send(policies, "Look at the launch numbers.", bob, {
+      principalPolicy: "retain",
+    });
+    const adoptedByBob = send(policies, "Actually include everyone.", bob, {
+      principalPolicy: "adopt",
+    });
+    const policyAdmitted = new Set([retainedByBob, adoptedByBob]);
+    // One person's two policies never share a step: the second leaves its own turn.
+    expect(policies.takeSteering(policyAdmitted, turn)?.sequences).toEqual([retainedByBob]);
+    expect(policies.takeSteering(policyAdmitted, turn)?.sequences).toEqual([adoptedByBob]);
+
+    const merged = new SessionInputQueue([]);
+    const firstWithout = send(merged, "Also cover the launch date.", alice);
+    const secondWith = send(merged, "Actually include everyone.", alice, { steeredBy: [bob] });
+    const batched = merged.takeSteering(new Set([firstWithout, secondWith]), turn)?.delivery;
+    // The later message's list wins, even when it is the only one that carries one.
+    expect(batched?.steeredBy).toEqual([bob]);
+
+    const reverse = new SessionInputQueue([]);
+    const firstWith = send(reverse, "Actually include everyone.", alice, { steeredBy: [bob] });
+    const secondWithout = send(reverse, "Also cover the launch date.", alice);
+    const emptied = reverse.takeSteering(new Set([firstWith, secondWithout]), turn)?.delivery;
+    // An earlier message's list must not survive the merge; a parent that omits it means empty.
+    expect(emptied && "steeredBy" in emptied).toBe(false);
+  });
+
+  it("keeps the turn's steered list unless its caller is the sender", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "BOB" };
+    const steered = [bob];
+
+    // Input without a sender could be anyone's, so it cannot release the caller's hold.
+    expect(steeredByAfter(steered, alice, undefined)).toBe(steered);
+    expect(steeredByAfter(steered, alice, null)).toBe(steered);
+    // Only the caller's own message releases it.
+    expect(steeredByAfter(steered, alice, alice)).toEqual([]);
+    // Anyone else is listed once, so a repeat leaves the list alone.
+    expect(steeredByAfter(steered, alice, bob)).toBe(steered);
+    expect(steeredByAfter([], alice, bob)).toEqual([bob]);
   });
 
   it("lets a queued message steer a held turn only when it arrived after the hold", () => {

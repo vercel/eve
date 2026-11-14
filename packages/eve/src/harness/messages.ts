@@ -440,11 +440,13 @@ interface DeliverLike {
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
+  readonly steeredBy?: readonly SessionAuthContext[];
 }
 
 /**
  * Coalesces an array of deliver-like items into a single item by
- * collecting all payloads and keeping the most recent auth value.
+ * collecting all payloads and keeping the most recent auth value. `steeredBy`
+ * follows the last item, so a later message without it clears an earlier list.
  *
  * Used by the workflow runtime to batch follow-up deliveries that
  * arrived while a turn or subagent delegation was in progress. Each
@@ -461,6 +463,7 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
 
   let auth = first.auth;
   let caller = first.caller;
+  let steeredBy = first.steeredBy;
   const payloads = [...first.payloads];
   const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
@@ -476,6 +479,7 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
       // The same caller's later message awaits its reply at its own address.
       caller = item.caller;
     }
+    steeredBy = item.steeredBy;
     payloads.push(...item.payloads);
     deliveryMetadata.push(
       ...(item.deliveryMetadata ?? []).map((entry) => ({
@@ -485,13 +489,19 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     );
   }
 
-  return {
+  const merged: T = {
     ...first,
     auth,
     caller,
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
     payloads,
   };
+  // `steeredBy` follows the last item, so an earlier message's list never reaches the child and
+  // an absent one stays absent rather than reading `undefined` as a list.
+  const writable = merged as { -readonly [K in keyof DeliverLike]: DeliverLike[K] };
+  if (steeredBy === undefined) delete writable.steeredBy;
+  else writable.steeredBy = steeredBy;
+  return merged;
 }
 
 /** Selects or transforms payloads without separating them from their receipt and caller identities. */

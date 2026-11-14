@@ -5,7 +5,13 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { runEffects, type RunEffectsInput } from "#definitions/kernel.js";
-import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  ParentSessionKey,
+  SessionKey,
+  SteeredByKey,
+} from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -784,8 +790,13 @@ export async function publishTerminalSessionEvent(input: {
   // handlers read, so install it here. A prewarmed session that expires,
   // resets, or closes before its first message has no turn yet: `turn_0`.
   const auth = ctx.get(AuthKey) ?? null;
+  const steeredBy = ctx.get(SteeredByKey);
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },
+    auth: {
+      current: auth,
+      initiator: ctx.get(InitiatorAuthKey) ?? auth,
+      ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
+    },
     parent: ctx.get(ParentSessionKey),
     sessionId,
     turn: input.turn ?? { id: "turn_0", sequence: 0 },

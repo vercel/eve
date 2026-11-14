@@ -21,6 +21,8 @@ import {
 } from "#execution/agent-sessions/start.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { NonRetryableError } from "#shared/run-errors.js";
+import { turnSteeredMessage } from "#runtime/connections/identity-hold.js";
+import type { SessionAuth } from "#context/keys.js";
 import { loadAgentRoster, type AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
@@ -54,6 +56,7 @@ export async function startRemoteSession(
     registry: registry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
+  holdForwardedCaller(remote, auth.steeredBy, action.remoteAgentName);
   const { callbackBaseUrl } = access;
   const child = await startRemoteAgentSession({
     action,
@@ -84,6 +87,20 @@ export async function startRemoteSession(
   return child.deliveryId === undefined ? { address } : { address, deliveryId: child.deliveryId };
 }
 
+/**
+ * A remote agent with `forwardPrincipal` receives the caller's identity, so a steered turn's
+ * call to it is refused. `steeredBy` may be missing on a run an older deployment started.
+ */
+function holdForwardedCaller(
+  remote: ResolvedRuntimeRemoteAgentNode,
+  steeredBy: SessionAuth["steeredBy"],
+  agentName: string,
+): void {
+  if (remote.forwardPrincipal === true && (steeredBy ?? []).length > 0) {
+    throw new NonRetryableError(turnSteeredMessage(`remote agent "${agentName}"`));
+  }
+}
+
 /** Sends a later message to a remote session; `idempotencyKey` makes a retry repeat it. */
 export async function sendRemoteSessionMessage(
   input: AgentSessionMessage & RemoteAgentSession,
@@ -91,6 +108,7 @@ export async function sendRemoteSessionMessage(
 ): Promise<AgentSessionReceipt> {
   const { address, context } = input;
   const remote = await resolveSessionRemote(context, address);
+  holdForwardedCaller(remote, input.auth.steeredBy, address.name);
   return await continueRemoteAgentSession({
     auth: input.auth.current,
     callback: {

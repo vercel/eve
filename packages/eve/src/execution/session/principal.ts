@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { PrincipalPolicy, SessionAuthContext } from "#channel/types.js";
 import { AuthKey } from "#context/keys.js";
 import type { TurnStepPayload } from "#execution/session/turn-step-types.js";
 
@@ -37,19 +37,40 @@ export function resolveTurnPrincipal(
 /**
  * The identity a running turn continues under once a message sent as `auth`
  * joins it. Within a turn the principal is fixed and only its claims may
- * update, so only the turn's own principal may join it; input without auth
- * acts as the turn's identity. Anyone else's answers settle requests as their
- * responder without joining the turn.
+ * update; input without auth acts as the turn's identity. Another principal
+ * joins only with a join policy: `"retain"` leaves the turn under its
+ * caller, `"adopt"` hands the turn to the sender. Anyone else's answers
+ * settle requests as their responder without joining the turn.
  */
 export function continueTurnAuth<T extends SessionAuthContext | null | undefined>(
   turnAuth: T,
   auth: SessionAuthContext | null | undefined,
+  policy?: PrincipalPolicy,
 ): T | SessionAuthContext | null {
   if (auth === undefined) return turnAuth;
   if (principalOf(auth) !== principalOf(turnAuth)) {
+    if (policy === "retain") return turnAuth;
+    if (policy === "adopt") return auth;
     throw new Error(
       "A message from another principal cannot join a running turn. Gate it with isSteeringDelivery so it waits for the turn to end.",
     );
   }
   return auth;
+}
+
+/**
+ * The turn's `steeredBy` once a message sent as `sender` joins it: only the caller's own
+ * identified message clears the list, and anyone else's adds them once. Input without a sender
+ * could be anyone's, so it leaves the list as it is rather than releasing the caller's hold.
+ */
+export function steeredByAfter(
+  steeredBy: readonly SessionAuthContext[],
+  caller: SessionAuthContext | null | undefined,
+  sender: SessionAuthContext | null | undefined,
+): readonly SessionAuthContext[] {
+  if (sender === undefined || sender === null) return steeredBy;
+  if (principalOf(sender) === principalOf(caller)) return [];
+  return steeredBy.some((person) => principalOf(person) === principalOf(sender))
+    ? steeredBy
+    : [...steeredBy, sender];
 }

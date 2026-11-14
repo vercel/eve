@@ -884,6 +884,23 @@ describe("slackChannel message status and guidance", () => {
       expect.stringContaining(`<guidance>\n${guidance}\n</guidance>`),
     );
   });
+
+  it("sends a hook's turnPolicy with its message, in place of the channel's", async () => {
+    const turnPolicy = { mode: "steer", principal: "retain" } as const;
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        turnPolicy: "queue",
+        onAppMention: () => ({ auth: null, turnPolicy }),
+      }),
+      mention({ ts: "1700000000.000001" }),
+      send,
+    );
+
+    expect(send.mock.calls[0]![1]).toMatchObject({ turnPolicy });
+  });
 });
 
 describe("slackChannel message edits", () => {

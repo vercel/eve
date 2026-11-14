@@ -56,6 +56,7 @@ import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { localDev, routeAuth } from "#public/channels/auth.js";
 import { isLocalDevAuth } from "#channel/auth/definitions.js";
 import { defaultEveAudience } from "#eve-channel/audience.js";
+import { turnPolicyForRequest } from "#eve-channel/turn-policy-request.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
@@ -535,7 +536,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
               context,
               history,
               outputSchema: body.outputSchema,
-              turnPolicy: body.turnPolicy,
+              turnPolicy: turnPolicyForRequest(body.turnPolicy, input.turnPolicy),
               title,
               // A repeat of the same request is the same delivery, with the same receipt.
               ...(body.idempotencyKey !== undefined && {

@@ -6,6 +6,7 @@ import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occur
 import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { Runtime } from "#channel/types.js";
 import { installedDurableHost } from "#execution/hosts.js";
+import { steeredModelCall, turnSteeredMessage } from "#runtime/connections/identity-hold.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
@@ -111,6 +112,8 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
   ): Promise<{ scope: ScheduleScopeValue; provider: ScheduleProviderContext }> => {
+    // A schedule binds its creator to work that outlives the turn.
+    if (steeredModelCall()) throw new Error(turnSteeredMessage("dynamic schedules"));
     const context = contextFor(operation, name);
     const scope =
       definition.scope === undefined

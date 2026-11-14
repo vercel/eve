@@ -289,7 +289,7 @@ Message sends default to `turnPolicy: "steer"`: the new message joins the runnin
 
 A steering message aborts the [`ctx.abortSignal`](/docs/tools/workflows#stop-early-for-a-new-message) of each `execute` workflow tool call the turn is waiting on. The call's questions end `withdrawn`, `sleep` and `ask_question` stop early, and the call ends with what its body returns. Steering ends an `eve__task_wait` but never interrupts a task, and a task's questions stay open.
 
-Only the turn's own caller steers it; another caller's message waits for the turn to end. Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. Structured `answers` answer the requests they name.
+By default, only the turn's own caller steers it; another caller's message waits for the turn to end. `turnPolicy: { mode: "steer", principal: "retain" }` lets another signed-in person's message join the running turn, which retains its caller. `principal: "adopt"` also joins it and makes the sender the caller. See [A turn runs as one principal](./security-model#a-turn-runs-as-one-principal). Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. Structured `answers` answer the requests they name.
 
 Answer a human-in-the-loop approval with the channel's Approve or Deny controls; text that doesn't match an option approves nothing. Such text from the person the turn serves steers the turn and cancels the approval, even with `turnPolicy: "queue"`. The turn can't end until that person acts. From anyone else, it waits until the turn ends. Calls already approved in the batch still run. Cancelling the turn withdraws the approval, and a later answer to it approves nothing.
 
@@ -301,7 +301,7 @@ One delivery can answer requests from several batches. Each answer stands as it 
 
 When steering interrupts model generation, the interrupted run ends `interrupted` with any usage the provider reported. The new message's `delivery.consumed` and the next `model.requested` for the same `turnId` follow.
 
-Multiple steering messages keep their arrival order and may be folded into one input at the next boundary. A message accepted after the turn ends starts the next turn.
+Messages from one sender keep their arrival order and may be folded into one input at the next boundary. Another sender's messages are read at a later boundary, and start their own turn if the turn ends first. A message accepted after the turn ends starts the next turn.
 
 ## Cancel the in-flight turn
 

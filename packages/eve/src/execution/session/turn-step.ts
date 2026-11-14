@@ -6,7 +6,7 @@ import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
-import { contextStorage } from "#context/container.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
@@ -30,6 +30,7 @@ import {
   ToolChannelKey,
   ToolStubsKey,
   TurnDeliveryIdsKey,
+  SteeredByKey,
 } from "#context/keys.js";
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
@@ -61,11 +62,17 @@ import {
   sessionView,
 } from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import { continueTurnAuth } from "#execution/session/principal.js";
+import {
+  ANONYMOUS_PRINCIPAL,
+  continueTurnAuth,
+  principalOf,
+  steeredByAfter,
+} from "#execution/session/principal.js";
+import { APPROVE_OPTION_ID } from "#protocol/interaction-options.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -446,10 +453,29 @@ async function runSessionStepBody(
     if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
     else if (delivery !== undefined && !startedBetweenTurns) {
       turnAuth =
-        resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+        resolved?.message === undefined
+          ? previousAuth
+          : continueTurnAuth(previousAuth, turnAuth, delivery.principalPolicy);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
+    // A turn that starts between turns begins with no steers; a child's first turn keeps the list
+    // its parent started it with. A parent's message carries the parent's list, and a mid-turn
+    // message is judged against the caller the turn has after it.
+    if (startedBetweenTurns && initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
+    if (
+      delivery !== undefined &&
+      answers === undefined &&
+      !ignoredActiveDelivery &&
+      resolved?.message !== undefined
+    ) {
+      if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
+      else if (!startedBetweenTurns) {
+        setSteeredBy(ctx, steeredByAfter(ctx.get(SteeredByKey) ?? [], turnAuth, delivery.auth));
+      }
+    } else if (callerApproved(answers, previousAuth, delivery?.auth)) {
+      setSteeredBy(ctx, []);
+    }
     if (ignoredActiveDelivery) {
       // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;
@@ -807,6 +833,29 @@ function stoppedForPerson(result: StepResult): boolean {
 /** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
 function ignoreTurnCancellation(error: unknown): void {
   if (!isTurnCancellation(error)) throw error;
+}
+
+/** An empty list is stored as an absent key, so a session with one person never carries it. */
+function setSteeredBy(ctx: ContextContainer, steeredBy: readonly SessionAuthContext[]): void {
+  if (steeredBy.length === 0) ctx.delete(SteeredByKey);
+  else ctx.set(SteeredByKey, steeredBy);
+}
+
+/** Whether the turn's own caller approved one of its calls with these answers. */
+function callerApproved(
+  answers: HarnessStepInput | undefined,
+  caller: SessionAuthContext | null | undefined,
+  responder: SessionAuthContext | null | undefined,
+): boolean {
+  if (caller == null || responder == null) return false;
+  const principal = principalOf(caller);
+  return (
+    principal !== ANONYMOUS_PRINCIPAL &&
+    principal === principalOf(responder) &&
+    (answers?.answers ?? []).some(
+      (answer) => answer.responder !== undefined && answer.optionId === APPROVE_OPTION_ID,
+    )
+  );
 }
 
 /**

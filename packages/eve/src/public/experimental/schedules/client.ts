@@ -9,6 +9,7 @@ import {
   SessionIdKey,
   ContinuationTokenKey,
   ChannelInstrumentationKey,
+  SteeredByKey,
 } from "#context/keys.js";
 import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
@@ -56,6 +57,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
     `Invalid dynamic schedules definition ${identity.logicalPath}.`,
   ) as DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
   const context = loadContext();
+  const steeredBy = context.get(SteeredByKey);
   return createScheduleCollectionClient(definition, {
     abortSignal: new AbortController().signal,
     session: {
@@ -64,6 +66,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
       auth: {
         current: context.get(AuthKey) ?? null,
         initiator: context.get(InitiatorAuthKey) ?? null,
+        ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
       },
     },
     channel: {

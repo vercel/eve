@@ -21,6 +21,7 @@ import type {
 import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
+import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 import { connectionEventDestination } from "#runtime/connections/events/path.js";
 import {
   sameEventOwner,
@@ -68,6 +69,8 @@ export class ConnectionEventActions {
       throw new Error(
         "Experimental event subscriptions currently require a root-agent connection.",
       );
+    // A subscription binds the caller to work that outlives the turn.
+    holdCallerIdentity(this.connection.connectionName, ctx);
     const { authorization, backend, connector } = this.events;
     const principal = resolveConnectionPrincipal(
       this.connection.connectionName,

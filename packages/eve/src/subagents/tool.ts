@@ -81,6 +81,8 @@ export function buildSubagentRunInput(input: {
   readonly parent: SubagentParentContext;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
+  /** The parent turn's `steeredBy`, so the child holds the caller's identity as its parent does. */
+  readonly steeredBy?: readonly SessionAuthContext[];
 }): SubagentRunInputBuild {
   const {
     action,
@@ -137,6 +139,9 @@ export function buildSubagentRunInput(input: {
     parentTraceContext: input.parent.traceContext,
     traceRoot: input.parent.traceRoot,
   };
+  if (input.steeredBy !== undefined && input.steeredBy.length > 0) {
+    runInput.steeredBy = input.steeredBy;
+  }
   return { childContinuationToken, runInput };
 }
 

@@ -22,7 +22,7 @@ import type {
   SessionCommand,
   TurnPolicy,
 } from "#channel/types.js";
-import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY, storedTurnPolicy } from "#channel/types.js";
 import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import { contextStorage } from "#context/container.js";
@@ -130,10 +130,9 @@ export function createChannelAddress<TState = undefined>(input: {
           message: serializeFilePartsInMessage(payload.message),
         },
         requestId: metadata.requestId,
-        turnPolicy:
-          payload.message === undefined
-            ? undefined
-            : (options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY),
+        ...(payload.message === undefined
+          ? { turnPolicy: undefined }
+          : storedTurnPolicy(options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY)),
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };

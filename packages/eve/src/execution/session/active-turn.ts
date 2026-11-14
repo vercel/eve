@@ -27,6 +27,7 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
+import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -59,6 +60,8 @@ export class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
   private readonly mappedForHeldRequest = new Set<number>();
+  /** Admitted sequences a runtime wait already reported as steering, so its loop cannot spin. */
+  private readonly reportedSteering = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
   /** The cancel control that stopped this turn, when it named its delivery. */
@@ -66,8 +69,8 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  /** Who alone steers the turn: its principal, or its delegated caller. */
-  private readonly identity: SteeringTurn;
+  /** The turn's principal and delegated caller; an `"adopt"` message can move the principal. */
+  private identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
@@ -111,11 +114,18 @@ export class ActiveTurn {
     if (
       delivery.kind === "deliver" &&
       !this.input.queue.isDuplicate(delivery) &&
-      isSteeringMessage(delivery, this.identity) &&
+      isSteeringMessage(delivery, this.identity, { paused: this.awaitsPerson }) &&
       !this.input.cursor.sessionState.hasProxyInputRequests
     )
       this.steeringController.abort();
   };
+
+  /** A request or sign-in is open, so another person's message waits for its caller. */
+  private get awaitsPerson(): boolean {
+    const { state } = readDurableSession(this.input.cursor.sessionState);
+    const view = storedProjection(state).view;
+    return openRequests(view).length > 0 || openSignIns(view).length > 0;
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -124,6 +134,11 @@ export class ActiveTurn {
   dispose(): void {
     this.unsubscribe();
     this.unsubscribeDelivery();
+  }
+
+  /** The turn runs as `principal` from here on: a message made its sender the turn's caller. */
+  adopt(principal: string): void {
+    this.identity = { ...this.identity, principal };
   }
 
   get steeringSignal(): AbortSignal {
@@ -139,6 +154,25 @@ export class ActiveTurn {
     this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
   }
 
+  /**
+   * Whether an admitted delivery steers the turn as it stands now. One that
+   * arrived while the turn waited on a person was admitted without steering;
+   * once that wait ends, it steers at the next boundary or runtime wait.
+   */
+  private steersNow(sequence: number): boolean {
+    const delivery = this.input.queue.delivery(sequence);
+    return (
+      delivery !== undefined &&
+      isSteeringMessage(delivery, this.identity, { paused: this.awaitsPerson })
+    );
+  }
+
+  /** Stops holding a sequence: it was taken, or left the queue. */
+  private forget(sequence: number): void {
+    this.admitted.delete(sequence);
+    this.reportedSteering.delete(sequence);
+  }
+
   /** Admits everything the pump accepted while the last step ran. */
   async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
@@ -148,22 +182,38 @@ export class ActiveTurn {
   /**
    * Steering admitted during this turn, routed to children first and coalesced.
    * The next step reads it as input, so its signal must not interrupt that
-   * step; only deliveries still unread re-signal the next generation.
+   * step; only deliveries still unread re-signal the next generation. One step
+   * reads one sender's messages, so a message it leaves admitted cuts the next
+   * generation: the boundary after it reads that message in this turn.
    */
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, {
+        ...options,
+        paused: this.awaitsPerson,
+      });
       if (selection === undefined) break;
-      for (const sequence of selection.sequences) this.admitted.delete(sequence);
+      for (const sequence of selection.sequences) this.forget(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
       if (routed.kind === "cancel-turn") {
         this.abort();
         break;
       }
-      if (routed.kind === "turn") steering.push(routed.delivery);
+      if (routed.kind === "turn") {
+        steering.push(routed.delivery);
+        break;
+      }
     }
     this.resetSteering();
+    // A message admitted when it became eligible signalled nothing, and one sender's
+    // messages fill this step. Left alone it would wait for a turn this step's reply
+    // ends, so cut that generation before it produces output.
+    if (
+      !this.input.cursor.sessionState.hasProxyInputRequests &&
+      [...this.admitted].some((sequence) => this.steersNow(sequence))
+    )
+      this.steeringController.abort();
     if (steering.length === 0) return undefined;
     const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
     if (delivery.caller !== undefined) this.caller = delivery.caller;
@@ -256,7 +306,7 @@ export class ActiveTurn {
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
       }
-      this.admitted.delete(sequence);
+      this.forget(sequence);
       // Someone else's answers settle the paused turn's request, but the rest of their
       // delivery waits for the turn to end, as their messages do.
       const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
@@ -333,34 +383,39 @@ export class ActiveTurn {
 
   /**
    * During a runtime wait, descendant-bound answers cannot wait for the
-   * boundary. Returns whether a newly routed delivery still steers: it
-   * answered nothing, so its message is for the model.
+   * boundary. Returns whether an admitted delivery still steers: it answered
+   * nothing, so its message is for the model. A delivery routed while the turn
+   * waited on a person is judged again on every wait, and reports once.
    */
   private async routeAdmittedToChildren(): Promise<boolean> {
     let steered = false;
     for (const sequence of this.admitted) {
-      if (this.routedToChildren.has(sequence)) continue;
       const delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) {
-        this.admitted.delete(sequence);
+        this.forget(sequence);
         continue;
       }
-      this.routedToChildren.add(sequence);
-      const routed = await this.input.cursor.advance((state) =>
-        routeDeliverToChildren({ delivery, ...state }),
-      );
-      if (routed.kind === "cancel-turn") {
-        this.input.queue.replaceDelivery(sequence, undefined);
-        this.admitted.delete(sequence);
-        this.abort();
-        return false;
+      if (!this.routedToChildren.has(sequence)) {
+        this.routedToChildren.add(sequence);
+        const routed = await this.input.cursor.advance((state) =>
+          routeDeliverToChildren({ delivery, ...state }),
+        );
+        if (routed.kind === "cancel-turn") {
+          this.input.queue.replaceDelivery(sequence, undefined);
+          this.forget(sequence);
+          this.abort();
+          return false;
+        }
+        this.input.queue.replaceDelivery(sequence, routed.remainder);
+        if (routed.remainder === undefined) {
+          this.forget(sequence);
+          continue;
+        }
       }
-      this.input.queue.replaceDelivery(sequence, routed.remainder);
-      if (routed.remainder === undefined) {
-        this.admitted.delete(sequence);
-        continue;
-      }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
+      // Reporting the same delivery on every pass would spin the wait's loop.
+      if (this.reportedSteering.has(sequence) || !this.steersNow(sequence)) continue;
+      this.reportedSteering.add(sequence);
+      steered = true;
     }
     return steered;
   }

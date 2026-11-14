@@ -7,6 +7,7 @@ import {
   InitiatorAuthKey,
   ParentSessionKey,
   SessionPredecessorKey,
+  SteeredByKey,
 } from "#context/keys.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import type { SessionFrame } from "#dynamic/definition.js";
@@ -43,6 +44,7 @@ export function sessionFrameOf(
 ): SessionFrame {
   const conversation = ctx.get(ConversationContextKey);
   const parent = ctx.get(ParentSessionKey);
+  const steeredBy = ctx.get(SteeredByKey);
   const view = input.view ?? currentView(ctx);
   const at = input.at ?? readDefinitionsState(ctx).at ?? view.session.startedAt;
   return {
@@ -50,7 +52,11 @@ export function sessionFrameOf(
     ...(conversation !== undefined && { conversation }),
     now: new Date(at ?? 0),
     session: {
-      auth: { current: ctx.get(AuthKey) ?? null, initiator: ctx.get(InitiatorAuthKey) ?? null },
+      auth: {
+        current: ctx.get(AuthKey) ?? null,
+        initiator: ctx.get(InitiatorAuthKey) ?? null,
+        ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
+      },
       id: sessionIdOf(ctx),
       // A root session has no parent; none is made up for it.
       ...(parent !== undefined && { parent }),
