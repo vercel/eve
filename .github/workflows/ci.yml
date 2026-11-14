@@ -154,8 +154,8 @@ jobs:
           fi
 
   # The unit tier in two halves. eve's vitest files split by vitest's own
-  # --shard; the second half also runs the other packages' unit tests and the
-  # script tests. The `test-unit` check below requires both halves.
+  # --shard; the first half also runs the other packages' unit tests, and the
+  # second half the script tests. The `test-unit` check below requires both halves.
   test-unit-shard:
     name: test-unit (${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -212,7 +212,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           pnpm exec turbo run test:unit --filter=eve -- --shard="$SHARD"
-          if [ "$SHARD" = "2/2" ]; then
+          if [ "$SHARD" = "1/2" ]; then
             pnpm exec turbo run test:unit --filter='!eve'
           fi
 
