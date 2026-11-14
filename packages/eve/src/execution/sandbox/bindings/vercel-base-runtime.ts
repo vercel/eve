@@ -1,5 +1,6 @@
 import { buildDockerBaseSetupScript } from "#execution/sandbox/bindings/docker-base-setup.js";
 import type { VercelSandboxCreateParams } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import { isVercelSandboxStoppedError } from "#execution/sandbox/bindings/vercel-errors.js";
 import type {
   VercelCreateOptions,
   VercelSandbox,
@@ -35,7 +36,20 @@ export function createVercelNetworkPolicySetter(
   sandbox: VercelSandbox,
 ): (policy: SandboxNetworkPolicy) => Promise<void> {
   return async (policy) => {
-    await sandbox.update({ networkPolicy: toVercelNetworkPolicy(policy) });
+    const networkPolicy = toVercelNetworkPolicy(policy);
+    try {
+      await sandbox.update({ networkPolicy });
+    } catch (error) {
+      if (!isVercelSandboxStoppedError(error)) throw error;
+      /*
+       * `update()` never resumes, and after a timeout the handle still caches
+       * the stopped session as running. A command resumes this same handle in
+       * place, so the retry reaches the new session. A failed live update saves
+       * nothing, so retrying it is safe.
+       */
+      await sandbox.runCommand({ cmd: "true", detached: true });
+      await sandbox.update({ networkPolicy });
+    }
   };
 }
 

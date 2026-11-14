@@ -9,13 +9,12 @@ export function isVercelSnapshotUnavailableError(error: unknown): boolean {
  * `snapshot_not_found` code, rather than any other 410.
  */
 export function isVercelSnapshotNotFoundError(error: unknown): boolean {
-  for (const candidate of walkErrorChain(error)) {
-    if (readErrorStatus(candidate) !== 410 || !isObject(candidate)) continue;
-    const body =
-      isObject(candidate.json) && isObject(candidate.json.error) ? candidate.json.error : undefined;
-    if (body?.code === "snapshot_not_found") return true;
-  }
-  return false;
+  return errorChainContainsCode(error, 410, "snapshot_not_found");
+}
+
+/** A call that reached a session after its timeout stopped it: 410 `sandbox_stopped`. */
+export function isVercelSandboxStoppedError(error: unknown): boolean {
+  return errorChainContainsCode(error, 410, "sandbox_stopped");
 }
 
 /**
@@ -55,6 +54,16 @@ export function isVercelSandboxMissingError(error: unknown): boolean {
 function errorChainContainsStatus(error: unknown, expectedStatus: number): boolean {
   for (const candidate of walkErrorChain(error)) {
     if (readErrorStatus(candidate) === expectedStatus) return true;
+  }
+  return false;
+}
+
+function errorChainContainsCode(error: unknown, expectedStatus: number, code: string): boolean {
+  for (const candidate of walkErrorChain(error)) {
+    if (readErrorStatus(candidate) !== expectedStatus || !isObject(candidate)) continue;
+    const body =
+      isObject(candidate.json) && isObject(candidate.json.error) ? candidate.json.error : undefined;
+    if (body?.code === code) return true;
   }
   return false;
 }
