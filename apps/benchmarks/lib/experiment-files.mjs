@@ -3,6 +3,9 @@ import { join } from "node:path";
 
 import { createJiti } from "jiti";
 
+/** Files `prepareFixtures` writes into each case directory (gitignored, not part of the case). */
+export const generatedFixtureFiles = ["PROMPT.md", ".eve-authoring-bootstrap.json", "package.json"];
+
 export function fixtureNames(evalsRoot) {
   return readdirSync(evalsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && existsSync(join(evalsRoot, entry.name, "CASE.ts")))
