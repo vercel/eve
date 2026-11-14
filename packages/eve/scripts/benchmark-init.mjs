@@ -33,7 +33,8 @@ import { join, resolve } from "node:path";
 // Timing stops at ready. Onboarding then asks the person to connect a model
 // provider (there are no credentials here), which no run waits on.
 //
-// One JSON object per line: a header, then one result per run.
+// One JSON object per line: a header, then one result per run. Each run's
+// terminal output is kept as init-<run>.log in the header's `root`.
 //
 // Usage: node packages/eve/scripts/benchmark-init.mjs <package-dir> [runs]
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
