@@ -20,7 +20,7 @@ import {
   useState,
 } from "react";
 import { logos, voiceLogo } from "@/lib/integrations/logos";
-import { dataAgentTemplateUrl, templateGalleryUrl } from "@/lib/templates/links";
+import { templateGalleryUrl } from "@/lib/templates/links";
 import { cn } from "@/lib/utils";
 import {
   type Author,
@@ -179,33 +179,46 @@ function SoftwareFactoryPreview({ stage }: { stage?: number }) {
 // The hero gives Slack agents purple and Teams agents blue; the brain takes teal.
 const brainAvatar = "bg-teal-700";
 
+// The company brain template's own tools: Slack search, then its Notion connection.
 const BRAIN_STEPS = [
   {
-    name: "list_models",
-    running: "Finding models",
-    result: "Found customers, orders, and payments",
+    name: "search_slack",
+    running: "Searching Slack",
+    result: "Found the launch thread in #checkout",
   },
   {
-    name: "get_model",
-    running: "Reading the orders model",
-    result: "Read the docs for the orders model",
+    name: "notion-search",
+    running: "Searching Notion",
+    result: "Found the Checkout v2 launch plan",
   },
-  { name: "query_sql", running: "Running a query", result: "Ran 1 query, returned 3 rows" },
+  {
+    name: "notion-fetch",
+    running: "Reading the launch plan",
+    result: "Read the rollout section in Notion",
+  },
 ];
 
-const BRAIN_ROWS = [
-  { month: "August", orders: 412, repeat: "38%" },
-  { month: "September", orders: 455, repeat: "41%" },
-  { month: "October", orders: 498, repeat: "44%" },
+// The sources the answer cites, as Slack unfurls them.
+const BRAIN_SOURCES = [
+  {
+    icon: logos.slack({ "aria-hidden": true }),
+    title: "Rollout moved to Tuesday",
+    meta: "#checkout · 14 replies",
+  },
+  {
+    icon: logos.notion({ "aria-hidden": true }),
+    title: "Checkout v2 launch plan",
+    meta: "Notion · Rollout",
+  },
 ];
 
 const DANA: Author = { name: "Dana" };
-const BRAIN: Author = { name: "data-agent", icon: IconBrain };
+const BRAIN: Author = { name: "company-brain", icon: IconBrain };
 
 /**
  * How long each stage of the demo waits before it shows: Dana's question, the agent working,
  * its reply with the first tool running, each tool finishing as the next runs, the answer,
- * the table, Dana's thumbs-up, her follow-up, then the agent's reply in its thread.
+ * its sources, Dana's thumbs-up, her follow-up, then the agent's reply in its thread.
  */
 const BRAIN_DEMO = [500, 700, 1200, 900, 900, 1000, 500, 600, 1100, 1300, 1600];
 
@@ -234,6 +247,8 @@ function RunSteps({
   demo: boolean;
   className?: string;
 }) {
+  // Names share one column, as wide as the longest in monospace characters, and never under 6rem.
+  const nameWidth = `${Math.max(...steps.map((step) => step.name.length))}ch`;
   return (
     <ul className={cn("m-0 flex list-none flex-col gap-0.5 p-0", className)}>
       {steps.map((step, index) => {
@@ -244,7 +259,10 @@ function RunSteps({
             className={cn("flex items-baseline gap-3 text-copy-13", demo && fadeIn)}
             key={step.name}
           >
-            <code className="w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000">
+            <code
+              className="min-w-24 shrink-0 font-mono text-copy-13-mono text-gray-1000"
+              style={{ width: nameWidth }}
+            >
               {step.name}
             </code>
             {/* Keyed by state, so the result fades in over the running label. */}
@@ -262,11 +280,11 @@ function RunSteps({
 }
 
 /**
- * The hero's Slack thread, with the data agent on its own avatar color. In the demo it
+ * The hero's Slack thread, with the company brain on its own avatar color. In the demo it
  * builds up stage by stage (`stage` counts the stages shown); otherwise it shows up to the
  * follow-up.
  */
-function DataAgentPreview({ stage }: { stage?: number }) {
+function CompanyBrainPreview({ stage }: { stage?: number }) {
   const demo = stage !== undefined;
   const shown = stage ?? FOLLOW_UP - 1;
   const list = useRef<HTMLDivElement>(null);
@@ -329,7 +347,7 @@ function DataAgentPreview({ stage }: { stage?: number }) {
             time="9:41 AM"
           >
             <p>
-              <Mention>data-agent</Mention> how are repeat orders trending this quarter?
+              <Mention>company-brain</Mention> when does the new checkout ship, and who signed off?
             </p>
           </SlackMessage>
         ) : null}
@@ -343,7 +361,7 @@ function DataAgentPreview({ stage }: { stage?: number }) {
             author={BRAIN}
             avatarColor={brainAvatar}
             className={cn(
-              // Dana's questions run a line each; the agent's answer keeps to its table's width.
+              // Dana's questions run a line each; the agent's answer keeps to its sources' width.
               "[--reply-width:27.5rem]",
               demo && agentMessageIn,
             )}
@@ -358,53 +376,23 @@ function DataAgentPreview({ stage }: { stage?: number }) {
             />
             {shown >= 7 ? (
               <p className={cn("mt-2 text-pretty", demo && fadeIn)}>
-                Repeat customers placed 44% of orders in October, up from 38% in August.
+                Checkout v2 rolls out to everyone on Tuesday. Priya signed off once the load test
+                passed.
               </p>
             ) : null}
-            {shown >= 8 ? (
-              <div
-                className={cn(
-                  "mt-2 rounded-lg border border-gray-alpha-400 bg-background-100 px-3 py-1",
-                  demo && fadeIn,
-                )}
-              >
-                <table className="w-full border-collapse text-left text-copy-13 tabular-nums">
-                  <thead className="text-gray-900">
-                    <tr className="border-gray-alpha-400 border-b">
-                      <th className="py-1.5 pr-3 font-normal" scope="col">
-                        Month
-                      </th>
-                      <th className="py-1.5 pr-3 text-right font-normal" scope="col">
-                        Orders
-                      </th>
-                      <th className="py-1.5 text-right font-normal" scope="col">
-                        Repeat
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-gray-1000">
-                    {BRAIN_ROWS.map((row, index) => (
-                      <tr
-                        className={cn(
-                          "border-gray-alpha-400 border-b last:border-b-0",
-                          demo && fadeIn,
-                        )}
-                        key={row.month}
-                        // Rows follow the card in, 60ms apart; inline, since the animation
-                        // shorthand would reset a class-set delay.
-                        style={demo ? { animationDelay: `${(index + 1) * 60}ms` } : undefined}
-                      >
-                        <th className="py-1.5 pr-3 font-normal" scope="row">
-                          {row.month}
-                        </th>
-                        <td className="py-1.5 pr-3 text-right">{row.orders}</td>
-                        <td className="py-1.5 text-right">{row.repeat}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
+            {shown >= 8
+              ? BRAIN_SOURCES.map((source, index) => (
+                  <div
+                    className={cn(demo && fadeIn)}
+                    key={source.title}
+                    // Sources follow the answer in, 60ms apart; inline, since the animation
+                    // shorthand would reset a class-set delay.
+                    style={demo ? { animationDelay: `${index * 60}ms` } : undefined}
+                  >
+                    <Card icon={source.icon} meta={source.meta} title={source.title} />
+                  </div>
+                ))
+              : null}
           </SlackMessage>
         ) : null}
         {shown >= 9 ? (
@@ -431,7 +419,7 @@ function DataAgentPreview({ stage }: { stage?: number }) {
             time="9:44 AM"
           >
             <p>
-              <Mention>data-agent</Mention> can you split October by payment method?
+              <Mention>company-brain</Mention> remind this channel the morning it ships
             </p>
             {shown >= FOLLOW_UP + 1 ? <ThreadReply demo={demo} /> : null}
           </SlackMessage>
@@ -520,7 +508,7 @@ function ThreadReply({ demo }: { demo: boolean }) {
               continued={false}
               time="9:44 AM"
             >
-              <p>Credit card 56%, bank transfer 21%, coupon 14%, and gift card 9%.</p>
+              <p>Scheduled. I'll post the rollout checklist here Tuesday at 9:00 AM.</p>
             </SlackMessage>
           </ol>
         </div>
@@ -1006,19 +994,25 @@ interface UseCase {
 
 const USE_CASES: UseCase[] = [
   {
-    id: "data-agent",
-    name: "Data agent",
-    text: "Build a Slack agent that answers your team's business questions from your documented dbt models.",
-    href: dataAgentTemplateUrl,
-    cta: "Use the data agent template",
+    id: "company-brain",
+    name: "Company brain",
+    text: "Build a Slack assistant for your whole company that answers from your sources, remembers context, and runs scheduled tasks.",
+    href: `${templateGalleryUrl}/eve-company-brain-template`,
+    cta: "Use the company brain template",
     features: [
-      { title: "Answers in Slack", text: "Only for the people and channels you allow." },
-      { title: "Grounded in dbt", text: "Reads your model docs before it writes a query." },
-      { title: "Read-only SQL", text: "Queries DuckDB or MotherDuck, and never writes to them." },
+      {
+        title: "Answers from evidence",
+        text: "Cites the threads and docs it read, and says when nothing answers.",
+      },
+      {
+        title: "Remembers context",
+        text: "Private notes for each person, shared notes per channel.",
+      },
+      { title: "Grows with your team", text: "Add connections, skills, and subagents as you go." },
     ],
     demo: BRAIN_DEMO,
     action: "Ask a question",
-    preview: (stage) => <DataAgentPreview stage={stage} />,
+    preview: (stage) => <CompanyBrainPreview stage={stage} />,
   },
   {
     id: "software-factory",
