@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -64,6 +64,20 @@ describe("claimReusableDevelopmentHost", () => {
     expect(await claimReusableDevelopmentHost(appRoot, "key-1")).toEqual(record);
     expect(await claimReusableDevelopmentHost(appRoot, "key-1")).toBeUndefined();
     await expect(stat(rootDir)).resolves.toBeDefined();
+  });
+
+  it("ignores a record copied from another app, leaving that app's workspace alone", async () => {
+    const original = await keptHost();
+    const copy = await mkdtemp(join(tmpdir(), "eve-dev-host-reuse-copy-"));
+    temporaryDirectories.push(copy);
+    await mkdir(join(copy, ".eve", "dev-hosts"), { recursive: true });
+    await writeFile(
+      join(copy, ".eve", "dev-hosts", "reusable-host.json"),
+      await readFile(join(original.appRoot, ".eve", "dev-hosts", "reusable-host.json")),
+    );
+
+    expect(await claimReusableDevelopmentHost(copy, "key-1")).toBeUndefined();
+    await expect(stat(original.rootDir)).resolves.toBeDefined();
   });
 
   it.each([

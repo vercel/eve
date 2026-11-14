@@ -48,7 +48,10 @@ export async function buildDevelopmentHost(
 async function statBuildInputs(
   ids: readonly string[],
 ): Promise<Record<string, readonly [number, number]>> {
-  const files = [...new Set(ids.filter((id) => isAbsolute(id) && !id.includes("?")))];
+  // Asset imports such as `?raw` read the file without the query.
+  const files = [
+    ...new Set(ids.filter((id) => isAbsolute(id)).map((id) => id.replace(/[?#].*$/u, ""))),
+  ];
   const stats = await mapConcurrent(files, async (file) => await stat(file).catch(() => undefined));
   return Object.fromEntries(
     files.flatMap((file, index) => {
