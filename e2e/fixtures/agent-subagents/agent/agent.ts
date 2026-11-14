@@ -269,6 +269,12 @@ function findListedTaskId(
 
 const agent: DefinedAgent = defineAgent({
   ...agentConfig,
+  // The remote continuation eval reattaches to a retired keeper, a root session of this
+  // deployment reached through remote-loopback, so its run must outlive the session.
+  experimental: {
+    ...agentConfig.experimental,
+    workflow: { ...agentConfig.experimental?.workflow, retention: "default" },
+  },
   model: defineDynamic(async (ctx) => {
     const messages = (await ctx.messages()).flatMap((message) => {
       if (message.role !== "user") return [];

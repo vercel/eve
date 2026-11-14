@@ -8,20 +8,36 @@ const registry = {
   worlds: [{ name: "vercel" }, { name: "postgres", package: "world-postgres" }],
 };
 
-function discover(packageJson, additionalFixtures = [], evals = [], selectedRegistry = registry) {
+// A fixture without explicit evals gets one untagged eval, so the world suites run it.
+// Explicit evals are tagged `real-model` unless the fixture says otherwise.
+function withEvals(fixture) {
+  const evals = fixture.evals ?? ["world"];
+  return { ...fixture, evals, realModelEvals: fixture.realModelEvals ?? fixture.evals ?? [] };
+}
+
+function discover(
+  packageJson,
+  additionalFixtures = [],
+  evals,
+  selectedRegistry = registry,
+  realModelEvals,
+) {
   return discoverE2eFixtures({
     registry: selectedRegistry,
     fixtures: [
-      {
+      withEvals({
         name: "fixture",
         dir: "fixtures/fixture",
         packageJson: { name: "fixture-package", ...packageJson },
         evals,
-      },
-      ...additionalFixtures.map((fixture) => ({
-        ...fixture,
-        packageJson: { name: `${fixture.name}-package`, ...fixture.packageJson },
-      })),
+        realModelEvals,
+      }),
+      ...additionalFixtures.map((fixture) =>
+        withEvals({
+          ...fixture,
+          packageJson: { name: `${fixture.name}-package`, ...fixture.packageJson },
+        }),
+      ),
     ],
   });
 }
@@ -97,7 +113,8 @@ test("an unknown e2e.worlds entry is rejected", () => {
 });
 
 test("model shards expand across selected models without multiplying world legs", () => {
-  const evals = ["nested/one", "nested/two", "three"];
+  // "world" is untagged, so the fixture also runs in its world suite.
+  const evals = ["nested/one", "nested/two", "three", "world"];
   const result = discover(
     {
       e2e: {
@@ -105,7 +122,7 @@ test("model shards expand across selected models without multiplying world legs"
         modelMatrix: "full",
         modelShards: [
           { name: "shard-1", evals: ["nested/one", "nested/two"] },
-          { name: "shard-2", evals: ["three"] },
+          { name: "shard-2", evals: ["three", "world"] },
         ],
       },
     },
@@ -114,7 +131,6 @@ test("model shards expand across selected models without multiplying world legs"
         name: "vercel-fixture",
         dir: "fixtures/vercel-fixture",
         packageJson: { e2e: { worlds: ["vercel"] } },
-        evals: [],
       },
     ],
     evals,
@@ -122,6 +138,7 @@ test("model shards expand across selected models without multiplying world legs"
       ...registry,
       models: [...registry.models, { name: "model-b", id: "provider/model-b" }],
     },
+    ["nested/one", "nested/two", "three"],
   );
 
   assert.deepEqual(
@@ -153,19 +170,23 @@ test("model shards expand across selected models without multiplying world legs"
 });
 
 test("unsharded fixtures keep one model entry with all evals implicit", () => {
-  const result = discover({}, [], ["nested/one", "two"]);
-  assert.deepEqual(result.modelMatrix, [
-    {
-      name: "fixture",
-      package: "fixture-package",
-      dir: "fixtures/fixture",
-      model_name: "model-a",
-      model_id: "provider/model-a",
-      optional: false,
-      model_evals: "real-model",
-      mock_evals: false,
-    },
-  ]);
+  const worlds = { name: "world-fixture", dir: "fixtures/world-fixture" };
+  const result = discover({}, [worlds], ["nested/one", "two"]);
+  assert.deepEqual(
+    result.modelMatrix.filter(({ name }) => name === "fixture"),
+    [
+      {
+        name: "fixture",
+        package: "fixture-package",
+        dir: "fixtures/fixture",
+        model_name: "model-a",
+        model_id: "provider/model-a",
+        optional: false,
+        model_evals: "real-model",
+        mock_evals: false,
+      },
+    ],
+  );
 });
 
 test("model shards reject empty shard lists, names, and eval lists", () => {
@@ -325,4 +346,44 @@ test("isRealModelEval finds the literal tag among others", () => {
   assert.equal(isRealModelEval("defineEval({ tags: ['hitl', 'real-model'] })"), true);
   assert.equal(isRealModelEval('defineEval({ tags: ["hitl"] }) // real-model'), false);
   assert.equal(isRealModelEval("defineEval({ description: 'no tags' })"), false);
+});
+
+test("a fixture whose evals are all real-model gets no world legs", () => {
+  const result = discover({}, [{ name: "world-fixture", dir: "fixtures/world-fixture" }], ["one"]);
+  for (const world of ["vercel", "postgres"]) {
+    assert.deepEqual(
+      worldMatrix(result, world).map(({ name }) => name),
+      ["world-fixture"],
+    );
+  }
+  assert.deepEqual(
+    result.modelMatrix
+      .filter(({ name }) => name === "fixture")
+      .map(({ model_evals }) => model_evals),
+    ["real-model"],
+  );
+});
+
+test("a world with a fixtures list runs only those fixtures", () => {
+  const listed = {
+    ...registry,
+    worlds: [{ name: "vercel", fixtures: ["listed"] }, { name: "postgres" }],
+  };
+  const result = discover({}, [{ name: "listed", dir: "fixtures/listed" }], undefined, listed);
+  assert.deepEqual(
+    worldMatrix(result, "vercel").map(({ name }) => name),
+    ["listed"],
+  );
+  assert.deepEqual(
+    worldMatrix(result, "postgres").map(({ name }) => name),
+    ["fixture", "listed"],
+  );
+});
+
+test("a world's fixtures list rejects unknown fixtures", () => {
+  const listed = { ...registry, worlds: [{ name: "vercel", fixtures: ["missing"] }] };
+  assert.throws(
+    () => discover({}, [], undefined, listed),
+    /world "vercel" lists unknown fixture "missing"/u,
+  );
 });
