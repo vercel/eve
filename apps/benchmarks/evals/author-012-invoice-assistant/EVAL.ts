@@ -6,6 +6,206 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// ---- grader-kit: copied from apps/benchmarks/lib/grader-kit.ts by `pnpm grader-kit:sync`. Edit it there. ----
+// How eve runs authored code, faked the same way in every authoring grader: tool calls with
+// their context and session state, approvals, dynamic definitions, and the project's own eve.
+// Most false failures in new graders came from a hand-rolled copy of one of these missing
+// something eve provides, so they live here once.
+//
+// agent-eval hides only files named EVAL.ts (and PROMPT.md) from the agent, so a grader can't
+// import a sibling module. `pnpm grader-kit:sync` copies this file between the grader-kit
+// markers of every EVAL.ts that has them, and `scripts/grader-kit.test.mjs` fails when a copy
+// drifts. Edit it here, never in an EVAL.ts.
+//
+// Imports are namespaced so they can't clash with a grader's own, and the file has no other
+// imports: a copy has to stand alone in the grader's workspace.
+import type { AsyncLocalStorage as GraderKitAsyncLocalStorage } from "node:async_hooks";
+import * as graderKitFs from "node:fs";
+import * as graderKitPath from "node:path";
+import * as graderKitUrl from "node:url";
+
+/** Whether an approval policy's decision asks a person first. */
+export function requiresApproval(decision: unknown): boolean {
+  if (decision === true || decision === "user-approval") return true;
+  return (
+    typeof decision === "object" &&
+    decision !== null &&
+    "type" in decision &&
+    decision.type === "user-approval"
+  );
+}
+
+/** Validates tool input the way eve does: Standard Schema first, then Zod's `safeParse`. */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+export async function parseInput(
+  tool: any,
+  input: unknown,
+): Promise<{ success: boolean; data?: any }> {
+  const standard = tool.inputSchema?.["~standard"];
+  if (typeof standard?.validate === "function") {
+    const result = await standard.validate(input);
+    return result.issues ? { success: false } : { success: true, data: result.value };
+  }
+  if (typeof tool.inputSchema?.safeParse === "function") return tool.inputSchema.safeParse(input);
+  return { success: true, data: input };
+}
+
+/**
+ * Runs a call that may be refused, ignoring the refusal. A tool can refuse by rejecting or by
+ * throwing synchronously (a non-async `execute`); eve treats both as the call failing.
+ */
+export async function settle(call: () => unknown): Promise<void> {
+  try {
+    await call();
+  } catch {}
+}
+
+/**
+ * Imports an `eve` entry point as the authored modules resolve it, sharing their module
+ * instance. `projectRoot` is the directory whose `node_modules/eve` the project uses.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- eve's types aren't installed at the root.
+export async function importProjectEve(subpath: string, projectRoot = "."): Promise<any> {
+  const eveRoot = graderKitPath.join(projectRoot, "node_modules/eve");
+  const target = JSON.parse(
+    graderKitFs.readFileSync(graderKitPath.join(eveRoot, "package.json"), "utf8"),
+  ).exports[subpath];
+  return import(
+    graderKitUrl.pathToFileURL(graderKitPath.resolve(eveRoot, target.import ?? target.default)).href
+  );
+}
+
+/** A session's context values, as `defineState` reads and writes them. */
+export class SessionState {
+  private readonly values = new Map<string, unknown>();
+  get(key: { name: string }) {
+    return this.values.get(key.name);
+  }
+  require(key: { name: string }) {
+    if (!this.values.has(key.name)) throw new Error(`Context key "${key.name}" is not set.`);
+    return this.values.get(key.name);
+  }
+  has(key: { name: string }) {
+    return this.values.has(key.name);
+  }
+  set(key: { name: string }, value: unknown) {
+    const next = typeof value === "function" ? value(this.values.get(key.name)) : value;
+    this.values.set(key.name, next);
+    return next;
+  }
+  ensure(key: { name: string }, create: () => unknown) {
+    return this.has(key) ? this.values.get(key.name) : this.set(key, create());
+  }
+  delete(key: { name: string }) {
+    return this.values.delete(key.name);
+  }
+  setVirtualContext(key: { name: string }, value: unknown) {
+    this.values.set(key.name, value);
+  }
+  *entries() {}
+}
+
+/**
+ * The process-wide storage eve keeps its session context in, shared by every eve copy. eve
+ * creates it when its context module loads, and `eve/tools` and `eve/extension` don't load
+ * that module, so a solution that never imports `eve/context` would leave it missing. Load
+ * it from the project's eve first.
+ */
+export async function sessionStorage(
+  projectRoot = ".",
+): Promise<GraderKitAsyncLocalStorage<{ context: SessionState }>> {
+  await importProjectEve("./context", projectRoot);
+  const key = Symbol.for("eve.context-storage");
+  const global = globalThis as Record<
+    symbol,
+    GraderKitAsyncLocalStorage<{ context: SessionState }> | undefined
+  >;
+  const storage = global[key];
+  if (!storage) throw new Error("eve context storage is missing after loading eve/context.");
+  return storage;
+}
+
+/** The session eve hands tools, hooks, and approval policies: one conversation, in its first turn. */
+export const graderSession = {
+  id: "session-1",
+  auth: { current: null, initiator: null },
+  turn: { id: "turn-1", sequence: 0 },
+};
+
+/** The person who approves calls in the grader, as eve hands them to an approved call. */
+export const graderApprover = {
+  authenticator: "grader",
+  issuer: "grader",
+  principalId: "approver-1",
+  principalType: "user",
+  subject: "approver-1",
+  attributes: {},
+  getToken: async () => {
+    throw new Error("The grader has no provider tokens.");
+  },
+};
+
+/**
+ * Runs a tool call the way eve does: input validated, a call context with a fresh ID and the
+ * session, inside a session whose state the tools can read and write. Pass the same
+ * `SessionState` to calls that belong to one conversation. eve only runs a tool that asks for
+ * approval once a person approves, and tells the call who did, so those calls get an approver.
+ */
+export async function runTool(
+  // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+  tool: any,
+  input: unknown,
+  session = new SessionState(),
+  projectRoot = ".",
+): Promise<unknown> {
+  const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
+  const call: Record<string, unknown> = {
+    abortSignal: new AbortController().signal,
+    callId: `call-${Math.random().toString(36).slice(2)}`,
+    toolName: "graded",
+    messages: [],
+    channel: { kind: "eve" },
+    session: graderSession,
+  };
+  if (tool.approval !== undefined) call.approval = { responder: graderApprover };
+  return (await sessionStorage(projectRoot)).run({ context: session }, () =>
+    tool.execute(parsed, call),
+  );
+}
+
+/**
+ * The function behind a `defineDynamic()` value, or undefined for anything else. eve keeps it
+ * under a cross-instance brand; packages before the pre-1.0 cleanup exposed it as
+ * `{ kind: "eve:dynamic", evaluate }`.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+export function dynamicEvaluator(definition: any): ((context: unknown) => unknown) | undefined {
+  const evaluate =
+    definition?.[Symbol.for("eve.dynamic")] ??
+    (definition?.kind === "eve:dynamic" ? definition.evaluate : undefined);
+  return typeof evaluate === "function" ? evaluate : undefined;
+}
+
+/** The context eve resolves a dynamic definition with, for one session and channel. */
+export function dynamicContext(
+  session: unknown,
+  channel: unknown = { kind: "http", metadata: {} },
+) {
+  return {
+    session,
+    channel,
+    // eve's view is opaque; a gate has no reason to read it here.
+    view: {},
+    turn: null,
+    now: new Date(),
+    model: { id: "anthropic/claude-sonnet-5" },
+    memo: async (key: unknown, fn: (occurrence: unknown) => unknown) =>
+      fn({ idempotencyKey: JSON.stringify(key), abortSignal: new AbortController().signal }),
+    messages: async () => [],
+  };
+}
+// ---- end grader-kit ----
+
 // Each test grades one requirement from the prompt, independently of the others,
 // so the share of passing tests is a partial score for the run.
 
@@ -106,8 +306,8 @@ test("turns away requests without a valid Tally session", async () => {
 });
 
 test("find_invoices lists only the caller's organization", async () => {
-  const tool = await load(`${agentRoot}/tools/find_invoices.ts`);
   const find = async (user: User, input: Record<string, unknown>) => {
+    const tool = await toolFor("find_invoices", user);
     const parsed = await parseInput(tool, input);
     expect(parsed.success, JSON.stringify(input)).toBe(true);
     return JSON.stringify(await tool.execute(parsed.data, await toolContext(user)));
@@ -129,6 +329,7 @@ test("find_invoices lists only the caller's organization", async () => {
   expect(mentions(overdue, 1042)).toBe(false);
 
   // The model controls tool input, so input naming another org must not reach it.
+  const tool = await toolFor("find_invoices", maya);
   for (const input of [{ orgId: "org_harbor" }, { organizationId: "org_harbor" }]) {
     const parsed = await parseInput(tool, input);
     if (!parsed.success) continue;
@@ -138,20 +339,24 @@ test("find_invoices lists only the caller's organization", async () => {
 });
 
 test("send_reminder reminds clients only within the caller's organization", async () => {
-  const tool = await load(`${agentRoot}/tools/send_reminder.ts`);
+  const leoTool = await toolFor("send_reminder", leo);
   const before = await reminderCount("org_brightside", "inv_1042");
-  await tool.execute(await invoiceInput(tool, "inv_1042"), await toolContext(leo));
+  await leoTool.execute(await invoiceInput(leoTool, "inv_1042"), await toolContext(leo));
   expect(await reminderCount("org_brightside", "inv_1042")).toBe(before + 1);
 
   const harborBefore = await reminderCount("org_harbor", "inv_2001");
-  await tool
-    .execute(await invoiceInput(tool, "inv_2001"), await toolContext(maya))
-    .catch(() => undefined);
+  const tool = await toolFor("send_reminder", maya);
+  if (tool !== null) {
+    const input = await invoiceInput(tool, "inv_2001");
+    const context = await toolContext(maya);
+    await settle(() => tool.execute(input, context));
+  }
   expect(await reminderCount("org_harbor", "inv_2001")).toBe(harborBefore);
 });
 
 test("asks an owner to confirm before voiding", async () => {
-  const tool = await load(`${agentRoot}/tools/void_invoice.ts`);
+  const tool = await toolFor("void_invoice", maya);
+  expect(tool, "an owner has no void_invoice tool").not.toBeNull();
   const input = await invoiceInput(tool, "inv_1044");
   expect(decision(await approve(tool, maya, input))).toBe("ask");
 
@@ -162,8 +367,10 @@ test("asks an owner to confirm before voiding", async () => {
 });
 
 test("never voids for members or across organizations", async () => {
-  const tool = await load(`${agentRoot}/tools/void_invoice.ts`);
   const attempt = async (user: User, invoiceId: string) => {
+    // A tool hidden from this person is a refusal too.
+    const tool = await toolFor("void_invoice", user);
+    if (tool === null) return;
     const input = await invoiceInput(tool, invoiceId);
     // A policy may refuse outright or refuse the person's approval; otherwise the
     // call has to refuse when it runs, even after the person who asked approved it.
@@ -171,7 +378,7 @@ test("never voids for members or across organizations", async () => {
     if (status === "deny") return;
     if (status === "ask" && !(await approvalSettles(tool, user, input))) return;
     const context = await toolContext(user, status === "ask" ? { approvedBy: user } : {});
-    await tool.execute(input, context).catch(() => undefined);
+    await settle(() => tool.execute(input, context));
   };
 
   await attempt(leo, "inv_1042");
@@ -184,7 +391,7 @@ test("never voids for members or across organizations", async () => {
 });
 
 test("draft_invoice creates a draft in the caller's organization", async () => {
-  const tool = await load(`${agentRoot}/tools/draft_invoice.ts`);
+  const tool = await toolFor("draft_invoice", sam);
   const input = await firstParsed(tool, draftCandidates("Pinecrest Hotel"));
   await tool.execute(input, await toolContext(sam));
   const invoices = await import(moduleUrl(`${projectRoot}/lib/invoices.ts`));
@@ -318,6 +525,28 @@ function appSourceFiles(): string[] {
 }
 
 /** Every frontend module that drives eve from React, joined with the modules it imports. */
+/**
+ * The fixed headers the app's own chat panel sends with every request, such as a custom
+ * anti-CSRF header (`headers: { "x-tally-assistant": "1" }` passed to `useEveAgent`), so a
+ * channel that requires one sees what the panel would send. Only string literals are replayed;
+ * a header the app computes, like a ticket its server signs, can't be.
+ */
+function panelHeaders(): Record<string, string> {
+  let source: string;
+  try {
+    source = panelSource();
+  } catch {
+    return {};
+  }
+  const headers: Record<string, string> = {};
+  for (const block of source.matchAll(/\bheaders\s*:\s*\{([^{}]*)\}/gu)) {
+    for (const entry of block[1]!.matchAll(/["']([\w-]+)["']\s*:\s*["']([^"']*)["']/gu)) {
+      headers[entry[1]!.toLowerCase()] = entry[2]!;
+    }
+  }
+  return headers;
+}
+
 function panelSource(): string {
   const panels = appSourceFiles().filter((file) =>
     /from\s+["']eve\/react["']/.test(readFileSync(file, "utf8")),
@@ -421,7 +650,7 @@ async function createSession(
   const response: Response = await route.handler(
     new Request("https://tally.example.com/eve/v1/session", {
       method: "POST",
-      headers: { "content-type": "application/json", ...headers },
+      headers: { "content-type": "application/json", ...panelHeaders(), ...headers },
       body: JSON.stringify({ message }),
     }),
     {
@@ -561,6 +790,7 @@ async function invoiceInput(tool: unknown, invoiceId: string) {
   const extras = Object.entries({
     reason: "Issued twice by mistake.",
     note: "Friendly reminder.",
+    message: "Friendly reminder.",
     tone: "friendly",
   });
   const extraSets = Array.from({ length: 2 ** extras.length }, (_, mask) =>
@@ -595,21 +825,6 @@ async function firstParsed(tool: any, candidates: unknown[]): Promise<any> {
   throw new Error(`The ${tool?.name ?? "tool"} schema rejected every expected input shape.`);
 }
 
-/**
- * Validates input the way eve does for any accepted schema: Standard Schema
- * (Zod and others), or a plain JSON Schema object, which eve does not validate here.
- */
-// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
-async function parseInput(tool: any, input: unknown): Promise<{ success: boolean; data?: any }> {
-  const standard = tool.inputSchema?.["~standard"];
-  if (typeof standard?.validate === "function") {
-    const result = await standard.validate(input);
-    return result.issues ? { success: false } : { success: true, data: result.value };
-  }
-  if (typeof tool.inputSchema?.safeParse === "function") return tool.inputSchema.safeParse(input);
-  return { success: true, data: input };
-}
-
 async function invoiceStatus(orgId: string, invoiceId: string): Promise<string | undefined> {
   const invoices = await import(moduleUrl(`${projectRoot}/lib/invoices.ts`));
   return (await invoices.getInvoice(orgId, invoiceId))?.status;
@@ -618,4 +833,17 @@ async function invoiceStatus(orgId: string, invoiceId: string): Promise<string |
 async function reminderCount(orgId: string, invoiceId: string): Promise<number> {
   const invoices = await import(moduleUrl(`${projectRoot}/lib/invoices.ts`));
   return (await invoices.getInvoice(orgId, invoiceId))?.reminders.length ?? 0;
+}
+
+/**
+ * The tool a person gets: the file's tool, or what a `defineDynamic()` resolves to for them,
+ * as eve does when it lists tools for a session. Null when it's hidden from them.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function toolFor(name: string, user: User): Promise<any> {
+  const definition = await load(`${agentRoot}/tools/${name}.ts`);
+  const evaluate = dynamicEvaluator(definition);
+  if (evaluate === undefined) return definition;
+  const { session } = await toolContext(user);
+  return (await evaluate(dynamicContext(session))) ?? null;
 }

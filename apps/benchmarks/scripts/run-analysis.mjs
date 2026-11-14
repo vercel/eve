@@ -72,7 +72,42 @@ export function analyzeRun(runPath) {
       .map((entry) => `${entry.phase}: ${entry.details?.stall ?? "did not finish"}`),
     failures: graderFailures(join(runPath, "outputs/eval.txt")),
     scriptFailures: scriptFailures(runPath),
+    installedEve: installedEve(join(runPath, "project")),
   };
+}
+
+/**
+ * Where each lockfile the agent changed resolved `eve` from: a tarball URL such as
+ * `https://pkg.eve.dev/<sha>/eve.tgz`, or a registry version such as `0.86.0`. agent-eval
+ * copies only changed files, so a run that kept the setup's install has none.
+ */
+export function installedEve(projectDir) {
+  if (!existsSync(projectDir)) return [];
+  const installs = [];
+  for (const entry of readdirSync(projectDir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || entry.parentPath.split(/[\\/]/u).includes("node_modules")) continue;
+    const path = join(entry.parentPath, entry.name);
+    const lockfile = path.slice(projectDir.length + 1).replaceAll("\\", "/");
+    if (entry.name === "package-lock.json") {
+      let packages;
+      try {
+        packages = JSON.parse(readFileSync(path, "utf8")).packages ?? {};
+      } catch {
+        continue;
+      }
+      for (const [key, value] of Object.entries(packages)) {
+        if (key === "node_modules/eve" || key.endsWith("/node_modules/eve")) {
+          installs.push({ lockfile, source: value.resolved ?? value.version ?? null });
+        }
+      }
+    } else if (entry.name === "pnpm-lock.yaml") {
+      const text = readFileSync(path, "utf8");
+      for (const match of text.matchAll(/^\s+eve:\n\s+specifier: .*\n\s+version: (.+)$/gmu)) {
+        installs.push({ lockfile, source: match[1].trim() });
+      }
+    }
+  }
+  return installs;
 }
 
 function failedCommands(commands) {
