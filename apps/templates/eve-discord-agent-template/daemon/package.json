@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@vercel/connect": "^2.5.2",
-    "eve": "^0.83.0"
+    "@vercel/connect": "^2.9.3",
+    "eve": "1.0.0-rc.17"
   }
 }

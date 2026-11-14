@@ -64,6 +64,7 @@ describe("root and worker capability boundaries", () => {
       "bash.ts",
       "capture_browser_image.ts",
       "computer_action.ts",
+      "edit_file.ts",
       "fill_from_link.ts",
       "fill_from_vault.ts",
       "list_vault.ts",
@@ -87,6 +88,7 @@ describe("root and worker capability boundaries", () => {
     expect(existsSync(`${workerTools}/load_skill.ts`)).toBe(false);
     for (const tool of [
       "bash",
+      "edit_file",
       "read_file",
       "web_fetch",
       "web_search",

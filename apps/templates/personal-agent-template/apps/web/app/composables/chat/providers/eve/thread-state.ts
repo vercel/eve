@@ -14,6 +14,7 @@ export function resumeOptionsFromThread(thread: ThreadRecord): ChatSessionOption
   return {
     initialSession: session?.sessionId
       ? {
+          ...(session.inbox ? { inbox: session.inbox } : {}),
           sessionId: session.sessionId,
           streamIndex: session.streamIndex ?? 0,
         }
@@ -30,8 +31,11 @@ export async function persistThreadState(
     return;
   }
 
+  // Save eve's whole session state, including the opaque `inbox` handle that lets later sends
+  // skip a server-side session lookup.
   const state: ThreadState = {
     session: {
+      ...(snapshot.session.inbox ? { inbox: snapshot.session.inbox } : {}),
       sessionId: snapshot.session.sessionId,
       streamIndex: snapshot.session.streamIndex,
     },
