@@ -1,7 +1,6 @@
 import { calls, deliveries, reply, turns, usage } from "eve/events";
 import { defineHook, type HookContext } from "eve/hooks";
 import { createLogger, initLogger } from "evlog";
-import { contentText, deliveredText } from "@agent/lib/content-text";
 
 // evlog's eve hook (evlog/eve) still reads v26 session events, which eve 1.0
 // no longer emits. This hook keeps the same per-turn wide event from v27
@@ -10,7 +9,7 @@ let loggerInitialized = false;
 
 function logger(context: Parameters<typeof createLogger>[0]) {
   if (!loggerInitialized) {
-    initLogger({ env: { service: "open-instinct" }, redact: false });
+    initLogger({ env: { service: "open-instinct" }, redact: true });
     loggerInitialized = true;
   }
   return createLogger(context);
@@ -25,10 +24,6 @@ export default defineHook({
     "turn.settled"(event, ctx) {
       try {
         const { outcome, turnId } = event.data;
-        const received = deliveries(ctx.view, { turnId })
-          .map(({ parts }) => deliveredText(parts ?? []))
-          .filter(Boolean)
-          .join("\n\n");
         const log = logger({
           agent: { name: ctx.agent.name },
           channel: { kind: channelKind(ctx) },
@@ -36,10 +31,8 @@ export default defineHook({
           // puts on this turn's model-call spans.
           requestId: `${ctx.session.id}:${turnId}`,
           message: {
-            received,
-            response: contentText(
-              reply(ctx.view, turnId).filter(({ kind }) => kind === "text")
-            ),
+            receivedCount: deliveries(ctx.view, { turnId }).length,
+            responsePartCount: reply(ctx.view, turnId).length,
           },
           session: { id: ctx.session.id },
           tools: calls(ctx.view, { kind: "tool", turnId }).map((call) => ({
@@ -50,12 +43,12 @@ export default defineHook({
           usage: usage(ctx.view).total,
         });
         if (outcome === "failed") {
-          log.error(event.data.error?.message ?? "The turn failed.");
+          log.error("The turn failed.");
         }
         log.emit();
-      } catch (error) {
-        // Telemetry must never fail the turn.
-        console.warn("[evlog] turn event failed", { cause: error });
+      } catch {
+        // Telemetry must never fail the turn or disclose private error details.
+        console.warn("[evlog] turn event failed");
       }
     },
     "session.ended"(event, ctx) {
@@ -72,11 +65,11 @@ export default defineHook({
           usage: usage(ctx.view).total,
         });
         if (event.data.outcome === "failed") {
-          log.error(event.data.error?.message ?? "The session failed.");
+          log.error("The session failed.");
         }
         log.emit();
-      } catch (error) {
-        console.warn("[evlog] session event failed", { cause: error });
+      } catch {
+        console.warn("[evlog] session event failed");
       }
     },
   },

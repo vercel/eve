@@ -1,6 +1,6 @@
 import type { Fact, SessionView, TurnSettled } from "eve/events";
 import type * as Evlog from "evlog";
-import type { DrainContext, WideEvent } from "evlog";
+import { initLogger, type DrainContext, type WideEvent } from "evlog";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hookContextFor } from "@tests/helpers/hook-context";
 import { viewOf } from "@tests/helpers/session-view";
@@ -17,8 +17,9 @@ import evlogHook from "@agent/hooks/evlog";
 const capturedEvents: WideEvent[] = [];
 
 beforeAll(async () => {
-  const { initLogger } = await vi.importActual<typeof Evlog>("evlog");
-  initLogger({
+  const { initLogger: initializeTestLogger } =
+    await vi.importActual<typeof Evlog>("evlog");
+  initializeTestLogger({
     drain({ event }: DrainContext) {
       capturedEvents.push(structuredClone(event));
     },
@@ -33,11 +34,11 @@ beforeEach(() => {
 });
 
 describe("evlog hook", () => {
-  it("emits full messages per turn and isolates later turns", async () => {
+  it("emits per-turn metadata without private conversation text", async () => {
     const turnFacts = [
       ...turnLines("turn-1", null, {
-        received: "email mason@example.com card 4111111111111111",
-        response: "full response mason@example.com",
+        received: "Alice lives at 24 Ordinary Street, email alice@example.com",
+        response: "I saved Alice's address at 24 Ordinary Street",
         tool: "web_search",
       }),
       ...turnLines("turn-2", "turn-1", {
@@ -56,21 +57,32 @@ describe("evlog hook", () => {
     expect(capturedEvents[0]).toMatchObject({
       agent: { name: "root" },
       channel: { kind: "linq" },
-      message: {
-        received: "email mason@example.com card 4111111111111111",
-        response: "full response mason@example.com",
-      },
+      message: { receivedCount: 1, responsePartCount: 1 },
       requestId: "session-1:turn-1",
       session: { id: "session-1" },
       tools: [{ name: "web_search", outcome: "completed" }],
       turn: { id: "turn-1", outcome: "completed" },
     });
     expect(capturedEvents[1]).toMatchObject({
-      message: { received: "next turn", response: "next response" },
+      message: { receivedCount: 1, responsePartCount: 1 },
       requestId: "session-1:turn-2",
       tools: [],
       turn: { id: "turn-2", outcome: "completed" },
     });
+    expect(initLogger).toHaveBeenCalledWith({
+      env: { service: "open-instinct" },
+      redact: true,
+    });
+    const serialized = JSON.stringify(capturedEvents);
+    for (const text of [
+      "Alice",
+      "24 Ordinary Street",
+      "alice@example.com",
+      "next turn",
+      "next response",
+    ]) {
+      expect(serialized).not.toContain(text);
+    }
   });
 
   it("emits one session event when the session ends", async () => {
@@ -85,7 +97,10 @@ describe("evlog hook", () => {
     await evlogHook.events["session.ended"]?.(
       {
         data: {
-          error: { code: "session_error", message: "Session crashed." },
+          error: {
+            code: "session_error",
+            message: "Alice's private session error",
+          },
           outcome: "failed",
         },
         type: "session.ended",
@@ -98,6 +113,45 @@ describe("evlog hook", () => {
       requestId: "session-1",
       session: { id: "session-1", outcome: "failed", turns: 1 },
     });
+    expect(JSON.stringify(capturedEvents)).not.toContain("Alice");
+  });
+
+  it("omits private turn errors and telemetry failures", async () => {
+    const facts = turnLines("turn-1", null, {
+      received: "hello",
+      response: "hi",
+    });
+    const view = viewOf(
+      facts
+        .map(({ facts: entries }) => entries)
+        .filter((entries) => entries.length > 0)
+    );
+    const settled = facts[3]?.settled;
+    if (!settled) throw new Error("Missing settlement");
+    const failed: TurnSettled = {
+      ...settled,
+      data: {
+        ...settled.data,
+        outcome: "failed",
+        error: { code: "private", message: "Alice's private error" },
+      },
+    };
+    await emitTurn(failed, view);
+    expect(JSON.stringify(capturedEvents)).not.toContain("Alice");
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const ctx = contextFor(view);
+      Object.defineProperty(ctx, "agent", {
+        get() {
+          throw new Error("Alice's private telemetry error");
+        },
+      });
+      await evlogHook.events["turn.settled"]?.(failed, ctx);
+      expect(warn).toHaveBeenCalledWith("[evlog] turn event failed");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -38,6 +38,11 @@ The repository compatibility runner supplies nonsecret, unreachable service
 values for offline builds. These are not deployment defaults; running the app
 still requires the service configuration described below.
 
+Operational turn and session telemetry enables evlog redaction and records only
+metadata, such as opaque IDs, outcomes, counts, tool names, and aggregate usage.
+It omits conversation text and raw failure details, even when the logger's
+redaction rules would not recognize that content as sensitive.
+
 ## Requirements and costs
 
 You can use free tiers for the supporting services. **Vercel requires the Pro
