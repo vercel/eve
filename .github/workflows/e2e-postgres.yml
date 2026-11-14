@@ -114,8 +114,11 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
+      # The first sandbox needs the image; pulling it now overlaps install and build.
       - name: Resolve eve sandbox image
         uses: ./.github/actions/sandbox-image
+        with:
+          pull: "background"
 
       # Reuse the verdict ci.yml saves from main so pnpm skips its supply-chain
       # check of the lockfile. This workflow only restores it.

@@ -100,9 +100,12 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
+      # The first sandbox needs the image; pulling it now overlaps install and build.
       - name: Resolve eve sandbox image
         if: needs.changes.outputs.relevant == 'true'
         uses: ./.github/actions/sandbox-image
+        with:
+          pull: "background"
 
       # pnpm verifies the lockfile against the supply-chain policies on every
       # install. Its verdict log is keyed by the lockfile hash, so the entry
