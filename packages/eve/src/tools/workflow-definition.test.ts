@@ -225,4 +225,73 @@ describe("defineWorkflowTool", () => {
       },
     });
   });
+
+  it("types a generator body's output by its yields and its return value", () => {
+    defineWorkflowTool({
+      description: "Ask for a refund decision.",
+      inputSchema: z.object({ id: z.string() }),
+      async *execute() {
+        yield { phase: "asking" };
+        return { decision: "approved" };
+      },
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string } | { decision: string }>();
+        return { type: "json", value: output };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string } | { decision: string }>();
+        return !("decision" in output);
+      },
+    });
+  });
+
+  it("types a generator body that returns nothing by its yields, which eve uses as the output", () => {
+    defineWorkflowTool({
+      description: "Report progress.",
+      inputSchema: z.object({ id: z.string() }),
+      async *execute() {
+        yield { phase: "done" };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string }>();
+        return true;
+      },
+    });
+  });
+
+  it("types a generator body's output by its outputSchema when it has one", () => {
+    defineWorkflowTool({
+      description: "Ask for a refund decision.",
+      inputSchema: z.object({ id: z.string() }),
+      outputSchema: z.object({ status: z.string(), decision: z.string().optional() }),
+      async *execute() {
+        const proposal = { status: "show_form" };
+        yield proposal;
+        return { ...proposal, decision: "approved" };
+      },
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ status: string; decision?: string | undefined }>();
+        return { type: "text", value: output.status };
+      },
+      endsTurn(output) {
+        expectTypeOf(output).toEqualTypeOf<{ status: string; decision?: string | undefined }>();
+        return output.decision === undefined;
+      },
+    });
+  });
+
+  it("types a task generator's output by its yields and its return value", () => {
+    defineWorkflowTool({
+      description: "Deploy",
+      inputSchema: z.object({ service: z.string() }),
+      async *task(input) {
+        yield { phase: "deploying" };
+        return { deployed: input.service };
+      },
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ phase: string } | { deployed: string }>();
+        return { type: "json", value: output };
+      },
+    });
+  });
 });
