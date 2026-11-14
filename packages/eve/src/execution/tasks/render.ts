@@ -32,7 +32,7 @@ const TASK_SYSTEM_BLOCK_CLOSING = [
 /** The task block for a session a person reads, where a reply before a result is posted. */
 export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
-  `- If you have nothing to tell the person until a result arrives, call ${TASK_WAIT_TOOL_NAME}. Start every independent task first, then wait.`,
+  `- If the person asked for the result, or you have nothing to tell them until it arrives, call ${TASK_WAIT_TOOL_NAME}. Start every independent task first, then wait; do not send an interim confirmation in place of the requested result.`,
   "- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.",
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
