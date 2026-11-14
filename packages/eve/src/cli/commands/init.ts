@@ -53,7 +53,7 @@ import {
   type InitCommandOptions,
 } from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
-import { tryInitializeGit } from "./init-git.js";
+import { startGitInitialization } from "./init-git.js";
 import { InitTargetError } from "./init-telemetry.js";
 import {
   reportExistingProjectChanges,
@@ -77,7 +77,7 @@ export interface InitCommandDependencies {
   scaffoldBaseProject: typeof scaffoldBaseProject;
   hasInteractiveTerminal: typeof hasInteractiveTerminal;
   spawnPackageManager: typeof spawnPackageManager;
-  tryInitializeGit: typeof tryInitializeGit;
+  startGitInitialization: typeof startGitInitialization;
   validateModelSlug: typeof validateModelSlug;
 }
 
@@ -92,7 +92,7 @@ const defaultDependencies: InitCommandDependencies = {
   scaffoldBaseProject,
   hasInteractiveTerminal,
   spawnPackageManager,
-  tryInitializeGit,
+  startGitInitialization,
   validateModelSlug,
 };
 
@@ -391,6 +391,11 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger, progressOptions);
     }
 
+    // Git setup doesn't read node_modules, so only the initial commit waits for the install.
+    const git =
+      project.kind === "created"
+        ? dependencies.startGitInitialization(project.projectPath)
+        : undefined;
     activeInitStep = "install_dependencies";
     trackStep?.(activeInitStep);
     progress.update("Installing dependencies", project.packageManager);
@@ -417,6 +422,7 @@ async function runInitSteps(input: {
     const installElapsedMs = dependencies.now() - installStartedAt;
     if (!packageManagerInstallSucceeded(installResult)) {
       installFailureCode = packageManagerInstallFailureCode(installResult);
+      await git?.settled();
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
       const { lines: failureOutput, truncated } = diagnostics.result();
@@ -463,7 +469,9 @@ async function runInitSteps(input: {
       trackStep?.(activeInitStep);
       progress.update("Initializing Git");
       initLog.debug("initializing git repository");
-      const gitResult = await dependencies.tryInitializeGit(project.projectPath);
+      const gitResult = await (
+        git ?? dependencies.startGitInitialization(project.projectPath)
+      ).commit();
       return {
         ...project,
         elapsedMs: dependencies.now() - startedAt,
