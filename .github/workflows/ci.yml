@@ -513,7 +513,10 @@ jobs:
             ./apps/fixtures/*
             ./e2e/fixtures/*
 
+      # Streamed, so each smoke script's start and result show up as it runs
+      # instead of when the whole task ends.
       - name: Run TUI smoke tests
+        timeout-minutes: 10
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-        run: pnpm test:tui
+        run: pnpm test:tui --log-order=stream

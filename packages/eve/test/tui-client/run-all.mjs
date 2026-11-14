@@ -27,6 +27,11 @@ const concurrency = Math.max(1, Number(process.env.EVE_TUI_CONCURRENCY ?? 3) || 
 const PORT_BASE = Number(process.env.PORT ?? 3000);
 const PORTS_PER_SLOT = 20;
 
+// The slowest script takes under 40 s in CI; a script still running after this
+// is stuck.
+const SCRIPT_TIMEOUT_MS = Number(process.env.EVE_TUI_SCRIPT_TIMEOUT_MS ?? 180_000);
+const KILL_GRACE_MS = 10_000;
+
 // Smoke tests that use the same app share one build. `startAgentServer` reads
 // this directory to build each app once per run and start that `.output`
 // afterwards; a lock in the same directory keeps scripts running together from
@@ -65,6 +70,7 @@ async function worker(slot) {
       PORT: String(PORT_BASE + slot * PORTS_PER_SLOT),
     };
     const buffered = concurrency > 1;
+    if (buffered) console.log(`[tui] started ${test}`);
     const testStartedAt = Date.now();
     const { exitCode, output } = await runNode(file, env, buffered);
     const durationMs = Date.now() - testStartedAt;
@@ -84,7 +90,7 @@ async function worker(slot) {
 
 function runNode(file, env, buffered) {
   if (!buffered) console.log(`\n[tui] node ${file}`);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const child = spawn(process.execPath, [file], {
       env,
       stdio: buffered ? ["ignore", "pipe", "pipe"] : "inherit",
@@ -92,13 +98,38 @@ function runNode(file, env, buffered) {
     const chunks = [];
     child.stdout?.on("data", (chunk) => chunks.push(chunk));
     child.stderr?.on("data", (chunk) => chunks.push(chunk));
-    child.once("error", reject);
+    // A script that cannot start or is killed by a signal fails with the output
+    // it wrote, and the run keeps going so the other scripts and the summary
+    // still print.
+    child.once("error", (error) => {
+      resolve({ exitCode: 1, output: `[tui] ${file} failed to start: ${error.message}\n` });
+    });
+    // A stuck script is stopped like Ctrl+C would stop it, so it shuts down its
+    // agent servers, and is killed if it does not exit; its output still prints.
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS).unref();
+    }, SCRIPT_TIMEOUT_MS);
     child.once("close", (code, signal) => {
-      if (signal !== null) {
-        reject(new Error(`${file} exited due to signal ${signal}.`));
+      clearTimeout(timeout);
+      const output = Buffer.concat(chunks).toString("utf8");
+      if (timedOut) {
+        resolve({
+          exitCode: 1,
+          output: `${output}\n[tui] ${file} timed out after ${seconds(SCRIPT_TIMEOUT_MS)}.\n`,
+        });
         return;
       }
-      resolve({ exitCode: code ?? 1, output: Buffer.concat(chunks).toString("utf8") });
+      if (signal !== null) {
+        resolve({
+          exitCode: 1,
+          output: `${output}\n[tui] ${file} exited due to signal ${signal}.\n`,
+        });
+        return;
+      }
+      resolve({ exitCode: code ?? 1, output });
     });
   });
 }

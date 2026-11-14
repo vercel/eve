@@ -271,6 +271,18 @@ async function snapshotStartupEnv(
     entries.sort(([left], [right]) => left.localeCompare(right));
   }
 
+  // A built server keeps its local Workflow store in the app's development
+  // state directory (`.eve/.workflow-data`), which it moves only under
+  // EVE_DEV=1, as smoke servers run. Smoke tests that run at the same time can
+  // start the same app, so each target gets its own state directory instead of
+  // two servers working off one store.
+  if (env.EVE_DEV_STATE_DIR === undefined) {
+    const stateDir = join(env.WORKFLOW_LOCAL_DATA_DIR, "eve-state");
+    env.EVE_DEV_STATE_DIR = stateDir;
+    entries.push(["EVE_DEV_STATE_DIR", stateDir]);
+    entries.sort(([left], [right]) => left.localeCompare(right));
+  }
+
   return {
     env,
     key: JSON.stringify(entries),
