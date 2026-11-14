@@ -592,8 +592,8 @@ jobs:
           cache-key: tui
           filters: |
             eve...
-            ./apps/fixtures/*
-            ./e2e/fixtures/*
+            {./apps/fixtures/*}...
+            {./e2e/fixtures/*}...
 
       # Streamed, so each smoke script's start and result show up as it runs
       # instead of when the whole task ends.

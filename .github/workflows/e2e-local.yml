@@ -107,10 +107,11 @@ jobs:
           pull: "background"
 
       # The workspace packages a fixture's build and evals read: eve, the
-      # shared fixtures, and the e2e config. It is the package set test-tui
-      # installs, so this restores the pnpm store that test-tui saves from main
-      # (about half the size of the whole workspace's) along with the lockfile
-      # verification verdict.
+      # shared fixtures, and the workspace packages they depend on (the e2e
+      # config, extensions such as @eve/agent-browser). test-tui installs the
+      # same set, so this restores the pnpm store that test-tui saves from
+      # main (about half the size of the whole workspace's) along with the
+      # lockfile verification verdict.
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'
         uses: ./.github/actions/pnpm-install
@@ -118,8 +119,8 @@ jobs:
           cache-key: tui
           filters: |
             eve...
-            ./apps/fixtures/*
-            ./e2e/fixtures/*
+            {./apps/fixtures/*}...
+            {./e2e/fixtures/*}...
 
       - name: Build fixture dependencies
         if: needs.changes.outputs.relevant == 'true'
