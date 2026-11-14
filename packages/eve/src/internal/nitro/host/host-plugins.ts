@@ -25,6 +25,8 @@ export interface HostPluginsInput {
   readonly appRoot: string;
   /** Loads eve's vendored dependencies from its install instead of bundling them (development hosts). */
   readonly loadVendoredDependenciesNatively?: boolean;
+  /** Receives every module the host build read, so a kept host can tell when it is stale. */
+  readonly onBuildInputs?: (ids: readonly string[]) => void;
   /** Package root authored assets may not escape. */
   readonly authoredPackageRoot: string;
   readonly externals: ExternalsPolicy;
@@ -50,6 +52,7 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
     input.loadVendoredDependenciesNatively === true
       ? createDevelopmentCompiledExternalsPlugin()
       : null,
+    input.onBuildInputs === undefined ? null : createBuildInputsPlugin(input.onBuildInputs),
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
@@ -112,6 +115,17 @@ function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
           id: pathToFileURL(resolvePackageCompiledFilePath(`src/${source.slice(1)}`)).href,
         };
       },
+    },
+  };
+}
+
+function createBuildInputsPlugin(
+  onBuildInputs: (ids: readonly string[]) => void,
+): NitroBuildPlugin {
+  return {
+    name: "eve:host-build-inputs",
+    buildEnd() {
+      onBuildInputs([...this.getModuleIds()]);
     },
   };
 }

@@ -1,3 +1,7 @@
+import { stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
+
+import { mapConcurrent } from "#shared/map-concurrent.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import type {
@@ -24,12 +28,32 @@ export async function prepareDevelopmentBuild(
 export async function buildDevelopmentHost(
   host: PreparedDevelopmentApplicationHost,
 ): Promise<DevelopmentHostBuild> {
+  const inputIds: string[] = [];
   const nitro = await createHostNitro(
     createHostSpec(
       host,
       { kind: "development" },
       { buildDir: host.workspace.nitroBuildDir, outputDir: host.workspace.nitroOutputDir },
     ),
+    {
+      onBuildInputs: (ids) => {
+        inputIds.push(...ids);
+      },
+    },
   );
-  return await buildDevelopmentHostCandidate({ host, nitro });
+  const payload = await buildDevelopmentHostCandidate({ host, nitro });
+  return { ...payload, inputs: await statBuildInputs(inputIds) };
+}
+
+async function statBuildInputs(
+  ids: readonly string[],
+): Promise<Record<string, readonly [number, number]>> {
+  const files = [...new Set(ids.filter((id) => isAbsolute(id) && !id.includes("?")))];
+  const stats = await mapConcurrent(files, async (file) => await stat(file).catch(() => undefined));
+  return Object.fromEntries(
+    files.flatMap((file, index) => {
+      const fileStat = stats[index];
+      return fileStat === undefined ? [] : [[file, [fileStat.mtimeMs, fileStat.size] as const]];
+    }),
+  );
 }

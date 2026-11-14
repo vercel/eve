@@ -6,6 +6,11 @@ import { createDevelopmentBuilds } from "#internal/nitro/host/dev-build-host.js"
 import { DevHostSupervisor } from "#internal/nitro/host/dev-host-supervisor.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
+import {
+  claimReusableDevelopmentHost,
+  computeDevelopmentHostReuseKey,
+  writeReusableDevelopmentHost,
+} from "#internal/nitro/host/dev-host-reuse.js";
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
@@ -336,18 +341,37 @@ async function startNitroDevelopmentServer(
   let authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
   let initialGenerationPublished = false;
   let initialWorkspaceTransferred = false;
+  let closing = false;
 
   try {
-    const preparedHost = await devBootPhase(
+    const compiledHost = await devBootPhase(
       "compiling agent",
       () => build.prepare({ appRoot: project.appRoot, developmentExtensions }),
       options.onBootProgress,
     );
     cleanup.defer(async () => {
       if (!initialWorkspaceTransferred) {
-        await removeDevelopmentHostWorkspace(preparedHost.workspace);
+        await removeDevelopmentHostWorkspace(compiledHost.workspace);
       }
     });
+    // An unchanged host from the previous run skips the host build. Like a
+    // runtime-only rebuild, the new generation runs on the kept host's workspace.
+    const reuseKey = await computeDevelopmentHostReuseKey(compiledHost).catch(() => undefined);
+    const reusable = await claimReusableDevelopmentHost(project.appRoot, reuseKey);
+    cleanup.defer(async () => {
+      if (!initialWorkspaceTransferred && reusable !== undefined) {
+        await removeDevelopmentHostWorkspace(reusable.workspace);
+      }
+    });
+    const preparedHost =
+      reusable === undefined
+        ? compiledHost
+        : {
+            ...compiledHost,
+            compiledArtifacts: reusable.compiledArtifacts,
+            workflowBuildDir: reusable.workflowBuildDir,
+            workspace: reusable.workspace,
+          };
     cleanup.defer(async () => {
       if (!initialGenerationPublished) {
         await discardDevelopmentGeneration(preparedHost.generation);
@@ -419,7 +443,7 @@ async function startNitroDevelopmentServer(
     await devBootPhase(
       "building dev bundle",
       async () => {
-        const payload = await build.buildHost(preparedHost);
+        const payload = reusable?.payload ?? (await build.buildHost(preparedHost));
         build.close();
         // Publish before the first worker goes live. The supervisor holds
         // requests until then, and with no generation published they would
@@ -430,9 +454,26 @@ async function startNitroDevelopmentServer(
         });
         initialGenerationPublished = true;
         const workspace = preparedHost.workspace;
+        if (reusable !== undefined) await removeDevelopmentHostWorkspace(compiledHost.workspace);
         initialWorkspaceTransferred = true;
         await devServer.swapTo({
-          dispose: async () => await removeDevelopmentHostWorkspace(workspace),
+          // Kept when the server closes with it still active, for the next start.
+          dispose: async () => {
+            if (closing && reuseKey !== undefined) {
+              await writeReusableDevelopmentHost(
+                {
+                  compiledArtifacts: preparedHost.compiledArtifacts,
+                  key: reuseKey,
+                  payload,
+                  workflowBuildDir: preparedHost.workflowBuildDir,
+                  workspace,
+                },
+                project.appRoot,
+              );
+              return;
+            }
+            await removeDevelopmentHostWorkspace(workspace);
+          },
           entry: payload.entry,
           workerData: payload.workerData,
         });
@@ -485,6 +526,7 @@ async function startNitroDevelopmentServer(
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
+        closing = true;
         const cleanupError = createDevelopmentServerCleanupError(
           await disposeCollectingErrors(owned),
         );

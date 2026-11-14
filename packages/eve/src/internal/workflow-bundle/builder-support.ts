@@ -95,6 +95,8 @@ export interface WorkflowBundleCreateWorkflowsBundleOptions {
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleResult {
+  /** Files the driver layers were built from. */
+  readonly inputs?: readonly string[];
   readonly manifest: WorkflowManifest;
 }
 
