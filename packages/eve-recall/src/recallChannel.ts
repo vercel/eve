@@ -5,6 +5,7 @@ import {
   type ChannelFrom,
   defineChannel,
   POST,
+  type RouteDefinition,
   type TurnPolicy,
 } from "eve/channels";
 import type { SessionAuthContext } from "eve/context";
@@ -236,6 +237,12 @@ export interface RecallChannelConfig {
    */
   shouldRespond?(input: RecallRespondInput): boolean | Promise<boolean>;
   readonly events?: RecallChannelEvents;
+  /**
+   * Extra routes mounted beside the webhook route. Their handlers address a
+   * meeting's session by bot id, such as `resolveSession(botId)`, so a page the
+   * bot streams with Output Media can follow the agent's replies.
+   */
+  readonly routes?: readonly RouteDefinition<RecallChannelState>[];
 }
 
 /** Concrete return type of {@link recallChannel}. */
@@ -315,6 +322,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
 
     routes: [
       POST<RecallChannelState>(route, handleWebhook({ api, botName, config, onMeetingEvent })),
+      ...(config.routes ?? []),
     ],
 
     async receive({ message, target, ...send }, { from }) {

@@ -144,7 +144,7 @@ The default `content.completed` handler posts each reply to the meeting chat, in
 
 The bot doesn't take private chat messages. Everyone in the meeting shares one session, so anything the agent reads stays in history that any participant can ask about later. When someone sends the bot a private Zoom chat message, the bot replies privately that it can't take private messages, and the message never reaches the session or `onMeetingEvent`.
 
-Webex bots can't send chat messages. The channel replies only in text; it doesn't speak.
+Webex bots can't send chat messages. The channel replies only in text; it doesn't speak. To have the bot answer out loud, stream a page with Output Media that plays the agent's replies, as the [eve Meeting Assistant template](https://github.com/vercel/eve/tree/main/apps/templates/eve-meeting-assistant-template) does. See [Extra routes](#extra-routes).
 
 ### Overlapping messages
 
@@ -175,6 +175,31 @@ Hooks and event handlers receive `recall`, a handle on the meeting's bot:
 - `request(path, init)` calls any Recall REST endpoint under `/api/v1`.
 
 The same operations are exported as standalone functions for code outside the channel, such as `sendRecallChatMessage`, `leaveRecallCall`, and `callRecallApi`.
+
+## Extra routes
+
+`routes` mounts more routes beside the webhook route. They run as the channel, so their handlers can find a meeting's session by bot id with `resolveSession(botId)` and follow it with `session.stream()`. For example, a page the bot streams through Output Media can read the agent's replies as they're written:
+
+```ts title="agent/channels/recall.ts"
+import { recallChannel, type RecallChannelState } from "@eve/recall";
+import { GET } from "eve/channels";
+
+export default recallChannel({
+  routes: [
+    GET<RecallChannelState>(
+      "/eve/v1/recall/replies/:botId",
+      async (request, { params, resolveSession }) => {
+        // Check that the caller may read this meeting before you stream it.
+        const session = await resolveSession(params.botId!);
+        if (session === undefined) return new Response("not found", { status: 404 });
+        // ...stream the session's content.delta events to the page
+      },
+    ),
+  ],
+});
+```
+
+A route on the channel is public like any other, so authorize each request against the meeting it reads.
 
 ## Webhook handling
 
