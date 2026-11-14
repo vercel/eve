@@ -5,7 +5,7 @@
 
 Content assistant built on [eve](https://eve.dev), the open-source agent framework.
 
-Writers tag the agent on  Slack and it drafts blog posts, LinkedIn and X posts, release notes, and newsletters in your house voice, pulling source material from Notion and adding approved pieces to it.
+Writers tag the agent on Slack and it drafts blog posts, LinkedIn and X posts, release notes, and newsletters in your house voice, pulling source material from Notion and adding approved pieces to it.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=eve-content-agent-template&repository-name=eve-content-agent-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-content-agent-template%2Ftree%2Fmain&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%2C%7B%22type%22%3A%22mcp.notion.com%22%2C%22env%22%3A%22NOTION_CONNECTOR%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%5D)
 
@@ -29,6 +29,7 @@ If you're working with an AI coding agent like Claude Code or Cursor, you can us
 ```text
 I want to build a Slack agent with the eve framework, using the eve content agent template at https://github.com/vercel-labs/eve-content-agent-template. Read the repository's README.md, AGENTS.md, and ARCHITECTURE.md and follow them. They cover deploying the template, building with eve, how everything works overall, and more.
 ```
+
 > Explore other prompts for building apps and agents in the [prompt library](https://vercel.com/kb/prompts).
 
 ## Deploy
@@ -46,16 +47,16 @@ Once deployed, @mention the bot in your Slack workspace to start drafting.
 
 ## Tech stack
 
-| Layer | Technology |
-| --- | --- |
-| Agent framework | [eve](https://eve.dev) |
-| Language | TypeScript (strict, ESM) |
-| Chat surface | Slack, via [Vercel Connect](https://vercel.com/docs/connect) |
+| Layer               | Technology                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| Agent framework     | [eve](https://eve.dev)                                                                |
+| Language            | TypeScript (strict, ESM)                                                              |
+| Chat surface        | Slack, via [Vercel Connect](https://vercel.com/docs/connect)                          |
 | Source & publishing | Notion (MCP), user-scoped OAuth via [Vercel Connect](https://vercel.com/docs/connect) |
-| File storage | [Vercel Blob](https://vercel.com/docs/vercel-blob) |
-| Model access | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) |
-| Sandbox | [Vercel Sandbox](https://vercel.com/docs/sandbox) |
-| Lint & format | [Ultracite](https://www.ultracite.ai/) (Biome) |
+| File storage        | [Vercel Blob](https://vercel.com/docs/vercel-blob)                                    |
+| Model access        | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway)                               |
+| Sandbox             | [Vercel Sandbox](https://vercel.com/docs/sandbox)                                     |
+| Lint & format       | [Ultracite](https://www.ultracite.ai/) (Biome)                                        |
 
 **Zero static keys.**
 Authentication runs entirely on [Vercel Connect](https://vercel.com/docs/connect)
@@ -134,7 +135,10 @@ eve deploy
 
 ### Evals
 
+Asset tools check decoded paths without leading slashes before accessing storage. Reserved memory paths and malformed or ambiguous encodings are refused, including nested escapes and traversal segments.
+
 ```bash
+pnpm test:smoke     # asset-path security regressions, no network or credentials
 pnpm eval:offline   # mock models, no model calls, a few seconds
 pnpm eval           # real models through the AI Gateway
 ```

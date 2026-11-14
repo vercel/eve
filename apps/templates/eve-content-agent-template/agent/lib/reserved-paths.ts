@@ -19,30 +19,48 @@ export const RESERVED_PATH_ERROR =
 /**
  * Whether a Blob pathname falls under a reserved prefix.
  *
- * @param pathname - A Blob object pathname (no leading slash), e.g. `drafts/post.md`.
- * @returns `true` when the path is reserved.
+ * @remarks
+ * Use the same decoded, slash-stripped representation for storage paths and URL paths.
+ * Reject nested escapes, traversal, URL delimiters, backslashes, and control characters:
+ * their interpretation can differ between the storage API and an HTTP URL.
+ *
+ * @param pathname - A Blob object pathname, e.g. `drafts/post.md`.
+ * @returns `true` when the path is reserved, malformed, or ambiguous.
  */
-export const isReservedPath = (pathname: string): boolean =>
-  RESERVED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+export const isReservedPath = (pathname: string): boolean => {
+  try {
+    const decoded = decodeURIComponent(pathname);
+    const normalized = decoded.replace(LEADING_SLASHES, "");
+    return (
+      AMBIGUOUS_PATH.test(normalized) ||
+      Array.from(normalized).some((char) => {
+        const code = char.charCodeAt(0);
+        return code < 32 || code === 127;
+      }) ||
+      RESERVED_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+    );
+  } catch {
+    return true;
+  }
+};
 
-/** Leading slashes stripped from a URL pathname before the reserved-prefix check. */
 const LEADING_SLASHES = /^\/+/;
+const AMBIGUOUS_PATH = /[%\\?#]|(?:^|\/)\.{1,2}(?:\/|$)/;
 
 /**
  * Whether a Blob URL points at a reserved object.
  *
  * @remarks
- * A Blob URL embeds the object pathname as its URL path, so the reserved-prefix check applies
- * to the URL's pathname. Unparseable input is treated as not reserved; the caller's own URL
- * validation handles malformed URLs.
+ * A Blob URL embeds the object pathname as its URL path. The storage-path guard decodes it
+ * exactly once and refuses malformed or ambiguous encodings rather than guessing a namespace.
  *
  * @param url - A full Blob URL.
- * @returns `true` when the URL addresses a reserved object.
+ * @returns `true` when the URL addresses a reserved object or cannot be checked safely.
  */
 export const isReservedUrl = (url: string): boolean => {
   try {
-    return isReservedPath(new URL(url).pathname.replace(LEADING_SLASHES, ""));
+    return isReservedPath(new URL(url).pathname);
   } catch {
-    return false;
+    return true;
   }
 };
