@@ -375,6 +375,15 @@ async function runSessionLoop(
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
         : undefined;
     const outcome = await execution.runTurn(payload, { caller, control });
+    // Only a running turn aborts its controls, so ones it left unaborted serve the next turn.
+    // Fresh ones would register two abort hooks between turns, which a message that arrives
+    // as this turn settles waits behind.
+    if (
+      control !== undefined &&
+      !control.cancellation.signal.aborted &&
+      !control.steering.signal.aborted
+    )
+      turnControl ??= control;
     progress.turnId = undefined;
     sessionTimeout?.recordActivity();
     if (outcome.caller !== undefined) progress.caller = outcome.caller;
