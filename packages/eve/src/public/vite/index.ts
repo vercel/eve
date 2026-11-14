@@ -1,6 +1,5 @@
-import type { Plugin } from "vite";
-
-import { createEveVitePlugin, type EveVitePluginOptions } from "#shared/vite-eve-plugin.js";
+import { createEveVitePlugin } from "#shared/vite-eve-plugin.js";
+import type { EveVitePlugin, EveVitePluginOptions } from "#shared/vite-eve-plugin-options.js";
 
 export type { EveVitePluginOptions };
 
@@ -22,6 +21,6 @@ export type { EveVitePluginOptions };
  * services, or a `vercel.ts` that composes `withEve` from `eve/vercel`, owns
  * the services instead.
  */
-export function eveVite(options: EveVitePluginOptions = {}): Plugin {
+export function eveVite(options: EveVitePluginOptions = {}): EveVitePlugin {
   return createEveVitePlugin({ host: { label: "Vite", slug: "vite" }, options });
 }

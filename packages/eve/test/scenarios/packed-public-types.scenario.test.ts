@@ -26,17 +26,6 @@ const integrations: Record<string, readonly string[]> = {
   "eve/react": ["react", "@types/react"],
   "eve/vue": ["vue"],
   "eve/svelte": ["svelte"],
-  "eve/sveltekit": ["vite"],
-  "eve/tanstack": ["vite"],
-  "eve/vite": ["vite"],
-  "eve/next": [
-    "next",
-    "react",
-    "react-dom",
-    "@types/react",
-    "@types/react-dom",
-    "@opentelemetry/api",
-  ],
   "eve/nuxt": ["nuxt", "@nuxt/kit", "@nuxt/schema", "vue", "vite"],
   "eve/channels/chat-sdk": ["chat"],
   "eve/channels/linq": ["chat", "@linqapp/sdk"],
@@ -62,6 +51,13 @@ const groups = [
   ...Object.entries(integrations)
     .filter(([entry]) => entries.includes(entry))
     .map(([entry, peers]) => ({ name: entry, entries: [entry], peers })),
+  // eve doesn't declare vite, so core compiles its Vite entries without it. With vite
+  // installed, their plugins must still fit Vite's own plugin type.
+  {
+    name: "vite plugins",
+    entries: ["eve/vite", "eve/sveltekit", "eve/tanstack"],
+    peers: ["vite"],
+  },
 ];
 
 const sessionConsumer = `
@@ -154,6 +150,15 @@ async function inferred(client: Client, store: SessionStore) {
 }
 `;
 
+const vitePluginConsumer = `
+import { defineConfig, type Plugin } from "vite";
+import { eveVite } from "eve/vite";
+import { eveSvelteKit } from "eve/sveltekit";
+import { eveTanStack } from "eve/tanstack";
+const plugin: Plugin = eveVite();
+defineConfig({ plugins: [plugin, eveSvelteKit(), eveTanStack()] });
+`;
+
 function version(name: string): string {
   for (const resolver of [require, ...frameworkRequires]) {
     const paths = [
@@ -209,7 +214,9 @@ describe("packed public declarations", () => {
               ? `import "eve/workflow-modules";`
               : `import type * as Entry${index} from ${JSON.stringify(entry)};`,
           )
-          .join("\n") + (group.name === "core" ? sessionConsumer : ""),
+          .join("\n") +
+          (group.name === "core" ? sessionConsumer : "") +
+          (group.name === "vite plugins" ? vitePluginConsumer : ""),
       );
       await writeFile(
         join(app, "tsconfig.json"),

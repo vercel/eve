@@ -1,6 +1,5 @@
-import type { Plugin } from "vite";
-
-import { createEveVitePlugin, type EveVitePluginOptions } from "#shared/vite-eve-plugin.js";
+import { createEveVitePlugin } from "#shared/vite-eve-plugin.js";
+import type { EveVitePlugin, EveVitePluginOptions } from "#shared/vite-eve-plugin-options.js";
 
 /**
  * Options for the eve SvelteKit Vite plugin.
@@ -22,7 +21,7 @@ export type EveSvelteKitPluginOptions = EveVitePluginOptions;
  * service and routes its transport requests before SvelteKit filesystem
  * routing.
  */
-export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
+export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): EveVitePlugin {
   return createEveVitePlugin({
     host: { label: "SvelteKit", slug: "sveltekit" },
     options,

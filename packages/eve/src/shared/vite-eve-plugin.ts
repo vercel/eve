@@ -19,6 +19,7 @@ import {
 } from "#shared/framework-eve-integration.js";
 import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 import { readOptionalFile } from "#shared/read-optional-file.js";
+import type { EveVitePluginOptions } from "#shared/vite-eve-plugin-options.js";
 
 /**
  * Dev servers this process spawned, keyed by agent root. Module scope
@@ -26,30 +27,6 @@ import { readOptionalFile } from "#shared/read-optional-file.js";
  * running servers through the shared registry.
  */
 const spawnedDevServers = new Map<string, ChildProcess>();
-
-/**
- * Options for eve's Vite plugins.
- */
-export interface EveVitePluginOptions {
-  /**
-   * Maximum time in milliseconds to wait for each eve development server to
-   * start, including waiting for another Vite process to start it. Defaults
-   * to 180000 (three minutes).
-   */
-  readonly devServerTimeoutMs?: number;
-  /**
-   * Path to the eve project root, relative to the Vite root unless absolute.
-   * The root may contain one `agent/` or an `agents/` workspace. Defaults to
-   * the Vite root.
-   */
-  readonly eveRoot?: string;
-  /**
-   * Command that builds each eve agent inside its generated Vercel service.
-   * Defaults to running the installed eve binary from the agent root
-   * (`node <path-to>/eve/bin/eve.js build`).
-   */
-  readonly eveBuildCommand?: string;
-}
 
 /**
  * The slice of Nitro's `nitro` Vite config key the plugin writes. It is typed

@@ -32,7 +32,7 @@ export default defineTool({
 
 ## Integration dependencies
 
-Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. `@vercel/connect` isn't a peer of eve, so your package manager won't warn about an older version; projects created by `eve init` already pin a supported one.
+Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. `next`, `vite`, `@nuxt/schema`, and `@vercel/connect` aren't peers of eve, so your package manager won't warn about an older version of them; projects created by `eve init` already pin supported ones.
 
 | Entry                                                         | Required integration packages                         |
 | ------------------------------------------------------------- | ----------------------------------------------------- |
@@ -40,7 +40,7 @@ Install the packages for each integration entry you import. Most are optional pe
 | `eve/vue`                                                     | `vue` 3.5 or later in v3                              |
 | `eve/svelte`                                                  | `svelte` 5                                            |
 | `eve/next`                                                    | `next` 16 and `react` 19                              |
-| `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.1 or later in v8                           |
+| `eve/vite`, `eve/sveltekit`, `eve/tanstack`                   | `vite` 8.3.1 or later in v8                           |
 | `eve/nuxt`                                                    | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
 | Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
 | `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |

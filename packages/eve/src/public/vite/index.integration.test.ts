@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
-import type { ConfigEnv, ProxyOptions, UserConfig } from "vite";
+import type { ConfigEnv, Plugin, ProxyOptions, UserConfig } from "vite";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { resolveSharedEveDevServer } from "#shared/framework-eve-server.js";
@@ -29,7 +29,7 @@ describe("eveVite", () => {
     resolveSharedEveDevServerMock
       .mockResolvedValueOnce({ origin: "http://127.0.0.1:4002" })
       .mockResolvedValueOnce({ origin: "http://127.0.0.1:4001" });
-    const config = eveVite().config as {
+    const config = (eveVite() as Plugin).config as {
       handler: (config: UserConfig, env: ConfigEnv) => Promise<UserConfig>;
     };
 

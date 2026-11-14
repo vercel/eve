@@ -1,6 +1,5 @@
-import type { Plugin } from "vite";
-
-import { createEveVitePlugin, type EveVitePluginOptions } from "#shared/vite-eve-plugin.js";
+import { createEveVitePlugin } from "#shared/vite-eve-plugin.js";
+import type { EveVitePlugin, EveVitePluginOptions } from "#shared/vite-eve-plugin-options.js";
 
 /**
  * Options for the eve TanStack Start Vite plugin.
@@ -24,7 +23,7 @@ export type EveTanStackPluginOptions = EveVitePluginOptions;
  * and routes its transport requests before TanStack Start's own routing,
  * including routes declared in `nitro({ vercel: { config } })`.
  */
-export function eveTanStack(options: EveTanStackPluginOptions = {}): Plugin {
+export function eveTanStack(options: EveTanStackPluginOptions = {}): EveVitePlugin {
   return createEveVitePlugin({
     host: { label: "TanStack Start", slug: "tanstack" },
     nitroOnly: true,
