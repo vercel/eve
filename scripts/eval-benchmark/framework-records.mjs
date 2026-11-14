@@ -27,12 +27,13 @@
 //                job (<dev-startup-dir>/package.jsonl: its stdout); subject
 //                `eve`, every run cold (empty npm cache)
 //   init         `npx eve init my-agent` (the getting-started command) on the
-//                packed eve, in a pseudo-terminal from an empty directory and
-//                npm cache: to eve running (npx's download), the project's
+//                packed eve, in a pseudo-terminal from an empty directory,
+//                npm cache, and home directory: to eve running (npx's download), the project's
 //                dependency install, the project created, the terminal UI's
 //                prompt, and the dev server ready, from
 //                packages/eve/scripts/benchmark-init.mjs in the same job
-//                (<dev-startup-dir>/init.jsonl: its stdout); subject
+//                (<dev-startup-dir>/init.jsonl: its stdout, with each run's
+//                terminal output beside it as init-<run>.log); subject
 //                `scaffold` (init's default project), every run cold
 //
 // A planned probe without data is a `missing` record, as in records.jsonl.
