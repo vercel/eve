@@ -23,7 +23,7 @@ An investigation starts from one of three places.
 
 The agent records novel, decision-relevant findings with source links. Each investigation turn has its own evidence set. The agent records each finding-and-URL pair once, then adds recorded evidence to the Slack result.
 
-Automated runs use webhook metadata and service-authenticated tools. They do not use per-user OAuth.
+Automated runs use webhook metadata and service-authenticated tools. They do not use per-user OAuth. The Slack history and thread read tools deny service identities, including webhook and channel-watch investigations; those runs must use the evidence supplied with the alert. Human Slack callers can read only conversations they currently belong to in the connected workspace. Missing membership permissions, lookup failures, and membership scans beyond 4,000 users deny access.
 
 Channel watch and custom skills are optional. Both store state in Vercel Blob. The Blob store is required only for these two features.
 
@@ -31,13 +31,13 @@ Channel watch and custom skills are optional. Both store state in Vercel Blob. T
 
 Select [**Deploy with Vercel**][deploy-with-vercel] to clone the repository, create a Vercel project, and provision the connectors and storage.
 
-| Provisioned                                       | Sets                                |
-| ------------------------------------------------- | ----------------------------------- |
-| Slack connector with trigger path `/eve/v1/slack` | `SLACK_CONNECTOR`                   |
-| GitHub connector, read-only install               | `GITHUB_CONNECTOR`                  |
-| Datadog connector                                 | `DATADOG_CONNECTOR`                 |
-| Vercel MCP connector                              | `SRE_VERCEL_CONNECTOR`              |
-| Private Vercel Blob store                         | Vercel Blob environment variables   |
+| Provisioned                                       | Sets                              |
+| ------------------------------------------------- | --------------------------------- |
+| Slack connector with trigger path `/eve/v1/slack` | `SLACK_CONNECTOR`                 |
+| GitHub connector, read-only install               | `GITHUB_CONNECTOR`                |
+| Datadog connector                                 | `DATADOG_CONNECTOR`               |
+| Vercel MCP connector                              | `SRE_VERCEL_CONNECTOR`            |
+| Private Vercel Blob store                         | Vercel Blob environment variables |
 
 For a complete CLI setup with your agent, use [`docs/setup-for-agents.md`](./docs/setup-for-agents.md).
 
@@ -58,14 +58,14 @@ pnpm dev
 
 ## Environment configuration
 
-| Variable            | Required          | Default         | What it does                                                                                            |
-| ------------------- | ----------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `SLACK_CONNECTOR`   | No                | `slack/sre`     | Connector UID for the Slack channel and bot Web API.                                                    |
-| `GITHUB_CONNECTOR`  | No                | `github/sre`    | Connector UID for the GitHub tools extension.                                                           |
-| `DATADOG_CONNECTOR` | No                | `datadog/sre`   | Connector UID for the Datadog MCP tools.                                                                |
-| `SRE_VERCEL_CONNECTOR` | No             | `vercel/sre`     | Connector UID for the Vercel MCP tools.                                                                |
-| `WEBHOOK_SECRET`    | No | none            | Shared secret for `POST /v1/investigate`. Use a long random value from Node crypto (`randomBytes(32)`). |
-| `DD_SITE`           | No                | `datadoghq.com` | Datadog site for MCP. Examples are `datadoghq.eu` and `us5.datadoghq.com`.                              |
+| Variable               | Required | Default         | What it does                                                                                            |
+| ---------------------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------- |
+| `SLACK_CONNECTOR`      | No       | `slack/sre`     | Connector UID for the Slack channel and bot Web API.                                                    |
+| `GITHUB_CONNECTOR`     | No       | `github/sre`    | Connector UID for the GitHub tools extension.                                                           |
+| `DATADOG_CONNECTOR`    | No       | `datadog/sre`   | Connector UID for the Datadog MCP tools.                                                                |
+| `SRE_VERCEL_CONNECTOR` | No       | `vercel/sre`    | Connector UID for the Vercel MCP tools.                                                                 |
+| `WEBHOOK_SECRET`       | No       | none            | Shared secret for `POST /v1/investigate`. Use a long random value from Node crypto (`randomBytes(32)`). |
+| `DD_SITE`              | No       | `datadoghq.com` | Datadog site for MCP. Examples are `datadoghq.eu` and `us5.datadoghq.com`.                              |
 
 Copy [`.env.example`](./.env.example) to `.env` to set local environment variables.
 

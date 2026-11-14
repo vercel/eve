@@ -3,6 +3,7 @@ import { callSlackApi } from "eve/channels/slack";
 import { defineTool } from "eve/tools";
 import z from "zod";
 import { SLACK_CONNECTOR } from "#lib/constants.ts";
+import { authorizeSlackRead } from "#lib/slack/authorize-read.ts";
 import {
   compactSlackMessage,
   normalizeSlackChannelId,
@@ -54,8 +55,9 @@ const slackReadThreadInputSchema = z.object({
 export default defineTool({
   description:
     "Read a Slack thread by channel and parent message timestamp. Use for threads outside the current conversation. Do not use this for normal channel history.",
-  async execute({ channelId, messageTs, cursor, limit, oldest, latest }) {
+  async execute({ channelId, messageTs, cursor, limit, oldest, latest }, ctx) {
     const channel = normalizeSlackChannelId(channelId);
+    await authorizeSlackRead(ctx.session.auth.current, channel, botToken);
     const response = await callSlackApi({
       body: {
         channel,

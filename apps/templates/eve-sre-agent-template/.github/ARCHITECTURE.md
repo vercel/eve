@@ -40,13 +40,13 @@ Channel watch and custom skills are optional. Both need the private Vercel Blob 
 
 ## Core components
 
-| Component        | Location                    | Purpose                                               |
-| ---------------- | --------------------------- | ----------------------------------------------------- |
-| Agent definition | `agent/agent.ts`            | Selects the model and reasoning effort.               |
-| Slack channel    | `agent/channels/slack.ts`   | Handles mentions, DMs, and watched channel messages.  |
-| Webhook channel  | `agent/channels/webhook.ts` | Accepts `POST /v1/investigate` and starts Slack runs. |
-| Instructions     | `agent/instructions/`       | Defines identity, rules, and tool guidance.           |
+| Component        | Location                    | Purpose                                                        |
+| ---------------- | --------------------------- | -------------------------------------------------------------- |
+| Agent definition | `agent/agent.ts`            | Selects the model and reasoning effort.                        |
+| Slack channel    | `agent/channels/slack.ts`   | Handles mentions, DMs, and watched channel messages.           |
+| Webhook channel  | `agent/channels/webhook.ts` | Accepts `POST /v1/investigate` and starts Slack runs.          |
+| Instructions     | `agent/instructions/`       | Defines identity, rules, and tool guidance.                    |
 | Evidence system  | `agent/lib/evidence.ts`     | Records findings and renders them for agent and Slack replies. |
-| Channel watch    | `agent/lib/channel-watch/`  | Admits top-level messages from watched channels.      |
-| Custom skills    | `agent/lib/skills/`         | Stores user and global runbooks in Blob.              |
-| Connectors       | `agent/lib/constants.ts`    | Resolves Slack, GitHub, Datadog, and Vercel connector UIDs. |
+| Channel watch    | `agent/lib/channel-watch/`  | Admits top-level messages from watched channels.               |
+| Custom skills    | `agent/lib/skills/`         | Stores user and global runbooks in Blob.                       |
+| Connectors       | `agent/lib/constants.ts`    | Resolves Slack, GitHub, Datadog, and Vercel connector UIDs.    |

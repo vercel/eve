@@ -33,12 +33,12 @@ pnpm exec eve link --project <project-name> --team <team> --non-interactive
 
 4. Create the connectors. Code reads connector UIDs from env, with defaults in `agent/lib/constants.ts` that match `vercel connect create … --name sre`:
 
-| Env                 | Default       | Used for                      |
-| ------------------- | ------------- | ----------------------------- |
-| `SLACK_CONNECTOR`   | `slack/sre`   | Slack channel and bot Web API |
-| `GITHUB_CONNECTOR`  | `github/sre`  | GitHub tools extension        |
-| `DATADOG_CONNECTOR` | `datadog/sre` | Datadog MCP (access token)    |
-| `SRE_VERCEL_CONNECTOR` | `vercel/sre` | Vercel MCP (user OAuth) |
+| Env                    | Default       | Used for                      |
+| ---------------------- | ------------- | ----------------------------- |
+| `SLACK_CONNECTOR`      | `slack/sre`   | Slack channel and bot Web API |
+| `GITHUB_CONNECTOR`     | `github/sre`  | GitHub tools extension        |
+| `DATADOG_CONNECTOR`    | `datadog/sre` | Datadog MCP (access token)    |
+| `SRE_VERCEL_CONNECTOR` | `vercel/sre`  | Vercel MCP (user OAuth)       |
 
 <!--AGENTS: please pause and mention this before proceeding-->
 
@@ -57,7 +57,7 @@ vercel connect create mcp.vercel.com --connection-method mcp --name sre
 vercel connect list
 ```
 
-The Slack connector turns on `message.channels`, `channels:history`, `message.groups`, and `groups:history` by default. Channel watch uses those events and scopes.
+The Slack connector turns on `message.channels`, `channels:history`, `message.groups`, and `groups:history` by default. Channel watch uses those events and scopes. The history and thread read tools also verify the caller's workspace and conversation membership with `auth.test` and `conversations.members`. Ensure the Slack app has the membership scopes for each conversation type it reads (`channels:read`, `groups:read`, `im:read`, and `mpim:read`), then reinstall or reconnect it after permission changes. These tools fail closed when membership cannot be verified and do not permit service-triggered investigations to use the bot's read access.
 
 Use the UID printed by each `vercel connect create` command for its attachment. Prefer read-only permissions on the GitHub install. If a connector UID differs from the defaults above, set the matching env var on the project:
 

@@ -52,12 +52,12 @@ curl --request POST "https://<your-deployment-hostname>/v1/investigate" \
   }'
 ```
 
-| Field | Required | Purpose |
-| --- | --- | --- |
-| `title` | Yes | Investigation label shown in Slack. |
-| `slackChannel` | Yes | Target Slack channel ID. |
-| `description` | No | Summary of the issue to investigate. |
-| `metadata` | No | Context from the caller, such as alert, incident, service, or time-window data. |
+| Field          | Required | Purpose                                                                         |
+| -------------- | -------- | ------------------------------------------------------------------------------- |
+| `title`        | Yes      | Investigation label shown in Slack.                                             |
+| `slackChannel` | Yes      | Target Slack channel ID.                                                        |
+| `description`  | No       | Summary of the issue to investigate.                                            |
+| `metadata`     | No       | Context from the caller, such as alert, incident, service, or time-window data. |
 
 A `202 Accepted` response confirms authentication, body validation, and background scheduling. Confirm the investigation thread in Slack separately.
 
