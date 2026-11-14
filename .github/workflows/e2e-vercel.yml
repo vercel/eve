@@ -81,6 +81,9 @@ jobs:
         include: ${{ fromJSON(needs.discover-fixtures.outputs.world_matrix) }}
 
     env:
+      # Fixtures capped at four concurrent evals for a server on the runner
+      # read this to run more at once against a deployment.
+      EVE_E2E_EVAL_CONCURRENCY: "8"
       EVE_E2E_MODEL: mock
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
       VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1"
